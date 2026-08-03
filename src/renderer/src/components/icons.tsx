@@ -387,3 +387,12 @@ export function DuckingIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function FillerWordIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 4h16v11H8l-4 4V4z" />
+      <path d="M2 2l20 20" />
+    </svg>
+  )
+}

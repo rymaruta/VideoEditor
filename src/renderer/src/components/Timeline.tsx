@@ -4,6 +4,7 @@ import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { snapTime } from '../lib/snapping'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
+import { FillerWordCutModal } from './FillerWordCutModal'
 import { AutoCaptionModal } from './AutoCaptionModal'
 import { Waveform } from './Waveform'
 import { isAspectMismatch } from '../lib/aspect'
@@ -20,6 +21,7 @@ import {
   VolumeXIcon,
   DuckingIcon,
   WandIcon,
+  FillerWordIcon,
   TypeIcon,
   MicIcon,
   CopyIcon,
@@ -87,6 +89,7 @@ export function Timeline(): React.JSX.Element {
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
   const [silenceCutClipId, setSilenceCutClipId] = useState<string | null>(null)
+  const [fillerWordClipId, setFillerWordClipId] = useState<string | null>(null)
   const [autoCaptionClipId, setAutoCaptionClipId] = useState<string | null>(null)
   const [selectedAudioClip, setSelectedAudioClip] = useState<{
     trackId: string
@@ -318,6 +321,10 @@ export function Timeline(): React.JSX.Element {
             <button className="small-button" onClick={() => setSilenceCutClipId(selectedClip.id)}>
               <WandIcon width={13} height={13} />
               無音カット
+            </button>
+            <button className="small-button" onClick={() => setFillerWordClipId(selectedClip.id)}>
+              <FillerWordIcon width={13} height={13} />
+              フィラーカット
             </button>
             <button className="small-button" onClick={() => setAutoCaptionClipId(selectedClip.id)}>
               <MicIcon width={13} height={13} />
@@ -681,6 +688,9 @@ export function Timeline(): React.JSX.Element {
       {trimClipId && <TrimModal clipId={trimClipId} onClose={() => setTrimClipId(null)} />}
       {silenceCutClipId && (
         <SilenceCutModal clipId={silenceCutClipId} onClose={() => setSilenceCutClipId(null)} />
+      )}
+      {fillerWordClipId && (
+        <FillerWordCutModal clipId={fillerWordClipId} onClose={() => setFillerWordClipId(null)} />
       )}
       {autoCaptionClipId && (
         <AutoCaptionModal clipId={autoCaptionClipId} onClose={() => setAutoCaptionClipId(null)} />
