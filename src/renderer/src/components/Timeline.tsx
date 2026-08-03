@@ -41,6 +41,7 @@ export function Timeline(): React.JSX.Element {
   const playheadTime = useProjectStore((s) => s.playheadTime)
   const removeClip = useProjectStore((s) => s.removeClip)
   const moveClip = useProjectStore((s) => s.moveClip)
+  const moveClipToIndex = useProjectStore((s) => s.moveClipToIndex)
   const splitClipAtTime = useProjectStore((s) => s.splitClipAtTime)
   const updateClipSpeed = useProjectStore((s) => s.updateClipSpeed)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
@@ -62,6 +63,8 @@ export function Timeline(): React.JSX.Element {
     clipId: string
   } | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
   const timedClips = buildTimedClips(project)
@@ -290,11 +293,34 @@ export function Timeline(): React.JSX.Element {
               return (
                 <div
                   key={tc.clip.id}
-                  className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''}`}
+                  className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''} ${
+                    draggedClipId === tc.clip.id ? 'dragging' : ''
+                  } ${dragOverIndex === i && draggedClipId && draggedClipId !== tc.clip.id ? 'drag-over' : ''}`}
                   style={{ width: clipWidth }}
+                  draggable
                   onClick={(e) => {
                     e.stopPropagation()
                     selectClip(tc.clip.id)
+                  }}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = 'move'
+                    setDraggedClipId(tc.clip.id)
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    setDragOverIndex(i)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (draggedClipId) moveClipToIndex(draggedClipId, i)
+                    setDraggedClipId(null)
+                    setDragOverIndex(null)
+                  }}
+                  onDragEnd={() => {
+                    setDraggedClipId(null)
+                    setDragOverIndex(null)
                   }}
                 >
                   {tc.clip.transitionIn && i > 0 && <span className="transition-marker" />}

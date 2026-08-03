@@ -7,6 +7,7 @@ import { TextOverlayPanel } from './components/TextOverlayPanel'
 import { YouTubeTrendPanel } from './components/YouTubeTrendPanel'
 import { ExportPanel } from './components/ExportPanel'
 import { NarrationPanel } from './components/NarrationPanel'
+import { ThumbnailPanel } from './components/ThumbnailPanel'
 import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
@@ -18,11 +19,12 @@ import {
   DownloadIcon,
   MicIcon,
   UndoIcon,
-  RedoIcon
+  RedoIcon,
+  ImageIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
-type RightTab = 'template' | 'text' | 'narration' | 'youtube' | 'export'
+type RightTab = 'template' | 'text' | 'narration' | 'thumbnail' | 'youtube' | 'export'
 
 const TABS: {
   id: RightTab
@@ -32,6 +34,7 @@ const TABS: {
   { id: 'template', label: 'テンプレート', icon: SparklesIcon },
   { id: 'text', label: 'テキスト', icon: TypeIcon },
   { id: 'narration', label: 'ボイス', icon: MicIcon },
+  { id: 'thumbnail', label: 'サムネ', icon: ImageIcon },
   { id: 'youtube', label: 'YouTube', icon: YoutubeIcon },
   { id: 'export', label: '書き出し', icon: DownloadIcon }
 ]
@@ -107,6 +110,7 @@ function App(): React.JSX.Element {
             {tab === 'template' && <TemplatePanel />}
             {tab === 'text' && <TextOverlayPanel />}
             {tab === 'narration' && <NarrationPanel />}
+            {tab === 'thumbnail' && <ThumbnailPanel />}
             {tab === 'youtube' && <YouTubeTrendPanel />}
             {tab === 'export' && <ExportPanel />}
           </div>

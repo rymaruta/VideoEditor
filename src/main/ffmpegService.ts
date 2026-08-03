@@ -15,7 +15,10 @@ import type {
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
 
-const ffmpegPath = (ffmpegStatic as unknown as string).replace('app.asar', 'app.asar.unpacked')
+export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
+  'app.asar',
+  'app.asar.unpacked'
+)
 const ffprobePath = ffprobeStatic.path.replace('app.asar', 'app.asar.unpacked')
 
 ffmpeg.setFfmpegPath(ffmpegPath)
@@ -69,6 +72,37 @@ export function generateThumbnailDataUrl(filePath: string, atSeconds: number): P
         folder: dir,
         size: '320x?'
       })
+  })
+}
+
+export function generateFrameDataUrl(
+  filePath: string,
+  atSeconds: number,
+  width: number,
+  height: number
+): Promise<string> {
+  const dir = mkdtempSync(join(tmpdir(), 've-frame-'))
+  const outFile = join(dir, 'frame.jpg')
+  const w = Math.round(width)
+  const h = Math.round(height)
+  return new Promise((resolve, reject) => {
+    ffmpeg(filePath)
+      .inputOptions([`-ss ${atSeconds}`])
+      .complexFilter([
+        `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[v]`
+      ])
+      .outputOptions(['-map [v]', '-frames:v 1'])
+      .output(outFile)
+      .on('error', reject)
+      .on('end', () => {
+        try {
+          const buf = readFileSync(outFile)
+          resolve(`data:image/jpeg;base64,${buf.toString('base64')}`)
+        } catch (e) {
+          reject(e)
+        }
+      })
+      .run()
   })
 }
 

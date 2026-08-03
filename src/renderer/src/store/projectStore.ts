@@ -43,6 +43,7 @@ interface ProjectState {
 
   addAsset: (asset: MediaAsset) => void
   addClipToTimeline: (assetId: string) => void
+  addTrimmedClipToTimeline: (assetId: string, inPoint: number, outPoint: number) => void
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
   updateClipSpeed: (clipId: string, speed: number) => void
   updateClipTransition: (clipId: string, transition: Transition | undefined) => void
@@ -50,6 +51,7 @@ interface ProjectState {
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
   removeClip: (clipId: string) => void
   moveClip: (clipId: string, direction: 'left' | 'right') => void
+  moveClipToIndex: (clipId: string, targetIndex: number) => void
   setAspectRatio: (ratio: AspectRatio) => void
   selectClip: (clipId: string | null) => void
   setPlayheadTime: (t: number) => void
@@ -75,6 +77,10 @@ interface ProjectState {
   removeAudioClip: (trackId: string, clipId: string) => void
 
   applyTemplate: (template: EditTemplate) => void
+  autoCutFromCandidates: (
+    picks: { assetId: string; start: number; end: number }[],
+    template: EditTemplate
+  ) => void
 }
 
 function totalDuration(project: Project): number {
@@ -146,6 +152,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         assetId,
         inPoint: 0,
         outPoint: asset.duration,
+        speed: 1
+      }
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, clips: [...state.project.clips, newClip] }
+      }
+    }),
+
+  addTrimmedClipToTimeline: (assetId, inPoint, outPoint) =>
+    set((state) => {
+      const asset = state.project.assets.find((a) => a.id === assetId)
+      if (!asset) return state
+      const newClip: Clip = {
+        id: uuid(),
+        assetId,
+        inPoint: Math.max(0, inPoint),
+        outPoint: Math.min(asset.duration, outPoint),
         speed: 1
       }
       return {
@@ -232,6 +255,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const swapWith = direction === 'left' ? idx - 1 : idx + 1
       if (swapWith < 0 || swapWith >= clips.length) return state
       ;[clips[idx], clips[swapWith]] = [clips[swapWith], clips[idx]]
+      return { ...pushHistory(state), project: { ...state.project, clips } }
+    }),
+
+  moveClipToIndex: (clipId, targetIndex) =>
+    set((state) => {
+      const clips = [...state.project.clips]
+      const fromIndex = clips.findIndex((c) => c.id === clipId)
+      if (fromIndex === -1) return state
+      const clamped = Math.max(0, Math.min(targetIndex, clips.length - 1))
+      if (clamped === fromIndex) return state
+      const [moved] = clips.splice(fromIndex, 1)
+      clips.splice(clamped, 0, moved)
       return { ...pushHistory(state), project: { ...state.project, clips } }
     }),
 
@@ -458,6 +493,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })
 
       return { ...pushHistory(state), project: { ...project, textOverlays: overlays } }
+    }),
+
+  autoCutFromCandidates: (picks, template) =>
+    set((state) => {
+      const clips: Clip[] = picks.map((p) => ({
+        id: uuid(),
+        assetId: p.assetId,
+        inPoint: p.start,
+        outPoint: p.end,
+        speed: 1
+      }))
+      const project: Project = {
+        ...state.project,
+        aspectRatio: '9:16',
+        clips
+      }
+      const total = totalDuration(project)
+      const overlays: TextOverlay[] = template.segments.map((segment, i) => {
+        const segmentSpan = total / template.segments.length
+        return {
+          id: uuid(),
+          text: segment.label,
+          startTime: i * segmentSpan,
+          endTime: (i + 1) * segmentSpan,
+          style: { ...template.captionStyle },
+          source: 'manual'
+        }
+      })
+      return {
+        ...pushHistory(state),
+        project: { ...project, textOverlays: overlays },
+        selectedClipId: null
+      }
     })
 }))
 

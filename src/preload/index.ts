@@ -4,6 +4,7 @@ import { IPC } from '@shared/ipc'
 import type {
   AspectRatio,
   ExportProgress,
+  HighlightCandidate,
   MediaProbeResult,
   Project,
   QualityPreset,
@@ -21,6 +22,12 @@ const api = {
     ipcRenderer.invoke(IPC.probeMedia, filePath),
   generateThumbnail: (filePath: string, atSeconds: number): Promise<string> =>
     ipcRenderer.invoke(IPC.generateThumbnail, filePath, atSeconds),
+  generateFrame: (
+    filePath: string,
+    atSeconds: number,
+    width: number,
+    height: number
+  ): Promise<string> => ipcRenderer.invoke(IPC.generateFrame, filePath, atSeconds, width, height),
   generateWaveform: (
     filePath: string,
     rangeStart: number,
@@ -35,6 +42,8 @@ const api = {
     rangeEnd: number
   ): Promise<SilenceRange[]> =>
     ipcRenderer.invoke(IPC.detectSilence, filePath, rangeStart, rangeEnd),
+  detectHighlights: (filePath: string, assetDuration: number): Promise<HighlightCandidate[]> =>
+    ipcRenderer.invoke(IPC.detectHighlights, filePath, assetDuration),
   transcribe: (
     filePath: string,
     rangeStart: number,

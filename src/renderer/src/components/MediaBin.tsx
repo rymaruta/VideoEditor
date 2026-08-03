@@ -3,7 +3,15 @@ import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { isAspectMismatch } from '../lib/aspect'
-import { UploadIcon, PlusIcon, ClapperboardIcon, MusicIcon, AlertTriangleIcon } from './icons'
+import { HighlightModal } from './HighlightModal'
+import {
+  UploadIcon,
+  PlusIcon,
+  ClapperboardIcon,
+  MusicIcon,
+  AlertTriangleIcon,
+  TargetIcon
+} from './icons'
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -28,6 +36,7 @@ export function MediaBin(): React.JSX.Element {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
+  const [highlightAssetId, setHighlightAssetId] = useState<string | null>(null)
 
   async function importFiles(paths: string[]): Promise<void> {
     if (paths.length === 0) return
@@ -136,6 +145,15 @@ export function MediaBin(): React.JSX.Element {
             {asset.hasVideo && (
               <button
                 className="icon-button"
+                onClick={() => setHighlightAssetId(asset.id)}
+                title="ハイライトを検出"
+              >
+                <TargetIcon width={14} height={14} />
+              </button>
+            )}
+            {asset.hasVideo && (
+              <button
+                className="icon-button"
                 onClick={() => addClipToTimeline(asset.id)}
                 title="動画トラックに追加"
               >
@@ -170,6 +188,9 @@ export function MediaBin(): React.JSX.Element {
           </div>
         ))}
       </div>
+      {highlightAssetId && (
+        <HighlightModal assetId={highlightAssetId} onClose={() => setHighlightAssetId(null)} />
+      )}
     </div>
   )
 }

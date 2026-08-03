@@ -6,6 +6,7 @@ import { IPC } from '@shared/ipc'
 import {
   probeMedia,
   generateThumbnailDataUrl,
+  generateFrameDataUrl,
   generateWaveformDataUrl,
   exportProject,
   detectSilence
@@ -13,6 +14,7 @@ import {
 import { transcribeRange } from './whisperService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import { saveProjectFile, loadProjectFile } from './projectFileService'
+import { detectHighlights } from './highlightService'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
 
 function createWindow(): void {
@@ -127,6 +129,11 @@ app.whenReady().then(() => {
     generateThumbnailDataUrl(filePath, atSeconds)
   )
   ipcMain.handle(
+    IPC.generateFrame,
+    async (_e, filePath: string, atSeconds: number, width: number, height: number) =>
+      generateFrameDataUrl(filePath, atSeconds, width, height)
+  )
+  ipcMain.handle(
     IPC.generateWaveform,
     async (
       _e,
@@ -141,6 +148,9 @@ app.whenReady().then(() => {
     IPC.detectSilence,
     async (_e, filePath: string, rangeStart: number, rangeEnd: number) =>
       detectSilence(filePath, rangeStart, rangeEnd)
+  )
+  ipcMain.handle(IPC.detectHighlights, async (_e, filePath: string, assetDuration: number) =>
+    detectHighlights(filePath, assetDuration)
   )
   ipcMain.handle(
     IPC.transcribe,

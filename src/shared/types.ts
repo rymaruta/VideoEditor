@@ -139,6 +139,14 @@ export interface TranscriptSegment {
   text: string
 }
 
+export interface HighlightCandidate {
+  start: number
+  end: number
+  score: number
+  hasSceneChange: boolean
+  hasAudioPeak: boolean
+}
+
 export interface VoicevoxStyle {
   id: number
   name: string
