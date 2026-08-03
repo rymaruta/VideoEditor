@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { TrimModal } from './TrimModal'
+import { ChevronLeftIcon, ChevronRightIcon, ScissorsIcon, TrashIcon } from './icons'
 
 const PIXELS_PER_SECOND = 40
 
@@ -34,11 +35,19 @@ export function Timeline(): React.JSX.Element {
         <h2>タイムライン</h2>
         {selectedClipId && (
           <div className="timeline-actions">
-            <button className="small-button" onClick={() => moveClip(selectedClipId, 'left')}>
-              ←
+            <button
+              className="icon-button"
+              title="左に移動"
+              onClick={() => moveClip(selectedClipId, 'left')}
+            >
+              <ChevronLeftIcon width={14} height={14} />
             </button>
-            <button className="small-button" onClick={() => moveClip(selectedClipId, 'right')}>
-              →
+            <button
+              className="icon-button"
+              title="右に移動"
+              onClick={() => moveClip(selectedClipId, 'right')}
+            >
+              <ChevronRightIcon width={14} height={14} />
             </button>
             <button className="small-button" onClick={() => setTrimClipId(selectedClipId)}>
               トリム
@@ -47,16 +56,21 @@ export function Timeline(): React.JSX.Element {
               className="small-button"
               onClick={() => splitClipAtTime(selectedClipId, playheadTime)}
             >
+              <ScissorsIcon width={13} height={13} />
               再生位置でカット
             </button>
-            <button className="small-button danger" onClick={() => removeClip(selectedClipId)}>
-              削除
+            <button
+              className="icon-button danger"
+              title="削除"
+              onClick={() => removeClip(selectedClipId)}
+            >
+              <TrashIcon width={14} height={14} />
             </button>
           </div>
         )}
       </div>
       <div className="timeline-track" style={{ width: timelineWidth }} onClick={handleTrackClick}>
-        {timedClips.map((tc) => (
+        {timedClips.map((tc, i) => (
           <div
             key={tc.clip.id}
             className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''}`}
@@ -66,6 +80,7 @@ export function Timeline(): React.JSX.Element {
               selectClip(tc.clip.id)
             }}
           >
+            <span className="timeline-clip-index">{i + 1}</span>
             <span className="timeline-clip-label" title={tc.asset.fileName}>
               {tc.asset.fileName}
             </span>
@@ -74,9 +89,11 @@ export function Timeline(): React.JSX.Element {
         <div
           className="timeline-playhead"
           style={{ left: Math.min(playheadTime, total) * PIXELS_PER_SECOND }}
-        />
+        >
+          <div className="timeline-playhead-handle" />
+        </div>
         {timedClips.length === 0 && (
-          <p className="hint-text">メディアからクリップを追加してください</p>
+          <p className="hint-text timeline-empty-hint">メディアからクリップを追加してください</p>
         )}
       </div>
       {trimClipId && <TrimModal clipId={trimClipId} onClose={() => setTrimClipId(null)} />}

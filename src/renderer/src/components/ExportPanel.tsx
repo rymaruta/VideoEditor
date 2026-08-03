@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import type { AspectRatio } from '@shared/types'
+import { DownloadIcon } from './icons'
 
 export function ExportPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
@@ -49,13 +49,24 @@ export function ExportPanel(): React.JSX.Element {
       </div>
       <div className="export-field">
         <label>アスペクト比</label>
-        <select
-          value={project.aspectRatio}
-          onChange={(e) => setAspectRatio(e.target.value as AspectRatio)}
-        >
-          <option value="9:16">9:16 (ショート動画)</option>
-          <option value="16:9">16:9 (横型)</option>
-        </select>
+        <div className="aspect-toggle">
+          <button
+            type="button"
+            className={project.aspectRatio === '9:16' ? 'active' : ''}
+            onClick={() => setAspectRatio('9:16')}
+          >
+            <span className="aspect-swatch aspect-swatch-9-16" />
+            9:16(ショート)
+          </button>
+          <button
+            type="button"
+            className={project.aspectRatio === '16:9' ? 'active' : ''}
+            onClick={() => setAspectRatio('16:9')}
+          >
+            <span className="aspect-swatch aspect-swatch-16-9" />
+            16:9(横型)
+          </button>
+        </div>
       </div>
       <div className="export-field">
         <label>解像度</label>
@@ -67,7 +78,8 @@ export function ExportPanel(): React.JSX.Element {
           <option value={720}>標準 (720)</option>
         </select>
       </div>
-      <button className="primary-button" onClick={handleExport} disabled={exporting}>
+      <button className="primary-button export-button" onClick={handleExport} disabled={exporting}>
+        <DownloadIcon width={15} height={15} />
         {exporting ? '書き出し中...' : '動画を書き出す'}
       </button>
       {progress && exporting && (

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
 import { fetchTrendingVideos, searchVideos, YouTubeVideoInfo } from '../lib/youtube'
+import { KeyIcon, SearchIcon, SparklesIcon, ExternalLinkIcon } from './icons'
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -63,7 +64,10 @@ export function YouTubeTrendPanel(): React.JSX.Element {
         YouTube公式APIでタイトル・再生時間・再生数などのメタデータのみ表示します(動画のダウンロードは行いません)。
       </p>
       <div className="youtube-field">
-        <label>YouTube Data API キー</label>
+        <label>
+          <KeyIcon width={12} height={12} />
+          YouTube Data API キー
+        </label>
         <input
           type="password"
           value={apiKey}
@@ -72,8 +76,9 @@ export function YouTubeTrendPanel(): React.JSX.Element {
         />
       </div>
       <div className="youtube-search-row">
-        <button onClick={handleTrending} disabled={loading}>
-          急上昇(日本)を見る
+        <button className="primary-button" onClick={handleTrending} disabled={loading}>
+          <SparklesIcon width={13} height={13} />
+          急上昇(日本)
         </button>
         <input
           type="text"
@@ -82,8 +87,8 @@ export function YouTubeTrendPanel(): React.JSX.Element {
           placeholder="キーワードで検索"
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
         />
-        <button onClick={handleSearch} disabled={loading}>
-          検索
+        <button className="icon-button" onClick={handleSearch} disabled={loading} title="検索">
+          <SearchIcon width={14} height={14} />
         </button>
       </div>
       {error && <p className="error-text">{error}</p>}
@@ -104,6 +109,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
                 className="small-button"
                 onClick={() => window.api.openExternal(`https://www.youtube.com/watch?v=${v.id}`)}
               >
+                <ExternalLinkIcon width={12} height={12} />
                 YouTubeで見る
               </button>
             </div>

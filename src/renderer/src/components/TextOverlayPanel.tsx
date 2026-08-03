@@ -1,6 +1,7 @@
 import { useProjectStore } from '../store/projectStore'
 import { getTotalDuration } from '../store/projectStore'
 import type { TextPosition } from '@shared/types'
+import { PlusIcon, TrashIcon, TypeIcon } from './icons'
 
 export function TextOverlayPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
@@ -15,7 +16,7 @@ export function TextOverlayPanel(): React.JSX.Element {
       <div className="panel-header">
         <h2>テキスト / 字幕</h2>
         <button
-          className="small-button"
+          className="primary-button"
           onClick={() =>
             addTextOverlay({
               text: '新しいテキスト',
@@ -31,11 +32,17 @@ export function TextOverlayPanel(): React.JSX.Element {
             })
           }
         >
-          + 追加
+          <PlusIcon width={14} height={14} />
+          追加
         </button>
       </div>
       <div className="overlay-list">
-        {project.textOverlays.length === 0 && <p className="hint-text">テキストはありません</p>}
+        {project.textOverlays.length === 0 && (
+          <div className="empty-state">
+            <TypeIcon width={26} height={26} />
+            <p className="hint-text">テキストはありません</p>
+          </div>
+        )}
         {project.textOverlays.map((o) => (
           <div key={o.id} className="overlay-item">
             <input
@@ -89,8 +96,12 @@ export function TextOverlayPanel(): React.JSX.Element {
                   }
                 />
               </label>
-              <button className="small-button danger" onClick={() => removeTextOverlay(o.id)}>
-                削除
+              <button
+                className="icon-button danger"
+                title="削除"
+                onClick={() => removeTextOverlay(o.id)}
+              >
+                <TrashIcon width={13} height={13} />
               </button>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { editTemplates } from '@shared/templates'
 import { useProjectStore } from '../store/projectStore'
+import { SparklesIcon } from './icons'
 
 export function TemplatePanel(): React.JSX.Element {
   const applyTemplate = useProjectStore((s) => s.applyTemplate)
@@ -16,7 +17,10 @@ export function TemplatePanel(): React.JSX.Element {
       <div className="template-list">
         {editTemplates.map((t) => (
           <div key={t.id} className="template-card">
-            <h3>{t.name}</h3>
+            <h3>
+              <SparklesIcon width={14} height={14} className="template-card-icon" />
+              {t.name}
+            </h3>
             <p>{t.description}</p>
             <ul>
               {t.segments.map((seg, i) => (

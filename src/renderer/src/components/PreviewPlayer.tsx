@@ -6,6 +6,7 @@ import {
   totalTimelineDuration,
   TimedClip
 } from '../lib/timelineMath'
+import { PlayIcon, PauseIcon, ClapperboardIcon } from './icons'
 
 function toFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
@@ -121,7 +122,10 @@ export function PreviewPlayer(): React.JSX.Element {
               onEnded={() => setIsPlaying(false)}
             />
           ) : (
-            <div className="preview-empty">タイムラインにクリップを追加してください</div>
+            <div className="preview-empty">
+              <ClapperboardIcon width={32} height={32} />
+              <p>タイムラインにクリップを追加してください</p>
+            </div>
           )}
           {activeOverlays.map((o) => (
             <div
@@ -140,9 +144,19 @@ export function PreviewPlayer(): React.JSX.Element {
         </div>
       </div>
       <div className="preview-controls">
-        <button onClick={() => setIsPlaying(!isPlaying)} disabled={!activeSrc}>
-          {isPlaying ? '一時停止' : '再生'}
+        <button
+          className="play-button"
+          onClick={() => setIsPlaying(!isPlaying)}
+          disabled={!activeSrc}
+        >
+          {isPlaying ? <PauseIcon width={16} height={16} /> : <PlayIcon width={16} height={16} />}
         </button>
+        <div className="scrub-track">
+          <div
+            className="scrub-fill"
+            style={{ width: total > 0 ? `${Math.min(100, (playheadTime / total) * 100)}%` : '0%' }}
+          />
+        </div>
         <span className="time-label">
           {formatTime(playheadTime)} / {formatTime(total)}
         </span>

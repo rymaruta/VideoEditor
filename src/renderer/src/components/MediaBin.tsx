@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
+import { UploadIcon, PlusIcon, ClapperboardIcon } from './icons'
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -62,13 +63,19 @@ export function MediaBin(): React.JSX.Element {
     <div className="panel media-bin">
       <div className="panel-header">
         <h2>メディア</h2>
-        <button onClick={handleImport} disabled={importing}>
-          {importing ? '読み込み中...' : '+ 動画を追加'}
+        <button className="primary-button" onClick={handleImport} disabled={importing}>
+          <UploadIcon width={14} height={14} />
+          {importing ? '読み込み中...' : '動画を追加'}
         </button>
       </div>
       {error && <p className="error-text">{error}</p>}
       <div className="media-list">
-        {assets.length === 0 && <p className="hint-text">動画ファイルを追加してください</p>}
+        {assets.length === 0 && (
+          <div className="empty-state">
+            <ClapperboardIcon width={28} height={28} />
+            <p className="hint-text">動画ファイルを追加してください</p>
+          </div>
+        )}
         {assets.map((asset) => (
           <div key={asset.id} className="media-item">
             <div className="media-thumb">
@@ -86,8 +93,12 @@ export function MediaBin(): React.JSX.Element {
                 {formatDuration(asset.duration)} ・ {asset.width}x{asset.height}
               </div>
             </div>
-            <button className="small-button" onClick={() => addClipToTimeline(asset.id)}>
-              タイムラインに追加
+            <button
+              className="icon-button"
+              onClick={() => addClipToTimeline(asset.id)}
+              title="タイムラインに追加"
+            >
+              <PlusIcon width={14} height={14} />
             </button>
           </div>
         ))}

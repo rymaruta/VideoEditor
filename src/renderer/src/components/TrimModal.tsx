@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { ScissorsIcon } from './icons'
 
 function toFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
@@ -44,7 +45,10 @@ export function TrimModal({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>クリップをトリム: {asset.fileName}</h3>
+        <h3>
+          <ScissorsIcon width={15} height={15} />
+          クリップをトリム: {asset.fileName}
+        </h3>
         <video
           src={toFileUrl(asset.filePath)}
           controls
@@ -75,7 +79,10 @@ export function TrimModal({
             onChange={(e) => setOutPoint(Math.max(Number(e.target.value), inPoint + 0.1))}
           />
         </div>
-        <p className="hint-text">元動画の長さ: {formatTime(asset.duration)}</p>
+        <div className="trim-summary">
+          <span className="project-badge">選択範囲: {formatTime(outPoint - inPoint)}</span>
+          <p className="hint-text">元動画の長さ: {formatTime(asset.duration)}</p>
+        </div>
         <div className="modal-actions">
           <button onClick={onClose}>キャンセル</button>
           <button onClick={handleSave} className="primary-button">

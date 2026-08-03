@@ -6,41 +6,71 @@ import { TemplatePanel } from './components/TemplatePanel'
 import { TextOverlayPanel } from './components/TextOverlayPanel'
 import { YouTubeTrendPanel } from './components/YouTubeTrendPanel'
 import { ExportPanel } from './components/ExportPanel'
+import { useProjectStore } from './store/projectStore'
+import {
+  ClapperboardIcon,
+  SparklesIcon,
+  TypeIcon,
+  YoutubeIcon,
+  DownloadIcon
+} from './components/icons'
+import type { SVGProps } from 'react'
 
 type RightTab = 'template' | 'text' | 'youtube' | 'export'
 
+const TABS: {
+  id: RightTab
+  label: string
+  icon: (props: SVGProps<SVGSVGElement>) => React.JSX.Element
+}[] = [
+  { id: 'template', label: 'テンプレート', icon: SparklesIcon },
+  { id: 'text', label: 'テキスト', icon: TypeIcon },
+  { id: 'youtube', label: 'YouTube', icon: YoutubeIcon },
+  { id: 'export', label: '書き出し', icon: DownloadIcon }
+]
+
 function App(): React.JSX.Element {
   const [tab, setTab] = useState<RightTab>('template')
+  const projectName = useProjectStore((s) => s.project.name)
+  const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
 
   return (
-    <div className="app-layout">
-      <div className="left-column">
-        <MediaBin />
-      </div>
-      <div className="center-column">
-        <PreviewPlayer />
-        <Timeline />
-      </div>
-      <div className="right-column">
-        <div className="tab-bar">
-          <button className={tab === 'template' ? 'active' : ''} onClick={() => setTab('template')}>
-            テンプレート
-          </button>
-          <button className={tab === 'text' ? 'active' : ''} onClick={() => setTab('text')}>
-            テキスト
-          </button>
-          <button className={tab === 'youtube' ? 'active' : ''} onClick={() => setTab('youtube')}>
-            YouTube
-          </button>
-          <button className={tab === 'export' ? 'active' : ''} onClick={() => setTab('export')}>
-            書き出し
-          </button>
+    <div className="app-shell">
+      <header className="top-bar">
+        <div className="top-bar-brand">
+          <span className="brand-icon">
+            <ClapperboardIcon width={18} height={18} />
+          </span>
+          <span className="brand-name">VideoEditor</span>
         </div>
-        <div className="tab-content">
-          {tab === 'template' && <TemplatePanel />}
-          {tab === 'text' && <TextOverlayPanel />}
-          {tab === 'youtube' && <YouTubeTrendPanel />}
-          {tab === 'export' && <ExportPanel />}
+        <div className="top-bar-project">
+          <span className="project-name">{projectName}</span>
+          <span className="project-badge">{aspectRatio}</span>
+        </div>
+      </header>
+      <div className="app-layout">
+        <div className="left-column">
+          <MediaBin />
+        </div>
+        <div className="center-column">
+          <PreviewPlayer />
+          <Timeline />
+        </div>
+        <div className="right-column">
+          <div className="tab-bar">
+            {TABS.map(({ id, label, icon: Icon }) => (
+              <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+                <Icon width={14} height={14} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="tab-content">
+            {tab === 'template' && <TemplatePanel />}
+            {tab === 'text' && <TextOverlayPanel />}
+            {tab === 'youtube' && <YouTubeTrendPanel />}
+            {tab === 'export' && <ExportPanel />}
+          </div>
         </div>
       </div>
     </div>
