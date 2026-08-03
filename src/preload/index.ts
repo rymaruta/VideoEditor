@@ -58,6 +58,23 @@ const api = {
     language?: string
   ): Promise<TranscriptSegment[]> =>
     ipcRenderer.invoke(IPC.transcribeWords, filePath, rangeStart, rangeEnd, language),
+  analyzeSmartCrop: (
+    filePath: string,
+    rangeStart: number,
+    rangeEnd: number,
+    sourceWidth: number,
+    sourceHeight: number,
+    targetAspect: number
+  ): Promise<{ x: number; y: number }> =>
+    ipcRenderer.invoke(
+      IPC.analyzeSmartCrop,
+      filePath,
+      rangeStart,
+      rangeEnd,
+      sourceWidth,
+      sourceHeight,
+      targetAspect
+    ),
   selectExportPath: (defaultName: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectExportPath, defaultName),
   selectExportFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectExportFolder),

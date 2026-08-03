@@ -47,6 +47,7 @@ interface ProjectState {
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
   updateClipSpeed: (clipId: string, speed: number) => void
   updateClipTransition: (clipId: string, transition: Transition | undefined) => void
+  updateClipCrop: (clipId: string, fillCrop: boolean, cropCenter?: { x: number; y: number }) => void
   replaceClipRange: (clipId: string, newClips: Clip[]) => void
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
   removeClip: (clipId: string) => void
@@ -203,6 +204,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...state.project,
         clips: state.project.clips.map((c) =>
           c.id === clipId ? { ...c, transitionIn: transition } : c
+        )
+      }
+    })),
+
+  updateClipCrop: (clipId, fillCrop, cropCenter) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        clips: state.project.clips.map((c) =>
+          c.id === clipId ? { ...c, fillCrop, cropCenter: cropCenter ?? c.cropCenter } : c
         )
       }
     })),

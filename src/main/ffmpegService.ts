@@ -261,8 +261,15 @@ export function exportProject(options: ExportOptions): Promise<void> {
         command.input(asset.filePath).inputOptions([`-ss ${clip.inPoint}`, `-t ${sourceDuration}`])
         const myIndex = inputIndex++
 
+        const scalePadFilter = clip.fillCrop
+          ? (() => {
+              const cx = clip.cropCenter?.x ?? 0.5
+              const cy = clip.cropCenter?.y ?? 0.5
+              return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:'min(max(0,(iw*${cx}-ow/2)),(iw-ow))':'min(max(0,(ih*${cy}-oh/2)),(ih-oh))'`
+            })()
+          : `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`
         filterParts.push(
-          `[${myIndex}:v]setpts=PTS/${speed},scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30[v${i}]`
+          `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,fps=30[v${i}]`
         )
         if (asset.hasAudio) {
           filterParts.push(

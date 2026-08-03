@@ -545,14 +545,22 @@ export function Timeline(): React.JSX.Element {
                     {tc.asset.fileName}
                     {tc.clip.speed !== 1 && ` (${tc.clip.speed}x)`}
                   </span>
-                  {isAspectMismatch(tc.asset, project.aspectRatio) && (
-                    <span
-                      className="timeline-mismatch-icon"
-                      title="プロジェクトのアスペクト比と異なるため黒帯が入ります"
-                    >
-                      <AlertTriangleIcon width={11} height={11} />
-                    </span>
-                  )}
+                  {isAspectMismatch(tc.asset, project.aspectRatio) &&
+                    (tc.clip.fillCrop ? (
+                      <span
+                        className="timeline-mismatch-icon timeline-crop-icon"
+                        title="スマートクロップ適用済み(黒帯なしで表示)"
+                      >
+                        <WandIcon width={11} height={11} />
+                      </span>
+                    ) : (
+                      <span
+                        className="timeline-mismatch-icon"
+                        title="プロジェクトのアスペクト比と異なるため黒帯が入ります"
+                      >
+                        <AlertTriangleIcon width={11} height={11} />
+                      </span>
+                    ))}
                   {tc.asset.hasAudio && clipWidth > 24 && (
                     <div className="timeline-clip-waveform">
                       <Waveform

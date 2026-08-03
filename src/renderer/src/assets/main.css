@@ -602,6 +602,10 @@ h3 {
   align-items: center;
 }
 
+.timeline-crop-icon {
+  color: var(--accent-1);
+}
+
 /* Preview player */
 .preview-player {
   flex: 1;

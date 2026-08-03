@@ -25,6 +25,8 @@ export interface Clip {
   outPoint: number
   speed: number
   transitionIn?: Transition
+  fillCrop?: boolean
+  cropCenter?: { x: number; y: number }
 }
 
 export type AspectRatio = '16:9' | '9:16'
