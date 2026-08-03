@@ -4,13 +4,15 @@ import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { isAspectMismatch } from '../lib/aspect'
 import { HighlightModal } from './HighlightModal'
+import { RoughCutModal } from './RoughCutModal'
 import {
   UploadIcon,
   PlusIcon,
   ClapperboardIcon,
   MusicIcon,
   AlertTriangleIcon,
-  TargetIcon
+  TargetIcon,
+  WandIcon
 } from './icons'
 
 function fileNameFromPath(path: string): string {
@@ -37,6 +39,8 @@ export function MediaBin(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
   const [highlightAssetId, setHighlightAssetId] = useState<string | null>(null)
+  const [showRoughCut, setShowRoughCut] = useState(false)
+  const hasVideoAssets = assets.some((a) => a.hasVideo)
 
   async function importFiles(paths: string[]): Promise<void> {
     if (paths.length === 0) return
@@ -104,6 +108,16 @@ export function MediaBin(): React.JSX.Element {
           </button>
         </div>
       </div>
+      {hasVideoAssets && (
+        <button
+          className="small-button roughcut-trigger"
+          onClick={() => setShowRoughCut(true)}
+          title="すべての動画素材からハイライトを検出し、タイムラインへ自動でラフカットを組み立てます"
+        >
+          <WandIcon width={13} height={13} />
+          複数素材から自動ラフカット
+        </button>
+      )}
       {importing && <p className="hint-text">読み込み中...</p>}
       {error && <p className="error-text">{error}</p>}
       <div className="media-list">
@@ -197,6 +211,7 @@ export function MediaBin(): React.JSX.Element {
       {highlightAssetId && (
         <HighlightModal assetId={highlightAssetId} onClose={() => setHighlightAssetId(null)} />
       )}
+      {showRoughCut && <RoughCutModal onClose={() => setShowRoughCut(false)} />}
     </div>
   )
 }

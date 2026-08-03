@@ -593,6 +593,48 @@ h3 {
   font-size: 9.5px;
 }
 
+.roughcut-trigger {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.roughcut-modal {
+  width: 620px;
+}
+
+.roughcut-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+}
+
+.roughcut-controls input[type='number'] {
+  width: 56px;
+  margin-left: 4px;
+}
+
+.roughcut-summary {
+  margin-bottom: 8px;
+}
+
+.roughcut-list {
+  max-height: 380px;
+}
+
+.roughcut-asset-group {
+  margin-bottom: 6px;
+}
+
+.roughcut-asset-name {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 600;
+  margin: 8px 0 4px;
+}
+
 .timeline-mismatch-icon {
   position: relative;
   z-index: 1;

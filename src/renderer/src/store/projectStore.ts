@@ -83,6 +83,7 @@ interface ProjectState {
     picks: { assetId: string; start: number; end: number }[],
     template: EditTemplate
   ) => void
+  addRoughCutClips: (picks: { assetId: string; start: number; end: number }[]) => void
 }
 
 function totalDuration(project: Project): number {
@@ -549,6 +550,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...pushHistory(state),
         project: { ...project, textOverlays: overlays },
         selectedClipId: null
+      }
+    }),
+
+  addRoughCutClips: (picks) =>
+    set((state) => {
+      const newClips: Clip[] = picks.map((p) => ({
+        id: uuid(),
+        assetId: p.assetId,
+        inPoint: p.start,
+        outPoint: p.end,
+        speed: 1
+      }))
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, clips: [...state.project.clips, ...newClips] }
       }
     })
 }))
