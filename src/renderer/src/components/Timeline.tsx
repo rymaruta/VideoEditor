@@ -17,7 +17,8 @@ import { AutoCaptionModal } from './AutoCaptionModal'
 import { TextBasedEditModal } from './TextBasedEditModal'
 import { Waveform } from './Waveform'
 import { isAspectMismatch } from '../lib/aspect'
-import type { Clip, TransitionType } from '@shared/types'
+import { formatIpcError } from '../lib/ipcError'
+import type { AudioTrack, Clip, TransitionType } from '@shared/types'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -37,7 +38,8 @@ import {
   ClipboardPasteIcon,
   ZoomInIcon,
   ZoomOutIcon,
-  AlertTriangleIcon
+  AlertTriangleIcon,
+  ActivityIcon
 } from './icons'
 
 const BASE_PIXELS_PER_SECOND = 40
@@ -95,6 +97,9 @@ export function Timeline(): React.JSX.Element {
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
   const pasteClip = useProjectStore((s) => s.pasteClip)
   const clipboardClip = useProjectStore((s) => s.clipboardClip)
+  const setBeatGrid = useProjectStore((s) => s.setBeatGrid)
+  const clearBeatGrid = useProjectStore((s) => s.clearBeatGrid)
+  const toggleBeatGridEnabled = useProjectStore((s) => s.toggleBeatGridEnabled)
   const keymapScheme = useSettingsStore((s) => s.keymapScheme)
   const setKeymapScheme = useSettingsStore((s) => s.setKeymapScheme)
   const keymap = getKeymap(keymapScheme)
@@ -104,6 +109,8 @@ export function Timeline(): React.JSX.Element {
   const [fillerWordClipId, setFillerWordClipId] = useState<string | null>(null)
   const [autoCaptionClipId, setAutoCaptionClipId] = useState<string | null>(null)
   const [textEditClipId, setTextEditClipId] = useState<string | null>(null)
+  const [bpmAnalyzingTrackId, setBpmAnalyzingTrackId] = useState<string | null>(null)
+  const [bpmError, setBpmError] = useState<string | null>(null)
   const [selectedAudioClip, setSelectedAudioClip] = useState<{
     trackId: string
     clipId: string
@@ -136,6 +143,25 @@ export function Timeline(): React.JSX.Element {
     return times
   }, [baseTimedClips, playheadTime, project.audioTracks, project.textOverlays])
 
+  const beatTimes = useMemo(() => {
+    const grid = project.beatGrid
+    if (!grid || !grid.enabled || grid.bpm <= 0) return []
+    const interval = 60 / grid.bpm
+    const maxTime = Math.max(30, ...snapCandidates) + interval
+    let phase = grid.offsetSeconds % interval
+    if (phase < 0) phase += interval
+    const times: number[] = []
+    for (let t = phase; t <= maxTime; t += interval) {
+      times.push(t)
+    }
+    return times
+  }, [project.beatGrid, snapCandidates])
+
+  const snapCandidatesWithBeat = useMemo(
+    () => [...snapCandidates, ...beatTimes],
+    [snapCandidates, beatTimes]
+  )
+
   useEffect(() => {
     if (!trimDrag) return
     function handleMouseMove(e: MouseEvent): void {
@@ -157,7 +183,11 @@ export function Timeline(): React.JSX.Element {
         }
         const rawTcEnd = prev.clipStartInTimeline + (liveOutPoint - liveInPoint) / prev.speed
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
-        const { time: snappedTcEnd, snapped } = snapTime(rawTcEnd, snapCandidates, thresholdSeconds)
+        const { time: snappedTcEnd, snapped } = snapTime(
+          rawTcEnd,
+          snapCandidatesWithBeat,
+          thresholdSeconds
+        )
         if (snapped) {
           const snappedDuration = snappedTcEnd - prev.clipStartInTimeline
           if (prev.edge === 'left') {
@@ -187,7 +217,7 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [trimDrag, pixelsPerSecond, updateClipTrim, snapCandidates])
+  }, [trimDrag, pixelsPerSecond, updateClipTrim, snapCandidatesWithBeat])
 
   useEffect(() => {
     if (!audioDrag) return
@@ -197,11 +227,11 @@ export function Timeline(): React.JSX.Element {
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
         const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
-        const startSnap = snapTime(rawStart, snapCandidates, thresholdSeconds)
+        const startSnap = snapTime(rawStart, snapCandidatesWithBeat, thresholdSeconds)
         if (startSnap.snapped) {
           return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
         }
-        const endSnap = snapTime(rawStart + prev.duration, snapCandidates, thresholdSeconds)
+        const endSnap = snapTime(rawStart + prev.duration, snapCandidatesWithBeat, thresholdSeconds)
         if (endSnap.snapped) {
           return {
             ...prev,
@@ -224,7 +254,7 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, snapCandidates])
+  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, snapCandidatesWithBeat])
 
   function beginTrimDrag(
     e: React.MouseEvent,
@@ -300,6 +330,32 @@ export function Timeline(): React.JSX.Element {
     setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (e.deltaY < 0 ? 1.1 : 0.9))))
   }
 
+  async function handleAnalyzeBpm(track: AudioTrack): Promise<void> {
+    const clip = track.clips[0]
+    if (!clip) return
+    const asset = project.assets.find((a) => a.id === clip.assetId)
+    if (!asset) return
+    setBpmAnalyzingTrackId(track.id)
+    setBpmError(null)
+    try {
+      const result = await window.api.analyzeBpm(
+        asset.filePath,
+        clip.inPoint,
+        clip.outPoint - clip.inPoint
+      )
+      setBeatGrid({
+        bpm: result.bpm,
+        offsetSeconds: clip.startTime + result.offsetSeconds,
+        enabled: true,
+        sourceLabel: track.name
+      })
+    } catch (e) {
+      setBpmError(formatIpcError(e))
+    } finally {
+      setBpmAnalyzingTrackId(null)
+    }
+  }
+
   const selectedAudioClipData =
     selectedAudioClip &&
     project.audioTracks
@@ -327,6 +383,29 @@ export function Timeline(): React.JSX.Element {
             <ZoomInIcon width={13} height={13} />
           </button>
         </div>
+        {project.beatGrid && (
+          <div className="beat-grid-info" title={`解析元: ${project.beatGrid.sourceLabel}`}>
+            <button
+              className={`icon-button ${project.beatGrid.enabled ? 'active' : ''}`}
+              title={
+                project.beatGrid.enabled
+                  ? 'ビートグリッドを非表示(スナップも無効化)'
+                  : 'ビートグリッドを表示(スナップも有効化)'
+              }
+              onClick={() => toggleBeatGridEnabled()}
+            >
+              <ActivityIcon width={13} height={13} />
+            </button>
+            <span className="beat-grid-bpm">{project.beatGrid.bpm} BPM</span>
+            <button
+              className="icon-button danger"
+              title="ビートグリッドを削除"
+              onClick={() => clearBeatGrid()}
+            >
+              <TrashIcon width={12} height={12} />
+            </button>
+          </div>
+        )}
         {selectedClip && (
           <div className="timeline-actions">
             <button
@@ -476,6 +555,7 @@ export function Timeline(): React.JSX.Element {
           </select>
         </label>
       </div>
+      {bpmError && <p className="error-text timeline-bpm-error">{bpmError}</p>}
 
       <div className="timeline-tracks">
         <div className="track-labels-col">
@@ -486,6 +566,14 @@ export function Timeline(): React.JSX.Element {
                 {track.name}
               </span>
               <div className="track-label-controls">
+                <button
+                  className="icon-button"
+                  title="このトラックの音声からBPMを解析してビートグリッドを表示"
+                  disabled={bpmAnalyzingTrackId === track.id || track.clips.length === 0}
+                  onClick={() => handleAnalyzeBpm(track)}
+                >
+                  {bpmAnalyzingTrackId === track.id ? '…' : <ActivityIcon width={13} height={13} />}
+                </button>
                 <button
                   className="icon-button"
                   title={track.muted ? 'ミュート解除' : 'ミュート'}
@@ -540,6 +628,10 @@ export function Timeline(): React.JSX.Element {
         </div>
 
         <div className="track-lanes-col" onWheel={handleWheelZoom}>
+          {project.beatGrid?.enabled &&
+            beatTimes.map((t, i) => (
+              <div key={i} className="timeline-beat-line" style={{ left: t * pixelsPerSecond }} />
+            ))}
           {activeSnapGuideTime !== null && (
             <div
               className="timeline-snap-guide"

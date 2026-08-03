@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import type {
   AspectRatio,
   AudioTrack,
+  BeatGrid,
   Clip,
   EditTemplate,
   MediaAsset,
@@ -21,7 +22,8 @@ function createBlankProject(): Project {
     assets: [],
     clips: [],
     audioTracks: [],
-    textOverlays: []
+    textOverlays: [],
+    beatGrid: null
   }
 }
 
@@ -77,6 +79,10 @@ interface ProjectState {
   addClipToAudioTrack: (trackId: string, assetId: string) => void
   updateAudioClipStart: (trackId: string, clipId: string, startTime: number) => void
   removeAudioClip: (trackId: string, clipId: string) => void
+
+  setBeatGrid: (grid: BeatGrid) => void
+  clearBeatGrid: () => void
+  toggleBeatGridEnabled: () => void
 
   applyTemplate: (template: EditTemplate) => void
   autoCutFromCandidates: (
@@ -477,6 +483,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         audioTracks: state.project.audioTracks.map((t) =>
           t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
         )
+      }
+    })),
+
+  setBeatGrid: (grid) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: { ...state.project, beatGrid: grid }
+    })),
+
+  clearBeatGrid: () =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: { ...state.project, beatGrid: null }
+    })),
+
+  toggleBeatGridEnabled: () =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        beatGrid: state.project.beatGrid
+          ? { ...state.project.beatGrid, enabled: !state.project.beatGrid.enabled }
+          : null
       }
     })),
 

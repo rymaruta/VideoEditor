@@ -94,6 +94,13 @@ export interface AudioTrack {
   clips: AudioTrackClip[]
 }
 
+export interface BeatGrid {
+  bpm: number
+  offsetSeconds: number
+  enabled: boolean
+  sourceLabel: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -102,6 +109,7 @@ export interface Project {
   clips: Clip[]
   audioTracks: AudioTrack[]
   textOverlays: TextOverlay[]
+  beatGrid?: BeatGrid | null
 }
 
 export interface TemplateSegment {
@@ -162,6 +170,12 @@ export interface HighlightCandidate {
   score: number
   hasSceneChange: boolean
   hasAudioPeak: boolean
+}
+
+export interface BpmAnalysisResult {
+  bpm: number
+  confidence: number
+  offsetSeconds: number
 }
 
 export interface VoicevoxStyle {

@@ -7,6 +7,7 @@ export const IPC = {
   generateWaveform: 'media:waveform',
   detectSilence: 'media:detectSilence',
   detectHighlights: 'media:detectHighlights',
+  analyzeBpm: 'media:analyzeBpm',
   transcribe: 'media:transcribe',
   transcribeWords: 'media:transcribeWords',
   analyzeSmartCrop: 'media:analyzeSmartCrop',

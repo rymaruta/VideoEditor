@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
 import type {
   AspectRatio,
+  BpmAnalysisResult,
   ExportProgress,
   HighlightCandidate,
   MediaProbeResult,
@@ -44,6 +45,8 @@ const api = {
     ipcRenderer.invoke(IPC.detectSilence, filePath, rangeStart, rangeEnd),
   detectHighlights: (filePath: string, assetDuration: number): Promise<HighlightCandidate[]> =>
     ipcRenderer.invoke(IPC.detectHighlights, filePath, assetDuration),
+  analyzeBpm: (filePath: string, start: number, duration: number): Promise<BpmAnalysisResult> =>
+    ipcRenderer.invoke(IPC.analyzeBpm, filePath, start, duration),
   transcribe: (
     filePath: string,
     rangeStart: number,

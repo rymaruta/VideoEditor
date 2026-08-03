@@ -1078,6 +1078,26 @@ h3 {
   text-align: center;
 }
 
+.beat-grid-info {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+}
+
+.beat-grid-bpm {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.timeline-bpm-error {
+  margin: 0 14px 6px;
+}
+
 .inline-select {
   display: flex;
   align-items: center;
@@ -1267,6 +1287,16 @@ h3 {
   width: 2px;
   background: #f5b942;
   z-index: 3;
+  pointer-events: none;
+}
+
+.timeline-beat-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(156, 140, 246, 0.35);
+  z-index: 1;
   pointer-events: none;
 }
 
