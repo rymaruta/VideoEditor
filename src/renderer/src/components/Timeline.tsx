@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
+import { snapTime } from '../lib/snapping'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
 import { AutoCaptionModal } from './AutoCaptionModal'
@@ -32,6 +33,7 @@ const BASE_PIXELS_PER_SECOND = 40
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 4
 const MIN_CLIP_SOURCE_DURATION = 0.2
+const SNAP_PIXELS = 8
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
@@ -39,12 +41,24 @@ interface TrimDragState {
   clipId: string
   edge: 'left' | 'right'
   startX: number
+  clipStartInTimeline: number
   originalInPoint: number
   originalOutPoint: number
   assetDuration: number
   speed: number
   liveInPoint: number
   liveOutPoint: number
+  snapGuideTime: number | null
+}
+
+interface AudioDragState {
+  trackId: string
+  clipId: string
+  startX: number
+  duration: number
+  originalStartTime: number
+  liveStartTime: number
+  snapGuideTime: number | null
 }
 
 export function Timeline(): React.JSX.Element {
@@ -82,8 +96,27 @@ export function Timeline(): React.JSX.Element {
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null)
+  const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
+
+  const baseTimedClips = useMemo(() => buildTimedClips(project), [project])
+
+  const snapCandidates = useMemo(() => {
+    const times: number[] = [0, playheadTime]
+    baseTimedClips.forEach((tc) => {
+      times.push(tc.start, tc.end)
+    })
+    project.audioTracks.forEach((track) => {
+      track.clips.forEach((c) => {
+        times.push(c.startTime, c.startTime + (c.outPoint - c.inPoint))
+      })
+    })
+    project.textOverlays.forEach((o) => {
+      times.push(o.startTime, o.endTime)
+    })
+    return times
+  }, [baseTimedClips, playheadTime, project.audioTracks, project.textOverlays])
 
   useEffect(() => {
     if (!trimDrag) return
@@ -91,18 +124,37 @@ export function Timeline(): React.JSX.Element {
       setTrimDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = ((e.clientX - prev.startX) / pixelsPerSecond) * prev.speed
+        let liveInPoint = prev.originalInPoint
+        let liveOutPoint = prev.originalOutPoint
         if (prev.edge === 'left') {
-          const liveInPoint = Math.min(
+          liveInPoint = Math.min(
             Math.max(0, prev.originalInPoint + deltaSeconds),
             prev.originalOutPoint - MIN_CLIP_SOURCE_DURATION
           )
-          return { ...prev, liveInPoint }
+        } else {
+          liveOutPoint = Math.max(
+            Math.min(prev.assetDuration, prev.originalOutPoint + deltaSeconds),
+            prev.originalInPoint + MIN_CLIP_SOURCE_DURATION
+          )
         }
-        const liveOutPoint = Math.max(
-          Math.min(prev.assetDuration, prev.originalOutPoint + deltaSeconds),
-          prev.originalInPoint + MIN_CLIP_SOURCE_DURATION
-        )
-        return { ...prev, liveOutPoint }
+        const rawTcEnd = prev.clipStartInTimeline + (liveOutPoint - liveInPoint) / prev.speed
+        const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
+        const { time: snappedTcEnd, snapped } = snapTime(rawTcEnd, snapCandidates, thresholdSeconds)
+        if (snapped) {
+          const snappedDuration = snappedTcEnd - prev.clipStartInTimeline
+          if (prev.edge === 'left') {
+            liveInPoint = Math.min(
+              Math.max(0, liveOutPoint - snappedDuration * prev.speed),
+              liveOutPoint - MIN_CLIP_SOURCE_DURATION
+            )
+          } else {
+            liveOutPoint = Math.max(
+              Math.min(prev.assetDuration, liveInPoint + snappedDuration * prev.speed),
+              liveInPoint + MIN_CLIP_SOURCE_DURATION
+            )
+          }
+        }
+        return { ...prev, liveInPoint, liveOutPoint, snapGuideTime: snapped ? snappedTcEnd : null }
       })
     }
     function handleMouseUp(): void {
@@ -117,13 +169,51 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [trimDrag, pixelsPerSecond, updateClipTrim])
+  }, [trimDrag, pixelsPerSecond, updateClipTrim, snapCandidates])
+
+  useEffect(() => {
+    if (!audioDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setAudioDrag((prev) => {
+        if (!prev) return prev
+        const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
+        const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
+        const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
+        const startSnap = snapTime(rawStart, snapCandidates, thresholdSeconds)
+        if (startSnap.snapped) {
+          return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
+        }
+        const endSnap = snapTime(rawStart + prev.duration, snapCandidates, thresholdSeconds)
+        if (endSnap.snapped) {
+          return {
+            ...prev,
+            liveStartTime: Math.max(0, endSnap.time - prev.duration),
+            snapGuideTime: endSnap.time
+          }
+        }
+        return { ...prev, liveStartTime: rawStart, snapGuideTime: null }
+      })
+    }
+    function handleMouseUp(): void {
+      setAudioDrag((prev) => {
+        if (prev) updateAudioClipStart(prev.trackId, prev.clipId, prev.liveStartTime)
+        return null
+      })
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, snapCandidates])
 
   function beginTrimDrag(
     e: React.MouseEvent,
     edge: 'left' | 'right',
     clip: Clip,
-    assetDuration: number
+    assetDuration: number,
+    clipStartInTimeline: number
   ): void {
     e.stopPropagation()
     e.preventDefault()
@@ -131,6 +221,8 @@ export function Timeline(): React.JSX.Element {
       clipId: clip.id,
       edge,
       startX: e.clientX,
+      clipStartInTimeline,
+      snapGuideTime: null,
       originalInPoint: clip.inPoint,
       originalOutPoint: clip.outPoint,
       assetDuration,
@@ -155,6 +247,7 @@ export function Timeline(): React.JSX.Element {
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
+  const activeSnapGuideTime = trimDrag?.snapGuideTime ?? audioDrag?.snapGuideTime ?? null
 
   function handleTrackClick(e: React.MouseEvent<HTMLDivElement>): void {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -373,6 +466,12 @@ export function Timeline(): React.JSX.Element {
         </div>
 
         <div className="track-lanes-col" onWheel={handleWheelZoom}>
+          {activeSnapGuideTime !== null && (
+            <div
+              className="timeline-snap-guide"
+              style={{ left: activeSnapGuideTime * pixelsPerSecond }}
+            />
+          )}
           <div
             className="track-lane video-lane"
             style={{ width: timelineWidth }}
@@ -420,14 +519,18 @@ export function Timeline(): React.JSX.Element {
                     draggable={false}
                     title="トリム(開始位置)"
                     onDragStart={(e) => e.preventDefault()}
-                    onMouseDown={(e) => beginTrimDrag(e, 'left', tc.clip, tc.asset.duration)}
+                    onMouseDown={(e) =>
+                      beginTrimDrag(e, 'left', tc.clip, tc.asset.duration, tc.start)
+                    }
                   />
                   <div
                     className="timeline-clip-handle timeline-clip-handle-right"
                     draggable={false}
                     title="トリム(終了位置)"
                     onDragStart={(e) => e.preventDefault()}
-                    onMouseDown={(e) => beginTrimDrag(e, 'right', tc.clip, tc.asset.duration)}
+                    onMouseDown={(e) =>
+                      beginTrimDrag(e, 'right', tc.clip, tc.asset.duration, tc.start)
+                    }
                   />
                   {tc.clip.transitionIn && i > 0 && <span className="transition-marker" />}
                   <span className="timeline-clip-index">{i + 1}</span>
@@ -477,15 +580,29 @@ export function Timeline(): React.JSX.Element {
                 if (!asset) return null
                 const dur = clip.outPoint - clip.inPoint
                 const clipWidth = dur * pixelsPerSecond
+                const isDraggingThis = audioDrag?.clipId === clip.id
+                const displayStart = isDraggingThis ? audioDrag.liveStartTime : clip.startTime
                 return (
                   <div
                     key={clip.id}
                     className={`timeline-audio-clip ${
                       selectedAudioClip?.clipId === clip.id ? 'selected' : ''
-                    }`}
+                    } ${isDraggingThis ? 'dragging' : ''}`}
                     style={{
-                      left: clip.startTime * pixelsPerSecond,
+                      left: displayStart * pixelsPerSecond,
                       width: clipWidth
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      setAudioDrag({
+                        trackId: track.id,
+                        clipId: clip.id,
+                        startX: e.clientX,
+                        duration: dur,
+                        originalStartTime: clip.startTime,
+                        liveStartTime: clip.startTime,
+                        snapGuideTime: null
+                      })
                     }}
                     onClick={(e) => {
                       e.stopPropagation()

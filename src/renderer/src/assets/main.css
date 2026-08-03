@@ -1038,6 +1038,22 @@ h3 {
   align-items: center;
   white-space: nowrap;
   overflow: hidden;
+  cursor: grab;
+}
+
+.timeline-audio-clip.dragging {
+  opacity: 0.6;
+  cursor: grabbing;
+}
+
+.timeline-snap-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #f5b942;
+  z-index: 3;
+  pointer-events: none;
 }
 
 .timeline-audio-clip-label {
