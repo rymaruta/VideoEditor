@@ -84,6 +84,24 @@ export async function fetchTrendingVideos(apiKey: string): Promise<YouTubeVideoI
   }))
 }
 
+const GAMING_CATEGORY_ID = '20'
+
+export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTubeVideoInfo[]> {
+  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=JP&videoCategoryId=${GAMING_CATEGORY_ID}&maxResults=25&key=${encodeURIComponent(apiKey)}`
+  const res = await fetch(url)
+  const data: ApiError & { items?: VideosListItem[] } = await res.json()
+  if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
+  return (data.items ?? []).map((item) => ({
+    id: item.id,
+    title: item.snippet.title,
+    channelTitle: item.snippet.channelTitle,
+    thumbnailUrl: pickThumbnail(item.snippet.thumbnails),
+    durationSeconds: parseIsoDuration(item.contentDetails.duration),
+    viewCount: Number(item.statistics?.viewCount ?? 0),
+    publishedAt: item.snippet.publishedAt
+  }))
+}
+
 export async function searchVideos(apiKey: string, query: string): Promise<YouTubeVideoInfo[]> {
   const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=viewCount&maxResults=15&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`
   const res = await fetch(searchUrl)

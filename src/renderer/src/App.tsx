@@ -9,6 +9,7 @@ import { ExportPanel } from './components/ExportPanel'
 import { NarrationPanel } from './components/NarrationPanel'
 import { ThumbnailPanel } from './components/ThumbnailPanel'
 import { AudioLibraryPanel } from './components/AudioLibraryPanel'
+import { GameTrendPanel } from './components/GameTrendPanel'
 import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
@@ -22,11 +23,13 @@ import {
   UndoIcon,
   RedoIcon,
   ImageIcon,
-  MusicIcon
+  MusicIcon,
+  TargetIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
-type RightTab = 'template' | 'text' | 'narration' | 'thumbnail' | 'audio' | 'youtube' | 'export'
+type RightTab =
+  'template' | 'text' | 'narration' | 'thumbnail' | 'audio' | 'gametrend' | 'youtube' | 'export'
 
 const TABS: {
   id: RightTab
@@ -38,6 +41,7 @@ const TABS: {
   { id: 'narration', label: 'ボイス', icon: MicIcon },
   { id: 'thumbnail', label: 'サムネ', icon: ImageIcon },
   { id: 'audio', label: 'BGM/SE', icon: MusicIcon },
+  { id: 'gametrend', label: 'ゲームトレンド', icon: TargetIcon },
   { id: 'youtube', label: 'YouTube', icon: YoutubeIcon },
   { id: 'export', label: '書き出し', icon: DownloadIcon }
 ]
@@ -115,6 +119,7 @@ function App(): React.JSX.Element {
             {tab === 'narration' && <NarrationPanel />}
             {tab === 'thumbnail' && <ThumbnailPanel />}
             {tab === 'audio' && <AudioLibraryPanel />}
+            {tab === 'gametrend' && <GameTrendPanel />}
             {tab === 'youtube' && <YouTubeTrendPanel />}
             {tab === 'export' && <ExportPanel />}
           </div>

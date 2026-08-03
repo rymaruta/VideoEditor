@@ -1398,6 +1398,92 @@ h3 {
   flex-shrink: 0;
 }
 
+/* Game Trend */
+.game-trend-panel .primary-button {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.game-trend-insights,
+.game-trend-tips,
+.game-trend-source {
+  margin-top: 14px;
+}
+
+.game-trend-insights h3,
+.game-trend-tips h3,
+.game-trend-source h3 {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.game-trend-insight-card {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 9px 10px;
+  margin-bottom: 8px;
+}
+
+.game-trend-insight-card h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-1);
+  margin-bottom: 4px;
+}
+
+.game-trend-insight-card p {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.game-trend-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.game-trend-evidence li {
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 10px;
+  position: relative;
+}
+
+.game-trend-evidence li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+}
+
+.game-trend-tips ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-trend-tips li {
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--bg-elevated-2);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+}
+
 /* Export */
 .export-field {
   display: flex;
