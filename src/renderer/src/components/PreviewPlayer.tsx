@@ -71,7 +71,20 @@ function overlayPreviewStyle(style: TextStyle): CSSProperties {
   }
 }
 
-function renderOverlayText(o: TextOverlay): React.ReactNode {
+function renderOverlayText(o: TextOverlay, playheadTime: number): React.ReactNode {
+  if (o.style.wordHighlight && o.words && o.words.length > 0) {
+    return o.words.map((w, i) => (
+      <span
+        key={i}
+        style={{
+          color:
+            playheadTime >= w.start && playheadTime < w.end ? o.style.highlightColor : undefined
+        }}
+      >
+        {w.text}
+      </span>
+    ))
+  }
   if (o.style.animation !== 'typewriter') return o.text
   const lines = o.text.split('\n')
   let charIndex = 0
@@ -270,7 +283,7 @@ export function PreviewPlayer(): React.JSX.Element {
                   setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
                 }}
               >
-                {renderOverlayText(o)}
+                {renderOverlayText(o, playheadTime)}
               </div>
             )
           })}

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
-import type { TranscriptSegment } from '@shared/types'
+import type { TranscriptSegment, TranscriptWord } from '@shared/types'
 
 const ffmpegPath = (ffmpegStatic as unknown as string).replace('app.asar', 'app.asar.unpacked')
 
@@ -100,4 +100,71 @@ export async function transcribeRange(
       text: chunk.text.trim()
     }))
     .filter((seg) => seg.text.length > 0)
+}
+
+function buildWordSegment(words: { raw: string; start: number; end: number }[]): TranscriptSegment {
+  const wordList: TranscriptWord[] = words.map((w, i) => ({
+    start: w.start,
+    end: w.end,
+    text: i === 0 ? w.raw.trimStart() : w.raw
+  }))
+  return {
+    start: wordList[0].start,
+    end: wordList[wordList.length - 1].end,
+    text: wordList.map((w) => w.text).join(''),
+    words: wordList
+  }
+}
+
+export async function transcribeWordsRange(
+  filePath: string,
+  rangeStart: number,
+  rangeEnd: number,
+  language: string = 'japanese',
+  maxWordsPerSegment = 5,
+  maxGapSeconds = 0.6
+): Promise<TranscriptSegment[]> {
+  const audio = extractPcm16k(filePath, rangeStart, rangeEnd)
+  let transcriber: Transcriber
+  try {
+    transcriber = await getTranscriber()
+  } catch (e) {
+    throw new Error(
+      `音声認識モデルの読み込みに失敗しました(初回はインターネット接続が必要です): ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    )
+  }
+
+  const result = await transcriber(audio, {
+    language,
+    task: 'transcribe',
+    return_timestamps: 'word',
+    chunk_length_s: 30
+  })
+
+  const words = (result.chunks ?? [])
+    .map((c) => ({
+      raw: c.text,
+      start: rangeStart + c.timestamp[0],
+      end: rangeStart + (c.timestamp[1] ?? c.timestamp[0])
+    }))
+    .filter((w) => w.raw.trim().length > 0)
+
+  if (words.length === 0) return []
+
+  const segments: TranscriptSegment[] = []
+  let current: typeof words = []
+  for (const w of words) {
+    if (current.length > 0) {
+      const gap = w.start - current[current.length - 1].end
+      if (current.length >= maxWordsPerSegment || gap > maxGapSeconds) {
+        segments.push(buildWordSegment(current))
+        current = []
+      }
+    }
+    current.push(w)
+  }
+  if (current.length > 0) segments.push(buildWordSegment(current))
+  return segments
 }

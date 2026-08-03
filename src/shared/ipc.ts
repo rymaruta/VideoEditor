@@ -8,6 +8,7 @@ export const IPC = {
   detectSilence: 'media:detectSilence',
   detectHighlights: 'media:detectHighlights',
   transcribe: 'media:transcribe',
+  transcribeWords: 'media:transcribeWords',
   voicevoxListSpeakers: 'voicevox:listSpeakers',
   voicevoxSynthesize: 'voicevox:synthesize',
   selectExportPath: 'export:selectPath',

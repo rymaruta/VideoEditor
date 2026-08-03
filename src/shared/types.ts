@@ -55,6 +55,14 @@ export interface TextStyle {
   backgroundOpacity: number
   letterSpacing: number
   animation: TextAnimation
+  wordHighlight: boolean
+  highlightColor: string
+}
+
+export interface TranscriptWord {
+  start: number
+  end: number
+  text: string
 }
 
 export interface TextOverlay {
@@ -64,6 +72,7 @@ export interface TextOverlay {
   endTime: number
   style: TextStyle
   source?: 'manual' | 'auto'
+  words?: TranscriptWord[]
 }
 
 export interface AudioTrackClip {
@@ -142,6 +151,7 @@ export interface TranscriptSegment {
   start: number
   end: number
   text: string
+  words?: TranscriptWord[]
 }
 
 export interface HighlightCandidate {

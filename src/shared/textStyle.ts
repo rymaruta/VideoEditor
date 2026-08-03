@@ -18,6 +18,8 @@ export function defaultTextStyle(overrides: Partial<TextStyle> = {}): TextStyle 
     backgroundOpacity: 0.5,
     letterSpacing: 0,
     animation: 'none',
+    wordHighlight: false,
+    highlightColor: '#ffe600',
     ...overrides
   }
 }

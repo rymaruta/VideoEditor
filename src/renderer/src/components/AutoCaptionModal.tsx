@@ -31,6 +31,7 @@ export function AutoCaptionModal({
   const [texts, setTexts] = useState<string[]>([])
   const [checked, setChecked] = useState<Set<number>>(new Set())
   const [language, setLanguage] = useState('japanese')
+  const [karaoke, setKaraoke] = useState(false)
 
   useEffect(() => {
     if (!clip || !asset) return
@@ -39,8 +40,10 @@ export function AutoCaptionModal({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
-    window.api
-      .transcribe(asset.filePath, clip.inPoint, clip.outPoint, language)
+    const request = karaoke
+      ? window.api.transcribeWords(asset.filePath, clip.inPoint, clip.outPoint, language)
+      : window.api.transcribe(asset.filePath, clip.inPoint, clip.outPoint, language)
+    request
       .then((result) => {
         setSegments(result)
         setTexts(result.map((r) => r.text))
@@ -49,7 +52,7 @@ export function AutoCaptionModal({
       .catch((e) => setError(formatIpcError(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clipId, language])
+  }, [clipId, language, karaoke])
 
   if (!clip || !asset) return null
 
@@ -77,12 +80,21 @@ export function AutoCaptionModal({
       if (!text) return
       const startTime = tc.start + (seg.start - clip.inPoint) / speed
       const endTime = tc.start + (seg.end - clip.inPoint) / speed
+      const words =
+        karaoke && seg.words
+          ? seg.words.map((w) => ({
+              text: w.text,
+              start: tc.start + (w.start - clip.inPoint) / speed,
+              end: tc.start + (w.end - clip.inPoint) / speed
+            }))
+          : undefined
       addTextOverlay({
         text,
         startTime,
         endTime,
-        style: defaultTextStyle(),
-        source: 'auto'
+        style: defaultTextStyle({ wordHighlight: karaoke && !!words }),
+        source: 'auto',
+        words
       })
     })
     onClose()
@@ -107,6 +119,15 @@ export function AutoCaptionModal({
             <option value="german">ドイツ語</option>
           </select>
         </div>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={karaoke}
+            onChange={(e) => setKaraoke(e.target.checked)}
+            disabled={loading}
+          />
+          単語ごとにハイライト(カラオケ字幕)
+        </label>
         {loading && (
           <p className="hint-text">
             音声を認識中...(初回はモデルのダウンロードのため数分かかる場合があります。インターネット接続が必要です)
@@ -129,6 +150,8 @@ export function AutoCaptionModal({
                 <input
                   type="text"
                   value={texts[i]}
+                  readOnly={karaoke}
+                  title={karaoke ? '単語ハイライトの時間同期を保つため編集できません' : undefined}
                   onChange={(e) =>
                     setTexts((prev) => prev.map((t, idx) => (idx === i ? e.target.value : t)))
                   }

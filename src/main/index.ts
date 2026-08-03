@@ -11,7 +11,7 @@ import {
   exportProject,
   detectSilence
 } from './ffmpegService'
-import { transcribeRange } from './whisperService'
+import { transcribeRange, transcribeWordsRange } from './whisperService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import { saveProjectFile, loadProjectFile } from './projectFileService'
 import { detectHighlights } from './highlightService'
@@ -167,6 +167,11 @@ app.whenReady().then(() => {
     IPC.transcribe,
     async (_e, filePath: string, rangeStart: number, rangeEnd: number, language?: string) =>
       transcribeRange(filePath, rangeStart, rangeEnd, language)
+  )
+  ipcMain.handle(
+    IPC.transcribeWords,
+    async (_e, filePath: string, rangeStart: number, rangeEnd: number, language?: string) =>
+      transcribeWordsRange(filePath, rangeStart, rangeEnd, language)
   )
   ipcMain.handle(IPC.voicevoxListSpeakers, async () => listSpeakers())
   ipcMain.handle(IPC.voicevoxSynthesize, async (_e, text: string, speakerId: number) =>

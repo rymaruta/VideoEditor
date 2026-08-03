@@ -1,4 +1,4 @@
-import type { TextOverlay, TextPosition } from '@shared/types'
+import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
 
 function toAssTime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -52,6 +52,19 @@ function buildTypewriterText(text: string, charDelayMs: number, revealMs: number
   return rendered.join('\\N')
 }
 
+function buildKaraokeText(words: TranscriptWord[], dialogueStart: number): string {
+  let cursor = dialogueStart
+  return words
+    .map((w) => {
+      const gap = w.start - cursor
+      const gapTag = gap > 0.01 ? `{\\k${Math.max(1, Math.round(gap * 100))}}` : ''
+      const durCentis = Math.max(1, Math.round((w.end - w.start) * 100))
+      cursor = w.end
+      return `${gapTag}{\\k${durCentis}}${escapeAssText(w.text)}`
+    })
+    .join('')
+}
+
 export function buildAssContent(overlays: TextOverlay[], width: number, height: number): string {
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -93,7 +106,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     }
 
     const rotationTag = style.rotation ? `\\frz${-style.rotation}` : ''
-    const primaryColor = toAssColor(style.color)
+    const useKaraoke = style.wordHighlight && !!o.words && o.words.length > 0
+    const primaryColor = toAssColor(useKaraoke ? style.highlightColor : style.color)
+    const secondaryTag = useKaraoke ? `\\2c${toAssColor(style.color)}` : ''
     const bold = style.bold ? 1 : 0
     const italic = style.italic ? 1 : 0
 
@@ -116,9 +131,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
         '\\fscx30\\fscy30\\t(0,250,\\fscx115\\fscy115)\\t(250,350,\\fscx92\\fscy92)\\t(350,500,\\fscx100\\fscy100)'
     }
 
-    const override = `{${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\1c${primaryColor}\\b${bold}\\i${italic}${spacingTag}${outlineTags}${shadowTag}${backgroundTags}${animationTag}}`
-    const text =
-      style.animation === 'typewriter' ? buildTypewriterText(o.text, 40, 50) : escapeAssText(o.text)
+    const override = `{${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\1c${primaryColor}${secondaryTag}\\b${bold}\\i${italic}${spacingTag}${outlineTags}${shadowTag}${backgroundTags}${animationTag}}`
+    const text = useKaraoke
+      ? buildKaraokeText(o.words!, o.startTime)
+      : style.animation === 'typewriter'
+        ? buildTypewriterText(o.text, 40, 50)
+        : escapeAssText(o.text)
     return `Dialogue: 0,${toAssTime(o.startTime)},${toAssTime(o.endTime)},Default,,0,0,${marginVOf(style.position)},,${override}${text}`
   })
 

@@ -28,7 +28,8 @@ export function TextOverlayPanel(): React.JSX.Element {
       startTime: o.startTime,
       endTime: o.endTime,
       style: { ...o.style },
-      source: o.source
+      source: o.source,
+      words: o.words ? o.words.map((w) => ({ ...w })) : undefined
     })
   }
 
@@ -91,6 +92,26 @@ export function TextOverlayPanel(): React.JSX.Element {
               </label>
               {o.source === 'auto' && <span className="project-badge">自動</span>}
             </div>
+
+            {o.words && o.words.length > 0 && (
+              <div className="overlay-item-row">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={o.style.wordHighlight}
+                    onChange={(e) => patchStyle(o.id, o.style, { wordHighlight: e.target.checked })}
+                  />
+                  単語ハイライト(カラオケ字幕)
+                </label>
+                {o.style.wordHighlight && (
+                  <input
+                    type="color"
+                    value={o.style.highlightColor}
+                    onChange={(e) => patchStyle(o.id, o.style, { highlightColor: e.target.value })}
+                  />
+                )}
+              </div>
+            )}
 
             <div className="overlay-item-row">
               <label>
