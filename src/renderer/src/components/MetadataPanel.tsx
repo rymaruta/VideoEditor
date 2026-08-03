@@ -1,0 +1,227 @@
+import { useState } from 'react'
+import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
+import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
+import { generateVideoMetadata, VideoMetadata } from '../lib/metadataGeneration'
+import { formatIpcError } from '../lib/ipcError'
+import { KeyIcon, SparklesIcon, CopyIcon, MegaphoneIcon } from './icons'
+
+const FRAME_FRACTIONS = [0.15, 0.5, 0.85]
+const FRAME_WIDTH = 320
+const FRAME_HEIGHT = 568
+
+function buildTranscript(project: ReturnType<typeof useProjectStore.getState>['project']): string {
+  return project.textOverlays
+    .slice()
+    .sort((a, b) => a.startTime - b.startTime)
+    .map((o) => o.text)
+    .join('\n')
+}
+
+export function MetadataPanel(): React.JSX.Element {
+  const project = useProjectStore((s) => s.project)
+  const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
+  const setGeminiApiKey = useSettingsStore((s) => s.setGeminiApiKey)
+
+  const [language, setLanguage] = useState('japanese')
+  const [extraContext, setExtraContext] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<VideoMetadata | null>(null)
+  const [frames, setFrames] = useState<string[]>([])
+  const [description, setDescription] = useState('')
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+
+  function copy(key: string, text: string): void {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKey(key)
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500)
+    })
+  }
+
+  async function handleGenerate(): Promise<void> {
+    if (!geminiApiKey) {
+      setError('Gemini API キーを入力してください')
+      return
+    }
+    const timedClips = buildTimedClips(project)
+    const total = totalTimelineDuration(timedClips)
+    if (total <= 0) {
+      setError('タイムラインにクリップがありません')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const capturedFrames: string[] = []
+      for (const fraction of FRAME_FRACTIONS) {
+        const globalTime = Math.min(total - 0.05, total * fraction)
+        const tc = findTimedClipAt(timedClips, globalTime)
+        if (!tc || !tc.asset.hasVideo) continue
+        const speed = tc.clip.speed || 1
+        const localTime = tc.clip.inPoint + (globalTime - tc.start) * speed
+        try {
+          const dataUrl = await window.api.generateFrame(
+            tc.asset.filePath,
+            localTime,
+            FRAME_WIDTH,
+            FRAME_HEIGHT
+          )
+          capturedFrames.push(dataUrl)
+        } catch {
+          // Skip frames that fail to extract (e.g. right at a clip boundary).
+        }
+      }
+      setFrames(capturedFrames)
+      const transcript = buildTranscript(project)
+      const metadata = await generateVideoMetadata(
+        geminiApiKey,
+        transcript,
+        extraContext,
+        language,
+        capturedFrames
+      )
+      setResult(metadata)
+      setDescription(metadata.description)
+    } catch (e) {
+      setError(formatIpcError(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="panel metadata-panel">
+      <div className="panel-header">
+        <h2>投稿準備</h2>
+      </div>
+      <p className="hint-text">
+        タイムラインのテロップ内容とサムネイル候補フレームだけを根拠に、Gemini(AI)がYouTube投稿用のタイトル案・概要欄・ハッシュタグ・固定コメント案を作成します。テロップにない内容は創作しません。
+      </p>
+      <div className="youtube-field">
+        <label>
+          <KeyIcon width={12} height={12} />
+          Gemini API キー
+        </label>
+        <input
+          type="password"
+          value={geminiApiKey}
+          onChange={(e) => setGeminiApiKey(e.target.value)}
+          placeholder="APIキーを入力"
+        />
+      </div>
+      <div className="trim-field">
+        <label>出力言語</label>
+        <select value={language} onChange={(e) => setLanguage(e.target.value)} disabled={loading}>
+          <option value="japanese">日本語</option>
+          <option value="english">英語</option>
+        </select>
+      </div>
+      <div className="trim-field">
+        <label>補足情報(任意。テロップだけで内容が伝わらない場合に入力)</label>
+        <textarea
+          className="metadata-context-input"
+          rows={3}
+          value={extraContext}
+          onChange={(e) => setExtraContext(e.target.value)}
+          placeholder="例: ○○というゲームの実況、初見プレイの反応シーン、など"
+        />
+      </div>
+      <button className="primary-button" onClick={handleGenerate} disabled={loading}>
+        <SparklesIcon width={13} height={13} />
+        {loading ? '生成中...' : result ? '別案を生成' : 'メタデータを生成'}
+      </button>
+      {error && <p className="error-text">{error}</p>}
+
+      {frames.length > 0 && (
+        <div className="metadata-frames">
+          {frames.map((f, i) => (
+            <img key={i} src={f} alt={`候補フレーム${i + 1}`} />
+          ))}
+        </div>
+      )}
+
+      {result && (
+        <>
+          <div className="metadata-section">
+            <h3>タイトル案</h3>
+            {result.titles.map((t, i) => (
+              <div key={i} className="metadata-title-item">
+                <span className="game-trend-hook-badge">{t.hookType}</span>
+                <span className="metadata-title-text">{t.title}</span>
+                <button
+                  className="icon-button"
+                  title="コピー"
+                  onClick={() => copy(`title${i}`, t.title)}
+                >
+                  <CopyIcon width={12} height={12} />
+                </button>
+                {copiedKey === `title${i}` && <span className="hint-text">コピーしました</span>}
+              </div>
+            ))}
+          </div>
+
+          <div className="metadata-section">
+            <h3>
+              概要欄
+              <button
+                className="small-button metadata-copy-inline"
+                onClick={() => copy('description', description)}
+              >
+                <CopyIcon width={12} height={12} />
+                コピー
+              </button>
+              {copiedKey === 'description' && <span className="hint-text">コピーしました</span>}
+            </h3>
+            <textarea
+              className="metadata-description-input"
+              rows={8}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <p className="hint-text">{description.length}文字</p>
+          </div>
+
+          <div className="metadata-section">
+            <h3>
+              ハッシュタグ
+              <button
+                className="small-button metadata-copy-inline"
+                onClick={() => copy('hashtags', result.hashtags.map((h) => `#${h}`).join(' '))}
+              >
+                <CopyIcon width={12} height={12} />
+                すべてコピー
+              </button>
+              {copiedKey === 'hashtags' && <span className="hint-text">コピーしました</span>}
+            </h3>
+            <div className="metadata-hashtags">
+              {result.hashtags.map((h, i) => (
+                <span key={i} className="metadata-hashtag-chip">
+                  #{h}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {result.pinnedComment && (
+            <div className="metadata-section">
+              <h3>
+                <MegaphoneIcon width={13} height={13} />
+                固定コメント案
+                <button
+                  className="small-button metadata-copy-inline"
+                  onClick={() => copy('pinned', result.pinnedComment)}
+                >
+                  <CopyIcon width={12} height={12} />
+                  コピー
+                </button>
+                {copiedKey === 'pinned' && <span className="hint-text">コピーしました</span>}
+              </h3>
+              <p>{result.pinnedComment}</p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}

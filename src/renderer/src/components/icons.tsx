@@ -396,3 +396,12 @@ export function FillerWordIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function MegaphoneIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 11v2a2 2 0 0 0 2 2h1l2 6h2l-1-6h2l9 4V5l-9 4H6a2 2 0 0 0-2 2z" />
+      <path d="M14 9v6" />
+    </svg>
+  )
+}

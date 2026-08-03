@@ -10,6 +10,7 @@ import { NarrationPanel } from './components/NarrationPanel'
 import { ThumbnailPanel } from './components/ThumbnailPanel'
 import { AudioLibraryPanel } from './components/AudioLibraryPanel'
 import { GameTrendPanel } from './components/GameTrendPanel'
+import { MetadataPanel } from './components/MetadataPanel'
 import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
@@ -24,12 +25,21 @@ import {
   RedoIcon,
   ImageIcon,
   MusicIcon,
-  TargetIcon
+  TargetIcon,
+  MegaphoneIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
 type RightTab =
-  'template' | 'text' | 'narration' | 'thumbnail' | 'audio' | 'gametrend' | 'youtube' | 'export'
+  | 'template'
+  | 'text'
+  | 'narration'
+  | 'thumbnail'
+  | 'audio'
+  | 'gametrend'
+  | 'youtube'
+  | 'metadata'
+  | 'export'
 
 const TABS: {
   id: RightTab
@@ -43,6 +53,7 @@ const TABS: {
   { id: 'audio', label: 'BGM/SE', icon: MusicIcon },
   { id: 'gametrend', label: 'ゲームトレンド', icon: TargetIcon },
   { id: 'youtube', label: 'YouTube', icon: YoutubeIcon },
+  { id: 'metadata', label: '投稿準備', icon: MegaphoneIcon },
   { id: 'export', label: '書き出し', icon: DownloadIcon }
 ]
 
@@ -121,6 +132,7 @@ function App(): React.JSX.Element {
             {tab === 'audio' && <AudioLibraryPanel />}
             {tab === 'gametrend' && <GameTrendPanel />}
             {tab === 'youtube' && <YouTubeTrendPanel />}
+            {tab === 'metadata' && <MetadataPanel />}
             {tab === 'export' && <ExportPanel />}
           </div>
         </div>

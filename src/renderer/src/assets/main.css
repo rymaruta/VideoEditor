@@ -1913,6 +1913,88 @@ h3 {
   padding: 6px 9px;
 }
 
+/* Metadata / publish prep */
+.metadata-panel {
+  overflow-y: auto;
+}
+
+.metadata-panel .primary-button {
+  width: 100%;
+  justify-content: center;
+  margin: 6px 0 10px;
+}
+
+.metadata-context-input {
+  width: 100%;
+  resize: vertical;
+}
+
+.metadata-frames {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.metadata-frames img {
+  width: 33.33%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+}
+
+.metadata-section {
+  margin-top: 16px;
+}
+
+.metadata-section h3 {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metadata-copy-inline {
+  margin-left: auto;
+}
+
+.metadata-title-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 7px 9px;
+  margin-bottom: 6px;
+}
+
+.metadata-title-text {
+  font-size: 12px;
+  color: var(--text-1);
+  flex: 1;
+}
+
+.metadata-description-input {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.metadata-hashtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.metadata-hashtag-chip {
+  font-size: 11px;
+  color: var(--accent-1);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
 /* Export */
 .export-field {
   display: flex;
