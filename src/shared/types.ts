@@ -7,7 +7,15 @@ export interface MediaAsset {
   height: number
   fps: number
   hasAudio: boolean
+  hasVideo: boolean
   thumbnailDataUrl?: string
+}
+
+export type TransitionType = 'none' | 'crossfade' | 'fade' | 'wipe'
+
+export interface Transition {
+  type: TransitionType
+  duration: number
 }
 
 export interface Clip {
@@ -15,6 +23,8 @@ export interface Clip {
   assetId: string
   inPoint: number
   outPoint: number
+  speed: number
+  transitionIn?: Transition
 }
 
 export type AspectRatio = '16:9' | '9:16'
@@ -35,6 +45,23 @@ export interface TextOverlay {
   startTime: number
   endTime: number
   style: TextStyle
+  source?: 'manual' | 'auto'
+}
+
+export interface AudioTrackClip {
+  id: string
+  assetId: string
+  startTime: number
+  inPoint: number
+  outPoint: number
+}
+
+export interface AudioTrack {
+  id: string
+  name: string
+  muted: boolean
+  volume: number
+  clips: AudioTrackClip[]
 }
 
 export interface Project {
@@ -43,6 +70,7 @@ export interface Project {
   aspectRatio: AspectRatio
   assets: MediaAsset[]
   clips: Clip[]
+  audioTracks: AudioTrack[]
   textOverlays: TextOverlay[]
 }
 
@@ -61,9 +89,13 @@ export interface EditTemplate {
   captionStyle: TextStyle
 }
 
+export type QualityPreset = 'high' | 'standard' | 'small'
+export type ResolutionHeight = 480 | 720 | 1080 | 1440
+
 export interface ExportSettings {
   aspectRatio: AspectRatio
-  resolutionHeight: 720 | 1080
+  resolutionHeight: ResolutionHeight
+  quality: QualityPreset
   outputPath: string
 }
 
@@ -78,4 +110,16 @@ export interface MediaProbeResult {
   height: number
   fps: number
   hasAudio: boolean
+  hasVideo: boolean
+}
+
+export interface SilenceRange {
+  start: number
+  end: number
+}
+
+export interface TranscriptSegment {
+  start: number
+  end: number
+  text: string
 }

@@ -3,8 +3,8 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
-import { probeMedia, generateThumbnailDataUrl, exportProject } from './ffmpegService'
-import type { Project, AspectRatio } from '@shared/types'
+import { probeMedia, generateThumbnailDataUrl, exportProject, detectSilence } from './ffmpegService'
+import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -43,6 +43,15 @@ function createWindow(): void {
     return result.filePaths
   })
 
+  ipcMain.handle(IPC.selectAudioFiles, async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: '音声ファイル', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] }]
+    })
+    if (result.canceled) return []
+    return result.filePaths
+  })
+
   ipcMain.handle(IPC.selectExportPath, async (_e, defaultName: string) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       defaultPath: defaultName,
@@ -59,7 +68,8 @@ function createWindow(): void {
       payload: {
         project: Project
         aspectRatio: AspectRatio
-        resolutionHeight: 720 | 1080
+        resolutionHeight: ResolutionHeight
+        quality: QualityPreset
         outputPath: string
       }
     ) => {
@@ -67,6 +77,7 @@ function createWindow(): void {
         project: payload.project,
         aspectRatio: payload.aspectRatio,
         resolutionHeight: payload.resolutionHeight,
+        quality: payload.quality,
         outputPath: payload.outputPath,
         onProgress: (percent, stage) => {
           event.sender.send(IPC.exportProgress, { percent, stage })
@@ -87,6 +98,11 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.probeMedia, async (_e, filePath: string) => probeMedia(filePath))
   ipcMain.handle(IPC.generateThumbnail, async (_e, filePath: string, atSeconds: number) =>
     generateThumbnailDataUrl(filePath, atSeconds)
+  )
+  ipcMain.handle(
+    IPC.detectSilence,
+    async (_e, filePath: string, rangeStart: number, rangeEnd: number) =>
+      detectSilence(filePath, rangeStart, rangeEnd)
   )
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     await shell.openExternal(url)

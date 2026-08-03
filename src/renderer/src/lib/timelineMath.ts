@@ -14,7 +14,7 @@ export function buildTimedClips(project: Project): TimedClip[] {
   for (const clip of project.clips) {
     const asset = assetById.get(clip.assetId)
     if (!asset) continue
-    const duration = clip.outPoint - clip.inPoint
+    const duration = (clip.outPoint - clip.inPoint) / (clip.speed || 1)
     result.push({ clip, asset, start: cursor, end: cursor + duration })
     cursor += duration
   }

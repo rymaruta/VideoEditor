@@ -169,3 +169,75 @@ export function KeyIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function MusicIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  )
+}
+
+export function Volume2Icon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M19 5a10 10 0 0 1 0 14" />
+    </svg>
+  )
+}
+
+export function VolumeXIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <line x1="23" y1="9" x2="17" y2="15" />
+      <line x1="17" y1="9" x2="23" y2="15" />
+    </svg>
+  )
+}
+
+export function GaugeIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+      <path d="M12 3a9 9 0 0 0-8.5 12" />
+      <path d="M12 3a9 9 0 0 1 8.5 12" />
+      <path d="m13.5 10.5 3-4" />
+    </svg>
+  )
+}
+
+export function LayersIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
+    </svg>
+  )
+}
+
+export function MicIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+    </svg>
+  )
+}
+
+export function WandIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="m15 4 1.5 1.5" />
+      <path d="M3 21 16.5 7.5" />
+      <path d="m18 3 1 2 2 1-2 1-1 2-1-2-2-1 2-1z" />
+      <path d="m6 15 .8 1.6L8.4 17l-1.6.8L6 19.4l-.8-1.6L3.6 17l1.6-.8z" />
+    </svg>
+  )
+}

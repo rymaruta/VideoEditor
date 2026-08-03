@@ -43,17 +43,20 @@ export function PreviewPlayer(): React.JSX.Element {
       return
     }
     const url = toFileUrl(tc.asset.filePath)
-    const localTime = tc.clip.inPoint + (time - tc.start)
+    const speed = tc.clip.speed || 1
+    const localTime = tc.clip.inPoint + (time - tc.start) * speed
     if (activeSrc !== url) {
       setActiveSrc(url)
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.currentTime = localTime
+          videoRef.current.playbackRate = speed
           if (resumePlaying) videoRef.current.play().catch(() => {})
         }
       })
     } else if (videoRef.current) {
       videoRef.current.currentTime = localTime
+      videoRef.current.playbackRate = speed
       if (resumePlaying) videoRef.current.play().catch(() => {})
     }
   }
@@ -89,7 +92,8 @@ export function PreviewPlayer(): React.JSX.Element {
     const tc = activeTimedClipRef.current
     const video = videoRef.current
     if (!tc || !video) return
-    const globalTime = tc.start + (video.currentTime - tc.clip.inPoint)
+    const speed = tc.clip.speed || 1
+    const globalTime = tc.start + (video.currentTime - tc.clip.inPoint) / speed
     setPlayheadTime(globalTime)
 
     if (video.currentTime >= tc.clip.outPoint - 0.02) {

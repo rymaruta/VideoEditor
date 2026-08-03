@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
-import { UploadIcon, PlusIcon, ClapperboardIcon } from './icons'
+import { UploadIcon, PlusIcon, ClapperboardIcon, MusicIcon } from './icons'
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -18,27 +18,30 @@ function formatDuration(seconds: number): string {
 
 export function MediaBin(): React.JSX.Element {
   const assets = useProjectStore((s) => s.project.assets)
+  const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const addAsset = useProjectStore((s) => s.addAsset)
   const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
+  const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
 
-  async function handleImport(): Promise<void> {
-    setError(null)
-    const paths = await window.api.selectMediaFiles()
+  async function importFiles(paths: string[]): Promise<void> {
     if (paths.length === 0) return
     setImporting(true)
     try {
       for (const filePath of paths) {
         const meta = await window.api.probeMedia(filePath)
         let thumbnailDataUrl: string | undefined
-        try {
-          thumbnailDataUrl = await window.api.generateThumbnail(
-            filePath,
-            Math.min(1, meta.duration / 2)
-          )
-        } catch {
-          thumbnailDataUrl = undefined
+        if (meta.hasVideo) {
+          try {
+            thumbnailDataUrl = await window.api.generateThumbnail(
+              filePath,
+              Math.min(1, meta.duration / 2)
+            )
+          } catch {
+            thumbnailDataUrl = undefined
+          }
         }
         addAsset({
           id: uuid(),
@@ -49,6 +52,7 @@ export function MediaBin(): React.JSX.Element {
           height: meta.height,
           fps: meta.fps,
           hasAudio: meta.hasAudio,
+          hasVideo: meta.hasVideo,
           thumbnailDataUrl
         })
       }
@@ -59,21 +63,42 @@ export function MediaBin(): React.JSX.Element {
     }
   }
 
+  async function handleImportVideo(): Promise<void> {
+    setError(null)
+    await importFiles(await window.api.selectMediaFiles())
+  }
+
+  async function handleImportAudio(): Promise<void> {
+    setError(null)
+    await importFiles(await window.api.selectAudioFiles())
+  }
+
   return (
     <div className="panel media-bin">
       <div className="panel-header">
         <h2>メディア</h2>
-        <button className="primary-button" onClick={handleImport} disabled={importing}>
-          <UploadIcon width={14} height={14} />
-          {importing ? '読み込み中...' : '動画を追加'}
-        </button>
+        <div className="media-import-buttons">
+          <button className="primary-button" onClick={handleImportVideo} disabled={importing}>
+            <UploadIcon width={14} height={14} />
+            動画
+          </button>
+          <button
+            className="icon-button"
+            onClick={handleImportAudio}
+            disabled={importing}
+            title="音楽/音声を追加"
+          >
+            <MusicIcon width={14} height={14} />
+          </button>
+        </div>
       </div>
+      {importing && <p className="hint-text">読み込み中...</p>}
       {error && <p className="error-text">{error}</p>}
       <div className="media-list">
         {assets.length === 0 && (
           <div className="empty-state">
             <ClapperboardIcon width={28} height={28} />
-            <p className="hint-text">動画ファイルを追加してください</p>
+            <p className="hint-text">動画・音声ファイルを追加してください</p>
           </div>
         )}
         {assets.map((asset) => (
@@ -82,7 +107,9 @@ export function MediaBin(): React.JSX.Element {
               {asset.thumbnailDataUrl ? (
                 <img src={asset.thumbnailDataUrl} alt={asset.fileName} />
               ) : (
-                <div className="media-thumb-placeholder" />
+                <div className="media-thumb-placeholder">
+                  {!asset.hasVideo && <MusicIcon width={16} height={16} />}
+                </div>
               )}
             </div>
             <div className="media-info">
@@ -90,16 +117,44 @@ export function MediaBin(): React.JSX.Element {
                 {asset.fileName}
               </div>
               <div className="media-meta">
-                {formatDuration(asset.duration)} ・ {asset.width}x{asset.height}
+                {formatDuration(asset.duration)}
+                {asset.hasVideo && ` ・ ${asset.width}x${asset.height}`}
               </div>
             </div>
-            <button
-              className="icon-button"
-              onClick={() => addClipToTimeline(asset.id)}
-              title="タイムラインに追加"
-            >
-              <PlusIcon width={14} height={14} />
-            </button>
+            {asset.hasVideo && (
+              <button
+                className="icon-button"
+                onClick={() => addClipToTimeline(asset.id)}
+                title="動画トラックに追加"
+              >
+                <PlusIcon width={14} height={14} />
+              </button>
+            )}
+            {asset.hasAudio && audioTracks.length > 0 && (
+              <div className="media-track-add">
+                <select
+                  value={trackChoice[asset.id] ?? audioTracks[0].id}
+                  onChange={(e) =>
+                    setTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
+                  }
+                >
+                  {audioTracks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="icon-button"
+                  title="音声トラックに追加"
+                  onClick={() =>
+                    addClipToAudioTrack(trackChoice[asset.id] ?? audioTracks[0].id, asset.id)
+                  }
+                >
+                  <PlusIcon width={14} height={14} />
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

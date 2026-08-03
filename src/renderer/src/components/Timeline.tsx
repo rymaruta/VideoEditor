@@ -2,9 +2,25 @@ import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { TrimModal } from './TrimModal'
-import { ChevronLeftIcon, ChevronRightIcon, ScissorsIcon, TrashIcon } from './icons'
+import { SilenceCutModal } from './SilenceCutModal'
+import type { TransitionType } from '@shared/types'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ScissorsIcon,
+  TrashIcon,
+  PlusIcon,
+  GaugeIcon,
+  LayersIcon,
+  Volume2Icon,
+  VolumeXIcon,
+  WandIcon,
+  TypeIcon
+} from './icons'
 
 const PIXELS_PER_SECOND = 40
+
+const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
 export function Timeline(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
@@ -15,12 +31,27 @@ export function Timeline(): React.JSX.Element {
   const removeClip = useProjectStore((s) => s.removeClip)
   const moveClip = useProjectStore((s) => s.moveClip)
   const splitClipAtTime = useProjectStore((s) => s.splitClipAtTime)
+  const updateClipSpeed = useProjectStore((s) => s.updateClipSpeed)
+  const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
+  const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
+  const removeAudioTrack = useProjectStore((s) => s.removeAudioTrack)
+  const toggleAudioTrackMute = useProjectStore((s) => s.toggleAudioTrackMute)
+  const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
+  const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
+  const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
+  const [silenceCutClipId, setSilenceCutClipId] = useState<string | null>(null)
+  const [selectedAudioClip, setSelectedAudioClip] = useState<{
+    trackId: string
+    clipId: string
+  } | null>(null)
 
   const timedClips = buildTimedClips(project)
   const total = totalTimelineDuration(timedClips)
   const timelineWidth = Math.max(total * PIXELS_PER_SECOND, 400)
+  const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
+  const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
 
   function handleTrackClick(e: React.MouseEvent<HTMLDivElement>): void {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -29,74 +60,270 @@ export function Timeline(): React.JSX.Element {
     seekTo(time)
   }
 
+  const selectedAudioClipData =
+    selectedAudioClip &&
+    project.audioTracks
+      .find((t) => t.id === selectedAudioClip.trackId)
+      ?.clips.find((c) => c.id === selectedAudioClip.clipId)
+
   return (
     <div className="panel timeline-panel">
       <div className="panel-header">
         <h2>タイムライン</h2>
-        {selectedClipId && (
+        {selectedClip && (
           <div className="timeline-actions">
             <button
               className="icon-button"
               title="左に移動"
-              onClick={() => moveClip(selectedClipId, 'left')}
+              onClick={() => moveClip(selectedClip.id, 'left')}
             >
               <ChevronLeftIcon width={14} height={14} />
             </button>
             <button
               className="icon-button"
               title="右に移動"
-              onClick={() => moveClip(selectedClipId, 'right')}
+              onClick={() => moveClip(selectedClip.id, 'right')}
             >
               <ChevronRightIcon width={14} height={14} />
             </button>
-            <button className="small-button" onClick={() => setTrimClipId(selectedClipId)}>
+            <button className="small-button" onClick={() => setTrimClipId(selectedClip.id)}>
               トリム
             </button>
             <button
               className="small-button"
-              onClick={() => splitClipAtTime(selectedClipId, playheadTime)}
+              onClick={() => splitClipAtTime(selectedClip.id, playheadTime)}
             >
               <ScissorsIcon width={13} height={13} />
-              再生位置でカット
+              カット
             </button>
+            <button className="small-button" onClick={() => setSilenceCutClipId(selectedClip.id)}>
+              <WandIcon width={13} height={13} />
+              無音カット
+            </button>
+            <label className="inline-select">
+              <GaugeIcon width={13} height={13} />
+              <select
+                value={selectedClip.speed || 1}
+                onChange={(e) => updateClipSpeed(selectedClip.id, Number(e.target.value))}
+              >
+                {SPEED_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}x
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedIndex > 0 && (
+              <>
+                <label className="inline-select">
+                  <LayersIcon width={13} height={13} />
+                  <select
+                    value={selectedClip.transitionIn?.type ?? 'none'}
+                    onChange={(e) =>
+                      updateClipTransition(
+                        selectedClip.id,
+                        e.target.value === 'none'
+                          ? undefined
+                          : {
+                              type: e.target.value as TransitionType,
+                              duration: selectedClip.transitionIn?.duration ?? 0.5
+                            }
+                      )
+                    }
+                  >
+                    <option value="none">カット</option>
+                    <option value="crossfade">クロスフェード</option>
+                    <option value="fade">フェード</option>
+                    <option value="wipe">ワイプ</option>
+                  </select>
+                </label>
+                {selectedClip.transitionIn && (
+                  <input
+                    className="transition-duration"
+                    type="number"
+                    min={0.1}
+                    max={2}
+                    step={0.1}
+                    value={selectedClip.transitionIn.duration}
+                    onChange={(e) =>
+                      updateClipTransition(selectedClip.id, {
+                        type: selectedClip.transitionIn?.type ?? 'crossfade',
+                        duration: Number(e.target.value)
+                      })
+                    }
+                    title="トランジション秒数"
+                  />
+                )}
+              </>
+            )}
             <button
               className="icon-button danger"
               title="削除"
-              onClick={() => removeClip(selectedClipId)}
+              onClick={() => removeClip(selectedClip.id)}
             >
               <TrashIcon width={14} height={14} />
             </button>
           </div>
         )}
       </div>
-      <div className="timeline-track" style={{ width: timelineWidth }} onClick={handleTrackClick}>
-        {timedClips.map((tc, i) => (
+
+      <div className="timeline-tracks">
+        <div className="track-labels-col">
+          <div className="track-label track-label-video">動画</div>
+          {project.audioTracks.map((track) => (
+            <div key={track.id} className="track-label">
+              <span className="track-label-name" title={track.name}>
+                {track.name}
+              </span>
+              <div className="track-label-controls">
+                <button
+                  className="icon-button"
+                  title={track.muted ? 'ミュート解除' : 'ミュート'}
+                  onClick={() => toggleAudioTrackMute(track.id)}
+                >
+                  {track.muted ? (
+                    <VolumeXIcon width={13} height={13} />
+                  ) : (
+                    <Volume2Icon width={13} height={13} />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1.5}
+                  step={0.05}
+                  value={track.volume}
+                  onChange={(e) => setAudioTrackVolume(track.id, Number(e.target.value))}
+                />
+                <button
+                  className="icon-button danger"
+                  title="トラック削除"
+                  onClick={() => removeAudioTrack(track.id)}
+                >
+                  <TrashIcon width={12} height={12} />
+                </button>
+              </div>
+            </div>
+          ))}
+          {project.textOverlays.length > 0 && (
+            <div className="track-label">
+              <span className="track-label-name">
+                <TypeIcon width={12} height={12} />
+                テロップ
+              </span>
+            </div>
+          )}
+          <button
+            className="small-button add-track-button"
+            onClick={() => addAudioTrack(`音声トラック ${project.audioTracks.length + 1}`)}
+          >
+            <PlusIcon width={12} height={12} />
+            音声トラック
+          </button>
+        </div>
+
+        <div className="track-lanes-col">
           <div
-            key={tc.clip.id}
-            className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''}`}
-            style={{ width: (tc.end - tc.start) * PIXELS_PER_SECOND }}
-            onClick={(e) => {
-              e.stopPropagation()
-              selectClip(tc.clip.id)
+            className="track-lane video-lane"
+            style={{ width: timelineWidth }}
+            onClick={handleTrackClick}
+          >
+            {timedClips.map((tc, i) => (
+              <div
+                key={tc.clip.id}
+                className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''}`}
+                style={{ width: (tc.end - tc.start) * PIXELS_PER_SECOND }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  selectClip(tc.clip.id)
+                }}
+              >
+                {tc.clip.transitionIn && i > 0 && <span className="transition-marker" />}
+                <span className="timeline-clip-index">{i + 1}</span>
+                <span className="timeline-clip-label" title={tc.asset.fileName}>
+                  {tc.asset.fileName}
+                  {tc.clip.speed !== 1 && ` (${tc.clip.speed}x)`}
+                </span>
+              </div>
+            ))}
+            {timedClips.length === 0 && (
+              <p className="hint-text timeline-empty-hint">
+                メディアからクリップを追加してください
+              </p>
+            )}
+            <div
+              className="timeline-playhead"
+              style={{ left: Math.min(playheadTime, total) * PIXELS_PER_SECOND }}
+            >
+              <div className="timeline-playhead-handle" />
+            </div>
+          </div>
+
+          {project.audioTracks.map((track) => (
+            <div key={track.id} className="track-lane audio-lane" style={{ width: timelineWidth }}>
+              {track.clips.map((clip) => {
+                const asset = project.assets.find((a) => a.id === clip.assetId)
+                if (!asset) return null
+                const dur = clip.outPoint - clip.inPoint
+                return (
+                  <div
+                    key={clip.id}
+                    className={`timeline-audio-clip ${
+                      selectedAudioClip?.clipId === clip.id ? 'selected' : ''
+                    }`}
+                    style={{
+                      left: clip.startTime * PIXELS_PER_SECOND,
+                      width: dur * PIXELS_PER_SECOND
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedAudioClip({ trackId: track.id, clipId: clip.id })
+                    }}
+                    title={asset.fileName}
+                  >
+                    {asset.fileName}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {selectedAudioClipData && selectedAudioClip && (
+        <div className="audio-clip-inspector">
+          <label>
+            開始位置(秒)
+            <input
+              type="number"
+              step={0.1}
+              min={0}
+              value={selectedAudioClipData.startTime}
+              onChange={(e) =>
+                updateAudioClipStart(
+                  selectedAudioClip.trackId,
+                  selectedAudioClip.clipId,
+                  Number(e.target.value)
+                )
+              }
+            />
+          </label>
+          <button
+            className="icon-button danger"
+            onClick={() => {
+              removeAudioClip(selectedAudioClip.trackId, selectedAudioClip.clipId)
+              setSelectedAudioClip(null)
             }}
           >
-            <span className="timeline-clip-index">{i + 1}</span>
-            <span className="timeline-clip-label" title={tc.asset.fileName}>
-              {tc.asset.fileName}
-            </span>
-          </div>
-        ))}
-        <div
-          className="timeline-playhead"
-          style={{ left: Math.min(playheadTime, total) * PIXELS_PER_SECOND }}
-        >
-          <div className="timeline-playhead-handle" />
+            <TrashIcon width={13} height={13} />
+          </button>
         </div>
-        {timedClips.length === 0 && (
-          <p className="hint-text timeline-empty-hint">メディアからクリップを追加してください</p>
-        )}
-      </div>
+      )}
+
       {trimClipId && <TrimModal clipId={trimClipId} onClose={() => setTrimClipId(null)} />}
+      {silenceCutClipId && (
+        <SilenceCutModal clipId={silenceCutClipId} onClose={() => setSilenceCutClipId(null)} />
+      )}
     </div>
   )
 }

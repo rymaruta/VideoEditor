@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { DownloadIcon } from './icons'
+import type { QualityPreset, ResolutionHeight } from '@shared/types'
 
 export function ExportPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const setAspectRatio = useProjectStore((s) => s.setAspectRatio)
-  const [resolutionHeight, setResolutionHeight] = useState<720 | 1080>(1080)
+  const [resolutionHeight, setResolutionHeight] = useState<ResolutionHeight>(1080)
+  const [quality, setQuality] = useState<QualityPreset>('standard')
   const [progress, setProgress] = useState<{ percent: number; stage: string } | null>(null)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +34,7 @@ export function ExportPanel(): React.JSX.Element {
         project,
         aspectRatio: project.aspectRatio,
         resolutionHeight,
+        quality,
         outputPath
       })
       setDoneMessage(`書き出しが完了しました: ${outputPath}`)
@@ -72,10 +75,20 @@ export function ExportPanel(): React.JSX.Element {
         <label>解像度</label>
         <select
           value={resolutionHeight}
-          onChange={(e) => setResolutionHeight(Number(e.target.value) as 720 | 1080)}
+          onChange={(e) => setResolutionHeight(Number(e.target.value) as ResolutionHeight)}
         >
-          <option value={1080}>高画質 (1080)</option>
-          <option value={720}>標準 (720)</option>
+          <option value={1440}>2K (1440)</option>
+          <option value={1080}>フルHD (1080)</option>
+          <option value={720}>HD (720)</option>
+          <option value={480}>SD (480・軽量)</option>
+        </select>
+      </div>
+      <div className="export-field">
+        <label>画質(圧縮率)</label>
+        <select value={quality} onChange={(e) => setQuality(e.target.value as QualityPreset)}>
+          <option value="high">高画質(ファイルサイズ大)</option>
+          <option value="standard">標準</option>
+          <option value="small">軽量(ファイルサイズ小)</option>
         </select>
       </div>
       <button className="primary-button export-button" onClick={handleExport} disabled={exporting}>

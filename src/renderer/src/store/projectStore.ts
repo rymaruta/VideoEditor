@@ -2,11 +2,13 @@ import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import type {
   AspectRatio,
+  AudioTrack,
   Clip,
   EditTemplate,
   MediaAsset,
   Project,
-  TextOverlay
+  TextOverlay,
+  Transition
 } from '@shared/types'
 
 interface ProjectState {
@@ -19,6 +21,9 @@ interface ProjectState {
   addAsset: (asset: MediaAsset) => void
   addClipToTimeline: (assetId: string) => void
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
+  updateClipSpeed: (clipId: string, speed: number) => void
+  updateClipTransition: (clipId: string, transition: Transition | undefined) => void
+  replaceClipRange: (clipId: string, newClips: Clip[]) => void
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
   removeClip: (clipId: string) => void
   moveClip: (clipId: string, direction: 'left' | 'right') => void
@@ -32,11 +37,23 @@ interface ProjectState {
   updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void
   removeTextOverlay: (id: string) => void
 
+  addAudioTrack: (name: string) => void
+  removeAudioTrack: (trackId: string) => void
+  toggleAudioTrackMute: (trackId: string) => void
+  setAudioTrackVolume: (trackId: string, volume: number) => void
+  addClipToAudioTrack: (trackId: string, assetId: string) => void
+  updateAudioClipStart: (trackId: string, clipId: string, startTime: number) => void
+  removeAudioClip: (trackId: string, clipId: string) => void
+
   applyTemplate: (template: EditTemplate) => void
 }
 
 function totalDuration(project: Project): number {
-  return project.clips.reduce((sum, c) => sum + (c.outPoint - c.inPoint), 0)
+  return project.clips.reduce((sum, c) => sum + (c.outPoint - c.inPoint) / (c.speed || 1), 0)
+}
+
+function audioTrackEnd(track: AudioTrack): number {
+  return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({
@@ -46,6 +63,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     aspectRatio: '9:16',
     assets: [],
     clips: [],
+    audioTracks: [],
     textOverlays: []
   },
   selectedClipId: null,
@@ -62,7 +80,13 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
       if (!asset) return state
-      const newClip: Clip = { id: uuid(), assetId, inPoint: 0, outPoint: asset.duration }
+      const newClip: Clip = {
+        id: uuid(),
+        assetId,
+        inPoint: 0,
+        outPoint: asset.duration,
+        speed: 1
+      }
       return { project: { ...state.project, clips: [...state.project.clips, newClip] } }
     }),
 
@@ -74,16 +98,50 @@ export const useProjectStore = create<ProjectState>((set) => ({
       }
     })),
 
+  updateClipSpeed: (clipId, speed) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, speed } : c))
+      }
+    })),
+
+  updateClipTransition: (clipId, transition) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        clips: state.project.clips.map((c) =>
+          c.id === clipId ? { ...c, transitionIn: transition } : c
+        )
+      }
+    })),
+
+  replaceClipRange: (clipId, newClips) =>
+    set((state) => {
+      const idx = state.project.clips.findIndex((c) => c.id === clipId)
+      if (idx === -1) return state
+      const clips = [...state.project.clips]
+      clips.splice(idx, 1, ...newClips)
+      return { project: { ...state.project, clips } }
+    }),
+
   splitClipAtTime: (clipId, absoluteTime) =>
     set((state) => {
       let elapsed = 0
       const clips: Clip[] = []
       for (const c of state.project.clips) {
-        const dur = c.outPoint - c.inPoint
+        const dur = (c.outPoint - c.inPoint) / (c.speed || 1)
         if (c.id === clipId && absoluteTime > elapsed && absoluteTime < elapsed + dur) {
-          const splitLocal = c.inPoint + (absoluteTime - elapsed)
-          clips.push({ id: c.id, assetId: c.assetId, inPoint: c.inPoint, outPoint: splitLocal })
-          clips.push({ id: uuid(), assetId: c.assetId, inPoint: splitLocal, outPoint: c.outPoint })
+          const speed = c.speed || 1
+          const splitLocal = c.inPoint + (absoluteTime - elapsed) * speed
+          clips.push({ ...c, outPoint: splitLocal })
+          clips.push({
+            id: uuid(),
+            assetId: c.assetId,
+            inPoint: splitLocal,
+            outPoint: c.outPoint,
+            speed
+          })
         } else {
           clips.push(c)
         }
@@ -145,6 +203,92 @@ export const useProjectStore = create<ProjectState>((set) => ({
       }
     })),
 
+  addAudioTrack: (name) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        audioTracks: [
+          ...state.project.audioTracks,
+          { id: uuid(), name, muted: false, volume: 1, clips: [] }
+        ]
+      }
+    })),
+
+  removeAudioTrack: (trackId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.filter((t) => t.id !== trackId)
+      }
+    })),
+
+  toggleAudioTrackMute: (trackId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId ? { ...t, muted: !t.muted } : t
+        )
+      }
+    })),
+
+  setAudioTrackVolume: (trackId, volume) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) => (t.id === trackId ? { ...t, volume } : t))
+      }
+    })),
+
+  addClipToAudioTrack: (trackId, assetId) =>
+    set((state) => {
+      const asset = state.project.assets.find((a) => a.id === assetId)
+      if (!asset) return state
+      return {
+        project: {
+          ...state.project,
+          audioTracks: state.project.audioTracks.map((t) => {
+            if (t.id !== trackId) return t
+            const startTime = audioTrackEnd(t)
+            return {
+              ...t,
+              clips: [
+                ...t.clips,
+                { id: uuid(), assetId, startTime, inPoint: 0, outPoint: asset.duration }
+              ]
+            }
+          })
+        }
+      }
+    }),
+
+  updateAudioClipStart: (trackId, clipId, startTime) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId ? { ...c, startTime: Math.max(0, startTime) } : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
+  removeAudioClip: (trackId, clipId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
+        )
+      }
+    })),
+
   applyTemplate: (template) =>
     set((state) => {
       let project = { ...state.project, aspectRatio: '9:16' as AspectRatio }
@@ -153,7 +297,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       if (template.jumpCutSeconds && duration > 0) {
         const newClips: Clip[] = []
         for (const c of project.clips) {
-          const dur = c.outPoint - c.inPoint
           let localStart = c.inPoint
           while (localStart < c.outPoint) {
             const localEnd = Math.min(localStart + template.jumpCutSeconds, c.outPoint)
@@ -161,11 +304,11 @@ export const useProjectStore = create<ProjectState>((set) => ({
               id: uuid(),
               assetId: c.assetId,
               inPoint: localStart,
-              outPoint: localEnd
+              outPoint: localEnd,
+              speed: 1
             })
             localStart = localEnd
           }
-          void dur
         }
         project = { ...project, clips: newClips }
       }
@@ -178,7 +321,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
           text: segment.label,
           startTime: i * segmentSpan,
           endTime: (i + 1) * segmentSpan,
-          style: { ...template.captionStyle }
+          style: { ...template.captionStyle },
+          source: 'manual'
         }
       })
 
