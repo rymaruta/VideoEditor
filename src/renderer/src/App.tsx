@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MediaBin } from './components/MediaBin'
 import { PreviewPlayer } from './components/PreviewPlayer'
 import { Timeline } from './components/Timeline'
@@ -57,6 +57,39 @@ const TABS: {
   { id: 'export', label: '書き出し', icon: DownloadIcon }
 ]
 
+const LEFT_WIDTH_KEY = 've-layout-left-width'
+const RIGHT_WIDTH_KEY = 've-layout-right-width'
+const TIMELINE_HEIGHT_KEY = 've-layout-timeline-height'
+
+const DEFAULT_LEFT_WIDTH = 280
+const DEFAULT_RIGHT_WIDTH = 340
+const DEFAULT_TIMELINE_HEIGHT = 340
+const MIN_LEFT_WIDTH = 200
+const MAX_LEFT_WIDTH = 480
+const MIN_RIGHT_WIDTH = 280
+const MAX_RIGHT_WIDTH = 540
+const MIN_TIMELINE_HEIGHT = 160
+const MAX_TIMELINE_HEIGHT = 560
+
+function readStoredSize(key: string, fallback: number): number {
+  const raw = localStorage.getItem(key)
+  const n = raw ? Number(raw) : NaN
+  return Number.isFinite(n) ? n : fallback
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+interface ResizeDragState {
+  kind: 'left' | 'right' | 'timeline'
+  startX: number
+  startY: number
+  startLeftWidth: number
+  startRightWidth: number
+  startTimelineHeight: number
+}
+
 function App(): React.JSX.Element {
   const [tab, setTab] = useState<RightTab>('template')
   const projectName = useProjectStore((s) => s.project.name)
@@ -66,6 +99,86 @@ function App(): React.JSX.Element {
   const undo = useProjectStore((s) => s.undo)
   const redo = useProjectStore((s) => s.redo)
   const isDirty = useProjectStore((s) => s.isDirty)
+
+  const [leftWidth, setLeftWidth] = useState(() =>
+    readStoredSize(LEFT_WIDTH_KEY, DEFAULT_LEFT_WIDTH)
+  )
+  const [rightWidth, setRightWidth] = useState(() =>
+    readStoredSize(RIGHT_WIDTH_KEY, DEFAULT_RIGHT_WIDTH)
+  )
+  const [timelineHeight, setTimelineHeight] = useState(() =>
+    readStoredSize(TIMELINE_HEIGHT_KEY, DEFAULT_TIMELINE_HEIGHT)
+  )
+  const [resizeDrag, setResizeDrag] = useState<ResizeDragState | null>(null)
+
+  function beginResize(kind: ResizeDragState['kind'], e: React.MouseEvent): void {
+    e.preventDefault()
+    setResizeDrag({
+      kind,
+      startX: e.clientX,
+      startY: e.clientY,
+      startLeftWidth: leftWidth,
+      startRightWidth: rightWidth,
+      startTimelineHeight: timelineHeight
+    })
+  }
+
+  useEffect(() => {
+    if (!resizeDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      if (!resizeDrag) return
+      if (resizeDrag.kind === 'left') {
+        setLeftWidth(
+          clamp(
+            resizeDrag.startLeftWidth + (e.clientX - resizeDrag.startX),
+            MIN_LEFT_WIDTH,
+            MAX_LEFT_WIDTH
+          )
+        )
+      } else if (resizeDrag.kind === 'right') {
+        setRightWidth(
+          clamp(
+            resizeDrag.startRightWidth - (e.clientX - resizeDrag.startX),
+            MIN_RIGHT_WIDTH,
+            MAX_RIGHT_WIDTH
+          )
+        )
+      } else {
+        setTimelineHeight(
+          clamp(
+            resizeDrag.startTimelineHeight - (e.clientY - resizeDrag.startY),
+            MIN_TIMELINE_HEIGHT,
+            MAX_TIMELINE_HEIGHT
+          )
+        )
+      }
+    }
+    function handleMouseUp(): void {
+      setResizeDrag(null)
+    }
+    const previousCursor = document.body.style.cursor
+    const previousUserSelect = document.body.style.userSelect
+    document.body.style.cursor = resizeDrag.kind === 'timeline' ? 'row-resize' : 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = previousCursor
+      document.body.style.userSelect = previousUserSelect
+    }
+  }, [resizeDrag])
+
+  useEffect(() => {
+    localStorage.setItem(LEFT_WIDTH_KEY, String(leftWidth))
+  }, [leftWidth])
+  useEffect(() => {
+    localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth))
+  }, [rightWidth])
+  useEffect(() => {
+    localStorage.setItem(TIMELINE_HEIGHT_KEY, String(timelineHeight))
+  }, [timelineHeight])
 
   useKeyboardShortcuts()
 
@@ -108,14 +221,31 @@ function App(): React.JSX.Element {
         </div>
       </header>
       <div className="app-layout">
-        <div className="left-column">
+        <div className="left-column" style={{ width: leftWidth }}>
           <MediaBin />
         </div>
+        <div
+          className={`col-resize-handle ${resizeDrag?.kind === 'left' ? 'active' : ''}`}
+          onMouseDown={(e) => beginResize('left', e)}
+          title="ドラッグして幅を調整"
+        />
         <div className="center-column">
           <PreviewPlayer />
-          <Timeline />
+          <div
+            className={`row-resize-handle ${resizeDrag?.kind === 'timeline' ? 'active' : ''}`}
+            onMouseDown={(e) => beginResize('timeline', e)}
+            title="ドラッグして高さを調整"
+          />
+          <div className="timeline-wrapper" style={{ height: timelineHeight }}>
+            <Timeline />
+          </div>
         </div>
-        <div className="right-column">
+        <div
+          className={`col-resize-handle ${resizeDrag?.kind === 'right' ? 'active' : ''}`}
+          onMouseDown={(e) => beginResize('right', e)}
+          title="ドラッグして幅を調整"
+        />
+        <div className="right-column" style={{ width: rightWidth }}>
           <div className="tab-bar">
             {TABS.map(({ id, label, icon: Icon }) => (
               <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>

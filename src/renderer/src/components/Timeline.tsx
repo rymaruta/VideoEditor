@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { snapTime } from '../lib/snapping'
@@ -102,6 +102,8 @@ export function Timeline(): React.JSX.Element {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null)
   const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
+  const [scrubbing, setScrubbing] = useState(false)
+  const videoLaneRef = useRef<HTMLDivElement>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
 
@@ -253,6 +255,26 @@ export function Timeline(): React.JSX.Element {
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
   const activeSnapGuideTime = trimDrag?.snapGuideTime ?? audioDrag?.snapGuideTime ?? null
+
+  useEffect(() => {
+    if (!scrubbing) return
+    function handleMove(e: MouseEvent): void {
+      const rect = videoLaneRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const x = e.clientX - rect.left
+      const time = Math.max(0, Math.min(total, x / pixelsPerSecond))
+      seekTo(time)
+    }
+    function handleUp(): void {
+      setScrubbing(false)
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+    }
+  }, [scrubbing, total, pixelsPerSecond, seekTo])
 
   function handleTrackClick(e: React.MouseEvent<HTMLDivElement>): void {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -486,6 +508,7 @@ export function Timeline(): React.JSX.Element {
             />
           )}
           <div
+            ref={videoLaneRef}
             className="track-lane video-lane"
             style={{ width: timelineWidth }}
             onClick={handleTrackClick}
@@ -590,7 +613,14 @@ export function Timeline(): React.JSX.Element {
               className="timeline-playhead"
               style={{ left: Math.min(playheadTime, total) * pixelsPerSecond }}
             >
-              <div className="timeline-playhead-handle" />
+              <div
+                className={`timeline-playhead-handle ${scrubbing ? 'active' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setScrubbing(true)
+                }}
+              />
             </div>
           </div>
 
