@@ -31,12 +31,27 @@ export type AspectRatio = '16:9' | '9:16'
 
 export type TextPosition = 'top' | 'center' | 'bottom'
 
+export type TextAnimation = 'none' | 'fadeIn' | 'popIn'
+
+export type FontFamily =
+  'sans-serif' | 'serif' | 'M PLUS Rounded 1c' | 'Noto Sans JP' | 'Noto Serif JP'
+
 export interface TextStyle {
+  fontFamily: FontFamily
   fontSize: number
   color: string
   position: TextPosition
   bold: boolean
+  italic: boolean
   outline: boolean
+  outlineColor: string
+  outlineWidth: number
+  shadow: boolean
+  background: boolean
+  backgroundColor: string
+  backgroundOpacity: number
+  letterSpacing: number
+  animation: TextAnimation
 }
 
 export interface TextOverlay {

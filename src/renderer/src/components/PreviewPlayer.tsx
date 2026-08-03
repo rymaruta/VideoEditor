@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import {
   buildTimedClips,
@@ -7,6 +7,7 @@ import {
   TimedClip
 } from '../lib/timelineMath'
 import { PlayIcon, PauseIcon, ClapperboardIcon } from './icons'
+import type { TextStyle } from '@shared/types'
 
 function toFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
@@ -18,6 +19,54 @@ function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '')
+  const r = parseInt(clean.slice(0, 2), 16)
+  const g = parseInt(clean.slice(2, 4), 16)
+  const b = parseInt(clean.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
+  'sans-serif': 'sans-serif',
+  serif: 'serif',
+  'M PLUS Rounded 1c': '"M PLUS Rounded 1c", sans-serif',
+  'Noto Sans JP': '"Noto Sans JP", sans-serif',
+  'Noto Serif JP': '"Noto Serif JP", serif'
+}
+
+function overlayPreviewStyle(style: TextStyle): CSSProperties {
+  const shadows: string[] = []
+  if (style.outline) {
+    const w = Math.max(1, Math.round(style.outlineWidth * 0.6))
+    const c = style.outlineColor
+    shadows.push(
+      `-${w}px -${w}px 0 ${c}`,
+      `${w}px -${w}px 0 ${c}`,
+      `-${w}px ${w}px 0 ${c}`,
+      `${w}px ${w}px 0 ${c}`
+    )
+  }
+  if (style.shadow) {
+    shadows.push('2px 3px 4px rgba(0,0,0,0.7)')
+  }
+  return {
+    fontFamily: FONT_STACKS[style.fontFamily],
+    fontSize: style.fontSize * 0.4,
+    color: style.color,
+    fontWeight: style.bold ? 700 : 400,
+    fontStyle: style.italic ? 'italic' : 'normal',
+    letterSpacing: style.letterSpacing ? `${style.letterSpacing * 0.4}px` : undefined,
+    textShadow: shadows.length > 0 ? shadows.join(', ') : undefined,
+    backgroundColor: style.background
+      ? hexToRgba(style.backgroundColor, style.backgroundOpacity)
+      : undefined,
+    padding: style.background ? '0.15em 0.4em' : undefined,
+    borderRadius: style.background ? '4px' : undefined,
+    display: style.background ? 'inline-block' : undefined
+  }
 }
 
 export function PreviewPlayer(): React.JSX.Element {
@@ -134,13 +183,8 @@ export function PreviewPlayer(): React.JSX.Element {
           {activeOverlays.map((o) => (
             <div
               key={o.id}
-              className={`overlay-text overlay-${o.style.position}`}
-              style={{
-                fontSize: o.style.fontSize * 0.4,
-                color: o.style.color,
-                fontWeight: o.style.bold ? 700 : 400,
-                textShadow: o.style.outline ? '0 0 4px rgba(0,0,0,0.9)' : undefined
-              }}
+              className={`overlay-text overlay-${o.style.position} anim-${o.style.animation}`}
+              style={overlayPreviewStyle(o.style)}
             >
               {o.text}
             </div>

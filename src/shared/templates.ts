@@ -1,4 +1,5 @@
 import { EditTemplate } from './types'
+import { defaultTextStyle } from './textStyle'
 
 /**
  * Curated short-form editing structures based on commonly observed public
@@ -20,7 +21,7 @@ export const editTemplates: EditTemplate[] = [
         suggestion: '「フォロー」「続きは概要欄」等を表示'
       }
     ],
-    captionStyle: { fontSize: 42, color: '#ffffff', position: 'top', bold: true, outline: true }
+    captionStyle: defaultTextStyle({ fontSize: 42, position: 'top' })
   },
   {
     id: 'jump-cut-fast',
@@ -35,7 +36,12 @@ export const editTemplates: EditTemplate[] = [
         suggestion: '2〜3秒ごとにカットを切り替える'
       }
     ],
-    captionStyle: { fontSize: 44, color: '#fff200', position: 'bottom', bold: true, outline: true }
+    captionStyle: defaultTextStyle({
+      fontSize: 44,
+      color: '#fff200',
+      position: 'bottom',
+      animation: 'popIn'
+    })
   },
   {
     id: 'before-after',
@@ -46,7 +52,7 @@ export const editTemplates: EditTemplate[] = [
       { label: '過程', durationHint: '3秒-終盤前', suggestion: '変化の過程を簡潔に見せる' },
       { label: 'After', durationHint: 'ラスト3-5秒', suggestion: '結果を強調して見せる' }
     ],
-    captionStyle: { fontSize: 40, color: '#ffffff', position: 'center', bold: true, outline: true }
+    captionStyle: defaultTextStyle({ fontSize: 40, position: 'center' })
   },
   {
     id: 'list-format',
@@ -57,7 +63,7 @@ export const editTemplates: EditTemplate[] = [
       { label: '項目1〜N', durationHint: '各5-8秒', suggestion: '項目ごとに番号ラベルを表示' },
       { label: 'まとめ', durationHint: 'ラスト2-3秒', suggestion: 'お気に入りはどれかを問いかける' }
     ],
-    captionStyle: { fontSize: 40, color: '#ffffff', position: 'top', bold: true, outline: true }
+    captionStyle: defaultTextStyle({ fontSize: 40, position: 'top' })
   },
   {
     id: 'storytelling',
@@ -69,6 +75,6 @@ export const editTemplates: EditTemplate[] = [
       { label: '転(山場)', durationHint: '中盤-終盤前', suggestion: '一番の見せ場・意外性を配置' },
       { label: '結(締め)', durationHint: 'ラスト', suggestion: '結末とひとことコメントで締める' }
     ],
-    captionStyle: { fontSize: 40, color: '#ffffff', position: 'bottom', bold: true, outline: true }
+    captionStyle: defaultTextStyle({ fontSize: 40, position: 'bottom' })
   }
 ]
