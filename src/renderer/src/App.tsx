@@ -8,13 +8,16 @@ import { YouTubeTrendPanel } from './components/YouTubeTrendPanel'
 import { ExportPanel } from './components/ExportPanel'
 import { NarrationPanel } from './components/NarrationPanel'
 import { useProjectStore } from './store/projectStore'
+import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
 import {
   ClapperboardIcon,
   SparklesIcon,
   TypeIcon,
   YoutubeIcon,
   DownloadIcon,
-  MicIcon
+  MicIcon,
+  UndoIcon,
+  RedoIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
@@ -36,15 +39,41 @@ function App(): React.JSX.Element {
   const [tab, setTab] = useState<RightTab>('template')
   const projectName = useProjectStore((s) => s.project.name)
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
+  const canUndo = useProjectStore((s) => s.past.length > 0)
+  const canRedo = useProjectStore((s) => s.future.length > 0)
+  const undo = useProjectStore((s) => s.undo)
+  const redo = useProjectStore((s) => s.redo)
+
+  useKeyboardShortcuts()
 
   return (
     <div className="app-shell">
       <header className="top-bar">
-        <div className="top-bar-brand">
-          <span className="brand-icon">
-            <ClapperboardIcon width={18} height={18} />
-          </span>
-          <span className="brand-name">VideoEditor</span>
+        <div className="top-bar-left">
+          <div className="top-bar-brand">
+            <span className="brand-icon">
+              <ClapperboardIcon width={18} height={18} />
+            </span>
+            <span className="brand-name">VideoEditor</span>
+          </div>
+          <div className="top-bar-history">
+            <button
+              className="icon-button"
+              title="元に戻す (Ctrl+Z)"
+              onClick={undo}
+              disabled={!canUndo}
+            >
+              <UndoIcon width={14} height={14} />
+            </button>
+            <button
+              className="icon-button"
+              title="やり直す (Ctrl+Shift+Z)"
+              onClick={redo}
+              disabled={!canRedo}
+            >
+              <RedoIcon width={14} height={14} />
+            </button>
+          </div>
         </div>
         <div className="top-bar-project">
           <span className="project-name">{projectName}</span>

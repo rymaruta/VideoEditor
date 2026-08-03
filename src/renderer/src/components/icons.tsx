@@ -241,3 +241,62 @@ export function WandIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function UndoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 7v6h6" />
+      <path d="M3 13a9 9 0 1 0 3-7" />
+    </svg>
+  )
+}
+
+export function RedoIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M21 7v6h-6" />
+      <path d="M21 13a9 9 0 1 1-3-7" />
+    </svg>
+  )
+}
+
+export function CopyIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  )
+}
+
+export function ClipboardPasteIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <rect x="8" y="2" width="8" height="4" rx="1" />
+      <path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2" />
+      <path d="M9 14h6" />
+      <path d="M9 18h6" />
+    </svg>
+  )
+}
+
+export function ZoomInIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <line x1="11" y1="8" x2="11" y2="14" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </svg>
+  )
+}
+
+export function ZoomOutIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </svg>
+  )
+}

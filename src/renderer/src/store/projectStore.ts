@@ -11,9 +11,14 @@ import type {
   Transition
 } from '@shared/types'
 
+const MAX_HISTORY = 50
+
 interface ProjectState {
   project: Project
+  past: Project[]
+  future: Project[]
   selectedClipId: string | null
+  clipboardClip: Clip | null
   playheadTime: number
   isPlaying: boolean
   seekRequest: { time: number; token: number } | null
@@ -32,6 +37,12 @@ interface ProjectState {
   setPlayheadTime: (t: number) => void
   setIsPlaying: (p: boolean) => void
   seekTo: (t: number) => void
+
+  copySelectedClip: () => void
+  pasteClip: () => void
+
+  undo: () => void
+  redo: () => void
 
   addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => void
   updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void
@@ -56,7 +67,11 @@ function audioTrackEnd(track: AudioTrack): number {
   return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
 }
 
-export const useProjectStore = create<ProjectState>((set) => ({
+function pushHistory(state: ProjectState): Pick<ProjectState, 'past' | 'future'> {
+  return { past: [...state.past, state.project].slice(-MAX_HISTORY), future: [] }
+}
+
+export const useProjectStore = create<ProjectState>((set, get) => ({
   project: {
     id: uuid(),
     name: '新規プロジェクト',
@@ -66,13 +81,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
     audioTracks: [],
     textOverlays: []
   },
+  past: [],
+  future: [],
   selectedClipId: null,
+  clipboardClip: null,
   playheadTime: 0,
   isPlaying: false,
   seekRequest: null,
 
   addAsset: (asset) =>
     set((state) => ({
+      ...pushHistory(state),
       project: { ...state.project, assets: [...state.project.assets, asset] }
     })),
 
@@ -87,11 +106,15 @@ export const useProjectStore = create<ProjectState>((set) => ({
         outPoint: asset.duration,
         speed: 1
       }
-      return { project: { ...state.project, clips: [...state.project.clips, newClip] } }
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, clips: [...state.project.clips, newClip] }
+      }
     }),
 
   updateClipTrim: (clipId, inPoint, outPoint) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, inPoint, outPoint } : c))
@@ -100,6 +123,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   updateClipSpeed: (clipId, speed) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, speed } : c))
@@ -108,6 +132,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   updateClipTransition: (clipId, transition) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         clips: state.project.clips.map((c) =>
@@ -122,7 +147,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       if (idx === -1) return state
       const clips = [...state.project.clips]
       clips.splice(idx, 1, ...newClips)
-      return { project: { ...state.project, clips } }
+      return { ...pushHistory(state), project: { ...state.project, clips } }
     }),
 
   splitClipAtTime: (clipId, absoluteTime) =>
@@ -147,11 +172,12 @@ export const useProjectStore = create<ProjectState>((set) => ({
         }
         elapsed += dur
       }
-      return { project: { ...state.project, clips } }
+      return { ...pushHistory(state), project: { ...state.project, clips } }
     }),
 
   removeClip: (clipId) =>
     set((state) => ({
+      ...pushHistory(state),
       project: { ...state.project, clips: state.project.clips.filter((c) => c.id !== clipId) },
       selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId
     })),
@@ -164,11 +190,14 @@ export const useProjectStore = create<ProjectState>((set) => ({
       const swapWith = direction === 'left' ? idx - 1 : idx + 1
       if (swapWith < 0 || swapWith >= clips.length) return state
       ;[clips[idx], clips[swapWith]] = [clips[swapWith], clips[idx]]
-      return { project: { ...state.project, clips } }
+      return { ...pushHistory(state), project: { ...state.project, clips } }
     }),
 
   setAspectRatio: (ratio) =>
-    set((state) => ({ project: { ...state.project, aspectRatio: ratio } })),
+    set((state) => ({
+      ...pushHistory(state),
+      project: { ...state.project, aspectRatio: ratio }
+    })),
 
   selectClip: (clipId) => set({ selectedClipId: clipId }),
   setPlayheadTime: (t) => set({ playheadTime: t }),
@@ -179,8 +208,59 @@ export const useProjectStore = create<ProjectState>((set) => ({
       seekRequest: { time: t, token: (state.seekRequest?.token ?? 0) + 1 }
     })),
 
+  copySelectedClip: () => {
+    const state = get()
+    const clip = state.project.clips.find((c) => c.id === state.selectedClipId)
+    if (clip) set({ clipboardClip: clip })
+  },
+
+  pasteClip: () =>
+    set((state) => {
+      if (!state.clipboardClip) return state
+      const newClip: Clip = {
+        ...state.clipboardClip,
+        id: uuid(),
+        transitionIn: undefined
+      }
+      const idx = state.project.clips.findIndex((c) => c.id === state.selectedClipId)
+      const clips = [...state.project.clips]
+      if (idx === -1) {
+        clips.push(newClip)
+      } else {
+        clips.splice(idx + 1, 0, newClip)
+      }
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, clips },
+        selectedClipId: newClip.id
+      }
+    }),
+
+  undo: () =>
+    set((state) => {
+      if (state.past.length === 0) return state
+      const previous = state.past[state.past.length - 1]
+      return {
+        past: state.past.slice(0, -1),
+        future: [state.project, ...state.future].slice(0, MAX_HISTORY),
+        project: previous
+      }
+    }),
+
+  redo: () =>
+    set((state) => {
+      if (state.future.length === 0) return state
+      const [next, ...rest] = state.future
+      return {
+        past: [...state.past, state.project].slice(-MAX_HISTORY),
+        future: rest,
+        project: next
+      }
+    }),
+
   addTextOverlay: (overlay) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         textOverlays: [...state.project.textOverlays, { ...overlay, id: uuid() }]
@@ -189,6 +269,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   updateTextOverlay: (id, patch) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         textOverlays: state.project.textOverlays.map((o) => (o.id === id ? { ...o, ...patch } : o))
@@ -197,6 +278,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   removeTextOverlay: (id) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         textOverlays: state.project.textOverlays.filter((o) => o.id !== id)
@@ -205,6 +287,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   addAudioTrack: (name) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         audioTracks: [
@@ -216,6 +299,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   removeAudioTrack: (trackId) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.filter((t) => t.id !== trackId)
@@ -224,6 +308,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   toggleAudioTrackMute: (trackId) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
@@ -234,6 +319,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   setAudioTrackVolume: (trackId, volume) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) => (t.id === trackId ? { ...t, volume } : t))
@@ -245,6 +331,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       const asset = state.project.assets.find((a) => a.id === assetId)
       if (!asset) return state
       return {
+        ...pushHistory(state),
         project: {
           ...state.project,
           audioTracks: state.project.audioTracks.map((t) => {
@@ -264,6 +351,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   updateAudioClipStart: (trackId, clipId, startTime) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
@@ -281,6 +369,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   removeAudioClip: (trackId, clipId) =>
     set((state) => ({
+      ...pushHistory(state),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
@@ -326,7 +415,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
         }
       })
 
-      return { project: { ...project, textOverlays: overlays } }
+      return { ...pushHistory(state), project: { ...project, textOverlays: overlays } }
     })
 }))
 

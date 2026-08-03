@@ -21,6 +21,14 @@ const api = {
     ipcRenderer.invoke(IPC.probeMedia, filePath),
   generateThumbnail: (filePath: string, atSeconds: number): Promise<string> =>
     ipcRenderer.invoke(IPC.generateThumbnail, filePath, atSeconds),
+  generateWaveform: (
+    filePath: string,
+    rangeStart: number,
+    rangeEnd: number,
+    width: number,
+    height: number
+  ): Promise<string> =>
+    ipcRenderer.invoke(IPC.generateWaveform, filePath, rangeStart, rangeEnd, width, height),
   detectSilence: (
     filePath: string,
     rangeStart: number,

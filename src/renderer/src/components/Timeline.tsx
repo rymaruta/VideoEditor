@@ -4,6 +4,7 @@ import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
 import { AutoCaptionModal } from './AutoCaptionModal'
+import { Waveform } from './Waveform'
 import type { TransitionType } from '@shared/types'
 import {
   ChevronLeftIcon,
@@ -17,10 +18,16 @@ import {
   VolumeXIcon,
   WandIcon,
   TypeIcon,
-  MicIcon
+  MicIcon,
+  CopyIcon,
+  ClipboardPasteIcon,
+  ZoomInIcon,
+  ZoomOutIcon
 } from './icons'
 
-const PIXELS_PER_SECOND = 40
+const BASE_PIXELS_PER_SECOND = 40
+const MIN_ZOOM = 0.25
+const MAX_ZOOM = 4
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
@@ -41,6 +48,9 @@ export function Timeline(): React.JSX.Element {
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
+  const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
+  const pasteClip = useProjectStore((s) => s.pasteClip)
+  const clipboardClip = useProjectStore((s) => s.clipboardClip)
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
   const [silenceCutClipId, setSilenceCutClipId] = useState<string | null>(null)
@@ -49,18 +59,26 @@ export function Timeline(): React.JSX.Element {
     trackId: string
     clipId: string
   } | null>(null)
+  const [zoom, setZoom] = useState(1)
 
+  const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
   const timedClips = buildTimedClips(project)
   const total = totalTimelineDuration(timedClips)
-  const timelineWidth = Math.max(total * PIXELS_PER_SECOND, 400)
+  const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
 
   function handleTrackClick(e: React.MouseEvent<HTMLDivElement>): void {
     const rect = e.currentTarget.getBoundingClientRect()
     const x = e.clientX - rect.left
-    const time = Math.max(0, Math.min(total, x / PIXELS_PER_SECOND))
+    const time = Math.max(0, Math.min(total, x / pixelsPerSecond))
     seekTo(time)
+  }
+
+  function handleWheelZoom(e: React.WheelEvent<HTMLDivElement>): void {
+    if (!e.ctrlKey && !e.metaKey) return
+    e.preventDefault()
+    setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (e.deltaY < 0 ? 1.1 : 0.9))))
   }
 
   const selectedAudioClipData =
@@ -73,6 +91,23 @@ export function Timeline(): React.JSX.Element {
     <div className="panel timeline-panel">
       <div className="panel-header">
         <h2>タイムライン</h2>
+        <div className="timeline-zoom">
+          <button
+            className="icon-button"
+            title="縮小"
+            onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.4))}
+          >
+            <ZoomOutIcon width={13} height={13} />
+          </button>
+          <span className="hint-text zoom-label">{Math.round(zoom * 100)}%</span>
+          <button
+            className="icon-button"
+            title="拡大"
+            onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))}
+          >
+            <ZoomInIcon width={13} height={13} />
+          </button>
+        </div>
         {selectedClip && (
           <div className="timeline-actions">
             <button
@@ -164,6 +199,13 @@ export function Timeline(): React.JSX.Element {
               </>
             )}
             <button
+              className="icon-button"
+              title="コピー (Ctrl+C)"
+              onClick={() => copySelectedClip()}
+            >
+              <CopyIcon width={13} height={13} />
+            </button>
+            <button
               className="icon-button danger"
               title="削除"
               onClick={() => removeClip(selectedClip.id)}
@@ -171,6 +213,12 @@ export function Timeline(): React.JSX.Element {
               <TrashIcon width={14} height={14} />
             </button>
           </div>
+        )}
+        {clipboardClip && (
+          <button className="small-button" title="貼り付け (Ctrl+V)" onClick={() => pasteClip()}>
+            <ClipboardPasteIcon width={13} height={13} />
+            貼り付け
+          </button>
         )}
       </div>
 
@@ -229,30 +277,44 @@ export function Timeline(): React.JSX.Element {
           </button>
         </div>
 
-        <div className="track-lanes-col">
+        <div className="track-lanes-col" onWheel={handleWheelZoom}>
           <div
             className="track-lane video-lane"
             style={{ width: timelineWidth }}
             onClick={handleTrackClick}
           >
-            {timedClips.map((tc, i) => (
-              <div
-                key={tc.clip.id}
-                className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''}`}
-                style={{ width: (tc.end - tc.start) * PIXELS_PER_SECOND }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  selectClip(tc.clip.id)
-                }}
-              >
-                {tc.clip.transitionIn && i > 0 && <span className="transition-marker" />}
-                <span className="timeline-clip-index">{i + 1}</span>
-                <span className="timeline-clip-label" title={tc.asset.fileName}>
-                  {tc.asset.fileName}
-                  {tc.clip.speed !== 1 && ` (${tc.clip.speed}x)`}
-                </span>
-              </div>
-            ))}
+            {timedClips.map((tc, i) => {
+              const clipWidth = (tc.end - tc.start) * pixelsPerSecond
+              return (
+                <div
+                  key={tc.clip.id}
+                  className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''}`}
+                  style={{ width: clipWidth }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    selectClip(tc.clip.id)
+                  }}
+                >
+                  {tc.clip.transitionIn && i > 0 && <span className="transition-marker" />}
+                  <span className="timeline-clip-index">{i + 1}</span>
+                  <span className="timeline-clip-label" title={tc.asset.fileName}>
+                    {tc.asset.fileName}
+                    {tc.clip.speed !== 1 && ` (${tc.clip.speed}x)`}
+                  </span>
+                  {tc.asset.hasAudio && clipWidth > 24 && (
+                    <div className="timeline-clip-waveform">
+                      <Waveform
+                        filePath={tc.asset.filePath}
+                        start={tc.clip.inPoint}
+                        end={tc.clip.outPoint}
+                        width={clipWidth}
+                        height={28}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
             {timedClips.length === 0 && (
               <p className="hint-text timeline-empty-hint">
                 メディアからクリップを追加してください
@@ -260,7 +322,7 @@ export function Timeline(): React.JSX.Element {
             )}
             <div
               className="timeline-playhead"
-              style={{ left: Math.min(playheadTime, total) * PIXELS_PER_SECOND }}
+              style={{ left: Math.min(playheadTime, total) * pixelsPerSecond }}
             >
               <div className="timeline-playhead-handle" />
             </div>
@@ -272,6 +334,7 @@ export function Timeline(): React.JSX.Element {
                 const asset = project.assets.find((a) => a.id === clip.assetId)
                 if (!asset) return null
                 const dur = clip.outPoint - clip.inPoint
+                const clipWidth = dur * pixelsPerSecond
                 return (
                   <div
                     key={clip.id}
@@ -279,8 +342,8 @@ export function Timeline(): React.JSX.Element {
                       selectedAudioClip?.clipId === clip.id ? 'selected' : ''
                     }`}
                     style={{
-                      left: clip.startTime * PIXELS_PER_SECOND,
-                      width: dur * PIXELS_PER_SECOND
+                      left: clip.startTime * pixelsPerSecond,
+                      width: clipWidth
                     }}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -288,7 +351,18 @@ export function Timeline(): React.JSX.Element {
                     }}
                     title={asset.fileName}
                   >
-                    {asset.fileName}
+                    <span className="timeline-audio-clip-label">{asset.fileName}</span>
+                    {clipWidth > 24 && (
+                      <div className="timeline-clip-waveform">
+                        <Waveform
+                          filePath={asset.filePath}
+                          start={clip.inPoint}
+                          end={clip.outPoint}
+                          width={clipWidth}
+                          height={30}
+                        />
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -302,8 +376,8 @@ export function Timeline(): React.JSX.Element {
                   key={overlay.id}
                   className={`timeline-caption-clip ${overlay.source === 'auto' ? 'auto' : ''}`}
                   style={{
-                    left: overlay.startTime * PIXELS_PER_SECOND,
-                    width: Math.max(4, (overlay.endTime - overlay.startTime) * PIXELS_PER_SECOND)
+                    left: overlay.startTime * pixelsPerSecond,
+                    width: Math.max(4, (overlay.endTime - overlay.startTime) * pixelsPerSecond)
                   }}
                   title={overlay.text}
                 >

@@ -3,7 +3,13 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
-import { probeMedia, generateThumbnailDataUrl, exportProject, detectSilence } from './ffmpegService'
+import {
+  probeMedia,
+  generateThumbnailDataUrl,
+  generateWaveformDataUrl,
+  exportProject,
+  detectSilence
+} from './ffmpegService'
 import { transcribeRange } from './whisperService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
@@ -100,6 +106,17 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.probeMedia, async (_e, filePath: string) => probeMedia(filePath))
   ipcMain.handle(IPC.generateThumbnail, async (_e, filePath: string, atSeconds: number) =>
     generateThumbnailDataUrl(filePath, atSeconds)
+  )
+  ipcMain.handle(
+    IPC.generateWaveform,
+    async (
+      _e,
+      filePath: string,
+      rangeStart: number,
+      rangeEnd: number,
+      width: number,
+      height: number
+    ) => generateWaveformDataUrl(filePath, rangeStart, rangeEnd, width, height)
   )
   ipcMain.handle(
     IPC.detectSilence,

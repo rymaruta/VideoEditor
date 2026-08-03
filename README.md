@@ -17,6 +17,7 @@ YouTubeショート動画向けの動画編集デスクトップアプリ(Electr
 - 書き出し画質(解像度480〜1440・圧縮率プリセット)を選択可能
 - 長尺(2時間級)ソース動画にも対応した書き出し(ffmpegによるカット済みクリップのみを処理)
 - VOICEVOX連携によるナレーション音声合成(ずんだもん等、公式キャラクターボイスのみ対応)
+- 編集の効率化機能: Undo/Redo、キーボードショートカット、クリップのコピー&貼り付け、タイムラインのズーム、波形表示
 
 ## 使い方
 
@@ -28,6 +29,18 @@ YouTubeショート動画向けの動画編集デスクトップアプリ(Electr
 YouTubeトレンド調査を使うには、右パネルの「YouTube」タブで [Google Cloud Console](https://console.cloud.google.com/) で発行した YouTube Data API v3 のAPIキーを入力してください。
 
 ナレーション音声合成を使うには、事前に [VOICEVOX](https://voicevox.hiroshiba.jp/) をインストールして起動しておいてください(アプリはローカルで動作しているVOICEVOX Engineに接続します)。
+
+### キーボードショートカット
+
+| キー | 動作 |
+| --- | --- |
+| Space | 再生/一時停止 |
+| S | 選択中クリップを再生位置で分割 |
+| Delete / Backspace | 選択中クリップを削除 |
+| Ctrl(Cmd)+Z | 元に戻す |
+| Ctrl(Cmd)+Shift+Z / Ctrl+Y | やり直す |
+| Ctrl(Cmd)+C / V | 選択中クリップのコピー/貼り付け |
+| Ctrl(Cmd)+ホイール(タイムライン上) | ズームイン/アウト |
 
 ## Project Setup
 

@@ -72,6 +72,38 @@ export function generateThumbnailDataUrl(filePath: string, atSeconds: number): P
   })
 }
 
+export function generateWaveformDataUrl(
+  filePath: string,
+  start: number,
+  end: number,
+  width: number,
+  height: number
+): Promise<string> {
+  const dir = mkdtempSync(join(tmpdir(), 've-wave-'))
+  const outFile = join(dir, 'wave.png')
+  const safeWidth = Math.max(20, Math.round(width))
+  const safeHeight = Math.max(10, Math.round(height))
+  return new Promise((resolve, reject) => {
+    ffmpeg(filePath)
+      .inputOptions([`-ss ${start}`, `-t ${Math.max(0.05, end - start)}`])
+      .complexFilter([
+        `[0:a]aformat=channel_layouts=mono,showwavespic=s=${safeWidth}x${safeHeight}:colors=0x9c8cf6[v]`
+      ])
+      .outputOptions(['-map [v]', '-frames:v 1'])
+      .output(outFile)
+      .on('error', reject)
+      .on('end', () => {
+        try {
+          const buf = readFileSync(outFile)
+          resolve(`data:image/png;base64,${buf.toString('base64')}`)
+        } catch (e) {
+          reject(e)
+        }
+      })
+      .run()
+  })
+}
+
 const SILENCE_NOISE_DB = -30
 const SILENCE_MIN_DURATION = 0.5
 

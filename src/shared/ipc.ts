@@ -3,6 +3,7 @@ export const IPC = {
   selectAudioFiles: 'media:selectAudioFiles',
   probeMedia: 'media:probe',
   generateThumbnail: 'media:thumbnail',
+  generateWaveform: 'media:waveform',
   detectSilence: 'media:detectSilence',
   transcribe: 'media:transcribe',
   voicevoxListSpeakers: 'voicevox:listSpeakers',

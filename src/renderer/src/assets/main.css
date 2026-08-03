@@ -225,10 +225,24 @@ h3 {
   background: rgba(255, 255, 255, 0.015);
 }
 
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .top-bar-brand {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.top-bar-history {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border-soft);
 }
 
 .brand-icon {
@@ -595,11 +609,30 @@ h3 {
   overflow: hidden;
 }
 
+.timeline-panel .panel-header {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  row-gap: 6px;
+  column-gap: 10px;
+}
+
 .timeline-actions {
   display: flex;
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
+}
+
+.timeline-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+}
+
+.zoom-label {
+  min-width: 34px;
+  text-align: center;
 }
 
 .inline-select {
@@ -734,7 +767,29 @@ h3 {
   align-items: center;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.timeline-audio-clip-label {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.timeline-clip-waveform {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.waveform-img {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
 }
 
 .timeline-audio-clip.selected {
@@ -823,6 +878,8 @@ h3 {
 }
 
 .timeline-clip-index {
+  position: relative;
+  z-index: 1;
   flex-shrink: 0;
   width: 16px;
   height: 16px;
@@ -837,6 +894,8 @@ h3 {
 }
 
 .timeline-clip-label {
+  position: relative;
+  z-index: 1;
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
