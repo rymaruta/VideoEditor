@@ -6,6 +6,7 @@ import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
 import { FillerWordCutModal } from './FillerWordCutModal'
 import { AutoCaptionModal } from './AutoCaptionModal'
+import { TextBasedEditModal } from './TextBasedEditModal'
 import { Waveform } from './Waveform'
 import { isAspectMismatch } from '../lib/aspect'
 import type { Clip, TransitionType } from '@shared/types'
@@ -91,6 +92,7 @@ export function Timeline(): React.JSX.Element {
   const [silenceCutClipId, setSilenceCutClipId] = useState<string | null>(null)
   const [fillerWordClipId, setFillerWordClipId] = useState<string | null>(null)
   const [autoCaptionClipId, setAutoCaptionClipId] = useState<string | null>(null)
+  const [textEditClipId, setTextEditClipId] = useState<string | null>(null)
   const [selectedAudioClip, setSelectedAudioClip] = useState<{
     trackId: string
     clipId: string
@@ -329,6 +331,10 @@ export function Timeline(): React.JSX.Element {
             <button className="small-button" onClick={() => setAutoCaptionClipId(selectedClip.id)}>
               <MicIcon width={13} height={13} />
               自動テロップ
+            </button>
+            <button className="small-button" onClick={() => setTextEditClipId(selectedClip.id)}>
+              <TypeIcon width={13} height={13} />
+              テキストで編集
             </button>
             <label className="inline-select">
               <GaugeIcon width={13} height={13} />
@@ -702,6 +708,9 @@ export function Timeline(): React.JSX.Element {
       )}
       {autoCaptionClipId && (
         <AutoCaptionModal clipId={autoCaptionClipId} onClose={() => setAutoCaptionClipId(null)} />
+      )}
+      {textEditClipId && (
+        <TextBasedEditModal clipId={textEditClipId} onClose={() => setTextEditClipId(null)} />
       )}
     </div>
   )

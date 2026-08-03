@@ -1190,6 +1190,39 @@ h3 {
   width: 100%;
 }
 
+.text-edit-modal {
+  width: 560px;
+}
+
+.text-edit-transcript {
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  line-height: 1.9;
+  font-size: 14px;
+}
+
+.text-edit-word {
+  cursor: pointer;
+  border-radius: 3px;
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease;
+}
+
+.text-edit-word:hover {
+  background: var(--accent-soft);
+}
+
+.text-edit-word.deleted {
+  text-decoration: line-through;
+  color: var(--text-3, #888);
+  background: rgba(220, 60, 60, 0.18);
+}
+
 .audio-clip-inspector {
   display: flex;
   align-items: center;
