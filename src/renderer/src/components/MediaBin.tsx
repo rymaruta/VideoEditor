@@ -120,7 +120,11 @@ export function MediaBin(): React.JSX.Element {
                 <img src={asset.thumbnailDataUrl} alt={asset.fileName} />
               ) : (
                 <div className="media-thumb-placeholder">
-                  {!asset.hasVideo && <MusicIcon width={16} height={16} />}
+                  {asset.hasVideo ? (
+                    <ClapperboardIcon width={16} height={16} />
+                  ) : (
+                    <MusicIcon width={16} height={16} />
+                  )}
                 </div>
               )}
             </div>
@@ -142,49 +146,51 @@ export function MediaBin(): React.JSX.Element {
                 )}
               </div>
             </div>
-            {asset.hasVideo && (
-              <button
-                className="icon-button"
-                onClick={() => setHighlightAssetId(asset.id)}
-                title="ハイライトを検出"
-              >
-                <TargetIcon width={14} height={14} />
-              </button>
-            )}
-            {asset.hasVideo && (
-              <button
-                className="icon-button"
-                onClick={() => addClipToTimeline(asset.id)}
-                title="動画トラックに追加"
-              >
-                <PlusIcon width={14} height={14} />
-              </button>
-            )}
-            {asset.hasAudio && audioTracks.length > 0 && (
-              <div className="media-track-add">
-                <select
-                  value={trackChoice[asset.id] ?? audioTracks[0].id}
-                  onChange={(e) =>
-                    setTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
-                  }
-                >
-                  {audioTracks.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
+            <div className="media-item-actions">
+              {asset.hasVideo && (
                 <button
                   className="icon-button"
-                  title="音声トラックに追加"
-                  onClick={() =>
-                    addClipToAudioTrack(trackChoice[asset.id] ?? audioTracks[0].id, asset.id)
-                  }
+                  onClick={() => setHighlightAssetId(asset.id)}
+                  title="ハイライトを検出"
+                >
+                  <TargetIcon width={14} height={14} />
+                </button>
+              )}
+              {asset.hasVideo && (
+                <button
+                  className="icon-button"
+                  onClick={() => addClipToTimeline(asset.id)}
+                  title="動画トラックに追加"
                 >
                   <PlusIcon width={14} height={14} />
                 </button>
-              </div>
-            )}
+              )}
+              {asset.hasAudio && audioTracks.length > 0 && (
+                <div className="media-track-add">
+                  <select
+                    value={trackChoice[asset.id] ?? audioTracks[0].id}
+                    onChange={(e) =>
+                      setTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
+                    }
+                  >
+                    {audioTracks.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="icon-button"
+                    title="音声トラックに追加"
+                    onClick={() =>
+                      addClipToAudioTrack(trackChoice[asset.id] ?? audioTracks[0].id, asset.id)
+                    }
+                  >
+                    <PlusIcon width={14} height={14} />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>

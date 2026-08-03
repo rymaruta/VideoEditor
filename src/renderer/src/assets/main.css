@@ -420,6 +420,7 @@ h3 {
 
 .media-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 9px;
   background-color: var(--bg-elevated-2);
@@ -429,6 +430,14 @@ h3 {
   transition:
     border-color 0.15s ease,
     background-color 0.15s ease;
+}
+
+.media-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  padding-left: 67px;
 }
 
 .media-item:hover {
