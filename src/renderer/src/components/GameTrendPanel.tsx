@@ -4,7 +4,7 @@ import { fetchTrendingGamingVideos, YouTubeVideoInfo } from '../lib/youtube'
 import { analyzeGamingTrends, GameTrendAnalysis } from '../lib/gameTrendAnalysis'
 import { compareTrend, saveTrendSnapshot, TrendComparison } from '../lib/trendHistory'
 import { formatIpcError } from '../lib/ipcError'
-import { KeyIcon, SparklesIcon, ExternalLinkIcon, TargetIcon, ImageIcon } from './icons'
+import { KeyIcon, SparklesIcon, ExternalLinkIcon, TargetIcon, ImageIcon, WandIcon } from './icons'
 
 function formatViews(views: number): string {
   if (views >= 10000) return `${(views / 10000).toFixed(1)}万回`
@@ -96,6 +96,17 @@ export function GameTrendPanel(): React.JSX.Element {
         {loading ? '分析中...' : '最新トレンドを分析'}
       </button>
       {error && <p className="error-text">{error}</p>}
+
+      {analysis && analysis.recommendedGame && (
+        <div className="game-trend-recommendation">
+          <h3>
+            <WandIcon width={14} height={14} />
+            次にやるべきゲーム
+          </h3>
+          <p className="game-trend-recommendation-name">{analysis.recommendedGame.gameName}</p>
+          <p className="game-trend-recommendation-reason">{analysis.recommendedGame.reason}</p>
+        </div>
+      )}
 
       {comparison && (comparison.newGames.length > 0 || comparison.sustainedGames.length > 0) && (
         <div className="game-trend-comparison">

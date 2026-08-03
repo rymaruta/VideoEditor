@@ -18,11 +18,17 @@ export interface ThumbnailInsight {
   textOverlayTendency: string
 }
 
+export interface RecommendedGame {
+  gameName: string
+  reason: string
+}
+
 export interface GameTrendAnalysis {
   insights: GameTrendInsight[]
   generalTips: string[]
   viralFactors: ViralFactor[]
   thumbnailInsight: ThumbnailInsight | null
+  recommendedGame: RecommendedGame | null
 }
 
 const GEMINI_MODEL = 'gemini-2.0-flash'
@@ -51,6 +57,7 @@ ${list}${thumbnailSection}
 2. リスト全体を俯瞰した、ゲーム実況ショート動画の編集で使える一般的なコツ(generalTips)を3つ、日本語の短い文で挙げてください。
 3. タイトルの「バズる要素」を構造化して抽出してください(viralFactors)。各タイトルが使っているフック手法を分類し(hookType、例: 数字訴求/疑問形/煽り文句/意外性の提示/共感訴求など)、根拠となったタイトル(exampleTitle、リスト内の文字列をそのまま引用)と、なぜそれが効果的そうか(explanation、日本語1文)を挙げてください。最大5件まで。
 ${thumbnailInstruction}
+5. 上記1で抽出したゲームの中から、今すぐ動画を作るなら最も良さそうなゲームを1つ選んでください(recommendedGame)。急上昇動画の件数や新しさ、シーンの分かりやすさ・真似しやすさを根拠に、なぜそのゲームを勧めるのか(reason、日本語2〜3文)を具体的に説明してください。ゲームが1件も抽出できなかった場合はrecommendedGameをnullにしてください。
 
 # 出力形式
 以下のJSON形式のみを出力してください。説明文やコードブロックの記法は不要です。
@@ -58,7 +65,8 @@ ${thumbnailInstruction}
   "insights": [{ "gameName": "string", "evidenceTitles": ["string"], "sceneSuggestion": "string" }],
   "generalTips": ["string"],
   "viralFactors": [{ "hookType": "string", "exampleTitle": "string", "explanation": "string" }],
-  "thumbnailInsight": { "colorTendency": "string", "compositionTendency": "string", "textOverlayTendency": "string" } | null
+  "thumbnailInsight": { "colorTendency": "string", "compositionTendency": "string", "textOverlayTendency": "string" } | null,
+  "recommendedGame": { "gameName": "string", "reason": "string" } | null
 }`
 }
 
@@ -130,6 +138,7 @@ export async function analyzeGamingTrends(
     insights: Array.isArray(parsed.insights) ? parsed.insights : [],
     generalTips: Array.isArray(parsed.generalTips) ? parsed.generalTips : [],
     viralFactors: Array.isArray(parsed.viralFactors) ? parsed.viralFactors : [],
-    thumbnailInsight: parsed.thumbnailInsight ?? null
+    thumbnailInsight: parsed.thumbnailInsight ?? null,
+    recommendedGame: parsed.recommendedGame ?? null
   }
 }
