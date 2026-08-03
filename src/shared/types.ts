@@ -31,7 +31,8 @@ export type AspectRatio = '16:9' | '9:16'
 
 export type TextPosition = 'top' | 'center' | 'bottom'
 
-export type TextAnimation = 'none' | 'fadeIn' | 'popIn'
+export type TextAnimation =
+  'none' | 'fadeIn' | 'popIn' | 'slideInUp' | 'slideInDown' | 'bounce' | 'typewriter'
 
 export type FontFamily =
   'sans-serif' | 'serif' | 'M PLUS Rounded 1c' | 'Noto Sans JP' | 'Noto Serif JP'
@@ -42,6 +43,7 @@ export interface TextStyle {
   color: string
   position: TextPosition
   customPosition?: { x: number; y: number }
+  rotation: number
   bold: boolean
   italic: boolean
   outline: boolean

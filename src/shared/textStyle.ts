@@ -6,6 +6,7 @@ export function defaultTextStyle(overrides: Partial<TextStyle> = {}): TextStyle 
     fontSize: 40,
     color: '#ffffff',
     position: 'bottom',
+    rotation: 0,
     bold: true,
     italic: false,
     outline: true,

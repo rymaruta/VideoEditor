@@ -65,7 +65,8 @@ function extractPcm16k(filePath: string, start: number, end: number): Float32Arr
 export async function transcribeRange(
   filePath: string,
   rangeStart: number,
-  rangeEnd: number
+  rangeEnd: number,
+  language: string = 'japanese'
 ): Promise<TranscriptSegment[]> {
   const audio = extractPcm16k(filePath, rangeStart, rangeEnd)
   let transcriber: Transcriber
@@ -80,7 +81,7 @@ export async function transcribeRange(
   }
 
   const result = await transcriber(audio, {
-    language: 'japanese',
+    language,
     task: 'transcribe',
     return_timestamps: true,
     chunk_length_s: 30

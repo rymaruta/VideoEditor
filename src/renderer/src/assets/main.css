@@ -139,7 +139,8 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   background-color: var(--bg-elevated);
   color: var(--text-1);
   border: 1px solid var(--border);
@@ -153,7 +154,8 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: none;
   border-color: var(--accent-1);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -694,6 +696,18 @@ h3 {
   animation: overlayPopIn 0.2s ease;
 }
 
+.anim-slideInUp {
+  animation: overlaySlideInUp 0.35s ease;
+}
+
+.anim-slideInDown {
+  animation: overlaySlideInDown 0.35s ease;
+}
+
+.anim-bounce {
+  animation: overlayBounce 0.5s ease;
+}
+
 @keyframes overlayFadeIn {
   from {
     opacity: 0;
@@ -709,6 +723,60 @@ h3 {
   }
   to {
     transform: scale(1);
+  }
+}
+
+@keyframes overlaySlideInUp {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes overlaySlideInDown {
+  from {
+    transform: translateY(-40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes overlayBounce {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(0.92);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.typewriter-char {
+  display: inline-block;
+  opacity: 0;
+  animation: overlayTypewriterChar 0.05s linear forwards;
+}
+
+@keyframes overlayTypewriterChar {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -1402,6 +1470,12 @@ h3 {
 
 .overlay-item input[type='text'] {
   width: 100%;
+}
+
+.overlay-text-input {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.4;
 }
 
 .overlay-item-row {

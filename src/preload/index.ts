@@ -47,9 +47,10 @@ const api = {
   transcribe: (
     filePath: string,
     rangeStart: number,
-    rangeEnd: number
+    rangeEnd: number,
+    language?: string
   ): Promise<TranscriptSegment[]> =>
-    ipcRenderer.invoke(IPC.transcribe, filePath, rangeStart, rangeEnd),
+    ipcRenderer.invoke(IPC.transcribe, filePath, rangeStart, rangeEnd, language),
   selectExportPath: (defaultName: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectExportPath, defaultName),
   selectExportFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectExportFolder),

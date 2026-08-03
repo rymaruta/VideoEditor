@@ -30,6 +30,7 @@ export function AutoCaptionModal({
   const [segments, setSegments] = useState<TranscriptSegment[]>([])
   const [texts, setTexts] = useState<string[]>([])
   const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [language, setLanguage] = useState('japanese')
 
   useEffect(() => {
     if (!clip || !asset) return
@@ -39,7 +40,7 @@ export function AutoCaptionModal({
     setLoading(true)
     setError(null)
     window.api
-      .transcribe(asset.filePath, clip.inPoint, clip.outPoint)
+      .transcribe(asset.filePath, clip.inPoint, clip.outPoint, language)
       .then((result) => {
         setSegments(result)
         setTexts(result.map((r) => r.text))
@@ -48,7 +49,7 @@ export function AutoCaptionModal({
       .catch((e) => setError(formatIpcError(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clipId])
+  }, [clipId, language])
 
   if (!clip || !asset) return null
 
@@ -94,6 +95,18 @@ export function AutoCaptionModal({
           <MicIcon width={15} height={15} />
           自動テロップ生成: {asset.fileName}
         </h3>
+        <div className="trim-field">
+          <label>音声の言語</label>
+          <select value={language} onChange={(e) => setLanguage(e.target.value)} disabled={loading}>
+            <option value="japanese">日本語</option>
+            <option value="english">英語</option>
+            <option value="chinese">中国語</option>
+            <option value="korean">韓国語</option>
+            <option value="spanish">スペイン語</option>
+            <option value="french">フランス語</option>
+            <option value="german">ドイツ語</option>
+          </select>
+        </div>
         {loading && (
           <p className="hint-text">
             音声を認識中...(初回はモデルのダウンロードのため数分かかる場合があります。インターネット接続が必要です)

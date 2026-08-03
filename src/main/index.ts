@@ -165,8 +165,8 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(
     IPC.transcribe,
-    async (_e, filePath: string, rangeStart: number, rangeEnd: number) =>
-      transcribeRange(filePath, rangeStart, rangeEnd)
+    async (_e, filePath: string, rangeStart: number, rangeEnd: number, language?: string) =>
+      transcribeRange(filePath, rangeStart, rangeEnd, language)
   )
   ipcMain.handle(IPC.voicevoxListSpeakers, async () => listSpeakers())
   ipcMain.handle(IPC.voicevoxSynthesize, async (_e, text: string, speakerId: number) =>

@@ -8,7 +8,7 @@ import {
 } from '../lib/timelineMath'
 import { PlayIcon, PauseIcon, ClapperboardIcon, YoutubeIcon } from './icons'
 import { ShortsUiMockup } from './ShortsUiMockup'
-import type { TextStyle } from '@shared/types'
+import type { TextOverlay, TextStyle } from '@shared/types'
 
 function toFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
@@ -66,8 +66,29 @@ function overlayPreviewStyle(style: TextStyle): CSSProperties {
       : undefined,
     padding: style.background ? '0.15em 0.4em' : undefined,
     borderRadius: style.background ? '4px' : undefined,
-    display: style.background ? 'inline-block' : undefined
+    display: style.background ? 'inline-block' : undefined,
+    whiteSpace: 'pre-line'
   }
+}
+
+function renderOverlayText(o: TextOverlay): React.ReactNode {
+  if (o.style.animation !== 'typewriter') return o.text
+  const lines = o.text.split('\n')
+  let charIndex = 0
+  return lines.map((line, lineIdx) => (
+    <span key={lineIdx}>
+      {lineIdx > 0 && <br />}
+      {[...line].map((char, i) => {
+        const delay = charIndex * 40
+        charIndex += 1
+        return (
+          <span key={i} className="typewriter-char" style={{ animationDelay: `${delay}ms` }}>
+            {char}
+          </span>
+        )
+      })}
+    </span>
+  ))
 }
 
 interface OverlayDragState {
@@ -230,10 +251,14 @@ export function PreviewPlayer(): React.JSX.Element {
               ? {
                   left: `${livePos.x * 100}%`,
                   top: `${livePos.y * 100}%`,
-                  right: 'auto',
-                  transform: 'translate(-50%, -50%)'
+                  right: 'auto'
                 }
               : {}
+            const transforms: string[] = []
+            if (livePos) transforms.push('translate(-50%, -50%)')
+            else if (o.style.position === 'center') transforms.push('translateY(-50%)')
+            if (o.style.rotation) transforms.push(`rotate(${o.style.rotation}deg)`)
+            if (transforms.length > 0) positionStyle.transform = transforms.join(' ')
             return (
               <div
                 key={o.id}
@@ -245,7 +270,7 @@ export function PreviewPlayer(): React.JSX.Element {
                   setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
                 }}
               >
-                {o.text}
+                {renderOverlayText(o)}
               </div>
             )
           })}

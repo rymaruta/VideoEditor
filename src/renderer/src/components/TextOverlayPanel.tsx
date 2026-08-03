@@ -1,8 +1,14 @@
 import { useProjectStore } from '../store/projectStore'
 import { getTotalDuration } from '../store/projectStore'
-import type { FontFamily, TextAnimation, TextPosition, TextStyle } from '@shared/types'
+import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } from '@shared/types'
 import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
-import { PlusIcon, TrashIcon, TypeIcon } from './icons'
+import { PlusIcon, TrashIcon, TypeIcon, CopyIcon } from './icons'
+
+function defaultPositionFraction(position: TextPosition): { x: number; y: number } {
+  if (position === 'top') return { x: 0.5, y: 0.08 }
+  if (position === 'bottom') return { x: 0.5, y: 0.9 }
+  return { x: 0.5, y: 0.5 }
+}
 
 export function TextOverlayPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
@@ -14,6 +20,16 @@ export function TextOverlayPanel(): React.JSX.Element {
 
   function patchStyle(id: string, current: TextStyle, patch: Partial<TextStyle>): void {
     updateTextOverlay(id, { style: { ...current, ...patch } })
+  }
+
+  function handleDuplicate(o: TextOverlay): void {
+    addTextOverlay({
+      text: o.text,
+      startTime: o.startTime,
+      endTime: o.endTime,
+      style: { ...o.style },
+      source: o.source
+    })
   }
 
   return (
@@ -48,8 +64,9 @@ export function TextOverlayPanel(): React.JSX.Element {
         )}
         {project.textOverlays.map((o) => (
           <div key={o.id} className="overlay-item">
-            <input
-              type="text"
+            <textarea
+              className="overlay-text-input"
+              rows={2}
               value={o.text}
               onChange={(e) => updateTextOverlay(o.id, { text: e.target.value })}
             />
@@ -118,6 +135,63 @@ export function TextOverlayPanel(): React.JSX.Element {
                   type="color"
                   value={o.style.color}
                   onChange={(e) => patchStyle(o.id, o.style, { color: e.target.value })}
+                />
+              </label>
+            </div>
+
+            <div className="overlay-item-row">
+              {(() => {
+                const pos = o.style.customPosition ?? defaultPositionFraction(o.style.position)
+                return (
+                  <>
+                    <label>
+                      X(%)
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={Math.round(pos.x * 100)}
+                        onChange={(e) =>
+                          patchStyle(o.id, o.style, {
+                            customPosition: {
+                              x: Math.min(100, Math.max(0, Number(e.target.value))) / 100,
+                              y: pos.y
+                            }
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Y(%)
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={Math.round(pos.y * 100)}
+                        onChange={(e) =>
+                          patchStyle(o.id, o.style, {
+                            customPosition: {
+                              x: pos.x,
+                              y: Math.min(100, Math.max(0, Number(e.target.value))) / 100
+                            }
+                          })
+                        }
+                      />
+                    </label>
+                  </>
+                )
+              })()}
+              <label>
+                回転(度)
+                <input
+                  type="number"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={o.style.rotation}
+                  onChange={(e) => patchStyle(o.id, o.style, { rotation: Number(e.target.value) })}
                 />
               </label>
             </div>
@@ -245,12 +319,19 @@ export function TextOverlayPanel(): React.JSX.Element {
                     <option value="none">なし</option>
                     <option value="fadeIn">フェードイン</option>
                     <option value="popIn">ポップイン</option>
+                    <option value="slideInUp">スライドイン(下から)</option>
+                    <option value="slideInDown">スライドイン(上から)</option>
+                    <option value="bounce">バウンス</option>
+                    <option value="typewriter">タイプライター</option>
                   </select>
                 </label>
               </div>
             </details>
 
             <div className="overlay-item-row">
+              <button className="icon-button" title="複製" onClick={() => handleDuplicate(o)}>
+                <CopyIcon width={13} height={13} />
+              </button>
               <button
                 className="icon-button danger"
                 title="削除"

@@ -36,6 +36,22 @@ function escapeAssText(text: string): string {
   return text.replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/\n/g, '\\N')
 }
 
+function buildTypewriterText(text: string, charDelayMs: number, revealMs: number): string {
+  const lines = text.split('\n')
+  let index = 0
+  const rendered = lines.map((line) =>
+    [...line]
+      .map((ch) => {
+        const start = index * charDelayMs
+        index += 1
+        const escaped = ch === '{' ? '\\{' : ch === '}' ? '\\}' : ch
+        return `{\\alpha&HFF&\\t(${start},${start + revealMs},\\alpha&H00&)}${escaped}`
+      })
+      .join('')
+  )
+  return rendered.join('\\N')
+}
+
 export function buildAssContent(overlays: TextOverlay[], width: number, height: number): string {
   const header = `[Script Info]
 ScriptType: v4.00+
@@ -56,9 +72,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 
   const lines = overlays.map((o) => {
     const style = o.style
-    const positionTag = style.customPosition
-      ? `\\pos(${Math.round(style.customPosition.x * width)},${Math.round(style.customPosition.y * height)})\\an5`
-      : `\\an${alignmentFor(style.position)}`
+    const alignCode = style.customPosition ? 5 : alignmentFor(style.position)
+    const target = style.customPosition
+      ? { x: style.customPosition.x * width, y: style.customPosition.y * height }
+      : alignCode === 8
+        ? { x: width / 2, y: height * 0.08 }
+        : alignCode === 2
+          ? { x: width / 2, y: height - height * 0.08 }
+          : { x: width / 2, y: height / 2 }
+
+    let positionTag: string
+    if (style.animation === 'slideInUp' || style.animation === 'slideInDown') {
+      const offset = Math.round(height * 0.06)
+      const yFrom = style.animation === 'slideInUp' ? target.y + offset : target.y - offset
+      positionTag = `\\an${alignCode}\\move(${Math.round(target.x)},${Math.round(yFrom)},${Math.round(target.x)},${Math.round(target.y)},0,350)`
+    } else if (style.customPosition) {
+      positionTag = `\\an5\\pos(${Math.round(target.x)},${Math.round(target.y)})`
+    } else {
+      positionTag = `\\an${alignCode}`
+    }
+
+    const rotationTag = style.rotation ? `\\frz${-style.rotation}` : ''
     const primaryColor = toAssColor(style.color)
     const bold = style.bold ? 1 : 0
     const italic = style.italic ? 1 : 0
@@ -77,10 +111,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       animationTag = '\\fad(300,0)'
     } else if (style.animation === 'popIn') {
       animationTag = '\\fscx60\\fscy60\\t(0,200,\\fscx100\\fscy100)'
+    } else if (style.animation === 'bounce') {
+      animationTag =
+        '\\fscx30\\fscy30\\t(0,250,\\fscx115\\fscy115)\\t(250,350,\\fscx92\\fscy92)\\t(350,500,\\fscx100\\fscy100)'
     }
 
-    const override = `{${positionTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\1c${primaryColor}\\b${bold}\\i${italic}${spacingTag}${outlineTags}${shadowTag}${backgroundTags}${animationTag}}`
-    return `Dialogue: 0,${toAssTime(o.startTime)},${toAssTime(o.endTime)},Default,,0,0,${marginVOf(style.position)},,${override}${escapeAssText(o.text)}`
+    const override = `{${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\1c${primaryColor}\\b${bold}\\i${italic}${spacingTag}${outlineTags}${shadowTag}${backgroundTags}${animationTag}}`
+    const text =
+      style.animation === 'typewriter' ? buildTypewriterText(o.text, 40, 50) : escapeAssText(o.text)
+    return `Dialogue: 0,${toAssTime(o.startTime)},${toAssTime(o.endTime)},Default,,0,0,${marginVOf(style.position)},,${override}${text}`
   })
 
   return `${header}\n${lines.join('\n')}\n`
