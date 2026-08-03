@@ -2,12 +2,21 @@ import { useState } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
 import { fetchTrendingGamingVideos, YouTubeVideoInfo } from '../lib/youtube'
 import { analyzeGamingTrends, GameTrendAnalysis } from '../lib/gameTrendAnalysis'
+import { compareTrend, saveTrendSnapshot, TrendComparison } from '../lib/trendHistory'
 import { formatIpcError } from '../lib/ipcError'
-import { KeyIcon, SparklesIcon, ExternalLinkIcon, TargetIcon } from './icons'
+import { KeyIcon, SparklesIcon, ExternalLinkIcon, TargetIcon, ImageIcon } from './icons'
 
 function formatViews(views: number): string {
   if (views >= 10000) return `${(views / 10000).toFixed(1)}万回`
   return `${views}回`
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const diffMs = Date.now() - timestamp
+  const hours = Math.round(diffMs / (1000 * 60 * 60))
+  if (hours < 1) return '1時間以内'
+  if (hours < 24) return `${hours}時間前`
+  return `${Math.round(hours / 24)}日前`
 }
 
 export function GameTrendPanel(): React.JSX.Element {
@@ -18,6 +27,7 @@ export function GameTrendPanel(): React.JSX.Element {
 
   const [videos, setVideos] = useState<YouTubeVideoInfo[]>([])
   const [analysis, setAnalysis] = useState<GameTrendAnalysis | null>(null)
+  const [comparison, setComparison] = useState<TrendComparison | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -33,10 +43,15 @@ export function GameTrendPanel(): React.JSX.Element {
     setLoading(true)
     setError(null)
     setAnalysis(null)
+    setComparison(null)
     try {
       const trending = await fetchTrendingGamingVideos(youtubeApiKey)
       setVideos(trending)
-      setAnalysis(await analyzeGamingTrends(geminiApiKey, trending))
+      const result = await analyzeGamingTrends(geminiApiKey, trending)
+      setAnalysis(result)
+      const gameNames = result.insights.map((i) => i.gameName)
+      setComparison(compareTrend(gameNames))
+      saveTrendSnapshot(gameNames)
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
@@ -50,7 +65,7 @@ export function GameTrendPanel(): React.JSX.Element {
         <h2>ゲームトレンド分析</h2>
       </div>
       <p className="hint-text">
-        YouTube公式APIで「ゲームカテゴリの急上昇動画(日本)」を取得し、そのタイトルだけを根拠にGemini(AI)がゲーム名とバズっていそうなシーンを要約します。実行するたびに最新の急上昇データを取得します。
+        YouTube公式APIで「ゲームカテゴリの急上昇動画(日本)」を取得し、そのタイトルとサムネイル画像だけを根拠にGemini(AI)がゲーム名・バズる要素・視覚傾向を分析します。実行するたびに最新の急上昇データを取得します。
       </p>
       <div className="youtube-field">
         <label>
@@ -82,6 +97,24 @@ export function GameTrendPanel(): React.JSX.Element {
       </button>
       {error && <p className="error-text">{error}</p>}
 
+      {comparison && (comparison.newGames.length > 0 || comparison.sustainedGames.length > 0) && (
+        <div className="game-trend-comparison">
+          <h3>前回({formatRelativeTime(comparison.previousTimestamp)})との比較</h3>
+          {comparison.newGames.length > 0 && (
+            <p>
+              <span className="trend-comparison-badge new">新規</span>
+              {comparison.newGames.join(' / ')}
+            </p>
+          )}
+          {comparison.sustainedGames.length > 0 && (
+            <p>
+              <span className="trend-comparison-badge sustained">継続</span>
+              {comparison.sustainedGames.join(' / ')}
+            </p>
+          )}
+        </div>
+      )}
+
       {analysis && analysis.insights.length > 0 && (
         <div className="game-trend-insights">
           <h3>今バズっていそうなゲーム</h3>
@@ -103,6 +136,35 @@ export function GameTrendPanel(): React.JSX.Element {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {analysis && analysis.viralFactors.length > 0 && (
+        <div className="game-trend-viral">
+          <h3>バズる要素(タイトルのフック手法)</h3>
+          {analysis.viralFactors.map((f, i) => (
+            <div key={i} className="game-trend-viral-card">
+              <span className="game-trend-hook-badge">{f.hookType}</span>
+              <p className="game-trend-viral-example" title={f.exampleTitle}>
+                「{f.exampleTitle}」
+              </p>
+              <p className="hint-text">{f.explanation}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {analysis && analysis.thumbnailInsight && (
+        <div className="game-trend-thumbnail-insight">
+          <h3>
+            <ImageIcon width={13} height={13} />
+            サムネイルの視覚傾向
+          </h3>
+          <ul>
+            <li>配色: {analysis.thumbnailInsight.colorTendency}</li>
+            <li>構図: {analysis.thumbnailInsight.compositionTendency}</li>
+            <li>文字入れ: {analysis.thumbnailInsight.textOverlayTendency}</li>
+          </ul>
         </div>
       )}
 
