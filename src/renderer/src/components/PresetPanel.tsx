@@ -2,14 +2,21 @@ import { useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore, CaptionPreset, SePreset } from '../store/presetStore'
+import { useSfxDictionaryStore } from '../store/sfxDictionaryStore'
 import { formatIpcError } from '../lib/ipcError'
-import { PlusIcon, TrashIcon, TypeIcon, MusicIcon, StarIcon } from './icons'
+import { KeywordSeModal } from './KeywordSeModal'
+import { PlusIcon, TrashIcon, TypeIcon, MusicIcon, StarIcon, WandIcon } from './icons'
 
 export function PresetPanel(): React.JSX.Element {
   const captionPresets = usePresetStore((s) => s.captionPresets)
   const removeCaptionPreset = usePresetStore((s) => s.removeCaptionPreset)
   const sePresets = usePresetStore((s) => s.sePresets)
   const removeSePreset = usePresetStore((s) => s.removeSePreset)
+
+  const dictionaryEntries = useSfxDictionaryStore((s) => s.entries)
+  const addDictionaryEntry = useSfxDictionaryStore((s) => s.addEntry)
+  const updateDictionaryEntry = useSfxDictionaryStore((s) => s.updateEntry)
+  const removeDictionaryEntry = useSfxDictionaryStore((s) => s.removeEntry)
 
   const project = useProjectStore((s) => s.project)
   const playheadTime = useProjectStore((s) => s.playheadTime)
@@ -20,6 +27,17 @@ export function PresetPanel(): React.JSX.Element {
 
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [newKeyword, setNewKeyword] = useState('')
+  const [newEntrySePresetId, setNewEntrySePresetId] = useState('')
+  const [showKeywordSeModal, setShowKeywordSeModal] = useState(false)
+
+  function handleAddDictionaryEntry(): void {
+    const keyword = newKeyword.trim()
+    const preset = sePresets.find((p) => p.id === newEntrySePresetId)
+    if (!keyword || !preset) return
+    addDictionaryEntry(keyword, preset.filePath, preset.fileName)
+    setNewKeyword('')
+  }
 
   function handleAddCaption(preset: CaptionPreset): void {
     addTextOverlay({
@@ -156,6 +174,86 @@ export function PresetPanel(): React.JSX.Element {
           </div>
         ))}
       </div>
+
+      <div className="preset-section">
+        <h3>
+          <WandIcon width={13} height={13} />
+          キーワード連動SE辞書
+        </h3>
+        <p className="hint-text">
+          テロップ内に登録した単語が現れると、そのタイミングに指定した効果音を自動配置できます。効果音は上の「効果音(SE)お気に入り」から選びます。
+        </p>
+        {dictionaryEntries.length === 0 && <p className="hint-text">まだ登録されていません。</p>}
+        {dictionaryEntries.map((entry) => (
+          <div key={entry.id} className="preset-item">
+            <div className="preset-item-info">
+              <span className="preset-item-name">
+                「{entry.keyword}」→ {entry.fileName}
+              </span>
+              <label className="keyword-se-volume-row hint-text">
+                音量
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={entry.volume}
+                  onChange={(e) =>
+                    updateDictionaryEntry(entry.id, { volume: Number(e.target.value) })
+                  }
+                />
+              </label>
+            </div>
+            <div className="preset-item-actions">
+              <button
+                className="icon-button danger"
+                title="削除"
+                onClick={() => removeDictionaryEntry(entry.id)}
+              >
+                <TrashIcon width={13} height={13} />
+              </button>
+            </div>
+          </div>
+        ))}
+        <div className="overlay-item-row keyword-se-add-row">
+          <input
+            type="text"
+            className="overlay-preset-name-input"
+            placeholder="キーワード(例: ドーン)"
+            value={newKeyword}
+            onChange={(e) => setNewKeyword(e.target.value)}
+          />
+          <select
+            value={newEntrySePresetId}
+            onChange={(e) => setNewEntrySePresetId(e.target.value)}
+          >
+            <option value="">効果音を選択</option>
+            {sePresets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="icon-button"
+            title="辞書に追加"
+            disabled={!newKeyword.trim() || !newEntrySePresetId}
+            onClick={handleAddDictionaryEntry}
+          >
+            <PlusIcon width={13} height={13} />
+          </button>
+        </div>
+        <button
+          className="primary-button keyword-se-scan-button"
+          disabled={dictionaryEntries.length === 0}
+          onClick={() => setShowKeywordSeModal(true)}
+        >
+          <WandIcon width={13} height={13} />
+          テロップをスキャンしてSEを配置
+        </button>
+      </div>
+
+      {showKeywordSeModal && <KeywordSeModal onClose={() => setShowKeywordSeModal(false)} />}
     </div>
   )
 }

@@ -2283,6 +2283,47 @@ h3 {
   flex-shrink: 0;
 }
 
+.keyword-se-volume-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.keyword-se-add-row {
+  margin-top: 8px;
+}
+
+.keyword-se-add-row select {
+  max-width: 140px;
+}
+
+.keyword-se-scan-button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.keyword-se-modal {
+  width: 560px;
+}
+
+.keyword-se-list {
+  max-height: 380px;
+}
+
+.keyword-se-keyword {
+  font-size: 12px;
+  color: var(--accent-1);
+  font-weight: 600;
+}
+
+.keyword-se-context {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 /* Export */
 .export-field {
   display: flex;

@@ -83,6 +83,7 @@ export interface AudioTrackClip {
   startTime: number
   inPoint: number
   outPoint: number
+  volume?: number
 }
 
 export interface AudioTrack {

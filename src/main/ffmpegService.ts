@@ -336,8 +336,9 @@ export function exportProject(options: ExportOptions): Promise<void> {
           const myIndex = inputIndex++
           const label = `atrk${trackIdx}_${clipIdx}`
           const delayMs = Math.max(0, Math.round(trackClip.startTime * 1000))
+          const clipVolume = track.volume * (trackClip.volume ?? 1)
           filterParts.push(
-            `[${myIndex}:a]asetpts=PTS-STARTPTS,volume=${track.volume},adelay=${delayMs}|${delayMs}[${label}]`
+            `[${myIndex}:a]asetpts=PTS-STARTPTS,volume=${clipVolume},adelay=${delayMs}|${delayMs}[${label}]`
           )
           clipLabels.push(label)
         })

@@ -93,6 +93,8 @@ export function Timeline(): React.JSX.Element {
   const toggleAudioTrackDucking = useProjectStore((s) => s.toggleAudioTrackDucking)
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
+  const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
+  const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
   const pasteClip = useProjectStore((s) => s.pasteClip)
@@ -847,6 +849,47 @@ export function Timeline(): React.JSX.Element {
                 )
               }
             />
+          </label>
+          <label>
+            音量
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={selectedAudioClipData.volume ?? 1}
+              onChange={(e) =>
+                updateAudioClipVolume(
+                  selectedAudioClip.trackId,
+                  selectedAudioClip.clipId,
+                  Number(e.target.value)
+                )
+              }
+            />
+          </label>
+          <label className="inline-select">
+            差し替え
+            <select
+              value={selectedAudioClipData.assetId}
+              onChange={(e) => {
+                const asset = project.assets.find((a) => a.id === e.target.value)
+                if (!asset) return
+                swapAudioClipAsset(
+                  selectedAudioClip.trackId,
+                  selectedAudioClip.clipId,
+                  asset.id,
+                  asset.duration
+                )
+              }}
+            >
+              {project.assets
+                .filter((a) => a.hasAudio)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.fileName}
+                  </option>
+                ))}
+            </select>
           </label>
           <button
             className="icon-button danger"

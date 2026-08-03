@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import type {
   AspectRatio,
   AudioTrack,
+  AudioTrackClip,
   BeatGrid,
   Clip,
   EditTemplate,
@@ -78,7 +79,12 @@ interface ProjectState {
   setAudioTrackVolume: (trackId: string, volume: number) => void
   addClipToAudioTrack: (trackId: string, assetId: string) => void
   updateAudioClipStart: (trackId: string, clipId: string, startTime: number) => void
+  updateAudioClipVolume: (trackId: string, clipId: string, volume: number) => void
+  swapAudioClipAsset: (trackId: string, clipId: string, assetId: string, outPoint: number) => void
   removeAudioClip: (trackId: string, clipId: string) => void
+  addKeywordSeClips: (
+    placements: { assetId: string; startTime: number; outPoint: number; volume: number }[]
+  ) => void
 
   setBeatGrid: (grid: BeatGrid) => void
   clearBeatGrid: () => void
@@ -475,6 +481,42 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })),
 
+  updateAudioClipVolume: (trackId, clipId, volume) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId ? { ...c, volume: Math.max(0, volume) } : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
+  swapAudioClipAsset: (trackId, clipId, assetId, outPoint) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId ? { ...c, assetId, inPoint: 0, outPoint } : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
   removeAudioClip: (trackId, clipId) =>
     set((state) => ({
       ...pushHistory(state),
@@ -485,6 +527,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         )
       }
     })),
+
+  addKeywordSeClips: (placements) =>
+    set((state) => {
+      const existingTrack = state.project.audioTracks.find((t) => t.name === 'SE')
+      const trackId = existingTrack?.id ?? uuid()
+      const newClips: AudioTrackClip[] = placements.map((p) => ({
+        id: uuid(),
+        assetId: p.assetId,
+        startTime: Math.max(0, p.startTime),
+        inPoint: 0,
+        outPoint: p.outPoint,
+        volume: p.volume
+      }))
+      const audioTracks = existingTrack
+        ? state.project.audioTracks.map((t) =>
+            t.id === trackId ? { ...t, clips: [...t.clips, ...newClips] } : t
+          )
+        : [
+            ...state.project.audioTracks,
+            {
+              id: trackId,
+              name: 'SE',
+              muted: false,
+              volume: 1,
+              duckingEnabled: false,
+              clips: newClips
+            }
+          ]
+      return { ...pushHistory(state), project: { ...state.project, audioTracks } }
+    }),
 
   setBeatGrid: (grid) =>
     set((state) => ({
