@@ -405,3 +405,15 @@ export function MegaphoneIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function ShuffleIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 6h3.5a4 4 0 0 1 3.2 1.6l6.6 8.8a4 4 0 0 0 3.2 1.6H21" />
+      <path d="M17 4l4 4-4 4" />
+      <path d="M3 18h3.5a4 4 0 0 0 3.2-1.6l1-1.3" />
+      <path d="M14 7.3L15.7 5.4A4 4 0 0 1 18.7 4H21" />
+      <path d="M17 12l4 4-4 4" />
+    </svg>
+  )
+}

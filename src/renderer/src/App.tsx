@@ -41,20 +41,56 @@ type RightTab =
   | 'metadata'
   | 'export'
 
-const TABS: {
+interface TabDef {
   id: RightTab
   label: string
   icon: (props: SVGProps<SVGSVGElement>) => React.JSX.Element
-}[] = [
-  { id: 'template', label: 'テンプレート', icon: SparklesIcon },
-  { id: 'text', label: 'テキスト', icon: TypeIcon },
-  { id: 'narration', label: 'ボイス', icon: MicIcon },
-  { id: 'thumbnail', label: 'サムネ', icon: ImageIcon },
-  { id: 'audio', label: 'BGM/SE', icon: MusicIcon },
-  { id: 'gametrend', label: 'ゲームトレンド', icon: TargetIcon },
-  { id: 'youtube', label: 'YouTube', icon: YoutubeIcon },
-  { id: 'metadata', label: '投稿準備', icon: MegaphoneIcon },
-  { id: 'export', label: '書き出し', icon: DownloadIcon }
+  description: string
+}
+
+const EDIT_TABS: TabDef[] = [
+  {
+    id: 'template',
+    label: 'テンプレート',
+    icon: SparklesIcon,
+    description: 'ショート動画のトレンド構成テンプレートを適用'
+  },
+  { id: 'text', label: 'テキスト', icon: TypeIcon, description: 'テロップ(字幕)の追加・編集' },
+  {
+    id: 'narration',
+    label: 'ボイス',
+    icon: MicIcon,
+    description: 'VOICEVOXによるナレーション音声合成'
+  },
+  { id: 'thumbnail', label: 'サムネ', icon: ImageIcon, description: 'サムネイル画像の自動生成' },
+  {
+    id: 'audio',
+    label: 'BGM/SE',
+    icon: MusicIcon,
+    description: 'BGM・効果音ライブラリの検索と追加'
+  }
+]
+
+const PUBLISH_TABS: TabDef[] = [
+  {
+    id: 'gametrend',
+    label: 'ゲームトレンド',
+    icon: TargetIcon,
+    description: 'ゲームトレンド分析(YouTube+Gemini)'
+  },
+  {
+    id: 'youtube',
+    label: 'YouTube',
+    icon: YoutubeIcon,
+    description: 'YouTubeトレンド・キーワード調査'
+  },
+  {
+    id: 'metadata',
+    label: '投稿準備',
+    icon: MegaphoneIcon,
+    description: '投稿用タイトル・概要欄・ハッシュタグの自動生成'
+  },
+  { id: 'export', label: '書き出し', icon: DownloadIcon, description: '動画の書き出し設定' }
 ]
 
 const LEFT_WIDTH_KEY = 've-layout-left-width'
@@ -247,8 +283,25 @@ function App(): React.JSX.Element {
         />
         <div className="right-column" style={{ width: rightWidth }}>
           <div className="tab-bar">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+            {EDIT_TABS.map(({ id, label, icon: Icon, description }) => (
+              <button
+                key={id}
+                className={tab === id ? 'active' : ''}
+                onClick={() => setTab(id)}
+                title={description}
+              >
+                <Icon width={14} height={14} />
+                <span>{label}</span>
+              </button>
+            ))}
+            <div className="tab-bar-divider" />
+            {PUBLISH_TABS.map(({ id, label, icon: Icon, description }) => (
+              <button
+                key={id}
+                className={tab === id ? 'active' : ''}
+                onClick={() => setTab(id)}
+                title={description}
+              >
                 <Icon width={14} height={14} />
                 <span>{label}</span>
               </button>

@@ -8,8 +8,8 @@
   --border: #2a2a35;
   --border-soft: #24242e;
   --text-1: #f3f3f6;
-  --text-2: #a6a6b3;
-  --text-3: #6d6d7a;
+  --text-2: #b5b5c2;
+  --text-3: #85858f;
   --accent-1: #7c6cf6;
   --accent-2: #ec4899;
   --accent-gradient: linear-gradient(135deg, var(--accent-1), var(--accent-2));
@@ -1519,6 +1519,13 @@ h3 {
   background: var(--accent-gradient);
   color: white;
   box-shadow: 0 4px 12px rgba(124, 108, 246, 0.3);
+}
+
+.tab-bar-divider {
+  flex-basis: 100%;
+  height: 1px;
+  margin: 2px 2px 3px;
+  background: var(--border-soft);
 }
 
 .tab-content {

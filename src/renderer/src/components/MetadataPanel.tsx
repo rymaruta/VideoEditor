@@ -2,9 +2,14 @@ import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
-import { generateVideoMetadata, VideoMetadata } from '../lib/metadataGeneration'
+import {
+  generateVideoMetadata,
+  regenerateTitles,
+  regeneratePinnedComment,
+  VideoMetadata
+} from '../lib/metadataGeneration'
 import { formatIpcError } from '../lib/ipcError'
-import { KeyIcon, SparklesIcon, CopyIcon, MegaphoneIcon } from './icons'
+import { KeyIcon, SparklesIcon, CopyIcon, MegaphoneIcon, ShuffleIcon } from './icons'
 
 const FRAME_FRACTIONS = [0.15, 0.5, 0.85]
 const FRAME_WIDTH = 320
@@ -31,6 +36,8 @@ export function MetadataPanel(): React.JSX.Element {
   const [frames, setFrames] = useState<string[]>([])
   const [description, setDescription] = useState('')
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [regeneratingTitles, setRegeneratingTitles] = useState(false)
+  const [regeneratingPinned, setRegeneratingPinned] = useState(false)
 
   function copy(key: string, text: string): void {
     navigator.clipboard.writeText(text).then(() => {
@@ -90,6 +97,50 @@ export function MetadataPanel(): React.JSX.Element {
     }
   }
 
+  async function handleRegenerateTitles(): Promise<void> {
+    if (!geminiApiKey || !result) return
+    setRegeneratingTitles(true)
+    setError(null)
+    try {
+      const transcript = buildTranscript(project)
+      const newTitles = await regenerateTitles(
+        geminiApiKey,
+        transcript,
+        extraContext,
+        language,
+        frames,
+        result.titles.map((t) => t.title)
+      )
+      setResult((prev) => (prev ? { ...prev, titles: newTitles } : prev))
+    } catch (e) {
+      setError(formatIpcError(e))
+    } finally {
+      setRegeneratingTitles(false)
+    }
+  }
+
+  async function handleRegeneratePinned(): Promise<void> {
+    if (!geminiApiKey || !result) return
+    setRegeneratingPinned(true)
+    setError(null)
+    try {
+      const transcript = buildTranscript(project)
+      const newComment = await regeneratePinnedComment(
+        geminiApiKey,
+        transcript,
+        extraContext,
+        language,
+        frames,
+        result.pinnedComment || null
+      )
+      setResult((prev) => (prev ? { ...prev, pinnedComment: newComment } : prev))
+    } catch (e) {
+      setError(formatIpcError(e))
+    } finally {
+      setRegeneratingPinned(false)
+    }
+  }
+
   return (
     <div className="panel metadata-panel">
       <div className="panel-header">
@@ -144,7 +195,18 @@ export function MetadataPanel(): React.JSX.Element {
       {result && (
         <>
           <div className="metadata-section">
-            <h3>タイトル案</h3>
+            <h3>
+              タイトル案
+              <button
+                className="small-button metadata-copy-inline"
+                onClick={handleRegenerateTitles}
+                disabled={regeneratingTitles}
+                title="タイトル案だけを再生成します"
+              >
+                <ShuffleIcon width={12} height={12} />
+                {regeneratingTitles ? '再生成中...' : '再生成'}
+              </button>
+            </h3>
             {result.titles.map((t, i) => (
               <div key={i} className="metadata-title-item">
                 <span className="game-trend-hook-badge">{t.hookType}</span>
@@ -210,6 +272,15 @@ export function MetadataPanel(): React.JSX.Element {
                 固定コメント案
                 <button
                   className="small-button metadata-copy-inline"
+                  onClick={handleRegeneratePinned}
+                  disabled={regeneratingPinned}
+                  title="固定コメント案だけを再生成します"
+                >
+                  <ShuffleIcon width={12} height={12} />
+                  {regeneratingPinned ? '再生成中...' : '再生成'}
+                </button>
+                <button
+                  className="small-button"
                   onClick={() => copy('pinned', result.pinnedComment)}
                 >
                   <CopyIcon width={12} height={12} />
