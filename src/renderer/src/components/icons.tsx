@@ -406,6 +406,14 @@ export function MegaphoneIcon(props: IconProps): React.JSX.Element {
   )
 }
 
+export function StarIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.3l-5.9 3.2 1.2-6.5-4.8-4.6 6.6-.9z" />
+    </svg>
+  )
+}
+
 export function ShuffleIcon(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)}>

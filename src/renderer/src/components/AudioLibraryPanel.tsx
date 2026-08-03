@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { usePresetStore } from '../store/presetStore'
 import {
   searchJamendoMusic,
   searchFreesoundEffects,
@@ -9,7 +10,15 @@ import {
   SoundEffectInfo
 } from '../lib/audioLibrary'
 import { formatIpcError } from '../lib/ipcError'
-import { KeyIcon, SearchIcon, MusicIcon, PlusIcon, PlayIcon, ExternalLinkIcon } from './icons'
+import {
+  KeyIcon,
+  SearchIcon,
+  MusicIcon,
+  PlusIcon,
+  PlayIcon,
+  ExternalLinkIcon,
+  StarIcon
+} from './icons'
 
 type LibraryKind = 'music' | 'sfx'
 
@@ -37,6 +46,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
   const addAsset = useProjectStore((s) => s.addAsset)
   const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
   const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
+  const addSePreset = usePresetStore((s) => s.addSePreset)
 
   const apiKey = kind === 'music' ? jamendoClientId : freesoundApiKey
   const trackName = kind === 'music' ? 'BGM' : '効果音'
@@ -107,6 +117,19 @@ export function AudioLibraryPanel(): React.JSX.Element {
       if (track) {
         addClipToAudioTrack(track.id, assetId)
       }
+    } catch (e) {
+      setError(formatIpcError(e))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function handleFavorite(id: string, url: string, name: string): Promise<void> {
+    setBusyId(`fav-${id}`)
+    setError(null)
+    try {
+      const { filePath } = await window.api.downloadAudioAsset(url, name)
+      addSePreset(name, filePath, name)
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
@@ -205,6 +228,14 @@ export function AudioLibraryPanel(): React.JSX.Element {
                 >
                   {busyId === `add-${t.id}` ? '...' : <PlusIcon width={13} height={13} />}
                 </button>
+                <button
+                  className="icon-button"
+                  title="お気に入りに登録"
+                  disabled={busyId !== null}
+                  onClick={() => handleFavorite(t.id, t.audioUrl, `${t.title}.mp3`)}
+                >
+                  {busyId === `fav-${t.id}` ? '...' : <StarIcon width={13} height={13} />}
+                </button>
               </div>
             </div>
           ))}
@@ -248,6 +279,14 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   onClick={() => handleAdd(s.id, s.previewUrl, `${s.name}.mp3`)}
                 >
                   {busyId === `add-${s.id}` ? '...' : <PlusIcon width={13} height={13} />}
+                </button>
+                <button
+                  className="icon-button"
+                  title="お気に入りに登録"
+                  disabled={busyId !== null}
+                  onClick={() => handleFavorite(s.id, s.previewUrl, `${s.name}.mp3`)}
+                >
+                  {busyId === `fav-${s.id}` ? '...' : <StarIcon width={13} height={13} />}
                 </button>
               </div>
             </div>

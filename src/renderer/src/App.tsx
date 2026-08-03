@@ -11,6 +11,7 @@ import { ThumbnailPanel } from './components/ThumbnailPanel'
 import { AudioLibraryPanel } from './components/AudioLibraryPanel'
 import { GameTrendPanel } from './components/GameTrendPanel'
 import { MetadataPanel } from './components/MetadataPanel'
+import { PresetPanel } from './components/PresetPanel'
 import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
@@ -26,7 +27,8 @@ import {
   ImageIcon,
   MusicIcon,
   TargetIcon,
-  MegaphoneIcon
+  MegaphoneIcon,
+  StarIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
@@ -36,6 +38,7 @@ type RightTab =
   | 'narration'
   | 'thumbnail'
   | 'audio'
+  | 'preset'
   | 'gametrend'
   | 'youtube'
   | 'metadata'
@@ -68,6 +71,12 @@ const EDIT_TABS: TabDef[] = [
     label: 'BGM/SE',
     icon: MusicIcon,
     description: 'BGM・効果音ライブラリの検索と追加'
+  },
+  {
+    id: 'preset',
+    label: 'プリセット',
+    icon: StarIcon,
+    description: 'お気に入り登録したテロップスタイル・効果音の管理'
   }
 ]
 
@@ -313,6 +322,7 @@ function App(): React.JSX.Element {
             {tab === 'narration' && <NarrationPanel />}
             {tab === 'thumbnail' && <ThumbnailPanel />}
             {tab === 'audio' && <AudioLibraryPanel />}
+            {tab === 'preset' && <PresetPanel />}
             {tab === 'gametrend' && <GameTrendPanel />}
             {tab === 'youtube' && <YouTubeTrendPanel />}
             {tab === 'metadata' && <MetadataPanel />}

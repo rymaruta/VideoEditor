@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { getTotalDuration } from '../store/projectStore'
+import { usePresetStore } from '../store/presetStore'
 import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } from '@shared/types'
 import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
-import { PlusIcon, TrashIcon, TypeIcon, CopyIcon } from './icons'
+import { PlusIcon, TrashIcon, TypeIcon, CopyIcon, StarIcon } from './icons'
 
 function defaultPositionFraction(position: TextPosition): { x: number; y: number } {
   if (position === 'top') return { x: 0.5, y: 0.08 }
@@ -15,11 +17,19 @@ export function TextOverlayPanel(): React.JSX.Element {
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
+  const addCaptionPreset = usePresetStore((s) => s.addCaptionPreset)
 
   const total = getTotalDuration(project)
+  const [presetNameDrafts, setPresetNameDrafts] = useState<Record<string, string>>({})
 
   function patchStyle(id: string, current: TextStyle, patch: Partial<TextStyle>): void {
     updateTextOverlay(id, { style: { ...current, ...patch } })
+  }
+
+  function handleSavePreset(o: TextOverlay): void {
+    const name = (presetNameDrafts[o.id] ?? '').trim() || 'マイプリセット'
+    addCaptionPreset(name, o.style)
+    setPresetNameDrafts((prev) => ({ ...prev, [o.id]: '' }))
   }
 
   function handleDuplicate(o: TextOverlay): void {
@@ -348,6 +358,25 @@ export function TextOverlayPanel(): React.JSX.Element {
                 </label>
               </div>
             </details>
+
+            <div className="overlay-item-row overlay-preset-save-row">
+              <input
+                type="text"
+                className="overlay-preset-name-input"
+                placeholder="プリセット名"
+                value={presetNameDrafts[o.id] ?? ''}
+                onChange={(e) =>
+                  setPresetNameDrafts((prev) => ({ ...prev, [o.id]: e.target.value }))
+                }
+              />
+              <button
+                className="icon-button"
+                title="このスタイルをプリセットとして保存"
+                onClick={() => handleSavePreset(o)}
+              >
+                <StarIcon width={13} height={13} />
+              </button>
+            </div>
 
             <div className="overlay-item-row">
               <button className="icon-button" title="複製" onClick={() => handleDuplicate(o)}>
