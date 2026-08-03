@@ -12,6 +12,7 @@ import {
 } from './ffmpegService'
 import { transcribeRange } from './whisperService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
+import { saveProjectFile, loadProjectFile } from './projectFileService'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
 
 function createWindow(): void {
@@ -67,6 +68,24 @@ function createWindow(): void {
     })
     if (result.canceled || !result.filePath) return null
     return result.filePath
+  })
+
+  ipcMain.handle(IPC.selectProjectSavePath, async (_e, defaultName: string) => {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: defaultName,
+      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    return result.filePath
+  })
+
+  ipcMain.handle(IPC.selectProjectOpenPath, async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
   })
 
   ipcMain.handle(
@@ -135,6 +154,17 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     await shell.openExternal(url)
   })
+  ipcMain.handle(IPC.showItemInFolder, (_e, filePath: string) => {
+    shell.showItemInFolder(filePath)
+  })
+  ipcMain.handle(IPC.openPath, async (_e, filePath: string) => {
+    const errorMessage = await shell.openPath(filePath)
+    if (errorMessage) throw new Error(errorMessage)
+  })
+  ipcMain.handle(IPC.saveProject, (_e, filePath: string, project: Project) => {
+    saveProjectFile(filePath, project)
+  })
+  ipcMain.handle(IPC.loadProject, (_e, filePath: string) => loadProjectFile(filePath))
 
   createWindow()
 

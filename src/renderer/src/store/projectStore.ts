@@ -13,15 +13,33 @@ import type {
 
 const MAX_HISTORY = 50
 
+function createBlankProject(): Project {
+  return {
+    id: uuid(),
+    name: '新規プロジェクト',
+    aspectRatio: '9:16',
+    assets: [],
+    clips: [],
+    audioTracks: [],
+    textOverlays: []
+  }
+}
+
 interface ProjectState {
   project: Project
   past: Project[]
   future: Project[]
+  currentFilePath: string | null
+  isDirty: boolean
   selectedClipId: string | null
   clipboardClip: Clip | null
   playheadTime: number
   isPlaying: boolean
   seekRequest: { time: number; token: number } | null
+
+  newProject: () => void
+  loadProject: (project: Project, filePath: string) => void
+  markSaved: (filePath: string) => void
 
   addAsset: (asset: MediaAsset) => void
   addClipToTimeline: (assetId: string) => void
@@ -67,27 +85,51 @@ function audioTrackEnd(track: AudioTrack): number {
   return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
 }
 
-function pushHistory(state: ProjectState): Pick<ProjectState, 'past' | 'future'> {
-  return { past: [...state.past, state.project].slice(-MAX_HISTORY), future: [] }
+function pushHistory(state: ProjectState): Pick<ProjectState, 'past' | 'future' | 'isDirty'> {
+  return { past: [...state.past, state.project].slice(-MAX_HISTORY), future: [], isDirty: true }
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
-  project: {
-    id: uuid(),
-    name: '新規プロジェクト',
-    aspectRatio: '9:16',
-    assets: [],
-    clips: [],
-    audioTracks: [],
-    textOverlays: []
-  },
+  project: createBlankProject(),
   past: [],
   future: [],
+  currentFilePath: null,
+  isDirty: false,
   selectedClipId: null,
   clipboardClip: null,
   playheadTime: 0,
   isPlaying: false,
   seekRequest: null,
+
+  newProject: () =>
+    set({
+      project: createBlankProject(),
+      past: [],
+      future: [],
+      currentFilePath: null,
+      isDirty: false,
+      selectedClipId: null,
+      clipboardClip: null,
+      playheadTime: 0,
+      isPlaying: false,
+      seekRequest: null
+    }),
+
+  loadProject: (project, filePath) =>
+    set({
+      project,
+      past: [],
+      future: [],
+      currentFilePath: filePath,
+      isDirty: false,
+      selectedClipId: null,
+      clipboardClip: null,
+      playheadTime: 0,
+      isPlaying: false,
+      seekRequest: null
+    }),
+
+  markSaved: (filePath) => set({ currentFilePath: filePath, isDirty: false }),
 
   addAsset: (asset) =>
     set((state) => ({

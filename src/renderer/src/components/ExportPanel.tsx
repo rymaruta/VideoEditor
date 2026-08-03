@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import { DownloadIcon } from './icons'
+import { DownloadIcon, FolderIcon, PlayCircleIcon } from './icons'
 import { formatIpcError } from '../lib/ipcError'
 import type { QualityPreset, ResolutionHeight } from '@shared/types'
 
@@ -13,6 +13,7 @@ export function ExportPanel(): React.JSX.Element {
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [doneMessage, setDoneMessage] = useState<string | null>(null)
+  const [doneFilePath, setDoneFilePath] = useState<string | null>(null)
 
   useEffect(() => {
     const unsubscribe = window.api.onExportProgress((p) => setProgress(p))
@@ -22,6 +23,7 @@ export function ExportPanel(): React.JSX.Element {
   async function handleExport(): Promise<void> {
     setError(null)
     setDoneMessage(null)
+    setDoneFilePath(null)
     if (project.clips.length === 0) {
       setError('タイムラインにクリップがありません')
       return
@@ -39,6 +41,7 @@ export function ExportPanel(): React.JSX.Element {
         outputPath
       })
       setDoneMessage(`書き出しが完了しました: ${outputPath}`)
+      setDoneFilePath(outputPath)
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
@@ -105,7 +108,27 @@ export function ExportPanel(): React.JSX.Element {
         </div>
       )}
       {error && <p className="error-text">{error}</p>}
-      {doneMessage && <p className="success-text">{doneMessage}</p>}
+      {doneMessage && (
+        <div className="export-done">
+          <p className="success-text">{doneMessage}</p>
+          <div className="export-done-actions">
+            <button
+              className="small-button"
+              onClick={() => doneFilePath && window.api.openPath(doneFilePath)}
+            >
+              <PlayCircleIcon width={13} height={13} />
+              再生
+            </button>
+            <button
+              className="small-button"
+              onClick={() => doneFilePath && window.api.showItemInFolder(doneFilePath)}
+            >
+              <FolderIcon width={13} height={13} />
+              フォルダを表示
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

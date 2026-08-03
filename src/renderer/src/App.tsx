@@ -7,6 +7,7 @@ import { TextOverlayPanel } from './components/TextOverlayPanel'
 import { YouTubeTrendPanel } from './components/YouTubeTrendPanel'
 import { ExportPanel } from './components/ExportPanel'
 import { NarrationPanel } from './components/NarrationPanel'
+import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
 import {
@@ -43,6 +44,7 @@ function App(): React.JSX.Element {
   const canRedo = useProjectStore((s) => s.future.length > 0)
   const undo = useProjectStore((s) => s.undo)
   const redo = useProjectStore((s) => s.redo)
+  const isDirty = useProjectStore((s) => s.isDirty)
 
   useKeyboardShortcuts()
 
@@ -56,6 +58,7 @@ function App(): React.JSX.Element {
             </span>
             <span className="brand-name">VideoEditor</span>
           </div>
+          <ProjectMenu />
           <div className="top-bar-history">
             <button
               className="icon-button"
@@ -76,7 +79,10 @@ function App(): React.JSX.Element {
           </div>
         </div>
         <div className="top-bar-project">
-          <span className="project-name">{projectName}</span>
+          <span className="project-name">
+            {projectName}
+            {isDirty && <span className="dirty-dot" title="未保存の変更があります" />}
+          </span>
           <span className="project-badge">{aspectRatio}</span>
         </div>
       </header>

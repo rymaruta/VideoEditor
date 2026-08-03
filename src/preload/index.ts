@@ -57,10 +57,20 @@ const api = {
     return () => ipcRenderer.removeListener(IPC.exportProgress, listener)
   },
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
+  showItemInFolder: (filePath: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.showItemInFolder, filePath),
+  openPath: (filePath: string): Promise<void> => ipcRenderer.invoke(IPC.openPath, filePath),
   voicevoxListSpeakers: (): Promise<VoicevoxSpeaker[]> =>
     ipcRenderer.invoke(IPC.voicevoxListSpeakers),
   voicevoxSynthesize: (text: string, speakerId: number): Promise<string> =>
-    ipcRenderer.invoke(IPC.voicevoxSynthesize, text, speakerId)
+    ipcRenderer.invoke(IPC.voicevoxSynthesize, text, speakerId),
+  selectProjectSavePath: (defaultName: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.selectProjectSavePath, defaultName),
+  selectProjectOpenPath: (): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.selectProjectOpenPath),
+  saveProject: (filePath: string, project: Project): Promise<void> =>
+    ipcRenderer.invoke(IPC.saveProject, filePath, project),
+  loadProject: (filePath: string): Promise<Project> => ipcRenderer.invoke(IPC.loadProject, filePath)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -5,6 +5,7 @@ import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
 import { AutoCaptionModal } from './AutoCaptionModal'
 import { Waveform } from './Waveform'
+import { isAspectMismatch } from '../lib/aspect'
 import type { TransitionType } from '@shared/types'
 import {
   ChevronLeftIcon,
@@ -22,7 +23,8 @@ import {
   CopyIcon,
   ClipboardPasteIcon,
   ZoomInIcon,
-  ZoomOutIcon
+  ZoomOutIcon,
+  AlertTriangleIcon
 } from './icons'
 
 const BASE_PIXELS_PER_SECOND = 40
@@ -301,6 +303,14 @@ export function Timeline(): React.JSX.Element {
                     {tc.asset.fileName}
                     {tc.clip.speed !== 1 && ` (${tc.clip.speed}x)`}
                   </span>
+                  {isAspectMismatch(tc.asset, project.aspectRatio) && (
+                    <span
+                      className="timeline-mismatch-icon"
+                      title="プロジェクトのアスペクト比と異なるため黒帯が入ります"
+                    >
+                      <AlertTriangleIcon width={11} height={11} />
+                    </span>
+                  )}
                   {tc.asset.hasAudio && clipWidth > 24 && (
                     <div className="timeline-clip-waveform">
                       <Waveform

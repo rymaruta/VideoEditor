@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { saveProject } from './projectFileActions'
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
@@ -35,12 +36,17 @@ export function useKeyboardShortcuts(): void {
         store.pasteClip()
         return
       }
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        saveProject().catch(() => {})
+        return
+      }
       if (e.code === 'Space') {
         e.preventDefault()
         store.setIsPlaying(!store.isPlaying)
         return
       }
-      if (e.key === 's' || e.key === 'S') {
+      if (!mod && (e.key === 's' || e.key === 'S')) {
         if (store.selectedClipId) {
           e.preventDefault()
           store.splitClipAtTime(store.selectedClipId, store.playheadTime)

@@ -11,5 +11,11 @@ export const IPC = {
   selectExportPath: 'export:selectPath',
   exportProject: 'export:run',
   exportProgress: 'export:progress',
-  openExternal: 'shell:openExternal'
+  openExternal: 'shell:openExternal',
+  showItemInFolder: 'shell:showItemInFolder',
+  openPath: 'shell:openPath',
+  selectProjectSavePath: 'project:selectSavePath',
+  selectProjectOpenPath: 'project:selectOpenPath',
+  saveProject: 'project:save',
+  loadProject: 'project:load'
 } as const

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
-import { UploadIcon, PlusIcon, ClapperboardIcon, MusicIcon } from './icons'
+import { isAspectMismatch } from '../lib/aspect'
+import { UploadIcon, PlusIcon, ClapperboardIcon, MusicIcon, AlertTriangleIcon } from './icons'
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -19,6 +20,7 @@ function formatDuration(seconds: number): string {
 
 export function MediaBin(): React.JSX.Element {
   const assets = useProjectStore((s) => s.project.assets)
+  const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const addAsset = useProjectStore((s) => s.addAsset)
   const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
@@ -120,6 +122,15 @@ export function MediaBin(): React.JSX.Element {
               <div className="media-meta">
                 {formatDuration(asset.duration)}
                 {asset.hasVideo && ` ・ ${asset.width}x${asset.height}`}
+                {asset.hasVideo && isAspectMismatch(asset, aspectRatio) && (
+                  <span
+                    className="mismatch-badge"
+                    title="プロジェクトのアスペクト比と異なるため、書き出し時に上下または左右に黒帯が入ります"
+                  >
+                    <AlertTriangleIcon width={11} height={11} />
+                    比率が異なる
+                  </span>
+                )}
               </div>
             </div>
             {asset.hasVideo && (

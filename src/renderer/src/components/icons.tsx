@@ -300,3 +300,60 @@ export function ZoomOutIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function FolderIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
+  )
+}
+
+export function PlayCircleIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="9" />
+      <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function SaveIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+      <polyline points="17 21 17 13 7 13 7 21" />
+      <polyline points="7 3 7 8 15 8" />
+    </svg>
+  )
+}
+
+export function FolderOpenIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2H5" />
+      <path d="m3 7 1.5 11a2 2 0 0 0 2 1.8h11a2 2 0 0 0 2-1.8L21 10H5.5A2 2 0 0 0 3.5 12" />
+    </svg>
+  )
+}
+
+export function FilePlusIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="12" y1="12" x2="12" y2="18" />
+      <line x1="9" y1="15" x2="15" y2="15" />
+    </svg>
+  )
+}
+
+export function AlertTriangleIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="m10.29 3.86-8.18 14.14A1.5 1.5 0 0 0 3.4 20.3h17.2a1.5 1.5 0 0 0 1.29-2.3L13.71 3.86a1.5 1.5 0 0 0-2.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  )
+}
