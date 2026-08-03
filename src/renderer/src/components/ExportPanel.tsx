@@ -1,19 +1,52 @@
 import { useEffect, useState } from 'react'
+import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
-import { DownloadIcon, FolderIcon, PlayCircleIcon } from './icons'
+import { DownloadIcon, FolderIcon, PlayCircleIcon, PlusIcon, TrashIcon, LayersIcon } from './icons'
 import { formatIpcError } from '../lib/ipcError'
-import type { QualityPreset, ResolutionHeight } from '@shared/types'
+import type { AspectRatio, QualityPreset, ResolutionHeight } from '@shared/types'
+
+interface BatchJob {
+  id: string
+  aspectRatio: AspectRatio
+  resolutionHeight: ResolutionHeight
+  quality: QualityPreset
+}
+
+type JobStatus = 'pending' | 'running' | 'done' | 'error'
+
+function qualityLabel(q: QualityPreset): string {
+  switch (q) {
+    case 'high':
+      return '高画質'
+    case 'small':
+      return '軽量'
+    default:
+      return '標準'
+  }
+}
+
+function jobFileName(projectName: string, job: BatchJob): string {
+  const aspect = job.aspectRatio === '9:16' ? '9x16' : '16x9'
+  return `${projectName}_${aspect}_${job.resolutionHeight}p.mp4`
+}
 
 export function ExportPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const setAspectRatio = useProjectStore((s) => s.setAspectRatio)
   const [resolutionHeight, setResolutionHeight] = useState<ResolutionHeight>(1080)
   const [quality, setQuality] = useState<QualityPreset>('standard')
+  const [loudnessNormalization, setLoudnessNormalization] = useState(true)
   const [progress, setProgress] = useState<{ percent: number; stage: string } | null>(null)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [doneMessage, setDoneMessage] = useState<string | null>(null)
   const [doneFilePath, setDoneFilePath] = useState<string | null>(null)
+
+  const [batchJobs, setBatchJobs] = useState<BatchJob[]>([])
+  const [batchStatus, setBatchStatus] = useState<Record<string, JobStatus>>({})
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchError, setBatchError] = useState<string | null>(null)
+  const [batchFolder, setBatchFolder] = useState<string | null>(null)
 
   useEffect(() => {
     const unsubscribe = window.api.onExportProgress((p) => setProgress(p))
@@ -38,7 +71,8 @@ export function ExportPanel(): React.JSX.Element {
         aspectRatio: project.aspectRatio,
         resolutionHeight,
         quality,
-        outputPath
+        outputPath,
+        loudnessNormalization
       })
       setDoneMessage(`書き出しが完了しました: ${outputPath}`)
       setDoneFilePath(outputPath)
@@ -47,6 +81,56 @@ export function ExportPanel(): React.JSX.Element {
     } finally {
       setExporting(false)
     }
+  }
+
+  function addBatchJob(aspectRatio: AspectRatio, height: ResolutionHeight, q: QualityPreset): void {
+    setBatchJobs((prev) => [
+      ...prev,
+      { id: uuid(), aspectRatio, resolutionHeight: height, quality: q }
+    ])
+  }
+
+  function removeBatchJob(id: string): void {
+    setBatchJobs((prev) => prev.filter((j) => j.id !== id))
+  }
+
+  async function handleBatchExport(): Promise<void> {
+    setBatchError(null)
+    if (project.clips.length === 0) {
+      setBatchError('タイムラインにクリップがありません')
+      return
+    }
+    if (batchJobs.length === 0) {
+      setBatchError('書き出す組み合わせを追加してください')
+      return
+    }
+    const folder = await window.api.selectExportFolder()
+    if (!folder) return
+    setBatchFolder(folder)
+    setBatchRunning(true)
+    const nextStatus: Record<string, JobStatus> = {}
+    batchJobs.forEach((j) => (nextStatus[j.id] = 'pending'))
+    setBatchStatus(nextStatus)
+    for (const job of batchJobs) {
+      setBatchStatus((prev) => ({ ...prev, [job.id]: 'running' }))
+      setProgress({ percent: 0, stage: '準備中' })
+      try {
+        const outputPath = `${folder}/${jobFileName(project.name, job)}`
+        await window.api.exportProject({
+          project,
+          aspectRatio: job.aspectRatio,
+          resolutionHeight: job.resolutionHeight,
+          quality: job.quality,
+          outputPath,
+          loudnessNormalization
+        })
+        setBatchStatus((prev) => ({ ...prev, [job.id]: 'done' }))
+      } catch (e) {
+        setBatchStatus((prev) => ({ ...prev, [job.id]: 'error' }))
+        setBatchError(formatIpcError(e))
+      }
+    }
+    setBatchRunning(false)
   }
 
   return (
@@ -95,11 +179,24 @@ export function ExportPanel(): React.JSX.Element {
           <option value="small">軽量(ファイルサイズ小)</option>
         </select>
       </div>
+      <div className="export-field">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={loudnessNormalization}
+            onChange={(e) => setLoudnessNormalization(e.target.checked)}
+          />
+          ラウドネス正規化(音量を自動調整)
+        </label>
+        <p className="hint-text">
+          元動画・BGM・ナレーションの音量差を書き出し時に自動で揃えます(YouTube推奨値に合わせています)。
+        </p>
+      </div>
       <button className="primary-button export-button" onClick={handleExport} disabled={exporting}>
         <DownloadIcon width={15} height={15} />
         {exporting ? '書き出し中...' : '動画を書き出す'}
       </button>
-      {progress && exporting && (
+      {progress && (exporting || batchRunning) && (
         <div className="progress-bar">
           <div className="progress-bar-fill" style={{ width: `${progress.percent}%` }} />
           <span>
@@ -129,6 +226,75 @@ export function ExportPanel(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      <div className="export-field batch-export-section">
+        <label>
+          <LayersIcon width={13} height={13} />
+          バッチ書き出し(複数の組み合わせをまとめて生成)
+        </label>
+        <div className="batch-quick-add">
+          <button
+            className="small-button"
+            onClick={() => addBatchJob('9:16', 1080, 'standard')}
+            disabled={batchRunning}
+          >
+            9:16 / 1080p
+          </button>
+          <button
+            className="small-button"
+            onClick={() => addBatchJob('16:9', 1080, 'standard')}
+            disabled={batchRunning}
+          >
+            16:9 / 1080p
+          </button>
+          <button
+            className="small-button"
+            onClick={() => addBatchJob('9:16', 720, 'small')}
+            disabled={batchRunning}
+          >
+            9:16 / 720p(軽量)
+          </button>
+        </div>
+        {batchJobs.length > 0 && (
+          <ul className="batch-job-list">
+            {batchJobs.map((job) => (
+              <li
+                key={job.id}
+                className={`batch-job-item batch-job-${batchStatus[job.id] ?? 'pending'}`}
+              >
+                <span>
+                  {job.aspectRatio} ・ {job.resolutionHeight}p ・ {qualityLabel(job.quality)}
+                </span>
+                {batchStatus[job.id] === 'done' && <span className="batch-job-badge">完了</span>}
+                {batchStatus[job.id] === 'running' && (
+                  <span className="batch-job-badge">実行中</span>
+                )}
+                {batchStatus[job.id] === 'error' && <span className="batch-job-badge">失敗</span>}
+                <button
+                  className="icon-button danger"
+                  title="削除"
+                  disabled={batchRunning}
+                  onClick={() => removeBatchJob(job.id)}
+                >
+                  <TrashIcon width={12} height={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button
+          className="primary-button"
+          onClick={handleBatchExport}
+          disabled={batchRunning || batchJobs.length === 0}
+        >
+          <PlusIcon width={13} height={13} />
+          {batchRunning ? '一括書き出し中...' : '一括書き出し'}
+        </button>
+        {batchFolder && !batchRunning && !batchError && (
+          <p className="hint-text">出力先: {batchFolder}</p>
+        )}
+        {batchError && <p className="error-text">{batchError}</p>}
+      </div>
     </div>
   )
 }

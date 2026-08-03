@@ -73,6 +73,14 @@ function createWindow(): void {
     return result.filePath
   })
 
+  ipcMain.handle(IPC.selectExportFolder, async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
   ipcMain.handle(IPC.selectProjectSavePath, async (_e, defaultName: string) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       defaultPath: defaultName,
@@ -101,6 +109,7 @@ function createWindow(): void {
         resolutionHeight: ResolutionHeight
         quality: QualityPreset
         outputPath: string
+        loudnessNormalization?: boolean
       }
     ) => {
       await exportProject({
@@ -109,6 +118,7 @@ function createWindow(): void {
         resolutionHeight: payload.resolutionHeight,
         quality: payload.quality,
         outputPath: payload.outputPath,
+        loudnessNormalization: payload.loudnessNormalization,
         onProgress: (percent, stage) => {
           event.sender.send(IPC.exportProgress, { percent, stage })
         }

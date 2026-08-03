@@ -11,6 +11,7 @@ export const IPC = {
   voicevoxListSpeakers: 'voicevox:listSpeakers',
   voicevoxSynthesize: 'voicevox:synthesize',
   selectExportPath: 'export:selectPath',
+  selectExportFolder: 'export:selectFolder',
   exportProject: 'export:run',
   exportProgress: 'export:progress',
   openExternal: 'shell:openExternal',

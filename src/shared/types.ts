@@ -113,6 +113,7 @@ export interface ExportSettings {
   resolutionHeight: ResolutionHeight
   quality: QualityPreset
   outputPath: string
+  loudnessNormalization?: boolean
 }
 
 export interface ExportProgress {

@@ -227,11 +227,13 @@ export interface ExportOptions {
   resolutionHeight: ResolutionHeight
   quality: QualityPreset
   outputPath: string
+  loudnessNormalization?: boolean
   onProgress: (percent: number, stage: string) => void
 }
 
 export function exportProject(options: ExportOptions): Promise<void> {
   const { project, aspectRatio, resolutionHeight, quality, outputPath, onProgress } = options
+  const loudnessNormalization = options.loudnessNormalization ?? false
   const { w, h } = targetResolution(aspectRatio, resolutionHeight)
   const assetById = new Map(project.assets.map((a) => [a.id, a]))
   const clips = project.clips
@@ -340,6 +342,11 @@ export function exportProject(options: ExportOptions): Promise<void> {
           `${mixInputs}amix=inputs=${extraAudioLabels.length + 1}:duration=first:dropout_transition=0:normalize=0[aout]`
         )
         audioLabel = '[aout]'
+      }
+
+      if (loudnessNormalization) {
+        filterParts.push(`${audioLabel}loudnorm=I=-14:TP=-1.5:LRA=11[aloud]`)
+        audioLabel = '[aloud]'
       }
 
       command

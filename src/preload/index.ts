@@ -52,12 +52,14 @@ const api = {
     ipcRenderer.invoke(IPC.transcribe, filePath, rangeStart, rangeEnd),
   selectExportPath: (defaultName: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectExportPath, defaultName),
+  selectExportFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectExportFolder),
   exportProject: (payload: {
     project: Project
     aspectRatio: AspectRatio
     resolutionHeight: ResolutionHeight
     quality: QualityPreset
     outputPath: string
+    loudnessNormalization?: boolean
   }): Promise<{ success: boolean }> => ipcRenderer.invoke(IPC.exportProject, payload),
   onExportProgress: (callback: (progress: ExportProgress) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, progress: ExportProgress): void =>
