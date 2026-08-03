@@ -79,7 +79,13 @@ const api = {
     ipcRenderer.invoke(IPC.selectProjectOpenPath),
   saveProject: (filePath: string, project: Project): Promise<void> =>
     ipcRenderer.invoke(IPC.saveProject, filePath, project),
-  loadProject: (filePath: string): Promise<Project> => ipcRenderer.invoke(IPC.loadProject, filePath)
+  loadProject: (filePath: string): Promise<Project> =>
+    ipcRenderer.invoke(IPC.loadProject, filePath),
+  downloadAudioAsset: (
+    url: string,
+    suggestedName: string
+  ): Promise<{ filePath: string; duration: number }> =>
+    ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

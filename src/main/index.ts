@@ -15,6 +15,7 @@ import { transcribeRange } from './whisperService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import { saveProjectFile, loadProjectFile } from './projectFileService'
 import { detectHighlights } from './highlightService'
+import { downloadAudioAsset } from './audioLibraryService'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
 
 function createWindow(): void {
@@ -175,6 +176,9 @@ app.whenReady().then(() => {
     saveProjectFile(filePath, project)
   })
   ipcMain.handle(IPC.loadProject, (_e, filePath: string) => loadProjectFile(filePath))
+  ipcMain.handle(IPC.downloadAudioAsset, async (_e, url: string, suggestedName: string) =>
+    downloadAudioAsset(url, suggestedName)
+  )
 
   createWindow()
 
