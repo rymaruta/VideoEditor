@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
+import { AutoCaptionModal } from './AutoCaptionModal'
 import type { TransitionType } from '@shared/types'
 import {
   ChevronLeftIcon,
@@ -15,7 +16,8 @@ import {
   Volume2Icon,
   VolumeXIcon,
   WandIcon,
-  TypeIcon
+  TypeIcon,
+  MicIcon
 } from './icons'
 
 const PIXELS_PER_SECOND = 40
@@ -42,6 +44,7 @@ export function Timeline(): React.JSX.Element {
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
   const [silenceCutClipId, setSilenceCutClipId] = useState<string | null>(null)
+  const [autoCaptionClipId, setAutoCaptionClipId] = useState<string | null>(null)
   const [selectedAudioClip, setSelectedAudioClip] = useState<{
     trackId: string
     clipId: string
@@ -99,6 +102,10 @@ export function Timeline(): React.JSX.Element {
             <button className="small-button" onClick={() => setSilenceCutClipId(selectedClip.id)}>
               <WandIcon width={13} height={13} />
               無音カット
+            </button>
+            <button className="small-button" onClick={() => setAutoCaptionClipId(selectedClip.id)}>
+              <MicIcon width={13} height={13} />
+              自動テロップ
             </button>
             <label className="inline-select">
               <GaugeIcon width={13} height={13} />
@@ -287,6 +294,24 @@ export function Timeline(): React.JSX.Element {
               })}
             </div>
           ))}
+
+          {project.textOverlays.length > 0 && (
+            <div className="track-lane caption-lane" style={{ width: timelineWidth }}>
+              {project.textOverlays.map((overlay) => (
+                <div
+                  key={overlay.id}
+                  className={`timeline-caption-clip ${overlay.source === 'auto' ? 'auto' : ''}`}
+                  style={{
+                    left: overlay.startTime * PIXELS_PER_SECOND,
+                    width: Math.max(4, (overlay.endTime - overlay.startTime) * PIXELS_PER_SECOND)
+                  }}
+                  title={overlay.text}
+                >
+                  {overlay.text}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -323,6 +348,9 @@ export function Timeline(): React.JSX.Element {
       {trimClipId && <TrimModal clipId={trimClipId} onClose={() => setTrimClipId(null)} />}
       {silenceCutClipId && (
         <SilenceCutModal clipId={silenceCutClipId} onClose={() => setSilenceCutClipId(null)} />
+      )}
+      {autoCaptionClipId && (
+        <AutoCaptionModal clipId={autoCaptionClipId} onClose={() => setAutoCaptionClipId(null)} />
       )}
     </div>
   )

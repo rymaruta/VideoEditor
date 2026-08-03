@@ -742,6 +742,40 @@ h3 {
   box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25);
 }
 
+.timeline-caption-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  background: linear-gradient(160deg, #6d4a9c, #4d3270);
+  border: 1px solid rgba(124, 108, 246, 0.5);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  color: var(--text-1);
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-caption-clip.auto {
+  border-style: dashed;
+}
+
+.caption-candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-elevated-2);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+}
+
+.caption-candidate input[type='text'] {
+  width: 100%;
+}
+
 .audio-clip-inspector {
   display: flex;
   align-items: center;

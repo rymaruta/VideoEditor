@@ -8,7 +8,8 @@ import type {
   Project,
   QualityPreset,
   ResolutionHeight,
-  SilenceRange
+  SilenceRange,
+  TranscriptSegment
 } from '@shared/types'
 
 // Custom APIs for renderer
@@ -25,6 +26,12 @@ const api = {
     rangeEnd: number
   ): Promise<SilenceRange[]> =>
     ipcRenderer.invoke(IPC.detectSilence, filePath, rangeStart, rangeEnd),
+  transcribe: (
+    filePath: string,
+    rangeStart: number,
+    rangeEnd: number
+  ): Promise<TranscriptSegment[]> =>
+    ipcRenderer.invoke(IPC.transcribe, filePath, rangeStart, rangeEnd),
   selectExportPath: (defaultName: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectExportPath, defaultName),
   exportProject: (payload: {
