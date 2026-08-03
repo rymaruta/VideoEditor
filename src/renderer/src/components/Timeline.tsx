@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { snapTime } from '../lib/snapping'
+import {
+  SHORTCUT_ACTIONS,
+  getActionLabel,
+  getKeymap,
+  KEYMAP_SCHEME_LABELS,
+  type KeymapScheme
+} from '../lib/keymap'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
 import { FillerWordCutModal } from './FillerWordCutModal'
@@ -87,6 +95,9 @@ export function Timeline(): React.JSX.Element {
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
   const pasteClip = useProjectStore((s) => s.pasteClip)
   const clipboardClip = useProjectStore((s) => s.clipboardClip)
+  const keymapScheme = useSettingsStore((s) => s.keymapScheme)
+  const setKeymapScheme = useSettingsStore((s) => s.setKeymapScheme)
+  const keymap = getKeymap(keymapScheme)
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
   const [silenceCutClipId, setSilenceCutClipId] = useState<string | null>(null)
@@ -337,6 +348,7 @@ export function Timeline(): React.JSX.Element {
             </button>
             <button
               className="small-button"
+              title={`分割 (${keymap.split.display})`}
               onClick={() => splitClipAtTime(selectedClip.id, playheadTime)}
             >
               <ScissorsIcon width={13} height={13} />
@@ -416,14 +428,14 @@ export function Timeline(): React.JSX.Element {
             )}
             <button
               className="icon-button"
-              title="コピー (Ctrl+C)"
+              title={`コピー (${keymap.copy.display})`}
               onClick={() => copySelectedClip()}
             >
               <CopyIcon width={13} height={13} />
             </button>
             <button
               className="icon-button danger"
-              title="削除"
+              title={`削除 (${keymap.delete.display})`}
               onClick={() => removeClip(selectedClip.id)}
             >
               <TrashIcon width={14} height={14} />
@@ -431,11 +443,38 @@ export function Timeline(): React.JSX.Element {
           </div>
         )}
         {clipboardClip && (
-          <button className="small-button" title="貼り付け (Ctrl+V)" onClick={() => pasteClip()}>
+          <button
+            className="small-button"
+            title={`貼り付け (${keymap.paste.display})`}
+            onClick={() => pasteClip()}
+          >
             <ClipboardPasteIcon width={13} height={13} />
             貼り付け
           </button>
         )}
+      </div>
+
+      <div className="timeline-shortcut-bar">
+        <div className="timeline-shortcut-hints">
+          {SHORTCUT_ACTIONS.map((action) => (
+            <span key={action} className="shortcut-hint">
+              {getActionLabel(action)}
+              <kbd>{keymap[action].display}</kbd>
+            </span>
+          ))}
+        </div>
+        <label className="inline-select keymap-select" title="キーボードショートカットの配置">
+          <select
+            value={keymapScheme}
+            onChange={(e) => setKeymapScheme(e.target.value as KeymapScheme)}
+          >
+            {Object.entries(KEYMAP_SCHEME_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="timeline-tracks">

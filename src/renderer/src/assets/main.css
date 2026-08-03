@@ -1104,6 +1104,47 @@ h3 {
   width: 52px;
 }
 
+.timeline-shortcut-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.timeline-shortcut-hints {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.shortcut-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.shortcut-hint kbd {
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.keymap-select {
+  flex-shrink: 0;
+}
+
 .timeline-tracks {
   flex: 1;
   min-height: 0;

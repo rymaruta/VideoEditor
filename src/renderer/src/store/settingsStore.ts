@@ -1,9 +1,11 @@
 import { create } from 'zustand'
+import type { KeymapScheme } from '../lib/keymap'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
 const FREESOUND_STORAGE_KEY = 've-freesound-api-key'
 const GEMINI_STORAGE_KEY = 've-gemini-api-key'
+const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
 
 interface SettingsState {
   youtubeApiKey: string
@@ -14,6 +16,8 @@ interface SettingsState {
   setFreesoundApiKey: (key: string) => void
   geminiApiKey: string
   setGeminiApiKey: (key: string) => void
+  keymapScheme: KeymapScheme
+  setKeymapScheme: (scheme: KeymapScheme) => void
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -36,5 +40,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setGeminiApiKey: (key) => {
     localStorage.setItem(GEMINI_STORAGE_KEY, key)
     set({ geminiApiKey: key })
+  },
+  keymapScheme: (localStorage.getItem(KEYMAP_STORAGE_KEY) as KeymapScheme) ?? 'default',
+  setKeymapScheme: (scheme) => {
+    localStorage.setItem(KEYMAP_STORAGE_KEY, scheme)
+    set({ keymapScheme: scheme })
   }
 }))

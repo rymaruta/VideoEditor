@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
 import { saveProject } from './projectFileActions'
+import { getKeymap, matchesBinding } from './keymap'
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
@@ -9,51 +11,58 @@ function isTypingTarget(el: EventTarget | null): boolean {
 }
 
 export function useKeyboardShortcuts(): void {
+  const keymapScheme = useSettingsStore((s) => s.keymapScheme)
+
   useEffect(() => {
+    const keymap = getKeymap(keymapScheme)
+
     function handleKeyDown(e: KeyboardEvent): void {
       if (isTypingTarget(e.target)) return
-      const mod = e.metaKey || e.ctrlKey
       const store = useProjectStore.getState()
 
-      if (mod && e.key.toLowerCase() === 'z') {
+      if (matchesBinding(e, keymap.undo)) {
         e.preventDefault()
-        if (e.shiftKey) store.redo()
-        else store.undo()
+        store.undo()
         return
       }
-      if (mod && e.key.toLowerCase() === 'y') {
+      if (matchesBinding(e, keymap.redo)) {
         e.preventDefault()
         store.redo()
         return
       }
-      if (mod && e.key.toLowerCase() === 'c') {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        store.redo()
+        return
+      }
+      if (matchesBinding(e, keymap.copy)) {
         e.preventDefault()
         store.copySelectedClip()
         return
       }
-      if (mod && e.key.toLowerCase() === 'v') {
+      if (matchesBinding(e, keymap.paste)) {
         e.preventDefault()
         store.pasteClip()
         return
       }
-      if (mod && e.key.toLowerCase() === 's') {
+      if (matchesBinding(e, keymap.save)) {
         e.preventDefault()
         saveProject().catch(() => {})
         return
       }
-      if (e.code === 'Space') {
+      if (matchesBinding(e, keymap.playPause)) {
         e.preventDefault()
         store.setIsPlaying(!store.isPlaying)
         return
       }
-      if (!mod && (e.key === 's' || e.key === 'S')) {
+      if (matchesBinding(e, keymap.split)) {
         if (store.selectedClipId) {
           e.preventDefault()
           store.splitClipAtTime(store.selectedClipId, store.playheadTime)
         }
         return
       }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (matchesBinding(e, keymap.delete)) {
         if (store.selectedClipId) {
           e.preventDefault()
           store.removeClip(store.selectedClipId)
@@ -63,5 +72,5 @@ export function useKeyboardShortcuts(): void {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [keymapScheme])
 }
