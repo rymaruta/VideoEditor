@@ -17,6 +17,7 @@ import {
   LayersIcon,
   Volume2Icon,
   VolumeXIcon,
+  DuckingIcon,
   WandIcon,
   TypeIcon,
   MicIcon,
@@ -62,6 +63,7 @@ export function Timeline(): React.JSX.Element {
   const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
   const removeAudioTrack = useProjectStore((s) => s.removeAudioTrack)
   const toggleAudioTrackMute = useProjectStore((s) => s.toggleAudioTrackMute)
+  const toggleAudioTrackDucking = useProjectStore((s) => s.toggleAudioTrackDucking)
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
@@ -327,6 +329,13 @@ export function Timeline(): React.JSX.Element {
                   ) : (
                     <Volume2Icon width={13} height={13} />
                   )}
+                </button>
+                <button
+                  className={`icon-button ${track.duckingEnabled ? 'active' : ''}`}
+                  title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる"
+                  onClick={() => toggleAudioTrackDucking(track.id)}
+                >
+                  <DuckingIcon width={13} height={13} />
                 </button>
                 <input
                   type="range"

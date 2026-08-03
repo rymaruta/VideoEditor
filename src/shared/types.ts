@@ -77,6 +77,7 @@ export interface AudioTrack {
   name: string
   muted: boolean
   volume: number
+  duckingEnabled: boolean
   clips: AudioTrackClip[]
 }
 

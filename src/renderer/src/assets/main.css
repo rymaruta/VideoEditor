@@ -935,7 +935,7 @@ h3 {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 96px 1fr;
+  grid-template-columns: 128px 1fr;
   gap: 0;
   overflow: hidden;
 }
@@ -977,6 +977,7 @@ h3 {
 
 .track-label-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 3px;
 }

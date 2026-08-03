@@ -377,3 +377,13 @@ export function ImageIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function DuckingIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 10v4a2 2 0 0 0 2 2h2l4 3V5L8 8H6a2 2 0 0 0-2 2z" />
+      <path d="M20 9v6" />
+      <path d="M17 11v2" />
+    </svg>
+  )
+}

@@ -71,6 +71,7 @@ interface ProjectState {
   addAudioTrack: (name: string) => void
   removeAudioTrack: (trackId: string) => void
   toggleAudioTrackMute: (trackId: string) => void
+  toggleAudioTrackDucking: (trackId: string) => void
   setAudioTrackVolume: (trackId: string, volume: number) => void
   addClipToAudioTrack: (trackId: string, assetId: string) => void
   updateAudioClipStart: (trackId: string, clipId: string, startTime: number) => void
@@ -369,7 +370,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...state.project,
         audioTracks: [
           ...state.project.audioTracks,
-          { id: uuid(), name, muted: false, volume: 1, clips: [] }
+          { id: uuid(), name, muted: false, volume: 1, duckingEnabled: false, clips: [] }
         ]
       }
     })),
@@ -390,6 +391,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
           t.id === trackId ? { ...t, muted: !t.muted } : t
+        )
+      }
+    })),
+
+  toggleAudioTrackDucking: (trackId) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId ? { ...t, duckingEnabled: !t.duckingEnabled } : t
         )
       }
     })),

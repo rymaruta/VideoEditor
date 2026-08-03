@@ -317,9 +317,10 @@ export function exportProject(options: ExportOptions): Promise<void> {
       }
 
       // --- Extra audio tracks (BGM / narration) mixed on top of the main audio ---
-      const extraAudioLabels: string[] = []
+      const perTrackAudio: { label: string; duck: boolean }[] = []
       project.audioTracks.forEach((track, trackIdx) => {
         if (track.muted) return
+        const clipLabels: string[] = []
         track.clips.forEach((trackClip, clipIdx) => {
           const asset = assetById.get(trackClip.assetId)
           if (!asset) return
@@ -331,13 +332,45 @@ export function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(
             `[${myIndex}:a]asetpts=PTS-STARTPTS,volume=${track.volume},adelay=${delayMs}|${delayMs}[${label}]`
           )
-          extraAudioLabels.push(label)
+          clipLabels.push(label)
         })
+        if (clipLabels.length === 0) return
+        let trackLabel = clipLabels[0]
+        if (clipLabels.length > 1) {
+          trackLabel = `atrkmix${trackIdx}`
+          filterParts.push(
+            `${clipLabels.map((l) => `[${l}]`).join('')}amix=inputs=${clipLabels.length}:duration=longest:dropout_transition=0:normalize=0[${trackLabel}]`
+          )
+        }
+        perTrackAudio.push({ label: trackLabel, duck: track.duckingEnabled })
       })
 
-      let audioLabel = `[${curA}]`
+      // Duck tracks flagged for ducking against the main video track's audio (voice/dialogue).
+      const duckTracks = perTrackAudio.filter((t) => t.duck)
+      let mainAudioForMix = curA
+      if (duckTracks.length > 0) {
+        const splitOutputs = [
+          `[${curA}_mixcopy]`,
+          ...duckTracks.map((_, i) => `[${curA}_duck${i}]`)
+        ]
+        filterParts.push(`[${curA}]asplit=${duckTracks.length + 1}${splitOutputs.join('')}`)
+        mainAudioForMix = `${curA}_mixcopy`
+        duckTracks.forEach((t, i) => {
+          const duckedLabel = `${t.label}_ducked`
+          filterParts.push(
+            `[${t.label}][${curA}_duck${i}]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=250[${duckedLabel}]`
+          )
+          t.label = duckedLabel
+        })
+      }
+
+      const extraAudioLabels = perTrackAudio.map((t) => t.label)
+
+      let audioLabel = `[${mainAudioForMix}]`
       if (extraAudioLabels.length > 0) {
-        const mixInputs = [`[${curA}]`, ...extraAudioLabels.map((l) => `[${l}]`)].join('')
+        const mixInputs = [`[${mainAudioForMix}]`, ...extraAudioLabels.map((l) => `[${l}]`)].join(
+          ''
+        )
         filterParts.push(
           `${mixInputs}amix=inputs=${extraAudioLabels.length + 1}:duration=first:dropout_transition=0:normalize=0[aout]`
         )
