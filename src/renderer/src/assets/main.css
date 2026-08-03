@@ -952,6 +952,33 @@ h3 {
   box-shadow: -3px 0 0 0 var(--accent-2);
 }
 
+.timeline-clip.trimming {
+  border-color: var(--accent-1);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.timeline-clip-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 2;
+  cursor: ew-resize;
+}
+
+.timeline-clip-handle-left {
+  left: 0;
+}
+
+.timeline-clip-handle-right {
+  right: 0;
+}
+
+.timeline-clip-handle:hover,
+.timeline-clip.trimming .timeline-clip-handle {
+  background: rgba(255, 255, 255, 0.28);
+}
+
 .timeline-clip-index {
   position: relative;
   z-index: 1;

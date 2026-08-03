@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { TrimModal } from './TrimModal'
@@ -6,7 +6,7 @@ import { SilenceCutModal } from './SilenceCutModal'
 import { AutoCaptionModal } from './AutoCaptionModal'
 import { Waveform } from './Waveform'
 import { isAspectMismatch } from '../lib/aspect'
-import type { TransitionType } from '@shared/types'
+import type { Clip, TransitionType } from '@shared/types'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -30,8 +30,21 @@ import {
 const BASE_PIXELS_PER_SECOND = 40
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 4
+const MIN_CLIP_SOURCE_DURATION = 0.2
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+interface TrimDragState {
+  clipId: string
+  edge: 'left' | 'right'
+  startX: number
+  originalInPoint: number
+  originalOutPoint: number
+  assetDuration: number
+  speed: number
+  liveInPoint: number
+  liveOutPoint: number
+}
 
 export function Timeline(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
@@ -45,6 +58,7 @@ export function Timeline(): React.JSX.Element {
   const splitClipAtTime = useProjectStore((s) => s.splitClipAtTime)
   const updateClipSpeed = useProjectStore((s) => s.updateClipSpeed)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
+  const updateClipTrim = useProjectStore((s) => s.updateClipTrim)
   const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
   const removeAudioTrack = useProjectStore((s) => s.removeAudioTrack)
   const toggleAudioTrackMute = useProjectStore((s) => s.toggleAudioTrackMute)
@@ -65,9 +79,76 @@ export function Timeline(): React.JSX.Element {
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
-  const timedClips = buildTimedClips(project)
+
+  useEffect(() => {
+    if (!trimDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setTrimDrag((prev) => {
+        if (!prev) return prev
+        const deltaSeconds = ((e.clientX - prev.startX) / pixelsPerSecond) * prev.speed
+        if (prev.edge === 'left') {
+          const liveInPoint = Math.min(
+            Math.max(0, prev.originalInPoint + deltaSeconds),
+            prev.originalOutPoint - MIN_CLIP_SOURCE_DURATION
+          )
+          return { ...prev, liveInPoint }
+        }
+        const liveOutPoint = Math.max(
+          Math.min(prev.assetDuration, prev.originalOutPoint + deltaSeconds),
+          prev.originalInPoint + MIN_CLIP_SOURCE_DURATION
+        )
+        return { ...prev, liveOutPoint }
+      })
+    }
+    function handleMouseUp(): void {
+      setTrimDrag((prev) => {
+        if (prev) updateClipTrim(prev.clipId, prev.liveInPoint, prev.liveOutPoint)
+        return null
+      })
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [trimDrag, pixelsPerSecond, updateClipTrim])
+
+  function beginTrimDrag(
+    e: React.MouseEvent,
+    edge: 'left' | 'right',
+    clip: Clip,
+    assetDuration: number
+  ): void {
+    e.stopPropagation()
+    e.preventDefault()
+    setTrimDrag({
+      clipId: clip.id,
+      edge,
+      startX: e.clientX,
+      originalInPoint: clip.inPoint,
+      originalOutPoint: clip.outPoint,
+      assetDuration,
+      speed: clip.speed || 1,
+      liveInPoint: clip.inPoint,
+      liveOutPoint: clip.outPoint
+    })
+  }
+
+  const previewProject = trimDrag
+    ? {
+        ...project,
+        clips: project.clips.map((c) =>
+          c.id === trimDrag.clipId
+            ? { ...c, inPoint: trimDrag.liveInPoint, outPoint: trimDrag.liveOutPoint }
+            : c
+        )
+      }
+    : project
+  const timedClips = buildTimedClips(previewProject)
   const total = totalTimelineDuration(timedClips)
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
@@ -295,7 +376,9 @@ export function Timeline(): React.JSX.Element {
                   key={tc.clip.id}
                   className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''} ${
                     draggedClipId === tc.clip.id ? 'dragging' : ''
-                  } ${dragOverIndex === i && draggedClipId && draggedClipId !== tc.clip.id ? 'drag-over' : ''}`}
+                  } ${dragOverIndex === i && draggedClipId && draggedClipId !== tc.clip.id ? 'drag-over' : ''} ${
+                    trimDrag?.clipId === tc.clip.id ? 'trimming' : ''
+                  }`}
                   style={{ width: clipWidth }}
                   draggable
                   onClick={(e) => {
@@ -323,6 +406,20 @@ export function Timeline(): React.JSX.Element {
                     setDragOverIndex(null)
                   }}
                 >
+                  <div
+                    className="timeline-clip-handle timeline-clip-handle-left"
+                    draggable={false}
+                    title="トリム(開始位置)"
+                    onDragStart={(e) => e.preventDefault()}
+                    onMouseDown={(e) => beginTrimDrag(e, 'left', tc.clip, tc.asset.duration)}
+                  />
+                  <div
+                    className="timeline-clip-handle timeline-clip-handle-right"
+                    draggable={false}
+                    title="トリム(終了位置)"
+                    onDragStart={(e) => e.preventDefault()}
+                    onMouseDown={(e) => beginTrimDrag(e, 'right', tc.clip, tc.asset.duration)}
+                  />
                   {tc.clip.transitionIn && i > 0 && <span className="transition-marker" />}
                   <span className="timeline-clip-index">{i + 1}</span>
                   <span className="timeline-clip-label" title={tc.asset.fileName}>
