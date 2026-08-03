@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import type { Clip, SilenceRange } from '@shared/types'
 import { v4 as uuid } from 'uuid'
+import { formatIpcError } from '../lib/ipcError'
 import { WandIcon } from './icons'
 
 function formatTime(seconds: number): string {
@@ -41,7 +42,7 @@ export function SilenceCutModal({
         setRanges(result)
         setChecked(new Set(result.map((_, i) => i)))
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(formatIpcError(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clipId])

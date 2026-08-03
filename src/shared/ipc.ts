@@ -5,6 +5,8 @@ export const IPC = {
   generateThumbnail: 'media:thumbnail',
   detectSilence: 'media:detectSilence',
   transcribe: 'media:transcribe',
+  voicevoxListSpeakers: 'voicevox:listSpeakers',
+  voicevoxSynthesize: 'voicevox:synthesize',
   selectExportPath: 'export:selectPath',
   exportProject: 'export:run',
   exportProgress: 'export:progress',

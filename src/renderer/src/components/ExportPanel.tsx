@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { DownloadIcon } from './icons'
+import { formatIpcError } from '../lib/ipcError'
 import type { QualityPreset, ResolutionHeight } from '@shared/types'
 
 export function ExportPanel(): React.JSX.Element {
@@ -39,7 +40,7 @@ export function ExportPanel(): React.JSX.Element {
       })
       setDoneMessage(`書き出しが完了しました: ${outputPath}`)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(formatIpcError(e))
     } finally {
       setExporting(false)
     }

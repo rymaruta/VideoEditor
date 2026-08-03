@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips } from '../lib/timelineMath'
+import { formatIpcError } from '../lib/ipcError'
 import { defaultTextStyle } from '@shared/textStyle'
 import type { TranscriptSegment } from '@shared/types'
 import { MicIcon } from './icons'
@@ -44,7 +45,7 @@ export function AutoCaptionModal({
         setTexts(result.map((r) => r.text))
         setChecked(new Set(result.map((_, i) => i)))
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(formatIpcError(e)))
       .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clipId])

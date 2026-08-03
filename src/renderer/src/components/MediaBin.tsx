@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
+import { formatIpcError } from '../lib/ipcError'
 import { UploadIcon, PlusIcon, ClapperboardIcon, MusicIcon } from './icons'
 
 function fileNameFromPath(path: string): string {
@@ -57,7 +58,7 @@ export function MediaBin(): React.JSX.Element {
         })
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(formatIpcError(e))
     } finally {
       setImporting(false)
     }

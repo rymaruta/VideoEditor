@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
 import { fetchTrendingVideos, searchVideos, YouTubeVideoInfo } from '../lib/youtube'
+import { formatIpcError } from '../lib/ipcError'
 import { KeyIcon, SearchIcon, SparklesIcon, ExternalLinkIcon } from './icons'
 
 function formatDuration(seconds: number): string {
@@ -32,7 +33,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
     try {
       setResults(await fetchTrendingVideos(apiKey))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(formatIpcError(e))
     } finally {
       setLoading(false)
     }
@@ -49,7 +50,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
     try {
       setResults(await searchVideos(apiKey, query))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(formatIpcError(e))
     } finally {
       setLoading(false)
     }

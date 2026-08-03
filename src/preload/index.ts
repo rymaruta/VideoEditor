@@ -9,7 +9,8 @@ import type {
   QualityPreset,
   ResolutionHeight,
   SilenceRange,
-  TranscriptSegment
+  TranscriptSegment,
+  VoicevoxSpeaker
 } from '@shared/types'
 
 // Custom APIs for renderer
@@ -47,7 +48,11 @@ const api = {
     ipcRenderer.on(IPC.exportProgress, listener)
     return () => ipcRenderer.removeListener(IPC.exportProgress, listener)
   },
-  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url)
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
+  voicevoxListSpeakers: (): Promise<VoicevoxSpeaker[]> =>
+    ipcRenderer.invoke(IPC.voicevoxListSpeakers),
+  voicevoxSynthesize: (text: string, speakerId: number): Promise<string> =>
+    ipcRenderer.invoke(IPC.voicevoxSynthesize, text, speakerId)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

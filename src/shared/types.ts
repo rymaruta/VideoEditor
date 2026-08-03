@@ -138,3 +138,13 @@ export interface TranscriptSegment {
   end: number
   text: string
 }
+
+export interface VoicevoxStyle {
+  id: number
+  name: string
+}
+
+export interface VoicevoxSpeaker {
+  name: string
+  styles: VoicevoxStyle[]
+}

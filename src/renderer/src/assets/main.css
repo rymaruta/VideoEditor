@@ -1208,6 +1208,40 @@ h3 {
   font-size: 13px;
 }
 
+/* Narration */
+.narration-panel .export-field select {
+  width: 100%;
+}
+
+.narration-text {
+  width: 100%;
+  background-color: var(--bg-elevated);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+
+.narration-text:focus {
+  outline: none;
+  border-color: var(--accent-1);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.narration-generate {
+  width: 100%;
+  justify-content: center;
+  padding: 10px;
+}
+
+.error-text button {
+  margin-top: 6px;
+}
+
 .progress-bar {
   position: relative;
   margin-top: 12px;

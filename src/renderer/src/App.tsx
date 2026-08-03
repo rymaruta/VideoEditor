@@ -6,17 +6,19 @@ import { TemplatePanel } from './components/TemplatePanel'
 import { TextOverlayPanel } from './components/TextOverlayPanel'
 import { YouTubeTrendPanel } from './components/YouTubeTrendPanel'
 import { ExportPanel } from './components/ExportPanel'
+import { NarrationPanel } from './components/NarrationPanel'
 import { useProjectStore } from './store/projectStore'
 import {
   ClapperboardIcon,
   SparklesIcon,
   TypeIcon,
   YoutubeIcon,
-  DownloadIcon
+  DownloadIcon,
+  MicIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
-type RightTab = 'template' | 'text' | 'youtube' | 'export'
+type RightTab = 'template' | 'text' | 'narration' | 'youtube' | 'export'
 
 const TABS: {
   id: RightTab
@@ -25,6 +27,7 @@ const TABS: {
 }[] = [
   { id: 'template', label: 'テンプレート', icon: SparklesIcon },
   { id: 'text', label: 'テキスト', icon: TypeIcon },
+  { id: 'narration', label: 'ボイス', icon: MicIcon },
   { id: 'youtube', label: 'YouTube', icon: YoutubeIcon },
   { id: 'export', label: '書き出し', icon: DownloadIcon }
 ]
@@ -68,6 +71,7 @@ function App(): React.JSX.Element {
           <div className="tab-content">
             {tab === 'template' && <TemplatePanel />}
             {tab === 'text' && <TextOverlayPanel />}
+            {tab === 'narration' && <NarrationPanel />}
             {tab === 'youtube' && <YouTubeTrendPanel />}
             {tab === 'export' && <ExportPanel />}
           </div>

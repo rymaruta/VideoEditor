@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
 import { probeMedia, generateThumbnailDataUrl, exportProject, detectSilence } from './ffmpegService'
 import { transcribeRange } from './whisperService'
+import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
 
 function createWindow(): void {
@@ -109,6 +110,10 @@ app.whenReady().then(() => {
     IPC.transcribe,
     async (_e, filePath: string, rangeStart: number, rangeEnd: number) =>
       transcribeRange(filePath, rangeStart, rangeEnd)
+  )
+  ipcMain.handle(IPC.voicevoxListSpeakers, async () => listSpeakers())
+  ipcMain.handle(IPC.voicevoxSynthesize, async (_e, text: string, speakerId: number) =>
+    synthesizeSpeech(text, speakerId)
   )
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
     await shell.openExternal(url)
