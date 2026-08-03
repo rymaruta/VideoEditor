@@ -6,7 +6,8 @@ import {
   totalTimelineDuration,
   TimedClip
 } from '../lib/timelineMath'
-import { PlayIcon, PauseIcon, ClapperboardIcon } from './icons'
+import { PlayIcon, PauseIcon, ClapperboardIcon, YoutubeIcon } from './icons'
+import { ShortsUiMockup } from './ShortsUiMockup'
 import type { TextStyle } from '@shared/types'
 
 function toFileUrl(filePath: string): string {
@@ -69,6 +70,12 @@ function overlayPreviewStyle(style: TextStyle): CSSProperties {
   }
 }
 
+interface OverlayDragState {
+  id: string
+  x: number
+  y: number
+}
+
 export function PreviewPlayer(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const isPlaying = useProjectStore((s) => s.isPlaying)
@@ -76,9 +83,46 @@ export function PreviewPlayer(): React.JSX.Element {
   const setPlayheadTime = useProjectStore((s) => s.setPlayheadTime)
   const playheadTime = useProjectStore((s) => s.playheadTime)
   const seekRequest = useProjectStore((s) => s.seekRequest)
+  const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
 
   const videoRef = useRef<HTMLVideoElement>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
   const activeTimedClipRef = useRef<TimedClip | null>(null)
+  const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
+  const [showShortsUi, setShowShortsUi] = useState(false)
+
+  function clientToNormalized(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = frameRef.current?.getBoundingClientRect()
+    if (!rect) return { x: 0.5, y: 0.5 }
+    return {
+      x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height))
+    }
+  }
+
+  useEffect(() => {
+    if (!overlayDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setOverlayDrag((prev) =>
+        prev ? { ...prev, ...clientToNormalized(e.clientX, e.clientY) } : prev
+      )
+    }
+    function handleMouseUp(): void {
+      const overlay = project.textOverlays.find((o) => o.id === overlayDrag?.id)
+      if (overlay && overlayDrag) {
+        updateTextOverlay(overlayDrag.id, {
+          style: { ...overlay.style, customPosition: { x: overlayDrag.x, y: overlayDrag.y } }
+        })
+      }
+      setOverlayDrag(null)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [overlayDrag, project.textOverlays, updateTextOverlay])
 
   const timedClips = useMemo(() => buildTimedClips(project), [project])
   const total = totalTimelineDuration(timedClips)
@@ -166,7 +210,7 @@ export function PreviewPlayer(): React.JSX.Element {
   return (
     <div className="panel preview-player">
       <div className="preview-frame-wrapper">
-        <div className={`preview-frame ${aspectClass}`}>
+        <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
           {activeSrc ? (
             <video
               ref={videoRef}
@@ -180,18 +224,44 @@ export function PreviewPlayer(): React.JSX.Element {
               <p>タイムラインにクリップを追加してください</p>
             </div>
           )}
-          {activeOverlays.map((o) => (
-            <div
-              key={o.id}
-              className={`overlay-text overlay-${o.style.position} anim-${o.style.animation}`}
-              style={overlayPreviewStyle(o.style)}
-            >
-              {o.text}
-            </div>
-          ))}
+          {activeOverlays.map((o) => {
+            const livePos = overlayDrag?.id === o.id ? overlayDrag : o.style.customPosition
+            const positionStyle: CSSProperties = livePos
+              ? {
+                  left: `${livePos.x * 100}%`,
+                  top: `${livePos.y * 100}%`,
+                  right: 'auto',
+                  transform: 'translate(-50%, -50%)'
+                }
+              : {}
+            return (
+              <div
+                key={o.id}
+                className={`overlay-text ${livePos ? '' : `overlay-${o.style.position}`} anim-${o.style.animation}`}
+                style={{ ...overlayPreviewStyle(o.style), ...positionStyle }}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
+                }}
+              >
+                {o.text}
+              </div>
+            )
+          })}
+          {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
         </div>
       </div>
       <div className="preview-controls">
+        {project.aspectRatio === '9:16' && (
+          <button
+            className={`icon-button ${showShortsUi ? 'active' : ''}`}
+            title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
+            onClick={() => setShowShortsUi((v) => !v)}
+          >
+            <YoutubeIcon width={14} height={14} />
+          </button>
+        )}
         <button
           className="play-button"
           onClick={() => setIsPlaying(!isPlaying)}

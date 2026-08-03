@@ -56,7 +56,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 
   const lines = overlays.map((o) => {
     const style = o.style
-    const alignment = alignmentFor(style.position)
+    const positionTag = style.customPosition
+      ? `\\pos(${Math.round(style.customPosition.x * width)},${Math.round(style.customPosition.y * height)})\\an5`
+      : `\\an${alignmentFor(style.position)}`
     const primaryColor = toAssColor(style.color)
     const bold = style.bold ? 1 : 0
     const italic = style.italic ? 1 : 0
@@ -77,7 +79,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       animationTag = '\\fscx60\\fscy60\\t(0,200,\\fscx100\\fscy100)'
     }
 
-    const override = `{\\an${alignment}\\fn${style.fontFamily}\\fs${style.fontSize}\\1c${primaryColor}\\b${bold}\\i${italic}${spacingTag}${outlineTags}${shadowTag}${backgroundTags}${animationTag}}`
+    const override = `{${positionTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\1c${primaryColor}\\b${bold}\\i${italic}${spacingTag}${outlineTags}${shadowTag}${backgroundTags}${animationTag}}`
     return `Dialogue: 0,${toAssTime(o.startTime)},${toAssTime(o.endTime)},Default,,0,0,${marginVOf(style.position)},,${override}${escapeAssText(o.text)}`
   })
 

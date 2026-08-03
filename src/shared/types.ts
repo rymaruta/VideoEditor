@@ -41,6 +41,7 @@ export interface TextStyle {
   fontSize: number
   color: string
   position: TextPosition
+  customPosition?: { x: number; y: number }
   bold: boolean
   italic: boolean
   outline: boolean

@@ -36,6 +36,9 @@ export function TextOverlayPanel(): React.JSX.Element {
           追加
         </button>
       </div>
+      <p className="hint-text">
+        プレビュー画面でテキストを直接ドラッグすると、自由な位置に配置できます。
+      </p>
       <div className="overlay-list">
         {project.textOverlays.length === 0 && (
           <div className="empty-state">
@@ -78,7 +81,10 @@ export function TextOverlayPanel(): React.JSX.Element {
                 <select
                   value={o.style.position}
                   onChange={(e) =>
-                    patchStyle(o.id, o.style, { position: e.target.value as TextPosition })
+                    patchStyle(o.id, o.style, {
+                      position: e.target.value as TextPosition,
+                      customPosition: undefined
+                    })
                   }
                 >
                   <option value="top">上</option>
@@ -86,6 +92,15 @@ export function TextOverlayPanel(): React.JSX.Element {
                   <option value="bottom">下</option>
                 </select>
               </label>
+              {o.style.customPosition && (
+                <button
+                  className="small-button"
+                  title="プレビュー画面でドラッグした自由配置を解除し、プリセット位置に戻します"
+                  onClick={() => patchStyle(o.id, o.style, { customPosition: undefined })}
+                >
+                  自由配置を解除
+                </button>
+              )}
               <label>
                 サイズ
                 <input
