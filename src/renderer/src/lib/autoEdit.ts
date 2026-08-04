@@ -1,0 +1,400 @@
+import { v4 as uuid } from 'uuid'
+import type { AutoEditPattern, AutoEditStyle, MediaAsset, TransitionType } from '@shared/types'
+import { useEditPreferenceStore } from '../store/editPreferenceStore'
+import { STYLE_DESCRIPTIONS, STYLE_LABELS } from './autoEditStyles'
+
+interface FlatCandidate {
+  assetId: string
+  assetIndex: number
+  start: number
+  end: number
+  score: number
+}
+
+interface StyleBuild {
+  style: AutoEditStyle
+  segments: FlatCandidate[]
+  transition: TransitionType
+}
+
+export interface AutoEditResult {
+  patterns: AutoEditPattern[]
+  recommendedPatternId?: string
+  thumbnails: Record<string, string>
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed
+  return function random(): number {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function seededShuffle<T>(arr: T[], rand: () => number): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+async function collectHighlights(
+  assets: MediaAsset[]
+): Promise<{ asset: MediaAsset; candidates: FlatCandidate[] }[]> {
+  const results: { asset: MediaAsset; candidates: FlatCandidate[] }[] = []
+  for (let i = 0; i < assets.length; i++) {
+    const asset = assets[i]
+    try {
+      const found = await window.api.detectHighlights(asset.filePath, asset.duration)
+      results.push({
+        asset,
+        candidates: found.map((c) => ({
+          assetId: asset.id,
+          assetIndex: i,
+          start: c.start,
+          end: c.end,
+          score: c.score
+        }))
+      })
+    } catch {
+      results.push({ asset, candidates: [] })
+    }
+  }
+  return results
+}
+
+function trimToMax(c: FlatCandidate, maxSeconds: number): FlatCandidate {
+  const duration = c.end - c.start
+  if (duration <= maxSeconds) return c
+  const center = (c.start + c.end) / 2
+  const half = maxSeconds / 2
+  return { ...c, start: Math.max(c.start, center - half), end: Math.min(c.end, center + half) }
+}
+
+function byAssetThenStart(a: FlatCandidate, b: FlatCandidate): number {
+  return a.assetIndex - b.assetIndex || a.start - b.start
+}
+
+function buildScorePattern(
+  flat: FlatCandidate[],
+  targetSeconds: number,
+  cap: number
+): FlatCandidate[] {
+  const sorted = [...flat].sort((a, b) => b.score - a.score)
+  const chosen: FlatCandidate[] = []
+  let total = 0
+  for (const c of sorted) {
+    if (chosen.length > 0 && total >= targetSeconds) break
+    const trimmed = trimToMax(c, cap)
+    chosen.push(trimmed)
+    total += trimmed.end - trimmed.start
+  }
+  return chosen.sort(byAssetThenStart)
+}
+
+function buildJumpcutPattern(
+  flat: FlatCandidate[],
+  rand: () => number,
+  targetSeconds: number,
+  cap: number
+): FlatCandidate[] {
+  const sorted = [...flat].sort((a, b) => b.score - a.score)
+  const pool = sorted.slice(0, Math.max(6, Math.min(sorted.length, 16)))
+  const shuffled = seededShuffle(pool, rand)
+  const chosen: FlatCandidate[] = []
+  let total = 0
+  for (const c of shuffled) {
+    if (chosen.length > 0 && total >= targetSeconds) break
+    const trimmed = trimToMax(c, cap)
+    chosen.push(trimmed)
+    total += trimmed.end - trimmed.start
+  }
+  return chosen
+}
+
+function buildStoryPattern(
+  flat: FlatCandidate[],
+  assetCount: number,
+  targetSeconds: number,
+  cap: number
+): FlatCandidate[] {
+  const chosen: FlatCandidate[] = []
+  const perAssetTarget = targetSeconds / Math.max(1, assetCount)
+  for (let idx = 0; idx < assetCount; idx++) {
+    const list = flat.filter((c) => c.assetIndex === idx).sort((a, b) => b.score - a.score)
+    let assetTotal = 0
+    for (const c of list) {
+      if (chosen.length > 0 && assetTotal >= perAssetTarget) break
+      const trimmed = trimToMax(c, cap)
+      chosen.push(trimmed)
+      assetTotal += trimmed.end - trimmed.start
+    }
+  }
+  return chosen.sort(byAssetThenStart)
+}
+
+function mergeNearby(cands: FlatCandidate[], gapThreshold: number): FlatCandidate[] {
+  const sorted = [...cands].sort((a, b) => a.start - b.start)
+  const merged: FlatCandidate[] = []
+  for (const c of sorted) {
+    const last = merged[merged.length - 1]
+    if (last && c.start - last.end <= gapThreshold) {
+      last.end = Math.max(last.end, c.end)
+      last.score = Math.max(last.score, c.score)
+    } else {
+      merged.push({ ...c })
+    }
+  }
+  return merged
+}
+
+function buildLongtakePattern(
+  flat: FlatCandidate[],
+  assetCount: number,
+  targetSeconds: number,
+  cap: number
+): FlatCandidate[] {
+  const merged: FlatCandidate[] = []
+  for (let i = 0; i < assetCount; i++) {
+    merged.push(
+      ...mergeNearby(
+        flat.filter((c) => c.assetIndex === i),
+        1.5
+      )
+    )
+  }
+  const sorted = merged.sort((a, b) => b.score - a.score)
+  const chosen: FlatCandidate[] = []
+  let total = 0
+  for (const c of sorted) {
+    if (chosen.length > 0 && total >= targetSeconds) break
+    const trimmed = trimToMax(c, cap)
+    chosen.push(trimmed)
+    total += trimmed.end - trimmed.start
+  }
+  return chosen.sort(byAssetThenStart)
+}
+
+function buildMixPattern(
+  flat: FlatCandidate[],
+  assetCount: number,
+  rand: () => number,
+  targetSeconds: number,
+  cap: number
+): FlatCandidate[] {
+  const queues: FlatCandidate[][] = []
+  for (let i = 0; i < assetCount; i++) {
+    queues.push(flat.filter((c) => c.assetIndex === i).sort((a, b) => b.score - a.score))
+  }
+  const order = seededShuffle(
+    Array.from({ length: assetCount }, (_, i) => i),
+    rand
+  )
+  const chosen: FlatCandidate[] = []
+  let total = 0
+  let progressed = true
+  while (progressed && (chosen.length === 0 || total < targetSeconds)) {
+    progressed = false
+    for (const assetIdx of order) {
+      const q = queues[assetIdx]
+      if (q.length === 0) continue
+      const c = q.shift()!
+      const trimmed = trimToMax(c, cap)
+      chosen.push(trimmed)
+      total += trimmed.end - trimmed.start
+      progressed = true
+      if (chosen.length > 0 && total >= targetSeconds) break
+    }
+  }
+  return chosen
+}
+
+interface GeminiPart {
+  text?: string
+  inlineData?: { mimeType: string; data: string }
+}
+
+interface GeminiResponse {
+  candidates?: { content?: { parts?: { text?: string }[] } }[]
+  error?: { message?: string }
+}
+
+async function enhanceWithGemini(
+  patterns: AutoEditPattern[],
+  thumbnails: Record<string, string>,
+  preferenceSummary: string,
+  apiKey: string
+): Promise<Record<string, string>> {
+  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const infoLines = patterns
+    .map(
+      (p, i) =>
+        `${i + 1}. id=${p.id} / スタイル=${STYLE_LABELS[p.style]} / カット数=${p.segments.length} / 尺=${p.totalDuration.toFixed(1)}秒`
+    )
+    .join('\n')
+  const parts: GeminiPart[] = [
+    {
+      text: `あなたはYouTube Shorts編集AIです。以下は動画素材から自動生成した編集パターンの情報と、それぞれの先頭カットのサムネイル画像です。画像から読み取れる内容を根拠に判断してください。
+
+# ユーザーの編集の好み傾向(これまでのフィードバックの蓄積)
+${preferenceSummary}
+
+# 生成された編集パターン
+${infoLines}
+
+# 依頼内容
+各パターンについて、画像の内容とスタイル・好み傾向を踏まえた日本語1文の短いキャッチーな説明文(description)を作ってください。好み傾向に最も合いそうなパターンのidを1つ選んでrecommendedIdとしてください。
+
+# 出力形式(このJSONのみを出力してください)
+{ "descriptions": [{ "id": "string", "description": "string" }], "recommendedId": "string" }`
+    }
+  ]
+  for (const p of patterns) {
+    const dataUrl = thumbnails[p.id]
+    if (!dataUrl) continue
+    const commaIdx = dataUrl.indexOf(',')
+    const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : ''
+    const mimeMatch = dataUrl.match(/^data:([^;]+);/)
+    parts.push({ inlineData: { mimeType: mimeMatch?.[1] ?? 'image/png', data: base64 } })
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: { responseMimeType: 'application/json' }
+    })
+  })
+  const data: GeminiResponse = await res.json()
+  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Geminiからの応答が空でした')
+  const parsed = JSON.parse(text) as {
+    descriptions?: { id: string; description: string }[]
+    recommendedId?: string
+  }
+  const map: Record<string, string> = {}
+  if (Array.isArray(parsed.descriptions)) {
+    for (const d of parsed.descriptions) {
+      if (d?.id && d?.description) map[d.id] = d.description
+    }
+  }
+  if (parsed.recommendedId) map.__recommendedId = parsed.recommendedId
+  return map
+}
+
+export async function generateAutoEditPatterns(
+  assets: MediaAsset[],
+  options: { seed?: number; geminiApiKey?: string } = {}
+): Promise<AutoEditResult> {
+  const videoAssets = assets.filter((a) => a.hasVideo)
+  if (videoAssets.length === 0) throw new Error('動画素材がありません')
+
+  const withCandidates = await collectHighlights(videoAssets)
+  const flat = withCandidates.flatMap((w) => w.candidates)
+  if (flat.length === 0) throw new Error('ハイライトを検出できませんでした')
+
+  const prefStore = useEditPreferenceStore.getState()
+  const preferredTransition = prefStore.getPreferredTransition()
+  const preferredSegmentSeconds = prefStore.getPreferredSegmentSeconds()
+  const preferenceSummary = prefStore.getSummaryText()
+
+  const rand = mulberry32(options.seed ?? Date.now())
+  const assetCount = videoAssets.length
+
+  const scoreCap = clamp(preferredSegmentSeconds ?? 4, 2, 6)
+  const jumpcutCap = clamp((preferredSegmentSeconds ?? 2) * 0.6, 0.8, 2.5)
+  const mixCap = clamp(preferredSegmentSeconds ?? 3, 1.5, 5)
+
+  const builds: StyleBuild[] = [
+    {
+      style: 'score',
+      segments: buildScorePattern(flat, 30, scoreCap),
+      transition: preferredTransition
+    },
+    {
+      style: 'jumpcut',
+      segments: buildJumpcutPattern(flat, rand, 22, jumpcutCap),
+      transition: 'none'
+    },
+    { style: 'story', segments: buildStoryPattern(flat, assetCount, 40, 5), transition: 'fade' },
+    {
+      style: 'longtake',
+      segments: buildLongtakePattern(flat, assetCount, 35, 9),
+      transition: 'crossfade'
+    },
+    {
+      style: 'mix',
+      segments: buildMixPattern(flat, assetCount, rand, 30, mixCap),
+      transition: preferredTransition
+    }
+  ]
+
+  let patterns: AutoEditPattern[] = builds
+    .filter((b) => b.segments.length > 0)
+    .map((b) => ({
+      id: uuid(),
+      style: b.style,
+      label: STYLE_LABELS[b.style],
+      description: STYLE_DESCRIPTIONS[b.style],
+      segments: b.segments.map((s) => ({
+        assetId: s.assetId,
+        start: s.start,
+        end: s.end,
+        score: s.score
+      })),
+      transition: b.transition,
+      totalDuration: b.segments.reduce((sum, s) => sum + (s.end - s.start), 0)
+    }))
+
+  if (patterns.length === 0) throw new Error('編集パターンを生成できませんでした')
+
+  const preferredOrder = prefStore.getPreferredStyleOrder()
+  patterns = [...patterns].sort(
+    (a, b) => preferredOrder.indexOf(a.style) - preferredOrder.indexOf(b.style)
+  )
+
+  const thumbnails: Record<string, string> = {}
+  for (const p of patterns) {
+    const first = p.segments[0]
+    const asset = videoAssets.find((a) => a.id === first.assetId)
+    if (!asset) continue
+    try {
+      const mid = (first.start + first.end) / 2
+      thumbnails[p.id] = await window.api.generateFrame(asset.filePath, mid, 480, 270)
+    } catch {
+      // Skip thumbnail generation failures; the card can render without one.
+    }
+  }
+
+  let recommendedPatternId: string | undefined
+  if (options.geminiApiKey) {
+    try {
+      const enhancement = await enhanceWithGemini(
+        patterns,
+        thumbnails,
+        preferenceSummary,
+        options.geminiApiKey
+      )
+      patterns = patterns.map((p) =>
+        enhancement[p.id] ? { ...p, description: enhancement[p.id] } : p
+      )
+      recommendedPatternId = enhancement.__recommendedId
+    } catch {
+      // Gemini enhancement is best-effort; keep the local descriptions on failure.
+    }
+  }
+
+  return { patterns, recommendedPatternId, thumbnails }
+}

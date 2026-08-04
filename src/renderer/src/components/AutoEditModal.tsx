@@ -1,0 +1,178 @@
+import { useEffect, useMemo, useState } from 'react'
+import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
+import { useEditPreferenceStore } from '../store/editPreferenceStore'
+import { generateAutoEditPatterns } from '../lib/autoEdit'
+import { formatIpcError } from '../lib/ipcError'
+import { TRANSITION_LABELS } from '../lib/autoEditStyles'
+import type { AutoEditPattern } from '@shared/types'
+import {
+  WandIcon,
+  PlusIcon,
+  RefreshIcon,
+  ThumbsUpIcon,
+  ThumbsDownIcon,
+  SparklesIcon
+} from './icons'
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.Element {
+  const project = useProjectStore((s) => s.project)
+  const applyAutoEditPattern = useProjectStore((s) => s.applyAutoEditPattern)
+  const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
+  const recordFeedback = useEditPreferenceStore((s) => s.recordFeedback)
+  const preferenceSummary = useEditPreferenceStore((s) => s.getSummaryText())
+  const videoAssets = useMemo(() => project.assets.filter((a) => a.hasVideo), [project.assets])
+
+  const [useGemini, setUseGemini] = useState(Boolean(geminiApiKey))
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [patterns, setPatterns] = useState<AutoEditPattern[]>([])
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
+  const [recommendedId, setRecommendedId] = useState<string | undefined>(undefined)
+  const [feedback, setFeedback] = useState<Record<string, 'liked' | 'disliked'>>({})
+  const [appliedId, setAppliedId] = useState<string | null>(null)
+  const [regenToken, setRegenToken] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    async function run(): Promise<void> {
+      setLoading(true)
+      setError(null)
+      setPatterns([])
+      setThumbnails({})
+      setFeedback({})
+      setAppliedId(null)
+      try {
+        const result = await generateAutoEditPatterns(videoAssets, {
+          seed: Date.now(),
+          geminiApiKey: useGemini ? geminiApiKey : undefined
+        })
+        if (cancelled) return
+        setPatterns(result.patterns)
+        setThumbnails(result.thumbnails)
+        setRecommendedId(result.recommendedPatternId)
+      } catch (e) {
+        if (!cancelled) setError(formatIpcError(e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regenToken])
+
+  function handleFeedback(pattern: AutoEditPattern, liked: boolean): void {
+    recordFeedback(pattern, liked)
+    setFeedback((prev) => ({ ...prev, [pattern.id]: liked ? 'liked' : 'disliked' }))
+  }
+
+  function handleApply(pattern: AutoEditPattern): void {
+    applyAutoEditPattern(pattern)
+    setAppliedId(pattern.id)
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal autoedit-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>
+          <WandIcon width={15} height={15} />
+          AIおまかせ全自動編集
+        </h3>
+        <p className="hint-text">
+          配置した動画素材からハイライトを検出し、傾向の異なる5パターンの編集案を自動生成します。気に入ったものはタイムラインに適用し、👍👎で評価すると次回以降の生成に好みが反映されます。
+        </p>
+        <p className="hint-text autoedit-preference">好みの傾向: {preferenceSummary}</p>
+        <div className="autoedit-toolbar">
+          <button
+            className="small-button"
+            onClick={() => setRegenToken((t) => t + 1)}
+            disabled={loading}
+          >
+            <RefreshIcon width={13} height={13} />
+            {loading ? '生成中...' : '再生成'}
+          </button>
+          {geminiApiKey && (
+            <label className="autoedit-gemini-toggle">
+              <input
+                type="checkbox"
+                checked={useGemini}
+                onChange={(e) => setUseGemini(e.target.checked)}
+              />
+              <SparklesIcon width={13} height={13} />
+              Geminiで内容を確認して説明文とおすすめを生成
+            </label>
+          )}
+        </div>
+        {loading && <p className="hint-text">解析中... 素材のハイライトを検出しています</p>}
+        {error && <p className="error-text">{error}</p>}
+        {!loading && !error && patterns.length === 0 && (
+          <p className="hint-text">編集パターンを生成できませんでした。</p>
+        )}
+        {!loading && patterns.length > 0 && (
+          <div className="autoedit-grid">
+            {patterns.map((p) => (
+              <div
+                key={p.id}
+                className={`autoedit-card ${appliedId === p.id ? 'applied' : ''} ${recommendedId === p.id ? 'recommended' : ''}`}
+              >
+                {recommendedId === p.id && (
+                  <span className="autoedit-badge">
+                    <SparklesIcon width={11} height={11} />
+                    AIのおすすめ
+                  </span>
+                )}
+                {thumbnails[p.id] ? (
+                  <img src={thumbnails[p.id]} alt={p.label} className="autoedit-thumb" />
+                ) : (
+                  <div className="autoedit-thumb autoedit-thumb-empty" />
+                )}
+                <div className="autoedit-card-body">
+                  <p className="autoedit-card-title">{p.label}</p>
+                  <p className="hint-text autoedit-card-desc">{p.description}</p>
+                  <p className="hint-text autoedit-card-meta">
+                    尺 {formatDuration(p.totalDuration)} / カット数 {p.segments.length} /{' '}
+                    {TRANSITION_LABELS[p.transition]}
+                  </p>
+                  <div className="autoedit-card-actions">
+                    <button className="primary-button" onClick={() => handleApply(p)}>
+                      <PlusIcon width={13} height={13} />
+                      {appliedId === p.id ? '適用済み' : 'タイムラインに適用'}
+                    </button>
+                    <div className="autoedit-feedback">
+                      <button
+                        className={`icon-button ${feedback[p.id] === 'liked' ? 'active' : ''}`}
+                        title="良い編集案"
+                        onClick={() => handleFeedback(p, true)}
+                      >
+                        <ThumbsUpIcon width={13} height={13} />
+                      </button>
+                      <button
+                        className={`icon-button ${feedback[p.id] === 'disliked' ? 'active' : ''}`}
+                        title="好みではない"
+                        onClick={() => handleFeedback(p, false)}
+                      >
+                        <ThumbsDownIcon width={13} height={13} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button onClick={onClose}>閉じる</button>
+        </div>
+      </div>
+    </div>
+  )
+}

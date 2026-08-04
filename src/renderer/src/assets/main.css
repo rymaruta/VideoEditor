@@ -651,10 +651,18 @@ h3 {
   font-size: 9.5px;
 }
 
-.roughcut-trigger {
+.media-bin-auto-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.roughcut-trigger,
+.autoedit-trigger {
   width: 100%;
   justify-content: center;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
 
 .roughcut-modal {
@@ -2694,4 +2702,113 @@ h3 {
 .highlight-score-fill {
   height: 100%;
   background: var(--accent-gradient);
+}
+
+.autoedit-modal {
+  width: 760px;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+
+.autoedit-preference {
+  background: var(--bg-elevated-2);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  margin-bottom: 4px;
+}
+
+.autoedit-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 10px 0;
+}
+
+.autoedit-gemini-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.autoedit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.autoedit-card {
+  position: relative;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.autoedit-card.applied {
+  border-color: var(--accent-1);
+}
+
+.autoedit-card.recommended {
+  box-shadow: 0 0 0 1px var(--accent-1);
+}
+
+.autoedit-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--accent-gradient);
+  color: white;
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  z-index: 1;
+}
+
+.autoedit-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #000;
+  display: block;
+}
+
+.autoedit-thumb-empty {
+  background: var(--bg-elevated-3);
+}
+
+.autoedit-card-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.autoedit-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.autoedit-card-desc {
+  min-height: 28px;
+}
+
+.autoedit-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.autoedit-feedback {
+  display: flex;
+  gap: 4px;
 }

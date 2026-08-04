@@ -453,3 +453,32 @@ export function MaximizeIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function ThumbsUpIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M7 10v11" />
+      <path d="M18.5 10H21a1 1 0 0 1 1 1.2l-1.4 7A2 2 0 0 1 18.6 20H10a2 2 0 0 1-2-2v-8.6a2 2 0 0 1 .4-1.2L12 3a1.5 1.5 0 0 1 3 1v6z" />
+    </svg>
+  )
+}
+
+export function ThumbsDownIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M17 14V3" />
+      <path d="M5.5 14H3a1 1 0 0 1-1-1.2l1.4-7A2 2 0 0 1 5.4 4H14a2 2 0 0 1 2 2v8.6a2 2 0 0 1-.4 1.2L12 21a1.5 1.5 0 0 1-3-1v-6z" />
+    </svg>
+  )
+}
+
+export function RefreshIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 12a9 9 0 0 1 15.3-6.4L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15.3 6.4L3 16" />
+      <path d="M3 21v-5h5" />
+    </svg>
+  )
+}

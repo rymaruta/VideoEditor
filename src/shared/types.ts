@@ -179,6 +179,25 @@ export interface BpmAnalysisResult {
   offsetSeconds: number
 }
 
+export type AutoEditStyle = 'score' | 'jumpcut' | 'story' | 'longtake' | 'mix'
+
+export interface AutoEditSegment {
+  assetId: string
+  start: number
+  end: number
+  score: number
+}
+
+export interface AutoEditPattern {
+  id: string
+  style: AutoEditStyle
+  label: string
+  description: string
+  segments: AutoEditSegment[]
+  transition: TransitionType
+  totalDuration: number
+}
+
 export interface VoicevoxStyle {
   id: number
   name: string
