@@ -2244,6 +2244,17 @@ h3 {
   flex: 1;
 }
 
+.metadata-title-count {
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.metadata-title-count.warn {
+  color: #ff8f9a;
+}
+
 .metadata-description-input {
   width: 100%;
   resize: vertical;
@@ -2466,6 +2477,17 @@ h3 {
 /* Thumbnail generator */
 .thumbnail-panel {
   overflow-y: auto;
+}
+
+.thumbnail-generate-buttons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.thumbnail-generate-buttons .primary-button {
+  flex: 1;
+  justify-content: center;
 }
 
 .thumbnail-candidates {

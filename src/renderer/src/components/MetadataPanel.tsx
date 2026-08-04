@@ -211,6 +211,12 @@ export function MetadataPanel(): React.JSX.Element {
               <div key={i} className="metadata-title-item">
                 <span className="game-trend-hook-badge">{t.hookType}</span>
                 <span className="metadata-title-text">{t.title}</span>
+                <span
+                  className={`metadata-title-count ${t.title.length > 70 ? 'warn' : ''}`}
+                  title="YouTubeの検索結果では長いタイトルが見切れることがあります(目安70文字)"
+                >
+                  {t.title.length}/100
+                </span>
                 <button
                   className="icon-button"
                   title="コピー"
