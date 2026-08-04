@@ -32,8 +32,22 @@ function createBlankProject(): Project {
   }
 }
 
+// Defends against project files saved by an older schema version (or a hand-edited /
+// partially corrupted file) that are missing fields added since — without this, loading
+// such a file would crash the whole app the moment any code accesses e.g.
+// project.audioTracks.forEach(...) on an undefined array.
 function normalizeLoadedProject(project: Project): Project {
-  return { ...project, videoOverlayTracks: project.videoOverlayTracks ?? [] }
+  return {
+    id: project.id ?? uuid(),
+    name: project.name ?? '無題のプロジェクト',
+    aspectRatio: project.aspectRatio ?? '9:16',
+    assets: project.assets ?? [],
+    clips: project.clips ?? [],
+    audioTracks: project.audioTracks ?? [],
+    videoOverlayTracks: project.videoOverlayTracks ?? [],
+    textOverlays: project.textOverlays ?? [],
+    beatGrid: project.beatGrid ?? null
+  }
 }
 
 interface ProjectState {
