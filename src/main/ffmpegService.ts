@@ -271,7 +271,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         filterParts.push(
           `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,fps=30[v${i}]`
         )
-        if (asset.hasAudio) {
+        if (asset.hasAudio && !clip.audioDetached) {
           filterParts.push(
             `[${myIndex}:a]atempo=${Math.min(2, Math.max(0.5, speed))},aresample=async=1,asetpts=PTS-STARTPTS[a${i}]`
           )

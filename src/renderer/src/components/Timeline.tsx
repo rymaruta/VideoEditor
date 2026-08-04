@@ -43,7 +43,8 @@ import {
   MagnetIcon,
   MaximizeIcon,
   EyeIcon,
-  EyeOffIcon
+  EyeOffIcon,
+  MusicIcon
 } from './icons'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
@@ -125,6 +126,7 @@ export function Timeline(): React.JSX.Element {
   const splitClipAtTime = useProjectStore((s) => s.splitClipAtTime)
   const updateClipSpeed = useProjectStore((s) => s.updateClipSpeed)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
+  const detachClipAudio = useProjectStore((s) => s.detachClipAudio)
   const updateClipTrim = useProjectStore((s) => s.updateClipTrim)
   const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
   const removeAudioTrack = useProjectStore((s) => s.removeAudioTrack)
@@ -763,6 +765,21 @@ export function Timeline(): React.JSX.Element {
               <TypeIcon width={13} height={13} />
               テキストで編集
             </button>
+            {timedClips[selectedIndex]?.asset.hasAudio && !selectedClip.audioDetached && (
+              <button
+                className="small-button"
+                title={
+                  selectedClip.speed !== 1
+                    ? '再生速度が1x以外のクリップは音声を分離できません'
+                    : '動画から音声を切り離し、独立した音声トラックに分けます'
+                }
+                disabled={selectedClip.speed !== 1}
+                onClick={() => detachClipAudio(selectedClip.id)}
+              >
+                <MusicIcon width={13} height={13} />
+                音声を分離
+              </button>
+            )}
             <label className="inline-select">
               <GaugeIcon width={13} height={13} />
               <select
@@ -1110,7 +1127,15 @@ export function Timeline(): React.JSX.Element {
                         <AlertTriangleIcon width={11} height={11} />
                       </span>
                     ))}
-                  {tc.asset.hasAudio && clipWidth > 24 && (
+                  {tc.clip.audioDetached && (
+                    <span
+                      className="timeline-mismatch-icon"
+                      title="音声は分離済み(音声トラックで管理されています)"
+                    >
+                      <VolumeXIcon width={11} height={11} />
+                    </span>
+                  )}
+                  {tc.asset.hasAudio && !tc.clip.audioDetached && clipWidth > 24 && (
                     <div className="timeline-clip-waveform">
                       <Waveform
                         filePath={tc.asset.filePath}

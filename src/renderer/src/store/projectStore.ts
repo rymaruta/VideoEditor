@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
+import { buildTimedClips } from '../lib/timelineMath'
 import type {
   AspectRatio,
   AudioTrack,
@@ -58,6 +59,7 @@ interface ProjectState {
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
   updateClipSpeed: (clipId: string, speed: number) => void
   updateClipTransition: (clipId: string, transition: Transition | undefined) => void
+  detachClipAudio: (clipId: string) => void
   updateClipCrop: (clipId: string, fillCrop: boolean, cropCenter?: { x: number; y: number }) => void
   replaceClipRange: (clipId: string, newClips: Clip[]) => void
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
@@ -262,6 +264,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         )
       }
     })),
+
+  detachClipAudio: (clipId) =>
+    set((state) => {
+      const clip = state.project.clips.find((c) => c.id === clipId)
+      if (!clip || clip.audioDetached) return state
+      const asset = state.project.assets.find((a) => a.id === clip.assetId)
+      if (!asset || !asset.hasAudio) return state
+      const timed = buildTimedClips(state.project)
+      const timedClip = timed.find((tc) => tc.clip.id === clipId)
+      if (!timedClip) return state
+      const newTrack: AudioTrack = {
+        id: uuid(),
+        name: `${asset.fileName}の音声`,
+        muted: false,
+        volume: 1,
+        duckingEnabled: false,
+        clips: [
+          {
+            id: uuid(),
+            assetId: clip.assetId,
+            startTime: timedClip.start,
+            inPoint: clip.inPoint,
+            outPoint: clip.outPoint
+          }
+        ]
+      }
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          clips: state.project.clips.map((c) =>
+            c.id === clipId ? { ...c, audioDetached: true } : c
+          ),
+          audioTracks: [...state.project.audioTracks, newTrack]
+        }
+      }
+    }),
 
   updateClipCrop: (clipId, fillCrop, cropCenter) =>
     set((state) => ({

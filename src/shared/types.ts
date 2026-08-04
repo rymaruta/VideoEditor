@@ -27,6 +27,7 @@ export interface Clip {
   transitionIn?: Transition
   fillCrop?: boolean
   cropCenter?: { x: number; y: number }
+  audioDetached?: boolean
 }
 
 export type AspectRatio = '16:9' | '9:16'
