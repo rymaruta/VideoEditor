@@ -78,6 +78,10 @@ export function Timeline(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const selectedClipId = useProjectStore((s) => s.selectedClipId)
   const selectClip = useProjectStore((s) => s.selectClip)
+  const multiSelectedClipIds = useProjectStore((s) => s.multiSelectedClipIds)
+  const setMultiSelectedClipIds = useProjectStore((s) => s.setMultiSelectedClipIds)
+  const removeClips = useProjectStore((s) => s.removeClips)
+  const updateClipsSpeed = useProjectStore((s) => s.updateClipsSpeed)
   const seekTo = useProjectStore((s) => s.seekTo)
   const playheadTime = useProjectStore((s) => s.playheadTime)
   const removeClip = useProjectStore((s) => s.removeClip)
@@ -124,6 +128,7 @@ export function Timeline(): React.JSX.Element {
   const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
   const [scrubbing, setScrubbing] = useState(false)
   const videoLaneRef = useRef<HTMLDivElement>(null)
+  const lastClickedClipIndexRef = useRef<number | null>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
 
@@ -408,7 +413,39 @@ export function Timeline(): React.JSX.Element {
             </button>
           </div>
         )}
-        {selectedClip && (
+        {multiSelectedClipIds.length > 1 && (
+          <div className="timeline-actions bulk-actions">
+            <span className="hint-text">{multiSelectedClipIds.length}個選択中</span>
+            <label className="inline-select">
+              <GaugeIcon width={13} height={13} />
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  if (!e.target.value) return
+                  updateClipsSpeed(multiSelectedClipIds, Number(e.target.value))
+                }}
+              >
+                <option value="" disabled>
+                  速度を一括変更
+                </option>
+                {SPEED_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}x
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="small-button danger"
+              title="選択したクリップをまとめて削除"
+              onClick={() => removeClips(multiSelectedClipIds)}
+            >
+              <TrashIcon width={13} height={13} />
+              まとめて削除
+            </button>
+          </div>
+        )}
+        {multiSelectedClipIds.length <= 1 && selectedClip && (
           <div className="timeline-actions">
             <button
               className="icon-button"
@@ -543,6 +580,10 @@ export function Timeline(): React.JSX.Element {
               <kbd>{keymap[action].display}</kbd>
             </span>
           ))}
+          <span className="shortcut-hint">
+            1フレーム移動
+            <kbd>←/→</kbd>
+          </span>
         </div>
         <label className="inline-select keymap-select" title="キーボードショートカットの配置">
           <select
@@ -651,16 +692,37 @@ export function Timeline(): React.JSX.Element {
               return (
                 <div
                   key={tc.clip.id}
-                  className={`timeline-clip ${selectedClipId === tc.clip.id ? 'selected' : ''} ${
-                    draggedClipId === tc.clip.id ? 'dragging' : ''
-                  } ${dragOverIndex === i && draggedClipId && draggedClipId !== tc.clip.id ? 'drag-over' : ''} ${
-                    trimDrag?.clipId === tc.clip.id ? 'trimming' : ''
-                  }`}
+                  className={`timeline-clip ${
+                    selectedClipId === tc.clip.id || multiSelectedClipIds.includes(tc.clip.id)
+                      ? 'selected'
+                      : ''
+                  } ${draggedClipId === tc.clip.id ? 'dragging' : ''} ${
+                    dragOverIndex === i && draggedClipId && draggedClipId !== tc.clip.id
+                      ? 'drag-over'
+                      : ''
+                  } ${trimDrag?.clipId === tc.clip.id ? 'trimming' : ''}`}
                   style={{ width: clipWidth }}
                   draggable
                   onClick={(e) => {
                     e.stopPropagation()
-                    selectClip(tc.clip.id)
+                    if (e.shiftKey && lastClickedClipIndexRef.current !== null) {
+                      const lo = Math.min(lastClickedClipIndexRef.current, i)
+                      const hi = Math.max(lastClickedClipIndexRef.current, i)
+                      const ids = timedClips.slice(lo, hi + 1).map((t) => t.clip.id)
+                      selectClip(tc.clip.id)
+                      setMultiSelectedClipIds(ids)
+                    } else if (e.metaKey || e.ctrlKey) {
+                      const exists = multiSelectedClipIds.includes(tc.clip.id)
+                      const next = exists
+                        ? multiSelectedClipIds.filter((id) => id !== tc.clip.id)
+                        : [...multiSelectedClipIds, tc.clip.id]
+                      selectClip(next.length > 0 ? next[next.length - 1] : null)
+                      setMultiSelectedClipIds(next)
+                      lastClickedClipIndexRef.current = i
+                    } else {
+                      selectClip(tc.clip.id)
+                      lastClickedClipIndexRef.current = i
+                    }
                   }}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = 'move'

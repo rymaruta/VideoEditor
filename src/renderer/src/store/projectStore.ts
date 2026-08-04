@@ -35,6 +35,7 @@ interface ProjectState {
   currentFilePath: string | null
   isDirty: boolean
   selectedClipId: string | null
+  multiSelectedClipIds: string[]
   clipboardClip: Clip | null
   playheadTime: number
   isPlaying: boolean
@@ -54,10 +55,13 @@ interface ProjectState {
   replaceClipRange: (clipId: string, newClips: Clip[]) => void
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
   removeClip: (clipId: string) => void
+  removeClips: (clipIds: string[]) => void
+  updateClipsSpeed: (clipIds: string[], speed: number) => void
   moveClip: (clipId: string, direction: 'left' | 'right') => void
   moveClipToIndex: (clipId: string, targetIndex: number) => void
   setAspectRatio: (ratio: AspectRatio) => void
   selectClip: (clipId: string | null) => void
+  setMultiSelectedClipIds: (clipIds: string[]) => void
   setPlayheadTime: (t: number) => void
   setIsPlaying: (p: boolean) => void
   seekTo: (t: number) => void
@@ -117,6 +121,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   currentFilePath: null,
   isDirty: false,
   selectedClipId: null,
+  multiSelectedClipIds: [],
   clipboardClip: null,
   playheadTime: 0,
   isPlaying: false,
@@ -130,6 +135,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       currentFilePath: null,
       isDirty: false,
       selectedClipId: null,
+      multiSelectedClipIds: [],
       clipboardClip: null,
       playheadTime: 0,
       isPlaying: false,
@@ -144,6 +150,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       currentFilePath: filePath,
       isDirty: false,
       selectedClipId: null,
+      multiSelectedClipIds: [],
       clipboardClip: null,
       playheadTime: 0,
       isPlaying: false,
@@ -270,8 +277,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => ({
       ...pushHistory(state),
       project: { ...state.project, clips: state.project.clips.filter((c) => c.id !== clipId) },
-      selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId
+      selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+      multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => id !== clipId)
     })),
+
+  removeClips: (clipIds) =>
+    set((state) => {
+      const idSet = new Set(clipIds)
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          clips: state.project.clips.filter((c) => !idSet.has(c.id))
+        },
+        selectedClipId:
+          state.selectedClipId && idSet.has(state.selectedClipId) ? null : state.selectedClipId,
+        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => !idSet.has(id))
+      }
+    }),
+
+  updateClipsSpeed: (clipIds, speed) =>
+    set((state) => {
+      const idSet = new Set(clipIds)
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          clips: state.project.clips.map((c) => (idSet.has(c.id) ? { ...c, speed } : c))
+        }
+      }
+    }),
 
   moveClip: (clipId, direction) =>
     set((state) => {
@@ -302,7 +337,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project: { ...state.project, aspectRatio: ratio }
     })),
 
-  selectClip: (clipId) => set({ selectedClipId: clipId }),
+  selectClip: (clipId) =>
+    set({ selectedClipId: clipId, multiSelectedClipIds: clipId ? [clipId] : [] }),
+  setMultiSelectedClipIds: (clipIds) => set({ multiSelectedClipIds: clipIds }),
   setPlayheadTime: (t) => set({ playheadTime: t }),
   setIsPlaying: (p) => set({ isPlaying: p }),
   seekTo: (t) =>
@@ -650,7 +687,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return {
         ...pushHistory(state),
         project: { ...project, textOverlays: overlays },
-        selectedClipId: null
+        selectedClipId: null,
+        multiSelectedClipIds: []
       }
     }),
 

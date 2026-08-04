@@ -1,8 +1,11 @@
 import { useEffect } from 'react'
-import { useProjectStore } from '../store/projectStore'
+import { getTotalDuration, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { saveProject } from './projectFileActions'
 import { getKeymap, matchesBinding } from './keymap'
+
+const FRAME_SECONDS = 1 / 30
+const FRAME_JUMP_SECONDS = FRAME_SECONDS * 10
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
@@ -63,10 +66,30 @@ export function useKeyboardShortcuts(): void {
         return
       }
       if (matchesBinding(e, keymap.delete)) {
-        if (store.selectedClipId) {
+        const ids =
+          store.multiSelectedClipIds.length > 0
+            ? store.multiSelectedClipIds
+            : store.selectedClipId
+              ? [store.selectedClipId]
+              : []
+        if (ids.length > 0) {
           e.preventDefault()
-          store.removeClip(store.selectedClipId)
+          store.removeClips(ids)
         }
+        return
+      }
+      if (
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+      ) {
+        e.preventDefault()
+        const step = e.shiftKey ? FRAME_JUMP_SECONDS : FRAME_SECONDS
+        const direction = e.key === 'ArrowLeft' ? -1 : 1
+        const total = getTotalDuration(store.project)
+        const next = Math.max(0, Math.min(total, store.playheadTime + direction * step))
+        store.seekTo(next)
       }
     }
 
