@@ -102,7 +102,7 @@ export function Timeline(): React.JSX.Element {
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
   const pasteClip = useProjectStore((s) => s.pasteClip)
-  const clipboardClip = useProjectStore((s) => s.clipboardClip)
+  const clipboardClips = useProjectStore((s) => s.clipboardClips)
   const setBeatGrid = useProjectStore((s) => s.setBeatGrid)
   const clearBeatGrid = useProjectStore((s) => s.clearBeatGrid)
   const toggleBeatGridEnabled = useProjectStore((s) => s.toggleBeatGridEnabled)
@@ -436,6 +436,13 @@ export function Timeline(): React.JSX.Element {
               </select>
             </label>
             <button
+              className="icon-button"
+              title={`コピー (${keymap.copy.display})`}
+              onClick={() => copySelectedClip()}
+            >
+              <CopyIcon width={13} height={13} />
+            </button>
+            <button
               className="small-button danger"
               title="選択したクリップをまとめて削除"
               onClick={() => removeClips(multiSelectedClipIds)}
@@ -560,14 +567,14 @@ export function Timeline(): React.JSX.Element {
             </button>
           </div>
         )}
-        {clipboardClip && (
+        {clipboardClips.length > 0 && (
           <button
             className="small-button"
             title={`貼り付け (${keymap.paste.display})`}
             onClick={() => pasteClip()}
           >
             <ClipboardPasteIcon width={13} height={13} />
-            貼り付け
+            貼り付け{clipboardClips.length > 1 ? `(${clipboardClips.length}個)` : ''}
           </button>
         )}
       </div>

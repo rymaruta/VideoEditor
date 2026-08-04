@@ -36,7 +36,7 @@ interface ProjectState {
   isDirty: boolean
   selectedClipId: string | null
   multiSelectedClipIds: string[]
-  clipboardClip: Clip | null
+  clipboardClips: Clip[]
   playheadTime: number
   isPlaying: boolean
   seekRequest: { time: number; token: number } | null
@@ -122,7 +122,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isDirty: false,
   selectedClipId: null,
   multiSelectedClipIds: [],
-  clipboardClip: null,
+  clipboardClips: [],
   playheadTime: 0,
   isPlaying: false,
   seekRequest: null,
@@ -136,7 +136,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       isDirty: false,
       selectedClipId: null,
       multiSelectedClipIds: [],
-      clipboardClip: null,
+      clipboardClips: [],
       playheadTime: 0,
       isPlaying: false,
       seekRequest: null
@@ -151,7 +151,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       isDirty: false,
       selectedClipId: null,
       multiSelectedClipIds: [],
-      clipboardClip: null,
+      clipboardClips: [],
       playheadTime: 0,
       isPlaying: false,
       seekRequest: null
@@ -350,29 +350,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   copySelectedClip: () => {
     const state = get()
-    const clip = state.project.clips.find((c) => c.id === state.selectedClipId)
-    if (clip) set({ clipboardClip: clip })
+    const idSet = new Set(
+      state.multiSelectedClipIds.length > 0
+        ? state.multiSelectedClipIds
+        : state.selectedClipId
+          ? [state.selectedClipId]
+          : []
+    )
+    const clips = state.project.clips.filter((c) => idSet.has(c.id))
+    if (clips.length > 0) set({ clipboardClips: clips })
   },
 
   pasteClip: () =>
     set((state) => {
-      if (!state.clipboardClip) return state
-      const newClip: Clip = {
-        ...state.clipboardClip,
+      if (state.clipboardClips.length === 0) return state
+      const newClips: Clip[] = state.clipboardClips.map((c) => ({
+        ...c,
         id: uuid(),
         transitionIn: undefined
-      }
+      }))
       const idx = state.project.clips.findIndex((c) => c.id === state.selectedClipId)
       const clips = [...state.project.clips]
       if (idx === -1) {
-        clips.push(newClip)
+        clips.push(...newClips)
       } else {
-        clips.splice(idx + 1, 0, newClip)
+        clips.splice(idx + 1, 0, ...newClips)
       }
       return {
         ...pushHistory(state),
         project: { ...state.project, clips },
-        selectedClipId: newClip.id
+        selectedClipId: newClips[newClips.length - 1].id,
+        multiSelectedClipIds: newClips.map((c) => c.id)
       }
     }),
 
