@@ -328,6 +328,18 @@ h3 {
   flex-direction: column;
   min-height: 0;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Collapsed panels stay mounted (rather than being removed from the tree) so any
+   in-progress async work inside them (AI generation, API calls) keeps running instead
+   of being discarded — they're just visually hidden and taken out of interaction. */
+.left-column.panel-collapsed,
+.right-column.panel-collapsed {
+  padding: 0;
+  border: none;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .center-column {
@@ -1801,7 +1813,19 @@ h3 {
   display: flex;
 }
 
-.tab-content > * {
+.tab-pane {
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+}
+
+.tab-pane.active {
+  display: flex;
+  flex: 1;
+}
+
+.tab-pane > * {
   flex: 1;
 }
 

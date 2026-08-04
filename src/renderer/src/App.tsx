@@ -366,11 +366,12 @@ function App(): React.JSX.Element {
         </div>
       </header>
       <div className="app-layout">
-        {!leftCollapsed && (
-          <div className="left-column" style={{ width: leftWidth }}>
-            <MediaBin />
-          </div>
-        )}
+        <div
+          className={`left-column ${leftCollapsed ? 'panel-collapsed' : ''}`}
+          style={{ width: leftCollapsed ? 0 : leftWidth }}
+        >
+          <MediaBin />
+        </div>
         <div className="col-resize-handle-track">
           {!leftCollapsed && (
             <div
@@ -422,47 +423,72 @@ function App(): React.JSX.Element {
             )}
           </button>
         </div>
-        {!rightCollapsed && (
-          <div className="right-column" style={{ width: rightWidth }}>
-            <div className="tab-bar">
-              {EDIT_TABS.map(({ id, label, icon: Icon, description }) => (
-                <button
-                  key={id}
-                  className={tab === id ? 'active' : ''}
-                  onClick={() => setTab(id)}
-                  title={description}
-                >
-                  <Icon width={14} height={14} />
-                  <span>{label}</span>
-                </button>
-              ))}
-              <div className="tab-bar-divider" />
-              {PUBLISH_TABS.map(({ id, label, icon: Icon, description }) => (
-                <button
-                  key={id}
-                  className={tab === id ? 'active' : ''}
-                  onClick={() => setTab(id)}
-                  title={description}
-                >
-                  <Icon width={14} height={14} />
-                  <span>{label}</span>
-                </button>
-              ))}
+        <div
+          className={`right-column ${rightCollapsed ? 'panel-collapsed' : ''}`}
+          style={{ width: rightCollapsed ? 0 : rightWidth }}
+        >
+          <div className="tab-bar">
+            {EDIT_TABS.map(({ id, label, icon: Icon, description }) => (
+              <button
+                key={id}
+                className={tab === id ? 'active' : ''}
+                onClick={() => setTab(id)}
+                title={description}
+              >
+                <Icon width={14} height={14} />
+                <span>{label}</span>
+              </button>
+            ))}
+            <div className="tab-bar-divider" />
+            {PUBLISH_TABS.map(({ id, label, icon: Icon, description }) => (
+              <button
+                key={id}
+                className={tab === id ? 'active' : ''}
+                onClick={() => setTab(id)}
+                title={description}
+              >
+                <Icon width={14} height={14} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+          {/* All tab panels stay mounted (hidden via CSS) rather than being unmounted on
+              switch, so an in-progress AI/API request (Gemini, VOICEVOX, YouTube, etc.) in
+              one tab keeps running and its result is still there when the user comes back,
+              instead of being silently discarded by switching tabs to do something else. */}
+          <div className="tab-content">
+            <div className={`tab-pane ${tab === 'template' ? 'active' : ''}`}>
+              <TemplatePanel />
             </div>
-            <div className="tab-content">
-              {tab === 'template' && <TemplatePanel />}
-              {tab === 'text' && <TextOverlayPanel />}
-              {tab === 'narration' && <NarrationPanel />}
-              {tab === 'thumbnail' && <ThumbnailPanel />}
-              {tab === 'audio' && <AudioLibraryPanel />}
-              {tab === 'preset' && <PresetPanel />}
-              {tab === 'gametrend' && <GameTrendPanel />}
-              {tab === 'youtube' && <YouTubeTrendPanel />}
-              {tab === 'metadata' && <MetadataPanel />}
-              {tab === 'export' && <ExportPanel />}
+            <div className={`tab-pane ${tab === 'text' ? 'active' : ''}`}>
+              <TextOverlayPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'narration' ? 'active' : ''}`}>
+              <NarrationPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'thumbnail' ? 'active' : ''}`}>
+              <ThumbnailPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'audio' ? 'active' : ''}`}>
+              <AudioLibraryPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'preset' ? 'active' : ''}`}>
+              <PresetPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'gametrend' ? 'active' : ''}`}>
+              <GameTrendPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'youtube' ? 'active' : ''}`}>
+              <YouTubeTrendPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'metadata' ? 'active' : ''}`}>
+              <MetadataPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'export' ? 'active' : ''}`}>
+              <ExportPanel />
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )
