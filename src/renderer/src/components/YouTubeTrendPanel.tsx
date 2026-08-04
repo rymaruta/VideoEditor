@@ -18,6 +18,7 @@ function formatViews(views: number): string {
 export function YouTubeTrendPanel(): React.JSX.Element {
   const apiKey = useSettingsStore((s) => s.youtubeApiKey)
   const setApiKey = useSettingsStore((s) => s.setYoutubeApiKey)
+  const envKeySources = useSettingsStore((s) => s.envKeySources)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<YouTubeVideoInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -75,6 +76,9 @@ export function YouTubeTrendPanel(): React.JSX.Element {
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="APIキーを入力"
         />
+        {envKeySources.youtubeApiKey && (
+          <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
+        )}
       </div>
       <div className="youtube-search-row">
         <button className="primary-button" onClick={handleTrending} disabled={loading}>

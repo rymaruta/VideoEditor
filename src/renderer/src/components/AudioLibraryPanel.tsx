@@ -34,6 +34,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
   const setJamendoClientId = useSettingsStore((s) => s.setJamendoClientId)
   const freesoundApiKey = useSettingsStore((s) => s.freesoundApiKey)
   const setFreesoundApiKey = useSettingsStore((s) => s.setFreesoundApiKey)
+  const envKeySources = useSettingsStore((s) => s.envKeySources)
 
   const [query, setQuery] = useState('')
   const [musicResults, setMusicResults] = useState<MusicTrackInfo[]>([])
@@ -170,6 +171,9 @@ export function AudioLibraryPanel(): React.JSX.Element {
           }
           placeholder={kind === 'music' ? 'Client ID を入力' : 'API キーを入力'}
         />
+        {(kind === 'music' ? envKeySources.jamendoClientId : envKeySources.freesoundApiKey) && (
+          <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
+        )}
       </div>
       <div className="youtube-search-row">
         <input

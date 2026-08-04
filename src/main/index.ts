@@ -18,7 +18,10 @@ import { saveProjectFile, loadProjectFile } from './projectFileService'
 import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
+import { loadEnvFile, getEnvApiKeys } from './envConfig'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
+
+loadEnvFile()
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -222,6 +225,7 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.downloadAudioAsset, async (_e, url: string, suggestedName: string) =>
     downloadAudioAsset(url, suggestedName)
   )
+  ipcMain.handle(IPC.getEnvApiKeys, () => getEnvApiKeys())
 
   createWindow()
 

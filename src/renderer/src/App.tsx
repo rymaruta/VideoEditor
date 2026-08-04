@@ -14,6 +14,7 @@ import { MetadataPanel } from './components/MetadataPanel'
 import { PresetPanel } from './components/PresetPanel'
 import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
+import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
 import {
   ClapperboardIcon,
@@ -148,6 +149,12 @@ function App(): React.JSX.Element {
   const undo = useProjectStore((s) => s.undo)
   const redo = useProjectStore((s) => s.redo)
   const isDirty = useProjectStore((s) => s.isDirty)
+  const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
+
+  useEffect(() => {
+    loadEnvApiKeys()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const [leftWidth, setLeftWidth] = useState(() =>
     readStoredSize(LEFT_WIDTH_KEY, DEFAULT_LEFT_WIDTH)

@@ -25,5 +25,6 @@ export const IPC = {
   selectProjectOpenPath: 'project:selectOpenPath',
   saveProject: 'project:save',
   loadProject: 'project:load',
-  downloadAudioAsset: 'audioLibrary:download'
+  downloadAudioAsset: 'audioLibrary:download',
+  getEnvApiKeys: 'settings:getEnvApiKeys'
 } as const

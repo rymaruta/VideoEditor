@@ -233,3 +233,10 @@ export interface VoicevoxSpeaker {
   name: string
   styles: VoicevoxStyle[]
 }
+
+export interface EnvApiKeys {
+  geminiApiKey: string
+  youtubeApiKey: string
+  jamendoClientId: string
+  freesoundApiKey: string
+}

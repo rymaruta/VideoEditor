@@ -27,6 +27,7 @@ export function MetadataPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
   const setGeminiApiKey = useSettingsStore((s) => s.setGeminiApiKey)
+  const envKeySources = useSettingsStore((s) => s.envKeySources)
 
   const [language, setLanguage] = useState('japanese')
   const [extraContext, setExtraContext] = useState('')
@@ -160,6 +161,9 @@ export function MetadataPanel(): React.JSX.Element {
           onChange={(e) => setGeminiApiKey(e.target.value)}
           placeholder="APIキーを入力"
         />
+        {envKeySources.geminiApiKey && (
+          <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
+        )}
       </div>
       <div className="trim-field">
         <label>出力言語</label>

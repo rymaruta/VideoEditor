@@ -24,6 +24,7 @@ export function GameTrendPanel(): React.JSX.Element {
   const setYoutubeApiKey = useSettingsStore((s) => s.setYoutubeApiKey)
   const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
   const setGeminiApiKey = useSettingsStore((s) => s.setGeminiApiKey)
+  const envKeySources = useSettingsStore((s) => s.envKeySources)
 
   const [videos, setVideos] = useState<YouTubeVideoInfo[]>([])
   const [analysis, setAnalysis] = useState<GameTrendAnalysis | null>(null)
@@ -90,6 +91,9 @@ export function GameTrendPanel(): React.JSX.Element {
           onChange={(e) => setGeminiApiKey(e.target.value)}
           placeholder="APIキーを入力"
         />
+        {envKeySources.geminiApiKey && (
+          <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
+        )}
       </div>
       <button className="primary-button" onClick={handleRefresh} disabled={loading}>
         <SparklesIcon width={13} height={13} />

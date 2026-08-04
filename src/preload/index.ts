@@ -4,6 +4,7 @@ import { IPC } from '@shared/ipc'
 import type {
   AspectRatio,
   BpmAnalysisResult,
+  EnvApiKeys,
   ExportProgress,
   HighlightCandidate,
   MediaProbeResult,
@@ -118,7 +119,8 @@ const api = {
     url: string,
     suggestedName: string
   ): Promise<{ filePath: string; duration: number }> =>
-    ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName)
+    ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName),
+  getEnvApiKeys: (): Promise<EnvApiKeys> => ipcRenderer.invoke(IPC.getEnvApiKeys)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
