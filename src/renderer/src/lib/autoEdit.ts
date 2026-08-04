@@ -394,7 +394,7 @@ async function scoreHighlightsWithGemini(
   }
   if (frames.length === 0) return new Map()
 
-  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const GEMINI_MODEL = 'gemini-flash-latest'
   const parts: GeminiPart[] = [
     {
       text: `あなたはYouTube Shorts編集AIです。以下は動画から抽出した${frames.length}個のハイライト候補シーンの代表フレーム画像です。画像は1〜${frames.length}の番号順に添付されています。
@@ -490,7 +490,7 @@ ${preferenceSummary}
   "reasoning": "この構成にした編集意図を日本語2〜3文で"
 }`
 
-  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const GEMINI_MODEL = 'gemini-flash-latest'
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
   const res = await fetch(url, {
     method: 'POST',
@@ -537,7 +537,7 @@ async function enhanceWithGemini(
   preferenceSummary: string,
   apiKey: string
 ): Promise<Record<string, string>> {
-  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const GEMINI_MODEL = 'gemini-flash-latest'
   const infoLines = patterns
     .map(
       (p, i) =>

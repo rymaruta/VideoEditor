@@ -31,7 +31,7 @@ export interface GameTrendAnalysis {
   recommendedGame: RecommendedGame | null
 }
 
-const GEMINI_MODEL = 'gemini-2.0-flash'
+const GEMINI_MODEL = 'gemini-flash-latest'
 const THUMBNAIL_SAMPLE_COUNT = 5
 
 function buildPrompt(videos: YouTubeVideoInfo[], includeThumbnails: boolean): string {

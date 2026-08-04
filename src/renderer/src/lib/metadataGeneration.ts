@@ -10,7 +10,7 @@ export interface VideoMetadata {
   pinnedComment: string
 }
 
-const GEMINI_MODEL = 'gemini-2.0-flash'
+const GEMINI_MODEL = 'gemini-flash-latest'
 
 function buildPrompt(transcript: string, extraContext: string, language: string): string {
   const languageLabel = language === 'english' ? '英語' : '日本語'
