@@ -13,8 +13,14 @@ import {
   YoutubeIcon,
   MaximizeIcon,
   Volume2Icon,
-  VolumeXIcon
+  VolumeXIcon,
+  SkipBackIcon,
+  SkipForwardIcon,
+  StepBackIcon,
+  StepForwardIcon
 } from './icons'
+
+const FRAME_SECONDS = 1 / 30
 import { ShortsUiMockup } from './ShortsUiMockup'
 import type {
   MediaAsset,
@@ -394,6 +400,11 @@ export function PreviewPlayer(): React.JSX.Element {
     }
   }, [volume, muted, activeSrc])
 
+  function stepFrame(direction: 1 | -1): void {
+    const next = Math.max(0, Math.min(total, playheadTime + direction * FRAME_SECONDS))
+    seekTo(next)
+  }
+
   useEffect(() => {
     localStorage.setItem(VOLUME_KEY, String(volume))
   }, [volume])
@@ -486,76 +497,121 @@ export function PreviewPlayer(): React.JSX.Element {
           </div>
         </div>
         <div className="preview-controls">
-          {project.aspectRatio === '9:16' && (
-            <button
-              className={`icon-button ${showShortsUi ? 'active' : ''}`}
-              title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
-              onClick={() => setShowShortsUi((v) => !v)}
-            >
-              <YoutubeIcon width={14} height={14} />
-            </button>
-          )}
-          <button
-            className="play-button"
-            onClick={() => setIsPlaying(!isPlaying)}
-            disabled={!activeSrc}
-          >
-            {isPlaying ? <PauseIcon width={16} height={16} /> : <PlayIcon width={16} height={16} />}
-          </button>
-          <div
-            ref={scrubTrackRef}
-            className={`scrub-track ${scrubbingPreview ? 'scrubbing' : ''}`}
-            onMouseDown={(e) => {
-              if (total <= 0) return
-              const rect = e.currentTarget.getBoundingClientRect()
-              const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
-              seekTo(ratio * total)
-              setScrubbingPreview(true)
-            }}
-          >
+          <div className="preview-scrub-row">
+            <span className="time-label current">{formatTime(playheadTime)}</span>
             <div
-              className="scrub-fill"
-              style={{
-                width: total > 0 ? `${Math.min(100, (playheadTime / total) * 100)}%` : '0%'
+              ref={scrubTrackRef}
+              className={`scrub-track ${scrubbingPreview ? 'scrubbing' : ''}`}
+              onMouseDown={(e) => {
+                if (total <= 0) return
+                const rect = e.currentTarget.getBoundingClientRect()
+                const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+                seekTo(ratio * total)
+                setScrubbingPreview(true)
               }}
-            />
-          </div>
-          <span className="time-label">
-            {formatTime(playheadTime)} / {formatTime(total)}
-          </span>
-          <div className="preview-volume">
-            <button
-              className="icon-button"
-              title={muted ? 'ミュート解除' : 'ミュート'}
-              onClick={() => setMuted((v) => !v)}
             >
-              {muted || volume === 0 ? (
-                <VolumeXIcon width={14} height={14} />
-              ) : (
-                <Volume2Icon width={14} height={14} />
-              )}
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={muted ? 0 : volume}
-              onChange={(e) => {
-                const v = Number(e.target.value)
-                setVolume(v)
-                if (v > 0 && muted) setMuted(false)
-              }}
-              title="音量"
-            />
+              <div
+                className="scrub-fill"
+                style={{
+                  width: total > 0 ? `${Math.min(100, (playheadTime / total) * 100)}%` : '0%'
+                }}
+              />
+            </div>
+            <span className="time-label total">{formatTime(total)}</span>
           </div>
-          <button
-            className={`icon-button ${isExpanded ? 'active' : ''}`}
-            title={isExpanded ? '実サイズ表示を閉じる (Esc)' : '実サイズで表示'}
-            onClick={() => setIsExpanded((v) => !v)}
-          >
-            <MaximizeIcon width={14} height={14} />
-          </button>
+          <div className="preview-transport-row">
+            <div className="transport-side transport-side-left">
+              {project.aspectRatio === '9:16' && (
+                <button
+                  className={`icon-button ${showShortsUi ? 'active' : ''}`}
+                  title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
+                  onClick={() => setShowShortsUi((v) => !v)}
+                >
+                  <YoutubeIcon width={14} height={14} />
+                </button>
+              )}
+            </div>
+            <div className="transport-center">
+              <button
+                className="icon-button"
+                title="先頭へ"
+                disabled={!activeSrc}
+                onClick={() => seekTo(0)}
+              >
+                <SkipBackIcon width={14} height={14} />
+              </button>
+              <button
+                className="icon-button"
+                title="1フレーム戻る (←)"
+                disabled={!activeSrc}
+                onClick={() => stepFrame(-1)}
+              >
+                <StepBackIcon width={14} height={14} />
+              </button>
+              <button
+                className="play-button"
+                onClick={() => setIsPlaying(!isPlaying)}
+                disabled={!activeSrc}
+              >
+                {isPlaying ? (
+                  <PauseIcon width={16} height={16} />
+                ) : (
+                  <PlayIcon width={16} height={16} />
+                )}
+              </button>
+              <button
+                className="icon-button"
+                title="1フレーム進む (→)"
+                disabled={!activeSrc}
+                onClick={() => stepFrame(1)}
+              >
+                <StepForwardIcon width={14} height={14} />
+              </button>
+              <button
+                className="icon-button"
+                title="末尾へ"
+                disabled={!activeSrc}
+                onClick={() => seekTo(total)}
+              >
+                <SkipForwardIcon width={14} height={14} />
+              </button>
+            </div>
+            <div className="transport-side transport-side-right">
+              <div className="preview-volume">
+                <button
+                  className="icon-button"
+                  title={muted ? 'ミュート解除' : 'ミュート'}
+                  onClick={() => setMuted((v) => !v)}
+                >
+                  {muted || volume === 0 ? (
+                    <VolumeXIcon width={14} height={14} />
+                  ) : (
+                    <Volume2Icon width={14} height={14} />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={muted ? 0 : volume}
+                  onChange={(e) => {
+                    const v = Number(e.target.value)
+                    setVolume(v)
+                    if (v > 0 && muted) setMuted(false)
+                  }}
+                  title="音量"
+                />
+              </div>
+              <button
+                className={`icon-button ${isExpanded ? 'active' : ''}`}
+                title={isExpanded ? '実サイズ表示を閉じる (Esc)' : '実サイズで表示'}
+                onClick={() => setIsExpanded((v) => !v)}
+              >
+                <MaximizeIcon width={14} height={14} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </>

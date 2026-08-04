@@ -502,3 +502,39 @@ export function RefreshIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function SkipBackIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <line x1="5" y1="4" x2="5" y2="20" stroke="currentColor" />
+      <polygon points="19 5 8 12 19 19 19 5" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function SkipForwardIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <line x1="19" y1="4" x2="19" y2="20" stroke="currentColor" />
+      <polygon points="5 5 16 12 5 19 5 5" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function StepBackIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <line x1="6" y1="5" x2="6" y2="19" stroke="currentColor" />
+      <polygon points="19 6 9 12 19 18 19 6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function StepForwardIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <line x1="18" y1="5" x2="18" y2="19" stroke="currentColor" />
+      <polygon points="5 6 15 12 5 18 5 6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}

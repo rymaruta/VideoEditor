@@ -1047,10 +1047,41 @@ h3 {
 
 .preview-controls {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   padding-top: 10px;
   width: 100%;
+}
+
+.preview-scrub-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.preview-transport-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.transport-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.transport-side-right {
+  justify-content: flex-end;
+}
+
+.transport-center {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .play-button {
