@@ -250,7 +250,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...pushHistory(state),
       project: {
         ...state.project,
-        clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, speed } : c))
+        // Clips with detached audio keep speed 1: the separated audio track has no
+        // speed adjustment of its own, so changing the video's speed would desync it.
+        clips: state.project.clips.map((c) =>
+          c.id === clipId && !c.audioDetached ? { ...c, speed } : c
+        )
       }
     })),
 
@@ -492,10 +496,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       if (state.past.length === 0) return state
       const previous = state.past[state.past.length - 1]
+      const idSet = new Set(previous.clips.map((c) => c.id))
       return {
         past: state.past.slice(0, -1),
         future: [state.project, ...state.future].slice(0, MAX_HISTORY),
-        project: previous
+        project: previous,
+        selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
+        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
       }
     }),
 
@@ -503,10 +510,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       if (state.future.length === 0) return state
       const [next, ...rest] = state.future
+      const idSet = new Set(next.clips.map((c) => c.id))
       return {
         past: [...state.past, state.project].slice(-MAX_HISTORY),
         future: rest,
-        project: next
+        project: next,
+        selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
+        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
       }
     }),
 
@@ -792,7 +802,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           t.id === trackId
             ? {
                 ...t,
-                clips: t.clips.map((c) => (c.id === clipId ? { ...c, inPoint, outPoint } : c))
+                clips: t.clips.map((c) =>
+                  c.id === clipId
+                    ? { ...c, inPoint: Math.max(0, inPoint), outPoint: Math.max(0, outPoint) }
+                    : c
+                )
               }
             : t
         )

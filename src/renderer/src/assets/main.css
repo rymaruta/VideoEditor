@@ -1072,12 +1072,22 @@ h3 {
   background: var(--bg-elevated-3);
   overflow: hidden;
   cursor: pointer;
+  transition: height 0.1s ease;
+}
+
+.scrub-track:hover,
+.scrub-track.scrubbing {
+  height: 7px;
 }
 
 .scrub-fill {
   height: 100%;
   background: var(--accent-gradient);
   transition: width 0.1s linear;
+}
+
+.scrub-track.scrubbing .scrub-fill {
+  transition: none;
 }
 
 .preview-volume {

@@ -1,7 +1,7 @@
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
-import { readFileSync, mkdtempSync, writeFileSync } from 'fs'
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type {
@@ -55,15 +55,21 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
 export function generateThumbnailDataUrl(filePath: string, atSeconds: number): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 've-thumb-'))
   const outFile = join(dir, 'thumb.jpg')
+  const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
-      .on('error', reject)
+      .on('error', (e) => {
+        cleanup()
+        reject(e)
+      })
       .on('end', () => {
         try {
           const buf = readFileSync(outFile)
           resolve(`data:image/jpeg;base64,${buf.toString('base64')}`)
         } catch (e) {
           reject(e)
+        } finally {
+          cleanup()
         }
       })
       .screenshots({
@@ -83,6 +89,7 @@ export function generateFrameDataUrl(
 ): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 've-frame-'))
   const outFile = join(dir, 'frame.jpg')
+  const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
   const w = Math.round(width)
   const h = Math.round(height)
   return new Promise((resolve, reject) => {
@@ -93,13 +100,18 @@ export function generateFrameDataUrl(
       ])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
-      .on('error', reject)
+      .on('error', (e) => {
+        cleanup()
+        reject(e)
+      })
       .on('end', () => {
         try {
           const buf = readFileSync(outFile)
           resolve(`data:image/jpeg;base64,${buf.toString('base64')}`)
         } catch (e) {
           reject(e)
+        } finally {
+          cleanup()
         }
       })
       .run()
@@ -115,6 +127,7 @@ export function generateWaveformDataUrl(
 ): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 've-wave-'))
   const outFile = join(dir, 'wave.png')
+  const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
   const safeWidth = Math.max(20, Math.round(width))
   const safeHeight = Math.max(10, Math.round(height))
   return new Promise((resolve, reject) => {
@@ -125,13 +138,18 @@ export function generateWaveformDataUrl(
       ])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
-      .on('error', reject)
+      .on('error', (e) => {
+        cleanup()
+        reject(e)
+      })
       .on('end', () => {
         try {
           const buf = readFileSync(outFile)
           resolve(`data:image/png;base64,${buf.toString('base64')}`)
         } catch (e) {
           reject(e)
+        } finally {
+          cleanup()
         }
       })
       .run()
@@ -246,6 +264,10 @@ export function exportProject(options: ExportOptions): Promise<void> {
 
   return new Promise((resolve, reject) => {
     let command: ffmpeg.FfmpegCommand
+    let assDir: string | null = null
+    const cleanupAssDir = (): void => {
+      if (assDir) rmSync(assDir, { recursive: true, force: true })
+    }
     try {
       command = ffmpeg()
       const filterParts: string[] = []
@@ -360,7 +382,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
 
       let videoLabel = `[${curV}]`
       if (project.textOverlays.length > 0) {
-        const assDir = mkdtempSync(join(tmpdir(), 've-subs-'))
+        assDir = mkdtempSync(join(tmpdir(), 've-subs-'))
         const assPath = join(assDir, 'overlay.ass')
         writeFileSync(assPath, buildAssContent(project.textOverlays, w, h), 'utf-8')
         filterParts.push(`[${curV}]subtitles=filename='${escapeFilterPath(assPath)}'[vout]`)
@@ -454,13 +476,18 @@ export function exportProject(options: ExportOptions): Promise<void> {
           const percent = totalDuration > 0 ? Math.min(99, (seconds / totalDuration) * 100) : 0
           onProgress(percent, 'エンコード中')
         })
-        .on('error', (err) => reject(err))
+        .on('error', (err) => {
+          cleanupAssDir()
+          reject(err)
+        })
         .on('end', () => {
+          cleanupAssDir()
           onProgress(100, '完了')
           resolve()
         })
         .run()
     } catch (e) {
+      cleanupAssDir()
       reject(e)
     }
   })

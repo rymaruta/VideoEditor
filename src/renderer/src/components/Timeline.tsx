@@ -780,10 +780,18 @@ export function Timeline(): React.JSX.Element {
                 音声を分離
               </button>
             )}
-            <label className="inline-select">
+            <label
+              className="inline-select"
+              title={
+                selectedClip.audioDetached
+                  ? '音声を分離済みのクリップは再生速度を変更できません(音声トラックとズレるため)'
+                  : undefined
+              }
+            >
               <GaugeIcon width={13} height={13} />
               <select
                 value={selectedClip.speed || 1}
+                disabled={selectedClip.audioDetached}
                 onChange={(e) => updateClipSpeed(selectedClip.id, Number(e.target.value))}
               >
                 {SPEED_OPTIONS.map((s) => (

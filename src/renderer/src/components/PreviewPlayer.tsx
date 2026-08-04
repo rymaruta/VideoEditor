@@ -225,6 +225,8 @@ export function PreviewPlayer(): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false)
   const [volume, setVolume] = useState(readStoredVolume)
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === 'true')
+  const [scrubbingPreview, setScrubbingPreview] = useState(false)
+  const scrubTrackRef = useRef<HTMLDivElement>(null)
 
   function clientToNormalized(clientX: number, clientY: number): { x: number; y: number } {
     const rect = frameRef.current?.getBoundingClientRect()
@@ -261,19 +263,50 @@ export function PreviewPlayer(): React.JSX.Element {
 
   const timedClips = useMemo(() => buildTimedClips(project), [project])
   const total = totalTimelineDuration(timedClips)
+
+  // Continuous drag-scrubbing on the preview's own progress bar: seekTo() already
+  // preserves the isPlaying state, so this lets the user grab the bar and drag through
+  // the video while it keeps playing, not just click to jump once.
+  useEffect(() => {
+    if (!scrubbingPreview) return
+    function handleMove(e: MouseEvent): void {
+      const rect = scrubTrackRef.current?.getBoundingClientRect()
+      if (!rect || total <= 0) return
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+      seekTo(ratio * total)
+    }
+    function handleUp(): void {
+      setScrubbingPreview(false)
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+    }
+  }, [scrubbingPreview, total, seekTo])
+
   const [activeSrc, setActiveSrc] = useState<string | null>(null)
+  // Long-lived closures (the rAF playback loop below) call loadClipForTime across many
+  // renders without being recreated, so they'd otherwise compare against a stale
+  // snapshot of `activeSrc` state. A ref is always current regardless of which
+  // render's closure reads it, so use it for the actual comparison.
+  const activeSrcRef = useRef<string | null>(null)
 
   function loadClipForTime(time: number, resumePlaying: boolean): void {
     const tc = findTimedClipAt(timedClips, time)
     activeTimedClipRef.current = tc
     if (!tc) {
+      activeSrcRef.current = null
       setActiveSrc(null)
+      setIsPlaying(false)
       return
     }
     const url = toFileUrl(tc.asset.filePath)
     const speed = tc.clip.speed || 1
     const localTime = tc.clip.inPoint + (time - tc.start) * speed
-    if (activeSrc !== url) {
+    if (activeSrcRef.current !== url) {
+      activeSrcRef.current = url
       setActiveSrc(url)
       requestAnimationFrame(() => {
         if (videoRef.current) {
@@ -300,13 +333,19 @@ export function PreviewPlayer(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekRequest?.token])
 
-  // Initial load / when timeline structure changes, ensure something is loaded.
+  // Initial load, and recovery when the currently-loaded clip is removed from the
+  // timeline (e.g. deleted) — otherwise the preview keeps playing the stale, now
+  // detached clip until it happens to reach its old out-point.
   useEffect(() => {
-    if (!activeTimedClipRef.current && timedClips.length > 0) {
+    const activeId = activeTimedClipRef.current?.clip.id
+    const activeStillPresent = activeId != null && timedClips.some((tc) => tc.clip.id === activeId)
+    if (activeId != null && !activeStillPresent) {
+      loadClipForTime(playheadTime, isPlaying)
+    } else if (!activeTimedClipRef.current && timedClips.length > 0) {
       loadClipForTime(0, false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timedClips.length])
+  }, [timedClips])
 
   useEffect(() => {
     if (isPlaying) {
@@ -464,12 +503,14 @@ export function PreviewPlayer(): React.JSX.Element {
             {isPlaying ? <PauseIcon width={16} height={16} /> : <PlayIcon width={16} height={16} />}
           </button>
           <div
-            className="scrub-track"
-            onClick={(e) => {
+            ref={scrubTrackRef}
+            className={`scrub-track ${scrubbingPreview ? 'scrubbing' : ''}`}
+            onMouseDown={(e) => {
               if (total <= 0) return
               const rect = e.currentTarget.getBoundingClientRect()
               const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
               seekTo(ratio * total)
+              setScrubbingPreview(true)
             }}
           >
             <div
