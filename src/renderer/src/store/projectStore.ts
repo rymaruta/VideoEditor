@@ -9,6 +9,7 @@ import type {
   Clip,
   EditTemplate,
   MediaAsset,
+  PipPosition,
   Project,
   TextOverlay,
   Transition
@@ -24,9 +25,14 @@ function createBlankProject(): Project {
     assets: [],
     clips: [],
     audioTracks: [],
+    videoOverlayTracks: [],
     textOverlays: [],
     beatGrid: null
   }
+}
+
+function normalizeLoadedProject(project: Project): Project {
+  return { ...project, videoOverlayTracks: project.videoOverlayTracks ?? [] }
 }
 
 interface ProjectState {
@@ -93,6 +99,27 @@ interface ProjectState {
     placements: { assetId: string; startTime: number; outPoint: number; volume: number }[]
   ) => void
 
+  addVideoOverlayTrack: (name: string) => void
+  removeVideoOverlayTrack: (trackId: string) => void
+  toggleVideoOverlayTrackHidden: (trackId: string) => void
+  setVideoOverlayTrackPosition: (trackId: string, position: PipPosition) => void
+  setVideoOverlayTrackScale: (trackId: string, scale: number) => void
+  addClipToVideoOverlayTrack: (trackId: string, assetId: string) => void
+  updateVideoOverlayClipStart: (trackId: string, clipId: string, startTime: number) => void
+  updateVideoOverlayClipTrim: (
+    trackId: string,
+    clipId: string,
+    inPoint: number,
+    outPoint: number
+  ) => void
+  swapVideoOverlayClipAsset: (
+    trackId: string,
+    clipId: string,
+    assetId: string,
+    outPoint: number
+  ) => void
+  removeVideoOverlayClip: (trackId: string, clipId: string) => void
+
   setBeatGrid: (grid: BeatGrid) => void
   clearBeatGrid: () => void
   toggleBeatGridEnabled: () => void
@@ -111,6 +138,10 @@ function totalDuration(project: Project): number {
 }
 
 function audioTrackEnd(track: AudioTrack): number {
+  return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
+}
+
+function videoOverlayTrackEnd(track: Project['videoOverlayTracks'][number]): number {
   return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
 }
 
@@ -148,7 +179,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   loadProject: (project, filePath) =>
     set({
-      project,
+      project: normalizeLoadedProject(project),
       past: [],
       future: [],
       currentFilePath: filePath,
@@ -608,6 +639,144 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
+        )
+      }
+    })),
+
+  addVideoOverlayTrack: (name) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: [
+          ...state.project.videoOverlayTracks,
+          { id: uuid(), name, hidden: false, position: 'top-right', scale: 0.32, clips: [] }
+        ]
+      }
+    })),
+
+  removeVideoOverlayTrack: (trackId) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => t.id !== trackId)
+      }
+    })),
+
+  toggleVideoOverlayTrackHidden: (trackId) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId ? { ...t, hidden: !t.hidden } : t
+        )
+      }
+    })),
+
+  setVideoOverlayTrackPosition: (trackId, position) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId ? { ...t, position } : t
+        )
+      }
+    })),
+
+  setVideoOverlayTrackScale: (trackId, scale) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId ? { ...t, scale: Math.min(0.6, Math.max(0.1, scale)) } : t
+        )
+      }
+    })),
+
+  addClipToVideoOverlayTrack: (trackId, assetId) =>
+    set((state) => {
+      const asset = state.project.assets.find((a) => a.id === assetId)
+      if (!asset) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          videoOverlayTracks: state.project.videoOverlayTracks.map((t) => {
+            if (t.id !== trackId) return t
+            const startTime = videoOverlayTrackEnd(t)
+            const outPoint = Math.min(asset.duration, 5)
+            return {
+              ...t,
+              clips: [...t.clips, { id: uuid(), assetId, startTime, inPoint: 0, outPoint }]
+            }
+          })
+        }
+      }
+    }),
+
+  updateVideoOverlayClipStart: (trackId, clipId, startTime) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId ? { ...c, startTime: Math.max(0, startTime) } : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
+  updateVideoOverlayClipTrim: (trackId, clipId, inPoint, outPoint) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) => (c.id === clipId ? { ...c, inPoint, outPoint } : c))
+              }
+            : t
+        )
+      }
+    })),
+
+  swapVideoOverlayClipAsset: (trackId, clipId, assetId, outPoint) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId ? { ...c, assetId, inPoint: 0, outPoint } : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
+  removeVideoOverlayClip: (trackId, clipId) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
           t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
         )
       }

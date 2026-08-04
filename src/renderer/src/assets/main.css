@@ -1071,12 +1071,37 @@ h3 {
   border-radius: 4px;
   background: var(--bg-elevated-3);
   overflow: hidden;
+  cursor: pointer;
 }
 
 .scrub-fill {
   height: 100%;
   background: var(--accent-gradient);
   transition: width 0.1s linear;
+}
+
+.preview-volume {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.preview-volume input[type='range'] {
+  width: 64px;
+}
+
+.preview-expanded-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  z-index: 199;
+}
+
+.preview-player.expanded {
+  position: fixed;
+  inset: 24px;
+  z-index: 200;
 }
 
 .time-label {
@@ -1367,6 +1392,43 @@ h3 {
 .timeline-audio-clip.selected {
   border-color: var(--success);
   box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25);
+}
+
+.video-overlay-lane {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+
+.video-overlay-lane.hidden {
+  opacity: 0.4;
+}
+
+.timeline-video-overlay-clip {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  background: linear-gradient(160deg, var(--accent-1), var(--accent-2));
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  color: white;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.timeline-video-overlay-clip.dragging {
+  opacity: 0.6;
+  cursor: grabbing;
+}
+
+.timeline-video-overlay-clip.selected {
+  border-color: white;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
 }
 
 .timeline-caption-clip {

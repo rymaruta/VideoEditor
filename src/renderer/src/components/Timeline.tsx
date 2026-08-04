@@ -18,7 +18,7 @@ import { TextBasedEditModal } from './TextBasedEditModal'
 import { Waveform } from './Waveform'
 import { isAspectMismatch } from '../lib/aspect'
 import { formatIpcError } from '../lib/ipcError'
-import type { AudioTrack, Clip, TransitionType } from '@shared/types'
+import type { AudioTrack, Clip, PipPosition, TransitionType } from '@shared/types'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -41,8 +41,17 @@ import {
   AlertTriangleIcon,
   ActivityIcon,
   MagnetIcon,
-  MaximizeIcon
+  MaximizeIcon,
+  EyeIcon,
+  EyeOffIcon
 } from './icons'
+
+const PIP_POSITION_LABELS: Record<PipPosition, string> = {
+  'top-left': '左上',
+  'top-right': '右上',
+  'bottom-left': '左下',
+  'bottom-right': '右下'
+}
 
 const BASE_PIXELS_PER_SECOND = 40
 const MIN_ZOOM = 0.25
@@ -67,6 +76,16 @@ interface TrimDragState {
 }
 
 interface AudioDragState {
+  trackId: string
+  clipId: string
+  startX: number
+  duration: number
+  originalStartTime: number
+  liveStartTime: number
+  snapGuideTime: number | null
+}
+
+interface VideoOverlayDragState {
   trackId: string
   clipId: string
   startX: number
@@ -116,6 +135,15 @@ export function Timeline(): React.JSX.Element {
   const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
   const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
+  const addVideoOverlayTrack = useProjectStore((s) => s.addVideoOverlayTrack)
+  const removeVideoOverlayTrack = useProjectStore((s) => s.removeVideoOverlayTrack)
+  const toggleVideoOverlayTrackHidden = useProjectStore((s) => s.toggleVideoOverlayTrackHidden)
+  const setVideoOverlayTrackPosition = useProjectStore((s) => s.setVideoOverlayTrackPosition)
+  const setVideoOverlayTrackScale = useProjectStore((s) => s.setVideoOverlayTrackScale)
+  const updateVideoOverlayClipStart = useProjectStore((s) => s.updateVideoOverlayClipStart)
+  const updateVideoOverlayClipTrim = useProjectStore((s) => s.updateVideoOverlayClipTrim)
+  const swapVideoOverlayClipAsset = useProjectStore((s) => s.swapVideoOverlayClipAsset)
+  const removeVideoOverlayClip = useProjectStore((s) => s.removeVideoOverlayClip)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
   const pasteClip = useProjectStore((s) => s.pasteClip)
@@ -140,6 +168,11 @@ export function Timeline(): React.JSX.Element {
     trackId: string
     clipId: string
   } | null>(null)
+  const [selectedVideoOverlayClip, setSelectedVideoOverlayClip] = useState<{
+    trackId: string
+    clipId: string
+  } | null>(null)
+  const [videoOverlayDrag, setVideoOverlayDrag] = useState<VideoOverlayDragState | null>(null)
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
@@ -166,11 +199,22 @@ export function Timeline(): React.JSX.Element {
         times.push(c.startTime, c.startTime + (c.outPoint - c.inPoint))
       })
     })
+    project.videoOverlayTracks.forEach((track) => {
+      track.clips.forEach((c) => {
+        times.push(c.startTime, c.startTime + (c.outPoint - c.inPoint))
+      })
+    })
     project.textOverlays.forEach((o) => {
       times.push(o.startTime, o.endTime)
     })
     return times
-  }, [baseTimedClips, playheadTime, project.audioTracks, project.textOverlays])
+  }, [
+    baseTimedClips,
+    playheadTime,
+    project.audioTracks,
+    project.videoOverlayTracks,
+    project.textOverlays
+  ])
 
   const beatTimes = useMemo(() => {
     const grid = project.beatGrid
@@ -289,6 +333,43 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mouseup', handleMouseUp)
     }
   }, [audioDrag, pixelsPerSecond, updateAudioClipStart, activeSnapCandidates])
+
+  useEffect(() => {
+    if (!videoOverlayDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setVideoOverlayDrag((prev) => {
+        if (!prev) return prev
+        const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
+        const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
+        const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
+        const startSnap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
+        if (startSnap.snapped) {
+          return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
+        }
+        const endSnap = snapTime(rawStart + prev.duration, activeSnapCandidates, thresholdSeconds)
+        if (endSnap.snapped) {
+          return {
+            ...prev,
+            liveStartTime: Math.max(0, endSnap.time - prev.duration),
+            snapGuideTime: endSnap.time
+          }
+        }
+        return { ...prev, liveStartTime: rawStart, snapGuideTime: null }
+      })
+    }
+    function handleMouseUp(): void {
+      setVideoOverlayDrag((prev) => {
+        if (prev) updateVideoOverlayClipStart(prev.trackId, prev.clipId, prev.liveStartTime)
+        return null
+      })
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [videoOverlayDrag, pixelsPerSecond, updateVideoOverlayClipStart, activeSnapCandidates])
 
   useEffect(() => {
     if (!overlayDrag) return
@@ -483,6 +564,15 @@ export function Timeline(): React.JSX.Element {
     project.audioTracks
       .find((t) => t.id === selectedAudioClip.trackId)
       ?.clips.find((c) => c.id === selectedAudioClip.clipId)
+
+  const selectedVideoOverlayClipData =
+    selectedVideoOverlayClip &&
+    project.videoOverlayTracks
+      .find((t) => t.id === selectedVideoOverlayClip.trackId)
+      ?.clips.find((c) => c.id === selectedVideoOverlayClip.clipId)
+  const selectedVideoOverlayAsset = selectedVideoOverlayClipData
+    ? project.assets.find((a) => a.id === selectedVideoOverlayClipData.assetId)
+    : undefined
 
   return (
     <div className="panel timeline-panel">
@@ -749,6 +839,64 @@ export function Timeline(): React.JSX.Element {
       <div className="timeline-tracks">
         <div className="track-labels-col">
           <div className="track-label track-label-video">動画</div>
+          {project.videoOverlayTracks.map((track) => (
+            <div key={track.id} className="track-label">
+              <span className="track-label-name" title={track.name}>
+                {track.name}
+              </span>
+              <div className="track-label-controls">
+                <button
+                  className="icon-button"
+                  title={track.hidden ? '表示' : '非表示(PiP合成をスキップ)'}
+                  onClick={() => toggleVideoOverlayTrackHidden(track.id)}
+                >
+                  {track.hidden ? (
+                    <EyeOffIcon width={13} height={13} />
+                  ) : (
+                    <EyeIcon width={13} height={13} />
+                  )}
+                </button>
+                <select
+                  value={track.position}
+                  title="ワイプの表示位置"
+                  onChange={(e) =>
+                    setVideoOverlayTrackPosition(track.id, e.target.value as PipPosition)
+                  }
+                >
+                  {(Object.keys(PIP_POSITION_LABELS) as PipPosition[]).map((p) => (
+                    <option key={p} value={p}>
+                      {PIP_POSITION_LABELS[p]}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="range"
+                  min={0.15}
+                  max={0.5}
+                  step={0.01}
+                  value={track.scale}
+                  title="ワイプのサイズ"
+                  onChange={(e) => setVideoOverlayTrackScale(track.id, Number(e.target.value))}
+                />
+                <button
+                  className="icon-button danger"
+                  title="トラック削除"
+                  onClick={() => removeVideoOverlayTrack(track.id)}
+                >
+                  <TrashIcon width={12} height={12} />
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            className="small-button add-track-button"
+            onClick={() =>
+              addVideoOverlayTrack(`動画トラック ${project.videoOverlayTracks.length + 2}`)
+            }
+          >
+            <PlusIcon width={12} height={12} />
+            動画トラック(PiP)
+          </button>
           {project.audioTracks.map((track) => (
             <div key={track.id} className="track-label">
               <span className="track-label-name" title={track.name}>
@@ -965,6 +1113,56 @@ export function Timeline(): React.JSX.Element {
             </div>
           </div>
 
+          {project.videoOverlayTracks.map((track) => (
+            <div
+              key={track.id}
+              className={`track-lane video-overlay-lane ${track.hidden ? 'hidden' : ''}`}
+              style={{ width: timelineWidth }}
+            >
+              {track.clips.map((clip) => {
+                const asset = project.assets.find((a) => a.id === clip.assetId)
+                if (!asset) return null
+                const dur = clip.outPoint - clip.inPoint
+                const clipWidth = dur * pixelsPerSecond
+                const isDraggingThis = videoOverlayDrag?.clipId === clip.id
+                const displayStart = isDraggingThis
+                  ? videoOverlayDrag.liveStartTime
+                  : clip.startTime
+                return (
+                  <div
+                    key={clip.id}
+                    className={`timeline-video-overlay-clip ${
+                      selectedVideoOverlayClip?.clipId === clip.id ? 'selected' : ''
+                    } ${isDraggingThis ? 'dragging' : ''}`}
+                    style={{
+                      left: displayStart * pixelsPerSecond,
+                      width: clipWidth
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      setVideoOverlayDrag({
+                        trackId: track.id,
+                        clipId: clip.id,
+                        startX: e.clientX,
+                        duration: dur,
+                        originalStartTime: clip.startTime,
+                        liveStartTime: clip.startTime,
+                        snapGuideTime: null
+                      })
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelectedVideoOverlayClip({ trackId: track.id, clipId: clip.id })
+                    }}
+                    title={asset.fileName}
+                  >
+                    <span className="timeline-audio-clip-label">{asset.fileName}</span>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+
           {project.audioTracks.map((track) => (
             <div key={track.id} className="track-lane audio-lane" style={{ width: timelineWidth }}>
               {track.clips.map((clip) => {
@@ -1159,6 +1357,99 @@ export function Timeline(): React.JSX.Element {
             onClick={() => {
               removeAudioClip(selectedAudioClip.trackId, selectedAudioClip.clipId)
               setSelectedAudioClip(null)
+            }}
+          >
+            <TrashIcon width={13} height={13} />
+          </button>
+        </div>
+      )}
+
+      {selectedVideoOverlayClipData && selectedVideoOverlayClip && selectedVideoOverlayAsset && (
+        <div className="audio-clip-inspector">
+          <label>
+            開始位置(秒)
+            <input
+              type="number"
+              step={0.1}
+              min={0}
+              value={selectedVideoOverlayClipData.startTime}
+              onChange={(e) =>
+                updateVideoOverlayClipStart(
+                  selectedVideoOverlayClip.trackId,
+                  selectedVideoOverlayClip.clipId,
+                  Number(e.target.value)
+                )
+              }
+            />
+          </label>
+          <label>
+            イン点(秒)
+            <input
+              type="number"
+              step={0.1}
+              min={0}
+              max={selectedVideoOverlayAsset.duration}
+              value={selectedVideoOverlayClipData.inPoint}
+              onChange={(e) =>
+                updateVideoOverlayClipTrim(
+                  selectedVideoOverlayClip.trackId,
+                  selectedVideoOverlayClip.clipId,
+                  Math.min(Number(e.target.value), selectedVideoOverlayClipData.outPoint - 0.1),
+                  selectedVideoOverlayClipData.outPoint
+                )
+              }
+            />
+          </label>
+          <label>
+            アウト点(秒)
+            <input
+              type="number"
+              step={0.1}
+              min={0}
+              max={selectedVideoOverlayAsset.duration}
+              value={selectedVideoOverlayClipData.outPoint}
+              onChange={(e) =>
+                updateVideoOverlayClipTrim(
+                  selectedVideoOverlayClip.trackId,
+                  selectedVideoOverlayClip.clipId,
+                  selectedVideoOverlayClipData.inPoint,
+                  Math.max(Number(e.target.value), selectedVideoOverlayClipData.inPoint + 0.1)
+                )
+              }
+            />
+          </label>
+          <label className="inline-select">
+            差し替え
+            <select
+              value={selectedVideoOverlayClipData.assetId}
+              onChange={(e) => {
+                const asset = project.assets.find((a) => a.id === e.target.value)
+                if (!asset) return
+                swapVideoOverlayClipAsset(
+                  selectedVideoOverlayClip.trackId,
+                  selectedVideoOverlayClip.clipId,
+                  asset.id,
+                  Math.min(asset.duration, 5)
+                )
+              }}
+            >
+              {project.assets
+                .filter((a) => a.hasVideo)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.fileName}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <button
+            className="icon-button danger"
+            onClick={() => {
+              removeVideoOverlayClip(
+                selectedVideoOverlayClip.trackId,
+                selectedVideoOverlayClip.clipId
+              )
+              setSelectedVideoOverlayClip(null)
             }}
           >
             <TrashIcon width={13} height={13} />

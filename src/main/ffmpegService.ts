@@ -314,6 +314,50 @@ export function exportProject(options: ExportOptions): Promise<void> {
         }
       }
 
+      // --- Video overlay tracks (PiP): scale + timestamp-shift + overlay onto the base video ---
+      const pipAudioEntries: { label: string; duck: boolean }[] = []
+      let pipCounter = 0
+      project.videoOverlayTracks.forEach((track) => {
+        if (track.hidden) return
+        track.clips.forEach((overlayClip) => {
+          const asset = assetById.get(overlayClip.assetId)
+          if (!asset) return
+          const dur = overlayClip.outPoint - overlayClip.inPoint
+          if (dur <= 0) return
+          command.input(asset.filePath).inputOptions([`-ss ${overlayClip.inPoint}`, `-t ${dur}`])
+          const myIndex = inputIndex++
+          const pipLabel = `pip${pipCounter}`
+          const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
+          filterParts.push(
+            `[${myIndex}:v]scale=${scaledWidth}:-2,setpts=PTS-STARTPTS+${overlayClip.startTime}/TB[${pipLabel}]`
+          )
+          const margin = Math.round(w * 0.04)
+          const xExpr =
+            track.position === 'top-left' || track.position === 'bottom-left'
+              ? `${margin}`
+              : `W-w-${margin}`
+          const yExpr =
+            track.position === 'top-left' || track.position === 'top-right'
+              ? `${margin}`
+              : `H-h-${margin}`
+          const endTime = overlayClip.startTime + dur
+          const outV = `vpip${pipCounter}`
+          filterParts.push(
+            `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${overlayClip.startTime}\\,${endTime})'[${outV}]`
+          )
+          curV = outV
+          if (asset.hasAudio) {
+            const delayMs = Math.max(0, Math.round(overlayClip.startTime * 1000))
+            const audioLabel = `pipaudio${pipCounter}`
+            filterParts.push(
+              `[${myIndex}:a]asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs}[${audioLabel}]`
+            )
+            pipAudioEntries.push({ label: audioLabel, duck: false })
+          }
+          pipCounter++
+        })
+      })
+
       let videoLabel = `[${curV}]`
       if (project.textOverlays.length > 0) {
         const assDir = mkdtempSync(join(tmpdir(), 've-subs-'))
@@ -352,6 +396,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         }
         perTrackAudio.push({ label: trackLabel, duck: track.duckingEnabled })
       })
+      perTrackAudio.push(...pipAudioEntries)
 
       // Duck tracks flagged for ducking against the main video track's audio (voice/dialogue).
       const duckTracks = perTrackAudio.filter((t) => t.duck)

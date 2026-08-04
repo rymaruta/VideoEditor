@@ -33,12 +33,15 @@ export function MediaBin(): React.JSX.Element {
   const assets = useProjectStore((s) => s.project.assets)
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
+  const videoOverlayTracks = useProjectStore((s) => s.project.videoOverlayTracks)
   const addAsset = useProjectStore((s) => s.addAsset)
   const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
   const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
+  const addClipToVideoOverlayTrack = useProjectStore((s) => s.addClipToVideoOverlayTrack)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
+  const [videoTrackChoice, setVideoTrackChoice] = useState<Record<string, string>>({})
   const [highlightAssetId, setHighlightAssetId] = useState<string | null>(null)
   const [showRoughCut, setShowRoughCut] = useState(false)
   const [showAutoEdit, setShowAutoEdit] = useState(false)
@@ -210,6 +213,34 @@ export function MediaBin(): React.JSX.Element {
                     title="音声トラックに追加"
                     onClick={() =>
                       addClipToAudioTrack(trackChoice[asset.id] ?? audioTracks[0].id, asset.id)
+                    }
+                  >
+                    <PlusIcon width={14} height={14} />
+                  </button>
+                </div>
+              )}
+              {asset.hasVideo && videoOverlayTracks.length > 0 && (
+                <div className="media-track-add">
+                  <select
+                    value={videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id}
+                    onChange={(e) =>
+                      setVideoTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
+                    }
+                  >
+                    {videoOverlayTracks.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="icon-button"
+                    title="動画トラック(PiP)に追加"
+                    onClick={() =>
+                      addClipToVideoOverlayTrack(
+                        videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id,
+                        asset.id
+                      )
                     }
                   >
                     <PlusIcon width={14} height={14} />

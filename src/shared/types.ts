@@ -102,6 +102,25 @@ export interface BeatGrid {
   sourceLabel: string
 }
 
+export type PipPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+export interface VideoOverlayClip {
+  id: string
+  assetId: string
+  startTime: number
+  inPoint: number
+  outPoint: number
+}
+
+export interface VideoOverlayTrack {
+  id: string
+  name: string
+  hidden: boolean
+  position: PipPosition
+  scale: number
+  clips: VideoOverlayClip[]
+}
+
 export interface Project {
   id: string
   name: string
@@ -109,6 +128,7 @@ export interface Project {
   assets: MediaAsset[]
   clips: Clip[]
   audioTracks: AudioTrack[]
+  videoOverlayTracks: VideoOverlayTrack[]
   textOverlays: TextOverlay[]
   beatGrid?: BeatGrid | null
 }

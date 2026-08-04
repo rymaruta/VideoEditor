@@ -6,9 +6,24 @@ import {
   totalTimelineDuration,
   TimedClip
 } from '../lib/timelineMath'
-import { PlayIcon, PauseIcon, ClapperboardIcon, YoutubeIcon } from './icons'
+import {
+  PlayIcon,
+  PauseIcon,
+  ClapperboardIcon,
+  YoutubeIcon,
+  MaximizeIcon,
+  Volume2Icon,
+  VolumeXIcon
+} from './icons'
 import { ShortsUiMockup } from './ShortsUiMockup'
-import type { TextOverlay, TextStyle } from '@shared/types'
+import type {
+  MediaAsset,
+  PipPosition,
+  TextOverlay,
+  TextStyle,
+  VideoOverlayClip,
+  VideoOverlayTrack
+} from '@shared/types'
 
 function toFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
@@ -110,6 +125,77 @@ interface OverlayDragState {
   y: number
 }
 
+const VOLUME_KEY = 've-preview-volume'
+const MUTED_KEY = 've-preview-muted'
+
+function readStoredVolume(): number {
+  const raw = localStorage.getItem(VOLUME_KEY)
+  const n = raw ? Number(raw) : 1
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1
+}
+
+function findActiveOverlayClip(
+  track: VideoOverlayTrack,
+  time: number
+): VideoOverlayClip | undefined {
+  return track.clips.find((c) => {
+    const duration = c.outPoint - c.inPoint
+    return time >= c.startTime && time < c.startTime + duration
+  })
+}
+
+function pipStyle(position: PipPosition, scale: number): CSSProperties {
+  const style: CSSProperties = {
+    position: 'absolute',
+    width: `${scale * 100}%`,
+    height: 'auto',
+    borderRadius: 8,
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.5)',
+    border: '2px solid rgba(255, 255, 255, 0.8)',
+    zIndex: 2
+  }
+  if (position === 'top-left' || position === 'top-right') style.top = '4%'
+  else style.bottom = '4%'
+  if (position === 'top-left' || position === 'bottom-left') style.left = '4%'
+  else style.right = '4%'
+  return style
+}
+
+function VideoOverlayLayer({
+  clip,
+  asset,
+  position,
+  scale,
+  playheadTime,
+  isPlaying
+}: {
+  clip: VideoOverlayClip
+  asset: MediaAsset
+  position: PipPosition
+  scale: number
+  playheadTime: number
+  isPlaying: boolean
+}): React.JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null)
+  const localTime = clip.inPoint + (playheadTime - clip.startTime)
+
+  useEffect(() => {
+    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.3) {
+      ref.current.currentTime = localTime
+    }
+  }, [localTime])
+
+  useEffect(() => {
+    if (isPlaying) {
+      ref.current?.play().catch(() => {})
+    } else {
+      ref.current?.pause()
+    }
+  }, [isPlaying])
+
+  return <video ref={ref} src={toFileUrl(asset.filePath)} style={pipStyle(position, scale)} />
+}
+
 export function PreviewPlayer(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const isPlaying = useProjectStore((s) => s.isPlaying)
@@ -117,6 +203,7 @@ export function PreviewPlayer(): React.JSX.Element {
   const setPlayheadTime = useProjectStore((s) => s.setPlayheadTime)
   const playheadTime = useProjectStore((s) => s.playheadTime)
   const seekRequest = useProjectStore((s) => s.seekRequest)
+  const seekTo = useProjectStore((s) => s.seekTo)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
 
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -124,6 +211,9 @@ export function PreviewPlayer(): React.JSX.Element {
   const activeTimedClipRef = useRef<TimedClip | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
   const [showShortsUi, setShowShortsUi] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [volume, setVolume] = useState(readStoredVolume)
+  const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === 'true')
 
   function clientToNormalized(clientX: number, clientY: number): { x: number; y: number } {
     const rect = frameRef.current?.getBoundingClientRect()
@@ -215,6 +305,29 @@ export function PreviewPlayer(): React.JSX.Element {
     }
   }, [isPlaying])
 
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume
+      videoRef.current.muted = muted
+    }
+  }, [volume, muted, activeSrc])
+
+  useEffect(() => {
+    localStorage.setItem(VOLUME_KEY, String(volume))
+  }, [volume])
+  useEffect(() => {
+    localStorage.setItem(MUTED_KEY, String(muted))
+  }, [muted])
+
+  useEffect(() => {
+    if (!isExpanded) return
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setIsExpanded(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isExpanded])
+
   function handleTimeUpdate(): void {
     const tc = activeTimedClipRef.current
     const video = videoRef.current
@@ -242,81 +355,148 @@ export function PreviewPlayer(): React.JSX.Element {
   const aspectClass = project.aspectRatio === '9:16' ? 'aspect-9-16' : 'aspect-16-9'
 
   return (
-    <div className="panel preview-player">
-      <div className="preview-frame-wrapper">
-        <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
-          {activeSrc ? (
-            <video
-              ref={videoRef}
-              src={activeSrc}
-              onTimeUpdate={handleTimeUpdate}
-              onEnded={() => setIsPlaying(false)}
-            />
-          ) : (
-            <div className="preview-empty">
-              <ClapperboardIcon width={32} height={32} />
-              <p>タイムラインにクリップを追加してください</p>
-            </div>
-          )}
-          {activeOverlays.map((o) => {
-            const livePos = overlayDrag?.id === o.id ? overlayDrag : o.style.customPosition
-            const positionStyle: CSSProperties = livePos
-              ? {
-                  left: `${livePos.x * 100}%`,
-                  top: `${livePos.y * 100}%`,
-                  right: 'auto'
-                }
-              : {}
-            const transforms: string[] = []
-            if (livePos) transforms.push('translate(-50%, -50%)')
-            else if (o.style.position === 'center') transforms.push('translateY(-50%)')
-            if (o.style.rotation) transforms.push(`rotate(${o.style.rotation}deg)`)
-            if (transforms.length > 0) positionStyle.transform = transforms.join(' ')
-            return (
-              <div
-                key={o.id}
-                className={`overlay-text ${livePos ? '' : `overlay-${o.style.position}`} anim-${o.style.animation}`}
-                style={{ ...overlayPreviewStyle(o.style), ...positionStyle }}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
-                }}
-              >
-                {renderOverlayText(o, playheadTime)}
+    <>
+      {isExpanded && (
+        <div className="preview-expanded-backdrop" onClick={() => setIsExpanded(false)} />
+      )}
+      <div className={`panel preview-player ${isExpanded ? 'expanded' : ''}`}>
+        <div className="preview-frame-wrapper">
+          <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
+            {activeSrc ? (
+              <video
+                ref={videoRef}
+                src={activeSrc}
+                onTimeUpdate={handleTimeUpdate}
+                onEnded={() => setIsPlaying(false)}
+              />
+            ) : (
+              <div className="preview-empty">
+                <ClapperboardIcon width={32} height={32} />
+                <p>タイムラインにクリップを追加してください</p>
               </div>
-            )
-          })}
-          {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
+            )}
+            {project.videoOverlayTracks
+              .filter((t) => !t.hidden)
+              .map((track) => {
+                const clip = findActiveOverlayClip(track, playheadTime)
+                if (!clip) return null
+                const asset = project.assets.find((a) => a.id === clip.assetId)
+                if (!asset) return null
+                return (
+                  <VideoOverlayLayer
+                    key={track.id}
+                    clip={clip}
+                    asset={asset}
+                    position={track.position}
+                    scale={track.scale}
+                    playheadTime={playheadTime}
+                    isPlaying={isPlaying}
+                  />
+                )
+              })}
+            {activeOverlays.map((o) => {
+              const livePos = overlayDrag?.id === o.id ? overlayDrag : o.style.customPosition
+              const positionStyle: CSSProperties = livePos
+                ? {
+                    left: `${livePos.x * 100}%`,
+                    top: `${livePos.y * 100}%`,
+                    right: 'auto'
+                  }
+                : {}
+              const transforms: string[] = []
+              if (livePos) transforms.push('translate(-50%, -50%)')
+              else if (o.style.position === 'center') transforms.push('translateY(-50%)')
+              if (o.style.rotation) transforms.push(`rotate(${o.style.rotation}deg)`)
+              if (transforms.length > 0) positionStyle.transform = transforms.join(' ')
+              return (
+                <div
+                  key={o.id}
+                  className={`overlay-text ${livePos ? '' : `overlay-${o.style.position}`} anim-${o.style.animation}`}
+                  style={{ ...overlayPreviewStyle(o.style), ...positionStyle }}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
+                  }}
+                >
+                  {renderOverlayText(o, playheadTime)}
+                </div>
+              )
+            })}
+            {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
+          </div>
         </div>
-      </div>
-      <div className="preview-controls">
-        {project.aspectRatio === '9:16' && (
+        <div className="preview-controls">
+          {project.aspectRatio === '9:16' && (
+            <button
+              className={`icon-button ${showShortsUi ? 'active' : ''}`}
+              title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
+              onClick={() => setShowShortsUi((v) => !v)}
+            >
+              <YoutubeIcon width={14} height={14} />
+            </button>
+          )}
           <button
-            className={`icon-button ${showShortsUi ? 'active' : ''}`}
-            title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
-            onClick={() => setShowShortsUi((v) => !v)}
+            className="play-button"
+            onClick={() => setIsPlaying(!isPlaying)}
+            disabled={!activeSrc}
           >
-            <YoutubeIcon width={14} height={14} />
+            {isPlaying ? <PauseIcon width={16} height={16} /> : <PlayIcon width={16} height={16} />}
           </button>
-        )}
-        <button
-          className="play-button"
-          onClick={() => setIsPlaying(!isPlaying)}
-          disabled={!activeSrc}
-        >
-          {isPlaying ? <PauseIcon width={16} height={16} /> : <PlayIcon width={16} height={16} />}
-        </button>
-        <div className="scrub-track">
           <div
-            className="scrub-fill"
-            style={{ width: total > 0 ? `${Math.min(100, (playheadTime / total) * 100)}%` : '0%' }}
-          />
+            className="scrub-track"
+            onClick={(e) => {
+              if (total <= 0) return
+              const rect = e.currentTarget.getBoundingClientRect()
+              const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width))
+              seekTo(ratio * total)
+            }}
+          >
+            <div
+              className="scrub-fill"
+              style={{
+                width: total > 0 ? `${Math.min(100, (playheadTime / total) * 100)}%` : '0%'
+              }}
+            />
+          </div>
+          <span className="time-label">
+            {formatTime(playheadTime)} / {formatTime(total)}
+          </span>
+          <div className="preview-volume">
+            <button
+              className="icon-button"
+              title={muted ? 'ミュート解除' : 'ミュート'}
+              onClick={() => setMuted((v) => !v)}
+            >
+              {muted || volume === 0 ? (
+                <VolumeXIcon width={14} height={14} />
+              ) : (
+                <Volume2Icon width={14} height={14} />
+              )}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={muted ? 0 : volume}
+              onChange={(e) => {
+                const v = Number(e.target.value)
+                setVolume(v)
+                if (v > 0 && muted) setMuted(false)
+              }}
+              title="音量"
+            />
+          </div>
+          <button
+            className={`icon-button ${isExpanded ? 'active' : ''}`}
+            title={isExpanded ? '実サイズ表示を閉じる (Esc)' : '実サイズで表示'}
+            onClick={() => setIsExpanded((v) => !v)}
+          >
+            <MaximizeIcon width={14} height={14} />
+          </button>
         </div>
-        <span className="time-label">
-          {formatTime(playheadTime)} / {formatTime(total)}
-        </span>
       </div>
-    </div>
+    </>
   )
 }

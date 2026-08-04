@@ -472,6 +472,26 @@ export function ThumbsDownIcon(props: IconProps): React.JSX.Element {
   )
 }
 
+export function EyeIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+export function EyeOffIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M17.9 17.9A11 11 0 0 1 12 20c-7 0-11-8-11-8a19.4 19.4 0 0 1 5-5.9" />
+      <path d="M9.9 5.2A10.6 10.6 0 0 1 12 5c7 0 11 8 11 8a19.6 19.6 0 0 1-2.6 3.9" />
+      <path d="M9.5 9.5a3 3 0 0 0 4.2 4.2" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  )
+}
+
 export function RefreshIcon(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)}>
