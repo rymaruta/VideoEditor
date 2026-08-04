@@ -2858,6 +2858,16 @@ h3 {
   box-shadow: 0 0 0 1px var(--accent-1);
 }
 
+.autoedit-card.director {
+  grid-column: 1 / -1;
+  border-color: var(--accent-1);
+  box-shadow: 0 0 0 1px var(--accent-1), 0 8px 24px rgba(34, 211, 238, 0.18);
+}
+
+.autoedit-card.director .autoedit-thumb {
+  aspect-ratio: 32 / 9;
+}
+
 .autoedit-badge {
   position: absolute;
   top: 8px;
@@ -2872,6 +2882,11 @@ h3 {
   padding: 2px 6px;
   border-radius: 10px;
   z-index: 1;
+}
+
+.autoedit-badge-director {
+  background: linear-gradient(135deg, #d4ff3f, var(--accent-1));
+  color: #0a0e14;
 }
 
 .autoedit-thumb {

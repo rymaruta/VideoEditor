@@ -129,54 +129,69 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
         )}
         {!loading && patterns.length > 0 && (
           <div className="autoedit-grid">
-            {patterns.map((p) => (
-              <div
-                key={p.id}
-                className={`autoedit-card ${appliedId === p.id ? 'applied' : ''} ${recommendedId === p.id ? 'recommended' : ''}`}
-              >
-                {recommendedId === p.id && (
-                  <span className="autoedit-badge">
-                    <SparklesIcon width={11} height={11} />
-                    AIのおすすめ
-                  </span>
-                )}
-                {thumbnails[p.id] ? (
-                  <img src={thumbnails[p.id]} alt={p.label} className="autoedit-thumb" />
-                ) : (
-                  <div className="autoedit-thumb autoedit-thumb-empty" />
-                )}
-                <div className="autoedit-card-body">
-                  <p className="autoedit-card-title">{p.label}</p>
-                  <p className="hint-text autoedit-card-desc">{p.description}</p>
-                  <p className="hint-text autoedit-card-meta">
-                    尺 {formatDuration(p.totalDuration)} / カット数 {p.segments.length} /{' '}
-                    {TRANSITION_LABELS[p.transition]}
-                  </p>
-                  <div className="autoedit-card-actions">
-                    <button className="primary-button" onClick={() => handleApply(p)}>
-                      <PlusIcon width={13} height={13} />
-                      {appliedId === p.id ? '適用済み' : 'タイムラインに適用'}
-                    </button>
-                    <div className="autoedit-feedback">
-                      <button
-                        className={`icon-button ${feedback[p.id] === 'liked' ? 'active' : ''}`}
-                        title="良い編集案"
-                        onClick={() => handleFeedback(p, true)}
-                      >
-                        <ThumbsUpIcon width={13} height={13} />
+            {patterns.map((p) => {
+              const isDirector = p.style === 'director'
+              const hasMixedTransitions = p.segments.some(
+                (s) => s.transitionIn && s.transitionIn !== p.segments[1]?.transitionIn
+              )
+              return (
+                <div
+                  key={p.id}
+                  className={`autoedit-card ${appliedId === p.id ? 'applied' : ''} ${recommendedId === p.id ? 'recommended' : ''} ${isDirector ? 'director' : ''}`}
+                >
+                  {isDirector ? (
+                    <span className="autoedit-badge autoedit-badge-director">
+                      <WandIcon width={11} height={11} />
+                      AIディレクター
+                    </span>
+                  ) : (
+                    recommendedId === p.id && (
+                      <span className="autoedit-badge">
+                        <SparklesIcon width={11} height={11} />
+                        AIのおすすめ
+                      </span>
+                    )
+                  )}
+                  {thumbnails[p.id] ? (
+                    <img src={thumbnails[p.id]} alt={p.label} className="autoedit-thumb" />
+                  ) : (
+                    <div className="autoedit-thumb autoedit-thumb-empty" />
+                  )}
+                  <div className="autoedit-card-body">
+                    <p className="autoedit-card-title">{p.label}</p>
+                    <p className="hint-text autoedit-card-desc">{p.description}</p>
+                    <p className="hint-text autoedit-card-meta">
+                      尺 {formatDuration(p.totalDuration)} / カット数 {p.segments.length} /{' '}
+                      {isDirector && hasMixedTransitions
+                        ? 'つなぎ方はカットごとにAIが選択'
+                        : TRANSITION_LABELS[p.transition]}
+                    </p>
+                    <div className="autoedit-card-actions">
+                      <button className="primary-button" onClick={() => handleApply(p)}>
+                        <PlusIcon width={13} height={13} />
+                        {appliedId === p.id ? '適用済み' : 'タイムラインに適用'}
                       </button>
-                      <button
-                        className={`icon-button ${feedback[p.id] === 'disliked' ? 'active' : ''}`}
-                        title="好みではない"
-                        onClick={() => handleFeedback(p, false)}
-                      >
-                        <ThumbsDownIcon width={13} height={13} />
-                      </button>
+                      <div className="autoedit-feedback">
+                        <button
+                          className={`icon-button ${feedback[p.id] === 'liked' ? 'active' : ''}`}
+                          title="良い編集案"
+                          onClick={() => handleFeedback(p, true)}
+                        >
+                          <ThumbsUpIcon width={13} height={13} />
+                        </button>
+                        <button
+                          className={`icon-button ${feedback[p.id] === 'disliked' ? 'active' : ''}`}
+                          title="好みではない"
+                          onClick={() => handleFeedback(p, false)}
+                        >
+                          <ThumbsDownIcon width={13} height={13} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
         <div className="modal-actions">

@@ -9,6 +9,8 @@ interface FlatCandidate {
   start: number
   end: number
   score: number
+  hasSceneChange: boolean
+  hasAudioPeak: boolean
 }
 
 interface StyleBuild {
@@ -63,7 +65,9 @@ async function collectHighlights(
           assetIndex: i,
           start: c.start,
           end: c.end,
-          score: c.score
+          score: c.score,
+          hasSceneChange: c.hasSceneChange,
+          hasAudioPeak: c.hasAudioPeak
         }))
       })
     } catch {
@@ -311,6 +315,97 @@ async function scoreHighlightsWithGemini(
   return map
 }
 
+const DIRECTOR_CANDIDATE_POOL_SIZE = 20
+const VALID_TRANSITIONS: TransitionType[] = ['none', 'crossfade', 'fade', 'wipe']
+
+interface DirectorPlan {
+  segments: FlatCandidate[]
+  transitions: TransitionType[]
+  reasoning: string
+}
+
+async function planDirectorPattern(
+  flat: FlatCandidate[],
+  videoAssets: MediaAsset[],
+  preferenceSummary: string,
+  apiKey: string
+): Promise<DirectorPlan | null> {
+  const pool = [...flat].sort((a, b) => b.score - a.score).slice(0, DIRECTOR_CANDIDATE_POOL_SIZE)
+  if (pool.length === 0) return null
+
+  const lines = pool
+    .map((c, i) => {
+      const asset = videoAssets.find((a) => a.id === c.assetId)
+      const flags =
+        [c.hasSceneChange ? 'カット点' : null, c.hasAudioPeak ? '音量ピーク' : null]
+          .filter(Boolean)
+          .join('/') || '特徴なし'
+      return `${i + 1}. 素材=${asset?.fileName ?? '不明'} / ${c.start.toFixed(1)}〜${c.end.toFixed(1)}秒 / スコア=${c.score.toFixed(0)} / ${flags}`
+    })
+    .join('\n')
+
+  const prompt = `あなたはYouTube Shorts専門のプロ編集者です。以下は動画素材から検出したハイライト候補のリストです(番号・素材名・区間・スコア・検出特徴)。
+
+# ハイライト候補
+${lines}
+
+# ユーザーの編集の好み傾向
+${preferenceSummary}
+
+# 依頼内容
+このリストから、視聴維持率が高くなるよう考え抜かれた1本の編集を組み立ててください。以下をあなた自身の編集判断で決めてください。
+- 使うカットの取捨選択(全部使う必要はありません。多すぎる/単調な構成は避けてください)
+- 再生する順番(素材の時系列順である必要はありません。冒頭でインパクトのあるカットを見せる、テンポの緩急をつけるなど、明確な編集意図を持って決めてください)
+- 各カットの前のつなぎ方(1カット目以外、"none"(カット)/"crossfade"/"fade"/"wipe"のいずれか)
+- 合計尺は20〜40秒程度を目安にしてください
+
+# 出力形式(このJSONのみを出力してください)
+{
+  "segments": [{ "index": number, "transition": "none" | "crossfade" | "fade" | "wipe" }],
+  "reasoning": "この構成にした編集意図を日本語2〜3文で"
+}`
+
+  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json' }
+    })
+  })
+  const data: GeminiResponse = await res.json()
+  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Geminiからの応答が空でした')
+  const parsed = JSON.parse(text) as {
+    segments?: { index: number; transition?: string }[]
+    reasoning?: string
+  }
+  if (!Array.isArray(parsed.segments) || parsed.segments.length === 0) return null
+
+  const segments: FlatCandidate[] = []
+  const transitions: TransitionType[] = []
+  for (const s of parsed.segments) {
+    const candidate = pool[s.index - 1]
+    if (!candidate) continue
+    segments.push(candidate)
+    transitions.push(
+      VALID_TRANSITIONS.includes(s.transition as TransitionType)
+        ? (s.transition as TransitionType)
+        : 'crossfade'
+    )
+  }
+  if (segments.length === 0) return null
+
+  return {
+    segments,
+    transitions,
+    reasoning: parsed.reasoning?.trim() || STYLE_DESCRIPTIONS.director
+  }
+}
+
 async function enhanceWithGemini(
   patterns: AutoEditPattern[],
   thumbnails: Record<string, string>,
@@ -459,6 +554,39 @@ export async function generateAutoEditPatterns(
       totalDuration: b.segments.reduce((sum, s) => sum + (s.end - s.start), 0)
     }))
 
+  let directorPatternId: string | undefined
+  if (options.geminiApiKey) {
+    try {
+      const plan = await planDirectorPattern(
+        flat,
+        videoAssets,
+        preferenceSummary,
+        options.geminiApiKey
+      )
+      if (plan) {
+        const id = uuid()
+        directorPatternId = id
+        patterns.push({
+          id,
+          style: 'director',
+          label: STYLE_LABELS.director,
+          description: plan.reasoning,
+          segments: plan.segments.map((s, i) => ({
+            assetId: s.assetId,
+            start: s.start,
+            end: s.end,
+            score: s.score,
+            transitionIn: i === 0 ? undefined : plan.transitions[i]
+          })),
+          transition: preferredTransition,
+          totalDuration: plan.segments.reduce((sum, s) => sum + (s.end - s.start), 0)
+        })
+      }
+    } catch {
+      // Director planning is best-effort; the fixed-heuristic patterns remain available.
+    }
+  }
+
   if (patterns.length === 0) throw new Error('編集パターンを生成できませんでした')
 
   const preferredOrder = prefStore.getPreferredStyleOrder()
@@ -479,11 +607,12 @@ export async function generateAutoEditPatterns(
     }
   }
 
-  let recommendedPatternId: string | undefined
+  let recommendedPatternId: string | undefined = directorPatternId
   if (options.geminiApiKey) {
     try {
+      const describable = patterns.filter((p) => p.id !== directorPatternId)
       const enhancement = await enhanceWithGemini(
-        patterns,
+        describable,
         thumbnails,
         preferenceSummary,
         options.geminiApiKey
@@ -491,7 +620,7 @@ export async function generateAutoEditPatterns(
       patterns = patterns.map((p) =>
         enhancement[p.id] ? { ...p, description: enhancement[p.id] } : p
       )
-      recommendedPatternId = enhancement.__recommendedId
+      if (!recommendedPatternId) recommendedPatternId = enhancement.__recommendedId
     } catch {
       // Gemini enhancement is best-effort; keep the local descriptions on failure.
     }

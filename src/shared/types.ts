@@ -199,13 +199,14 @@ export interface BpmAnalysisResult {
   offsetSeconds: number
 }
 
-export type AutoEditStyle = 'score' | 'jumpcut' | 'story' | 'longtake' | 'mix'
+export type AutoEditStyle = 'score' | 'jumpcut' | 'story' | 'longtake' | 'mix' | 'director'
 
 export interface AutoEditSegment {
   assetId: string
   start: number
   end: number
   score: number
+  transitionIn?: TransitionType
 }
 
 export interface AutoEditPattern {

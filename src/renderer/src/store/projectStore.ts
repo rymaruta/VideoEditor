@@ -926,17 +926,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   applyAutoEditPattern: (pattern) =>
     set((state) => {
-      const newClips: Clip[] = pattern.segments.map((seg, i) => ({
-        id: uuid(),
-        assetId: seg.assetId,
-        inPoint: seg.start,
-        outPoint: seg.end,
-        speed: 1,
-        transitionIn:
-          i === 0 || pattern.transition === 'none'
-            ? undefined
-            : { type: pattern.transition, duration: 0.5 }
-      }))
+      const newClips: Clip[] = pattern.segments.map((seg, i) => {
+        const transitionType = seg.transitionIn ?? pattern.transition
+        return {
+          id: uuid(),
+          assetId: seg.assetId,
+          inPoint: seg.start,
+          outPoint: seg.end,
+          speed: 1,
+          transitionIn:
+            i === 0 || transitionType === 'none'
+              ? undefined
+              : { type: transitionType, duration: 0.5 }
+        }
+      })
       return {
         ...pushHistory(state),
         project: { ...state.project, clips: [...state.project.clips, ...newClips] }
