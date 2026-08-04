@@ -293,7 +293,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         if (!transition || transition.type === 'none' || transition.duration <= 0) {
           const outV = `vcat${i}`
           const outA = `acat${i}`
-          filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0[${outV}]`)
+          filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/30[${outV}]`)
           filterParts.push(`[${curA}][a${i}]concat=n=2:v=0:a=1[${outA}]`)
           curV = outV
           curA = outA
@@ -305,7 +305,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
           const outV = `vxf${i}`
           const outA = `axf${i}`
           filterParts.push(
-            `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset}[${outV}]`
+            `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=1/30[${outV}]`
           )
           filterParts.push(`[${curA}][a${i}]acrossfade=d=${t}[${outA}]`)
           curV = outV
