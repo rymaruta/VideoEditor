@@ -986,11 +986,13 @@ export function Timeline(): React.JSX.Element {
                 <input
                   type="range"
                   min={0}
-                  max={1.5}
+                  max={3}
                   step={0.05}
                   value={track.volume}
+                  title={`音量 ${Math.round(track.volume * 100)}%`}
                   onChange={(e) => setAudioTrackVolume(track.id, Number(e.target.value))}
                 />
+                <span className="hint-text volume-percent">{Math.round(track.volume * 100)}%</span>
                 <button
                   className="icon-button danger"
                   title="トラック削除"
@@ -1391,11 +1393,11 @@ export function Timeline(): React.JSX.Element {
             />
           </label>
           <label>
-            音量
+            音量({Math.round((selectedAudioClipData.volume ?? 1) * 100)}%)
             <input
               type="range"
               min={0}
-              max={2}
+              max={3}
               step={0.05}
               value={selectedAudioClipData.volume ?? 1}
               onChange={(e) =>

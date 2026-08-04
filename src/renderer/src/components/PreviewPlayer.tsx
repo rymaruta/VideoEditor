@@ -167,7 +167,9 @@ function VideoOverlayLayer({
   position,
   scale,
   playheadTime,
-  isPlaying
+  isPlaying,
+  volume,
+  muted
 }: {
   clip: VideoOverlayClip
   asset: MediaAsset
@@ -175,6 +177,8 @@ function VideoOverlayLayer({
   scale: number
   playheadTime: number
   isPlaying: boolean
+  volume: number
+  muted: boolean
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const localTime = clip.inPoint + (playheadTime - clip.startTime)
@@ -192,6 +196,13 @@ function VideoOverlayLayer({
       ref.current?.pause()
     }
   }, [isPlaying])
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.volume = volume
+      ref.current.muted = muted
+    }
+  }, [volume, muted])
 
   return <video ref={ref} src={toFileUrl(asset.filePath)} style={pipStyle(position, scale)} />
 }
@@ -305,6 +316,38 @@ export function PreviewPlayer(): React.JSX.Element {
     }
   }, [isPlaying])
 
+  // Drive the playhead from requestAnimationFrame instead of the <video> element's
+  // native `timeupdate` event, which only fires a handful of times per second and
+  // makes the timeline playhead visibly jump instead of gliding smoothly.
+  useEffect(() => {
+    if (!isPlaying) return
+    let frameId: number
+    function tick(): void {
+      const tc = activeTimedClipRef.current
+      const video = videoRef.current
+      if (tc && video) {
+        const speed = tc.clip.speed || 1
+        const globalTime = tc.start + (video.currentTime - tc.clip.inPoint) / speed
+        setPlayheadTime(globalTime)
+
+        if (video.currentTime >= tc.clip.outPoint - 0.02) {
+          const idx = timedClips.indexOf(tc)
+          const next = timedClips[idx + 1]
+          if (next) {
+            loadClipForTime(next.start, isPlaying)
+          } else {
+            video.pause()
+            setIsPlaying(false)
+          }
+        }
+      }
+      frameId = requestAnimationFrame(tick)
+    }
+    frameId = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frameId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, timedClips])
+
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = volume
@@ -328,26 +371,6 @@ export function PreviewPlayer(): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isExpanded])
 
-  function handleTimeUpdate(): void {
-    const tc = activeTimedClipRef.current
-    const video = videoRef.current
-    if (!tc || !video) return
-    const speed = tc.clip.speed || 1
-    const globalTime = tc.start + (video.currentTime - tc.clip.inPoint) / speed
-    setPlayheadTime(globalTime)
-
-    if (video.currentTime >= tc.clip.outPoint - 0.02) {
-      const idx = timedClips.indexOf(tc)
-      const next = timedClips[idx + 1]
-      if (next) {
-        loadClipForTime(next.start, isPlaying)
-      } else {
-        video.pause()
-        setIsPlaying(false)
-      }
-    }
-  }
-
   const activeOverlays = project.textOverlays.filter(
     (o) => playheadTime >= o.startTime && playheadTime < o.endTime
   )
@@ -363,12 +386,7 @@ export function PreviewPlayer(): React.JSX.Element {
         <div className="preview-frame-wrapper">
           <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
             {activeSrc ? (
-              <video
-                ref={videoRef}
-                src={activeSrc}
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={() => setIsPlaying(false)}
-              />
+              <video ref={videoRef} src={activeSrc} onEnded={() => setIsPlaying(false)} />
             ) : (
               <div className="preview-empty">
                 <ClapperboardIcon width={32} height={32} />
@@ -391,6 +409,8 @@ export function PreviewPlayer(): React.JSX.Element {
                     scale={track.scale}
                     playheadTime={playheadTime}
                     isPlaying={isPlaying}
+                    volume={volume}
+                    muted={muted}
                   />
                 )
               })}
