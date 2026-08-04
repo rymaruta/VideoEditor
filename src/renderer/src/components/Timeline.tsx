@@ -7,6 +7,7 @@ import {
   SHORTCUT_ACTIONS,
   getActionLabel,
   getKeymap,
+  matchesBinding,
   KEYMAP_SCHEME_LABELS,
   type KeymapScheme
 } from '../lib/keymap'
@@ -137,6 +138,7 @@ export function Timeline(): React.JSX.Element {
   const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
   const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
+  const splitAudioClipAtTime = useProjectStore((s) => s.splitAudioClipAtTime)
   const addVideoOverlayTrack = useProjectStore((s) => s.addVideoOverlayTrack)
   const removeVideoOverlayTrack = useProjectStore((s) => s.removeVideoOverlayTrack)
   const toggleVideoOverlayTrackHidden = useProjectStore((s) => s.toggleVideoOverlayTrackHidden)
@@ -146,6 +148,7 @@ export function Timeline(): React.JSX.Element {
   const updateVideoOverlayClipTrim = useProjectStore((s) => s.updateVideoOverlayClipTrim)
   const swapVideoOverlayClipAsset = useProjectStore((s) => s.swapVideoOverlayClipAsset)
   const removeVideoOverlayClip = useProjectStore((s) => s.removeVideoOverlayClip)
+  const splitVideoOverlayClipAtTime = useProjectStore((s) => s.splitVideoOverlayClipAtTime)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
@@ -255,7 +258,6 @@ export function Timeline(): React.JSX.Element {
 
   useEffect(() => {
     function handleDeleteKey(e: KeyboardEvent): void {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return
       const target = e.target
       if (target instanceof HTMLElement) {
         const tag = target.tagName
@@ -263,6 +265,24 @@ export function Timeline(): React.JSX.Element {
           return
         }
       }
+      // Audio/PiP-overlay clip selection lives in local state here, invisible to the
+      // global keyboard shortcut hook (which only knows about the main clips track's
+      // selectedClipId) — so split/delete for these clips has to be handled locally too.
+      if (matchesBinding(e, keymap.split)) {
+        if (selectedAudioClip) {
+          e.preventDefault()
+          splitAudioClipAtTime(selectedAudioClip.trackId, selectedAudioClip.clipId, playheadTime)
+        } else if (selectedVideoOverlayClip) {
+          e.preventDefault()
+          splitVideoOverlayClipAtTime(
+            selectedVideoOverlayClip.trackId,
+            selectedVideoOverlayClip.clipId,
+            playheadTime
+          )
+        }
+        return
+      }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
       if (selectedOverlayId) {
         e.preventDefault()
         removeTextOverlay(selectedOverlayId)
@@ -285,7 +305,11 @@ export function Timeline(): React.JSX.Element {
     selectedVideoOverlayClip,
     removeTextOverlay,
     removeAudioClip,
-    removeVideoOverlayClip
+    removeVideoOverlayClip,
+    splitAudioClipAtTime,
+    splitVideoOverlayClipAtTime,
+    playheadTime,
+    keymap.split
   ])
 
   useEffect(() => {
@@ -1442,6 +1466,26 @@ export function Timeline(): React.JSX.Element {
             </select>
           </label>
           <button
+            className="small-button"
+            title={`分割 (${keymap.split.display})`}
+            disabled={
+              playheadTime <= selectedAudioClipData.startTime ||
+              playheadTime >=
+                selectedAudioClipData.startTime +
+                  (selectedAudioClipData.outPoint - selectedAudioClipData.inPoint)
+            }
+            onClick={() =>
+              splitAudioClipAtTime(
+                selectedAudioClip.trackId,
+                selectedAudioClip.clipId,
+                playheadTime
+              )
+            }
+          >
+            <ScissorsIcon width={13} height={13} />
+            カット
+          </button>
+          <button
             className="icon-button danger"
             onClick={() => {
               removeAudioClip(selectedAudioClip.trackId, selectedAudioClip.clipId)
@@ -1531,6 +1575,26 @@ export function Timeline(): React.JSX.Element {
                 ))}
             </select>
           </label>
+          <button
+            className="small-button"
+            title={`分割 (${keymap.split.display})`}
+            disabled={
+              playheadTime <= selectedVideoOverlayClipData.startTime ||
+              playheadTime >=
+                selectedVideoOverlayClipData.startTime +
+                  (selectedVideoOverlayClipData.outPoint - selectedVideoOverlayClipData.inPoint)
+            }
+            onClick={() =>
+              splitVideoOverlayClipAtTime(
+                selectedVideoOverlayClip.trackId,
+                selectedVideoOverlayClip.clipId,
+                playheadTime
+              )
+            }
+          >
+            <ScissorsIcon width={13} height={13} />
+            カット
+          </button>
           <button
             className="icon-button danger"
             onClick={() => {

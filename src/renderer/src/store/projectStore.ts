@@ -129,6 +129,7 @@ interface ProjectState {
   updateAudioClipVolume: (trackId: string, clipId: string, volume: number) => void
   swapAudioClipAsset: (trackId: string, clipId: string, assetId: string, outPoint: number) => void
   removeAudioClip: (trackId: string, clipId: string) => void
+  splitAudioClipAtTime: (trackId: string, clipId: string, absoluteTime: number) => void
   addKeywordSeClips: (
     placements: { assetId: string; startTime: number; outPoint: number; volume: number }[]
   ) => void
@@ -153,6 +154,7 @@ interface ProjectState {
     outPoint: number
   ) => void
   removeVideoOverlayClip: (trackId: string, clipId: string) => void
+  splitVideoOverlayClipAtTime: (trackId: string, clipId: string, absoluteTime: number) => void
 
   setBeatGrid: (grid: BeatGrid) => void
   clearBeatGrid: () => void
@@ -780,6 +782,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })),
 
+  splitAudioClipAtTime: (trackId, clipId, absoluteTime) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) => {
+          if (t.id !== trackId) return t
+          return {
+            ...t,
+            clips: t.clips.flatMap((c) => {
+              if (c.id !== clipId) return [c]
+              const dur = c.outPoint - c.inPoint
+              if (absoluteTime <= c.startTime || absoluteTime >= c.startTime + dur) return [c]
+              const splitLocal = c.inPoint + (absoluteTime - c.startTime)
+              return [
+                { ...c, outPoint: splitLocal },
+                { ...c, id: uuid(), startTime: absoluteTime, inPoint: splitLocal }
+              ]
+            })
+          }
+        })
+      }
+    })),
+
   addVideoOverlayTrack: (name) =>
     set((state) => ({
       ...pushHistory(state),
@@ -919,6 +945,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
           t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
         )
+      }
+    })),
+
+  splitVideoOverlayClipAtTime: (trackId, clipId, absoluteTime) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) => {
+          if (t.id !== trackId) return t
+          return {
+            ...t,
+            clips: t.clips.flatMap((c) => {
+              if (c.id !== clipId) return [c]
+              const dur = c.outPoint - c.inPoint
+              if (absoluteTime <= c.startTime || absoluteTime >= c.startTime + dur) return [c]
+              const splitLocal = c.inPoint + (absoluteTime - c.startTime)
+              return [
+                { ...c, outPoint: splitLocal },
+                { ...c, id: uuid(), startTime: absoluteTime, inPoint: splitLocal }
+              ]
+            })
+          }
+        })
       }
     })),
 
