@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
+import { existsSync, rmSync, statSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
@@ -9,6 +10,7 @@ import {
   generateFrameDataUrl,
   generateWaveformDataUrl,
   exportProject,
+  cancelExport,
   detectSilence
 } from './ffmpegService'
 import { transcribeRange, transcribeWordsRange } from './whisperService'
@@ -22,6 +24,9 @@ import { loadEnvFile, getEnvApiKeys } from './envConfig'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
 
 loadEnvFile()
+
+let hasUnsavedChanges = false
+let autosavePath = ''
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -43,6 +48,26 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+  })
+
+  mainWindow.on('close', (e) => {
+    if (!hasUnsavedChanges) {
+      if (autosavePath && existsSync(autosavePath)) rmSync(autosavePath, { force: true })
+      return
+    }
+    e.preventDefault()
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      buttons: ['保存せずに終了', 'キャンセル'],
+      defaultId: 1,
+      cancelId: 1,
+      message: '保存されていない変更があります',
+      detail: '変更を保存せずに終了しますか?'
+    })
+    if (choice === 0) {
+      hasUnsavedChanges = false
+      mainWindow.close()
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -231,6 +256,23 @@ app.whenReady().then(() => {
     downloadAudioAsset(url, suggestedName)
   )
   ipcMain.handle(IPC.getEnvApiKeys, () => getEnvApiKeys())
+
+  autosavePath = join(app.getPath('userData'), 'autosave.veproj')
+  ipcMain.on(IPC.setDirtyState, (_e, dirty: boolean) => {
+    hasUnsavedChanges = dirty
+  })
+  ipcMain.handle(IPC.checkAutosave, () => {
+    if (!existsSync(autosavePath)) return { exists: false }
+    return { exists: true, mtimeMs: statSync(autosavePath).mtimeMs }
+  })
+  ipcMain.handle(IPC.loadAutosave, () => loadProjectFile(autosavePath))
+  ipcMain.handle(IPC.autosaveProject, (_e, project: Project) =>
+    saveProjectFile(autosavePath, project)
+  )
+  ipcMain.handle(IPC.clearAutosave, () => {
+    if (existsSync(autosavePath)) rmSync(autosavePath, { force: true })
+  })
+  ipcMain.handle(IPC.cancelExport, () => cancelExport())
 
   createWindow()
 

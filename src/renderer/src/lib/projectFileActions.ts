@@ -6,6 +6,7 @@ export async function saveProjectAs(): Promise<void> {
   if (!filePath) return
   await window.api.saveProject(filePath, project)
   markSaved(filePath)
+  await window.api.clearAutosave()
 }
 
 export async function saveProject(): Promise<void> {
@@ -16,6 +17,7 @@ export async function saveProject(): Promise<void> {
   }
   await window.api.saveProject(currentFilePath, project)
   markSaved(currentFilePath)
+  await window.api.clearAutosave()
 }
 
 export async function openProject(): Promise<void> {
@@ -25,10 +27,12 @@ export async function openProject(): Promise<void> {
   if (!filePath) return
   const loaded = await window.api.loadProject(filePath)
   loadProject(loaded, filePath)
+  await window.api.clearAutosave()
 }
 
-export function startNewProject(): void {
+export async function startNewProject(): Promise<void> {
   const { isDirty, newProject } = useProjectStore.getState()
   if (isDirty && !confirm('保存されていない変更があります。破棄して新規作成しますか?')) return
   newProject()
+  await window.api.clearAutosave()
 }

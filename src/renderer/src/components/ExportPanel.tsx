@@ -77,10 +77,16 @@ export function ExportPanel(): React.JSX.Element {
       setDoneMessage(`書き出しが完了しました: ${outputPath}`)
       setDoneFilePath(outputPath)
     } catch (e) {
-      setError(formatIpcError(e))
+      const message = formatIpcError(e)
+      if (message !== 'EXPORT_CANCELED') setError(message)
     } finally {
       setExporting(false)
+      setProgress(null)
     }
+  }
+
+  async function handleCancelExport(): Promise<void> {
+    await window.api.cancelExport()
   }
 
   function addBatchJob(aspectRatio: AspectRatio, height: ResolutionHeight, q: QualityPreset): void {
@@ -126,11 +132,21 @@ export function ExportPanel(): React.JSX.Element {
         })
         setBatchStatus((prev) => ({ ...prev, [job.id]: 'done' }))
       } catch (e) {
-        setBatchStatus((prev) => ({ ...prev, [job.id]: 'error' }))
-        setBatchError(formatIpcError(e))
+        const message = formatIpcError(e)
+        setBatchStatus((prev) => ({
+          ...prev,
+          [job.id]: message === 'EXPORT_CANCELED' ? 'pending' : 'error'
+        }))
+        if (message === 'EXPORT_CANCELED') {
+          setBatchRunning(false)
+          setProgress(null)
+          return
+        }
+        setBatchError(message)
       }
     }
     setBatchRunning(false)
+    setProgress(null)
   }
 
   return (
@@ -192,10 +208,21 @@ export function ExportPanel(): React.JSX.Element {
           元動画・BGM・ナレーションの音量差を書き出し時に自動で揃えます(YouTube推奨値に合わせています)。
         </p>
       </div>
-      <button className="primary-button export-button" onClick={handleExport} disabled={exporting}>
-        <DownloadIcon width={15} height={15} />
-        {exporting ? '書き出し中...' : '動画を書き出す'}
-      </button>
+      <div className="export-button-row">
+        <button
+          className="primary-button export-button"
+          onClick={handleExport}
+          disabled={exporting}
+        >
+          <DownloadIcon width={15} height={15} />
+          {exporting ? '書き出し中...' : '動画を書き出す'}
+        </button>
+        {(exporting || batchRunning) && (
+          <button className="small-button danger" onClick={handleCancelExport}>
+            キャンセル
+          </button>
+        )}
+      </div>
       {progress && (exporting || batchRunning) && (
         <div className="progress-bar">
           <div className="progress-bar-fill" style={{ width: `${progress.percent}%` }} />

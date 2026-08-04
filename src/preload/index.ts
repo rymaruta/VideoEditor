@@ -120,7 +120,15 @@ const api = {
     suggestedName: string
   ): Promise<{ filePath: string; duration: number }> =>
     ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName),
-  getEnvApiKeys: (): Promise<EnvApiKeys> => ipcRenderer.invoke(IPC.getEnvApiKeys)
+  getEnvApiKeys: (): Promise<EnvApiKeys> => ipcRenderer.invoke(IPC.getEnvApiKeys),
+  setDirtyState: (dirty: boolean): void => ipcRenderer.send(IPC.setDirtyState, dirty),
+  checkAutosave: (): Promise<{ exists: boolean; mtimeMs?: number }> =>
+    ipcRenderer.invoke(IPC.checkAutosave),
+  loadAutosave: (): Promise<Project> => ipcRenderer.invoke(IPC.loadAutosave),
+  autosaveProject: (project: Project): Promise<void> =>
+    ipcRenderer.invoke(IPC.autosaveProject, project),
+  clearAutosave: (): Promise<void> => ipcRenderer.invoke(IPC.clearAutosave),
+  cancelExport: (): Promise<void> => ipcRenderer.invoke(IPC.cancelExport)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

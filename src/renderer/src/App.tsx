@@ -152,10 +152,44 @@ function App(): React.JSX.Element {
   const redo = useProjectStore((s) => s.redo)
   const isDirty = useProjectStore((s) => s.isDirty)
   const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
+  const restoreAutosave = useProjectStore((s) => s.restoreAutosave)
 
   useEffect(() => {
     loadEnvApiKeys()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Crash recovery: on launch, offer to restore a draft that was autosaved but
+  // never cleanly saved/closed (e.g. after a crash or forced quit).
+  useEffect(() => {
+    ;(async () => {
+      const status = await window.api.checkAutosave()
+      if (!status.exists) return
+      const restore = confirm(
+        '自動保存されたデータが見つかりました。前回、保存せずに終了した可能性があります。復元しますか?'
+      )
+      if (restore) {
+        const project = await window.api.loadAutosave()
+        restoreAutosave(project)
+      } else {
+        await window.api.clearAutosave()
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Keep the main process informed of unsaved-changes state so it can warn
+  // before quitting, and periodically autosave a recovery draft while dirty.
+  useEffect(() => {
+    window.api.setDirtyState(isDirty)
+  }, [isDirty])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const { project, isDirty } = useProjectStore.getState()
+      if (isDirty) window.api.autosaveProject(project)
+    }, 60000)
+    return () => clearInterval(interval)
   }, [])
 
   const [leftWidth, setLeftWidth] = useState(() =>

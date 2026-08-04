@@ -26,5 +26,11 @@ export const IPC = {
   saveProject: 'project:save',
   loadProject: 'project:load',
   downloadAudioAsset: 'audioLibrary:download',
-  getEnvApiKeys: 'settings:getEnvApiKeys'
+  getEnvApiKeys: 'settings:getEnvApiKeys',
+  setDirtyState: 'project:setDirtyState',
+  checkAutosave: 'project:checkAutosave',
+  loadAutosave: 'project:loadAutosave',
+  autosaveProject: 'project:autosave',
+  clearAutosave: 'project:clearAutosave',
+  cancelExport: 'export:cancel'
 } as const

@@ -2605,6 +2605,15 @@ h3 {
   font-size: 13px;
 }
 
+.export-button-row {
+  display: flex;
+  gap: 8px;
+}
+
+.export-button-row .export-button {
+  flex: 1;
+}
+
 /* Narration */
 .narration-panel .export-field select {
   width: 100%;

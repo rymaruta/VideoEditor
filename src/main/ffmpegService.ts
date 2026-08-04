@@ -249,6 +249,16 @@ export interface ExportOptions {
   onProgress: (percent: number, stage: string) => void
 }
 
+let currentExportCommand: ffmpeg.FfmpegCommand | null = null
+let exportCancelRequested = false
+
+export function cancelExport(): void {
+  if (currentExportCommand) {
+    exportCancelRequested = true
+    currentExportCommand.kill('SIGKILL')
+  }
+}
+
 export function exportProject(options: ExportOptions): Promise<void> {
   const { project, aspectRatio, resolutionHeight, quality, outputPath, onProgress } = options
   const loudnessNormalization = options.loudnessNormalization ?? false
@@ -261,6 +271,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
 
   const clipOutputDurations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
   const totalDuration = clipOutputDurations.reduce((sum, d) => sum + d, 0)
+  exportCancelRequested = false
 
   return new Promise((resolve, reject) => {
     let command: ffmpeg.FfmpegCommand
@@ -478,16 +489,25 @@ export function exportProject(options: ExportOptions): Promise<void> {
         })
         .on('error', (err) => {
           cleanupAssDir()
-          reject(err)
+          currentExportCommand = null
+          if (exportCancelRequested) {
+            rmSync(outputPath, { force: true })
+            reject(new Error('EXPORT_CANCELED'))
+          } else {
+            reject(err)
+          }
         })
         .on('end', () => {
           cleanupAssDir()
+          currentExportCommand = null
           onProgress(100, '完了')
           resolve()
         })
         .run()
+      currentExportCommand = command
     } catch (e) {
       cleanupAssDir()
+      currentExportCommand = null
       reject(e)
     }
   })

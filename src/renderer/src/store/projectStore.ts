@@ -51,6 +51,7 @@ interface ProjectState {
 
   newProject: () => void
   loadProject: (project: Project, filePath: string) => void
+  restoreAutosave: (project: Project) => void
   markSaved: (filePath: string) => void
 
   addAsset: (asset: MediaAsset) => void
@@ -186,6 +187,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       future: [],
       currentFilePath: filePath,
       isDirty: false,
+      selectedClipId: null,
+      multiSelectedClipIds: [],
+      clipboardClips: [],
+      playheadTime: 0,
+      isPlaying: false,
+      seekRequest: null
+    }),
+
+  restoreAutosave: (project) =>
+    set({
+      project: normalizeLoadedProject(project),
+      past: [],
+      future: [],
+      currentFilePath: null,
+      // The recovered draft doesn't exist on disk under a real save yet, so keep
+      // it flagged dirty until the user explicitly saves it.
+      isDirty: true,
       selectedClipId: null,
       multiSelectedClipIds: [],
       clipboardClips: [],
