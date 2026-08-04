@@ -145,6 +145,7 @@ export function Timeline(): React.JSX.Element {
   const swapVideoOverlayClipAsset = useProjectStore((s) => s.swapVideoOverlayClipAsset)
   const removeVideoOverlayClip = useProjectStore((s) => s.removeVideoOverlayClip)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
+  const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
   const pasteClip = useProjectStore((s) => s.pasteClip)
   const clipboardClips = useProjectStore((s) => s.clipboardClips)
@@ -181,6 +182,16 @@ export function Timeline(): React.JSX.Element {
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [scrubbing, setScrubbing] = useState(false)
+
+  function selectOnly(kind: 'clip' | 'audio' | 'videoOverlay' | 'caption'): void {
+    if (kind !== 'clip') {
+      selectClip(null)
+      setMultiSelectedClipIds([])
+    }
+    if (kind !== 'audio') setSelectedAudioClip(null)
+    if (kind !== 'videoOverlay') setSelectedVideoOverlayClip(null)
+    if (kind !== 'caption') setSelectedOverlayId(null)
+  }
   const videoLaneRef = useRef<HTMLDivElement>(null)
   const trackLanesColRef = useRef<HTMLDivElement>(null)
   const lastClickedClipIndexRef = useRef<number | null>(null)
@@ -239,6 +250,41 @@ export function Timeline(): React.JSX.Element {
     () => (snapEnabled ? snapCandidatesWithBeat : []),
     [snapEnabled, snapCandidatesWithBeat]
   )
+
+  useEffect(() => {
+    function handleDeleteKey(e: KeyboardEvent): void {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const target = e.target
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
+          return
+        }
+      }
+      if (selectedOverlayId) {
+        e.preventDefault()
+        removeTextOverlay(selectedOverlayId)
+        setSelectedOverlayId(null)
+      } else if (selectedAudioClip) {
+        e.preventDefault()
+        removeAudioClip(selectedAudioClip.trackId, selectedAudioClip.clipId)
+        setSelectedAudioClip(null)
+      } else if (selectedVideoOverlayClip) {
+        e.preventDefault()
+        removeVideoOverlayClip(selectedVideoOverlayClip.trackId, selectedVideoOverlayClip.clipId)
+        setSelectedVideoOverlayClip(null)
+      }
+    }
+    window.addEventListener('keydown', handleDeleteKey)
+    return () => window.removeEventListener('keydown', handleDeleteKey)
+  }, [
+    selectedOverlayId,
+    selectedAudioClip,
+    selectedVideoOverlayClip,
+    removeTextOverlay,
+    removeAudioClip,
+    removeVideoOverlayClip
+  ])
 
   useEffect(() => {
     if (!trimDrag) return
@@ -983,6 +1029,7 @@ export function Timeline(): React.JSX.Element {
                   draggable
                   onClick={(e) => {
                     e.stopPropagation()
+                    selectOnly('clip')
                     if (e.shiftKey && lastClickedClipIndexRef.current !== null) {
                       const lo = Math.min(lastClickedClipIndexRef.current, i)
                       const hi = Math.max(lastClickedClipIndexRef.current, i)
@@ -1136,6 +1183,7 @@ export function Timeline(): React.JSX.Element {
                     }}
                     onClick={(e) => {
                       e.stopPropagation()
+                      selectOnly('videoOverlay')
                       setSelectedVideoOverlayClip({ trackId: track.id, clipId: clip.id })
                     }}
                     title={asset.fileName}
@@ -1180,6 +1228,7 @@ export function Timeline(): React.JSX.Element {
                     }}
                     onClick={(e) => {
                       e.stopPropagation()
+                      selectOnly('audio')
                       setSelectedAudioClip({ trackId: track.id, clipId: clip.id })
                     }}
                     title={asset.fileName}
@@ -1238,6 +1287,7 @@ export function Timeline(): React.JSX.Element {
                       className="timeline-caption-handle timeline-caption-handle-left"
                       onMouseDown={(e) => {
                         e.stopPropagation()
+                        selectOnly('caption')
                         setSelectedOverlayId(overlay.id)
                         setOverlayDrag({
                           overlayId: overlay.id,
@@ -1256,6 +1306,7 @@ export function Timeline(): React.JSX.Element {
                       className="timeline-caption-handle timeline-caption-handle-right"
                       onMouseDown={(e) => {
                         e.stopPropagation()
+                        selectOnly('caption')
                         setSelectedOverlayId(overlay.id)
                         setOverlayDrag({
                           overlayId: overlay.id,

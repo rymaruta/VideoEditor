@@ -32,7 +32,12 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // Dev mode serves the renderer from http://localhost (Vite dev server), and
+      // Chromium blocks file:// resource loads (local video/audio assets) from an
+      // http(s) origin by default. The packaged app loads the renderer via file://
+      // and is unaffected, so this only relaxes the dev-only workflow.
+      webSecurity: !is.dev
     }
   })
 
