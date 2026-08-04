@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MediaBin } from './components/MediaBin'
 import { PreviewPlayer } from './components/PreviewPlayer'
 import { Timeline } from './components/Timeline'
@@ -115,11 +115,13 @@ const DEFAULT_LEFT_WIDTH = 260
 const DEFAULT_RIGHT_WIDTH = 320
 const DEFAULT_TIMELINE_HEIGHT = 440
 const MIN_LEFT_WIDTH = 200
-const MAX_LEFT_WIDTH = 480
 const MIN_RIGHT_WIDTH = 280
-const MAX_RIGHT_WIDTH = 540
 const MIN_TIMELINE_HEIGHT = 160
 const MAX_TIMELINE_HEIGHT = 560
+// DaVinci Resolve-style panels: no fixed pixel cap. The only limit is leaving
+// enough room for the preview/timeline in the center to stay usable.
+const MIN_CENTER_WIDTH = 360
+const RESIZE_CHROME_WIDTH = 80
 
 function readStoredSize(key: string, fallback: number): number {
   const raw = localStorage.getItem(key)
@@ -190,19 +192,29 @@ function App(): React.JSX.Element {
     function handleMouseMove(e: MouseEvent): void {
       if (!resizeDrag) return
       if (resizeDrag.kind === 'left') {
+        const rightSpace = rightCollapsed ? 0 : resizeDrag.startRightWidth
+        const maxLeftWidth = Math.max(
+          MIN_LEFT_WIDTH,
+          window.innerWidth - rightSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
+        )
         setLeftWidth(
           clamp(
             resizeDrag.startLeftWidth + (e.clientX - resizeDrag.startX),
             MIN_LEFT_WIDTH,
-            MAX_LEFT_WIDTH
+            maxLeftWidth
           )
         )
       } else if (resizeDrag.kind === 'right') {
+        const leftSpace = leftCollapsed ? 0 : resizeDrag.startLeftWidth
+        const maxRightWidth = Math.max(
+          MIN_RIGHT_WIDTH,
+          window.innerWidth - leftSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
+        )
         setRightWidth(
           clamp(
             resizeDrag.startRightWidth - (e.clientX - resizeDrag.startX),
             MIN_RIGHT_WIDTH,
-            MAX_RIGHT_WIDTH
+            maxRightWidth
           )
         )
       } else {
@@ -230,7 +242,7 @@ function App(): React.JSX.Element {
       document.body.style.cursor = previousCursor
       document.body.style.userSelect = previousUserSelect
     }
-  }, [resizeDrag])
+  }, [resizeDrag, leftCollapsed, rightCollapsed])
 
   useEffect(() => {
     localStorage.setItem(LEFT_WIDTH_KEY, String(leftWidth))
@@ -247,6 +259,37 @@ function App(): React.JSX.Element {
   useEffect(() => {
     localStorage.setItem(RIGHT_COLLAPSED_KEY, String(rightCollapsed))
   }, [rightCollapsed])
+
+  // Re-clamp panel widths when the OS window itself is resized (not just via drag),
+  // so shrinking the window can't squeeze the center preview/timeline out entirely.
+  const layoutRef = useRef({ leftWidth, rightWidth, leftCollapsed, rightCollapsed })
+  useEffect(() => {
+    layoutRef.current = { leftWidth, rightWidth, leftCollapsed, rightCollapsed }
+  }, [leftWidth, rightWidth, leftCollapsed, rightCollapsed])
+  useEffect(() => {
+    function handleWindowResize(): void {
+      const {
+        leftWidth: lw,
+        rightWidth: rw,
+        leftCollapsed: lc,
+        rightCollapsed: rc
+      } = layoutRef.current
+      const rightSpace = rc ? 0 : rw
+      const leftSpace = lc ? 0 : lw
+      const maxLeftWidth = Math.max(
+        MIN_LEFT_WIDTH,
+        window.innerWidth - rightSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
+      )
+      const maxRightWidth = Math.max(
+        MIN_RIGHT_WIDTH,
+        window.innerWidth - leftSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
+      )
+      setLeftWidth((w) => clamp(w, MIN_LEFT_WIDTH, maxLeftWidth))
+      setRightWidth((w) => clamp(w, MIN_RIGHT_WIDTH, maxRightWidth))
+    }
+    window.addEventListener('resize', handleWindowResize)
+    return () => window.removeEventListener('resize', handleWindowResize)
+  }, [])
 
   useKeyboardShortcuts()
 
