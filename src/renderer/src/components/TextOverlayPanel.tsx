@@ -17,10 +17,12 @@ export function TextOverlayPanel(): React.JSX.Element {
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
+  const shiftAllTextOverlays = useProjectStore((s) => s.shiftAllTextOverlays)
   const addCaptionPreset = usePresetStore((s) => s.addCaptionPreset)
 
   const total = getTotalDuration(project)
   const [presetNameDrafts, setPresetNameDrafts] = useState<Record<string, string>>({})
+  const [shiftAmount, setShiftAmount] = useState(0.5)
 
   function patchStyle(id: string, current: TextStyle, patch: Partial<TextStyle>): void {
     updateTextOverlay(id, { style: { ...current, ...patch } })
@@ -64,8 +66,30 @@ export function TextOverlayPanel(): React.JSX.Element {
         </button>
       </div>
       <p className="hint-text">
-        プレビュー画面でテキストを直接ドラッグすると、自由な位置に配置できます。
+        プレビュー画面でテキストを直接ドラッグすると、自由な位置に配置できます。タイムライン上のテロップブロックをドラッグすると開始位置の移動、左右の端をドラッグすると個別のトリムができます。
       </p>
+      {project.textOverlays.length > 0 && (
+        <div className="overlay-shift-row">
+          <span className="hint-text">全テロップを一括シフト</span>
+          <input
+            type="number"
+            step={0.1}
+            value={shiftAmount}
+            onChange={(e) => setShiftAmount(Number(e.target.value))}
+          />
+          <span className="hint-text">秒</span>
+          <button
+            className="small-button"
+            onClick={() => shiftAllTextOverlays(shiftAmount)}
+            title="すべてのテロップの開始/終了時刻を指定した秒数だけ一括でずらします"
+          >
+            適用
+          </button>
+          <button className="small-button" onClick={() => shiftAllTextOverlays(-shiftAmount)}>
+            逆方向に適用
+          </button>
+        </div>
+      )}
       <div className="overlay-list">
         {project.textOverlays.length === 0 && (
           <div className="empty-state">

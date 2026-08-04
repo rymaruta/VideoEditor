@@ -76,6 +76,19 @@ interface AudioDragState {
   snapGuideTime: number | null
 }
 
+interface OverlayDragState {
+  overlayId: string
+  mode: 'move' | 'trim-left' | 'trim-right'
+  startX: number
+  originalStartTime: number
+  originalEndTime: number
+  liveStartTime: number
+  liveEndTime: number
+  snapGuideTime: number | null
+}
+
+const MIN_OVERLAY_DURATION = 0.2
+
 export function Timeline(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const selectedClipId = useProjectStore((s) => s.selectedClipId)
@@ -103,6 +116,7 @@ export function Timeline(): React.JSX.Element {
   const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
   const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
+  const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const copySelectedClip = useProjectStore((s) => s.copySelectedClip)
   const pasteClip = useProjectStore((s) => s.pasteClip)
   const clipboardClips = useProjectStore((s) => s.clipboardClips)
@@ -131,6 +145,8 @@ export function Timeline(): React.JSX.Element {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null)
   const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
+  const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [scrubbing, setScrubbing] = useState(false)
   const videoLaneRef = useRef<HTMLDivElement>(null)
   const trackLanesColRef = useRef<HTMLDivElement>(null)
@@ -274,6 +290,85 @@ export function Timeline(): React.JSX.Element {
     }
   }, [audioDrag, pixelsPerSecond, updateAudioClipStart, activeSnapCandidates])
 
+  useEffect(() => {
+    if (!overlayDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setOverlayDrag((prev) => {
+        if (!prev) return prev
+        const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
+        const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
+        const duration = prev.originalEndTime - prev.originalStartTime
+        if (prev.mode === 'move') {
+          const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
+          const startSnap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
+          if (startSnap.snapped) {
+            return {
+              ...prev,
+              liveStartTime: startSnap.time,
+              liveEndTime: startSnap.time + duration,
+              snapGuideTime: startSnap.time
+            }
+          }
+          const endSnap = snapTime(rawStart + duration, activeSnapCandidates, thresholdSeconds)
+          if (endSnap.snapped) {
+            const liveStartTime = Math.max(0, endSnap.time - duration)
+            return {
+              ...prev,
+              liveStartTime,
+              liveEndTime: liveStartTime + duration,
+              snapGuideTime: endSnap.time
+            }
+          }
+          return {
+            ...prev,
+            liveStartTime: rawStart,
+            liveEndTime: rawStart + duration,
+            snapGuideTime: null
+          }
+        }
+        if (prev.mode === 'trim-left') {
+          const rawStart = Math.min(
+            prev.originalEndTime - MIN_OVERLAY_DURATION,
+            Math.max(0, prev.originalStartTime + deltaSeconds)
+          )
+          const snap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
+          return {
+            ...prev,
+            liveStartTime: snap.snapped ? snap.time : rawStart,
+            snapGuideTime: snap.snapped ? snap.time : null
+          }
+        }
+        const rawEnd = Math.max(
+          prev.originalStartTime + MIN_OVERLAY_DURATION,
+          prev.originalEndTime + deltaSeconds
+        )
+        const snap = snapTime(rawEnd, activeSnapCandidates, thresholdSeconds)
+        return {
+          ...prev,
+          liveEndTime: snap.snapped ? snap.time : rawEnd,
+          snapGuideTime: snap.snapped ? snap.time : null
+        }
+      })
+    }
+    function handleMouseUp(): void {
+      setOverlayDrag((prev) => {
+        if (prev) {
+          updateTextOverlay(prev.overlayId, {
+            startTime: prev.liveStartTime,
+            endTime: prev.liveEndTime
+          })
+        }
+        return null
+      })
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [overlayDrag, pixelsPerSecond, updateTextOverlay, activeSnapCandidates])
+
   function beginTrimDrag(
     e: React.MouseEvent,
     edge: 'left' | 'right',
@@ -313,7 +408,8 @@ export function Timeline(): React.JSX.Element {
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
-  const activeSnapGuideTime = trimDrag?.snapGuideTime ?? audioDrag?.snapGuideTime ?? null
+  const activeSnapGuideTime =
+    trimDrag?.snapGuideTime ?? audioDrag?.snapGuideTime ?? overlayDrag?.snapGuideTime ?? null
 
   useEffect(() => {
     if (!scrubbing) return
@@ -926,19 +1022,74 @@ export function Timeline(): React.JSX.Element {
 
           {project.textOverlays.length > 0 && (
             <div className="track-lane caption-lane" style={{ width: timelineWidth }}>
-              {project.textOverlays.map((overlay) => (
-                <div
-                  key={overlay.id}
-                  className={`timeline-caption-clip ${overlay.source === 'auto' ? 'auto' : ''}`}
-                  style={{
-                    left: overlay.startTime * pixelsPerSecond,
-                    width: Math.max(4, (overlay.endTime - overlay.startTime) * pixelsPerSecond)
-                  }}
-                  title={overlay.text}
-                >
-                  {overlay.text}
-                </div>
-              ))}
+              {project.textOverlays.map((overlay) => {
+                const isDragging = overlayDrag?.overlayId === overlay.id
+                const displayStart = isDragging ? overlayDrag.liveStartTime : overlay.startTime
+                const displayEnd = isDragging ? overlayDrag.liveEndTime : overlay.endTime
+                return (
+                  <div
+                    key={overlay.id}
+                    className={`timeline-caption-clip ${overlay.source === 'auto' ? 'auto' : ''} ${
+                      selectedOverlayId === overlay.id ? 'selected' : ''
+                    } ${isDragging ? 'dragging' : ''}`}
+                    style={{
+                      left: displayStart * pixelsPerSecond,
+                      width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond)
+                    }}
+                    title={overlay.text}
+                    onMouseDown={(e) => {
+                      e.stopPropagation()
+                      setSelectedOverlayId(overlay.id)
+                      setOverlayDrag({
+                        overlayId: overlay.id,
+                        mode: 'move',
+                        startX: e.clientX,
+                        originalStartTime: overlay.startTime,
+                        originalEndTime: overlay.endTime,
+                        liveStartTime: overlay.startTime,
+                        liveEndTime: overlay.endTime,
+                        snapGuideTime: null
+                      })
+                    }}
+                  >
+                    <div
+                      className="timeline-caption-handle timeline-caption-handle-left"
+                      onMouseDown={(e) => {
+                        e.stopPropagation()
+                        setSelectedOverlayId(overlay.id)
+                        setOverlayDrag({
+                          overlayId: overlay.id,
+                          mode: 'trim-left',
+                          startX: e.clientX,
+                          originalStartTime: overlay.startTime,
+                          originalEndTime: overlay.endTime,
+                          liveStartTime: overlay.startTime,
+                          liveEndTime: overlay.endTime,
+                          snapGuideTime: null
+                        })
+                      }}
+                    />
+                    {overlay.text}
+                    <div
+                      className="timeline-caption-handle timeline-caption-handle-right"
+                      onMouseDown={(e) => {
+                        e.stopPropagation()
+                        setSelectedOverlayId(overlay.id)
+                        setOverlayDrag({
+                          overlayId: overlay.id,
+                          mode: 'trim-right',
+                          startX: e.clientX,
+                          originalStartTime: overlay.startTime,
+                          originalEndTime: overlay.endTime,
+                          liveStartTime: overlay.startTime,
+                          liveEndTime: overlay.endTime,
+                          snapGuideTime: null
+                        })
+                      }}
+                    />
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

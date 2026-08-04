@@ -76,6 +76,7 @@ interface ProjectState {
   addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => void
   updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void
   removeTextOverlay: (id: string) => void
+  shiftAllTextOverlays: (deltaSeconds: number) => void
 
   addAudioTrack: (name: string) => void
   removeAudioTrack: (trackId: string) => void
@@ -454,6 +455,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project: {
         ...state.project,
         textOverlays: state.project.textOverlays.filter((o) => o.id !== id)
+      }
+    })),
+
+  shiftAllTextOverlays: (deltaSeconds) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        textOverlays: state.project.textOverlays.map((o) => {
+          const duration = o.endTime - o.startTime
+          const startTime = Math.max(0, o.startTime + deltaSeconds)
+          return { ...o, startTime, endTime: startTime + duration }
+        })
       }
     })),
 
