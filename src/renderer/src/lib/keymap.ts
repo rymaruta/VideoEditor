@@ -1,7 +1,7 @@
 export type KeymapScheme = 'default' | 'premiere' | 'capcut'
 
 export type ShortcutAction =
-  'undo' | 'redo' | 'copy' | 'paste' | 'save' | 'playPause' | 'split' | 'delete'
+  'undo' | 'redo' | 'copy' | 'paste' | 'duplicate' | 'save' | 'playPause' | 'split' | 'delete'
 
 export interface KeyBinding {
   key: string
@@ -15,6 +15,7 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   'delete',
   'copy',
   'paste',
+  'duplicate',
   'undo',
   'redo',
   'playPause',
@@ -26,6 +27,7 @@ const ACTION_LABELS: Record<ShortcutAction, string> = {
   redo: 'やり直す',
   copy: 'コピー',
   paste: '貼り付け',
+  duplicate: '複製',
   save: '保存',
   playPause: '再生/停止',
   split: '分割',
@@ -38,6 +40,7 @@ const KEYMAPS: Record<KeymapScheme, Record<ShortcutAction, KeyBinding>> = {
     redo: { key: 'z', ctrl: true, shift: true, display: 'Ctrl+Shift+Z' },
     copy: { key: 'c', ctrl: true, display: 'Ctrl+C' },
     paste: { key: 'v', ctrl: true, display: 'Ctrl+V' },
+    duplicate: { key: 'd', ctrl: true, display: 'Ctrl+D' },
     save: { key: 's', ctrl: true, display: 'Ctrl+S' },
     playPause: { key: ' ', display: 'Space' },
     split: { key: 's', display: 'S' },
@@ -48,6 +51,7 @@ const KEYMAPS: Record<KeymapScheme, Record<ShortcutAction, KeyBinding>> = {
     redo: { key: 'z', ctrl: true, shift: true, display: 'Ctrl+Shift+Z' },
     copy: { key: 'c', ctrl: true, display: 'Ctrl+C' },
     paste: { key: 'v', ctrl: true, display: 'Ctrl+V' },
+    duplicate: { key: 'd', ctrl: true, display: 'Ctrl+D' },
     save: { key: 's', ctrl: true, display: 'Ctrl+S' },
     playPause: { key: ' ', display: 'Space' },
     split: { key: 'k', ctrl: true, display: 'Ctrl+K' },
@@ -58,6 +62,7 @@ const KEYMAPS: Record<KeymapScheme, Record<ShortcutAction, KeyBinding>> = {
     redo: { key: 'z', ctrl: true, shift: true, display: 'Ctrl+Shift+Z' },
     copy: { key: 'c', ctrl: true, display: 'Ctrl+C' },
     paste: { key: 'v', ctrl: true, display: 'Ctrl+V' },
+    duplicate: { key: 'd', ctrl: true, display: 'Ctrl+D' },
     save: { key: 's', ctrl: true, display: 'Ctrl+S' },
     playPause: { key: ' ', display: 'Space' },
     split: { key: 'b', ctrl: true, display: 'Ctrl+B' },

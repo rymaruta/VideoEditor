@@ -433,3 +433,23 @@ export function ShuffleIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+export function MagnetIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M6 15V6a4 4 0 0 1 8 0v9" />
+      <path d="M18 15a6 6 0 0 1-12 0v-3h4v3a2 2 0 0 0 4 0v-3h4z" />
+    </svg>
+  )
+}
+
+export function MaximizeIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+  )
+}

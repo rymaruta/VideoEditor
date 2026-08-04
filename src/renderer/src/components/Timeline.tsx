@@ -39,7 +39,9 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
   AlertTriangleIcon,
-  ActivityIcon
+  ActivityIcon,
+  MagnetIcon,
+  MaximizeIcon
 } from './icons'
 
 const BASE_PIXELS_PER_SECOND = 40
@@ -81,6 +83,7 @@ export function Timeline(): React.JSX.Element {
   const multiSelectedClipIds = useProjectStore((s) => s.multiSelectedClipIds)
   const setMultiSelectedClipIds = useProjectStore((s) => s.setMultiSelectedClipIds)
   const removeClips = useProjectStore((s) => s.removeClips)
+  const duplicateClips = useProjectStore((s) => s.duplicateClips)
   const updateClipsSpeed = useProjectStore((s) => s.updateClipsSpeed)
   const seekTo = useProjectStore((s) => s.seekTo)
   const playheadTime = useProjectStore((s) => s.playheadTime)
@@ -108,6 +111,8 @@ export function Timeline(): React.JSX.Element {
   const toggleBeatGridEnabled = useProjectStore((s) => s.toggleBeatGridEnabled)
   const keymapScheme = useSettingsStore((s) => s.keymapScheme)
   const setKeymapScheme = useSettingsStore((s) => s.setKeymapScheme)
+  const snapEnabled = useSettingsStore((s) => s.snapEnabled)
+  const setSnapEnabled = useSettingsStore((s) => s.setSnapEnabled)
   const keymap = getKeymap(keymapScheme)
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
@@ -128,6 +133,7 @@ export function Timeline(): React.JSX.Element {
   const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
   const [scrubbing, setScrubbing] = useState(false)
   const videoLaneRef = useRef<HTMLDivElement>(null)
+  const trackLanesColRef = useRef<HTMLDivElement>(null)
   const lastClickedClipIndexRef = useRef<number | null>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
@@ -169,6 +175,11 @@ export function Timeline(): React.JSX.Element {
     [snapCandidates, beatTimes]
   )
 
+  const activeSnapCandidates = useMemo(
+    () => (snapEnabled ? snapCandidatesWithBeat : []),
+    [snapEnabled, snapCandidatesWithBeat]
+  )
+
   useEffect(() => {
     if (!trimDrag) return
     function handleMouseMove(e: MouseEvent): void {
@@ -192,7 +203,7 @@ export function Timeline(): React.JSX.Element {
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
         const { time: snappedTcEnd, snapped } = snapTime(
           rawTcEnd,
-          snapCandidatesWithBeat,
+          activeSnapCandidates,
           thresholdSeconds
         )
         if (snapped) {
@@ -224,7 +235,7 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [trimDrag, pixelsPerSecond, updateClipTrim, snapCandidatesWithBeat])
+  }, [trimDrag, pixelsPerSecond, updateClipTrim, activeSnapCandidates])
 
   useEffect(() => {
     if (!audioDrag) return
@@ -234,11 +245,11 @@ export function Timeline(): React.JSX.Element {
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
         const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
-        const startSnap = snapTime(rawStart, snapCandidatesWithBeat, thresholdSeconds)
+        const startSnap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
         if (startSnap.snapped) {
           return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
         }
-        const endSnap = snapTime(rawStart + prev.duration, snapCandidatesWithBeat, thresholdSeconds)
+        const endSnap = snapTime(rawStart + prev.duration, activeSnapCandidates, thresholdSeconds)
         if (endSnap.snapped) {
           return {
             ...prev,
@@ -261,7 +272,7 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, snapCandidatesWithBeat])
+  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, activeSnapCandidates])
 
   function beginTrimDrag(
     e: React.MouseEvent,
@@ -337,6 +348,14 @@ export function Timeline(): React.JSX.Element {
     setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (e.deltaY < 0 ? 1.1 : 0.9))))
   }
 
+  function handleZoomToFit(): void {
+    const container = trackLanesColRef.current
+    if (!container || total <= 0) return
+    const availableWidth = container.clientWidth - 16
+    const fitZoom = availableWidth / (total * BASE_PIXELS_PER_SECOND)
+    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, fitZoom)))
+  }
+
   async function handleAnalyzeBpm(track: AudioTrack): Promise<void> {
     const clip = track.clips[0]
     if (!clip) return
@@ -388,6 +407,16 @@ export function Timeline(): React.JSX.Element {
             onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))}
           >
             <ZoomInIcon width={13} height={13} />
+          </button>
+          <button className="icon-button" title="タイムライン全体を表示" onClick={handleZoomToFit}>
+            <MaximizeIcon width={13} height={13} />
+          </button>
+          <button
+            className={`icon-button ${snapEnabled ? 'active' : ''}`}
+            title={snapEnabled ? 'スナップを無効化' : 'スナップを有効化'}
+            onClick={() => setSnapEnabled(!snapEnabled)}
+          >
+            <MagnetIcon width={13} height={13} />
           </button>
         </div>
         {project.beatGrid && (
@@ -441,6 +470,13 @@ export function Timeline(): React.JSX.Element {
               onClick={() => copySelectedClip()}
             >
               <CopyIcon width={13} height={13} />
+            </button>
+            <button
+              className="small-button"
+              title={`複製 (${keymap.duplicate.display})`}
+              onClick={() => duplicateClips(multiSelectedClipIds)}
+            >
+              複製
             </button>
             <button
               className="small-button danger"
@@ -557,6 +593,13 @@ export function Timeline(): React.JSX.Element {
               onClick={() => copySelectedClip()}
             >
               <CopyIcon width={13} height={13} />
+            </button>
+            <button
+              className="small-button"
+              title={`複製 (${keymap.duplicate.display})`}
+              onClick={() => duplicateClips([selectedClip.id])}
+            >
+              複製
             </button>
             <button
               className="icon-button danger"
@@ -677,7 +720,7 @@ export function Timeline(): React.JSX.Element {
           </button>
         </div>
 
-        <div className="track-lanes-col" onWheel={handleWheelZoom}>
+        <div className="track-lanes-col" ref={trackLanesColRef} onWheel={handleWheelZoom}>
           {project.beatGrid?.enabled &&
             beatTimes.map((t, i) => (
               <div key={i} className="timeline-beat-line" style={{ left: t * pixelsPerSecond }} />

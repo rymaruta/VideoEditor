@@ -56,6 +56,7 @@ interface ProjectState {
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
   removeClip: (clipId: string) => void
   removeClips: (clipIds: string[]) => void
+  duplicateClips: (clipIds: string[]) => void
   updateClipsSpeed: (clipIds: string[], speed: number) => void
   moveClip: (clipId: string, direction: 'left' | 'right') => void
   moveClipToIndex: (clipId: string, targetIndex: number) => void
@@ -293,6 +294,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedClipId:
           state.selectedClipId && idSet.has(state.selectedClipId) ? null : state.selectedClipId,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => !idSet.has(id))
+      }
+    }),
+
+  duplicateClips: (clipIds) =>
+    set((state) => {
+      const idSet = new Set(clipIds)
+      const indices = state.project.clips
+        .map((c, i) => (idSet.has(c.id) ? i : -1))
+        .filter((i) => i !== -1)
+      if (indices.length === 0) return state
+      const lastIndex = Math.max(...indices)
+      const newClips: Clip[] = indices.map((i) => ({
+        ...state.project.clips[i],
+        id: uuid(),
+        transitionIn: undefined
+      }))
+      const clips = [...state.project.clips]
+      clips.splice(lastIndex + 1, 0, ...newClips)
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, clips },
+        selectedClipId: newClips[newClips.length - 1].id,
+        multiSelectedClipIds: newClips.map((c) => c.id)
       }
     }),
 

@@ -6,6 +6,7 @@ const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
 const FREESOUND_STORAGE_KEY = 've-freesound-api-key'
 const GEMINI_STORAGE_KEY = 've-gemini-api-key'
 const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
+const SNAP_ENABLED_KEY = 've-snap-enabled'
 
 interface SettingsState {
   youtubeApiKey: string
@@ -18,6 +19,8 @@ interface SettingsState {
   setGeminiApiKey: (key: string) => void
   keymapScheme: KeymapScheme
   setKeymapScheme: (scheme: KeymapScheme) => void
+  snapEnabled: boolean
+  setSnapEnabled: (enabled: boolean) => void
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -45,5 +48,10 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setKeymapScheme: (scheme) => {
     localStorage.setItem(KEYMAP_STORAGE_KEY, scheme)
     set({ keymapScheme: scheme })
+  },
+  snapEnabled: localStorage.getItem(SNAP_ENABLED_KEY) !== 'false',
+  setSnapEnabled: (enabled) => {
+    localStorage.setItem(SNAP_ENABLED_KEY, String(enabled))
+    set({ snapEnabled: enabled })
   }
 }))

@@ -13,6 +13,11 @@ function isTypingTarget(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
 }
 
+function selectedClipIds(store: ReturnType<typeof useProjectStore.getState>): string[] {
+  if (store.multiSelectedClipIds.length > 0) return store.multiSelectedClipIds
+  return store.selectedClipId ? [store.selectedClipId] : []
+}
+
 export function useKeyboardShortcuts(): void {
   const keymapScheme = useSettingsStore((s) => s.keymapScheme)
 
@@ -48,6 +53,14 @@ export function useKeyboardShortcuts(): void {
         store.pasteClip()
         return
       }
+      if (matchesBinding(e, keymap.duplicate)) {
+        const ids = selectedClipIds(store)
+        if (ids.length > 0) {
+          e.preventDefault()
+          store.duplicateClips(ids)
+        }
+        return
+      }
       if (matchesBinding(e, keymap.save)) {
         e.preventDefault()
         saveProject().catch(() => {})
@@ -66,12 +79,7 @@ export function useKeyboardShortcuts(): void {
         return
       }
       if (matchesBinding(e, keymap.delete)) {
-        const ids =
-          store.multiSelectedClipIds.length > 0
-            ? store.multiSelectedClipIds
-            : store.selectedClipId
-              ? [store.selectedClipId]
-              : []
+        const ids = selectedClipIds(store)
         if (ids.length > 0) {
           e.preventDefault()
           store.removeClips(ids)
