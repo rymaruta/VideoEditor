@@ -38,6 +38,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [feedback, setFeedback] = useState<Record<string, 'liked' | 'disliked'>>({})
   const [appliedId, setAppliedId] = useState<string | null>(null)
   const [regenToken, setRegenToken] = useState(0)
+  const [aiScoredCount, setAiScoredCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -48,6 +49,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
       setThumbnails({})
       setFeedback({})
       setAppliedId(null)
+      setAiScoredCount(0)
       try {
         const result = await generateAutoEditPatterns(videoAssets, {
           seed: Date.now(),
@@ -57,6 +59,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
         setPatterns(result.patterns)
         setThumbnails(result.thumbnails)
         setRecommendedId(result.recommendedPatternId)
+        setAiScoredCount(result.aiScoredCandidateCount)
       } catch (e) {
         if (!cancelled) setError(formatIpcError(e))
       } finally {
@@ -88,7 +91,8 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
           AIおまかせ全自動編集
         </h3>
         <p className="hint-text">
-          配置した動画素材からハイライトを検出し、傾向の異なる5パターンの編集案を自動生成します。気に入ったものはタイムラインに適用し、👍👎で評価すると次回以降の生成に好みが反映されます。
+          配置した動画素材からハイライトを検出し、傾向の異なる5パターンの編集案を自動生成します。Gemini
+          APIキーを設定している場合は、候補シーンの画像を見せて盛り上がり度を採点させ、選定精度を高めます。気に入ったものはタイムラインに適用し、👍👎で評価すると次回以降の生成に好みが反映されます。
         </p>
         <p className="hint-text autoedit-preference">好みの傾向: {preferenceSummary}</p>
         <div className="autoedit-toolbar">
@@ -108,10 +112,16 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                 onChange={(e) => setUseGemini(e.target.checked)}
               />
               <SparklesIcon width={13} height={13} />
-              Geminiで内容を確認して説明文とおすすめを生成
+              Geminiでハイライト候補を採点して選定精度を上げる
             </label>
           )}
         </div>
+        {!loading && aiScoredCount > 0 && (
+          <p className="hint-text autoedit-ai-note">
+            <SparklesIcon width={12} height={12} />
+            Geminiが候補シーン{aiScoredCount}件を採点し、盛り上がり・表情を編集に反映しました
+          </p>
+        )}
         {loading && <p className="hint-text">解析中... 素材のハイライトを検出しています</p>}
         {error && <p className="error-text">{error}</p>}
         {!loading && !error && patterns.length === 0 && (

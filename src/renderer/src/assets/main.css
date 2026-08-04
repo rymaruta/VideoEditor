@@ -2812,6 +2812,13 @@ h3 {
   margin-bottom: 4px;
 }
 
+.autoedit-ai-note {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent-1);
+}
+
 .autoedit-toolbar {
   display: flex;
   align-items: center;

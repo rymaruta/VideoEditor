@@ -21,6 +21,7 @@ export interface AutoEditResult {
   patterns: AutoEditPattern[]
   recommendedPatternId?: string
   thumbnails: Record<string, string>
+  aiScoredCandidateCount: number
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -82,6 +83,17 @@ function trimToMax(c: FlatCandidate, maxSeconds: number): FlatCandidate {
 
 function byAssetThenStart(a: FlatCandidate, b: FlatCandidate): number {
   return a.assetIndex - b.assetIndex || a.start - b.start
+}
+
+function normalizeScoresInPlace(candidates: FlatCandidate[]): void {
+  if (candidates.length === 0) return
+  const scores = candidates.map((c) => c.score)
+  const min = Math.min(...scores)
+  const max = Math.max(...scores)
+  const range = max - min || 1
+  for (const c of candidates) {
+    c.score = ((c.score - min) / range) * 100
+  }
 }
 
 function buildScorePattern(
@@ -228,6 +240,77 @@ interface GeminiResponse {
   error?: { message?: string }
 }
 
+const GEMINI_HIGHLIGHT_SAMPLE_COUNT = 12
+
+async function scoreHighlightsWithGemini(
+  candidates: FlatCandidate[],
+  videoAssets: MediaAsset[],
+  apiKey: string
+): Promise<Map<FlatCandidate, number>> {
+  const ranked = [...candidates]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, GEMINI_HIGHLIGHT_SAMPLE_COUNT)
+
+  const frames: { candidate: FlatCandidate; dataUrl: string }[] = []
+  for (const c of ranked) {
+    const asset = videoAssets.find((a) => a.id === c.assetId)
+    if (!asset) continue
+    try {
+      const mid = (c.start + c.end) / 2
+      const dataUrl = await window.api.generateFrame(asset.filePath, mid, 320, 180)
+      frames.push({ candidate: c, dataUrl })
+    } catch {
+      // Skip candidates whose frame extraction fails; they keep their local score.
+    }
+  }
+  if (frames.length === 0) return new Map()
+
+  const GEMINI_MODEL = 'gemini-2.0-flash'
+  const parts: GeminiPart[] = [
+    {
+      text: `あなたはYouTube Shorts編集AIです。以下は動画から抽出した${frames.length}個のハイライト候補シーンの代表フレーム画像です。画像は1〜${frames.length}の番号順に添付されています。
+
+# 依頼内容
+各画像について、表情の盛り上がり・驚き/笑いなどの感情の強さ・動きの激しさを基準に、そのシーンが「見せ場」としてどれくらい魅力的かを0〜100点で採点してください。人物が映っていない、または単調な画像は低い点数にしてください。
+
+# 出力形式(このJSONのみを出力してください)
+{ "scores": [{ "index": number, "score": number }] }`
+    }
+  ]
+  frames.forEach((f) => {
+    const commaIdx = f.dataUrl.indexOf(',')
+    const base64 = commaIdx >= 0 ? f.dataUrl.slice(commaIdx + 1) : ''
+    const mimeMatch = f.dataUrl.match(/^data:([^;]+);/)
+    parts.push({ inlineData: { mimeType: mimeMatch?.[1] ?? 'image/png', data: base64 } })
+  })
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: { responseMimeType: 'application/json' }
+    })
+  })
+  const data: GeminiResponse = await res.json()
+  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Geminiからの応答が空でした')
+  const parsed = JSON.parse(text) as { scores?: { index: number; score: number }[] }
+
+  const map = new Map<FlatCandidate, number>()
+  if (Array.isArray(parsed.scores)) {
+    for (const s of parsed.scores) {
+      const frame = frames[s.index - 1]
+      if (frame && typeof s.score === 'number') {
+        map.set(frame.candidate, Math.max(0, Math.min(100, s.score)))
+      }
+    }
+  }
+  return map
+}
+
 async function enhanceWithGemini(
   patterns: AutoEditPattern[],
   thumbnails: Record<string, string>,
@@ -304,6 +387,24 @@ export async function generateAutoEditPatterns(
   const withCandidates = await collectHighlights(videoAssets)
   const flat = withCandidates.flatMap((w) => w.candidates)
   if (flat.length === 0) throw new Error('ハイライトを検出できませんでした')
+
+  normalizeScoresInPlace(flat)
+
+  let aiScoredCandidateCount = 0
+  if (options.geminiApiKey) {
+    try {
+      const aiScores = await scoreHighlightsWithGemini(flat, videoAssets, options.geminiApiKey)
+      for (const c of flat) {
+        const aiScore = aiScores.get(c)
+        if (aiScore !== undefined) {
+          c.score = c.score * 0.4 + aiScore * 0.6
+          aiScoredCandidateCount++
+        }
+      }
+    } catch {
+      // AI scoring is best-effort; the local scene/audio-based scores remain in place.
+    }
+  }
 
   const prefStore = useEditPreferenceStore.getState()
   const preferredTransition = prefStore.getPreferredTransition()
@@ -396,5 +497,5 @@ export async function generateAutoEditPatterns(
     }
   }
 
-  return { patterns, recommendedPatternId, thumbnails }
+  return { patterns, recommendedPatternId, thumbnails, aiScoredCandidateCount }
 }
