@@ -72,7 +72,8 @@ export function SilenceCutModal({
           assetId: clip.assetId,
           inPoint: cursor,
           outPoint: start,
-          speed: clip.speed
+          speed: clip.speed,
+          audioDetached: clip.audioDetached
         })
       }
       cursor = Math.max(cursor, end)
@@ -83,7 +84,8 @@ export function SilenceCutModal({
         assetId: clip.assetId,
         inPoint: cursor,
         outPoint: clip.outPoint,
-        speed: clip.speed
+        speed: clip.speed,
+        audioDetached: clip.audioDetached
       })
     }
     if (segments.length === 0) {

@@ -337,7 +337,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             assetId: c.assetId,
             inPoint: splitLocal,
             outPoint: c.outPoint,
-            speed
+            speed,
+            audioDetached: c.audioDetached
           })
         } else {
           clips.push(c)
@@ -381,7 +382,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const newClips: Clip[] = indices.map((i) => ({
         ...state.project.clips[i],
         id: uuid(),
-        transitionIn: undefined
+        transitionIn: undefined,
+        audioDetached: false
       }))
       const clips = [...state.project.clips]
       clips.splice(lastIndex + 1, 0, ...newClips)
@@ -400,7 +402,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...pushHistory(state),
         project: {
           ...state.project,
-          clips: state.project.clips.map((c) => (idSet.has(c.id) ? { ...c, speed } : c))
+          // Clips with detached audio keep speed 1: the separated audio track has no
+          // speed adjustment of its own, so changing the video's speed would desync it.
+          clips: state.project.clips.map((c) =>
+            idSet.has(c.id) && !c.audioDetached ? { ...c, speed } : c
+          )
         }
       }
     }),
@@ -464,7 +470,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const newClips: Clip[] = state.clipboardClips.map((c) => ({
         ...c,
         id: uuid(),
-        transitionIn: undefined
+        transitionIn: undefined,
+        audioDetached: false
       }))
       const idx = state.project.clips.findIndex((c) => c.id === state.selectedClipId)
       const clips = [...state.project.clips]
