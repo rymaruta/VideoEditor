@@ -2929,3 +2929,14 @@ h3 {
   display: flex;
   gap: 4px;
 }
+
+.autoedit-finish-button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.autoedit-finish-result {
+  margin-top: 6px;
+  color: var(--success);
+}

@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useEditPreferenceStore } from '../store/editPreferenceStore'
 import { generateAutoEditPatterns } from '../lib/autoEdit'
+import { autoFinishTimeline, type AutoFinishResult } from '../lib/autoFinish'
 import { formatIpcError } from '../lib/ipcError'
 import { TRANSITION_LABELS } from '../lib/autoEditStyles'
 import type { AutoEditPattern } from '@shared/types'
@@ -12,7 +13,8 @@ import {
   RefreshIcon,
   ThumbsUpIcon,
   ThumbsDownIcon,
-  SparklesIcon
+  SparklesIcon,
+  MicIcon
 } from './icons'
 
 function formatDuration(seconds: number): string {
@@ -39,6 +41,9 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [appliedId, setAppliedId] = useState<string | null>(null)
   const [regenToken, setRegenToken] = useState(0)
   const [aiScoredCount, setAiScoredCount] = useState(0)
+  const [finishingId, setFinishingId] = useState<string | null>(null)
+  const [finishResult, setFinishResult] = useState<AutoFinishResult | null>(null)
+  const [finishError, setFinishError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -81,6 +86,22 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
   function handleApply(pattern: AutoEditPattern): void {
     applyAutoEditPattern(pattern)
     setAppliedId(pattern.id)
+  }
+
+  async function handleApplyAndFinish(pattern: AutoEditPattern): Promise<void> {
+    applyAutoEditPattern(pattern)
+    setAppliedId(pattern.id)
+    setFinishingId(pattern.id)
+    setFinishError(null)
+    setFinishResult(null)
+    try {
+      const result = await autoFinishTimeline(geminiApiKey || undefined, 'japanese')
+      setFinishResult(result)
+    } catch (e) {
+      setFinishError(formatIpcError(e))
+    } finally {
+      setFinishingId(null)
+    }
   }
 
   return (
@@ -188,6 +209,30 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                         </button>
                       </div>
                     </div>
+                    <button
+                      className="small-button autoedit-finish-button"
+                      onClick={() => handleApplyAndFinish(p)}
+                      disabled={finishingId === p.id}
+                      title="タイムラインに適用した上で、字幕の自動文字起こしと投稿メタデータ生成まで一括で行います"
+                    >
+                      <MicIcon width={12} height={12} />
+                      {finishingId === p.id
+                        ? '字幕・メタデータを生成中...'
+                        : '適用して自動で仕上げる'}
+                    </button>
+                    {appliedId === p.id && finishResult && (
+                      <p className="hint-text autoedit-finish-result">
+                        字幕を{finishResult.captionCount}件追加しました
+                        {finishResult.metadata
+                          ? '。メタデータも生成しました。「投稿準備」タブでご確認ください。'
+                          : geminiApiKey
+                            ? '。メタデータの生成に失敗しました。'
+                            : '。メタデータも生成するにはGemini APIキーを設定してください。'}
+                      </p>
+                    )}
+                    {appliedId === p.id && finishError && (
+                      <p className="error-text">{finishError}</p>
+                    )}
                   </div>
                 </div>
               )
