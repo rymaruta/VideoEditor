@@ -48,11 +48,28 @@ interface ProjectState {
   playheadTime: number
   isPlaying: boolean
   seekRequest: { time: number; token: number } | null
+  missingAssetIds: string[]
 
   newProject: () => void
   loadProject: (project: Project, filePath: string) => void
   restoreAutosave: (project: Project) => void
   markSaved: (filePath: string) => void
+
+  setMissingAssetIds: (ids: string[]) => void
+  relinkAsset: (
+    assetId: string,
+    filePath: string,
+    fileName: string,
+    probe: {
+      duration: number
+      width: number
+      height: number
+      fps: number
+      hasAudio: boolean
+      hasVideo: boolean
+    },
+    thumbnailDataUrl: string | undefined
+  ) => void
 
   addAsset: (asset: MediaAsset) => void
   addClipToTimeline: (assetId: string) => void
@@ -164,6 +181,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   playheadTime: 0,
   isPlaying: false,
   seekRequest: null,
+  missingAssetIds: [],
+
+  setMissingAssetIds: (ids) => set({ missingAssetIds: ids }),
+
+  relinkAsset: (assetId, filePath, fileName, probe, thumbnailDataUrl) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        assets: state.project.assets.map((a) =>
+          a.id === assetId
+            ? {
+                ...a,
+                filePath,
+                fileName,
+                duration: probe.duration,
+                width: probe.width,
+                height: probe.height,
+                fps: probe.fps,
+                hasAudio: probe.hasAudio,
+                hasVideo: probe.hasVideo,
+                thumbnailDataUrl
+              }
+            : a
+        )
+      },
+      isDirty: true,
+      missingAssetIds: state.missingAssetIds.filter((id) => id !== assetId)
+    })),
 
   newProject: () =>
     set({
@@ -177,7 +222,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       clipboardClips: [],
       playheadTime: 0,
       isPlaying: false,
-      seekRequest: null
+      seekRequest: null,
+      missingAssetIds: []
     }),
 
   loadProject: (project, filePath) =>
@@ -192,7 +238,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       clipboardClips: [],
       playheadTime: 0,
       isPlaying: false,
-      seekRequest: null
+      seekRequest: null,
+      missingAssetIds: []
     }),
 
   restoreAutosave: (project) =>
@@ -208,6 +255,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       multiSelectedClipIds: [],
       clipboardClips: [],
       playheadTime: 0,
+      missingAssetIds: [],
       isPlaying: false,
       seekRequest: null
     }),

@@ -30,8 +30,26 @@ function jobFileName(projectName: string, job: BatchJob): string {
   return `${projectName}_${aspect}_${job.resolutionHeight}p.mp4`
 }
 
+function usedMissingAssetCount(
+  project: ReturnType<typeof useProjectStore.getState>['project'],
+  missingAssetIds: string[]
+): number {
+  if (missingAssetIds.length === 0) return 0
+  const missingSet = new Set(missingAssetIds)
+  const usedIds = new Set<string>()
+  project.clips.forEach((c) => usedIds.add(c.assetId))
+  project.audioTracks.forEach((t) => t.clips.forEach((c) => usedIds.add(c.assetId)))
+  project.videoOverlayTracks.forEach((t) => t.clips.forEach((c) => usedIds.add(c.assetId)))
+  let count = 0
+  usedIds.forEach((id) => {
+    if (missingSet.has(id)) count++
+  })
+  return count
+}
+
 export function ExportPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
+  const missingAssetIds = useProjectStore((s) => s.missingAssetIds)
   const setAspectRatio = useProjectStore((s) => s.setAspectRatio)
   const [resolutionHeight, setResolutionHeight] = useState<ResolutionHeight>(1080)
   const [quality, setQuality] = useState<QualityPreset>('standard')
@@ -59,6 +77,12 @@ export function ExportPanel(): React.JSX.Element {
     setDoneFilePath(null)
     if (project.clips.length === 0) {
       setError('タイムラインにクリップがありません')
+      return
+    }
+    if (usedMissingAssetCount(project, missingAssetIds) > 0) {
+      setError(
+        '見つからない素材ファイルがタイムラインで使用されています。メディアパネルで再リンクしてから書き出してください。'
+      )
       return
     }
     const outputPath = await window.api.selectExportPath(`${project.name}.mp4`)
@@ -108,6 +132,12 @@ export function ExportPanel(): React.JSX.Element {
     }
     if (batchJobs.length === 0) {
       setBatchError('書き出す組み合わせを追加してください')
+      return
+    }
+    if (usedMissingAssetCount(project, missingAssetIds) > 0) {
+      setBatchError(
+        '見つからない素材ファイルがタイムラインで使用されています。メディアパネルで再リンクしてから書き出してください。'
+      )
       return
     }
     const folder = await window.api.selectExportFolder()

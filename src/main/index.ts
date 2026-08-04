@@ -99,6 +99,33 @@ function createWindow(): void {
     return result.filePaths
   })
 
+  ipcMain.handle(IPC.selectRelinkFile, async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'メディアファイル',
+          extensions: [
+            'mp4',
+            'mov',
+            'mkv',
+            'avi',
+            'webm',
+            'm4v',
+            'mp3',
+            'wav',
+            'm4a',
+            'aac',
+            'ogg',
+            'flac'
+          ]
+        }
+      ]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
   ipcMain.handle(IPC.selectExportPath, async (_e, defaultName: string) => {
     const result = await dialog.showSaveDialog(mainWindow, {
       defaultPath: defaultName,
@@ -171,6 +198,9 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle(IPC.probeMedia, async (_e, filePath: string) => probeMedia(filePath))
+  ipcMain.handle(IPC.checkFilesExist, (_e, filePaths: string[]) =>
+    filePaths.filter((p) => !existsSync(p))
+  )
   ipcMain.handle(IPC.generateThumbnail, async (_e, filePath: string, atSeconds: number) =>
     generateThumbnailDataUrl(filePath, atSeconds)
   )

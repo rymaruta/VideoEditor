@@ -13,7 +13,8 @@ import {
   MusicIcon,
   AlertTriangleIcon,
   TargetIcon,
-  WandIcon
+  WandIcon,
+  RefreshIcon
 } from './icons'
 
 function fileNameFromPath(path: string): string {
@@ -38,6 +39,8 @@ export function MediaBin(): React.JSX.Element {
   const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
   const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
   const addClipToVideoOverlayTrack = useProjectStore((s) => s.addClipToVideoOverlayTrack)
+  const missingAssetIds = useProjectStore((s) => s.missingAssetIds)
+  const relinkAsset = useProjectStore((s) => s.relinkAsset)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
@@ -45,7 +48,34 @@ export function MediaBin(): React.JSX.Element {
   const [highlightAssetId, setHighlightAssetId] = useState<string | null>(null)
   const [showRoughCut, setShowRoughCut] = useState(false)
   const [showAutoEdit, setShowAutoEdit] = useState(false)
+  const [relinkingId, setRelinkingId] = useState<string | null>(null)
   const hasVideoAssets = assets.some((a) => a.hasVideo)
+
+  async function handleRelink(assetId: string): Promise<void> {
+    setError(null)
+    setRelinkingId(assetId)
+    try {
+      const filePath = await window.api.selectRelinkFile()
+      if (!filePath) return
+      const meta = await window.api.probeMedia(filePath)
+      let thumbnailDataUrl: string | undefined
+      if (meta.hasVideo) {
+        try {
+          thumbnailDataUrl = await window.api.generateThumbnail(
+            filePath,
+            Math.min(1, meta.duration / 2)
+          )
+        } catch {
+          thumbnailDataUrl = undefined
+        }
+      }
+      relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl)
+    } catch (e) {
+      setError(formatIpcError(e))
+    } finally {
+      setRelinkingId(null)
+    }
+  }
 
   async function importFiles(paths: string[]): Promise<void> {
     if (paths.length === 0) return
@@ -142,114 +172,137 @@ export function MediaBin(): React.JSX.Element {
             <p className="hint-text">動画・音声ファイルを追加してください</p>
           </div>
         )}
-        {assets.map((asset) => (
-          <div key={asset.id} className="media-item">
-            <div className="media-thumb">
-              {asset.thumbnailDataUrl ? (
-                <img src={asset.thumbnailDataUrl} alt={asset.fileName} />
-              ) : (
-                <div className="media-thumb-placeholder">
-                  {asset.hasVideo ? (
-                    <ClapperboardIcon width={16} height={16} />
-                  ) : (
-                    <MusicIcon width={16} height={16} />
+        {assets.map((asset) => {
+          const isMissing = missingAssetIds.includes(asset.id)
+          return (
+            <div key={asset.id} className={`media-item ${isMissing ? 'media-item-missing' : ''}`}>
+              <div className="media-thumb">
+                {asset.thumbnailDataUrl ? (
+                  <img src={asset.thumbnailDataUrl} alt={asset.fileName} />
+                ) : (
+                  <div className="media-thumb-placeholder">
+                    {asset.hasVideo ? (
+                      <ClapperboardIcon width={16} height={16} />
+                    ) : (
+                      <MusicIcon width={16} height={16} />
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="media-info">
+                <div className="media-name" title={asset.fileName}>
+                  {asset.fileName}
+                </div>
+                <div className="media-meta">
+                  {formatDuration(asset.duration)}
+                  {asset.hasVideo && ` ・ ${asset.width}x${asset.height}`}
+                  {asset.hasVideo && !isMissing && isAspectMismatch(asset, aspectRatio) && (
+                    <span
+                      className="mismatch-badge"
+                      title="プロジェクトのアスペクト比と異なるため、書き出し時に上下または左右に黒帯が入ります"
+                    >
+                      <AlertTriangleIcon width={11} height={11} />
+                      比率が異なる
+                    </span>
+                  )}
+                  {isMissing && (
+                    <span
+                      className="mismatch-badge missing-badge"
+                      title={`ファイルが見つかりません: ${asset.filePath}`}
+                    >
+                      <AlertTriangleIcon width={11} height={11} />
+                      ファイルが見つかりません
+                    </span>
                   )}
                 </div>
-              )}
-            </div>
-            <div className="media-info">
-              <div className="media-name" title={asset.fileName}>
-                {asset.fileName}
               </div>
-              <div className="media-meta">
-                {formatDuration(asset.duration)}
-                {asset.hasVideo && ` ・ ${asset.width}x${asset.height}`}
-                {asset.hasVideo && isAspectMismatch(asset, aspectRatio) && (
-                  <span
-                    className="mismatch-badge"
-                    title="プロジェクトのアスペクト比と異なるため、書き出し時に上下または左右に黒帯が入ります"
+              <div className="media-item-actions">
+                {isMissing && (
+                  <button
+                    className="small-button"
+                    onClick={() => handleRelink(asset.id)}
+                    disabled={relinkingId === asset.id}
+                    title="移動・改名されたファイルの場所を選び直します"
                   >
-                    <AlertTriangleIcon width={11} height={11} />
-                    比率が異なる
-                  </span>
+                    <RefreshIcon width={13} height={13} />
+                    再リンク
+                  </button>
+                )}
+                {!isMissing && asset.hasVideo && (
+                  <button
+                    className="icon-button"
+                    onClick={() => setHighlightAssetId(asset.id)}
+                    title="ハイライトを検出"
+                  >
+                    <TargetIcon width={14} height={14} />
+                  </button>
+                )}
+                {!isMissing && asset.hasVideo && (
+                  <button
+                    className="icon-button"
+                    onClick={() => addClipToTimeline(asset.id)}
+                    title="動画トラックに追加"
+                  >
+                    <PlusIcon width={14} height={14} />
+                  </button>
+                )}
+                {!isMissing && asset.hasAudio && audioTracks.length > 0 && (
+                  <div className="media-track-add">
+                    <select
+                      value={trackChoice[asset.id] ?? audioTracks[0].id}
+                      onChange={(e) =>
+                        setTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
+                      }
+                    >
+                      {audioTracks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="icon-button"
+                      title="音声トラックに追加"
+                      onClick={() =>
+                        addClipToAudioTrack(trackChoice[asset.id] ?? audioTracks[0].id, asset.id)
+                      }
+                    >
+                      <PlusIcon width={14} height={14} />
+                    </button>
+                  </div>
+                )}
+                {!isMissing && asset.hasVideo && videoOverlayTracks.length > 0 && (
+                  <div className="media-track-add">
+                    <select
+                      value={videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id}
+                      onChange={(e) =>
+                        setVideoTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
+                      }
+                    >
+                      {videoOverlayTracks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="icon-button"
+                      title="動画トラック(PiP)に追加"
+                      onClick={() =>
+                        addClipToVideoOverlayTrack(
+                          videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id,
+                          asset.id
+                        )
+                      }
+                    >
+                      <PlusIcon width={14} height={14} />
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
-            <div className="media-item-actions">
-              {asset.hasVideo && (
-                <button
-                  className="icon-button"
-                  onClick={() => setHighlightAssetId(asset.id)}
-                  title="ハイライトを検出"
-                >
-                  <TargetIcon width={14} height={14} />
-                </button>
-              )}
-              {asset.hasVideo && (
-                <button
-                  className="icon-button"
-                  onClick={() => addClipToTimeline(asset.id)}
-                  title="動画トラックに追加"
-                >
-                  <PlusIcon width={14} height={14} />
-                </button>
-              )}
-              {asset.hasAudio && audioTracks.length > 0 && (
-                <div className="media-track-add">
-                  <select
-                    value={trackChoice[asset.id] ?? audioTracks[0].id}
-                    onChange={(e) =>
-                      setTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
-                    }
-                  >
-                    {audioTracks.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="icon-button"
-                    title="音声トラックに追加"
-                    onClick={() =>
-                      addClipToAudioTrack(trackChoice[asset.id] ?? audioTracks[0].id, asset.id)
-                    }
-                  >
-                    <PlusIcon width={14} height={14} />
-                  </button>
-                </div>
-              )}
-              {asset.hasVideo && videoOverlayTracks.length > 0 && (
-                <div className="media-track-add">
-                  <select
-                    value={videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id}
-                    onChange={(e) =>
-                      setVideoTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
-                    }
-                  >
-                    {videoOverlayTracks.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="icon-button"
-                    title="動画トラック(PiP)に追加"
-                    onClick={() =>
-                      addClipToVideoOverlayTrack(
-                        videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id,
-                        asset.id
-                      )
-                    }
-                  >
-                    <PlusIcon width={14} height={14} />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
       {highlightAssetId && (
         <HighlightModal assetId={highlightAssetId} onClose={() => setHighlightAssetId(null)} />

@@ -620,6 +620,14 @@ h3 {
   background-color: var(--bg-elevated-3);
 }
 
+.media-item-missing {
+  border-color: rgba(242, 73, 92, 0.35);
+}
+
+.media-item-missing .media-thumb {
+  opacity: 0.4;
+}
+
 .media-thumb {
   width: 58px;
   height: 42px;
@@ -694,6 +702,11 @@ h3 {
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 9.5px;
+}
+
+.mismatch-badge.missing-badge {
+  color: #ffb3bb;
+  background: var(--danger-soft);
 }
 
 .media-bin-auto-buttons {

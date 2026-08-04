@@ -1,5 +1,16 @@
 import { useProjectStore } from '../store/projectStore'
 
+export async function checkMissingAssets(): Promise<void> {
+  const { project, setMissingAssetIds } = useProjectStore.getState()
+  if (project.assets.length === 0) {
+    setMissingAssetIds([])
+    return
+  }
+  const missingPaths = await window.api.checkFilesExist(project.assets.map((a) => a.filePath))
+  const missingSet = new Set(missingPaths)
+  setMissingAssetIds(project.assets.filter((a) => missingSet.has(a.filePath)).map((a) => a.id))
+}
+
 export async function saveProjectAs(): Promise<void> {
   const { project, markSaved } = useProjectStore.getState()
   const filePath = await window.api.selectProjectSavePath(`${project.name}.veproj`)
@@ -28,6 +39,7 @@ export async function openProject(): Promise<void> {
   const loaded = await window.api.loadProject(filePath)
   loadProject(loaded, filePath)
   await window.api.clearAutosave()
+  await checkMissingAssets()
 }
 
 export async function startNewProject(): Promise<void> {

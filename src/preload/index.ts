@@ -21,6 +21,9 @@ import type {
 const api = {
   selectMediaFiles: (): Promise<string[]> => ipcRenderer.invoke(IPC.selectMediaFiles),
   selectAudioFiles: (): Promise<string[]> => ipcRenderer.invoke(IPC.selectAudioFiles),
+  selectRelinkFile: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectRelinkFile),
+  checkFilesExist: (filePaths: string[]): Promise<string[]> =>
+    ipcRenderer.invoke(IPC.checkFilesExist, filePaths),
   probeMedia: (filePath: string): Promise<MediaProbeResult> =>
     ipcRenderer.invoke(IPC.probeMedia, filePath),
   generateThumbnail: (filePath: string, atSeconds: number): Promise<string> =>

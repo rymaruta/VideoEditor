@@ -16,6 +16,7 @@ import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
+import { checkMissingAssets } from './lib/projectFileActions'
 import {
   ClapperboardIcon,
   SparklesIcon,
@@ -171,6 +172,7 @@ function App(): React.JSX.Element {
       if (restore) {
         const project = await window.api.loadAutosave()
         restoreAutosave(project)
+        await checkMissingAssets()
       } else {
         await window.api.clearAutosave()
       }
