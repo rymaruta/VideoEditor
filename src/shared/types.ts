@@ -199,7 +199,8 @@ export interface BpmAnalysisResult {
   offsetSeconds: number
 }
 
-export type AutoEditStyle = 'score' | 'jumpcut' | 'story' | 'longtake' | 'mix' | 'director'
+export type AutoEditStyle =
+  'score' | 'jumpcut' | 'story' | 'longtake' | 'mix' | 'director' | 'beatsync'
 
 export interface AutoEditSegment {
   assetId: string

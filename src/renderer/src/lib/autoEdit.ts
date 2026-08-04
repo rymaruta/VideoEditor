@@ -1,5 +1,11 @@
 import { v4 as uuid } from 'uuid'
-import type { AutoEditPattern, AutoEditStyle, MediaAsset, TransitionType } from '@shared/types'
+import type {
+  AudioTrack,
+  AutoEditPattern,
+  AutoEditStyle,
+  MediaAsset,
+  TransitionType
+} from '@shared/types'
 import { useEditPreferenceStore } from '../store/editPreferenceStore'
 import { STYLE_DESCRIPTIONS, STYLE_LABELS } from './autoEditStyles'
 
@@ -17,6 +23,7 @@ interface StyleBuild {
   style: AutoEditStyle
   segments: FlatCandidate[]
   transition: TransitionType
+  description?: string
 }
 
 export interface AutoEditResult {
@@ -24,6 +31,7 @@ export interface AutoEditResult {
   recommendedPatternId?: string
   thumbnails: Record<string, string>
   aiScoredCandidateCount: number
+  bgmBeat: { bpm: number; assetName: string } | null
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -83,6 +91,27 @@ function trimToMax(c: FlatCandidate, maxSeconds: number): FlatCandidate {
   const center = (c.start + c.end) / 2
   const half = maxSeconds / 2
   return { ...c, start: Math.max(c.start, center - half), end: Math.min(c.end, center + half) }
+}
+
+function forceExactDuration(
+  c: FlatCandidate,
+  duration: number,
+  assetDuration: number
+): FlatCandidate {
+  const clampedDuration = Math.min(duration, assetDuration)
+  const center = (c.start + c.end) / 2
+  let start = center - clampedDuration / 2
+  let end = center + clampedDuration / 2
+  if (start < 0) {
+    end -= start
+    start = 0
+  }
+  if (end > assetDuration) {
+    start -= end - assetDuration
+    end = assetDuration
+  }
+  start = Math.max(0, start)
+  return { ...c, start, end: start + clampedDuration }
 }
 
 function byAssetThenStart(a: FlatCandidate, b: FlatCandidate): number {
@@ -230,6 +259,57 @@ function buildMixPattern(
       progressed = true
       if (chosen.length > 0 && total >= targetSeconds) break
     }
+  }
+  return chosen
+}
+
+const BEATSYNC_ANALYZE_MAX_SECONDS = 60
+const BEATSYNC_TARGET_SECONDS = 24
+
+async function detectBgmBeat(
+  audioTracks: AudioTrack[],
+  assets: MediaAsset[]
+): Promise<{ bpm: number; offsetSeconds: number; assetName: string } | null> {
+  for (const track of audioTracks) {
+    const clip = track.clips[0]
+    if (!clip) continue
+    const asset = assets.find((a) => a.id === clip.assetId)
+    if (!asset) continue
+    try {
+      const duration = Math.min(BEATSYNC_ANALYZE_MAX_SECONDS, clip.outPoint - clip.inPoint)
+      const result = await window.api.analyzeBpm(asset.filePath, clip.inPoint, duration)
+      if (result.bpm > 0) {
+        return { bpm: result.bpm, offsetSeconds: result.offsetSeconds, assetName: asset.fileName }
+      }
+    } catch {
+      // Try the next audio track if BPM analysis fails for this one.
+    }
+  }
+  return null
+}
+
+function buildBeatSyncPattern(
+  flat: FlatCandidate[],
+  videoAssets: MediaAsset[],
+  bpm: number,
+  preferredSegmentSeconds: number | null,
+  rand: () => number
+): FlatCandidate[] {
+  const beatInterval = 60 / bpm
+  const beatsPerCut = preferredSegmentSeconds
+    ? clamp(Math.round(preferredSegmentSeconds / beatInterval), 1, 4)
+    : 2
+  const cutInterval = beatInterval * beatsPerCut
+  const numCuts = Math.max(6, Math.round(BEATSYNC_TARGET_SECONDS / cutInterval))
+  const pool = [...flat].sort((a, b) => b.score - a.score).slice(0, Math.max(numCuts, 16))
+  if (pool.length === 0) return []
+  const shuffled = seededShuffle(pool, rand)
+  const chosen: FlatCandidate[] = []
+  for (let i = 0; i < numCuts; i++) {
+    const source = shuffled[i % shuffled.length]
+    const asset = videoAssets.find((a) => a.id === source.assetId)
+    if (!asset || asset.duration < cutInterval) continue
+    chosen.push(forceExactDuration(source, cutInterval, asset.duration))
   }
   return chosen
 }
@@ -474,7 +554,7 @@ ${infoLines}
 
 export async function generateAutoEditPatterns(
   assets: MediaAsset[],
-  options: { seed?: number; geminiApiKey?: string } = {}
+  options: { seed?: number; geminiApiKey?: string; audioTracks?: AudioTrack[] } = {}
 ): Promise<AutoEditResult> {
   const videoAssets = assets.filter((a) => a.hasVideo)
   if (videoAssets.length === 0) throw new Error('動画素材がありません')
@@ -513,6 +593,8 @@ export async function generateAutoEditPatterns(
   const jumpcutCap = clamp((preferredSegmentSeconds ?? 2) * 0.6, 0.8, 2.5)
   const mixCap = clamp(preferredSegmentSeconds ?? 3, 1.5, 5)
 
+  const bgmBeat = options.audioTracks ? await detectBgmBeat(options.audioTracks, assets) : null
+
   const builds: StyleBuild[] = [
     {
       style: 'score',
@@ -537,13 +619,22 @@ export async function generateAutoEditPatterns(
     }
   ]
 
+  if (bgmBeat) {
+    builds.push({
+      style: 'beatsync',
+      segments: buildBeatSyncPattern(flat, videoAssets, bgmBeat.bpm, preferredSegmentSeconds, rand),
+      transition: 'none',
+      description: `BGM「${bgmBeat.assetName}」のテンポ(約${Math.round(bgmBeat.bpm)} BPM)に合わせてカット点を打った編集です。`
+    })
+  }
+
   let patterns: AutoEditPattern[] = builds
     .filter((b) => b.segments.length > 0)
     .map((b) => ({
       id: uuid(),
       style: b.style,
       label: STYLE_LABELS[b.style],
-      description: STYLE_DESCRIPTIONS[b.style],
+      description: b.description ?? STYLE_DESCRIPTIONS[b.style],
       segments: b.segments.map((s) => ({
         assetId: s.assetId,
         start: s.start,
@@ -626,5 +717,11 @@ export async function generateAutoEditPatterns(
     }
   }
 
-  return { patterns, recommendedPatternId, thumbnails, aiScoredCandidateCount }
+  return {
+    patterns,
+    recommendedPatternId,
+    thumbnails,
+    aiScoredCandidateCount,
+    bgmBeat: bgmBeat ? { bpm: bgmBeat.bpm, assetName: bgmBeat.assetName } : null
+  }
 }

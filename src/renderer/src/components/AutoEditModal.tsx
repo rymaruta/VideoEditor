@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useEditPreferenceStore } from '../store/editPreferenceStore'
@@ -29,7 +29,6 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
   const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
   const recordFeedback = useEditPreferenceStore((s) => s.recordFeedback)
   const preferenceSummary = useEditPreferenceStore((s) => s.getSummaryText())
-  const videoAssets = useMemo(() => project.assets.filter((a) => a.hasVideo), [project.assets])
 
   const [useGemini, setUseGemini] = useState(Boolean(geminiApiKey))
   const [loading, setLoading] = useState(true)
@@ -41,6 +40,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [appliedId, setAppliedId] = useState<string | null>(null)
   const [regenToken, setRegenToken] = useState(0)
   const [aiScoredCount, setAiScoredCount] = useState(0)
+  const [bgmBeat, setBgmBeat] = useState<{ bpm: number; assetName: string } | null>(null)
   const [finishingId, setFinishingId] = useState<string | null>(null)
   const [finishResult, setFinishResult] = useState<AutoFinishResult | null>(null)
   const [finishError, setFinishError] = useState<string | null>(null)
@@ -55,16 +55,19 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
       setFeedback({})
       setAppliedId(null)
       setAiScoredCount(0)
+      setBgmBeat(null)
       try {
-        const result = await generateAutoEditPatterns(videoAssets, {
+        const result = await generateAutoEditPatterns(project.assets, {
           seed: Date.now(),
-          geminiApiKey: useGemini ? geminiApiKey : undefined
+          geminiApiKey: useGemini ? geminiApiKey : undefined,
+          audioTracks: project.audioTracks
         })
         if (cancelled) return
         setPatterns(result.patterns)
         setThumbnails(result.thumbnails)
         setRecommendedId(result.recommendedPatternId)
         setAiScoredCount(result.aiScoredCandidateCount)
+        setBgmBeat(result.bgmBeat)
       } catch (e) {
         if (!cancelled) setError(formatIpcError(e))
       } finally {
@@ -141,6 +144,13 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
           <p className="hint-text autoedit-ai-note">
             <SparklesIcon width={12} height={12} />
             Geminiが候補シーン{aiScoredCount}件を採点し、盛り上がり・表情を編集に反映しました
+          </p>
+        )}
+        {!loading && bgmBeat && (
+          <p className="hint-text autoedit-ai-note">
+            <SparklesIcon width={12} height={12} />
+            BGM「{bgmBeat.assetName}」のテンポ(約{Math.round(bgmBeat.bpm)}{' '}
+            BPM)を検出し、ビートシンク編集を追加しました
           </p>
         )}
         {loading && <p className="hint-text">解析中... 素材のハイライトを検出しています</p>}
