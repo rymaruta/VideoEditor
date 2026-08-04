@@ -28,7 +28,9 @@ import {
   MusicIcon,
   TargetIcon,
   MegaphoneIcon,
-  StarIcon
+  StarIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
@@ -105,10 +107,12 @@ const PUBLISH_TABS: TabDef[] = [
 const LEFT_WIDTH_KEY = 've-layout-left-width'
 const RIGHT_WIDTH_KEY = 've-layout-right-width'
 const TIMELINE_HEIGHT_KEY = 've-layout-timeline-height'
+const LEFT_COLLAPSED_KEY = 've-layout-left-collapsed'
+const RIGHT_COLLAPSED_KEY = 've-layout-right-collapsed'
 
-const DEFAULT_LEFT_WIDTH = 280
-const DEFAULT_RIGHT_WIDTH = 340
-const DEFAULT_TIMELINE_HEIGHT = 340
+const DEFAULT_LEFT_WIDTH = 260
+const DEFAULT_RIGHT_WIDTH = 320
+const DEFAULT_TIMELINE_HEIGHT = 440
 const MIN_LEFT_WIDTH = 200
 const MAX_LEFT_WIDTH = 480
 const MIN_RIGHT_WIDTH = 280
@@ -153,6 +157,12 @@ function App(): React.JSX.Element {
   )
   const [timelineHeight, setTimelineHeight] = useState(() =>
     readStoredSize(TIMELINE_HEIGHT_KEY, DEFAULT_TIMELINE_HEIGHT)
+  )
+  const [leftCollapsed, setLeftCollapsed] = useState(
+    () => localStorage.getItem(LEFT_COLLAPSED_KEY) === 'true'
+  )
+  const [rightCollapsed, setRightCollapsed] = useState(
+    () => localStorage.getItem(RIGHT_COLLAPSED_KEY) === 'true'
   )
   const [resizeDrag, setResizeDrag] = useState<ResizeDragState | null>(null)
 
@@ -224,6 +234,12 @@ function App(): React.JSX.Element {
   useEffect(() => {
     localStorage.setItem(TIMELINE_HEIGHT_KEY, String(timelineHeight))
   }, [timelineHeight])
+  useEffect(() => {
+    localStorage.setItem(LEFT_COLLAPSED_KEY, String(leftCollapsed))
+  }, [leftCollapsed])
+  useEffect(() => {
+    localStorage.setItem(RIGHT_COLLAPSED_KEY, String(rightCollapsed))
+  }, [rightCollapsed])
 
   useKeyboardShortcuts()
 
@@ -266,14 +282,31 @@ function App(): React.JSX.Element {
         </div>
       </header>
       <div className="app-layout">
-        <div className="left-column" style={{ width: leftWidth }}>
-          <MediaBin />
+        {!leftCollapsed && (
+          <div className="left-column" style={{ width: leftWidth }}>
+            <MediaBin />
+          </div>
+        )}
+        <div className="col-resize-handle-track">
+          {!leftCollapsed && (
+            <div
+              className={`col-resize-handle ${resizeDrag?.kind === 'left' ? 'active' : ''}`}
+              onMouseDown={(e) => beginResize('left', e)}
+              title="ドラッグして幅を調整"
+            />
+          )}
+          <button
+            className="panel-collapse-toggle"
+            onClick={() => setLeftCollapsed((v) => !v)}
+            title={leftCollapsed ? 'メディアパネルを表示' : 'メディアパネルを折りたたむ'}
+          >
+            {leftCollapsed ? (
+              <ChevronRightIcon width={11} height={11} />
+            ) : (
+              <ChevronLeftIcon width={11} height={11} />
+            )}
+          </button>
         </div>
-        <div
-          className={`col-resize-handle ${resizeDrag?.kind === 'left' ? 'active' : ''}`}
-          onMouseDown={(e) => beginResize('left', e)}
-          title="ドラッグして幅を調整"
-        />
         <div className="center-column">
           <PreviewPlayer />
           <div
@@ -285,50 +318,67 @@ function App(): React.JSX.Element {
             <Timeline />
           </div>
         </div>
-        <div
-          className={`col-resize-handle ${resizeDrag?.kind === 'right' ? 'active' : ''}`}
-          onMouseDown={(e) => beginResize('right', e)}
-          title="ドラッグして幅を調整"
-        />
-        <div className="right-column" style={{ width: rightWidth }}>
-          <div className="tab-bar">
-            {EDIT_TABS.map(({ id, label, icon: Icon, description }) => (
-              <button
-                key={id}
-                className={tab === id ? 'active' : ''}
-                onClick={() => setTab(id)}
-                title={description}
-              >
-                <Icon width={14} height={14} />
-                <span>{label}</span>
-              </button>
-            ))}
-            <div className="tab-bar-divider" />
-            {PUBLISH_TABS.map(({ id, label, icon: Icon, description }) => (
-              <button
-                key={id}
-                className={tab === id ? 'active' : ''}
-                onClick={() => setTab(id)}
-                title={description}
-              >
-                <Icon width={14} height={14} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-          <div className="tab-content">
-            {tab === 'template' && <TemplatePanel />}
-            {tab === 'text' && <TextOverlayPanel />}
-            {tab === 'narration' && <NarrationPanel />}
-            {tab === 'thumbnail' && <ThumbnailPanel />}
-            {tab === 'audio' && <AudioLibraryPanel />}
-            {tab === 'preset' && <PresetPanel />}
-            {tab === 'gametrend' && <GameTrendPanel />}
-            {tab === 'youtube' && <YouTubeTrendPanel />}
-            {tab === 'metadata' && <MetadataPanel />}
-            {tab === 'export' && <ExportPanel />}
-          </div>
+        <div className="col-resize-handle-track">
+          {!rightCollapsed && (
+            <div
+              className={`col-resize-handle ${resizeDrag?.kind === 'right' ? 'active' : ''}`}
+              onMouseDown={(e) => beginResize('right', e)}
+              title="ドラッグして幅を調整"
+            />
+          )}
+          <button
+            className="panel-collapse-toggle"
+            onClick={() => setRightCollapsed((v) => !v)}
+            title={rightCollapsed ? '右パネルを表示' : '右パネルを折りたたむ'}
+          >
+            {rightCollapsed ? (
+              <ChevronLeftIcon width={11} height={11} />
+            ) : (
+              <ChevronRightIcon width={11} height={11} />
+            )}
+          </button>
         </div>
+        {!rightCollapsed && (
+          <div className="right-column" style={{ width: rightWidth }}>
+            <div className="tab-bar">
+              {EDIT_TABS.map(({ id, label, icon: Icon, description }) => (
+                <button
+                  key={id}
+                  className={tab === id ? 'active' : ''}
+                  onClick={() => setTab(id)}
+                  title={description}
+                >
+                  <Icon width={14} height={14} />
+                  <span>{label}</span>
+                </button>
+              ))}
+              <div className="tab-bar-divider" />
+              {PUBLISH_TABS.map(({ id, label, icon: Icon, description }) => (
+                <button
+                  key={id}
+                  className={tab === id ? 'active' : ''}
+                  onClick={() => setTab(id)}
+                  title={description}
+                >
+                  <Icon width={14} height={14} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="tab-content">
+              {tab === 'template' && <TemplatePanel />}
+              {tab === 'text' && <TextOverlayPanel />}
+              {tab === 'narration' && <NarrationPanel />}
+              {tab === 'thumbnail' && <ThumbnailPanel />}
+              {tab === 'audio' && <AudioLibraryPanel />}
+              {tab === 'preset' && <PresetPanel />}
+              {tab === 'gametrend' && <GameTrendPanel />}
+              {tab === 'youtube' && <YouTubeTrendPanel />}
+              {tab === 'metadata' && <MetadataPanel />}
+              {tab === 'export' && <ExportPanel />}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

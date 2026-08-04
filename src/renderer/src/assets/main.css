@@ -1,26 +1,26 @@
 @import './base.css';
 
 :root {
-  --bg: #0b0b0f;
-  --bg-elevated: #16161d;
-  --bg-elevated-2: #1e1e27;
-  --bg-elevated-3: #26262f;
-  --border: #2a2a35;
-  --border-soft: #24242e;
-  --text-1: #f3f3f6;
-  --text-2: #b5b5c2;
-  --text-3: #85858f;
-  --accent-1: #7c6cf6;
-  --accent-2: #ec4899;
+  --bg: #0a0e14;
+  --bg-elevated: #10151d;
+  --bg-elevated-2: #161c26;
+  --bg-elevated-3: #1d242f;
+  --border: #232b38;
+  --border-soft: #1c2330;
+  --text-1: #eef2f7;
+  --text-2: #a3aebb;
+  --text-3: #6b7684;
+  --accent-1: #22d3ee;
+  --accent-2: #3b82f6;
   --accent-gradient: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  --accent-soft: rgba(124, 108, 246, 0.16);
+  --accent-soft: rgba(34, 211, 238, 0.14);
   --danger: #f2495c;
   --danger-soft: rgba(242, 73, 92, 0.14);
-  --success: #34d399;
-  --radius-lg: 16px;
-  --radius-md: 10px;
-  --radius-sm: 7px;
-  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 30px rgba(0, 0, 0, 0.35);
+  --success: #2dd4bf;
+  --radius-lg: 10px;
+  --radius-md: 7px;
+  --radius-sm: 5px;
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.45);
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Segoe UI', Inter,
     Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -52,7 +52,7 @@ body {
   overflow: hidden;
   user-select: none;
   font-family: var(--font-sans);
-  background: radial-gradient(circle at 15% 0%, #17141f 0%, var(--bg) 45%);
+  background: radial-gradient(circle at 15% 0%, #101c26 0%, var(--bg) 45%);
 }
 
 #root {
@@ -126,12 +126,12 @@ button:disabled {
   border-color: transparent;
   color: white;
   font-weight: 600;
-  box-shadow: 0 4px 14px rgba(124, 108, 246, 0.35);
+  box-shadow: 0 4px 14px rgba(34, 211, 238, 0.35);
 }
 
 .primary-button:hover:not(:disabled) {
   filter: brightness(1.08);
-  box-shadow: 0 6px 18px rgba(124, 108, 246, 0.45);
+  box-shadow: 0 6px 18px rgba(34, 211, 238, 0.45);
 }
 
 .primary-button:disabled {
@@ -370,6 +370,39 @@ h3 {
   height: 60px;
 }
 
+.col-resize-handle-track {
+  position: relative;
+  width: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-collapse-toggle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.panel-collapse-toggle:hover {
+  background: var(--bg-elevated-3);
+  color: var(--text-1);
+  border-color: var(--accent-1);
+}
+
 .row-resize-handle {
   height: 10px;
   flex-shrink: 0;
@@ -514,7 +547,7 @@ h3 {
 }
 
 .batch-job-running .batch-job-badge {
-  background: rgba(124, 108, 246, 0.18);
+  background: rgba(34, 211, 238, 0.18);
   color: var(--accent-1);
 }
 
@@ -1340,8 +1373,8 @@ h3 {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  background: linear-gradient(160deg, #6d4a9c, #4d3270);
-  border: 1px solid rgba(124, 108, 246, 0.5);
+  background: linear-gradient(160deg, #1f6f8a, #164a5c);
+  border: 1px solid rgba(34, 211, 238, 0.5);
   border-radius: var(--radius-sm);
   font-size: 10.5px;
   color: var(--text-1);
@@ -1632,7 +1665,7 @@ h3 {
 .tab-bar button.active {
   background: var(--accent-gradient);
   color: white;
-  box-shadow: 0 4px 12px rgba(124, 108, 246, 0.3);
+  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
 }
 
 .tab-bar-divider {
@@ -2122,7 +2155,7 @@ h3 {
 }
 
 .trend-comparison-badge.new {
-  background: rgba(124, 108, 246, 0.18);
+  background: rgba(34, 211, 238, 0.18);
   color: var(--accent-1);
 }
 
