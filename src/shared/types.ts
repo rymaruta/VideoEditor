@@ -200,7 +200,11 @@ export interface BpmAnalysisResult {
 }
 
 export type AutoEditStyle =
-  'score' | 'jumpcut' | 'story' | 'longtake' | 'mix' | 'director' | 'beatsync'
+  'score' | 'jumpcut' | 'story' | 'longtake' | 'mix' | 'director' | 'beatsync' | 'reference'
+
+export interface ReferenceStyleAnalysis {
+  cutTimes: number[]
+}
 
 export interface AutoEditSegment {
   assetId: string

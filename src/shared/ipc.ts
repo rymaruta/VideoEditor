@@ -8,6 +8,7 @@ export const IPC = {
   detectSilence: 'media:detectSilence',
   detectHighlights: 'media:detectHighlights',
   analyzeBpm: 'media:analyzeBpm',
+  analyzeReferenceStyle: 'media:analyzeReferenceStyle',
   transcribe: 'media:transcribe',
   transcribeWords: 'media:transcribeWords',
   analyzeSmartCrop: 'media:analyzeSmartCrop',

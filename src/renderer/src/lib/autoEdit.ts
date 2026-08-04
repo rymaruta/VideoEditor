@@ -32,6 +32,7 @@ export interface AutoEditResult {
   thumbnails: Record<string, string>
   aiScoredCandidateCount: number
   bgmBeat: { bpm: number; assetName: string } | null
+  referenceStyle: { avgCutSeconds: number; cutCount: number } | null
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -314,6 +315,50 @@ function buildBeatSyncPattern(
   return chosen
 }
 
+const REFERENCE_CUT_MIN_GAP = 0.3
+const REFERENCE_CUT_MAX_GAP = 15
+const REFERENCE_TARGET_SECONDS = 26
+
+async function analyzeReferenceStyle(
+  filePath: string
+): Promise<{ avgCutSeconds: number; cutCount: number } | null> {
+  try {
+    const { cutTimes } = await window.api.analyzeReferenceStyle(filePath)
+    if (cutTimes.length < 2) return null
+    const sorted = [...cutTimes].sort((a, b) => a - b)
+    const intervals: number[] = []
+    for (let i = 1; i < sorted.length; i++) {
+      const gap = sorted[i] - sorted[i - 1]
+      if (gap >= REFERENCE_CUT_MIN_GAP && gap <= REFERENCE_CUT_MAX_GAP) intervals.push(gap)
+    }
+    if (intervals.length === 0) return null
+    const avgCutSeconds = intervals.reduce((a, b) => a + b, 0) / intervals.length
+    return { avgCutSeconds: clamp(avgCutSeconds, 0.5, 8), cutCount: intervals.length }
+  } catch {
+    return null
+  }
+}
+
+function buildReferenceStylePattern(
+  flat: FlatCandidate[],
+  videoAssets: MediaAsset[],
+  avgCutSeconds: number,
+  rand: () => number
+): FlatCandidate[] {
+  const numCuts = Math.max(6, Math.round(REFERENCE_TARGET_SECONDS / avgCutSeconds))
+  const pool = [...flat].sort((a, b) => b.score - a.score).slice(0, Math.max(numCuts, 16))
+  if (pool.length === 0) return []
+  const shuffled = seededShuffle(pool, rand)
+  const chosen: FlatCandidate[] = []
+  for (let i = 0; i < numCuts; i++) {
+    const source = shuffled[i % shuffled.length]
+    const asset = videoAssets.find((a) => a.id === source.assetId)
+    if (!asset || asset.duration < avgCutSeconds) continue
+    chosen.push(forceExactDuration(source, avgCutSeconds, asset.duration))
+  }
+  return chosen
+}
+
 interface GeminiPart {
   text?: string
   inlineData?: { mimeType: string; data: string }
@@ -554,7 +599,12 @@ ${infoLines}
 
 export async function generateAutoEditPatterns(
   assets: MediaAsset[],
-  options: { seed?: number; geminiApiKey?: string; audioTracks?: AudioTrack[] } = {}
+  options: {
+    seed?: number
+    geminiApiKey?: string
+    audioTracks?: AudioTrack[]
+    referenceFilePath?: string
+  } = {}
 ): Promise<AutoEditResult> {
   const videoAssets = assets.filter((a) => a.hasVideo)
   if (videoAssets.length === 0) throw new Error('動画素材がありません')
@@ -594,6 +644,9 @@ export async function generateAutoEditPatterns(
   const mixCap = clamp(preferredSegmentSeconds ?? 3, 1.5, 5)
 
   const bgmBeat = options.audioTracks ? await detectBgmBeat(options.audioTracks, assets) : null
+  const referenceStyle = options.referenceFilePath
+    ? await analyzeReferenceStyle(options.referenceFilePath)
+    : null
 
   const builds: StyleBuild[] = [
     {
@@ -625,6 +678,15 @@ export async function generateAutoEditPatterns(
       segments: buildBeatSyncPattern(flat, videoAssets, bgmBeat.bpm, preferredSegmentSeconds, rand),
       transition: 'none',
       description: `BGM「${bgmBeat.assetName}」のテンポ(約${Math.round(bgmBeat.bpm)} BPM)に合わせてカット点を打った編集です。`
+    })
+  }
+
+  if (referenceStyle) {
+    builds.push({
+      style: 'reference',
+      segments: buildReferenceStylePattern(flat, videoAssets, referenceStyle.avgCutSeconds, rand),
+      transition: 'none',
+      description: `参考動画の平均カット間隔(約${referenceStyle.avgCutSeconds.toFixed(1)}秒)のテンポで再構成した編集です。`
     })
   }
 
@@ -722,6 +784,7 @@ export async function generateAutoEditPatterns(
     recommendedPatternId,
     thumbnails,
     aiScoredCandidateCount,
-    bgmBeat: bgmBeat ? { bpm: bgmBeat.bpm, assetName: bgmBeat.assetName } : null
+    bgmBeat: bgmBeat ? { bpm: bgmBeat.bpm, assetName: bgmBeat.assetName } : null,
+    referenceStyle
   }
 }

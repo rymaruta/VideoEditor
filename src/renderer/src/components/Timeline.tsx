@@ -888,15 +888,6 @@ export function Timeline(): React.JSX.Element {
               </div>
             </div>
           ))}
-          <button
-            className="small-button add-track-button"
-            onClick={() =>
-              addVideoOverlayTrack(`動画トラック ${project.videoOverlayTracks.length + 2}`)
-            }
-          >
-            <PlusIcon width={12} height={12} />
-            動画トラック(PiP)
-          </button>
           {project.audioTracks.map((track) => (
             <div key={track.id} className="track-label">
               <span className="track-label-name" title={track.name}>
@@ -955,13 +946,6 @@ export function Timeline(): React.JSX.Element {
               </span>
             </div>
           )}
-          <button
-            className="small-button add-track-button"
-            onClick={() => addAudioTrack(`音声トラック ${project.audioTracks.length + 1}`)}
-          >
-            <PlusIcon width={12} height={12} />
-            音声トラック
-          </button>
         </div>
 
         <div className="track-lanes-col" ref={trackLanesColRef} onWheel={handleWheelZoom}>
@@ -1291,6 +1275,25 @@ export function Timeline(): React.JSX.Element {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="timeline-track-actions">
+        <button
+          className="small-button add-track-button"
+          onClick={() =>
+            addVideoOverlayTrack(`動画トラック ${project.videoOverlayTracks.length + 2}`)
+          }
+        >
+          <PlusIcon width={12} height={12} />
+          動画トラック(PiP)
+        </button>
+        <button
+          className="small-button add-track-button"
+          onClick={() => addAudioTrack(`音声トラック ${project.audioTracks.length + 1}`)}
+        >
+          <PlusIcon width={12} height={12} />
+          音声トラック
+        </button>
       </div>
 
       {selectedAudioClipData && selectedAudioClip && (

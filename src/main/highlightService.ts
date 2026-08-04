@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
-import type { HighlightCandidate } from '@shared/types'
+import type { HighlightCandidate, ReferenceStyleAnalysis } from '@shared/types'
 
 function runFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -14,7 +14,7 @@ function runFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> 
   })
 }
 
-async function detectSceneChanges(filePath: string): Promise<number[]> {
+export async function detectSceneChanges(filePath: string): Promise<number[]> {
   const { stderr } = await runFfmpeg([
     '-i',
     filePath,
@@ -131,4 +131,9 @@ export async function detectHighlights(
   })
 
   return candidates.sort((a, b) => b.score - a.score).slice(0, 12)
+}
+
+export async function analyzeReferenceStyle(filePath: string): Promise<ReferenceStyleAnalysis> {
+  const cutTimes = await detectSceneChanges(filePath)
+  return { cutTimes }
 }

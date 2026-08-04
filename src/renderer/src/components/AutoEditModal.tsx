@@ -14,13 +14,19 @@ import {
   ThumbsUpIcon,
   ThumbsDownIcon,
   SparklesIcon,
-  MicIcon
+  MicIcon,
+  ClapperboardIcon,
+  TrashIcon
 } from './icons'
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.round(seconds % 60)
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function basename(filePath: string): string {
+  return filePath.split(/[/\\]/).pop() ?? filePath
 }
 
 export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.Element {
@@ -41,6 +47,11 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
   const [regenToken, setRegenToken] = useState(0)
   const [aiScoredCount, setAiScoredCount] = useState(0)
   const [bgmBeat, setBgmBeat] = useState<{ bpm: number; assetName: string } | null>(null)
+  const [referencePath, setReferencePath] = useState<string | null>(null)
+  const [referenceStyle, setReferenceStyle] = useState<{
+    avgCutSeconds: number
+    cutCount: number
+  } | null>(null)
   const [finishingId, setFinishingId] = useState<string | null>(null)
   const [finishResult, setFinishResult] = useState<AutoFinishResult | null>(null)
   const [finishError, setFinishError] = useState<string | null>(null)
@@ -56,11 +67,13 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
       setAppliedId(null)
       setAiScoredCount(0)
       setBgmBeat(null)
+      setReferenceStyle(null)
       try {
         const result = await generateAutoEditPatterns(project.assets, {
           seed: Date.now(),
           geminiApiKey: useGemini ? geminiApiKey : undefined,
-          audioTracks: project.audioTracks
+          audioTracks: project.audioTracks,
+          referenceFilePath: referencePath ?? undefined
         })
         if (cancelled) return
         setPatterns(result.patterns)
@@ -68,6 +81,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
         setRecommendedId(result.recommendedPatternId)
         setAiScoredCount(result.aiScoredCandidateCount)
         setBgmBeat(result.bgmBeat)
+        setReferenceStyle(result.referenceStyle)
       } catch (e) {
         if (!cancelled) setError(formatIpcError(e))
       } finally {
@@ -79,7 +93,16 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [regenToken])
+  }, [regenToken, referencePath])
+
+  async function handlePickReference(): Promise<void> {
+    const paths = await window.api.selectMediaFiles()
+    if (paths.length > 0) setReferencePath(paths[0])
+  }
+
+  function handleClearReference(): void {
+    setReferencePath(null)
+  }
 
   function handleFeedback(pattern: AutoEditPattern, liked: boolean): void {
     recordFeedback(pattern, liked)
@@ -139,6 +162,23 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
               Geminiでハイライト候補を採点して選定精度を上げる
             </label>
           )}
+          <button className="small-button" onClick={handlePickReference} disabled={loading}>
+            <ClapperboardIcon width={13} height={13} />
+            参考動画を選ぶ
+          </button>
+          {referencePath && (
+            <span className="autoedit-reference-chip">
+              {basename(referencePath)}
+              <button
+                className="icon-button"
+                title="参考動画の選択を解除"
+                onClick={handleClearReference}
+                disabled={loading}
+              >
+                <TrashIcon width={12} height={12} />
+              </button>
+            </span>
+          )}
         </div>
         {!loading && aiScoredCount > 0 && (
           <p className="hint-text autoedit-ai-note">
@@ -151,6 +191,18 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
             <SparklesIcon width={12} height={12} />
             BGM「{bgmBeat.assetName}」のテンポ(約{Math.round(bgmBeat.bpm)}{' '}
             BPM)を検出し、ビートシンク編集を追加しました
+          </p>
+        )}
+        {!loading && referencePath && referenceStyle && (
+          <p className="hint-text autoedit-ai-note">
+            <ClapperboardIcon width={12} height={12} />
+            参考動画の平均カット間隔(約{referenceStyle.avgCutSeconds.toFixed(1)}
+            秒、カット{referenceStyle.cutCount}箇所)を検出し、参考動画スタイル編集を追加しました
+          </p>
+        )}
+        {!loading && referencePath && !referenceStyle && (
+          <p className="hint-text autoedit-ai-note">
+            参考動画からカットのテンポを検出できませんでした。別の動画を試してください。
           </p>
         )}
         {loading && <p className="hint-text">解析中... 素材のハイライトを検出しています</p>}

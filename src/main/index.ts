@@ -15,7 +15,7 @@ import { transcribeRange, transcribeWordsRange } from './whisperService'
 import { analyzeSmartCropCenter } from './smartCropService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import { saveProjectFile, loadProjectFile } from './projectFileService'
-import { detectHighlights } from './highlightService'
+import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
@@ -167,6 +167,9 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.analyzeBpm, async (_e, filePath: string, start: number, duration: number) =>
     analyzeBpm(filePath, start, duration)
+  )
+  ipcMain.handle(IPC.analyzeReferenceStyle, async (_e, filePath: string) =>
+    analyzeReferenceStyle(filePath)
   )
   ipcMain.handle(
     IPC.transcribe,

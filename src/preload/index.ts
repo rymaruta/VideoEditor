@@ -9,6 +9,7 @@ import type {
   MediaProbeResult,
   Project,
   QualityPreset,
+  ReferenceStyleAnalysis,
   ResolutionHeight,
   SilenceRange,
   TranscriptSegment,
@@ -47,6 +48,8 @@ const api = {
     ipcRenderer.invoke(IPC.detectHighlights, filePath, assetDuration),
   analyzeBpm: (filePath: string, start: number, duration: number): Promise<BpmAnalysisResult> =>
     ipcRenderer.invoke(IPC.analyzeBpm, filePath, start, duration),
+  analyzeReferenceStyle: (filePath: string): Promise<ReferenceStyleAnalysis> =>
+    ipcRenderer.invoke(IPC.analyzeReferenceStyle, filePath),
   transcribe: (
     filePath: string,
     rangeStart: number,

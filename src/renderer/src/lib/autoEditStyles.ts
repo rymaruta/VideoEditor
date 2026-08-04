@@ -7,7 +7,8 @@ export const AUTO_EDIT_STYLES: AutoEditStyle[] = [
   'longtake',
   'mix',
   'director',
-  'beatsync'
+  'beatsync',
+  'reference'
 ]
 
 export const TRANSITION_TYPES: TransitionType[] = ['none', 'crossfade', 'fade', 'wipe']
@@ -19,7 +20,8 @@ export const STYLE_LABELS: Record<AutoEditStyle, string> = {
   longtake: 'ロングテイク',
   mix: 'ミックス',
   director: 'AIディレクター',
-  beatsync: 'ビートシンク'
+  beatsync: 'ビートシンク',
+  reference: '参考動画スタイル'
 }
 
 export const STYLE_DESCRIPTIONS: Record<AutoEditStyle, string> = {
@@ -29,7 +31,8 @@ export const STYLE_DESCRIPTIONS: Record<AutoEditStyle, string> = {
   longtake: 'カットを絞り、じっくり見せるロングテイク編集です。',
   mix: 'スタイルをバランスよく組み合わせたミックス編集です。',
   director: 'Geminiが構成・順番・つなぎ方まで一括で組み立てた編集案です。',
-  beatsync: 'BGMのテンポに合わせてカット点を打った編集です。'
+  beatsync: 'BGMのテンポに合わせてカット点を打った編集です。',
+  reference: '参考動画のカットのテンポを真似て再構成した編集です。'
 }
 
 export const TRANSITION_LABELS: Record<TransitionType, string> = {
