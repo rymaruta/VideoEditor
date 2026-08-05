@@ -203,6 +203,22 @@ function App(): React.JSX.Element {
   const [timelineHeight, setTimelineHeight] = useState(() =>
     readStoredSize(TIMELINE_HEIGHT_KEY, DEFAULT_TIMELINE_HEIGHT)
   )
+  const previousTimelineHeightRef = useRef(timelineHeight)
+
+  // Double-clicking the preview/timeline divider snaps the timeline down to its
+  // minimum height (maximizing the preview) and back, so getting a much bigger
+  // preview doesn't require manually dragging the divider every time.
+  function handleDividerDoubleClick(): void {
+    setTimelineHeight((current) => {
+      if (current > MIN_TIMELINE_HEIGHT) {
+        previousTimelineHeightRef.current = current
+        return MIN_TIMELINE_HEIGHT
+      }
+      return previousTimelineHeightRef.current > MIN_TIMELINE_HEIGHT
+        ? previousTimelineHeightRef.current
+        : DEFAULT_TIMELINE_HEIGHT
+    })
+  }
   const [leftCollapsed, setLeftCollapsed] = useState(
     () => localStorage.getItem(LEFT_COLLAPSED_KEY) === 'true'
   )
@@ -399,7 +415,8 @@ function App(): React.JSX.Element {
           <div
             className={`row-resize-handle ${resizeDrag?.kind === 'timeline' ? 'active' : ''}`}
             onMouseDown={(e) => beginResize('timeline', e)}
-            title="ドラッグして高さを調整"
+            onDoubleClick={handleDividerDoubleClick}
+            title="ドラッグして高さを調整(ダブルクリックでプレビューを最大化/元に戻す)"
           />
           <div className="timeline-wrapper" style={{ height: timelineHeight }}>
             <Timeline />
