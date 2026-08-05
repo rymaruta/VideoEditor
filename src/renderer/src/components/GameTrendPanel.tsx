@@ -19,7 +19,15 @@ import {
   MegaphoneIcon
 } from './icons'
 
-const SUGGESTED_QUESTIONS = [
+// Before any data is fetched the questions can't refer to "this list", so the
+// starting suggestions differ from the ones offered once results are on screen.
+const SUGGESTED_QUESTIONS_BEFORE_FETCH = [
+  '今ゲームのショートで伸びてるのは？',
+  '今日1本作るなら何を撮ればいい？',
+  '伸びてる動画のタイトルの付け方を教えて'
+]
+
+const SUGGESTED_QUESTIONS_AFTER_FETCH = [
   'この中で初心者でも撮りやすいのはどれ？',
   '再生数が伸びているタイトルの共通点は？',
   '明日1本作るなら何をどう撮ればいい？'
@@ -54,7 +62,32 @@ export function GameTrendPanel(): React.JSX.Element {
   const [chat, setChat] = useState<TrendChatTurn[]>([])
   const [question, setQuestion] = useState('')
   const [asking, setAsking] = useState(false)
+  const [fetchingForQuestion, setFetchingForQuestion] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+
+  const hasData = videos.length > 0
+
+  // Returns the freshly fetched data rather than only writing it to state, so a caller
+  // that needs it in the same tick (asking a question before any fetch has happened)
+  // doesn't have to wait for a re-render to read it back.
+  async function fetchTrendData(): Promise<{
+    videos: YouTubeVideoInfo[]
+    analysis: GameTrendAnalysis
+  }> {
+    const trending = await fetchTrendingGamingVideos(youtubeApiKey)
+    if (trending.length === 0) {
+      throw new Error(
+        '急上昇のゲーム動画を取得できませんでした。APIキーと通信環境を確認してください。'
+      )
+    }
+    setVideos(trending)
+    const result = await analyzeGamingTrends(geminiApiKey, trending, instruction)
+    setAnalysis(result)
+    const gameNames = result.insights.map((i) => i.gameName)
+    setComparison(compareTrend(gameNames))
+    saveTrendSnapshot(gameNames)
+    return { videos: trending, analysis: result }
+  }
 
   async function handleRefresh(): Promise<void> {
     if (!youtubeApiKey) {
@@ -75,13 +108,7 @@ export function GameTrendPanel(): React.JSX.Element {
     setChat([])
     setChatError(null)
     try {
-      const trending = await fetchTrendingGamingVideos(youtubeApiKey)
-      setVideos(trending)
-      const result = await analyzeGamingTrends(geminiApiKey, trending, instruction)
-      setAnalysis(result)
-      const gameNames = result.insights.map((i) => i.gameName)
-      setComparison(compareTrend(gameNames))
-      saveTrendSnapshot(gameNames)
+      await fetchTrendData()
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
@@ -91,9 +118,19 @@ export function GameTrendPanel(): React.JSX.Element {
 
   async function handleAsk(text: string): Promise<void> {
     const trimmed = text.trim()
-    if (!trimmed || asking) return
+    if (!trimmed || asking || loading) return
     if (!geminiApiKey) {
       setChatError('Gemini API キーを入力してください')
+      return
+    }
+    // Asking without having fetched anything yet is allowed: the trend data is
+    // fetched first and the question is then answered against it, so the user never
+    // has to remember to press "分析" before they can ask something.
+    const needsFetch = !hasData
+    if (needsFetch && !youtubeApiKey) {
+      setChatError(
+        'YouTube Data API キーを入力してください(質問に答えるため、先に急上昇データを取得します)'
+      )
       return
     }
     const historyBeforeAsk = chat
@@ -102,7 +139,22 @@ export function GameTrendPanel(): React.JSX.Element {
     setAsking(true)
     setChatError(null)
     try {
-      const answer = await askAboutTrends(geminiApiKey, videos, analysis, historyBeforeAsk, trimmed)
+      let data: { videos: YouTubeVideoInfo[]; analysis: GameTrendAnalysis | null } = {
+        videos,
+        analysis
+      }
+      if (needsFetch) {
+        setFetchingForQuestion(true)
+        data = await fetchTrendData()
+        setFetchingForQuestion(false)
+      }
+      const answer = await askAboutTrends(
+        geminiApiKey,
+        data.videos,
+        data.analysis,
+        historyBeforeAsk,
+        trimmed
+      )
       setChat([
         ...historyBeforeAsk,
         { role: 'user', text: trimmed },
@@ -116,6 +168,7 @@ export function GameTrendPanel(): React.JSX.Element {
       setChatError(formatIpcError(e))
     } finally {
       setAsking(false)
+      setFetchingForQuestion(false)
     }
   }
 
@@ -167,7 +220,7 @@ export function GameTrendPanel(): React.JSX.Element {
           書いておくと、分析の切り口をここに寄せます。空欄でも通常どおり分析します。
         </p>
       </div>
-      <button className="primary-button" onClick={handleRefresh} disabled={loading}>
+      <button className="primary-button" onClick={handleRefresh} disabled={loading || asking}>
         <SparklesIcon width={13} height={13} />
         {loading ? '分析中...' : '最新トレンドを分析'}
       </button>
@@ -184,71 +237,88 @@ export function GameTrendPanel(): React.JSX.Element {
         </div>
       )}
 
-      {videos.length > 0 && (
-        <div className="game-trend-chat">
-          <h3>
-            <MegaphoneIcon width={13} height={13} />
-            このトレンドについて質問する
-          </h3>
-          <p className="hint-text">
-            上で取得した急上昇動画リストと分析結果だけを根拠に答えます。データから分からないことは「分からない」と答えます。
-          </p>
-          {chat.length > 0 && (
-            <div className="game-trend-chat-log">
-              {chat.map((turn, i) => (
-                <div key={i} className={`game-trend-chat-turn ${turn.role}`}>
-                  {turn.text}
-                </div>
-              ))}
-              {asking && <div className="game-trend-chat-turn model pending">回答を作成中...</div>}
-            </div>
-          )}
-          {chat.length === 0 && !asking && (
-            <div className="game-trend-chat-suggestions">
-              {SUGGESTED_QUESTIONS.map((q) => (
-                <button key={q} className="small-button" onClick={() => handleAsk(q)}>
-                  {q}
-                </button>
-              ))}
-            </div>
-          )}
-          <textarea
-            className="game-trend-chat-input"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault()
-                handleAsk(question)
-              }
-            }}
-            rows={2}
-            placeholder="聞きたいことを書いてください(Ctrl+Enterで送信)"
-          />
-          <div className="game-trend-chat-actions">
-            <button
-              className="primary-button"
-              onClick={() => handleAsk(question)}
-              disabled={asking || question.trim() === ''}
-            >
-              {asking ? '回答を作成中...' : '質問する'}
-            </button>
-            {chat.length > 0 && (
-              <button
-                className="small-button"
-                onClick={() => {
-                  setChat([])
-                  setChatError(null)
-                }}
-                disabled={asking}
-              >
-                会話をクリア
-              </button>
+      <div className="game-trend-chat">
+        <h3>
+          <MegaphoneIcon width={13} height={13} />
+          {hasData ? 'このトレンドについて質問する' : 'トレンドについて質問する'}
+        </h3>
+        <p className="hint-text">
+          {hasData
+            ? '上で取得した急上昇動画リストと分析結果だけを根拠に答えます。データから分からないことは「分からない」と答えます。'
+            : 'そのまま質問できます。まだ取得していない場合は、急上昇データを自動で取得してから答えます(分析ボタンを先に押す必要はありません)。'}
+        </p>
+        {chat.length > 0 && (
+          <div className="game-trend-chat-log">
+            {chat.map((turn, i) => (
+              <div key={i} className={`game-trend-chat-turn ${turn.role}`}>
+                {turn.text}
+              </div>
+            ))}
+            {asking && (
+              <div className="game-trend-chat-turn model pending">
+                {fetchingForQuestion ? '急上昇データを取得中...' : '回答を作成中...'}
+              </div>
             )}
           </div>
-          {chatError && <p className="error-text">{chatError}</p>}
+        )}
+        {chat.length === 0 && !asking && (
+          <div className="game-trend-chat-suggestions">
+            {(hasData ? SUGGESTED_QUESTIONS_AFTER_FETCH : SUGGESTED_QUESTIONS_BEFORE_FETCH).map(
+              (q) => (
+                <button
+                  key={q}
+                  className="small-button"
+                  onClick={() => handleAsk(q)}
+                  disabled={loading}
+                >
+                  {q}
+                </button>
+              )
+            )}
+          </div>
+        )}
+        <textarea
+          className="game-trend-chat-input"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault()
+              handleAsk(question)
+            }
+          }}
+          rows={2}
+          placeholder="聞きたいことを書いてください(Ctrl+Enterで送信)"
+        />
+        <div className="game-trend-chat-actions">
+          <button
+            className="primary-button"
+            onClick={() => handleAsk(question)}
+            disabled={asking || loading || question.trim() === ''}
+          >
+            {asking
+              ? fetchingForQuestion
+                ? 'データを取得中...'
+                : '回答を作成中...'
+              : hasData
+                ? '質問する'
+                : '取得して質問する'}
+          </button>
+          {chat.length > 0 && (
+            <button
+              className="small-button"
+              onClick={() => {
+                setChat([])
+                setChatError(null)
+              }}
+              disabled={asking}
+            >
+              会話をクリア
+            </button>
+          )}
         </div>
-      )}
+        {chatError && <p className="error-text">{chatError}</p>}
+      </div>
 
       {comparison && (comparison.newGames.length > 0 || comparison.sustainedGames.length > 0) && (
         <div className="game-trend-comparison">
