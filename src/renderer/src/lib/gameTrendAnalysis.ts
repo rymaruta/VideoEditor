@@ -35,12 +35,25 @@ export interface GameTrendAnalysis {
 const GEMINI_MODEL = 'gemini-flash-latest'
 const THUMBNAIL_SAMPLE_COUNT = 5
 
-function buildPrompt(videos: YouTubeVideoInfo[], includeThumbnails: boolean): string {
-  const list = videos
+function buildVideoList(videos: YouTubeVideoInfo[]): string {
+  return videos
     .map(
       (v, i) => `${i + 1}. 「${v.title}」 / チャンネル: ${v.channelTitle} / 再生数: ${v.viewCount}`
     )
     .join('\n')
+}
+
+function buildPrompt(
+  videos: YouTubeVideoInfo[],
+  includeThumbnails: boolean,
+  userInstruction: string
+): string {
+  const list = buildVideoList(videos)
+  // The user's own words are quoted into the prompt rather than concatenated as bare
+  // instructions, so a long note can't read as a replacement for the output contract below.
+  const instructionSection = userInstruction.trim()
+    ? `\n\n# 利用者からの補足指示\n利用者が次の指示を出しています。分析の観点や語り口をこれに寄せてください。ただし出力形式と「リストにない情報を創作しない」原則は必ず守ること。\n"""\n${userInstruction.trim()}\n"""`
+    : ''
   const thumbnailSection = includeThumbnails
     ? `\n\n# サムネイル画像\n再生数上位${THUMBNAIL_SAMPLE_COUNT}件のサムネイル画像を添付しています。画像から読み取れる範囲でのみ視覚的傾向を分析してください。`
     : ''
@@ -51,7 +64,7 @@ function buildPrompt(videos: YouTubeVideoInfo[], includeThumbnails: boolean): st
   return `あなたはYouTube Shortsの編集アドバイザーです。以下はYouTube Data API(公式)で取得した「日本のゲームカテゴリ急上昇動画」の実際のタイトル・チャンネル名・再生数のリストです。このリストと添付画像に書かれている情報だけを根拠にして分析してください。リストにないゲームや情報を推測・創作しないでください。
 
 # 急上昇動画リスト
-${list}${thumbnailSection}
+${list}${thumbnailSection}${instructionSection}
 
 # 依頼内容
 1. 上記リストのタイトルから実際に読み取れるゲーム名を抽出し、それぞれについて根拠となったタイトル(evidenceTitles、リスト内の文字列をそのまま引用)と、そのゲームの動画で今バズっていそうなシーンの特徴(sceneSuggestion、日本語で1〜2文、具体的に)をまとめてください。タイトルからゲーム名が判断できない場合はそのタイトルは無視してください。
@@ -69,6 +82,63 @@ ${thumbnailInstruction}
   "thumbnailInsight": { "colorTendency": "string", "compositionTendency": "string", "textOverlayTendency": "string" } | null,
   "recommendedGame": { "gameName": "string", "reason": "string" } | null
 }`
+}
+
+export interface TrendChatTurn {
+  role: 'user' | 'model'
+  text: string
+}
+
+function buildChatSystemPrompt(
+  videos: YouTubeVideoInfo[],
+  analysis: GameTrendAnalysis | null
+): string {
+  const analysisSection = analysis
+    ? `\n\n# すでに提示済みの分析結果\n${JSON.stringify(analysis, null, 2)}`
+    : ''
+  return `あなたはYouTube Shortsの編集アドバイザーです。利用者からの質問に日本語で答えてください。
+
+判断材料は、以下の「急上昇動画リスト」(YouTube Data APIで取得した実データ)と「すでに提示済みの分析結果」だけです。
+
+# 急上昇動画リスト
+${buildVideoList(videos)}${analysisSection}
+
+# 回答のルール
+- リストや分析結果から読み取れないことを推測で断言しないこと。答えられない場合は「取得したデータからは分からない」と正直に言い、代わりに何を調べれば分かるかを添える。
+- 一般論(編集技法・YouTubeの傾向など)を答えるときは、それがデータに基づく話ではなく一般論であることを明示する。
+- 具体的な数字やタイトルを挙げるときは、必ずリストにある文字列をそのまま引用する。
+- 簡潔に答える。前置きや復唱はせず、聞かれたことに直接答える。長くても400字程度。
+- 箇条書きが分かりやすい場合は使ってよい。Markdownの見出しや強調記号は使わない。`
+}
+
+export async function askAboutTrends(
+  apiKey: string,
+  videos: YouTubeVideoInfo[],
+  analysis: GameTrendAnalysis | null,
+  history: TrendChatTurn[],
+  question: string
+): Promise<string> {
+  // The grounding data is folded into the first user turn (rather than sent as a
+  // separate system instruction) so it stays attached to the conversation on every
+  // follow-up question without being re-sent each time.
+  const contents = [
+    { role: 'user', parts: [{ text: buildChatSystemPrompt(videos, analysis) }] },
+    { role: 'model', parts: [{ text: '承知しました。取得したデータの範囲で回答します。' }] },
+    ...history.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
+    { role: 'user', parts: [{ text: question }] }
+  ]
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents })
+  })
+  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
+  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text || !text.trim()) throw new Error('Geminiからの応答が空でした')
+  return text.trim()
 }
 
 interface GeminiInlineImage {
@@ -100,7 +170,8 @@ interface GeminiResponse {
 
 export async function analyzeGamingTrends(
   apiKey: string,
-  videos: YouTubeVideoInfo[]
+  videos: YouTubeVideoInfo[],
+  userInstruction = ''
 ): Promise<GameTrendAnalysis> {
   const topByViews = [...videos]
     .sort((a, b) => b.viewCount - a.viewCount)
@@ -112,7 +183,7 @@ export async function analyzeGamingTrends(
   ).filter((img): img is GeminiInlineImage => img !== null)
 
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
-    { text: buildPrompt(videos, images.length > 0) },
+    { text: buildPrompt(videos, images.length > 0, userInstruction) },
     ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.data } }))
   ]
 

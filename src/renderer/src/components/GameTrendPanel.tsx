@@ -1,10 +1,29 @@
 import { useState } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
 import { fetchTrendingGamingVideos, YouTubeVideoInfo } from '../lib/youtube'
-import { analyzeGamingTrends, GameTrendAnalysis } from '../lib/gameTrendAnalysis'
+import {
+  analyzeGamingTrends,
+  askAboutTrends,
+  GameTrendAnalysis,
+  TrendChatTurn
+} from '../lib/gameTrendAnalysis'
 import { compareTrend, saveTrendSnapshot, TrendComparison } from '../lib/trendHistory'
 import { formatIpcError } from '../lib/ipcError'
-import { KeyIcon, SparklesIcon, ExternalLinkIcon, TargetIcon, ImageIcon, WandIcon } from './icons'
+import {
+  KeyIcon,
+  SparklesIcon,
+  ExternalLinkIcon,
+  TargetIcon,
+  ImageIcon,
+  WandIcon,
+  MegaphoneIcon
+} from './icons'
+
+const SUGGESTED_QUESTIONS = [
+  'この中で初心者でも撮りやすいのはどれ？',
+  '再生数が伸びているタイトルの共通点は？',
+  '明日1本作るなら何をどう撮ればいい？'
+]
 
 function formatViews(views: number): string {
   if (views >= 10000) return `${(views / 10000).toFixed(1)}万回`
@@ -31,6 +50,11 @@ export function GameTrendPanel(): React.JSX.Element {
   const [comparison, setComparison] = useState<TrendComparison | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [instruction, setInstruction] = useState('')
+  const [chat, setChat] = useState<TrendChatTurn[]>([])
+  const [question, setQuestion] = useState('')
+  const [asking, setAsking] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
 
   async function handleRefresh(): Promise<void> {
     if (!youtubeApiKey) {
@@ -45,10 +69,15 @@ export function GameTrendPanel(): React.JSX.Element {
     setError(null)
     setAnalysis(null)
     setComparison(null)
+    // The chat is grounded in a specific snapshot of trending videos, so a fresh
+    // fetch invalidates it — keeping the old turns would let follow-up questions
+    // silently refer to data that is no longer on screen.
+    setChat([])
+    setChatError(null)
     try {
       const trending = await fetchTrendingGamingVideos(youtubeApiKey)
       setVideos(trending)
-      const result = await analyzeGamingTrends(geminiApiKey, trending)
+      const result = await analyzeGamingTrends(geminiApiKey, trending, instruction)
       setAnalysis(result)
       const gameNames = result.insights.map((i) => i.gameName)
       setComparison(compareTrend(gameNames))
@@ -57,6 +86,36 @@ export function GameTrendPanel(): React.JSX.Element {
       setError(formatIpcError(e))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleAsk(text: string): Promise<void> {
+    const trimmed = text.trim()
+    if (!trimmed || asking) return
+    if (!geminiApiKey) {
+      setChatError('Gemini API キーを入力してください')
+      return
+    }
+    const historyBeforeAsk = chat
+    setChat([...historyBeforeAsk, { role: 'user', text: trimmed }])
+    setQuestion('')
+    setAsking(true)
+    setChatError(null)
+    try {
+      const answer = await askAboutTrends(geminiApiKey, videos, analysis, historyBeforeAsk, trimmed)
+      setChat([
+        ...historyBeforeAsk,
+        { role: 'user', text: trimmed },
+        { role: 'model', text: answer }
+      ])
+    } catch (e) {
+      // Drop the unanswered question so a retry doesn't send it twice, and put the
+      // text back in the box so it isn't lost.
+      setChat(historyBeforeAsk)
+      setQuestion(trimmed)
+      setChatError(formatIpcError(e))
+    } finally {
+      setAsking(false)
     }
   }
 
@@ -95,6 +154,19 @@ export function GameTrendPanel(): React.JSX.Element {
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
       </div>
+      <div className="youtube-field">
+        <label>分析の観点(任意)</label>
+        <textarea
+          className="game-trend-instruction"
+          value={instruction}
+          onChange={(e) => setInstruction(e.target.value)}
+          rows={2}
+          placeholder="例: ホラーゲーム中心で見たい / 顔出しなしで作れるものを重視して"
+        />
+        <p className="hint-text">
+          書いておくと、分析の切り口をここに寄せます。空欄でも通常どおり分析します。
+        </p>
+      </div>
       <button className="primary-button" onClick={handleRefresh} disabled={loading}>
         <SparklesIcon width={13} height={13} />
         {loading ? '分析中...' : '最新トレンドを分析'}
@@ -109,6 +181,72 @@ export function GameTrendPanel(): React.JSX.Element {
           </h3>
           <p className="game-trend-recommendation-name">{analysis.recommendedGame.gameName}</p>
           <p className="game-trend-recommendation-reason">{analysis.recommendedGame.reason}</p>
+        </div>
+      )}
+
+      {videos.length > 0 && (
+        <div className="game-trend-chat">
+          <h3>
+            <MegaphoneIcon width={13} height={13} />
+            このトレンドについて質問する
+          </h3>
+          <p className="hint-text">
+            上で取得した急上昇動画リストと分析結果だけを根拠に答えます。データから分からないことは「分からない」と答えます。
+          </p>
+          {chat.length > 0 && (
+            <div className="game-trend-chat-log">
+              {chat.map((turn, i) => (
+                <div key={i} className={`game-trend-chat-turn ${turn.role}`}>
+                  {turn.text}
+                </div>
+              ))}
+              {asking && <div className="game-trend-chat-turn model pending">回答を作成中...</div>}
+            </div>
+          )}
+          {chat.length === 0 && !asking && (
+            <div className="game-trend-chat-suggestions">
+              {SUGGESTED_QUESTIONS.map((q) => (
+                <button key={q} className="small-button" onClick={() => handleAsk(q)}>
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
+          <textarea
+            className="game-trend-chat-input"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault()
+                handleAsk(question)
+              }
+            }}
+            rows={2}
+            placeholder="聞きたいことを書いてください(Ctrl+Enterで送信)"
+          />
+          <div className="game-trend-chat-actions">
+            <button
+              className="primary-button"
+              onClick={() => handleAsk(question)}
+              disabled={asking || question.trim() === ''}
+            >
+              {asking ? '回答を作成中...' : '質問する'}
+            </button>
+            {chat.length > 0 && (
+              <button
+                className="small-button"
+                onClick={() => {
+                  setChat([])
+                  setChatError(null)
+                }}
+                disabled={asking}
+              >
+                会話をクリア
+              </button>
+            )}
+          </div>
+          {chatError && <p className="error-text">{chatError}</p>}
         </div>
       )}
 

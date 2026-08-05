@@ -863,6 +863,24 @@ h3 {
   text-align: center;
 }
 
+/* Sits on top of the (black, frozen) video frame rather than replacing it, so the
+   clip stays selectable and trimmable even though it can't be decoded for preview. */
+.preview-playback-error {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  background: rgba(24, 28, 36, 0.94);
+  border: 1px solid var(--danger, #e5484d);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  color: var(--text-1);
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: left;
+}
+
 .overlay-text {
   position: absolute;
   left: 5%;
@@ -2376,6 +2394,91 @@ h3 {
   font-size: 12px;
   color: var(--text-2);
   line-height: 1.6;
+}
+
+.game-trend-instruction {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+}
+
+.game-trend-chat {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.game-trend-chat h3 {
+  font-size: 12px;
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.game-trend-chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.game-trend-chat-turn {
+  font-size: 12px;
+  line-height: 1.65;
+  border-radius: var(--radius-md);
+  padding: 9px 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.game-trend-chat-turn.user {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-1);
+  color: var(--text-1);
+  align-self: flex-end;
+  max-width: 90%;
+}
+
+.game-trend-chat-turn.model {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text-2);
+}
+
+.game-trend-chat-turn.pending {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.game-trend-chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.game-trend-chat-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 48px;
+}
+
+.game-trend-chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.game-trend-chat-actions .primary-button {
+  width: auto;
+  flex: 1;
+  min-width: 140px;
 }
 
 .game-trend-comparison h3 {

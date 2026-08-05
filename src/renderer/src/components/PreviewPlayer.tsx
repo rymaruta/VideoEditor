@@ -285,7 +285,22 @@ export function PreviewPlayer(): React.JSX.Element {
   const [volume, setVolume] = useState(readStoredVolume)
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === 'true')
   const [scrubbingPreview, setScrubbingPreview] = useState(false)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
   const scrubTrackRef = useRef<HTMLDivElement>(null)
+
+  // The preview uses Chromium's <video>, which supports far fewer codecs than the
+  // ffmpeg used for export — H.265/HEVC and AV1 game captures decode fine on export
+  // but fail here. Without this, play() just rejects, the button stays in its
+  // "playing" state and nothing moves, with no indication of why.
+  function handleVideoError(): void {
+    const code = videoRef.current?.error?.code
+    setIsPlaying(false)
+    setPlaybackError(
+      code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || code === MediaError.MEDIA_ERR_DECODE
+        ? 'この動画はプレビューで再生できません。H.265(HEVC)やAV1など、プレビューが対応していない形式の可能性があります。カット位置の指定などの編集は行えます。書き出しは別の仕組み(ffmpeg)を使うため、成功する場合があります。'
+        : 'この動画を読み込めませんでした。ファイルが移動・削除されていないか確認してください。'
+    )
+  }
 
   function clientToNormalized(clientX: number, clientY: number): { x: number; y: number } {
     const rect = frameRef.current?.getBoundingClientRect()
@@ -407,11 +422,23 @@ export function PreviewPlayer(): React.JSX.Element {
   }, [timedClips])
 
   useEffect(() => {
-    if (isPlaying) {
-      videoRef.current?.play().catch(() => {})
-    } else {
-      videoRef.current?.pause()
+    const video = videoRef.current
+    if (!video) return
+    if (!isPlaying) {
+      video.pause()
+      return
     }
+    // The <video> may already have failed to decode before play was ever pressed, in
+    // which case no further error event fires — the button would otherwise sit in its
+    // "playing" state forever with nothing moving.
+    if (video.error) {
+      handleVideoError()
+      return
+    }
+    video.play().catch(() => {
+      if (videoRef.current?.error) handleVideoError()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying])
 
   // Drive the playhead from requestAnimationFrame instead of the <video> element's
@@ -494,13 +521,20 @@ export function PreviewPlayer(): React.JSX.Element {
         <div className="preview-frame-wrapper">
           <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
             {activeSrc ? (
-              <video ref={videoRef} src={activeSrc} onEnded={() => setIsPlaying(false)} />
+              <video
+                ref={videoRef}
+                src={activeSrc}
+                onEnded={() => setIsPlaying(false)}
+                onError={handleVideoError}
+                onLoadedData={() => setPlaybackError(null)}
+              />
             ) : (
               <div className="preview-empty">
                 <ClapperboardIcon width={32} height={32} />
                 <p>タイムラインにクリップを追加してください</p>
               </div>
             )}
+            {playbackError && <div className="preview-playback-error">{playbackError}</div>}
             {project.videoOverlayTracks
               .filter((t) => !t.hidden)
               .map((track) => {
