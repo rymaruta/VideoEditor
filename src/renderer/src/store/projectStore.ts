@@ -376,12 +376,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const existing =
         state.project.audioTracks.find((t) => t.id === target.trackId) ??
         state.project.audioTracks.find((t) => t.name === target.trackName)
+      // Re-adding the same sound effect must reuse its asset rather than pile up a
+      // duplicate media entry for every placement.
+      const existingAsset = state.project.assets.find((a) => a.filePath === asset.filePath)
+      const effectiveAsset = existingAsset ?? asset
       const clip: AudioTrackClip = {
         id: uuid(),
-        assetId: asset.id,
+        assetId: effectiveAsset.id,
         startTime: existing ? audioTrackEnd(existing) : 0,
         inPoint: 0,
-        outPoint: asset.duration
+        outPoint: effectiveAsset.duration
       }
       const audioTracks = existing
         ? state.project.audioTracks.map((t) =>
@@ -402,7 +406,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...pushHistory(state),
         project: {
           ...state.project,
-          assets: [...state.project.assets, asset],
+          assets: existingAsset ? state.project.assets : [...state.project.assets, asset],
           audioTracks
         }
       }

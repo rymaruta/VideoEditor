@@ -12,6 +12,22 @@ function defaultPositionFraction(position: TextPosition): { x: number; y: number
   return { x: 0.5, y: 0.5 }
 }
 
+const MIN_OVERLAY_DURATION = 0.1
+
+// The min/max attributes only constrain the spinner — a typed value still reaches
+// onChange. Unclamped, a negative start produced a malformed ASS timestamp and an
+// end before the start made the caption silently vanish from both preview and
+// export, with nothing on screen to explain why.
+function clampOverlayStart(value: number, endTime: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(Math.max(0, value), Math.max(0, endTime - MIN_OVERLAY_DURATION))
+}
+
+function clampOverlayEnd(value: number, startTime: number): number {
+  if (!Number.isFinite(value)) return startTime + MIN_OVERLAY_DURATION
+  return Math.max(value, startTime + MIN_OVERLAY_DURATION)
+}
+
 export function TextOverlayPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
@@ -111,8 +127,14 @@ export function TextOverlayPanel(): React.JSX.Element {
                 <input
                   type="number"
                   step={0.1}
+                  min={0}
+                  max={Math.max(0, o.endTime - MIN_OVERLAY_DURATION)}
                   value={o.startTime}
-                  onChange={(e) => updateTextOverlay(o.id, { startTime: Number(e.target.value) })}
+                  onChange={(e) =>
+                    updateTextOverlay(o.id, {
+                      startTime: clampOverlayStart(Number(e.target.value), o.endTime)
+                    })
+                  }
                 />
               </label>
               <label>
@@ -120,8 +142,13 @@ export function TextOverlayPanel(): React.JSX.Element {
                 <input
                   type="number"
                   step={0.1}
+                  min={o.startTime + MIN_OVERLAY_DURATION}
                   value={o.endTime}
-                  onChange={(e) => updateTextOverlay(o.id, { endTime: Number(e.target.value) })}
+                  onChange={(e) =>
+                    updateTextOverlay(o.id, {
+                      endTime: clampOverlayEnd(Number(e.target.value), o.startTime)
+                    })
+                  }
                 />
               </label>
               {o.source === 'auto' && <span className="project-badge">自動</span>}

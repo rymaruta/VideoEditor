@@ -28,9 +28,7 @@ export function PresetPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const playheadTime = useProjectStore((s) => s.playheadTime)
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
-  const addAsset = useProjectStore((s) => s.addAsset)
-  const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
-  const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
+  const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
 
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -60,30 +58,24 @@ export function PresetPanel(): React.JSX.Element {
     setBusyId(preset.id)
     setError(null)
     try {
-      let asset = project.assets.find((a) => a.filePath === preset.filePath)
-      if (!asset) {
-        const meta = await window.api.probeMedia(preset.filePath)
-        asset = {
-          id: uuid(),
+      const known = project.assets.find((a) => a.filePath === preset.filePath)
+      const duration = known?.duration ?? (await window.api.probeMedia(preset.filePath)).duration
+      // Asset + track + clip as one undoable step (the store reuses the asset when
+      // this sound effect is already in the project).
+      addAudioClipWithAsset(
+        {
+          id: known?.id ?? uuid(),
           filePath: preset.filePath,
           fileName: preset.fileName,
-          duration: meta.duration,
+          duration,
           width: 0,
           height: 0,
           fps: 0,
           hasAudio: true,
           hasVideo: false
-        }
-        addAsset(asset)
-      }
-      let track = useProjectStore.getState().project.audioTracks.find((t) => t.name === 'SE')
-      if (!track) {
-        addAudioTrack('SE')
-        track = useProjectStore.getState().project.audioTracks.find((t) => t.name === 'SE')
-      }
-      if (track) {
-        addClipToAudioTrack(track.id, asset.id)
-      }
+        },
+        { trackName: 'SE' }
+      )
     } catch (e) {
       setError(formatIpcError(e))
     } finally {

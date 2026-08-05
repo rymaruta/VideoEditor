@@ -1,10 +1,14 @@
 import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
 
 function toAssTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  const cs = Math.round((seconds - Math.floor(seconds)) * 100)
+  // A negative or non-finite time (an older project file, a hand-edited .veproj)
+  // would render as "-1:-1:-3.00", which libass cannot parse — the subtitle line
+  // is then dropped or misplaced. Clamp instead of emitting a broken timestamp.
+  const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
+  const h = Math.floor(safe / 3600)
+  const m = Math.floor((safe % 3600) / 60)
+  const s = Math.floor(safe % 60)
+  const cs = Math.round((safe - Math.floor(safe)) * 100)
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`
 }
 
