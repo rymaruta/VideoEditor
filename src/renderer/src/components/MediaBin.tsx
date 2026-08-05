@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
+import { canPreviewFile } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
 import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
@@ -62,6 +63,27 @@ export function MediaBin(): React.JSX.Element {
     })
   }, [])
 
+  // Transcoding is the expensive fallback, so it only runs once the preview element
+  // itself has said it cannot play the file. Chromium can decode HEVC on machines with
+  // OS support, where transcoding would be pure waste.
+  async function ensurePreviewable(
+    assetId: string,
+    filePath: string,
+    codecSaysUnplayable: boolean,
+    hasVideo: boolean
+  ): Promise<void> {
+    if (await canPreviewFile(filePath, hasVideo)) return
+    if (!codecSaysUnplayable) {
+      // The file failed to load for a reason a transcode won't fix (corrupt, or a
+      // container the demuxer rejects). Say so rather than burning minutes on ffmpeg.
+      setError(
+        `${fileNameFromPath(filePath)}: プレビューで読み込めませんでした。ファイルが壊れている可能性があります。`
+      )
+      return
+    }
+    await buildPreviewProxy(assetId, filePath)
+  }
+
   async function buildPreviewProxy(assetId: string, filePath: string): Promise<void> {
     setProxyProgress((prev) => ({ ...prev, [assetId]: 0 }))
     try {
@@ -101,7 +123,7 @@ export function MediaBin(): React.JSX.Element {
         }
       }
       relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl)
-      if (meta.needsPreviewProxy) void buildPreviewProxy(assetId, filePath)
+      void ensurePreviewable(assetId, filePath, meta.needsPreviewProxy, meta.hasVideo)
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
@@ -116,7 +138,7 @@ export function MediaBin(): React.JSX.Element {
     // never be imported while the user assumes every valid selection was added.
     const failures: string[] = []
     const imported: MediaAsset[] = []
-    const needsProxy: MediaAsset[] = []
+    const proxyCandidates: { asset: MediaAsset; codecSaysUnplayable: boolean }[] = []
     for (const filePath of paths) {
       try {
         const meta = await window.api.probeMedia(filePath)
@@ -144,7 +166,7 @@ export function MediaBin(): React.JSX.Element {
           thumbnailDataUrl
         }
         imported.push(asset)
-        if (meta.needsPreviewProxy) needsProxy.push(asset)
+        proxyCandidates.push({ asset, codecSaysUnplayable: meta.needsPreviewProxy })
       } catch (e) {
         failures.push(`${fileNameFromPath(filePath)}: ${formatIpcError(e)}`)
       }
@@ -153,8 +175,8 @@ export function MediaBin(): React.JSX.Element {
     addAssets(imported)
     // Assets are added first and the (potentially slow) transcode runs afterwards, so
     // the media list appears immediately instead of freezing until ffmpeg finishes.
-    for (const asset of needsProxy) {
-      void buildPreviewProxy(asset.id, asset.filePath)
+    for (const { asset, codecSaysUnplayable } of proxyCandidates) {
+      void ensurePreviewable(asset.id, asset.filePath, codecSaysUnplayable, asset.hasVideo)
     }
     if (failures.length > 0) {
       setError(`${failures.length}件のファイルを読み込めませんでした — ${failures.join(' / ')}`)

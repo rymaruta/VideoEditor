@@ -264,6 +264,13 @@ function registerWindowScopedIpcHandlers(): void {
   )
 }
 
+// Chromium ships without an HEVC decoder of its own, but can use the OS one on
+// macOS/Windows when this is enabled. It is the difference between previewing a
+// game capture directly and having to transcode a proxy copy of every file first.
+// Must be set before the app is ready; a machine without platform support simply
+// keeps reporting HEVC as unplayable and falls back to the proxy.
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.videoeditor.app')
 

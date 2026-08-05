@@ -27,6 +27,21 @@ export function needsPreviewProxy(
   return false
 }
 
+interface ProxyStreamInfo {
+  audioCodec: string
+  hasAudio: boolean
+}
+
+function probeStreams(filePath: string): Promise<ProxyStreamInfo> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err || !data) return resolve({ audioCodec: '', hasAudio: false })
+      const audio = data.streams.find((s) => s.codec_type === 'audio')
+      resolve({ audioCodec: audio?.codec_name ?? '', hasAudio: Boolean(audio) })
+    })
+  })
+}
+
 function proxyDir(): string {
   const dir = join(app.getPath('userData'), 'preview-proxies')
   mkdirSync(dir, { recursive: true })
@@ -66,41 +81,49 @@ export function ensurePreviewProxy(
   // Written to a temporary name and renamed only on success, so an interrupted run
   // can never leave a half-written file that would later be treated as a valid cache.
   const tmpPath = `${outPath}.partial.mp4`
-  const task = new Promise<string>((resolve, reject) => {
-    ffmpeg(filePath)
-      .videoCodec('libx264')
-      .audioCodec('aac')
-      .outputOptions([
-        '-preset veryfast',
-        '-crf 26',
-        // Downscale only when taller than 720p; -2 keeps the width even for H.264.
-        '-vf scale=-2:min(720\\,ih)',
-        '-pix_fmt yuv420p',
-        '-movflags +faststart',
-        '-ac 2'
-      ])
-      .on('progress', (p) => {
-        if (onProgress && typeof p.percent === 'number') {
-          onProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
-        }
-      })
-      .on('error', (err) => {
-        rmSync(tmpPath, { force: true })
-        reject(err)
-      })
-      .on('end', () => {
-        try {
-          renameSync(tmpPath, outPath)
-          resolve(outPath)
-        } catch (e) {
-          rmSync(tmpPath, { force: true })
-          reject(e)
-        }
-      })
-      .save(tmpPath)
-  }).finally(() => {
-    inFlight.delete(outPath)
-  })
+  const task = probeStreams(filePath)
+    .then(
+      ({ audioCodec, hasAudio }) =>
+        new Promise<string>((resolve, reject) => {
+          const command = ffmpeg(filePath).videoCodec('libx264').outputOptions([
+            '-preset veryfast',
+            '-crf 28',
+            // 540p is plenty for a preview and roughly halves both the encode time and
+            // the file size versus 720p. Export is unaffected — it reads the original.
+            '-vf scale=-2:min(540\\,ih)',
+            '-pix_fmt yuv420p',
+            '-movflags +faststart'
+          ])
+          // Re-encoding audio that the preview can already play is wasted time; only the
+          // video stream is actually the problem in the common HEVC case.
+          if (!hasAudio) command.noAudio()
+          else if (PREVIEWABLE_AUDIO_CODECS.has(audioCodec)) command.audioCodec('copy')
+          else command.audioCodec('aac').outputOptions(['-ac 2'])
+          command
+            .on('progress', (p) => {
+              if (onProgress && typeof p.percent === 'number') {
+                onProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
+              }
+            })
+            .on('error', (err) => {
+              rmSync(tmpPath, { force: true })
+              reject(err)
+            })
+            .on('end', () => {
+              try {
+                renameSync(tmpPath, outPath)
+                resolve(outPath)
+              } catch (e) {
+                rmSync(tmpPath, { force: true })
+                reject(e)
+              }
+            })
+            .save(tmpPath)
+        })
+    )
+    .finally(() => {
+      inFlight.delete(outPath)
+    })
 
   inFlight.set(outPath, task)
   return task

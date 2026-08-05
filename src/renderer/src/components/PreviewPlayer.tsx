@@ -287,14 +287,32 @@ export function PreviewPlayer(): React.JSX.Element {
   // ffmpeg used for export — H.265/HEVC and AV1 game captures decode fine on export
   // but fail here. Without this, play() just rejects, the button stays in its
   // "playing" state and nothing moves, with no indication of why.
+  const UNPLAYABLE_MESSAGE =
+    'この動画はプレビューで再生できません。H.265(HEVC)やAV1など、プレビューが対応していない形式の可能性があります。カット位置の指定などの編集は行えます。書き出しは別の仕組み(ffmpeg)を使うため、成功する場合があります。'
+
   function handleVideoError(): void {
     const code = videoRef.current?.error?.code
     setIsPlaying(false)
     setPlaybackError(
       code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || code === MediaError.MEDIA_ERR_DECODE
-        ? 'この動画はプレビューで再生できません。H.265(HEVC)やAV1など、プレビューが対応していない形式の可能性があります。カット位置の指定などの編集は行えます。書き出しは別の仕組み(ffmpeg)を使うため、成功する場合があります。'
+        ? UNPLAYABLE_MESSAGE
         : 'この動画を読み込めませんでした。ファイルが移動・削除されていないか確認してください。'
     )
+  }
+
+  // A file whose video stream can't be decoded but whose audio can (HEVC video + AAC
+  // audio) loads "successfully" and fires no error — it just never produces a frame.
+  // videoWidth is the only signal that separates it from a working clip.
+  function handleLoadedMetadata(): void {
+    const video = videoRef.current
+    if (!video) return
+    const expectsVideo = activeTimedClipRef.current?.asset.hasVideo ?? true
+    if (expectsVideo && video.videoWidth === 0) {
+      setIsPlaying(false)
+      setPlaybackError(UNPLAYABLE_MESSAGE)
+      return
+    }
+    setPlaybackError(null)
   }
 
   function clientToNormalized(clientX: number, clientY: number): { x: number; y: number } {
@@ -410,8 +428,18 @@ export function PreviewPlayer(): React.JSX.Element {
     const activeStillPresent = activeId != null && timedClips.some((tc) => tc.clip.id === activeId)
     if (activeId != null && !activeStillPresent) {
       loadClipForTime(playheadTime, isPlaying)
-    } else if (!activeTimedClipRef.current && timedClips.length > 0) {
+      return
+    }
+    if (!activeTimedClipRef.current && timedClips.length > 0) {
       loadClipForTime(0, false)
+      return
+    }
+    // The loaded clip's source file can change while it stays on the timeline: a
+    // preview proxy finishing its transcode swaps the asset's playback path. Without
+    // this the element keeps the old, undecodable src and never starts.
+    const current = timedClips.find((tc) => tc.clip.id === activeId)
+    if (current && previewSourceUrl(current.asset) !== activeSrcRef.current) {
+      loadClipForTime(playheadTime, isPlaying)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timedClips])
@@ -521,7 +549,7 @@ export function PreviewPlayer(): React.JSX.Element {
                 src={activeSrc}
                 onEnded={() => setIsPlaying(false)}
                 onError={handleVideoError}
-                onLoadedData={() => setPlaybackError(null)}
+                onLoadedMetadata={handleLoadedMetadata}
               />
             ) : (
               <div className="preview-empty">
