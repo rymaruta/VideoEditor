@@ -97,6 +97,22 @@ interface VideoOverlayDragState {
   snapGuideTime: number | null
 }
 
+interface MediaTrimDragState {
+  kind: 'audio' | 'videoOverlay'
+  trackId: string
+  clipId: string
+  edge: 'left' | 'right'
+  startX: number
+  assetDuration: number
+  originalStartTime: number
+  originalInPoint: number
+  originalOutPoint: number
+  liveStartTime: number
+  liveInPoint: number
+  liveOutPoint: number
+  snapGuideTime: number | null
+}
+
 interface OverlayDragState {
   overlayId: string
   mode: 'move' | 'trim-left' | 'trim-right'
@@ -136,6 +152,7 @@ export function Timeline(): React.JSX.Element {
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
   const updateAudioClipTrim = useProjectStore((s) => s.updateAudioClipTrim)
+  const updateAudioClipStartAndTrim = useProjectStore((s) => s.updateAudioClipStartAndTrim)
   const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
   const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
@@ -147,6 +164,9 @@ export function Timeline(): React.JSX.Element {
   const setVideoOverlayTrackScale = useProjectStore((s) => s.setVideoOverlayTrackScale)
   const updateVideoOverlayClipStart = useProjectStore((s) => s.updateVideoOverlayClipStart)
   const updateVideoOverlayClipTrim = useProjectStore((s) => s.updateVideoOverlayClipTrim)
+  const updateVideoOverlayClipStartAndTrim = useProjectStore(
+    (s) => s.updateVideoOverlayClipStartAndTrim
+  )
   const swapVideoOverlayClipAsset = useProjectStore((s) => s.swapVideoOverlayClipAsset)
   const removeVideoOverlayClip = useProjectStore((s) => s.removeVideoOverlayClip)
   const splitVideoOverlayClipAtTime = useProjectStore((s) => s.splitVideoOverlayClipAtTime)
@@ -185,6 +205,7 @@ export function Timeline(): React.JSX.Element {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null)
   const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
+  const [mediaTrimDrag, setMediaTrimDrag] = useState<MediaTrimDragState | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
   const [scrubbing, setScrubbing] = useState(false)
@@ -408,6 +429,92 @@ export function Timeline(): React.JSX.Element {
   }, [audioDrag, pixelsPerSecond, updateAudioClipStart, activeSnapCandidates])
 
   useEffect(() => {
+    if (!mediaTrimDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setMediaTrimDrag((prev) => {
+        if (!prev) return prev
+        const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
+        const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
+        if (prev.edge === 'left') {
+          // Dragging the left handle moves startTime and inPoint together, keeping the
+          // clip's end time fixed — the usual "ripple the in-point" trim behavior.
+          const maxDelta = prev.originalOutPoint - prev.originalInPoint - MIN_CLIP_SOURCE_DURATION
+          const minDelta = -Math.min(prev.originalInPoint, prev.originalStartTime)
+          let delta = Math.min(maxDelta, Math.max(minDelta, deltaSeconds))
+          const snap = snapTime(
+            prev.originalStartTime + delta,
+            activeSnapCandidates,
+            thresholdSeconds
+          )
+          if (snap.snapped) {
+            delta = Math.min(maxDelta, Math.max(minDelta, snap.time - prev.originalStartTime))
+          }
+          return {
+            ...prev,
+            liveStartTime: prev.originalStartTime + delta,
+            liveInPoint: prev.originalInPoint + delta,
+            snapGuideTime: snap.snapped ? prev.originalStartTime + delta : null
+          }
+        }
+        // Right handle: only the out-point (and therefore the clip's end time) moves.
+        const maxDelta = prev.assetDuration - prev.originalOutPoint
+        const minDelta = -(prev.originalOutPoint - prev.originalInPoint - MIN_CLIP_SOURCE_DURATION)
+        let delta = Math.min(maxDelta, Math.max(minDelta, deltaSeconds))
+        const rawEnd =
+          prev.originalStartTime + (prev.originalOutPoint + delta - prev.originalInPoint)
+        const snap = snapTime(rawEnd, activeSnapCandidates, thresholdSeconds)
+        if (snap.snapped) {
+          const snappedOutPoint = prev.originalInPoint + (snap.time - prev.originalStartTime)
+          delta = Math.min(maxDelta, Math.max(minDelta, snappedOutPoint - prev.originalOutPoint))
+        }
+        return {
+          ...prev,
+          liveOutPoint: prev.originalOutPoint + delta,
+          snapGuideTime: snap.snapped
+            ? prev.originalStartTime + (prev.originalOutPoint + delta - prev.originalInPoint)
+            : null
+        }
+      })
+    }
+    function handleMouseUp(): void {
+      setMediaTrimDrag((prev) => {
+        if (prev) {
+          if (prev.kind === 'audio') {
+            updateAudioClipStartAndTrim(
+              prev.trackId,
+              prev.clipId,
+              prev.liveStartTime,
+              prev.liveInPoint,
+              prev.liveOutPoint
+            )
+          } else {
+            updateVideoOverlayClipStartAndTrim(
+              prev.trackId,
+              prev.clipId,
+              prev.liveStartTime,
+              prev.liveInPoint,
+              prev.liveOutPoint
+            )
+          }
+        }
+        return null
+      })
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [
+    mediaTrimDrag,
+    pixelsPerSecond,
+    activeSnapCandidates,
+    updateAudioClipStartAndTrim,
+    updateVideoOverlayClipStartAndTrim
+  ])
+
+  useEffect(() => {
     if (!videoOverlayDrag) return
     function handleMouseMove(e: MouseEvent): void {
       setVideoOverlayDrag((prev) => {
@@ -563,7 +670,11 @@ export function Timeline(): React.JSX.Element {
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
   const activeSnapGuideTime =
-    trimDrag?.snapGuideTime ?? audioDrag?.snapGuideTime ?? overlayDrag?.snapGuideTime ?? null
+    trimDrag?.snapGuideTime ??
+    audioDrag?.snapGuideTime ??
+    overlayDrag?.snapGuideTime ??
+    mediaTrimDrag?.snapGuideTime ??
+    null
 
   useEffect(() => {
     if (!scrubbing) return
@@ -1216,18 +1327,24 @@ export function Timeline(): React.JSX.Element {
               {track.clips.map((clip) => {
                 const asset = project.assets.find((a) => a.id === clip.assetId)
                 if (!asset) return null
-                const dur = clip.outPoint - clip.inPoint
+                const isTrimmingThis =
+                  mediaTrimDrag?.kind === 'videoOverlay' && mediaTrimDrag.clipId === clip.id
+                const inPoint = isTrimmingThis ? mediaTrimDrag.liveInPoint : clip.inPoint
+                const outPoint = isTrimmingThis ? mediaTrimDrag.liveOutPoint : clip.outPoint
+                const dur = outPoint - inPoint
                 const clipWidth = dur * pixelsPerSecond
                 const isDraggingThis = videoOverlayDrag?.clipId === clip.id
-                const displayStart = isDraggingThis
-                  ? videoOverlayDrag.liveStartTime
-                  : clip.startTime
+                const displayStart = isTrimmingThis
+                  ? mediaTrimDrag.liveStartTime
+                  : isDraggingThis
+                    ? videoOverlayDrag.liveStartTime
+                    : clip.startTime
                 return (
                   <div
                     key={clip.id}
                     className={`timeline-video-overlay-clip ${
                       selectedVideoOverlayClip?.clipId === clip.id ? 'selected' : ''
-                    } ${isDraggingThis ? 'dragging' : ''}`}
+                    } ${isDraggingThis ? 'dragging' : ''} ${isTrimmingThis ? 'trimming' : ''}`}
                     style={{
                       left: displayStart * pixelsPerSecond,
                       width: clipWidth
@@ -1251,7 +1368,49 @@ export function Timeline(): React.JSX.Element {
                     }}
                     title={asset.fileName}
                   >
+                    <div
+                      className="timeline-clip-handle timeline-clip-handle-left"
+                      onMouseDown={(e) => {
+                        e.stopPropagation()
+                        setMediaTrimDrag({
+                          kind: 'videoOverlay',
+                          trackId: track.id,
+                          clipId: clip.id,
+                          edge: 'left',
+                          startX: e.clientX,
+                          assetDuration: asset.duration,
+                          originalStartTime: clip.startTime,
+                          originalInPoint: clip.inPoint,
+                          originalOutPoint: clip.outPoint,
+                          liveStartTime: clip.startTime,
+                          liveInPoint: clip.inPoint,
+                          liveOutPoint: clip.outPoint,
+                          snapGuideTime: null
+                        })
+                      }}
+                    />
                     <span className="timeline-audio-clip-label">{asset.fileName}</span>
+                    <div
+                      className="timeline-clip-handle timeline-clip-handle-right"
+                      onMouseDown={(e) => {
+                        e.stopPropagation()
+                        setMediaTrimDrag({
+                          kind: 'videoOverlay',
+                          trackId: track.id,
+                          clipId: clip.id,
+                          edge: 'right',
+                          startX: e.clientX,
+                          assetDuration: asset.duration,
+                          originalStartTime: clip.startTime,
+                          originalInPoint: clip.inPoint,
+                          originalOutPoint: clip.outPoint,
+                          liveStartTime: clip.startTime,
+                          liveInPoint: clip.inPoint,
+                          liveOutPoint: clip.outPoint,
+                          snapGuideTime: null
+                        })
+                      }}
+                    />
                   </div>
                 )
               })}
@@ -1263,16 +1422,24 @@ export function Timeline(): React.JSX.Element {
               {track.clips.map((clip) => {
                 const asset = project.assets.find((a) => a.id === clip.assetId)
                 if (!asset) return null
-                const dur = clip.outPoint - clip.inPoint
+                const isTrimmingThis =
+                  mediaTrimDrag?.kind === 'audio' && mediaTrimDrag.clipId === clip.id
+                const inPoint = isTrimmingThis ? mediaTrimDrag.liveInPoint : clip.inPoint
+                const outPoint = isTrimmingThis ? mediaTrimDrag.liveOutPoint : clip.outPoint
+                const dur = outPoint - inPoint
                 const clipWidth = dur * pixelsPerSecond
                 const isDraggingThis = audioDrag?.clipId === clip.id
-                const displayStart = isDraggingThis ? audioDrag.liveStartTime : clip.startTime
+                const displayStart = isTrimmingThis
+                  ? mediaTrimDrag.liveStartTime
+                  : isDraggingThis
+                    ? audioDrag.liveStartTime
+                    : clip.startTime
                 return (
                   <div
                     key={clip.id}
                     className={`timeline-audio-clip ${
                       selectedAudioClip?.clipId === clip.id ? 'selected' : ''
-                    } ${isDraggingThis ? 'dragging' : ''}`}
+                    } ${isDraggingThis ? 'dragging' : ''} ${isTrimmingThis ? 'trimming' : ''}`}
                     style={{
                       left: displayStart * pixelsPerSecond,
                       width: clipWidth
@@ -1296,18 +1463,60 @@ export function Timeline(): React.JSX.Element {
                     }}
                     title={asset.fileName}
                   >
+                    <div
+                      className="timeline-clip-handle timeline-clip-handle-left"
+                      onMouseDown={(e) => {
+                        e.stopPropagation()
+                        setMediaTrimDrag({
+                          kind: 'audio',
+                          trackId: track.id,
+                          clipId: clip.id,
+                          edge: 'left',
+                          startX: e.clientX,
+                          assetDuration: asset.duration,
+                          originalStartTime: clip.startTime,
+                          originalInPoint: clip.inPoint,
+                          originalOutPoint: clip.outPoint,
+                          liveStartTime: clip.startTime,
+                          liveInPoint: clip.inPoint,
+                          liveOutPoint: clip.outPoint,
+                          snapGuideTime: null
+                        })
+                      }}
+                    />
                     <span className="timeline-audio-clip-label">{asset.fileName}</span>
                     {clipWidth > 24 && (
                       <div className="timeline-clip-waveform">
                         <Waveform
                           filePath={asset.filePath}
-                          start={clip.inPoint}
-                          end={clip.outPoint}
+                          start={inPoint}
+                          end={outPoint}
                           width={clipWidth}
                           height={30}
                         />
                       </div>
                     )}
+                    <div
+                      className="timeline-clip-handle timeline-clip-handle-right"
+                      onMouseDown={(e) => {
+                        e.stopPropagation()
+                        setMediaTrimDrag({
+                          kind: 'audio',
+                          trackId: track.id,
+                          clipId: clip.id,
+                          edge: 'right',
+                          startX: e.clientX,
+                          assetDuration: asset.duration,
+                          originalStartTime: clip.startTime,
+                          originalInPoint: clip.inPoint,
+                          originalOutPoint: clip.outPoint,
+                          liveStartTime: clip.startTime,
+                          liveInPoint: clip.inPoint,
+                          liveOutPoint: clip.outPoint,
+                          snapGuideTime: null
+                        })
+                      }}
+                    />
                   </div>
                 )
               })}

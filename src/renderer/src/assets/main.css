@@ -1429,6 +1429,11 @@ h3 {
   cursor: grabbing;
 }
 
+.timeline-audio-clip.trimming,
+.timeline-video-overlay-clip.trimming {
+  border-color: #f5b942;
+}
+
 .timeline-snap-guide {
   position: absolute;
   top: 0;

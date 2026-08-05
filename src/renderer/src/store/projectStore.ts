@@ -127,6 +127,13 @@ interface ProjectState {
   addClipToAudioTrack: (trackId: string, assetId: string) => void
   updateAudioClipStart: (trackId: string, clipId: string, startTime: number) => void
   updateAudioClipTrim: (trackId: string, clipId: string, inPoint: number, outPoint: number) => void
+  updateAudioClipStartAndTrim: (
+    trackId: string,
+    clipId: string,
+    startTime: number,
+    inPoint: number,
+    outPoint: number
+  ) => void
   updateAudioClipVolume: (trackId: string, clipId: string, volume: number) => void
   swapAudioClipAsset: (trackId: string, clipId: string, assetId: string, outPoint: number) => void
   removeAudioClip: (trackId: string, clipId: string) => void
@@ -145,6 +152,13 @@ interface ProjectState {
   updateVideoOverlayClipTrim: (
     trackId: string,
     clipId: string,
+    inPoint: number,
+    outPoint: number
+  ) => void
+  updateVideoOverlayClipStartAndTrim: (
+    trackId: string,
+    clipId: string,
+    startTime: number,
     inPoint: number,
     outPoint: number
   ) => void
@@ -756,6 +770,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })),
 
+  // Dragging a clip's left trim handle moves startTime and inPoint together in one
+  // undoable step (as opposed to updateAudioClipStart + updateAudioClipTrim, which
+  // would otherwise push two separate history entries for a single drag gesture).
+  updateAudioClipStartAndTrim: (trackId, clipId, startTime, inPoint, outPoint) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId
+                    ? {
+                        ...c,
+                        startTime: Math.max(0, startTime),
+                        inPoint: Math.max(0, inPoint),
+                        outPoint: Math.max(0, outPoint)
+                      }
+                    : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
   updateAudioClipVolume: (trackId, clipId, volume) =>
     set((state) => ({
       ...pushHistory(state),
@@ -932,6 +974,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 clips: t.clips.map((c) =>
                   c.id === clipId
                     ? { ...c, inPoint: Math.max(0, inPoint), outPoint: Math.max(0, outPoint) }
+                    : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
+  updateVideoOverlayClipStartAndTrim: (trackId, clipId, startTime, inPoint, outPoint) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId
+                    ? {
+                        ...c,
+                        startTime: Math.max(0, startTime),
+                        inPoint: Math.max(0, inPoint),
+                        outPoint: Math.max(0, outPoint)
+                      }
                     : c
                 )
               }
