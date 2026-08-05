@@ -1267,6 +1267,12 @@ h3 {
   row-gap: 4px;
 }
 
+.shortcut-guide-toggle {
+  width: auto;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
 .timeline-shortcut-hints {
   display: flex;
   align-items: center;

@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { existsSync, rmSync, statSync } from 'fs'
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
@@ -27,11 +27,46 @@ loadEnvFile()
 
 let hasUnsavedChanges = false
 let autosavePath = ''
+let windowStatePath = ''
+
+interface WindowState {
+  width: number
+  height: number
+  x?: number
+  y?: number
+  isMaximized: boolean
+}
+
+function loadWindowState(): WindowState | null {
+  try {
+    if (!windowStatePath || !existsSync(windowStatePath)) return null
+    return JSON.parse(readFileSync(windowStatePath, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+function saveWindowState(mainWindow: BrowserWindow): void {
+  if (!windowStatePath) return
+  const isMaximized = mainWindow.isMaximized()
+  const bounds = isMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds()
+  const state: WindowState = { ...bounds, isMaximized }
+  try {
+    writeFileSync(windowStatePath, JSON.stringify(state))
+  } catch {
+    // Best-effort only; losing the remembered size/position isn't worth surfacing an error.
+  }
+}
 
 function createWindow(): void {
+  windowStatePath = join(app.getPath('userData'), 'window-state.json')
+  const savedState = loadWindowState()
+
   const mainWindow = new BrowserWindow({
-    width: 1360,
-    height: 860,
+    width: savedState?.width ?? 1360,
+    height: savedState?.height ?? 860,
+    x: savedState?.x,
+    y: savedState?.y,
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
@@ -46,11 +81,27 @@ function createWindow(): void {
     }
   })
 
+  // Fill the screen on first launch (no remembered state yet); afterwards, whatever
+  // size/position/maximized-state the user leaves the window in is remembered and
+  // restored next time, instead of always reopening at a fixed 1360x860.
+  if (!savedState || savedState.isMaximized) {
+    mainWindow.maximize()
+  }
+
+  let saveStateTimer: NodeJS.Timeout | null = null
+  function scheduleSaveWindowState(): void {
+    if (saveStateTimer) clearTimeout(saveStateTimer)
+    saveStateTimer = setTimeout(() => saveWindowState(mainWindow), 500)
+  }
+  mainWindow.on('resize', scheduleSaveWindowState)
+  mainWindow.on('move', scheduleSaveWindowState)
+
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
 
   mainWindow.on('close', (e) => {
+    saveWindowState(mainWindow)
     if (!hasUnsavedChanges) {
       if (autosavePath && existsSync(autosavePath)) rmSync(autosavePath, { force: true })
       return

@@ -7,6 +7,7 @@ const FREESOUND_STORAGE_KEY = 've-freesound-api-key'
 const GEMINI_STORAGE_KEY = 've-gemini-api-key'
 const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
 const SNAP_ENABLED_KEY = 've-snap-enabled'
+const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible'
 
 export interface EnvKeySources {
   youtubeApiKey: boolean
@@ -28,6 +29,8 @@ interface SettingsState {
   setKeymapScheme: (scheme: KeymapScheme) => void
   snapEnabled: boolean
   setSnapEnabled: (enabled: boolean) => void
+  shortcutGuideVisible: boolean
+  setShortcutGuideVisible: (visible: boolean) => void
   envKeySources: EnvKeySources
   loadEnvApiKeys: () => Promise<void>
 }
@@ -71,6 +74,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setSnapEnabled: (enabled) => {
     localStorage.setItem(SNAP_ENABLED_KEY, String(enabled))
     set({ snapEnabled: enabled })
+  },
+  shortcutGuideVisible: localStorage.getItem(SHORTCUT_GUIDE_VISIBLE_KEY) !== 'false',
+  setShortcutGuideVisible: (visible) => {
+    localStorage.setItem(SHORTCUT_GUIDE_VISIBLE_KEY, String(visible))
+    set({ shortcutGuideVisible: visible })
   },
   envKeySources: {
     youtubeApiKey: false,

@@ -23,6 +23,7 @@ import type { AudioTrack, Clip, PipPosition, TransitionType } from '@shared/type
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  KeyIcon,
   ScissorsIcon,
   TrashIcon,
   PlusIcon,
@@ -182,6 +183,8 @@ export function Timeline(): React.JSX.Element {
   const setKeymapScheme = useSettingsStore((s) => s.setKeymapScheme)
   const snapEnabled = useSettingsStore((s) => s.snapEnabled)
   const setSnapEnabled = useSettingsStore((s) => s.setSnapEnabled)
+  const shortcutGuideVisible = useSettingsStore((s) => s.shortcutGuideVisible)
+  const setShortcutGuideVisible = useSettingsStore((s) => s.setShortcutGuideVisible)
   const keymap = getKeymap(keymapScheme)
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
@@ -1019,30 +1022,50 @@ export function Timeline(): React.JSX.Element {
       </div>
 
       <div className="timeline-shortcut-bar">
-        <div className="timeline-shortcut-hints">
-          {SHORTCUT_ACTIONS.map((action) => (
-            <span key={action} className="shortcut-hint">
-              {getActionLabel(action)}
-              <kbd>{keymap[action].display}</kbd>
-            </span>
-          ))}
-          <span className="shortcut-hint">
-            1フレーム移動
-            <kbd>←/→</kbd>
-          </span>
-        </div>
-        <label className="inline-select keymap-select" title="キーボードショートカットの配置">
-          <select
-            value={keymapScheme}
-            onChange={(e) => setKeymapScheme(e.target.value as KeymapScheme)}
-          >
-            {Object.entries(KEYMAP_SCHEME_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <button
+          className="icon-button shortcut-guide-toggle"
+          title={
+            shortcutGuideVisible
+              ? 'ショートカット一覧を隠す(プレビューやタイムラインを広く使えます)'
+              : 'ショートカット一覧を表示'
+          }
+          onClick={() => setShortcutGuideVisible(!shortcutGuideVisible)}
+        >
+          <KeyIcon width={13} height={13} />
+          {shortcutGuideVisible ? (
+            <ChevronLeftIcon width={11} height={11} />
+          ) : (
+            <ChevronRightIcon width={11} height={11} />
+          )}
+        </button>
+        {shortcutGuideVisible && (
+          <>
+            <div className="timeline-shortcut-hints">
+              {SHORTCUT_ACTIONS.map((action) => (
+                <span key={action} className="shortcut-hint">
+                  {getActionLabel(action)}
+                  <kbd>{keymap[action].display}</kbd>
+                </span>
+              ))}
+              <span className="shortcut-hint">
+                1フレーム移動
+                <kbd>←/→</kbd>
+              </span>
+            </div>
+            <label className="inline-select keymap-select" title="キーボードショートカットの配置">
+              <select
+                value={keymapScheme}
+                onChange={(e) => setKeymapScheme(e.target.value as KeymapScheme)}
+              >
+                {Object.entries(KEYMAP_SCHEME_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
       </div>
       {bpmError && <p className="error-text timeline-bpm-error">{bpmError}</p>}
 
