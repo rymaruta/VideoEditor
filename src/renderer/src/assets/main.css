@@ -391,19 +391,28 @@ h3 {
   min-height: 0;
 }
 
+/* The grab strip is deliberately much wider than the 2px line it draws: aiming at a
+   hairline is fiddly, so the whole strip is the target and the line is only a hint. */
 .col-resize-handle {
-  width: 10px;
+  width: 18px;
   flex-shrink: 0;
   cursor: col-resize;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.col-resize-handle:hover,
+.col-resize-handle.active {
+  background: var(--accent-soft);
 }
 
 .col-resize-handle::after {
   content: '';
   width: 2px;
-  height: 40px;
+  height: 56px;
   border-radius: 2px;
   background: var(--border-soft);
   transition:
@@ -414,55 +423,40 @@ h3 {
 .col-resize-handle:hover::after,
 .col-resize-handle.active::after {
   background: var(--accent-1);
-  height: 60px;
+  height: 88px;
 }
 
-.col-resize-handle-track {
-  position: relative;
-  width: 10px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* A collapsed panel has zero width, so this divider is the only thing left to grab.
+   Dragging is disabled (there is nothing to resize) and it stays permanently visible
+   so the double-click that brings the panel back is still discoverable. */
+.col-resize-handle.collapsed {
+  cursor: pointer;
 }
 
-.panel-collapse-toggle {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 50%;
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-}
-
-.panel-collapse-toggle:hover {
-  background: var(--bg-elevated-3);
-  color: var(--text-1);
-  border-color: var(--accent-1);
+.col-resize-handle.collapsed::after {
+  height: 72px;
 }
 
 .row-resize-handle {
-  height: 10px;
+  height: 18px;
   flex-shrink: 0;
   cursor: row-resize;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.row-resize-handle:hover,
+.row-resize-handle.active {
+  background: var(--accent-soft);
 }
 
 .row-resize-handle::after {
   content: '';
   height: 2px;
-  width: 40px;
+  width: 56px;
   border-radius: 2px;
   background: var(--border-soft);
   transition:
@@ -473,7 +467,7 @@ h3 {
 .row-resize-handle:hover::after,
 .row-resize-handle.active::after {
   background: var(--accent-1);
-  width: 60px;
+  width: 88px;
 }
 
 .panel {

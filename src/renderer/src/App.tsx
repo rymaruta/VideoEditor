@@ -30,9 +30,7 @@ import {
   MusicIcon,
   TargetIcon,
   MegaphoneIcon,
-  StarIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon
+  StarIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
 
@@ -390,26 +388,18 @@ function App(): React.JSX.Element {
         >
           <MediaBin />
         </div>
-        <div className="col-resize-handle-track">
-          {!leftCollapsed && (
-            <div
-              className={`col-resize-handle ${resizeDrag?.kind === 'left' ? 'active' : ''}`}
-              onMouseDown={(e) => beginResize('left', e)}
-              title="ドラッグして幅を調整"
-            />
-          )}
-          <button
-            className="panel-collapse-toggle"
-            onClick={() => setLeftCollapsed((v) => !v)}
-            title={leftCollapsed ? 'メディアパネルを表示' : 'メディアパネルを折りたたむ'}
-          >
-            {leftCollapsed ? (
-              <ChevronRightIcon width={11} height={11} />
-            ) : (
-              <ChevronLeftIcon width={11} height={11} />
-            )}
-          </button>
-        </div>
+        <div
+          className={`col-resize-handle ${leftCollapsed ? 'collapsed' : ''} ${
+            resizeDrag?.kind === 'left' ? 'active' : ''
+          }`}
+          onMouseDown={leftCollapsed ? undefined : (e) => beginResize('left', e)}
+          onDoubleClick={() => setLeftCollapsed((v) => !v)}
+          title={
+            leftCollapsed
+              ? 'ダブルクリックでメディアパネルを表示'
+              : 'ドラッグして幅を調整(ダブルクリックで折りたたむ)'
+          }
+        />
         <div className="center-column">
           <PreviewPlayer />
           <div
@@ -422,26 +412,18 @@ function App(): React.JSX.Element {
             <Timeline />
           </div>
         </div>
-        <div className="col-resize-handle-track">
-          {!rightCollapsed && (
-            <div
-              className={`col-resize-handle ${resizeDrag?.kind === 'right' ? 'active' : ''}`}
-              onMouseDown={(e) => beginResize('right', e)}
-              title="ドラッグして幅を調整"
-            />
-          )}
-          <button
-            className="panel-collapse-toggle"
-            onClick={() => setRightCollapsed((v) => !v)}
-            title={rightCollapsed ? '右パネルを表示' : '右パネルを折りたたむ'}
-          >
-            {rightCollapsed ? (
-              <ChevronLeftIcon width={11} height={11} />
-            ) : (
-              <ChevronRightIcon width={11} height={11} />
-            )}
-          </button>
-        </div>
+        <div
+          className={`col-resize-handle ${rightCollapsed ? 'collapsed' : ''} ${
+            resizeDrag?.kind === 'right' ? 'active' : ''
+          }`}
+          onMouseDown={rightCollapsed ? undefined : (e) => beginResize('right', e)}
+          onDoubleClick={() => setRightCollapsed((v) => !v)}
+          title={
+            rightCollapsed
+              ? 'ダブルクリックで右パネルを表示'
+              : 'ドラッグして幅を調整(ダブルクリックで折りたたむ)'
+          }
+        />
         <div
           className={`right-column ${rightCollapsed ? 'panel-collapsed' : ''}`}
           style={{ width: rightCollapsed ? 0 : rightWidth }}
