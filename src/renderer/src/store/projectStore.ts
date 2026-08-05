@@ -200,6 +200,21 @@ function videoOverlayTrackEnd(track: Project['videoOverlayTracks'][number]): num
   return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
 }
 
+// Detached audio that is still linked belongs to its clip, so it goes with it —
+// leaving it behind would keep playing the deleted clip's dialogue over whatever
+// footage slid into that spot. Audio the user has since edited is already
+// unlinked and is therefore left alone.
+function removeLinkedAudioFor(
+  audioTracks: AudioTrack[],
+  removedClipIds: Set<string>
+): AudioTrack[] {
+  if (!audioTracks.some((t) => t.clips.some((c) => c.linkedClipId))) return audioTracks
+  return audioTracks.map((t) => {
+    const clips = t.clips.filter((c) => !c.linkedClipId || !removedClipIds.has(c.linkedClipId))
+    return clips.length === t.clips.length ? t : { ...t, clips }
+  })
+}
+
 function pushHistory(state: ProjectState): Pick<ProjectState, 'past' | 'future' | 'isDirty'> {
   return { past: [...state.past, state.project].slice(-MAX_HISTORY), future: [], isDirty: true }
 }
@@ -428,7 +443,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (idx === -1) return state
       const clips = [...state.project.clips]
       clips.splice(idx, 1, ...newClips)
-      return { ...pushHistory(state), project: { ...state.project, clips } }
+      // Silence/filler/text-based cuts replace one clip with several. Detached audio
+      // linked to the original must be rebuilt to match the surviving segments —
+      // otherwise the video loses the cut-out parts while its separated audio plays
+      // on unchanged, desyncing everything from that point on.
+      const audioTracks = state.project.audioTracks.map((t) => {
+        if (!t.clips.some((c) => c.linkedClipId === clipId)) return t
+        return {
+          ...t,
+          clips: t.clips.flatMap((c) => {
+            if (c.linkedClipId !== clipId) return [c]
+            // Positions and trims are filled in by the link mirror right after.
+            return newClips.map((seg) => ({
+              ...c,
+              id: uuid(),
+              inPoint: seg.inPoint,
+              outPoint: seg.outPoint,
+              linkedClipId: seg.id
+            }))
+          })
+        }
+      })
+      return { ...pushHistory(state), project: { ...state.project, clips, audioTracks } }
     }),
 
   splitClipAtTime: (clipId, absoluteTime) =>
@@ -489,7 +525,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   removeClip: (clipId) =>
     set((state) => ({
       ...pushHistory(state),
-      project: { ...state.project, clips: state.project.clips.filter((c) => c.id !== clipId) },
+      project: {
+        ...state.project,
+        clips: state.project.clips.filter((c) => c.id !== clipId),
+        audioTracks: removeLinkedAudioFor(state.project.audioTracks, new Set([clipId]))
+      },
       selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
       multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => id !== clipId)
     })),
@@ -501,7 +541,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...pushHistory(state),
         project: {
           ...state.project,
-          clips: state.project.clips.filter((c) => !idSet.has(c.id))
+          clips: state.project.clips.filter((c) => !idSet.has(c.id)),
+          audioTracks: removeLinkedAudioFor(state.project.audioTracks, idSet)
         },
         selectedClipId:
           state.selectedClipId && idSet.has(state.selectedClipId) ? null : state.selectedClipId,
