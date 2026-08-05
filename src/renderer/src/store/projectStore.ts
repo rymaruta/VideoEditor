@@ -126,6 +126,7 @@ interface ProjectState {
   setAudioTrackVolume: (trackId: string, volume: number) => void
   addClipToAudioTrack: (trackId: string, assetId: string) => void
   updateAudioClipStart: (trackId: string, clipId: string, startTime: number) => void
+  updateAudioClipTrim: (trackId: string, clipId: string, inPoint: number, outPoint: number) => void
   updateAudioClipVolume: (trackId: string, clipId: string, volume: number) => void
   swapAudioClipAsset: (trackId: string, clipId: string, assetId: string, outPoint: number) => void
   removeAudioClip: (trackId: string, clipId: string) => void
@@ -728,6 +729,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 ...t,
                 clips: t.clips.map((c) =>
                   c.id === clipId ? { ...c, startTime: Math.max(0, startTime) } : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
+  updateAudioClipTrim: (trackId, clipId, inPoint, outPoint) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId
+                    ? { ...c, inPoint: Math.max(0, inPoint), outPoint: Math.max(0, outPoint) }
+                    : c
                 )
               }
             : t

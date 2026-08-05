@@ -135,6 +135,7 @@ export function Timeline(): React.JSX.Element {
   const toggleAudioTrackDucking = useProjectStore((s) => s.toggleAudioTrackDucking)
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
+  const updateAudioClipTrim = useProjectStore((s) => s.updateAudioClipTrim)
   const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
   const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
@@ -636,6 +637,9 @@ export function Timeline(): React.JSX.Element {
     project.audioTracks
       .find((t) => t.id === selectedAudioClip.trackId)
       ?.clips.find((c) => c.id === selectedAudioClip.clipId)
+  const selectedAudioClipAsset = selectedAudioClipData
+    ? project.assets.find((a) => a.id === selectedAudioClipData.assetId)
+    : undefined
 
   const selectedVideoOverlayClipData =
     selectedVideoOverlayClip &&
@@ -1424,6 +1428,46 @@ export function Timeline(): React.JSX.Element {
               }
             />
           </label>
+          {selectedAudioClipAsset && (
+            <>
+              <label>
+                イン点(秒)
+                <input
+                  type="number"
+                  step={0.1}
+                  min={0}
+                  max={selectedAudioClipAsset.duration}
+                  value={selectedAudioClipData.inPoint}
+                  onChange={(e) =>
+                    updateAudioClipTrim(
+                      selectedAudioClip.trackId,
+                      selectedAudioClip.clipId,
+                      Math.min(Number(e.target.value), selectedAudioClipData.outPoint - 0.1),
+                      selectedAudioClipData.outPoint
+                    )
+                  }
+                />
+              </label>
+              <label>
+                アウト点(秒)
+                <input
+                  type="number"
+                  step={0.1}
+                  min={0}
+                  max={selectedAudioClipAsset.duration}
+                  value={selectedAudioClipData.outPoint}
+                  onChange={(e) =>
+                    updateAudioClipTrim(
+                      selectedAudioClip.trackId,
+                      selectedAudioClip.clipId,
+                      selectedAudioClipData.inPoint,
+                      Math.max(Number(e.target.value), selectedAudioClipData.inPoint + 0.1)
+                    )
+                  }
+                />
+              </label>
+            </>
+          )}
           <label>
             音量({Math.round((selectedAudioClipData.volume ?? 1) * 100)}%)
             <input
