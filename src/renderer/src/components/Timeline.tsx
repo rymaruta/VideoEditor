@@ -64,6 +64,13 @@ const SNAP_PIXELS = 8
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
+const TRANSITION_LABELS: Record<TransitionType, string> = {
+  none: 'カット',
+  crossfade: 'クロスフェード',
+  fade: 'フェード',
+  wipe: 'ワイプ'
+}
+
 interface TrimDragState {
   clipId: string
   edge: 'left' | 'right'
@@ -211,6 +218,7 @@ export function Timeline(): React.JSX.Element {
   const [mediaTrimDrag, setMediaTrimDrag] = useState<MediaTrimDragState | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
+  const [transitionPopoverClipId, setTransitionPopoverClipId] = useState<string | null>(null)
   const [scrubbing, setScrubbing] = useState(false)
 
   function selectOnly(kind: 'clip' | 'audio' | 'videoOverlay' | 'caption'): void {
@@ -280,6 +288,15 @@ export function Timeline(): React.JSX.Element {
     () => (snapEnabled ? snapCandidatesWithBeat : []),
     [snapEnabled, snapCandidatesWithBeat]
   )
+
+  useEffect(() => {
+    if (!transitionPopoverClipId) return
+    function handleOutsideClick(): void {
+      setTransitionPopoverClipId(null)
+    }
+    window.addEventListener('click', handleOutsideClick)
+    return () => window.removeEventListener('click', handleOutsideClick)
+  }, [transitionPopoverClipId])
 
   useEffect(() => {
     function handleDeleteKey(e: KeyboardEvent): void {
@@ -1277,7 +1294,63 @@ export function Timeline(): React.JSX.Element {
                       beginTrimDrag(e, 'right', tc.clip, tc.asset.duration, tc.start)
                     }
                   />
-                  {tc.clip.transitionIn && i > 0 && <span className="transition-marker" />}
+                  {i > 0 && (
+                    <div
+                      className={`transition-marker ${tc.clip.transitionIn ? 'has-transition' : ''}`}
+                      title={
+                        tc.clip.transitionIn
+                          ? `トランジション: ${TRANSITION_LABELS[tc.clip.transitionIn.type]}(クリックで変更)`
+                          : 'トランジションを追加'
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setTransitionPopoverClipId((prev) =>
+                          prev === tc.clip.id ? null : tc.clip.id
+                        )
+                      }}
+                    >
+                      {transitionPopoverClipId === tc.clip.id && (
+                        <div className="transition-popover" onClick={(e) => e.stopPropagation()}>
+                          <select
+                            value={tc.clip.transitionIn?.type ?? 'none'}
+                            onChange={(e) =>
+                              updateClipTransition(
+                                tc.clip.id,
+                                e.target.value === 'none'
+                                  ? undefined
+                                  : {
+                                      type: e.target.value as TransitionType,
+                                      duration: tc.clip.transitionIn?.duration ?? 0.5
+                                    }
+                              )
+                            }
+                          >
+                            <option value="none">カット</option>
+                            <option value="crossfade">クロスフェード</option>
+                            <option value="fade">フェード</option>
+                            <option value="wipe">ワイプ</option>
+                          </select>
+                          {tc.clip.transitionIn && (
+                            <input
+                              className="transition-duration"
+                              type="number"
+                              min={0.1}
+                              max={2}
+                              step={0.1}
+                              value={tc.clip.transitionIn.duration}
+                              onChange={(e) =>
+                                updateClipTransition(tc.clip.id, {
+                                  type: tc.clip.transitionIn?.type ?? 'crossfade',
+                                  duration: Number(e.target.value)
+                                })
+                              }
+                              title="トランジション秒数"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <span className="timeline-clip-index">{i + 1}</span>
                   <span className="timeline-clip-label" title={tc.asset.fileName}>
                     {tc.asset.fileName}
