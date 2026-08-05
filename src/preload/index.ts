@@ -28,6 +28,16 @@ const api = {
     ipcRenderer.invoke(IPC.probeMedia, filePath),
   generateThumbnail: (filePath: string, atSeconds: number): Promise<string> =>
     ipcRenderer.invoke(IPC.generateThumbnail, filePath, atSeconds),
+  ensurePreviewProxy: (filePath: string, assetId: string): Promise<string> =>
+    ipcRenderer.invoke(IPC.ensurePreviewProxy, filePath, assetId),
+  onPreviewProxyProgress: (
+    callback: (payload: { assetId: string; percent: number }) => void
+  ): (() => void) => {
+    const listener = (_e: unknown, payload: { assetId: string; percent: number }): void =>
+      callback(payload)
+    ipcRenderer.on(IPC.previewProxyProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.previewProxyProgress, listener)
+  },
   generateFrame: (
     filePath: string,
     atSeconds: number,

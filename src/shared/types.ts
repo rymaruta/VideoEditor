@@ -9,6 +9,12 @@ export interface MediaAsset {
   hasAudio: boolean
   hasVideo: boolean
   thumbnailDataUrl?: string
+  /**
+   * Transcoded H.264 copy used only for preview playback, for sources whose codec
+   * Chromium's <video> cannot decode (H.265/HEVC, ProRes, ...). Export always reads
+   * `filePath`, so this never affects output quality. Absent when not needed.
+   */
+  proxyPath?: string
 }
 
 export type TransitionType = 'none' | 'crossfade' | 'fade' | 'wipe'
@@ -174,6 +180,10 @@ export interface MediaProbeResult {
   fps: number
   hasAudio: boolean
   hasVideo: boolean
+  videoCodec: string
+  audioCodec: string
+  /** True when the preview <video> cannot decode this file and a proxy is required. */
+  needsPreviewProxy: boolean
 }
 
 export interface SilenceRange {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
@@ -42,6 +42,7 @@ export function MediaBin(): React.JSX.Element {
   const addClipToVideoOverlayTrack = useProjectStore((s) => s.addClipToVideoOverlayTrack)
   const missingAssetIds = useProjectStore((s) => s.missingAssetIds)
   const relinkAsset = useProjectStore((s) => s.relinkAsset)
+  const setAssetProxyPath = useProjectStore((s) => s.setAssetProxyPath)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
@@ -50,7 +51,36 @@ export function MediaBin(): React.JSX.Element {
   const [showRoughCut, setShowRoughCut] = useState(false)
   const [showAutoEdit, setShowAutoEdit] = useState(false)
   const [relinkingId, setRelinkingId] = useState<string | null>(null)
+  const [proxyProgress, setProxyProgress] = useState<Record<string, number>>({})
   const hasVideoAssets = assets.some((a) => a.hasVideo)
+
+  // Progress arrives on a main-process channel keyed by asset id, so several files
+  // being transcoded at once each drive their own row.
+  useEffect(() => {
+    return window.api.onPreviewProxyProgress(({ assetId, percent }) => {
+      setProxyProgress((prev) => ({ ...prev, [assetId]: percent }))
+    })
+  }, [])
+
+  async function buildPreviewProxy(assetId: string, filePath: string): Promise<void> {
+    setProxyProgress((prev) => ({ ...prev, [assetId]: 0 }))
+    try {
+      const proxyPath = await window.api.ensurePreviewProxy(filePath, assetId)
+      setAssetProxyPath(assetId, proxyPath)
+    } catch (e) {
+      // The asset stays usable — it just can't be previewed. Surfacing this beats
+      // leaving the user with a black preview and no explanation.
+      setError(
+        `${fileNameFromPath(filePath)}: プレビュー用の変換に失敗しました。編集と書き出しは可能ですが、プレビューでは再生できません — ${formatIpcError(e)}`
+      )
+    } finally {
+      setProxyProgress((prev) => {
+        const next = { ...prev }
+        delete next[assetId]
+        return next
+      })
+    }
+  }
 
   async function handleRelink(assetId: string): Promise<void> {
     setError(null)
@@ -71,6 +101,7 @@ export function MediaBin(): React.JSX.Element {
         }
       }
       relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl)
+      if (meta.needsPreviewProxy) void buildPreviewProxy(assetId, filePath)
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
@@ -85,6 +116,7 @@ export function MediaBin(): React.JSX.Element {
     // never be imported while the user assumes every valid selection was added.
     const failures: string[] = []
     const imported: MediaAsset[] = []
+    const needsProxy: MediaAsset[] = []
     for (const filePath of paths) {
       try {
         const meta = await window.api.probeMedia(filePath)
@@ -99,7 +131,7 @@ export function MediaBin(): React.JSX.Element {
             thumbnailDataUrl = undefined
           }
         }
-        imported.push({
+        const asset: MediaAsset = {
           id: uuid(),
           filePath,
           fileName: fileNameFromPath(filePath),
@@ -110,13 +142,20 @@ export function MediaBin(): React.JSX.Element {
           hasAudio: meta.hasAudio,
           hasVideo: meta.hasVideo,
           thumbnailDataUrl
-        })
+        }
+        imported.push(asset)
+        if (meta.needsPreviewProxy) needsProxy.push(asset)
       } catch (e) {
         failures.push(`${fileNameFromPath(filePath)}: ${formatIpcError(e)}`)
       }
     }
     // One history entry for the whole import, not one per file.
     addAssets(imported)
+    // Assets are added first and the (potentially slow) transcode runs afterwards, so
+    // the media list appears immediately instead of freezing until ffmpeg finishes.
+    for (const asset of needsProxy) {
+      void buildPreviewProxy(asset.id, asset.filePath)
+    }
     if (failures.length > 0) {
       setError(`${failures.length}件のファイルを読み込めませんでした — ${failures.join(' / ')}`)
     }
@@ -224,6 +263,20 @@ export function MediaBin(): React.JSX.Element {
                     </span>
                   )}
                 </div>
+                {proxyProgress[asset.id] !== undefined && (
+                  <div
+                    className="media-proxy-progress"
+                    title="プレビューで再生できない形式のため、プレビュー専用の変換をしています。書き出しは元のファイルを使うので画質は落ちません。"
+                  >
+                    <div className="media-proxy-bar">
+                      <div
+                        className="media-proxy-bar-fill"
+                        style={{ width: `${proxyProgress[asset.id]}%` }}
+                      />
+                    </div>
+                    <span>プレビュー用に変換中 {proxyProgress[asset.id]}%</span>
+                  </div>
+                )}
               </div>
               <div className="media-item-actions">
                 {isMissing && (

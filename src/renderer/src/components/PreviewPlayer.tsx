@@ -31,12 +31,7 @@ import type {
   VideoOverlayClip,
   VideoOverlayTrack
 } from '@shared/types'
-
-function toFileUrl(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/')
-  const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`
-  return `file://${encodeURI(withSlash)}`
-}
+import { previewSourceUrl } from '../lib/previewSource'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -211,7 +206,7 @@ function VideoOverlayLayer({
     }
   }, [volume, muted])
 
-  return <video ref={ref} src={toFileUrl(asset.filePath)} style={pipStyle(position, scale)} />
+  return <video ref={ref} src={previewSourceUrl(asset)} style={pipStyle(position, scale)} />
 }
 
 // Plays one BGM/narration/SE clip during preview via a hidden <audio> element,
@@ -263,7 +258,7 @@ function AudioTrackClipLayer({
 
   // Hidden: this element exists only to play back the audio-track clip, and must
   // not take part in the preview frame's layout.
-  return <audio ref={ref} src={toFileUrl(asset.filePath)} style={{ display: 'none' }} />
+  return <audio ref={ref} src={previewSourceUrl(asset)} style={{ display: 'none' }} />
 }
 
 export function PreviewPlayer(): React.JSX.Element {
@@ -376,7 +371,7 @@ export function PreviewPlayer(): React.JSX.Element {
       setIsPlaying(false)
       return
     }
-    const url = toFileUrl(tc.asset.filePath)
+    const url = previewSourceUrl(tc.asset)
     const speed = tc.clip.speed || 1
     const localTime = tc.clip.inPoint + (time - tc.start) * speed
     if (activeSrcRef.current !== url) {

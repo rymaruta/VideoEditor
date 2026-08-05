@@ -4,6 +4,7 @@ import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
+import { ensurePreviewProxy } from './previewProxyService'
 import {
   probeMedia,
   generateThumbnailDataUrl,
@@ -271,6 +272,15 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle(IPC.probeMedia, async (_e, filePath: string) => probeMedia(filePath))
+  ipcMain.handle(IPC.ensurePreviewProxy, async (event, filePath: string, assetId: string) =>
+    ensurePreviewProxy(filePath, (percent) => {
+      // Sent back to the window that asked, so an import in one window can't
+      // drive a progress bar in another.
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(IPC.previewProxyProgress, { assetId, percent })
+      }
+    })
+  )
   ipcMain.handle(IPC.checkFilesExist, (_e, filePaths: string[]) =>
     filePaths.filter((p) => !existsSync(p))
   )

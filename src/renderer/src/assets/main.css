@@ -881,6 +881,28 @@ h3 {
   text-align: left;
 }
 
+.media-proxy-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.media-proxy-bar {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+.media-proxy-bar-fill {
+  height: 100%;
+  background: var(--accent-1);
+  transition: width 0.2s ease;
+}
+
 .overlay-text {
   position: absolute;
   left: 5%;

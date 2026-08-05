@@ -2,12 +2,7 @@ import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
 import { ScissorsIcon } from './icons'
-
-function toFileUrl(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/')
-  const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`
-  return `file://${encodeURI(withSlash)}`
-}
+import { previewSourceUrl } from '../lib/previewSource'
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -87,7 +82,7 @@ export function TrimModal({
           クリップをトリム: {asset.fileName}
         </h3>
         <video
-          src={toFileUrl(asset.filePath)}
+          src={previewSourceUrl(asset)}
           controls
           className="trim-preview-video"
           onLoadedMetadata={(e) => {

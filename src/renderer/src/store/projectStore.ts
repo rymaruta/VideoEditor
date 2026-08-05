@@ -89,6 +89,7 @@ interface ProjectState {
 
   addAsset: (asset: MediaAsset) => void
   addAssets: (assets: MediaAsset[]) => void
+  setAssetProxyPath: (assetId: string, proxyPath: string) => void
   addAudioClipWithAsset: (
     asset: MediaAsset,
     target: { trackId?: string; trackName: string }
@@ -366,6 +367,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return {
         ...pushHistory(state),
         project: { ...state.project, assets: [...state.project.assets, ...assets] }
+      }
+    }),
+
+  // Background result of transcoding a preview proxy, not something the user did:
+  // it must not create an undo entry (undoing an import would otherwise leave a
+  // half-state) and must not mark the project dirty, since the proxy is a rebuildable
+  // cache rather than edited content.
+  setAssetProxyPath: (assetId, proxyPath) =>
+    set((state) => {
+      const target = state.project.assets.find((a) => a.id === assetId)
+      if (!target || target.proxyPath === proxyPath) return state
+      return {
+        project: {
+          ...state.project,
+          assets: state.project.assets.map((a) => (a.id === assetId ? { ...a, proxyPath } : a))
+        }
       }
     }),
 

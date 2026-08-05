@@ -14,6 +14,7 @@ import type {
   TransitionType
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
+import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
   'app.asar',
@@ -38,6 +39,8 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
         const [num, den] = videoStream.r_frame_rate.split('/').map(Number)
         if (den) fps = num / den
       }
+      const videoCodec = videoStream?.codec_name ?? ''
+      const audioCodec = audioStream?.codec_name ?? ''
       resolve({
         duration: Number(
           data.format.duration ?? videoStream?.duration ?? audioStream?.duration ?? 0
@@ -46,7 +49,15 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
         height: videoStream?.height ?? 0,
         fps,
         hasAudio: Boolean(audioStream),
-        hasVideo: Boolean(videoStream)
+        hasVideo: Boolean(videoStream),
+        videoCodec,
+        audioCodec,
+        needsPreviewProxy: needsPreviewProxy(
+          videoCodec,
+          audioCodec,
+          Boolean(videoStream),
+          Boolean(audioStream)
+        )
       })
     })
   })
