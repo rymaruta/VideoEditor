@@ -91,6 +91,8 @@ export function TextBasedEditModal({
     })
     if (rangeStart !== null) cutRanges.push({ start: rangeStart, end: rangeEnd })
 
+    // Spread the source clip so per-clip settings not listed here (crop/fill
+    // framing, detached-audio flag) carry over to every surviving segment.
     const segments: Clip[] = []
     let cursor = clip.inPoint
     for (const range of cutRanges) {
@@ -98,24 +100,22 @@ export function TextBasedEditModal({
       const end = Math.min(clip.outPoint, range.end)
       if (start > cursor + 0.05) {
         segments.push({
+          ...clip,
           id: uuid(),
-          assetId: clip.assetId,
           inPoint: cursor,
           outPoint: start,
-          speed: clip.speed,
-          audioDetached: clip.audioDetached
+          transitionIn: undefined
         })
       }
       cursor = Math.max(cursor, end)
     }
     if (cursor < clip.outPoint - 0.05) {
       segments.push({
+        ...clip,
         id: uuid(),
-        assetId: clip.assetId,
         inPoint: cursor,
         outPoint: clip.outPoint,
-        speed: clip.speed,
-        audioDetached: clip.audioDetached
+        transitionIn: undefined
       })
     }
     if (segments.length === 0) {

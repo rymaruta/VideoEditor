@@ -34,6 +34,11 @@ export function TrimModal({
 
   const [inPoint, setInPoint] = useState(clip?.inPoint ?? 0)
   const [outPoint, setOutPoint] = useState(clip?.outPoint ?? asset?.duration ?? 0)
+  // Crop settings are edited as a draft alongside the trim. They used to be
+  // committed the moment the checkbox was ticked, so "キャンセル" left them
+  // applied — and every toggle cost its own undo step.
+  const [fillCrop, setFillCrop] = useState(clip?.fillCrop ?? false)
+  const [cropCenter, setCropCenter] = useState(clip?.cropCenter)
   const [detecting, setDetecting] = useState(false)
   const [detectError, setDetectError] = useState<string | null>(null)
 
@@ -42,6 +47,9 @@ export function TrimModal({
   function handleSave(): void {
     if (inPoint < outPoint) {
       updateClipTrim(clipId, inPoint, outPoint)
+    }
+    if (fillCrop !== (clip?.fillCrop ?? false) || cropCenter !== clip?.cropCenter) {
+      updateClipCrop(clipId, fillCrop, cropCenter)
     }
     onClose()
   }
@@ -62,7 +70,8 @@ export function TrimModal({
         asset.height,
         targetAspect
       )
-      updateClipCrop(clipId, true, center)
+      setFillCrop(true)
+      setCropCenter(center)
     } catch {
       setDetectError('被写体の自動検出に失敗しました')
     } finally {
@@ -116,22 +125,22 @@ export function TrimModal({
             <label className="checkbox-label">
               <input
                 type="checkbox"
-                checked={!!clip.fillCrop}
-                onChange={(e) => updateClipCrop(clipId, e.target.checked, clip.cropCenter)}
+                checked={fillCrop}
+                onChange={(e) => setFillCrop(e.target.checked)}
               />
               クロップして画面いっぱいに表示(黒帯なし)
             </label>
             <p className="hint-text">
               プロジェクトのアスペクト比と異なるため、有効にすると余白なしで表示されますが、映像の左右(または上下)が切り取られます。
             </p>
-            {clip.fillCrop && (
+            {fillCrop && (
               <div className="overlay-item-row">
                 <button onClick={handleDetectCrop} disabled={detecting}>
                   {detecting ? '被写体を検出中...' : '被写体を自動検出してクロップ位置を調整'}
                 </button>
                 <button
                   className="small-button"
-                  onClick={() => updateClipCrop(clipId, true, { x: 0.5, y: 0.5 })}
+                  onClick={() => setCropCenter({ x: 0.5, y: 0.5 })}
                   disabled={detecting}
                 >
                   中央に戻す

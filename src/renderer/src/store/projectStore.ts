@@ -220,7 +220,35 @@ function removeLinkedAudioFor(
   })
 }
 
-function pushHistory(state: ProjectState): Pick<ProjectState, 'past' | 'future' | 'isDirty'> {
+// Continuous controls (typing in a caption, dragging a volume/size slider) fire an
+// action per keystroke or per pixel. Without coalescing, typing a 30-character
+// caption pushed 30 history entries and blew away the 50-entry undo history, and
+// one undo only removed a single character. Consecutive edits carrying the same
+// key within COALESCE_MS fold into the entry that opened the burst, so undo
+// returns to the state from before the user started editing that field.
+const COALESCE_MS = 700
+let lastCoalesceKey: string | null = null
+let lastCoalesceAt = 0
+
+function resetHistoryCoalescing(): void {
+  lastCoalesceKey = null
+}
+
+function pushHistory(
+  state: ProjectState,
+  coalesceKey?: string
+): Pick<ProjectState, 'past' | 'future' | 'isDirty'> {
+  if (coalesceKey) {
+    const now = Date.now()
+    const continuing = lastCoalesceKey === coalesceKey && now - lastCoalesceAt < COALESCE_MS
+    lastCoalesceKey = coalesceKey
+    lastCoalesceAt = now
+    if (continuing) {
+      return { past: state.past, future: [], isDirty: true }
+    }
+  } else {
+    lastCoalesceKey = null
+  }
   return { past: [...state.past, state.project].slice(-MAX_HISTORY), future: [], isDirty: true }
 }
 
@@ -268,7 +296,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       missingAssetIds: state.missingAssetIds.filter((id) => id !== assetId)
     })),
 
-  newProject: () =>
+  newProject: () => {
+    resetHistoryCoalescing()
     set({
       project: createBlankProject(),
       past: [],
@@ -282,7 +311,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       isPlaying: false,
       seekRequest: null,
       missingAssetIds: []
-    }),
+    })
+  },
 
   loadProject: (project, filePath) =>
     set({
@@ -414,7 +444,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateClipTrim: (clipId, inPoint, outPoint) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `clipTrim:${clipId}`),
       project: {
         ...state.project,
         clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, inPoint, outPoint } : c))
@@ -538,13 +568,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           const speed = c.speed || 1
           const splitLocal = c.inPoint + (absoluteTime - elapsed) * speed
           clips.push({ ...c, outPoint: splitLocal })
+          // Spread the source clip so per-clip settings that aren't listed here
+          // (crop/fill framing in particular) survive the split — rebuilding the
+          // second half field by field silently dropped them.
           clips.push({
+            ...c,
             id: secondHalfId,
-            assetId: c.assetId,
             inPoint: splitLocal,
             outPoint: c.outPoint,
             speed,
-            audioDetached: c.audioDetached
+            transitionIn: undefined
           })
         } else {
           clips.push(c)
@@ -724,7 +757,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     }),
 
-  undo: () =>
+  undo: () => {
+    resetHistoryCoalescing()
     set((state) => {
       if (state.past.length === 0) return state
       const previous = state.past[state.past.length - 1]
@@ -740,9 +774,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
       }
-    }),
+    })
+  },
 
-  redo: () =>
+  redo: () => {
+    resetHistoryCoalescing()
     set((state) => {
       if (state.future.length === 0) return state
       const [next, ...rest] = state.future
@@ -755,7 +791,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
       }
-    }),
+    })
+  },
 
   addTextOverlay: (overlay) =>
     set((state) => ({
@@ -783,7 +820,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateTextOverlay: (id, patch) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `overlay:${id}`),
       project: {
         ...state.project,
         textOverlays: state.project.textOverlays.map((o) => (o.id === id ? { ...o, ...patch } : o))
@@ -857,7 +894,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setAudioTrackVolume: (trackId, volume) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `trackVolume:${trackId}`),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) => (t.id === trackId ? { ...t, volume } : t))
@@ -889,7 +926,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateAudioClipStart: (trackId, clipId, startTime) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `audioStart:${clipId}`),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
@@ -909,7 +946,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateAudioClipTrim: (trackId, clipId, inPoint, outPoint) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `audioTrim:${clipId}`),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
@@ -963,7 +1000,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateAudioClipVolume: (trackId, clipId, volume) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `audioVolume:${clipId}`),
       project: {
         ...state.project,
         audioTracks: state.project.audioTracks.map((t) =>
@@ -1101,7 +1138,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setVideoOverlayTrackScale: (trackId, scale) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `pipScale:${trackId}`),
       project: {
         ...state.project,
         videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
@@ -1133,7 +1170,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateVideoOverlayClipStart: (trackId, clipId, startTime) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `pipStart:${clipId}`),
       project: {
         ...state.project,
         videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
@@ -1151,7 +1188,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateVideoOverlayClipTrim: (trackId, clipId, inPoint, outPoint) =>
     set((state) => ({
-      ...pushHistory(state),
+      ...pushHistory(state, `pipTrim:${clipId}`),
       project: {
         ...state.project,
         videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
