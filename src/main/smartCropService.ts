@@ -1,17 +1,27 @@
-import { execFileSync } from 'child_process'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { ffmpegPath } from './ffmpegService'
 
+const execFileAsync = promisify(execFile)
+
 const SAMPLE_COUNT = 6
 const SAMPLE_WIDTH = 160
 
-function extractRawFrame(filePath: string, atSeconds: number, w: number, h: number): Buffer {
+// Async on purpose: this runs six times per invocation, and a synchronous ffmpeg
+// call blocks the whole main process (every IPC, dialog, even the close button).
+async function extractRawFrame(
+  filePath: string,
+  atSeconds: number,
+  w: number,
+  h: number
+): Promise<Buffer> {
   const dir = mkdtempSync(join(tmpdir(), 've-crop-'))
   const outPath = join(dir, 'frame.raw')
   try {
-    execFileSync(ffmpegPath, [
+    await execFileAsync(ffmpegPath, [
       '-y',
       '-ss',
       String(Math.max(0, atSeconds)),
@@ -86,14 +96,14 @@ function bestWindowCenter(energy: number[], windowFraction: number): number {
  * as a lightweight stand-in for real subject detection (no ML model / extra deps required).
  * Averages edge-energy profiles across several sampled frames to reduce single-frame noise.
  */
-export function analyzeSmartCropCenter(
+export async function analyzeSmartCropCenter(
   filePath: string,
   rangeStart: number,
   rangeEnd: number,
   sourceWidth: number,
   sourceHeight: number,
   targetAspect: number
-): { x: number; y: number } {
+): Promise<{ x: number; y: number }> {
   if (!sourceWidth || !sourceHeight) return { x: 0.5, y: 0.5 }
   const sourceAspect = sourceWidth / sourceHeight
   const cropHorizontal = sourceAspect > targetAspect
@@ -109,7 +119,7 @@ export function analyzeSmartCropCenter(
   const energies: number[][] = []
   for (const t of timestamps) {
     try {
-      const frame = extractRawFrame(filePath, t, sampleW, sampleH)
+      const frame = await extractRawFrame(filePath, t, sampleW, sampleH)
       energies.push(
         cropHorizontal ? columnEnergy(frame, sampleW, sampleH) : rowEnergy(frame, sampleW, sampleH)
       )

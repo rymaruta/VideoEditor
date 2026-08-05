@@ -10,7 +10,22 @@ function runFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> 
     proc.stdout.on('data', (chunk) => (stdout += chunk.toString()))
     proc.stderr.on('data', (chunk) => (stderr += chunk.toString()))
     proc.on('error', reject)
-    proc.on('close', () => resolve({ stdout, stderr }))
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr })
+        return
+      }
+      // Swallowing a non-zero exit here used to surface as "no highlights found"
+      // for e.g. corrupt files or videos without an audio stream — report the real
+      // failure instead of sending users hunting through fine footage.
+      const lastLine =
+        stderr
+          .trim()
+          .split('\n')
+          .filter((l) => l.trim() !== '')
+          .pop() ?? ''
+      reject(new Error(`ffmpegによる解析に失敗しました (exit ${code}): ${lastLine}`))
+    })
   })
 }
 

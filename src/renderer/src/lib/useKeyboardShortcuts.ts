@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { getTotalDuration, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { saveProject } from './projectFileActions'
+import { formatIpcError } from './ipcError'
 import { getKeymap, matchesBinding } from './keymap'
 
 const FRAME_SECONDS = 1 / 30
@@ -11,6 +12,13 @@ function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+}
+
+// While any modal dialog is open, timeline-wide shortcuts must not reach the
+// timeline: Delete would remove the very clip the modal is editing behind the
+// user's back, S would split it, Space would start playback behind the dialog.
+export function isModalOpen(): boolean {
+  return document.querySelector('.modal-backdrop') !== null
 }
 
 function selectedClipIds(store: ReturnType<typeof useProjectStore.getState>): string[] {
@@ -26,6 +34,7 @@ export function useKeyboardShortcuts(): void {
 
     function handleKeyDown(e: KeyboardEvent): void {
       if (isTypingTarget(e.target)) return
+      if (isModalOpen()) return
       const store = useProjectStore.getState()
 
       if (matchesBinding(e, keymap.undo)) {
@@ -63,7 +72,11 @@ export function useKeyboardShortcuts(): void {
       }
       if (matchesBinding(e, keymap.save)) {
         e.preventDefault()
-        saveProject().catch(() => {})
+        // Surface failures in the same spot as the toolbar save button — a silently
+        // swallowed Ctrl+S error looks like a successful save and invites data loss.
+        saveProject().catch((err) => {
+          useProjectStore.getState().setSaveError(formatIpcError(err))
+        })
         return
       }
       if (matchesBinding(e, keymap.playPause)) {

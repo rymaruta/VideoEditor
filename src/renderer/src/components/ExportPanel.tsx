@@ -242,7 +242,7 @@ export function ExportPanel(): React.JSX.Element {
         <button
           className="primary-button export-button"
           onClick={handleExport}
-          disabled={exporting}
+          disabled={exporting || batchRunning}
         >
           <DownloadIcon width={15} height={15} />
           {exporting ? '書き出し中...' : '動画を書き出す'}
@@ -342,7 +342,7 @@ export function ExportPanel(): React.JSX.Element {
         <button
           className="primary-button"
           onClick={handleBatchExport}
-          disabled={batchRunning || batchJobs.length === 0}
+          disabled={batchRunning || exporting || batchJobs.length === 0}
         >
           <PlusIcon width={13} height={13} />
           {batchRunning ? '一括書き出し中...' : '一括書き出し'}

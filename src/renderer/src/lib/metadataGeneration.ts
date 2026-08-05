@@ -152,6 +152,29 @@ async function callGemini(
   }
 }
 
+// Element-level coercion: the model occasionally returns bare strings where
+// {title, hookType} objects were requested, or non-string array items — rendering
+// such an element uncoerced throws during render and blanks the whole app.
+function coerceTitles(value: unknown): TitleCandidate[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((t): TitleCandidate | null => {
+      if (typeof t === 'string') return { title: t, hookType: '' }
+      if (typeof t === 'object' && t !== null) {
+        const o = t as Record<string, unknown>
+        const title = typeof o.title === 'string' ? o.title : ''
+        if (!title) return null
+        return { title, hookType: typeof o.hookType === 'string' ? o.hookType : '' }
+      }
+      return null
+    })
+    .filter((t): t is TitleCandidate => t !== null)
+}
+
+function coerceStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((s): s is string => typeof s === 'string') : []
+}
+
 export async function generateVideoMetadata(
   apiKey: string,
   transcript: string,
@@ -165,9 +188,9 @@ export async function generateVideoMetadata(
     thumbnailDataUrls
   )) as Partial<VideoMetadata>
   return {
-    titles: Array.isArray(parsed.titles) ? parsed.titles : [],
+    titles: coerceTitles(parsed.titles),
     description: typeof parsed.description === 'string' ? parsed.description : '',
-    hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
+    hashtags: coerceStringArray(parsed.hashtags),
     pinnedComment: typeof parsed.pinnedComment === 'string' ? parsed.pinnedComment : ''
   }
 }
@@ -185,7 +208,7 @@ export async function regenerateTitles(
     buildTitlesOnlyPrompt(transcript, extraContext, language, avoidTitles),
     thumbnailDataUrls
   )) as Partial<VideoMetadata>
-  return Array.isArray(parsed.titles) ? parsed.titles : []
+  return coerceTitles(parsed.titles)
 }
 
 export async function regeneratePinnedComment(

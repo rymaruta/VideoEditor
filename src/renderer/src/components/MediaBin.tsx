@@ -80,8 +80,11 @@ export function MediaBin(): React.JSX.Element {
   async function importFiles(paths: string[]): Promise<void> {
     if (paths.length === 0) return
     setImporting(true)
-    try {
-      for (const filePath of paths) {
+    // One bad file must not abort the batch: the files after it would silently
+    // never be imported while the user assumes every valid selection was added.
+    const failures: string[] = []
+    for (const filePath of paths) {
+      try {
         const meta = await window.api.probeMedia(filePath)
         let thumbnailDataUrl: string | undefined
         if (meta.hasVideo) {
@@ -106,12 +109,14 @@ export function MediaBin(): React.JSX.Element {
           hasVideo: meta.hasVideo,
           thumbnailDataUrl
         })
+      } catch (e) {
+        failures.push(`${fileNameFromPath(filePath)}: ${formatIpcError(e)}`)
       }
-    } catch (e) {
-      setError(formatIpcError(e))
-    } finally {
-      setImporting(false)
     }
+    if (failures.length > 0) {
+      setError(`${failures.length}件のファイルを読み込めませんでした — ${failures.join(' / ')}`)
+    }
+    setImporting(false)
   }
 
   async function handleImportVideo(): Promise<void> {

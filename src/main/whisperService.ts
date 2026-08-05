@@ -1,9 +1,12 @@
-import { execFileSync } from 'child_process'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { TranscriptSegment, TranscriptWord } from '@shared/types'
+
+const execFileAsync = promisify(execFile)
 
 const ffmpegPath = (ffmpegStatic as unknown as string).replace('app.asar', 'app.asar.unpacked')
 
@@ -35,11 +38,14 @@ async function getTranscriber(): Promise<Transcriber> {
   return transcriberPromise
 }
 
-function extractPcm16k(filePath: string, start: number, end: number): Float32Array {
+// Async on purpose: a synchronous ffmpeg call here blocks the whole main process
+// (every IPC, dialog, even the close button) for the duration of the decode —
+// seconds to minutes on long clips.
+async function extractPcm16k(filePath: string, start: number, end: number): Promise<Float32Array> {
   const dir = mkdtempSync(join(tmpdir(), 've-whisper-'))
   const rawPath = join(dir, 'audio.f32le')
   try {
-    execFileSync(ffmpegPath, [
+    await execFileAsync(ffmpegPath, [
       '-y',
       '-ss',
       String(start),
@@ -68,7 +74,7 @@ export async function transcribeRange(
   rangeEnd: number,
   language: string = 'japanese'
 ): Promise<TranscriptSegment[]> {
-  const audio = extractPcm16k(filePath, rangeStart, rangeEnd)
+  const audio = await extractPcm16k(filePath, rangeStart, rangeEnd)
   let transcriber: Transcriber
   try {
     transcriber = await getTranscriber()
@@ -124,7 +130,7 @@ export async function transcribeWordsRange(
   maxWordsPerSegment = 5,
   maxGapSeconds = 0.6
 ): Promise<TranscriptSegment[]> {
-  const audio = extractPcm16k(filePath, rangeStart, rangeEnd)
+  const audio = await extractPcm16k(filePath, rangeStart, rangeEnd)
   let transcriber: Transcriber
   try {
     transcriber = await getTranscriber()

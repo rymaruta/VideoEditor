@@ -110,6 +110,24 @@ button:disabled {
   justify-content: center;
 }
 
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100vh;
+  padding: 32px;
+  text-align: center;
+}
+
+.error-boundary-message {
+  color: var(--danger, #f2495c);
+  font-size: 13px;
+  max-width: 640px;
+  word-break: break-all;
+}
+
 .linked-audio-badge {
   color: var(--accent-1);
   border-color: rgba(34, 211, 238, 0.4);

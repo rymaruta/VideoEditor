@@ -7,6 +7,8 @@ import { SaveIcon, FolderOpenIcon, FilePlusIcon } from './icons'
 export function ProjectMenu(): React.JSX.Element {
   const currentFilePath = useProjectStore((s) => s.currentFilePath)
   const isDirty = useProjectStore((s) => s.isDirty)
+  const saveError = useProjectStore((s) => s.saveError)
+  const setSaveError = useProjectStore((s) => s.setSaveError)
   const [error, setError] = useState<string | null>(null)
 
   async function handleSave(): Promise<void> {
@@ -14,7 +16,7 @@ export function ProjectMenu(): React.JSX.Element {
     try {
       await saveProject()
     } catch (e) {
-      setError(formatIpcError(e))
+      setSaveError(formatIpcError(e))
     }
   }
 
@@ -45,7 +47,7 @@ export function ProjectMenu(): React.JSX.Element {
           <SaveIcon width={14} height={14} />
         </button>
       </div>
-      {error && <span className="project-menu-error">{error}</span>}
+      {(error ?? saveError) && <span className="project-menu-error">{error ?? saveError}</span>}
     </div>
   )
 }

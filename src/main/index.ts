@@ -131,9 +131,31 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+}
 
-  ipcMain.handle(IPC.selectMediaFiles, async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+// Dialog helpers parented to the window that sent the IPC request. Handlers must
+// NOT be registered inside createWindow(): on macOS the app keeps running with all
+// windows closed, and reopening via the dock calls createWindow() again — a second
+// ipcMain.handle() for the same channel throws and crashes the main process.
+function showOpenDialogForSender(
+  event: Electron.IpcMainInvokeEvent,
+  options: Electron.OpenDialogOptions
+): Promise<Electron.OpenDialogReturnValue> {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options)
+}
+
+function showSaveDialogForSender(
+  event: Electron.IpcMainInvokeEvent,
+  options: Electron.SaveDialogOptions
+): Promise<Electron.SaveDialogReturnValue> {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)
+}
+
+function registerWindowScopedIpcHandlers(): void {
+  ipcMain.handle(IPC.selectMediaFiles, async (event) => {
+    const result = await showOpenDialogForSender(event, {
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: '動画ファイル', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'] }]
     })
@@ -141,8 +163,8 @@ function createWindow(): void {
     return result.filePaths
   })
 
-  ipcMain.handle(IPC.selectAudioFiles, async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+  ipcMain.handle(IPC.selectAudioFiles, async (event) => {
+    const result = await showOpenDialogForSender(event, {
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: '音声ファイル', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] }]
     })
@@ -150,8 +172,8 @@ function createWindow(): void {
     return result.filePaths
   })
 
-  ipcMain.handle(IPC.selectRelinkFile, async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+  ipcMain.handle(IPC.selectRelinkFile, async (event) => {
+    const result = await showOpenDialogForSender(event, {
       properties: ['openFile'],
       filters: [
         {
@@ -177,8 +199,8 @@ function createWindow(): void {
     return result.filePaths[0]
   })
 
-  ipcMain.handle(IPC.selectExportPath, async (_e, defaultName: string) => {
-    const result = await dialog.showSaveDialog(mainWindow, {
+  ipcMain.handle(IPC.selectExportPath, async (event, defaultName: string) => {
+    const result = await showSaveDialogForSender(event, {
       defaultPath: defaultName,
       filters: [{ name: 'MP4動画', extensions: ['mp4'] }]
     })
@@ -186,16 +208,16 @@ function createWindow(): void {
     return result.filePath
   })
 
-  ipcMain.handle(IPC.selectExportFolder, async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+  ipcMain.handle(IPC.selectExportFolder, async (event) => {
+    const result = await showOpenDialogForSender(event, {
       properties: ['openDirectory', 'createDirectory']
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
   })
 
-  ipcMain.handle(IPC.selectProjectSavePath, async (_e, defaultName: string) => {
-    const result = await dialog.showSaveDialog(mainWindow, {
+  ipcMain.handle(IPC.selectProjectSavePath, async (event, defaultName: string) => {
+    const result = await showSaveDialogForSender(event, {
       defaultPath: defaultName,
       filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
     })
@@ -203,8 +225,8 @@ function createWindow(): void {
     return result.filePath
   })
 
-  ipcMain.handle(IPC.selectProjectOpenPath, async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+  ipcMain.handle(IPC.selectProjectOpenPath, async (event) => {
+    const result = await showOpenDialogForSender(event, {
       properties: ['openFile'],
       filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
     })
@@ -354,6 +376,8 @@ app.whenReady().then(() => {
     if (existsSync(autosavePath)) rmSync(autosavePath, { force: true })
   })
   ipcMain.handle(IPC.cancelExport, () => cancelExport())
+
+  registerWindowScopedIpcHandlers()
 
   createWindow()
 

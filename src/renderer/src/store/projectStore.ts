@@ -63,7 +63,9 @@ interface ProjectState {
   isPlaying: boolean
   seekRequest: { time: number; token: number } | null
   missingAssetIds: string[]
+  saveError: string | null
 
+  setSaveError: (message: string | null) => void
   newProject: () => void
   loadProject: (project: Project, filePath: string) => void
   restoreAutosave: (project: Project) => void
@@ -215,6 +217,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isPlaying: false,
   seekRequest: null,
   missingAssetIds: [],
+  saveError: null,
+
+  setSaveError: (message) => set({ saveError: message }),
 
   setMissingAssetIds: (ids) => set({ missingAssetIds: ids }),
 
@@ -293,7 +298,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       seekRequest: null
     }),
 
-  markSaved: (filePath) => set({ currentFilePath: filePath, isDirty: false }),
+  markSaved: (filePath) => set({ currentFilePath: filePath, isDirty: false, saveError: null }),
 
   addAsset: (asset) =>
     set((state) => ({

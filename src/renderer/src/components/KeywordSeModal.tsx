@@ -47,8 +47,12 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
         volume: number
       }[] = []
       const durationCache = new Map<string, number>()
+      // The render-time `project` snapshot goes stale after each addAsset; without
+      // this map, several matches on the same SE file would each fail the find and
+      // register a duplicate asset for the same wav.
+      const createdByPath = new Map(project.assets.map((a) => [a.filePath, a]))
       for (const match of chosen) {
-        let asset = project.assets.find((a) => a.filePath === match.entry.filePath)
+        let asset = createdByPath.get(match.entry.filePath)
         if (!asset) {
           let duration = durationCache.get(match.entry.filePath)
           if (duration === undefined) {
@@ -68,6 +72,7 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
             hasVideo: false
           }
           addAsset(asset)
+          createdByPath.set(asset.filePath, asset)
         }
         placements.push({
           assetId: asset.id,

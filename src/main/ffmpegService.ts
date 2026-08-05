@@ -268,6 +268,14 @@ export function exportProject(options: ExportOptions): Promise<void> {
   if (clips.length === 0) {
     return Promise.reject(new Error('タイムラインにクリップがありません'))
   }
+  // The cancel handle and progress channel are singletons; a second concurrent
+  // encode would overwrite currentExportCommand and leave the first job
+  // uncancelable, with both jobs fighting over the one progress bar.
+  if (currentExportCommand) {
+    return Promise.reject(
+      new Error('別の書き出しが進行中です。完了またはキャンセルしてから再度お試しください')
+    )
+  }
 
   const clipOutputDurations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
   const totalDuration = clipOutputDurations.reduce((sum, d) => sum + d, 0)
@@ -323,7 +331,13 @@ export function exportProject(options: ExportOptions): Promise<void> {
         const clip = clips[i]
         const incomingDuration = clipOutputDurations[i]
         const transition = clip.transitionIn
-        if (!transition || transition.type === 'none' || transition.duration <= 0) {
+        // A crossfade must be strictly shorter than both neighbors: xfade/acrossfade
+        // reject a duration exceeding either input and abort the whole encode. When a
+        // neighbor is too short (e.g. a tiny split fragment), fall back to a hard cut.
+        const maxDur = Math.min(curDuration, incomingDuration) - 0.05
+        const wantsTransition = transition && transition.type !== 'none' && transition.duration > 0
+        const t = wantsTransition ? Math.min(transition.duration, maxDur) : 0
+        if (!wantsTransition || t < 0.02) {
           const outV = `vcat${i}`
           const outA = `acat${i}`
           filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/30[${outV}]`)
@@ -332,8 +346,6 @@ export function exportProject(options: ExportOptions): Promise<void> {
           curA = outA
           curDuration = curDuration + incomingDuration
         } else {
-          const maxDur = Math.max(0.1, Math.min(curDuration, incomingDuration) - 0.05)
-          const t = Math.min(transition.duration, maxDur)
           const offset = Math.max(0, curDuration - t)
           const outV = `vxf${i}`
           const outA = `axf${i}`

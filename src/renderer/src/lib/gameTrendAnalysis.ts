@@ -134,11 +134,53 @@ export async function analyzeGamingTrends(
   } catch {
     throw new Error('Geminiの応答を解析できませんでした')
   }
+  // Element-level coercion: the model occasionally returns strings where objects
+  // were requested, or omits a field — rendering such an element uncoerced throws
+  // during render and blanks the whole app.
+  const asString = (v: unknown): string => (typeof v === 'string' ? v : '')
+  const asStringArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : []
+  const isObject = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v)
+
+  const insights: GameTrendInsight[] = (Array.isArray(parsed.insights) ? parsed.insights : [])
+    .filter(isObject)
+    .map((o) => ({
+      gameName: asString(o.gameName),
+      evidenceTitles: asStringArray(o.evidenceTitles),
+      sceneSuggestion: asString(o.sceneSuggestion)
+    }))
+    .filter((o) => o.gameName !== '')
+  const viralFactors: ViralFactor[] = (
+    Array.isArray(parsed.viralFactors) ? parsed.viralFactors : []
+  )
+    .filter(isObject)
+    .map((o) => ({
+      hookType: asString(o.hookType),
+      exampleTitle: asString(o.exampleTitle),
+      explanation: asString(o.explanation)
+    }))
+    .filter((o) => o.hookType !== '' || o.exampleTitle !== '')
+  const thumbnailInsight: ThumbnailInsight | null = isObject(parsed.thumbnailInsight)
+    ? {
+        colorTendency: asString(parsed.thumbnailInsight.colorTendency),
+        compositionTendency: asString(parsed.thumbnailInsight.compositionTendency),
+        textOverlayTendency: asString(parsed.thumbnailInsight.textOverlayTendency)
+      }
+    : null
+  const recommendedGame: RecommendedGame | null =
+    isObject(parsed.recommendedGame) && asString(parsed.recommendedGame.gameName) !== ''
+      ? {
+          gameName: asString(parsed.recommendedGame.gameName),
+          reason: asString(parsed.recommendedGame.reason)
+        }
+      : null
+
   return {
-    insights: Array.isArray(parsed.insights) ? parsed.insights : [],
-    generalTips: Array.isArray(parsed.generalTips) ? parsed.generalTips : [],
-    viralFactors: Array.isArray(parsed.viralFactors) ? parsed.viralFactors : [],
-    thumbnailInsight: parsed.thumbnailInsight ?? null,
-    recommendedGame: parsed.recommendedGame ?? null
+    insights,
+    generalTips: asStringArray(parsed.generalTips),
+    viralFactors,
+    thumbnailInsight,
+    recommendedGame
   }
 }

@@ -11,6 +11,7 @@ import {
   KEYMAP_SCHEME_LABELS,
   type KeymapScheme
 } from '../lib/keymap'
+import { isModalOpen } from '../lib/useKeyboardShortcuts'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
 import { FillerWordCutModal } from './FillerWordCutModal'
@@ -309,6 +310,7 @@ export function Timeline(): React.JSX.Element {
           return
         }
       }
+      if (isModalOpen()) return
       // Audio/PiP-overlay clip selection lives in local state here, invisible to the
       // global keyboard shortcut hook (which only knows about the main clips track's
       // selectedClipId) — so split/delete for these clips has to be handled locally too.
