@@ -647,8 +647,13 @@ h3 {
   align-items: center;
   gap: 6px;
   flex-basis: 100%;
+  min-width: 0;
+  /* Two track pickers plus the indent are wider than a narrow media panel, which
+     used to push the whole list into a horizontal scrollbar. Wrap instead. */
+  flex-wrap: wrap;
   padding-left: 67px;
 }
+
 
 .media-item:hover {
   border-color: var(--border);
@@ -697,11 +702,12 @@ h3 {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 .media-track-add select {
   max-width: 90px;
+  min-width: 0;
   font-size: 10.5px;
 }
 
@@ -1343,8 +1349,15 @@ h3 {
   min-height: 0;
   display: grid;
   grid-template-columns: 152px 1fr;
+  align-content: start;
   gap: 0;
-  overflow: hidden;
+  /* The grid row is content-height, so with several audio/PiP tracks it grows
+     past the timeline panel. This used to be `overflow: hidden`, which clipped
+     the lower tracks away with no scrollbar anywhere — they became completely
+     unreachable. Scrolling here (rather than inside the lanes column) also keeps
+     each track's label aligned with its lane. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .track-labels-col {
@@ -1424,7 +1437,10 @@ h3 {
 
 .track-lanes-col {
   position: relative;
-  overflow: auto;
+  /* Horizontal only: vertical scrolling belongs to .timeline-tracks so the
+     labels column scrolls in step with the lanes. */
+  overflow-x: auto;
+  overflow-y: hidden;
   display: flex;
   flex-direction: column;
   gap: 3px;
