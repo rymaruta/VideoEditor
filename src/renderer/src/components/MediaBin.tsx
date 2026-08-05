@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { isAspectMismatch } from '../lib/aspect'
+import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
 import { RoughCutModal } from './RoughCutModal'
 import { AutoEditModal } from './AutoEditModal'
@@ -35,7 +36,7 @@ export function MediaBin(): React.JSX.Element {
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const videoOverlayTracks = useProjectStore((s) => s.project.videoOverlayTracks)
-  const addAsset = useProjectStore((s) => s.addAsset)
+  const addAssets = useProjectStore((s) => s.addAssets)
   const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
   const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
   const addClipToVideoOverlayTrack = useProjectStore((s) => s.addClipToVideoOverlayTrack)
@@ -83,6 +84,7 @@ export function MediaBin(): React.JSX.Element {
     // One bad file must not abort the batch: the files after it would silently
     // never be imported while the user assumes every valid selection was added.
     const failures: string[] = []
+    const imported: MediaAsset[] = []
     for (const filePath of paths) {
       try {
         const meta = await window.api.probeMedia(filePath)
@@ -97,7 +99,7 @@ export function MediaBin(): React.JSX.Element {
             thumbnailDataUrl = undefined
           }
         }
-        addAsset({
+        imported.push({
           id: uuid(),
           filePath,
           fileName: fileNameFromPath(filePath),
@@ -113,6 +115,8 @@ export function MediaBin(): React.JSX.Element {
         failures.push(`${fileNameFromPath(filePath)}: ${formatIpcError(e)}`)
       }
     }
+    // One history entry for the whole import, not one per file.
+    addAssets(imported)
     if (failures.length > 0) {
       setError(`${failures.length}件のファイルを読み込めませんでした — ${failures.join(' / ')}`)
     }

@@ -8,14 +8,34 @@ export function TemplatePanel(): React.JSX.Element {
   const applyTemplate = useProjectStore((s) => s.applyTemplate)
   const autoCutFromCandidates = useProjectStore((s) => s.autoCutFromCandidates)
   const clipCount = useProjectStore((s) => s.project.clips.length)
+  const overlayCount = useProjectStore((s) => s.project.textOverlays.length)
   const assets = useProjectStore((s) => s.project.assets)
   const videoAssets = useMemo(() => assets.filter((a) => a.hasVideo), [assets])
   const [autoCutting, setAutoCutting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Both actions overwrite the existing captions with the template's placeholder
+  // labels, and 自動カット rebuilds the whole clip list — losing auto-generated
+  // subtitles and a trimmed timeline in one click is not something to do silently.
+  function confirmDiscard(replacesClips: boolean): boolean {
+    const losses: string[] = []
+    if (overlayCount > 0) losses.push(`テロップ${overlayCount}件`)
+    if (replacesClips && clipCount > 0) losses.push(`現在のタイムライン(${clipCount}クリップ)`)
+    if (losses.length === 0) return true
+    return confirm(
+      `${losses.join('と')}はテンプレートの内容に置き換えられます。続行しますか?\n(元に戻すで取り消せます)`
+    )
+  }
+
+  function handleApplyTemplate(template: (typeof editTemplates)[number]): void {
+    if (!confirmDiscard(Boolean(template.jumpCutSeconds))) return
+    applyTemplate(template)
+  }
+
   async function handleAutoCut(templateId: string): Promise<void> {
     const template = editTemplates.find((t) => t.id === templateId)
     if (!template) return
+    if (!confirmDiscard(true)) return
     setError(null)
     setAutoCutting(templateId)
     try {
@@ -53,7 +73,7 @@ export function TemplatePanel(): React.JSX.Element {
         <h2>トレンド構成テンプレート</h2>
       </div>
       <p className="hint-text">
-        ショート動画でよく使われる構成パターンです。適用するとアスペクト比が9:16になり、字幕プレースホルダーが自動配置されます(テキストは後で編集できます)。
+        ショート動画でよく使われる構成パターンです。適用するとアスペクト比が9:16になり、字幕プレースホルダーが自動配置されます(テキストは後で編集できます)。既にテロップがある場合は置き換えられるため、実行前に確認が表示されます。
       </p>
       {error && <p className="error-text">{error}</p>}
       <div className="template-list">
@@ -75,7 +95,7 @@ export function TemplatePanel(): React.JSX.Element {
               <button
                 className="primary-button"
                 disabled={clipCount === 0}
-                onClick={() => applyTemplate(t)}
+                onClick={() => handleApplyTemplate(t)}
               >
                 このテンプレートを適用
               </button>

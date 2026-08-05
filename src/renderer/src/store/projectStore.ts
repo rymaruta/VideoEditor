@@ -88,6 +88,11 @@ interface ProjectState {
   ) => void
 
   addAsset: (asset: MediaAsset) => void
+  addAssets: (assets: MediaAsset[]) => void
+  addAudioClipWithAsset: (
+    asset: MediaAsset,
+    target: { trackId?: string; trackName: string }
+  ) => void
   addClipToTimeline: (assetId: string) => void
   addTrimmedClipToTimeline: (assetId: string, inPoint: number, outPoint: number) => void
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
@@ -320,6 +325,58 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...pushHistory(state),
       project: { ...state.project, assets: [...state.project.assets, asset] }
     })),
+
+  // Importing a folder of recordings one asset at a time would push one history
+  // entry per file, so a 60-file import flushed the entire 50-entry undo history
+  // and made everything done before the import unrecoverable.
+  addAssets: (assets) =>
+    set((state) => {
+      if (assets.length === 0) return state
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, assets: [...state.project.assets, ...assets] }
+      }
+    }),
+
+  // Adding narration/BGM is one user action but three mutations (asset, track,
+  // clip). Kept as a single history entry so undo doesn't leave an orphaned empty
+  // track and an unused asset behind.
+  addAudioClipWithAsset: (asset, target) =>
+    set((state) => {
+      const existing =
+        state.project.audioTracks.find((t) => t.id === target.trackId) ??
+        state.project.audioTracks.find((t) => t.name === target.trackName)
+      const clip: AudioTrackClip = {
+        id: uuid(),
+        assetId: asset.id,
+        startTime: existing ? audioTrackEnd(existing) : 0,
+        inPoint: 0,
+        outPoint: asset.duration
+      }
+      const audioTracks = existing
+        ? state.project.audioTracks.map((t) =>
+            t.id === existing.id ? { ...t, clips: [...t.clips, clip] } : t
+          )
+        : [
+            ...state.project.audioTracks,
+            {
+              id: uuid(),
+              name: target.trackName,
+              muted: false,
+              volume: 1,
+              duckingEnabled: false,
+              clips: [clip]
+            }
+          ]
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          assets: [...state.project.assets, asset],
+          audioTracks
+        }
+      }
+    }),
 
   addClipToTimeline: (assetId) =>
     set((state) => {
@@ -676,6 +733,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         past: state.past.slice(0, -1),
         future: [state.project, ...state.future].slice(0, MAX_HISTORY),
         project: previous,
+        // Undoing changes the document relative to what was last written to disk.
+        // Without this the save button stays disabled, the close prompt never
+        // appears and no recovery draft is written — the undo is silently lost.
+        isDirty: true,
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
       }
@@ -690,6 +751,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         past: [...state.past, state.project].slice(-MAX_HISTORY),
         future: rest,
         project: next,
+        isDirty: true,
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
       }

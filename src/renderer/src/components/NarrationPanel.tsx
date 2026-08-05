@@ -11,9 +11,7 @@ function fileNameFromPath(path: string): string {
 
 export function NarrationPanel(): React.JSX.Element {
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
-  const addAsset = useProjectStore((s) => s.addAsset)
-  const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
-  const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
+  const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
 
   const [speakers, setSpeakers] = useState<VoicevoxSpeaker[]>([])
   const [connError, setConnError] = useState<string | null>(null)
@@ -55,26 +53,22 @@ export function NarrationPanel(): React.JSX.Element {
     try {
       const filePath = await window.api.voicevoxSynthesize(text, styleId)
       const meta = await window.api.probeMedia(filePath)
-      const assetId = uuid()
-      addAsset({
-        id: assetId,
-        filePath,
-        fileName: fileNameFromPath(filePath),
-        duration: meta.duration,
-        width: 0,
-        height: 0,
-        fps: 0,
-        hasAudio: true,
-        hasVideo: false
-      })
-      let targetTrackId = trackId
-      if (!targetTrackId) {
-        addAudioTrack('ナレーション')
-        targetTrackId = useProjectStore.getState().project.audioTracks.slice(-1)[0]?.id ?? ''
-      }
-      if (targetTrackId) {
-        addClipToAudioTrack(targetTrackId, assetId)
-      }
+      // Asset + track + clip as one undoable step, so a single undo doesn't leave
+      // an empty narration track and an unused asset behind.
+      addAudioClipWithAsset(
+        {
+          id: uuid(),
+          filePath,
+          fileName: fileNameFromPath(filePath),
+          duration: meta.duration,
+          width: 0,
+          height: 0,
+          fps: 0,
+          hasAudio: true,
+          hasVideo: false
+        },
+        { trackId: trackId || undefined, trackName: 'ナレーション' }
+      )
       setDoneMessage('ナレーションを音声トラックに追加しました。')
     } catch (e) {
       setError(formatIpcError(e))

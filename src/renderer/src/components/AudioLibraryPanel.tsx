@@ -44,9 +44,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
   const [busyId, setBusyId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const addAsset = useProjectStore((s) => s.addAsset)
-  const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
-  const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
+  const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
   const addSePreset = usePresetStore((s) => s.addSePreset)
 
   const apiKey = kind === 'music' ? jamendoClientId : freesoundApiKey
@@ -98,26 +96,22 @@ export function AudioLibraryPanel(): React.JSX.Element {
     setError(null)
     try {
       const { filePath, duration } = await window.api.downloadAudioAsset(url, name)
-      const assetId = uuid()
-      addAsset({
-        id: assetId,
-        filePath,
-        fileName: name,
-        duration,
-        width: 0,
-        height: 0,
-        fps: 0,
-        hasAudio: true,
-        hasVideo: false
-      })
-      let track = useProjectStore.getState().project.audioTracks.find((t) => t.name === trackName)
-      if (!track) {
-        addAudioTrack(trackName)
-        track = useProjectStore.getState().project.audioTracks.find((t) => t.name === trackName)
-      }
-      if (track) {
-        addClipToAudioTrack(track.id, assetId)
-      }
+      // Asset + track + clip as one undoable step, so a single undo doesn't leave
+      // an empty track and an unused asset behind.
+      addAudioClipWithAsset(
+        {
+          id: uuid(),
+          filePath,
+          fileName: name,
+          duration,
+          width: 0,
+          height: 0,
+          fps: 0,
+          hasAudio: true,
+          hasVideo: false
+        },
+        { trackName }
+      )
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
