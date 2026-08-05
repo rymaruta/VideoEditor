@@ -154,7 +154,7 @@ function buildJumpcutPattern(
   cap: number
 ): FlatCandidate[] {
   const sorted = [...flat].sort((a, b) => b.score - a.score)
-  const pool = sorted.slice(0, Math.max(6, Math.min(sorted.length, 16)))
+  const pool = sorted.slice(0, Math.max(6, Math.min(sorted.length, 24)))
   const shuffled = seededShuffle(pool, rand)
   const chosen: FlatCandidate[] = []
   let total = 0
@@ -302,7 +302,7 @@ function buildBeatSyncPattern(
     : 2
   const cutInterval = beatInterval * beatsPerCut
   const numCuts = Math.max(6, Math.round(BEATSYNC_TARGET_SECONDS / cutInterval))
-  const pool = [...flat].sort((a, b) => b.score - a.score).slice(0, Math.max(numCuts, 16))
+  const pool = [...flat].sort((a, b) => b.score - a.score).slice(0, Math.max(numCuts, 24))
   if (pool.length === 0) return []
   const shuffled = seededShuffle(pool, rand)
   const chosen: FlatCandidate[] = []
@@ -346,7 +346,7 @@ function buildReferenceStylePattern(
   rand: () => number
 ): FlatCandidate[] {
   const numCuts = Math.max(6, Math.round(REFERENCE_TARGET_SECONDS / avgCutSeconds))
-  const pool = [...flat].sort((a, b) => b.score - a.score).slice(0, Math.max(numCuts, 16))
+  const pool = [...flat].sort((a, b) => b.score - a.score).slice(0, Math.max(numCuts, 24))
   if (pool.length === 0) return []
   const shuffled = seededShuffle(pool, rand)
   const chosen: FlatCandidate[] = []
@@ -369,7 +369,7 @@ interface GeminiResponse {
   error?: { message?: string }
 }
 
-const GEMINI_HIGHLIGHT_SAMPLE_COUNT = 12
+const GEMINI_HIGHLIGHT_SAMPLE_COUNT = 20
 
 async function scoreHighlightsWithGemini(
   candidates: FlatCandidate[],
@@ -440,7 +440,7 @@ async function scoreHighlightsWithGemini(
   return map
 }
 
-const DIRECTOR_CANDIDATE_POOL_SIZE = 20
+const DIRECTOR_CANDIDATE_POOL_SIZE = 30
 const VALID_TRANSITIONS: TransitionType[] = ['none', 'crossfade', 'fade', 'wipe']
 
 interface DirectorPlan {

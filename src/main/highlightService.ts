@@ -71,6 +71,20 @@ const CANDIDATE_LEAD_IN = 1
 const CANDIDATE_TAIL = 3
 const ADJACENT_PEAK_GAP = 1.5
 const SCENE_MATCH_WINDOW = 2
+const MIN_HIGHLIGHT_CANDIDATES = 12
+const MAX_HIGHLIGHT_CANDIDATES = 40
+const CANDIDATES_PER_SECOND_DIVISOR = 8
+
+// Longer source footage tends to contain more distinct highlight moments; a fixed
+// cap discards genuinely good candidates once a video runs past a couple of
+// minutes. Scale the cap with duration instead, while keeping short-clip behavior
+// unchanged.
+function highlightCandidateLimit(assetDuration: number): number {
+  return Math.min(
+    MAX_HIGHLIGHT_CANDIDATES,
+    Math.max(MIN_HIGHLIGHT_CANDIDATES, Math.round(assetDuration / CANDIDATES_PER_SECOND_DIVISOR))
+  )
+}
 
 export async function detectHighlights(
   filePath: string,
@@ -130,7 +144,9 @@ export async function detectHighlights(
     }
   })
 
-  return candidates.sort((a, b) => b.score - a.score).slice(0, 12)
+  return candidates
+    .sort((a, b) => b.score - a.score)
+    .slice(0, highlightCandidateLimit(assetDuration))
 }
 
 export async function analyzeReferenceStyle(filePath: string): Promise<ReferenceStyleAnalysis> {
