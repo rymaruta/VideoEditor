@@ -7,6 +7,13 @@ import { formatIpcError } from '../lib/ipcError'
 import { KeywordSeModal } from './KeywordSeModal'
 import { PlusIcon, TrashIcon, TypeIcon, MusicIcon, StarIcon, WandIcon } from './icons'
 
+// Presets and the SE dictionary live in localStorage, outside the project's undo
+// history — deleting one is permanent, so a single click on a small trash icon
+// must not be the whole interaction.
+function confirmDeletePreset(label: string): boolean {
+  return confirm(`「${label}」を削除しますか?この操作は元に戻せません。`)
+}
+
 export function PresetPanel(): React.JSX.Element {
   const captionPresets = usePresetStore((s) => s.captionPresets)
   const removeCaptionPreset = usePresetStore((s) => s.removeCaptionPreset)
@@ -131,7 +138,9 @@ export function PresetPanel(): React.JSX.Element {
               <button
                 className="icon-button danger"
                 title="削除"
-                onClick={() => removeCaptionPreset(preset.id)}
+                onClick={() => {
+                  if (confirmDeletePreset(preset.name)) removeCaptionPreset(preset.id)
+                }}
               >
                 <TrashIcon width={13} height={13} />
               </button>
@@ -166,7 +175,9 @@ export function PresetPanel(): React.JSX.Element {
               <button
                 className="icon-button danger"
                 title="削除"
-                onClick={() => removeSePreset(preset.id)}
+                onClick={() => {
+                  if (confirmDeletePreset(preset.name)) removeSePreset(preset.id)
+                }}
               >
                 <TrashIcon width={13} height={13} />
               </button>
@@ -208,7 +219,9 @@ export function PresetPanel(): React.JSX.Element {
               <button
                 className="icon-button danger"
                 title="削除"
-                onClick={() => removeDictionaryEntry(entry.id)}
+                onClick={() => {
+                  if (confirmDeletePreset(entry.keyword)) removeDictionaryEntry(entry.id)
+                }}
               >
                 <TrashIcon width={13} height={13} />
               </button>

@@ -776,6 +776,16 @@ export function Timeline(): React.JSX.Element {
     return project.clips.filter((c) => ids.has(c.id) && c.audioDetached).length
   }, [multiSelectedClipIds, project.clips])
 
+  // Deleting a track takes every clip on it. That is a very different weight of
+  // action from deleting one clip, and it sits behind a 12px trash icon, so ask
+  // first whenever there is actually something to lose.
+  function confirmRemoveTrack(name: string, clipCount: number): boolean {
+    if (clipCount === 0) return true
+    return confirm(
+      `トラック「${name}」には${clipCount}個のクリップがあります。トラックごと削除しますか?\n(元に戻すで取り消せます)`
+    )
+  }
+
   const selectedAudioClipData =
     selectedAudioClip &&
     project.audioTracks
@@ -1157,7 +1167,11 @@ export function Timeline(): React.JSX.Element {
                 <button
                   className="icon-button danger"
                   title="トラック削除"
-                  onClick={() => removeVideoOverlayTrack(track.id)}
+                  onClick={() => {
+                    if (confirmRemoveTrack(track.name, track.clips.length)) {
+                      removeVideoOverlayTrack(track.id)
+                    }
+                  }}
                 >
                   <TrashIcon width={12} height={12} />
                 </button>
@@ -1209,7 +1223,11 @@ export function Timeline(): React.JSX.Element {
                 <button
                   className="icon-button danger"
                   title="トラック削除"
-                  onClick={() => removeAudioTrack(track.id)}
+                  onClick={() => {
+                    if (confirmRemoveTrack(track.name, track.clips.length)) {
+                      removeAudioTrack(track.id)
+                    }
+                  }}
                 >
                   <TrashIcon width={12} height={12} />
                 </button>
