@@ -2,6 +2,7 @@ import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from './timelineMath'
 import { defaultTextStyle } from '@shared/textStyle'
 import { generateVideoMetadata, type VideoMetadata } from './metadataGeneration'
+import type { TextOverlay } from '@shared/types'
 
 const FRAME_FRACTIONS = [0.15, 0.5, 0.85]
 const FRAME_WIDTH = 320
@@ -19,7 +20,7 @@ export async function autoFinishTimeline(
   const store = useProjectStore.getState()
   const timedClips = buildTimedClips(store.project)
 
-  let captionCount = 0
+  const overlays: Omit<TextOverlay, 'id'>[] = []
   for (const tc of timedClips) {
     if (!tc.asset.hasAudio) continue
     try {
@@ -35,19 +36,20 @@ export async function autoFinishTimeline(
         if (!text) continue
         const startTime = tc.start + (seg.start - tc.clip.inPoint) / speed
         const endTime = tc.start + (seg.end - tc.clip.inPoint) / speed
-        store.addTextOverlay({
+        overlays.push({
           text,
           startTime,
           endTime,
           style: defaultTextStyle(),
           source: 'auto'
         })
-        captionCount++
       }
     } catch {
       // Skip clips whose transcription fails; continue with the rest.
     }
   }
+  store.addTextOverlays(overlays)
+  const captionCount = overlays.length
 
   let metadata: VideoMetadata | null = null
   if (geminiApiKey) {

@@ -3,7 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { defaultTextStyle } from '@shared/textStyle'
-import type { TranscriptSegment } from '@shared/types'
+import type { TextOverlay, TranscriptSegment } from '@shared/types'
 import { MicIcon } from './icons'
 
 function formatTime(seconds: number): string {
@@ -20,7 +20,7 @@ export function AutoCaptionModal({
   onClose: () => void
 }): React.JSX.Element | null {
   const project = useProjectStore((s) => s.project)
-  const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
+  const addTextOverlays = useProjectStore((s) => s.addTextOverlays)
 
   const clip = project.clips.find((c) => c.id === clipId)
   const asset = clip ? project.assets.find((a) => a.id === clip.assetId) : undefined
@@ -74,6 +74,7 @@ export function AutoCaptionModal({
       return
     }
     const speed = clip.speed || 1
+    const overlays: Omit<TextOverlay, 'id'>[] = []
     segments.forEach((seg, i) => {
       if (!checked.has(i)) return
       const text = texts[i].trim()
@@ -88,7 +89,7 @@ export function AutoCaptionModal({
               end: tc.start + (w.end - clip.inPoint) / speed
             }))
           : undefined
-      addTextOverlay({
+      overlays.push({
         text,
         startTime,
         endTime,
@@ -97,6 +98,7 @@ export function AutoCaptionModal({
         words
       })
     })
+    addTextOverlays(overlays)
     onClose()
   }
 
