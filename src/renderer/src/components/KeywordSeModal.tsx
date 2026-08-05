@@ -14,7 +14,6 @@ function formatTime(seconds: number): string {
 
 export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
-  const addAsset = useProjectStore((s) => s.addAsset)
   const addKeywordSeClips = useProjectStore((s) => s.addKeywordSeClips)
   const dictionary = useSfxDictionaryStore((s) => s.entries)
 
@@ -51,6 +50,7 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
       // this map, several matches on the same SE file would each fail the find and
       // register a duplicate asset for the same wav.
       const createdByPath = new Map(project.assets.map((a) => [a.filePath, a]))
+      const newAssets: typeof project.assets = []
       for (const match of chosen) {
         let asset = createdByPath.get(match.entry.filePath)
         if (!asset) {
@@ -71,7 +71,7 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
             hasAudio: true,
             hasVideo: false
           }
-          addAsset(asset)
+          newAssets.push(asset)
           createdByPath.set(asset.filePath, asset)
         }
         placements.push({
@@ -81,7 +81,9 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
           volume: match.entry.volume
         })
       }
-      addKeywordSeClips(placements)
+      // One scan = one undo step: the newly used SE files are registered together
+      // with the clips instead of one history entry per file.
+      addKeywordSeClips(placements, newAssets)
       onClose()
     } catch (e) {
       setError(formatIpcError(e))

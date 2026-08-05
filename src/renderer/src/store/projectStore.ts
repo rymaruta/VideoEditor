@@ -148,7 +148,8 @@ interface ProjectState {
   removeAudioClip: (trackId: string, clipId: string) => void
   splitAudioClipAtTime: (trackId: string, clipId: string, absoluteTime: number) => void
   addKeywordSeClips: (
-    placements: { assetId: string; startTime: number; outPoint: number; volume: number }[]
+    placements: { assetId: string; startTime: number; outPoint: number; volume: number }[],
+    newAssets?: MediaAsset[]
   ) => void
 
   addVideoOverlayTrack: (name: string) => void
@@ -1288,7 +1289,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return { ...pushHistory(state), project: { ...state.project, videoOverlayTracks } }
     }),
 
-  addKeywordSeClips: (placements) =>
+  addKeywordSeClips: (placements, newAssets) =>
     set((state) => {
       const existingTrack = state.project.audioTracks.find((t) => t.name === 'SE')
       const trackId = existingTrack?.id ?? uuid()
@@ -1315,7 +1316,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               clips: newClips
             }
           ]
-      return { ...pushHistory(state), project: { ...state.project, audioTracks } }
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          // Registering the newly used SE files here keeps one scan = one undo step.
+          assets: newAssets?.length
+            ? [...state.project.assets, ...newAssets]
+            : state.project.assets,
+          audioTracks
+        }
+      }
     }),
 
   setBeatGrid: (grid) =>
@@ -1352,12 +1363,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           let localStart = c.inPoint
           while (localStart < c.outPoint) {
             const localEnd = Math.min(localStart + template.jumpCutSeconds, c.outPoint)
+            // Spread the source clip: rebuilding field by field dropped the crop
+            // framing and, worse, the audioDetached flag — the recut clips then
+            // played their embedded audio again on top of the separated track.
             newClips.push({
+              ...c,
               id: uuid(),
-              assetId: c.assetId,
               inPoint: localStart,
               outPoint: localEnd,
-              speed: 1
+              speed: 1,
+              transitionIn: undefined
             })
             localStart = localEnd
           }
