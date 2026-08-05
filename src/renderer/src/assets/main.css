@@ -110,6 +110,13 @@ button:disabled {
   justify-content: center;
 }
 
+.bulk-speed-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #f5b942;
+}
+
 .error-boundary {
   display: flex;
   flex-direction: column;

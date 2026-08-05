@@ -1,6 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { app } from 'electron'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import type { VoicevoxSpeaker } from '@shared/types'
 
 const ENGINE_BASE = 'http://127.0.0.1:50021'
@@ -63,8 +64,12 @@ export async function synthesizeSpeech(text: string, speakerId: number): Promise
   }
 
   const buf = Buffer.from(await synthRes.arrayBuffer())
-  const dir = mkdtempSync(join(tmpdir(), 've-voicevox-'))
-  const outPath = join(dir, `narration-${Date.now()}.wav`)
+  // Narration is saved project content, not scratch: writing it to the OS temp
+  // directory meant a reboot (which clears /tmp) silently emptied the narration
+  // track of any project that referenced it.
+  const dir = join(app.getPath('userData'), 'narration')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const outPath = join(dir, `narration-${randomUUID()}.wav`)
   writeFileSync(outPath, buf)
   return outPath
 }

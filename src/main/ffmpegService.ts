@@ -250,13 +250,15 @@ export interface ExportOptions {
 }
 
 let currentExportCommand: ffmpeg.FfmpegCommand | null = null
+let exportInProgress = false
 let exportCancelRequested = false
 
 export function cancelExport(): void {
-  if (currentExportCommand) {
-    exportCancelRequested = true
-    currentExportCommand.kill('SIGKILL')
-  }
+  if (!exportInProgress) return
+  // Also covers the window before .run() assigns currentExportCommand: the flag
+  // makes the in-flight job abort as soon as its command handle exists.
+  exportCancelRequested = true
+  currentExportCommand?.kill('SIGKILL')
 }
 
 export function exportProject(options: ExportOptions): Promise<void> {
@@ -270,15 +272,29 @@ export function exportProject(options: ExportOptions): Promise<void> {
   }
   // The cancel handle and progress channel are singletons; a second concurrent
   // encode would overwrite currentExportCommand and leave the first job
-  // uncancelable, with both jobs fighting over the one progress bar.
-  if (currentExportCommand) {
+  // uncancelable, with both jobs fighting over the one progress bar. The flag is
+  // set synchronously here so two calls in the same tick can't both get through.
+  if (exportInProgress) {
     return Promise.reject(
       new Error('別の書き出しが進行中です。完了またはキャンセルしてから再度お試しください')
     )
   }
+  exportInProgress = true
 
   const clipOutputDurations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
-  const totalDuration = clipOutputDurations.reduce((sum, d) => sum + d, 0)
+  let totalDuration = clipOutputDurations.reduce((sum, d) => sum + d, 0)
+  // Where each clip begins on the app's timeline (clips laid back-to-back). A
+  // crossfade overlaps two clips, so the exported video is shorter than this by the
+  // transition duration — exportStarts below tracks the real output positions.
+  const timelineStarts: number[] = []
+  {
+    let acc = 0
+    for (const d of clipOutputDurations) {
+      timelineStarts.push(acc)
+      acc += d
+    }
+  }
+  const exportStarts: number[] = new Array(clips.length).fill(0)
   exportCancelRequested = false
 
   return new Promise((resolve, reject) => {
@@ -344,6 +360,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(`[${curA}][a${i}]concat=n=2:v=0:a=1[${outA}]`)
           curV = outV
           curA = outA
+          exportStarts[i] = curDuration
           curDuration = curDuration + incomingDuration
         } else {
           const offset = Math.max(0, curDuration - t)
@@ -355,9 +372,25 @@ export function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(`[${curA}][a${i}]acrossfade=d=${t}[${outA}]`)
           curV = outV
           curA = outA
+          exportStarts[i] = offset
           curDuration = curDuration + incomingDuration - t
         }
       }
+
+      // Transitions overlap their two clips, so the output is shorter than the
+      // timeline. Text overlays, audio-track clips and PiP clips are all anchored to
+      // timeline seconds, so without this remap everything after the first
+      // transition would be burned in / delayed by the accumulated overlap.
+      const toExportTime = (timelineTime: number): number => {
+        let idx = 0
+        for (let i = 0; i < timelineStarts.length; i++) {
+          if (timelineStarts[i] <= timelineTime) idx = i
+          else break
+        }
+        return Math.max(0, timelineTime - (timelineStarts[idx] - exportStarts[idx]))
+      }
+      // The encoded video's real length; the raw timeline sum would stall progress short of 100%.
+      totalDuration = curDuration
 
       // --- Video overlay tracks (PiP): scale + timestamp-shift + overlay onto the base video ---
       const pipAudioEntries: { label: string; duck: boolean }[] = []
@@ -371,10 +404,11 @@ export function exportProject(options: ExportOptions): Promise<void> {
           if (dur <= 0) return
           command.input(asset.filePath).inputOptions([`-ss ${overlayClip.inPoint}`, `-t ${dur}`])
           const myIndex = inputIndex++
+          const pipStart = toExportTime(overlayClip.startTime)
           const pipLabel = `pip${pipCounter}`
           const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
           filterParts.push(
-            `[${myIndex}:v]scale=${scaledWidth}:-2,setpts=PTS-STARTPTS+${overlayClip.startTime}/TB[${pipLabel}]`
+            `[${myIndex}:v]scale=${scaledWidth}:-2,setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
           )
           const margin = Math.round(w * 0.04)
           const xExpr =
@@ -385,14 +419,14 @@ export function exportProject(options: ExportOptions): Promise<void> {
             track.position === 'top-left' || track.position === 'top-right'
               ? `${margin}`
               : `H-h-${margin}`
-          const endTime = overlayClip.startTime + dur
+          const endTime = pipStart + dur
           const outV = `vpip${pipCounter}`
           filterParts.push(
-            `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${overlayClip.startTime}\\,${endTime})'[${outV}]`
+            `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${pipStart}\\,${endTime})'[${outV}]`
           )
           curV = outV
           if (asset.hasAudio) {
-            const delayMs = Math.max(0, Math.round(overlayClip.startTime * 1000))
+            const delayMs = Math.max(0, Math.round(pipStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
             filterParts.push(
               `[${myIndex}:a]asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs}[${audioLabel}]`
@@ -407,7 +441,17 @@ export function exportProject(options: ExportOptions): Promise<void> {
       if (project.textOverlays.length > 0) {
         assDir = mkdtempSync(join(tmpdir(), 've-subs-'))
         const assPath = join(assDir, 'overlay.ass')
-        writeFileSync(assPath, buildAssContent(project.textOverlays, w, h), 'utf-8')
+        const remappedOverlays = project.textOverlays.map((o) => ({
+          ...o,
+          startTime: toExportTime(o.startTime),
+          endTime: toExportTime(o.endTime),
+          words: o.words?.map((word) => ({
+            ...word,
+            start: toExportTime(word.start),
+            end: toExportTime(word.end)
+          }))
+        }))
+        writeFileSync(assPath, buildAssContent(remappedOverlays, w, h), 'utf-8')
         filterParts.push(`[${curV}]subtitles=filename='${escapeFilterPath(assPath)}'[vout]`)
         videoLabel = '[vout]'
       }
@@ -421,10 +465,11 @@ export function exportProject(options: ExportOptions): Promise<void> {
           const asset = assetById.get(trackClip.assetId)
           if (!asset) return
           const dur = trackClip.outPoint - trackClip.inPoint
+          if (dur <= 0) return
           command.input(asset.filePath).inputOptions([`-ss ${trackClip.inPoint}`, `-t ${dur}`])
           const myIndex = inputIndex++
           const label = `atrk${trackIdx}_${clipIdx}`
-          const delayMs = Math.max(0, Math.round(trackClip.startTime * 1000))
+          const delayMs = Math.max(0, Math.round(toExportTime(trackClip.startTime) * 1000))
           const clipVolume = track.volume * (trackClip.volume ?? 1)
           filterParts.push(
             `[${myIndex}:a]asetpts=PTS-STARTPTS,volume=${clipVolume},adelay=${delayMs}|${delayMs}[${label}]`
@@ -502,6 +547,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         .on('error', (err) => {
           cleanupAssDir()
           currentExportCommand = null
+          exportInProgress = false
           if (exportCancelRequested) {
             rmSync(outputPath, { force: true })
             reject(new Error('EXPORT_CANCELED'))
@@ -512,14 +558,19 @@ export function exportProject(options: ExportOptions): Promise<void> {
         .on('end', () => {
           cleanupAssDir()
           currentExportCommand = null
+          exportInProgress = false
           onProgress(100, '完了')
           resolve()
         })
         .run()
       currentExportCommand = command
+      // A cancel that arrived while the filter graph was still being built has no
+      // command to kill yet, so honour it as soon as the handle exists.
+      if (exportCancelRequested) command.kill('SIGKILL')
     } catch (e) {
       cleanupAssDir()
       currentExportCommand = null
+      exportInProgress = false
       reject(e)
     }
   })

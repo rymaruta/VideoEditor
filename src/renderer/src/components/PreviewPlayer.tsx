@@ -261,7 +261,9 @@ function AudioTrackClipLayer({
     }
   }, [effectiveVolume, masterMuted, trackMuted])
 
-  return <audio ref={ref} src={toFileUrl(asset.filePath)} />
+  // Hidden: this element exists only to play back the audio-track clip, and must
+  // not take part in the preview frame's layout.
+  return <audio ref={ref} src={toFileUrl(asset.filePath)} style={{ display: 'none' }} />
 }
 
 export function PreviewPlayer(): React.JSX.Element {

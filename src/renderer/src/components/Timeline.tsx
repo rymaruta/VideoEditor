@@ -767,6 +767,15 @@ export function Timeline(): React.JSX.Element {
     }
   }
 
+  // Clips whose audio was detached can't have their speed changed (it would drift
+  // from the separated audio track), so a bulk speed change silently skips them —
+  // surface that instead of leaving the user with a partially-applied change.
+  const bulkDetachedCount = useMemo(() => {
+    if (multiSelectedClipIds.length < 2) return 0
+    const ids = new Set(multiSelectedClipIds)
+    return project.clips.filter((c) => ids.has(c.id) && c.audioDetached).length
+  }, [multiSelectedClipIds, project.clips])
+
   const selectedAudioClipData =
     selectedAudioClip &&
     project.audioTracks
@@ -842,7 +851,14 @@ export function Timeline(): React.JSX.Element {
         {multiSelectedClipIds.length > 1 && (
           <div className="timeline-actions bulk-actions">
             <span className="hint-text">{multiSelectedClipIds.length}個選択中</span>
-            <label className="inline-select">
+            <label
+              className="inline-select"
+              title={
+                bulkDetachedCount > 0
+                  ? `音声を分離済みのクリップ${bulkDetachedCount}個は速度を変更できないため対象外になります(音声トラックとズレるため)`
+                  : undefined
+              }
+            >
               <GaugeIcon width={13} height={13} />
               <select
                 defaultValue=""
@@ -861,6 +877,12 @@ export function Timeline(): React.JSX.Element {
                 ))}
               </select>
             </label>
+            {bulkDetachedCount > 0 && (
+              <span className="hint-text bulk-speed-warning">
+                <AlertTriangleIcon width={12} height={12} />
+                音声分離済み{bulkDetachedCount}個は速度変更の対象外
+              </span>
+            )}
             <button
               className="icon-button"
               title={`コピー (${keymap.copy.display})`}

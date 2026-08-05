@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { createWriteStream, existsSync, mkdirSync } from 'fs'
+import { createWriteStream, existsSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import https from 'https'
@@ -64,7 +64,14 @@ export async function downloadAudioAsset(
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const ext = extensionFromUrl(url)
   const filePath = join(dir, `${randomUUID()}-${sanitizeFileName(suggestedName)}.${ext}`)
-  await download(url, filePath)
-  const meta = await probeMedia(filePath)
-  return { filePath, duration: meta.duration }
+  try {
+    await download(url, filePath)
+    const meta = await probeMedia(filePath)
+    return { filePath, duration: meta.duration }
+  } catch (e) {
+    // A dropped connection or an undecodable download would otherwise leave a
+    // partial file in userData forever — each retry adding another orphan.
+    rmSync(filePath, { force: true })
+    throw e
+  }
 }
