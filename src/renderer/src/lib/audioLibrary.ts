@@ -1,3 +1,4 @@
+import { readJsonResponse } from './httpJson'
 export interface MusicTrackInfo {
   id: string
   title: string
@@ -44,7 +45,7 @@ export async function searchJamendoMusic(
     namesearch: query
   })
   const res = await fetch(`https://api.jamendo.com/v3.0/tracks/?${params.toString()}`)
-  const data: JamendoResponse = await res.json()
+  const data = await readJsonResponse<JamendoResponse>(res, 'Jamendo API')
   if (!res.ok || data.headers?.status === 'failed') {
     throw new Error(data.headers?.error_message ?? 'Jamendo API エラー')
   }
@@ -84,7 +85,7 @@ export async function searchFreesoundEffects(
     token: apiKey
   })
   const res = await fetch(`https://freesound.org/apiv2/search/text/?${params.toString()}`)
-  const data: FreesoundResponse = await res.json()
+  const data = await readJsonResponse<FreesoundResponse>(res, 'Freesound API')
   if (!res.ok) throw new Error(data.detail ?? 'Freesound API エラー')
   return (data.results ?? [])
     .filter((r) => r.previews?.['preview-hq-mp3'] || r.previews?.['preview-lq-mp3'])

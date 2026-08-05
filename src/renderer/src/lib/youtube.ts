@@ -1,3 +1,4 @@
+import { readJsonResponse } from './httpJson'
 export interface YouTubeVideoInfo {
   id: string
   title: string
@@ -56,7 +57,7 @@ async function fetchVideoDetails(
   if (ids.length === 0) return new Map()
   const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics&id=${ids.join(',')}&key=${encodeURIComponent(apiKey)}`
   const res = await fetch(url)
-  const data: ApiError & { items?: VideosListItem[] } = await res.json()
+  const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
   const map = new Map<string, { duration: number; views: number }>()
   for (const item of data.items ?? []) {
@@ -71,7 +72,7 @@ async function fetchVideoDetails(
 export async function fetchTrendingVideos(apiKey: string): Promise<YouTubeVideoInfo[]> {
   const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=JP&maxResults=15&key=${encodeURIComponent(apiKey)}`
   const res = await fetch(url)
-  const data: ApiError & { items?: VideosListItem[] } = await res.json()
+  const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
   return (data.items ?? []).map((item) => ({
     id: item.id,
@@ -89,7 +90,7 @@ const GAMING_CATEGORY_ID = '20'
 export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTubeVideoInfo[]> {
   const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=JP&videoCategoryId=${GAMING_CATEGORY_ID}&maxResults=25&key=${encodeURIComponent(apiKey)}`
   const res = await fetch(url)
-  const data: ApiError & { items?: VideosListItem[] } = await res.json()
+  const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
   return (data.items ?? []).map((item) => ({
     id: item.id,
@@ -105,7 +106,7 @@ export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTube
 export async function searchVideos(apiKey: string, query: string): Promise<YouTubeVideoInfo[]> {
   const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=viewCount&maxResults=15&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`
   const res = await fetch(searchUrl)
-  const data: ApiError & { items?: SearchListItem[] } = await res.json()
+  const data = await readJsonResponse<ApiError & { items?: SearchListItem[] }>(res, 'YouTube API')
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
   const items = data.items ?? []
   const ids = items.map((i) => i.id.videoId).filter((id): id is string => Boolean(id))

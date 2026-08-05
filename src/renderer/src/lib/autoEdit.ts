@@ -1,3 +1,4 @@
+import { readJsonResponse } from './httpJson'
 import { v4 as uuid } from 'uuid'
 import type {
   AudioTrack,
@@ -422,7 +423,7 @@ async function scoreHighlightsWithGemini(
       generationConfig: { responseMimeType: 'application/json' }
     })
   })
-  const data: GeminiResponse = await res.json()
+  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
   if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Geminiからの応答が空でした')
@@ -500,7 +501,7 @@ ${preferenceSummary}
       generationConfig: { responseMimeType: 'application/json' }
     })
   })
-  const data: GeminiResponse = await res.json()
+  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
   if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Geminiからの応答が空でした')
@@ -579,7 +580,7 @@ ${infoLines}
       generationConfig: { responseMimeType: 'application/json' }
     })
   })
-  const data: GeminiResponse = await res.json()
+  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
   if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Geminiからの応答が空でした')

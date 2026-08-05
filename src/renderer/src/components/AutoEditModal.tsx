@@ -109,12 +109,25 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
     setFeedback((prev) => ({ ...prev, [pattern.id]: liked ? 'liked' : 'disliked' }))
   }
 
+  // Applying appends the pattern's clips to the timeline. The button used to stay
+  // clickable after showing 「適用済み」, so a second click silently doubled the
+  // whole edit; the patterns are also alternatives, so stacking two of them is
+  // almost never intended.
+  function confirmApply(pattern: AutoEditPattern): boolean {
+    if (appliedId === null || appliedId === pattern.id) return true
+    return confirm(
+      '別のパターンが既にタイムラインへ適用されています。このパターンは既存のクリップの後ろに追加されます。続行しますか?'
+    )
+  }
+
   function handleApply(pattern: AutoEditPattern): void {
+    if (!confirmApply(pattern)) return
     applyAutoEditPattern(pattern)
     setAppliedId(pattern.id)
   }
 
   async function handleApplyAndFinish(pattern: AutoEditPattern): Promise<void> {
+    if (!confirmApply(pattern)) return
     applyAutoEditPattern(pattern)
     setAppliedId(pattern.id)
     setFinishingId(pattern.id)
@@ -250,7 +263,16 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                         : TRANSITION_LABELS[p.transition]}
                     </p>
                     <div className="autoedit-card-actions">
-                      <button className="primary-button" onClick={() => handleApply(p)}>
+                      <button
+                        className="primary-button"
+                        onClick={() => handleApply(p)}
+                        disabled={appliedId === p.id}
+                        title={
+                          appliedId === p.id
+                            ? 'このパターンは既にタイムラインへ追加されています'
+                            : undefined
+                        }
+                      >
                         <PlusIcon width={13} height={13} />
                         {appliedId === p.id ? '適用済み' : 'タイムラインに適用'}
                       </button>
@@ -274,7 +296,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                     <button
                       className="small-button autoedit-finish-button"
                       onClick={() => handleApplyAndFinish(p)}
-                      disabled={finishingId === p.id}
+                      disabled={finishingId === p.id || appliedId === p.id}
                       title="タイムラインに適用した上で、字幕の自動文字起こしと投稿メタデータ生成まで一括で行います"
                     >
                       <MicIcon width={12} height={12} />

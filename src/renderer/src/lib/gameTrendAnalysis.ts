@@ -1,3 +1,4 @@
+import { readJsonResponse } from './httpJson'
 import type { YouTubeVideoInfo } from './youtube'
 
 export interface GameTrendInsight {
@@ -124,7 +125,7 @@ export async function analyzeGamingTrends(
       generationConfig: { responseMimeType: 'application/json' }
     })
   })
-  const data: GeminiResponse = await res.json()
+  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
   if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Geminiからの応答が空でした')

@@ -112,6 +112,11 @@ export function MetadataPanel(): React.JSX.Element {
         frames,
         result.titles.map((t) => t.title)
       )
+      // An unusable response must not wipe the titles already on screen.
+      if (newTitles.length === 0) {
+        setError('タイトル案を再生成できませんでした。もう一度お試しください。')
+        return
+      }
       setResult((prev) => (prev ? { ...prev, titles: newTitles } : prev))
     } catch (e) {
       setError(formatIpcError(e))
@@ -134,6 +139,10 @@ export function MetadataPanel(): React.JSX.Element {
         frames,
         result.pinnedComment || null
       )
+      if (!newComment.trim()) {
+        setError('固定コメント案を再生成できませんでした。もう一度お試しください。')
+        return
+      }
       setResult((prev) => (prev ? { ...prev, pinnedComment: newComment } : prev))
     } catch (e) {
       setError(formatIpcError(e))
