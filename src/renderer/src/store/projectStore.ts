@@ -136,6 +136,7 @@ interface ProjectState {
     outPoint: number
   ) => void
   updateAudioClipVolume: (trackId: string, clipId: string, volume: number) => void
+  unlinkAudioClip: (trackId: string, clipId: string) => void
   swapAudioClipAsset: (trackId: string, clipId: string, assetId: string, outPoint: number) => void
   removeAudioClip: (trackId: string, clipId: string) => void
   splitAudioClipAtTime: (trackId: string, clipId: string, absoluteTime: number) => void
@@ -388,7 +389,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             assetId: clip.assetId,
             startTime: timedClip.start,
             inPoint: clip.inPoint,
-            outPoint: clip.outPoint
+            outPoint: clip.outPoint,
+            linkedClipId: clip.id
           }
         ]
       }
@@ -428,16 +430,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       let elapsed = 0
       let didSplit = false
+      let secondHalfId: string | null = null
       const clips: Clip[] = []
       for (const c of state.project.clips) {
         const dur = (c.outPoint - c.inPoint) / (c.speed || 1)
         if (c.id === clipId && absoluteTime > elapsed && absoluteTime < elapsed + dur) {
           didSplit = true
+          secondHalfId = uuid()
           const speed = c.speed || 1
           const splitLocal = c.inPoint + (absoluteTime - elapsed) * speed
           clips.push({ ...c, outPoint: splitLocal })
           clips.push({
-            id: uuid(),
+            id: secondHalfId,
             assetId: c.assetId,
             inPoint: splitLocal,
             outPoint: c.outPoint,
@@ -450,7 +454,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         elapsed += dur
       }
       if (!didSplit) return state
-      return { ...pushHistory(state), project: { ...state.project, clips } }
+      // Detached audio linked to the split clip must split too: the link mirror
+      // trims linked audio to its source clip's bounds, so without a second piece
+      // linked to the new half, that half (audioDetached=true) would export silent.
+      const audioTracks = state.project.audioTracks.map((t) => {
+        if (!t.clips.some((c) => c.linkedClipId === clipId)) return t
+        return {
+          ...t,
+          clips: t.clips.flatMap((c) => {
+            if (c.linkedClipId !== clipId) return [c]
+            const splitLocal = c.inPoint + (absoluteTime - c.startTime)
+            if (splitLocal <= c.inPoint || splitLocal >= c.outPoint) return [c]
+            return [
+              { ...c, outPoint: splitLocal },
+              {
+                ...c,
+                id: uuid(),
+                startTime: absoluteTime,
+                inPoint: splitLocal,
+                linkedClipId: secondHalfId ?? undefined
+              }
+            ]
+          })
+        }
+      })
+      return { ...pushHistory(state), project: { ...state.project, clips, audioTracks } }
     }),
 
   removeClip: (clipId) =>
@@ -761,7 +789,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             ? {
                 ...t,
                 clips: t.clips.map((c) =>
-                  c.id === clipId ? { ...c, startTime: Math.max(0, startTime) } : c
+                  c.id === clipId
+                    ? { ...c, startTime: Math.max(0, startTime), linkedClipId: undefined }
+                    : c
                 )
               }
             : t
@@ -780,7 +810,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 ...t,
                 clips: t.clips.map((c) =>
                   c.id === clipId
-                    ? { ...c, inPoint: Math.max(0, inPoint), outPoint: Math.max(0, outPoint) }
+                    ? {
+                        ...c,
+                        inPoint: Math.max(0, inPoint),
+                        outPoint: Math.max(0, outPoint),
+                        linkedClipId: undefined
+                      }
                     : c
                 )
               }
@@ -807,7 +842,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                         ...c,
                         startTime: Math.max(0, startTime),
                         inPoint: Math.max(0, inPoint),
-                        outPoint: Math.max(0, outPoint)
+                        outPoint: Math.max(0, outPoint),
+                        linkedClipId: undefined
                       }
                     : c
                 )
@@ -845,8 +881,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             ? {
                 ...t,
                 clips: t.clips.map((c) =>
-                  c.id === clipId ? { ...c, assetId, inPoint: 0, outPoint } : c
+                  c.id === clipId
+                    ? { ...c, assetId, inPoint: 0, outPoint, linkedClipId: undefined }
+                    : c
                 )
+              }
+            : t
+        )
+      }
+    })),
+
+  unlinkAudioClip: (trackId, clipId) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) => (c.id === clipId ? { ...c, linkedClipId: undefined } : c))
               }
             : t
         )
@@ -878,8 +932,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             didSplit = true
             const splitLocal = c.inPoint + (absoluteTime - c.startTime)
             return [
-              { ...c, outPoint: splitLocal },
-              { ...c, id: uuid(), startTime: absoluteTime, inPoint: splitLocal }
+              { ...c, outPoint: splitLocal, linkedClipId: undefined },
+              {
+                ...c,
+                id: uuid(),
+                startTime: absoluteTime,
+                inPoint: splitLocal,
+                linkedClipId: undefined
+              }
             ]
           })
         }
@@ -1243,6 +1303,53 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })
 }))
+
+// Detached-audio clips (linkedClipId set) must follow their source clip: the main
+// track lays clips back-to-back, so trimming/reordering/deleting ANY earlier clip
+// shifts every later clip's absolute start — and a frozen startTime would silently
+// export lip-synced audio seconds out of place. Mirror position and trim from the
+// live source clip; unlink (freezing current values) when the source is gone.
+function syncLinkedAudioClips(project: Project): Project {
+  const hasLinks = project.audioTracks.some((t) => t.clips.some((c) => c.linkedClipId))
+  if (!hasLinks) return project
+  const timedById = new Map(buildTimedClips(project).map((tc) => [tc.clip.id, tc]))
+  let changed = false
+  const audioTracks = project.audioTracks.map((t) => {
+    let trackChanged = false
+    const clips = t.clips.map((c) => {
+      if (!c.linkedClipId) return c
+      const tc = timedById.get(c.linkedClipId)
+      if (!tc) {
+        trackChanged = true
+        return { ...c, linkedClipId: undefined }
+      }
+      if (
+        c.startTime === tc.start &&
+        c.inPoint === tc.clip.inPoint &&
+        c.outPoint === tc.clip.outPoint
+      ) {
+        return c
+      }
+      trackChanged = true
+      return { ...c, startTime: tc.start, inPoint: tc.clip.inPoint, outPoint: tc.clip.outPoint }
+    })
+    if (trackChanged) changed = true
+    return trackChanged ? { ...t, clips } : t
+  })
+  return changed ? { ...project, audioTracks } : project
+}
+
+// Runs the mirror as a silent follow-up correction (no history entry of its own):
+// the triggering edit already pushed one, and undo restores an already-synced
+// snapshot so this stays a no-op on undo/redo. The clips-identity guard prevents
+// recursion — the correction only touches audioTracks.
+useProjectStore.subscribe((state, prevState) => {
+  if (state.project === prevState.project) return
+  const synced = syncLinkedAudioClips(state.project)
+  if (synced !== state.project) {
+    useProjectStore.setState({ project: synced })
+  }
+})
 
 export function getTotalDuration(project: Project): number {
   return totalDuration(project)

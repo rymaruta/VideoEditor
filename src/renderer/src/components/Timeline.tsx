@@ -24,6 +24,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   KeyIcon,
+  LinkIcon,
   ScissorsIcon,
   TrashIcon,
   PlusIcon,
@@ -165,6 +166,7 @@ export function Timeline(): React.JSX.Element {
   const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
   const splitAudioClipAtTime = useProjectStore((s) => s.splitAudioClipAtTime)
+  const unlinkAudioClip = useProjectStore((s) => s.unlinkAudioClip)
   const addVideoOverlayTrack = useProjectStore((s) => s.addVideoOverlayTrack)
   const removeVideoOverlayTrack = useProjectStore((s) => s.removeVideoOverlayTrack)
   const toggleVideoOverlayTrackHidden = useProjectStore((s) => s.toggleVideoOverlayTrackHidden)
@@ -1717,6 +1719,16 @@ export function Timeline(): React.JSX.Element {
 
       {selectedAudioClipData && selectedAudioClip && (
         <div className="audio-clip-inspector">
+          {selectedAudioClipData.linkedClipId && (
+            <button
+              className="small-button linked-audio-badge"
+              title="この分離音声は本編クリップに追従しています(位置・トリムが自動同期)。クリックでリンクを解除して独立させます"
+              onClick={() => unlinkAudioClip(selectedAudioClip.trackId, selectedAudioClip.clipId)}
+            >
+              <LinkIcon width={12} height={12} />
+              本編に追従中
+            </button>
+          )}
           <label>
             開始位置(秒)
             <input

@@ -23,6 +23,7 @@ import {
 const FRAME_SECONDS = 1 / 30
 import { ShortsUiMockup } from './ShortsUiMockup'
 import type {
+  AudioTrackClip,
   MediaAsset,
   PipPosition,
   TextOverlay,
@@ -213,6 +214,56 @@ function VideoOverlayLayer({
   return <video ref={ref} src={toFileUrl(asset.filePath)} style={pipStyle(position, scale)} />
 }
 
+// Plays one BGM/narration/SE clip during preview via a hidden <audio> element,
+// mounted only while the playhead is inside the clip's range. Ducking is an
+// export-time filter and is not simulated here.
+function AudioTrackClipLayer({
+  clip,
+  asset,
+  trackVolume,
+  trackMuted,
+  playheadTime,
+  isPlaying,
+  masterVolume,
+  masterMuted
+}: {
+  clip: AudioTrackClip
+  asset: MediaAsset
+  trackVolume: number
+  trackMuted: boolean
+  playheadTime: number
+  isPlaying: boolean
+  masterVolume: number
+  masterMuted: boolean
+}): React.JSX.Element {
+  const ref = useRef<HTMLAudioElement>(null)
+  const localTime = clip.inPoint + (playheadTime - clip.startTime)
+
+  useEffect(() => {
+    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.3) {
+      ref.current.currentTime = localTime
+    }
+  }, [localTime])
+
+  useEffect(() => {
+    if (isPlaying) {
+      ref.current?.play().catch(() => {})
+    } else {
+      ref.current?.pause()
+    }
+  }, [isPlaying])
+
+  const effectiveVolume = Math.min(1, Math.max(0, masterVolume * trackVolume * (clip.volume ?? 1)))
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.volume = effectiveVolume
+      ref.current.muted = masterMuted || trackMuted
+    }
+  }, [effectiveVolume, masterMuted, trackMuted])
+
+  return <audio ref={ref} src={toFileUrl(asset.filePath)} />
+}
+
 export function PreviewPlayer(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const isPlaying = useProjectStore((s) => s.isPlaying)
@@ -393,12 +444,17 @@ export function PreviewPlayer(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, timedClips])
 
+  // A clip whose audio was detached must not also play its embedded audio here —
+  // the detached copy on the audio track supplies it, and both at once would double.
+  const activeClipAudioDetached =
+    findTimedClipAt(timedClips, playheadTime)?.clip.audioDetached ?? false
+
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.volume = volume
-      videoRef.current.muted = muted
+      videoRef.current.muted = muted || activeClipAudioDetached
     }
-  }, [volume, muted, activeSrc])
+  }, [volume, muted, activeSrc, activeClipAudioDetached])
 
   function stepFrame(direction: 1 | -1): void {
     const next = Math.max(0, Math.min(total, playheadTime + direction * FRAME_SECONDS))
@@ -494,6 +550,31 @@ export function PreviewPlayer(): React.JSX.Element {
               )
             })}
             {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
+            {project.audioTracks.flatMap((track) =>
+              track.clips
+                .filter(
+                  (c) =>
+                    playheadTime >= c.startTime &&
+                    playheadTime < c.startTime + (c.outPoint - c.inPoint)
+                )
+                .map((clip) => {
+                  const asset = project.assets.find((a) => a.id === clip.assetId)
+                  if (!asset) return null
+                  return (
+                    <AudioTrackClipLayer
+                      key={clip.id}
+                      clip={clip}
+                      asset={asset}
+                      trackVolume={track.volume}
+                      trackMuted={track.muted}
+                      playheadTime={playheadTime}
+                      isPlaying={isPlaying}
+                      masterVolume={volume}
+                      masterMuted={muted}
+                    />
+                  )
+                })
+            )}
           </div>
         </div>
         <div className="preview-controls">

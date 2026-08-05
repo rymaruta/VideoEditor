@@ -110,6 +110,16 @@ button:disabled {
   justify-content: center;
 }
 
+.linked-audio-badge {
+  color: var(--accent-1);
+  border-color: rgba(34, 211, 238, 0.4);
+  background-color: var(--accent-soft);
+}
+
+.linked-audio-badge:hover:not(:disabled) {
+  border-color: var(--accent-1);
+}
+
 .danger {
   color: #ffb3bb;
   border-color: rgba(242, 73, 92, 0.35);

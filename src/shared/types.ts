@@ -85,6 +85,8 @@ export interface AudioTrackClip {
   inPoint: number
   outPoint: number
   volume?: number
+  /** 音声分離で作られたクリップが追従する本編クリップのID。手動編集でリンク解除される */
+  linkedClipId?: string
 }
 
 export interface AudioTrack {
