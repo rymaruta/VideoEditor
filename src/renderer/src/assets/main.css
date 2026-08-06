@@ -385,6 +385,14 @@ h3 {
   min-width: 0;
 }
 
+/* Sits first in the row but pushed to the end visually, so the destructive action is
+   never adjacent to the "add to timeline" buttons people click repeatedly. */
+.media-item-remove {
+  order: 99;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .timeline-tools {
   display: flex;
   gap: 3px;

@@ -17,7 +17,8 @@ import {
   AlertTriangleIcon,
   TargetIcon,
   WandIcon,
-  RefreshIcon
+  RefreshIcon,
+  TrashIcon
 } from './icons'
 
 function fileNameFromPath(path: string): string {
@@ -46,6 +47,8 @@ export function MediaBin(): React.JSX.Element {
   const relinkAsset = useProjectStore((s) => s.relinkAsset)
   const setAssetProxyPath = useProjectStore((s) => s.setAssetProxyPath)
   const openInSourceViewer = useProjectStore((s) => s.openInSourceViewer)
+  const removeAsset = useProjectStore((s) => s.removeAsset)
+  const textOverlays = useProjectStore((s) => s.project.textOverlays)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -106,6 +109,45 @@ export function MediaBin(): React.JSX.Element {
         return next
       })
     }
+  }
+
+  // Deleting an asset also deletes every clip made from it, so the count is shown
+  // before doing it — losing a cut you spent time on to a stray click is much worse
+  // than one extra confirmation.
+  function handleRemoveAsset(asset: MediaAsset): void {
+    const timelineUses = useProjectStore
+      .getState()
+      .project.clips.filter((c) => c.assetId === asset.id).length
+    const audioUses = audioTracks.reduce(
+      (n, t) => n + t.clips.filter((c) => c.assetId === asset.id).length,
+      0
+    )
+    const pipUses = videoOverlayTracks.reduce(
+      (n, t) => n + t.clips.filter((c) => c.assetId === asset.id).length,
+      0
+    )
+    const total = timelineUses + audioUses + pipUses
+    if (total > 0) {
+      const parts: string[] = []
+      if (timelineUses > 0) parts.push(`タイムライン ${timelineUses}箇所`)
+      if (audioUses > 0) parts.push(`音声トラック ${audioUses}箇所`)
+      if (pipUses > 0) parts.push(`動画トラック(PiP) ${pipUses}箇所`)
+      // Captions hold absolute times, so removing clips shifts the material out from
+      // under them. Saying so up front beats letting the user discover it later.
+      const captionWarning =
+        timelineUses > 0 && textOverlays.length > 0
+          ? '\n\nタイムラインが詰まるため、テロップの位置がずれます。'
+          : ''
+      if (
+        !confirm(
+          `「${asset.fileName}」は${parts.join(' / ')}で使用中です。\n削除するとこれらのクリップも一緒に消えます。${captionWarning}\n\n削除しますか?(Ctrl+Zで元に戻せます)`
+        )
+      ) {
+        return
+      }
+    }
+    setError(null)
+    removeAsset(asset.id)
   }
 
   async function handleRelink(assetId: string): Promise<void> {
@@ -320,6 +362,13 @@ export function MediaBin(): React.JSX.Element {
                 )}
               </div>
               <div className="media-item-actions">
+                <button
+                  className="icon-button danger media-item-remove"
+                  onClick={() => handleRemoveAsset(asset)}
+                  title="この素材をプロジェクトから削除(使用中のクリップも一緒に消えます)"
+                >
+                  <TrashIcon width={12} height={12} />
+                </button>
                 {!isMissing && (
                   <button
                     className="small-button"

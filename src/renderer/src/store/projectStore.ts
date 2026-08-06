@@ -103,6 +103,7 @@ interface ProjectState {
   addAsset: (asset: MediaAsset) => void
   addAssets: (assets: MediaAsset[]) => void
   setAssetProxyPath: (assetId: string, proxyPath: string) => void
+  removeAsset: (assetId: string) => void
   addAudioClipWithAsset: (
     asset: MediaAsset,
     target: { trackId?: string; trackName: string }
@@ -493,6 +494,53 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           ...state.project,
           assets: state.project.assets.map((a) => (a.id === assetId ? { ...a, proxyPath } : a))
         }
+      }
+    }),
+
+  // Removing an asset must take every clip that references it with it — a clip whose
+  // asset is gone has no file to read and would break both preview and export. That
+  // makes this one user action spanning four collections, so it is one history entry.
+  removeAsset: (assetId) =>
+    set((state) => {
+      if (!state.project.assets.some((a) => a.id === assetId)) return state
+      const removedClipIds = state.project.clips
+        .filter((c) => c.assetId === assetId)
+        .map((c) => c.id)
+      const clips = state.project.clips.filter((c) => c.assetId !== assetId)
+      const audioTracks = state.project.audioTracks.map((t) => ({
+        ...t,
+        // Detached audio linked to a removed video clip goes too, even when the audio
+        // clip itself points at a different asset.
+        clips: t.clips.filter(
+          (c) =>
+            c.assetId !== assetId &&
+            !(c.linkedClipId != null && removedClipIds.includes(c.linkedClipId))
+        )
+      }))
+      const videoOverlayTracks = state.project.videoOverlayTracks.map((t) => ({
+        ...t,
+        clips: t.clips.filter((c) => c.assetId !== assetId)
+      }))
+      const stillSelected =
+        state.selectedClipId != null && clips.some((c) => c.id === state.selectedClipId)
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          assets: state.project.assets.filter((a) => a.id !== assetId),
+          clips,
+          audioTracks,
+          videoOverlayTracks
+        },
+        selectedClipId: stillSelected ? state.selectedClipId : null,
+        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) =>
+          clips.some((c) => c.id === id)
+        ),
+        // The source viewer would otherwise keep showing a file the project no longer has.
+        sourceAssetId: state.sourceAssetId === assetId ? null : state.sourceAssetId,
+        sourceIn: state.sourceAssetId === assetId ? null : state.sourceIn,
+        sourceOut: state.sourceAssetId === assetId ? null : state.sourceOut,
+        missingAssetIds: state.missingAssetIds.filter((id) => id !== assetId)
       }
     }),
 
