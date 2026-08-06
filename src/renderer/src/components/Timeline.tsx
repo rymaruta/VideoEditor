@@ -372,6 +372,7 @@ export function Timeline(): React.JSX.Element {
 
   useEffect(() => {
     if (!trimDrag) return
+    const trimDragSnapshot = trimDrag
     function handleMouseMove(e: MouseEvent): void {
       setTrimDrag((prev) => {
         if (!prev) return prev
@@ -414,10 +415,17 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      setTrimDrag((prev) => {
-        if (prev) updateClipTrim(prev.clipId, prev.liveInPoint, prev.liveOutPoint)
-        return null
-      })
+      // Commit outside the state updater: React runs updater callbacks during the
+      // render phase, so a store write in there updates other components mid-render
+      // (React logs "Cannot update a component while rendering a different one") and
+      // gets replayed when StrictMode double-invokes the updater. The effect re-runs
+      // on every trimDrag change, so this closure always sees the live values.
+      updateClipTrim(
+        trimDragSnapshot.clipId,
+        trimDragSnapshot.liveInPoint,
+        trimDragSnapshot.liveOutPoint
+      )
+      setTrimDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -455,15 +463,16 @@ export function Timeline(): React.JSX.Element {
   // one undo step.
   useEffect(() => {
     if (!rollDrag) return
+    const rollDragSnapshot = rollDrag
     function handleMouseMove(e: MouseEvent): void {
-      setRollDrag((prev) => {
-        if (!prev) return prev
-        const wanted = (e.clientX - prev.startX) / pixelsPerSecond
-        const step = wanted - prev.applied
-        if (Math.abs(step) < 1e-4) return prev
-        rollTrim(prev.leftClipId, prev.rightClipId, step)
-        return { ...prev, applied: wanted }
-      })
+      // rollTrim takes a *relative* step, so it must never run inside a state
+      // updater: StrictMode double-invokes those, which applied every step twice and
+      // moved the boundary at 2x the mouse (measured: a 40px = 1s drag rolled 2s).
+      const wanted = (e.clientX - rollDragSnapshot.startX) / pixelsPerSecond
+      const step = wanted - rollDragSnapshot.applied
+      if (Math.abs(step) < 1e-4) return
+      rollTrim(rollDragSnapshot.leftClipId, rollDragSnapshot.rightClipId, step)
+      setRollDrag({ ...rollDragSnapshot, applied: wanted })
     }
     function handleMouseUp(): void {
       setRollDrag(null)
@@ -478,6 +487,7 @@ export function Timeline(): React.JSX.Element {
 
   useEffect(() => {
     if (!audioDrag) return
+    const audioDragSnapshot = audioDrag
     function handleMouseMove(e: MouseEvent): void {
       setAudioDrag((prev) => {
         if (!prev) return prev
@@ -500,10 +510,12 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      setAudioDrag((prev) => {
-        if (prev) updateAudioClipStart(prev.trackId, prev.clipId, prev.liveStartTime)
-        return null
-      })
+      updateAudioClipStart(
+        audioDragSnapshot.trackId,
+        audioDragSnapshot.clipId,
+        audioDragSnapshot.liveStartTime
+      )
+      setAudioDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -515,6 +527,7 @@ export function Timeline(): React.JSX.Element {
 
   useEffect(() => {
     if (!mediaTrimDrag) return
+    const mediaTrimDragSnapshot = mediaTrimDrag
     function handleMouseMove(e: MouseEvent): void {
       setMediaTrimDrag((prev) => {
         if (!prev) return prev
@@ -562,28 +575,24 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      setMediaTrimDrag((prev) => {
-        if (prev) {
-          if (prev.kind === 'audio') {
-            updateAudioClipStartAndTrim(
-              prev.trackId,
-              prev.clipId,
-              prev.liveStartTime,
-              prev.liveInPoint,
-              prev.liveOutPoint
-            )
-          } else {
-            updateVideoOverlayClipStartAndTrim(
-              prev.trackId,
-              prev.clipId,
-              prev.liveStartTime,
-              prev.liveInPoint,
-              prev.liveOutPoint
-            )
-          }
-        }
-        return null
-      })
+      if (mediaTrimDragSnapshot.kind === 'audio') {
+        updateAudioClipStartAndTrim(
+          mediaTrimDragSnapshot.trackId,
+          mediaTrimDragSnapshot.clipId,
+          mediaTrimDragSnapshot.liveStartTime,
+          mediaTrimDragSnapshot.liveInPoint,
+          mediaTrimDragSnapshot.liveOutPoint
+        )
+      } else {
+        updateVideoOverlayClipStartAndTrim(
+          mediaTrimDragSnapshot.trackId,
+          mediaTrimDragSnapshot.clipId,
+          mediaTrimDragSnapshot.liveStartTime,
+          mediaTrimDragSnapshot.liveInPoint,
+          mediaTrimDragSnapshot.liveOutPoint
+        )
+      }
+      setMediaTrimDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -601,6 +610,7 @@ export function Timeline(): React.JSX.Element {
 
   useEffect(() => {
     if (!videoOverlayDrag) return
+    const videoOverlayDragSnapshot = videoOverlayDrag
     function handleMouseMove(e: MouseEvent): void {
       setVideoOverlayDrag((prev) => {
         if (!prev) return prev
@@ -623,10 +633,12 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      setVideoOverlayDrag((prev) => {
-        if (prev) updateVideoOverlayClipStart(prev.trackId, prev.clipId, prev.liveStartTime)
-        return null
-      })
+      updateVideoOverlayClipStart(
+        videoOverlayDragSnapshot.trackId,
+        videoOverlayDragSnapshot.clipId,
+        videoOverlayDragSnapshot.liveStartTime
+      )
+      setVideoOverlayDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -638,6 +650,7 @@ export function Timeline(): React.JSX.Element {
 
   useEffect(() => {
     if (!overlayDrag) return
+    const overlayDragSnapshot = overlayDrag
     function handleMouseMove(e: MouseEvent): void {
       setOverlayDrag((prev) => {
         if (!prev) return prev
@@ -697,15 +710,11 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      setOverlayDrag((prev) => {
-        if (prev) {
-          updateTextOverlay(prev.overlayId, {
-            startTime: prev.liveStartTime,
-            endTime: prev.liveEndTime
-          })
-        }
-        return null
+      updateTextOverlay(overlayDragSnapshot.overlayId, {
+        startTime: overlayDragSnapshot.liveStartTime,
+        endTime: overlayDragSnapshot.liveEndTime
       })
+      setOverlayDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
