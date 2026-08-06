@@ -198,6 +198,12 @@ export interface TranscriptSegment {
   words?: TranscriptWord[]
 }
 
+export interface LongFormWindow {
+  start: number
+  end: number
+  score: number
+}
+
 export interface HighlightCandidate {
   start: number
   end: number

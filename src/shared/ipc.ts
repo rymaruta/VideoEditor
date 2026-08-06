@@ -9,6 +9,7 @@ export const IPC = {
   generateWaveform: 'media:waveform',
   detectSilence: 'media:detectSilence',
   detectHighlights: 'media:detectHighlights',
+  scanLongFormWindows: 'media:scanLongFormWindows',
   analyzeBpm: 'media:analyzeBpm',
   analyzeReferenceStyle: 'media:analyzeReferenceStyle',
   transcribe: 'media:transcribe',

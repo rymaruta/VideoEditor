@@ -5,6 +5,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
 import { ensurePreviewProxy } from './previewProxyService'
+import { scanLongFormWindows } from './longFormService'
 import {
   probeMedia,
   generateThumbnailDataUrl,
@@ -279,6 +280,11 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle(IPC.probeMedia, async (_e, filePath: string) => probeMedia(filePath))
+  ipcMain.handle(
+    IPC.scanLongFormWindows,
+    async (_e, filePath: string, duration: number, maxWindows: number) =>
+      scanLongFormWindows(filePath, duration, maxWindows)
+  )
   ipcMain.handle(IPC.ensurePreviewProxy, async (event, filePath: string, assetId: string) =>
     ensurePreviewProxy(filePath, (percent) => {
       // Sent back to the window that asked, so an import in one window can't

@@ -53,7 +53,7 @@ interface AudioLevel {
   rmsDb: number
 }
 
-async function detectAudioLevels(filePath: string): Promise<AudioLevel[]> {
+export async function detectAudioLevels(filePath: string): Promise<AudioLevel[]> {
   const { stdout } = await runFfmpeg([
     '-i',
     filePath,

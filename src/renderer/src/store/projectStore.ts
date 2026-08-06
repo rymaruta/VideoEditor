@@ -204,6 +204,10 @@ interface ProjectState {
     template: EditTemplate
   ) => void
   addRoughCutClips: (picks: { assetId: string; start: number; end: number }[]) => void
+  applyShortPlan: (
+    picks: { assetId: string; start: number; end: number }[],
+    overlays: Omit<TextOverlay, 'id'>[]
+  ) => void
   applyAutoEditPattern: (pattern: AutoEditPattern) => void
 }
 
@@ -1580,6 +1584,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return {
         ...pushHistory(state),
         project: { ...state.project, clips: [...state.project.clips, ...newClips] }
+      }
+    }),
+
+  // Adding the cut and its hook caption is one user action ("apply this plan"), so it
+  // must be one undo step — otherwise undoing leaves the clips behind with the caption
+  // gone, which is a state the user never asked for.
+  applyShortPlan: (picks, overlays) =>
+    set((state) => {
+      if (picks.length === 0) return state
+      const newClips: Clip[] = picks.map((p) => ({
+        id: uuid(),
+        assetId: p.assetId,
+        inPoint: p.start,
+        outPoint: p.end,
+        speed: 1
+      }))
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          clips: [...state.project.clips, ...newClips],
+          textOverlays: [
+            ...state.project.textOverlays,
+            ...overlays.map((o) => ({ ...o, id: uuid() }))
+          ]
+        }
       }
     }),
 

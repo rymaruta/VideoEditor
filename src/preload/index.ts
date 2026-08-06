@@ -14,7 +14,8 @@ import type {
   ResolutionHeight,
   SilenceRange,
   TranscriptSegment,
-  VoicevoxSpeaker
+  VoicevoxSpeaker,
+  LongFormWindow
 } from '@shared/types'
 
 // Custom APIs for renderer
@@ -28,6 +29,12 @@ const api = {
     ipcRenderer.invoke(IPC.probeMedia, filePath),
   generateThumbnail: (filePath: string, atSeconds: number): Promise<string> =>
     ipcRenderer.invoke(IPC.generateThumbnail, filePath, atSeconds),
+  scanLongFormWindows: (
+    filePath: string,
+    duration: number,
+    maxWindows: number
+  ): Promise<LongFormWindow[]> =>
+    ipcRenderer.invoke(IPC.scanLongFormWindows, filePath, duration, maxWindows),
   ensurePreviewProxy: (filePath: string, assetId: string): Promise<string> =>
     ipcRenderer.invoke(IPC.ensurePreviewProxy, filePath, assetId),
   onPreviewProxyProgress: (

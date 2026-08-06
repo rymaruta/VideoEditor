@@ -8,6 +8,7 @@ import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
 import { RoughCutModal } from './RoughCutModal'
 import { AutoEditModal } from './AutoEditModal'
+import { LongFormShortModal } from './LongFormShortModal'
 import {
   UploadIcon,
   PlusIcon,
@@ -53,6 +54,7 @@ export function MediaBin(): React.JSX.Element {
   const [highlightAssetId, setHighlightAssetId] = useState<string | null>(null)
   const [showRoughCut, setShowRoughCut] = useState(false)
   const [showAutoEdit, setShowAutoEdit] = useState(false)
+  const [showLongForm, setShowLongForm] = useState(false)
   const [relinkingId, setRelinkingId] = useState<string | null>(null)
   const [proxyProgress, setProxyProgress] = useState<Record<string, number>>({})
   const hasVideoAssets = assets.some((a) => a.hasVideo)
@@ -217,6 +219,14 @@ export function MediaBin(): React.JSX.Element {
       </div>
       {hasVideoAssets && (
         <div className="media-bin-auto-buttons">
+          <button
+            className="small-button longform-trigger"
+            onClick={() => setShowLongForm(true)}
+            title="2時間などの長い動画から、音声の盛り上がりを手がかりに30秒前後のショートをAIが組み立てます"
+          >
+            <WandIcon width={13} height={13} />
+            長尺からショートを自動生成
+          </button>
           <button
             className="small-button autoedit-trigger"
             onClick={() => setShowAutoEdit(true)}
@@ -411,6 +421,7 @@ export function MediaBin(): React.JSX.Element {
       )}
       {showRoughCut && <RoughCutModal onClose={() => setShowRoughCut(false)} />}
       {showAutoEdit && <AutoEditModal onClose={() => setShowAutoEdit(false)} />}
+      {showLongForm && <LongFormShortModal onClose={() => setShowLongForm(false)} />}
     </div>
   )
 }
