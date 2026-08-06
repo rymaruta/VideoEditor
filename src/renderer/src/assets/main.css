@@ -385,6 +385,147 @@ h3 {
   min-width: 0;
 }
 
+.viewer-row {
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+
+/* Both viewers share the row evenly, and each is allowed to shrink — otherwise the
+   program viewer keeps its intrinsic width and pushes the source one off-screen. */
+.viewer-row > .panel {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.source-viewer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+}
+
+.source-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.source-viewer-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-1);
+  min-width: 0;
+}
+
+.source-viewer-name {
+  color: var(--text-3);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.source-viewer-frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.source-viewer-frame video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.source-viewer-times {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.source-viewer-range {
+  color: var(--accent-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-viewer-track {
+  position: relative;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--bg-elevated-2);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.source-viewer-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent-1);
+  border-right: 2px solid var(--accent-1);
+}
+
+.source-viewer-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--text-1);
+}
+
+.source-viewer-transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.source-viewer-transport .icon-button.active {
+  color: var(--accent-1);
+  border-color: var(--accent-1);
+}
+
+.source-viewer-rate {
+  font-size: 11px;
+  color: var(--accent-1);
+  font-weight: 600;
+  min-width: 28px;
+}
+
+.source-viewer-marks,
+.source-viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.source-viewer-actions .primary-button {
+  width: auto;
+  flex: 1;
+  min-width: 130px;
+}
+
+.media-item-in-source {
+  border-color: var(--accent-1);
+}
+
 .timeline-wrapper {
   display: flex;
   flex-direction: column;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MediaBin } from './components/MediaBin'
 import { PreviewPlayer } from './components/PreviewPlayer'
+import { SourceViewer } from './components/SourceViewer'
 import { Timeline } from './components/Timeline'
 import { TemplatePanel } from './components/TemplatePanel'
 import { TextOverlayPanel } from './components/TextOverlayPanel'
@@ -152,6 +153,7 @@ function App(): React.JSX.Element {
   const isDirty = useProjectStore((s) => s.isDirty)
   const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
   const restoreAutosave = useProjectStore((s) => s.restoreAutosave)
+  const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
 
   useEffect(() => {
     loadEnvApiKeys()
@@ -401,7 +403,13 @@ function App(): React.JSX.Element {
           }
         />
         <div className="center-column">
-          <PreviewPlayer />
+          <div className="viewer-row">
+            {/* Keyed by asset so switching clips remounts the viewer: transport position,
+                play state and shuttle speed all belong to the clip being auditioned and
+                must not carry over to the next one. */}
+            {sourceAssetId && <SourceViewer key={sourceAssetId} />}
+            <PreviewPlayer />
+          </div>
           <div
             className={`row-resize-handle ${resizeDrag?.kind === 'timeline' ? 'active' : ''}`}
             onMouseDown={(e) => beginResize('timeline', e)}

@@ -65,6 +65,16 @@ interface ProjectState {
   missingAssetIds: string[]
   saveError: string | null
 
+  // Source viewer (DaVinci-style two-up): the asset being auditioned and the range
+  // marked on it. Transient UI state — never written to the project file.
+  sourceAssetId: string | null
+  sourceIn: number | null
+  sourceOut: number | null
+  openInSourceViewer: (assetId: string) => void
+  closeSourceViewer: () => void
+  setSourceIn: (t: number | null) => void
+  setSourceOut: (t: number | null) => void
+
   setSaveError: (message: string | null) => void
   newProject: () => void
   loadProject: (project: Project, filePath: string) => void
@@ -96,6 +106,8 @@ interface ProjectState {
   ) => void
   addClipToTimeline: (assetId: string) => void
   addTrimmedClipToTimeline: (assetId: string, inPoint: number, outPoint: number) => void
+  insertClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
+  overwriteClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
   updateClipSpeed: (clipId: string, speed: number) => void
   updateClipTransition: (clipId: string, transition: Transition | undefined) => void
@@ -236,6 +248,75 @@ function resetHistoryCoalescing(): void {
   lastCoalesceKey = null
 }
 
+/**
+ * Splices a source range into the main video track at a timeline position.
+ *
+ * Main-track clips are stored sequentially with no absolute start times, so a position
+ * is only meaningful as an offset accumulated across the clips before it. A cut that
+ * lands mid-clip therefore has to split that clip rather than just choosing an index.
+ *
+ * With `overwrite`, the same amount of time the new clip occupies is consumed from the
+ * material that followed, so everything downstream keeps its position; otherwise the
+ * remainder is pushed later (insert). Returns null when nothing would change.
+ */
+function buildInsertedClips(
+  project: Project,
+  assetId: string,
+  inPoint: number,
+  outPoint: number,
+  atTime: number,
+  overwrite: boolean
+): Clip[] | null {
+  const asset = project.assets.find((a) => a.id === assetId)
+  if (!asset) return null
+  const from = Math.max(0, Math.min(inPoint, asset.duration))
+  const to = Math.min(asset.duration, Math.max(outPoint, from))
+  const insertedDuration = to - from
+  if (insertedDuration <= 0) return null
+
+  const clipDuration = (c: Clip): number => (c.outPoint - c.inPoint) / (c.speed || 1)
+  const newClip: Clip = { id: uuid(), assetId, inPoint: from, outPoint: to, speed: 1 }
+
+  // Split whatever sits under the insertion point into "before" and "after" halves.
+  const before: Clip[] = []
+  const after: Clip[] = []
+  let elapsed = 0
+  for (const c of project.clips) {
+    const dur = clipDuration(c)
+    if (atTime >= elapsed + dur - 1e-6) {
+      before.push(c)
+    } else if (atTime <= elapsed + 1e-6) {
+      after.push(c)
+    } else {
+      const speed = c.speed || 1
+      const splitLocal = c.inPoint + (atTime - elapsed) * speed
+      before.push({ ...c, outPoint: splitLocal })
+      after.push({ ...c, id: uuid(), inPoint: splitLocal, transitionIn: undefined })
+    }
+    elapsed += dur
+  }
+
+  if (!overwrite) return [...before, newClip, ...after]
+
+  // Consume `insertedDuration` worth of the following material, trimming the clip that
+  // the consumed range ends inside rather than dropping it whole.
+  let remaining = insertedDuration
+  const kept: Clip[] = []
+  for (const c of after) {
+    const dur = clipDuration(c)
+    if (remaining <= 1e-6) {
+      kept.push(c)
+    } else if (remaining >= dur - 1e-6) {
+      remaining -= dur
+    } else {
+      const speed = c.speed || 1
+      kept.push({ ...c, inPoint: c.inPoint + remaining * speed, transitionIn: undefined })
+      remaining = 0
+    }
+  }
+  return [...before, newClip, ...kept]
+}
+
 function pushHistory(
   state: ProjectState,
   coalesceKey?: string
@@ -268,6 +349,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   seekRequest: null,
   missingAssetIds: [],
   saveError: null,
+
+  sourceAssetId: null,
+  sourceIn: null,
+  sourceOut: null,
+  // Marks reset with the clip: they describe a range inside one asset and mean
+  // nothing once a different one is loaded.
+  openInSourceViewer: (assetId) => set({ sourceAssetId: assetId, sourceIn: null, sourceOut: null }),
+  closeSourceViewer: () => set({ sourceAssetId: null, sourceIn: null, sourceOut: null }),
+  setSourceIn: (t) =>
+    set((state) => ({
+      sourceIn: t,
+      // An in point past the out point would describe a negative range; drop the
+      // stale marker rather than silently producing an empty edit later.
+      sourceOut:
+        t !== null && state.sourceOut !== null && state.sourceOut <= t ? null : state.sourceOut
+    })),
+  setSourceOut: (t) =>
+    set((state) => ({
+      sourceOut: t,
+      sourceIn: t !== null && state.sourceIn !== null && state.sourceIn >= t ? null : state.sourceIn
+    })),
 
   setSaveError: (message) => set({ saveError: message }),
 
@@ -462,6 +564,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...pushHistory(state),
         project: { ...state.project, clips: [...state.project.clips, newClip] }
       }
+    }),
+
+  // Three-point editing, DaVinci-style: the source range says how long, the timeline
+  // playhead says where. Insert ripples everything after the playhead later; overwrite
+  // consumes the same amount of existing material instead.
+  insertClipAtTime: (assetId, inPoint, outPoint, atTime) =>
+    set((state) => {
+      const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, false)
+      if (!built) return state
+      return { ...pushHistory(state), project: { ...state.project, clips: built } }
+    }),
+
+  overwriteClipAtTime: (assetId, inPoint, outPoint, atTime) =>
+    set((state) => {
+      const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, true)
+      if (!built) return state
+      return { ...pushHistory(state), project: { ...state.project, clips: built } }
     }),
 
   updateClipTrim: (clipId, inPoint, outPoint) =>

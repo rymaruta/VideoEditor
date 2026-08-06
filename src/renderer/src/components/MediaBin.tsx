@@ -44,6 +44,8 @@ export function MediaBin(): React.JSX.Element {
   const missingAssetIds = useProjectStore((s) => s.missingAssetIds)
   const relinkAsset = useProjectStore((s) => s.relinkAsset)
   const setAssetProxyPath = useProjectStore((s) => s.setAssetProxyPath)
+  const openInSourceViewer = useProjectStore((s) => s.openInSourceViewer)
+  const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
@@ -245,7 +247,14 @@ export function MediaBin(): React.JSX.Element {
         {assets.map((asset) => {
           const isMissing = missingAssetIds.includes(asset.id)
           return (
-            <div key={asset.id} className={`media-item ${isMissing ? 'media-item-missing' : ''}`}>
+            <div
+              key={asset.id}
+              className={`media-item ${isMissing ? 'media-item-missing' : ''} ${
+                sourceAssetId === asset.id ? 'media-item-in-source' : ''
+              }`}
+              onDoubleClick={() => !isMissing && openInSourceViewer(asset.id)}
+              title="ダブルクリックでソースビューアで開く"
+            >
               <div className="media-thumb">
                 {asset.thumbnailDataUrl ? (
                   <img src={asset.thumbnailDataUrl} alt={asset.fileName} />
@@ -301,6 +310,15 @@ export function MediaBin(): React.JSX.Element {
                 )}
               </div>
               <div className="media-item-actions">
+                {!isMissing && (
+                  <button
+                    className="small-button"
+                    onClick={() => openInSourceViewer(asset.id)}
+                    title="ソースビューアで開いて、使う範囲を決めてから配置する"
+                  >
+                    ソースで開く
+                  </button>
+                )}
                 {isMissing && (
                   <button
                     className="small-button"
