@@ -243,6 +243,31 @@ function removeLinkedAudioFor(
   })
 }
 
+// Deleting a detached-audio clip (or the whole track it sits on) has to hand the
+// audio back to its source clip. `audioDetached` only means "this clip's audio is
+// playing from a separate track"; once that track is gone the flag is a dead end —
+// the clip exports in digital silence, 音声を分離 is a no-op because it refuses to
+// run on an already-detached clip, and speed changes stay blocked. The audio was
+// unrecoverable except by undo.
+// Only removal clears the flag. Severing a link while the audio clip lives on
+// (dragging it, swapping its asset, the jump-cut recut) must keep the clip muted,
+// otherwise its embedded audio plays on top of the still-present separated track.
+function reattachClipsWithoutLinkedAudio(project: Project, unlinkedClipIds: string[]): Project {
+  if (unlinkedClipIds.length === 0) return project
+  const stillLinked = new Set(
+    project.audioTracks.flatMap((t) => t.clips.map((c) => c.linkedClipId).filter(Boolean))
+  )
+  const orphaned = new Set(unlinkedClipIds.filter((id) => !stillLinked.has(id)))
+  if (orphaned.size === 0) return project
+  let changed = false
+  const clips = project.clips.map((c) => {
+    if (!orphaned.has(c.id) || !c.audioDetached) return c
+    changed = true
+    return { ...c, audioDetached: false }
+  })
+  return changed ? { ...project, clips } : project
+}
+
 // Continuous controls (typing in a caption, dragging a volume/size slider) fire an
 // action per keystroke or per pixel. Without coalescing, typing a 30-character
 // caption pushed 30 history entries and blew away the 50-entry undo history, and
@@ -507,16 +532,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         .filter((c) => c.assetId === assetId)
         .map((c) => c.id)
       const clips = state.project.clips.filter((c) => c.assetId !== assetId)
-      const audioTracks = state.project.audioTracks.map((t) => ({
-        ...t,
-        // Detached audio linked to a removed video clip goes too, even when the audio
-        // clip itself points at a different asset.
-        clips: t.clips.filter(
-          (c) =>
-            c.assetId !== assetId &&
-            !(c.linkedClipId != null && removedClipIds.includes(c.linkedClipId))
-        )
-      }))
+      const audioTracks = state.project.audioTracks
+        .map((t) => ({
+          ...t,
+          // Detached audio linked to a removed video clip goes too, even when the audio
+          // clip itself points at a different asset.
+          clips: t.clips.filter(
+            (c) =>
+              c.assetId !== assetId &&
+              !(c.linkedClipId != null && removedClipIds.includes(c.linkedClipId))
+          )
+        }))
+        // A track emptied by this deletion (typically the "◯◯の音声" track the
+        // detach created) would otherwise sit in the timeline forever, named after a
+        // file the project no longer has. A track that was already empty is left
+        // alone — the user made it deliberately and is about to fill it.
+        .filter((t, i) => t.clips.length > 0 || state.project.audioTracks[i].clips.length === 0)
       const videoOverlayTracks = state.project.videoOverlayTracks.map((t) => ({
         ...t,
         clips: t.clips.filter((c) => c.assetId !== assetId)
@@ -1102,13 +1133,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })),
 
   removeAudioTrack: (trackId) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        audioTracks: state.project.audioTracks.filter((t) => t.id !== trackId)
+    set((state) => {
+      const track = state.project.audioTracks.find((t) => t.id === trackId)
+      if (!track) return state
+      const unlinked = track.clips
+        .map((c) => c.linkedClipId)
+        .filter((id): id is string => id != null)
+      return {
+        ...pushHistory(state),
+        project: reattachClipsWithoutLinkedAudio(
+          {
+            ...state.project,
+            audioTracks: state.project.audioTracks.filter((t) => t.id !== trackId)
+          },
+          unlinked
+        )
       }
-    })),
+    }),
 
   toggleAudioTrackMute: (trackId) =>
     set((state) => ({
@@ -1293,15 +1334,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })),
 
   removeAudioClip: (trackId, clipId) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        audioTracks: state.project.audioTracks.map((t) =>
-          t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
+    set((state) => {
+      const removed = state.project.audioTracks
+        .find((t) => t.id === trackId)
+        ?.clips.find((c) => c.id === clipId)
+      if (!removed) return state
+      return {
+        ...pushHistory(state),
+        project: reattachClipsWithoutLinkedAudio(
+          {
+            ...state.project,
+            audioTracks: state.project.audioTracks.map((t) =>
+              t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
+            )
+          },
+          removed.linkedClipId ? [removed.linkedClipId] : []
         )
       }
-    })),
+    }),
 
   splitAudioClipAtTime: (trackId, clipId, absoluteTime) =>
     set((state) => {
