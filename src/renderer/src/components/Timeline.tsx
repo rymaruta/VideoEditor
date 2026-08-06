@@ -73,6 +73,15 @@ const TRANSITION_LABELS: Record<TransitionType, string> = {
   wipe: 'ワイプ'
 }
 
+export type EditTool = 'select' | 'trim' | 'razor'
+
+interface RollDragState {
+  leftClipId: string
+  rightClipId: string
+  startX: number
+  applied: number
+}
+
 interface TrimDragState {
   clipId: string
   edge: 'left' | 'right'
@@ -155,6 +164,7 @@ export function Timeline(): React.JSX.Element {
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
   const detachClipAudio = useProjectStore((s) => s.detachClipAudio)
   const updateClipTrim = useProjectStore((s) => s.updateClipTrim)
+  const rollTrim = useProjectStore((s) => s.rollTrim)
   const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
   const removeAudioTrack = useProjectStore((s) => s.removeAudioTrack)
   const toggleAudioTrackMute = useProjectStore((s) => s.toggleAudioTrackMute)
@@ -217,6 +227,8 @@ export function Timeline(): React.JSX.Element {
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null)
+  const [editTool, setEditTool] = useState<EditTool>('select')
+  const [rollDrag, setRollDrag] = useState<RollDragState | null>(null)
   const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
   const [mediaTrimDrag, setMediaTrimDrag] = useState<MediaTrimDragState | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
@@ -414,6 +426,55 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mouseup', handleMouseUp)
     }
   }, [trimDrag, pixelsPerSecond, updateClipTrim, activeSnapCandidates])
+
+  // A / T / B pick the editing tool, matching the muscle memory of every NLE. Guarded
+  // against firing while typing, and against modifier combos that belong to other
+  // shortcuts (Ctrl+A etc.).
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      const target = e.target as HTMLElement | null
+      const typing =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      if (typing || e.ctrlKey || e.metaKey || e.altKey) return
+      const key = e.key.toLowerCase()
+      if (key === 'a') setEditTool('select')
+      else if (key === 't') setEditTool('trim')
+      else if (key === 'b') setEditTool('razor')
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Roll drags apply incrementally: rollTrim clamps against both clips' limits, so the
+  // only way to know how far the boundary actually moved is to feed it the delta since
+  // the last mousemove and let it clamp. The history coalesce key keeps a whole drag as
+  // one undo step.
+  useEffect(() => {
+    if (!rollDrag) return
+    function handleMouseMove(e: MouseEvent): void {
+      setRollDrag((prev) => {
+        if (!prev) return prev
+        const wanted = (e.clientX - prev.startX) / pixelsPerSecond
+        const step = wanted - prev.applied
+        if (Math.abs(step) < 1e-4) return prev
+        rollTrim(prev.leftClipId, prev.rightClipId, step)
+        return { ...prev, applied: wanted }
+      })
+    }
+    function handleMouseUp(): void {
+      setRollDrag(null)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [rollDrag, pixelsPerSecond, rollTrim])
 
   useEffect(() => {
     if (!audioDrag) return
@@ -834,6 +895,24 @@ export function Timeline(): React.JSX.Element {
           >
             <MagnetIcon width={13} height={13} />
           </button>
+          <div className="timeline-tools" role="group" aria-label="編集ツール">
+            {(
+              [
+                ['select', 'A', '選択', 'クリップを選んで並べ替える'],
+                ['trim', 'T', 'トリム', 'クリップの端と、隣との境界(ロールトリム)を調整する'],
+                ['razor', 'B', 'カミソリ', 'クリックした位置でクリップを分割する']
+              ] as const
+            ).map(([tool, key, label, hint]) => (
+              <button
+                key={tool}
+                className={`small-button ${editTool === tool ? 'active' : ''}`}
+                title={`${label} (${key}) — ${hint}`}
+                onClick={() => setEditTool(tool)}
+              >
+                {key}
+              </button>
+            ))}
+          </div>
         </div>
         {project.beatGrid && (
           <div className="beat-grid-info" title={`解析元: ${project.beatGrid.sourceLabel}`}>
@@ -1104,6 +1183,12 @@ export function Timeline(): React.JSX.Element {
                 1フレーム移動
                 <kbd>←/→</kbd>
               </span>
+              <span className="shortcut-hint">
+                ツール切替
+                <kbd>A</kbd>
+                <kbd>T</kbd>
+                <kbd>B</kbd>
+              </span>
             </div>
             <label className="inline-select keymap-select" title="キーボードショートカットの配置">
               <select
@@ -1274,11 +1359,19 @@ export function Timeline(): React.JSX.Element {
                     dragOverIndex === i && draggedClipId && draggedClipId !== tc.clip.id
                       ? 'drag-over'
                       : ''
-                  } ${trimDrag?.clipId === tc.clip.id ? 'trimming' : ''}`}
+                  } ${trimDrag?.clipId === tc.clip.id ? 'trimming' : ''} tool-${editTool}`}
                   style={{ width: clipWidth }}
-                  draggable
+                  draggable={editTool === 'select'}
                   onClick={(e) => {
                     e.stopPropagation()
+                    // Razor turns a plain click into a cut at the clicked position,
+                    // which is what the tool is for — selection is unchanged.
+                    if (editTool === 'razor') {
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const localSeconds = (e.clientX - rect.left) / pixelsPerSecond
+                      splitClipAtTime(tc.clip.id, tc.start + localSeconds)
+                      return
+                    }
                     selectOnly('clip')
                     if (e.shiftKey && lastClickedClipIndexRef.current !== null) {
                       const lo = Math.min(lastClickedClipIndexRef.current, i)
@@ -1320,6 +1413,24 @@ export function Timeline(): React.JSX.Element {
                     setDragOverIndex(null)
                   }}
                 >
+                  {editTool === 'trim' && i > 0 && (
+                    <div
+                      className="timeline-roll-handle"
+                      draggable={false}
+                      title="ロールトリム: 隣との境界だけを動かす(全体の長さは変わりません)"
+                      onDragStart={(e) => e.preventDefault()}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setRollDrag({
+                          leftClipId: timedClips[i - 1].clip.id,
+                          rightClipId: tc.clip.id,
+                          startX: e.clientX,
+                          applied: 0
+                        })
+                      }}
+                    />
+                  )}
                   <div
                     className="timeline-clip-handle timeline-clip-handle-left"
                     draggable={false}

@@ -17,6 +17,9 @@ import type {
 } from '@shared/types'
 
 const MAX_HISTORY = 50
+// Shortest a clip may become in source seconds; below this it would vanish visually
+// while still occupying an entry in the timeline.
+const MIN_CLIP_SOURCE_DURATION = 0.1
 
 function createBlankProject(): Project {
   return {
@@ -109,6 +112,7 @@ interface ProjectState {
   insertClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
   overwriteClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
+  rollTrim: (leftClipId: string, rightClipId: string, deltaSeconds: number) => void
   updateClipSpeed: (clipId: string, speed: number) => void
   updateClipTransition: (clipId: string, transition: Transition | undefined) => void
   detachClipAudio: (clipId: string) => void
@@ -595,6 +599,47 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, inPoint, outPoint } : c))
       }
     })),
+
+  // Roll trim: moves the boundary between two neighbours without changing the total
+  // length. The left clip gives up (or gains) exactly what the right clip gains (or
+  // gives up), so everything downstream keeps its timeline position — the difference
+  // from an ordinary edge drag, which ripples everything after it.
+  rollTrim: (leftClipId, rightClipId, deltaSeconds) =>
+    set((state) => {
+      const left = state.project.clips.find((c) => c.id === leftClipId)
+      const right = state.project.clips.find((c) => c.id === rightClipId)
+      if (!left || !right) return state
+      const leftAsset = state.project.assets.find((a) => a.id === left.assetId)
+      const rightAsset = state.project.assets.find((a) => a.id === right.assetId)
+      if (!leftAsset || !rightAsset) return state
+      const leftSpeed = left.speed || 1
+      const rightSpeed = right.speed || 1
+
+      // Clamp against all four limits at once and in timeline seconds, so a drag that
+      // would overrun one side stops at that side's limit instead of being rejected.
+      const maxForward = Math.min(
+        (leftAsset.duration - left.outPoint) / leftSpeed,
+        (right.outPoint - right.inPoint - MIN_CLIP_SOURCE_DURATION) / rightSpeed
+      )
+      const maxBackward = Math.min(
+        (left.outPoint - left.inPoint - MIN_CLIP_SOURCE_DURATION) / leftSpeed,
+        right.inPoint / rightSpeed
+      )
+      const delta = Math.max(-maxBackward, Math.min(maxForward, deltaSeconds))
+      if (Math.abs(delta) < 1e-6) return state
+
+      return {
+        ...pushHistory(state, `roll:${leftClipId}:${rightClipId}`),
+        project: {
+          ...state.project,
+          clips: state.project.clips.map((c) => {
+            if (c.id === leftClipId) return { ...c, outPoint: c.outPoint + delta * leftSpeed }
+            if (c.id === rightClipId) return { ...c, inPoint: c.inPoint + delta * rightSpeed }
+            return c
+          })
+        }
+      }
+    }),
 
   updateClipSpeed: (clipId, speed) =>
     set((state) => ({
