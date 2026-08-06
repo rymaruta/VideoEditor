@@ -656,7 +656,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateClipCrop: (clipId, fillCrop, cropCenter) =>
     set((state) => ({
-      ...pushHistory(state),
+      // Dragging the crop-centre slider fires continuously; without coalescing one
+      // adjustment would bury the rest of the undo history.
+      ...pushHistory(state, `clipCrop:${clipId}`),
       project: {
         ...state.project,
         clips: state.project.clips.map((c) =>

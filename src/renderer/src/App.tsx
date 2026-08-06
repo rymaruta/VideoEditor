@@ -13,6 +13,7 @@ import { AudioLibraryPanel } from './components/AudioLibraryPanel'
 import { GameTrendPanel } from './components/GameTrendPanel'
 import { MetadataPanel } from './components/MetadataPanel'
 import { PresetPanel } from './components/PresetPanel'
+import { Inspector } from './components/Inspector'
 import { ProjectMenu } from './components/ProjectMenu'
 import { useProjectStore } from './store/projectStore'
 import { useSettingsStore } from './store/settingsStore'
@@ -36,6 +37,7 @@ import {
 import type { SVGProps } from 'react'
 
 type RightTab =
+  | 'inspector'
   | 'template'
   | 'text'
   | 'narration'
@@ -55,6 +57,12 @@ interface TabDef {
 }
 
 const EDIT_TABS: TabDef[] = [
+  {
+    id: 'inspector',
+    label: 'インスペクタ',
+    icon: TargetIcon,
+    description: '選択したクリップの尺・速度・フレーミング・繋ぎ・音声をまとめて編集'
+  },
   {
     id: 'template',
     label: 'テンプレート',
@@ -466,6 +474,9 @@ function App(): React.JSX.Element {
               one tab keeps running and its result is still there when the user comes back,
               instead of being silently discarded by switching tabs to do something else. */}
           <div className="tab-content">
+            <div className={`tab-pane ${tab === 'inspector' ? 'active' : ''}`}>
+              <Inspector />
+            </div>
             <div className={`tab-pane ${tab === 'template' ? 'active' : ''}`}>
               <TemplatePanel />
             </div>
