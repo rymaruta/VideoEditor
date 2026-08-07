@@ -25,9 +25,16 @@ function qualityLabel(q: QualityPreset): string {
   }
 }
 
+// Every dimension the job list shows the user has to appear in the file name, or two
+// queued jobs land on the same path and the later encode silently overwrites the
+// earlier one — the UI reports both as 完了 while only one file exists. Quality was
+// missing here, so 1080p/高画質 and 1080p/軽量 collided.
+// The project name comes from the .veproj file, so a path separator in it would send
+// the output into a directory that may not exist and fail the whole batch.
 function jobFileName(projectName: string, job: BatchJob): string {
   const aspect = job.aspectRatio === '9:16' ? '9x16' : '16x9'
-  return `${projectName}_${aspect}_${job.resolutionHeight}p.mp4`
+  const safeName = projectName.replace(/[/\\:*?"<>|]/g, '_').trim() || '無題のプロジェクト'
+  return `${safeName}_${aspect}_${job.resolutionHeight}p_${qualityLabel(job.quality)}.mp4`
 }
 
 function usedMissingAssetCount(
@@ -113,7 +120,21 @@ export function ExportPanel(): React.JSX.Element {
     await window.api.cancelExport()
   }
 
+  function hasBatchJob(
+    aspectRatio: AspectRatio,
+    height: ResolutionHeight,
+    q: QualityPreset
+  ): boolean {
+    return batchJobs.some(
+      (j) => j.aspectRatio === aspectRatio && j.resolutionHeight === height && j.quality === q
+    )
+  }
+
+  // The same combination twice produces the same file name, so the second encode just
+  // overwrites the first — wasted minutes and a job list that promises more files than
+  // the user gets. The quick-add buttons show what is already queued instead.
   function addBatchJob(aspectRatio: AspectRatio, height: ResolutionHeight, q: QualityPreset): void {
+    if (hasBatchJob(aspectRatio, height, q)) return
     setBatchJobs((prev) => [
       ...prev,
       { id: uuid(), aspectRatio, resolutionHeight: height, quality: q }
@@ -293,23 +314,29 @@ export function ExportPanel(): React.JSX.Element {
           <button
             className="small-button"
             onClick={() => addBatchJob('9:16', 1080, 'standard')}
-            disabled={batchRunning}
+            disabled={batchRunning || hasBatchJob('9:16', 1080, 'standard')}
+            title={hasBatchJob('9:16', 1080, 'standard') ? 'すでに追加済みです' : undefined}
           >
             9:16 / 1080p
+            {hasBatchJob('9:16', 1080, 'standard') && ' ✓'}
           </button>
           <button
             className="small-button"
             onClick={() => addBatchJob('16:9', 1080, 'standard')}
-            disabled={batchRunning}
+            disabled={batchRunning || hasBatchJob('16:9', 1080, 'standard')}
+            title={hasBatchJob('16:9', 1080, 'standard') ? 'すでに追加済みです' : undefined}
           >
             16:9 / 1080p
+            {hasBatchJob('16:9', 1080, 'standard') && ' ✓'}
           </button>
           <button
             className="small-button"
             onClick={() => addBatchJob('9:16', 720, 'small')}
-            disabled={batchRunning}
+            disabled={batchRunning || hasBatchJob('9:16', 720, 'small')}
+            title={hasBatchJob('9:16', 720, 'small') ? 'すでに追加済みです' : undefined}
           >
             9:16 / 720p(軽量)
+            {hasBatchJob('9:16', 720, 'small') && ' ✓'}
           </button>
         </div>
         {batchJobs.length > 0 && (
