@@ -1,7 +1,7 @@
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type {
@@ -63,7 +63,42 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
   })
 }
 
-export function generateThumbnailDataUrl(filePath: string, atSeconds: number): Promise<string> {
+// Seeking at or past the end of a file makes ffmpeg emit no frame at all, and the
+// caller then hit a raw `ENOENT ... /tmp/ve-thumb-xxx/thumb.jpg`. A time *inside* the
+// media failed too: 19.999s of a 20s clip lands after the last frame's timestamp.
+// Clamping to a point that always has a frame means "the end of this clip" returns its
+// last frame instead of an error. autoFinish.ts previously worked around this locally
+// with `total - 0.05` and a silent catch; the other five call sites had no guard, and
+// the thumbnail panel aborted its whole candidate run on a single failed frame.
+const SEEK_END_MARGIN = 0.1
+
+function clampSeekSeconds(filePath: string, atSeconds: number): Promise<number> {
+  return new Promise((resolve) => {
+    if (!Number.isFinite(atSeconds) || atSeconds <= 0) return resolve(0)
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      const duration = data?.format?.duration
+      // Probe failure is not ours to report here — run with the original time so the
+      // real ffmpeg error (missing file, unreadable codec) reaches the caller intact.
+      if (err || typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
+        return resolve(atSeconds)
+      }
+      resolve(Math.min(atSeconds, Math.max(0, duration - SEEK_END_MARGIN)))
+    })
+  })
+}
+
+function readFrameFile(outFile: string): string {
+  if (!existsSync(outFile)) {
+    throw new Error('指定した位置のフレームを取得できませんでした')
+  }
+  return `data:image/jpeg;base64,${readFileSync(outFile).toString('base64')}`
+}
+
+export async function generateThumbnailDataUrl(
+  filePath: string,
+  atSeconds: number
+): Promise<string> {
+  const seekSeconds = await clampSeekSeconds(filePath, atSeconds)
   const dir = mkdtempSync(join(tmpdir(), 've-thumb-'))
   const outFile = join(dir, 'thumb.jpg')
   const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
@@ -75,8 +110,7 @@ export function generateThumbnailDataUrl(filePath: string, atSeconds: number): P
       })
       .on('end', () => {
         try {
-          const buf = readFileSync(outFile)
-          resolve(`data:image/jpeg;base64,${buf.toString('base64')}`)
+          resolve(readFrameFile(outFile))
         } catch (e) {
           reject(e)
         } finally {
@@ -84,7 +118,7 @@ export function generateThumbnailDataUrl(filePath: string, atSeconds: number): P
         }
       })
       .screenshots({
-        timestamps: [atSeconds],
+        timestamps: [seekSeconds],
         filename: 'thumb.jpg',
         folder: dir,
         size: '320x?'
@@ -92,12 +126,13 @@ export function generateThumbnailDataUrl(filePath: string, atSeconds: number): P
   })
 }
 
-export function generateFrameDataUrl(
+export async function generateFrameDataUrl(
   filePath: string,
   atSeconds: number,
   width: number,
   height: number
 ): Promise<string> {
+  const seekSeconds = await clampSeekSeconds(filePath, atSeconds)
   const dir = mkdtempSync(join(tmpdir(), 've-frame-'))
   const outFile = join(dir, 'frame.jpg')
   const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
@@ -105,7 +140,7 @@ export function generateFrameDataUrl(
   const h = Math.round(height)
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
-      .inputOptions([`-ss ${atSeconds}`])
+      .inputOptions([`-ss ${seekSeconds}`])
       .complexFilter([
         `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[v]`
       ])
@@ -117,8 +152,7 @@ export function generateFrameDataUrl(
       })
       .on('end', () => {
         try {
-          const buf = readFileSync(outFile)
-          resolve(`data:image/jpeg;base64,${buf.toString('base64')}`)
+          resolve(readFrameFile(outFile))
         } catch (e) {
           reject(e)
         } finally {
