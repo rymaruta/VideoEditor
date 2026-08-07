@@ -36,8 +36,18 @@ function toAssAlpha(opacity: number): string {
   return `&H${alpha.toString(16).padStart(2, '0').toUpperCase()}&`
 }
 
+// ASS has no escape for a literal backslash — libass reads \N, \n and \h as control
+// sequences — so a caption typed as "C:\Nintendo" rendered as "C:" + a line break +
+// "intendo": the N was swallowed and an unwanted line appeared. A zero-width space
+// after the backslash breaks the sequence without changing what the viewer sees.
+// This MUST run before the brace/newline escapes, otherwise it would mangle the
+// backslashes those escapes introduce.
+function escapeAssBackslash(text: string): string {
+  return text.replace(/\\/g, '\\\u200B')
+}
+
 function escapeAssText(text: string): string {
-  return text.replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/\n/g, '\\N')
+  return escapeAssBackslash(text).replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/\n/g, '\\N')
 }
 
 function buildTypewriterText(text: string, charDelayMs: number, revealMs: number): string {
@@ -48,7 +58,10 @@ function buildTypewriterText(text: string, charDelayMs: number, revealMs: number
       .map((ch) => {
         const start = index * charDelayMs
         index += 1
-        const escaped = ch === '{' ? '\\{' : ch === '}' ? '\\}' : ch
+        // A raw backslash here is worse than in plain text: the next thing emitted
+        // is an override block, so "\" + "{\alpha..." would escape that brace and
+        // dump the tag on screen as literal text.
+        const escaped = ch === '{' ? '\\{' : ch === '}' ? '\\}' : escapeAssBackslash(ch)
         return `{\\alpha&HFF&\\t(${start},${start + revealMs},\\alpha&H00&)}${escaped}`
       })
       .join('')
