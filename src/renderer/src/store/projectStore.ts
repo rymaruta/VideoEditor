@@ -410,29 +410,60 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setMissingAssetIds: (ids) => set({ missingAssetIds: ids }),
 
   relinkAsset: (assetId, filePath, fileName, probe, thumbnailDataUrl) =>
-    set((state) => ({
-      project: {
-        ...state.project,
-        assets: state.project.assets.map((a) =>
-          a.id === assetId
-            ? {
-                ...a,
-                filePath,
-                fileName,
-                duration: probe.duration,
-                width: probe.width,
-                height: probe.height,
-                fps: probe.fps,
-                hasAudio: probe.hasAudio,
-                hasVideo: probe.hasVideo,
-                thumbnailDataUrl
-              }
-            : a
-        )
-      },
-      isDirty: true,
-      missingAssetIds: state.missingAssetIds.filter((id) => id !== assetId)
-    })),
+    set((state) => {
+      // Trims are offsets into the *old* file. Relinking to a shorter one left them
+      // pointing past the end: a 0–20s clip on a 15s replacement still read 20s on the
+      // timeline while ffmpeg only produced 15s, so every telop, BGM clip and PiP after
+      // it burned in 5s out of place. Clamp everything that indexes into this asset.
+      const clampRange = <T extends { inPoint: number; outPoint: number }>(clip: T): T => {
+        if (clip.outPoint <= probe.duration) return clip
+        const outPoint = Math.max(0, probe.duration)
+        const inPoint = Math.min(clip.inPoint, Math.max(0, outPoint - MIN_CLIP_SOURCE_DURATION))
+        return inPoint === clip.inPoint && outPoint === clip.outPoint
+          ? clip
+          : { ...clip, inPoint, outPoint }
+      }
+      const forAsset = <T extends { assetId: string; inPoint: number; outPoint: number }>(
+        clip: T
+      ): T => (clip.assetId === assetId ? clampRange(clip) : clip)
+
+      return {
+        project: {
+          ...state.project,
+          assets: state.project.assets.map((a) =>
+            a.id === assetId
+              ? {
+                  ...a,
+                  filePath,
+                  fileName,
+                  duration: probe.duration,
+                  width: probe.width,
+                  height: probe.height,
+                  fps: probe.fps,
+                  hasAudio: probe.hasAudio,
+                  hasVideo: probe.hasVideo,
+                  thumbnailDataUrl,
+                  // The proxy was transcoded from the file we just replaced. Keeping it
+                  // made the preview play the OLD footage while the export used the new
+                  // file — the one place the two must never disagree.
+                  proxyPath: undefined
+                }
+              : a
+          ),
+          clips: state.project.clips.map(forAsset),
+          audioTracks: state.project.audioTracks.map((t) => ({
+            ...t,
+            clips: t.clips.map(forAsset)
+          })),
+          videoOverlayTracks: state.project.videoOverlayTracks.map((t) => ({
+            ...t,
+            clips: t.clips.map(forAsset)
+          }))
+        },
+        isDirty: true,
+        missingAssetIds: state.missingAssetIds.filter((id) => id !== assetId)
+      }
+    }),
 
   newProject: () => {
     resetHistoryCoalescing()
