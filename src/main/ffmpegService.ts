@@ -264,6 +264,29 @@ let currentExportCommand: ffmpeg.FfmpegCommand | null = null
 let exportInProgress = false
 let exportCancelRequested = false
 
+// ffmpeg's atempo filter only accepts a rate between 0.5 and 2.0, so speeds outside
+// that range have to be reached by chaining several instances. Clamping to the range
+// (the previous behaviour) silently desynced every clip using the UI's 0.25x / 3x /
+// 4x buttons: a 20s clip at 4x exported 5s of video against 10s of audio, and at
+// 0.25x it was 80s of video against 40s of audio.
+export function atempoChain(speed: number): string {
+  if (!Number.isFinite(speed) || speed <= 0) return 'atempo=1'
+  const steps: number[] = []
+  let remaining = speed
+  while (remaining > 2) {
+    steps.push(2)
+    remaining /= 2
+  }
+  while (remaining < 0.5) {
+    steps.push(0.5)
+    remaining *= 2
+  }
+  steps.push(remaining)
+  // Trailing float noise (atempo=1.0000000000000002) makes ffmpeg's filter parser
+  // fussy and the graph unreadable in logs.
+  return steps.map((s) => `atempo=${Number(s.toFixed(6))}`).join(',')
+}
+
 export function cancelExport(): void {
   if (!exportInProgress) return
   // Also covers the window before .run() assigns currentExportCommand: the flag
@@ -341,7 +364,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         )
         if (asset.hasAudio && !clip.audioDetached) {
           filterParts.push(
-            `[${myIndex}:a]atempo=${Math.min(2, Math.max(0.5, speed))},aresample=async=1,asetpts=PTS-STARTPTS[a${i}]`
+            `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS[a${i}]`
           )
         } else {
           filterParts.push(
