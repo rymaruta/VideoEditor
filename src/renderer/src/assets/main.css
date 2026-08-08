@@ -3371,6 +3371,11 @@ h3 {
   padding: 22px;
   width: 460px;
   max-width: 90vw;
+  /* 中身が増えて画面より高くなると、背景が固定表示のため下端の .modal-actions が
+     画面外へ出て押せなくなる(スクロールして追いかけることもできない)。はみ出す分は
+     モーダル内でスクロールさせる。画面に収まっているモーダルには影響しない。 */
+  max-height: 88vh;
+  overflow-y: auto;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 

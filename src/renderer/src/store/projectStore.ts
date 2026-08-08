@@ -210,7 +210,7 @@ interface ProjectState {
   ) => void
   addRoughCutClips: (picks: { assetId: string; start: number; end: number }[]) => void
   applyShortPlan: (
-    picks: { assetId: string; start: number; end: number }[],
+    picks: { assetId: string; start: number; end: number; transitionIn?: Transition }[],
     overlays: Omit<TextOverlay, 'id'>[]
   ) => void
   applyAutoEditPattern: (pattern: AutoEditPattern) => void
@@ -1796,12 +1796,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   applyShortPlan: (picks, overlays) =>
     set((state) => {
       if (picks.length === 0) return state
-      const newClips: Clip[] = picks.map((p) => ({
+      const newClips: Clip[] = picks.map((p, i) => ({
         id: uuid(),
         assetId: p.assetId,
         inPoint: p.start,
         outPoint: p.end,
-        speed: 1
+        speed: 1,
+        // The first appended clip joins whatever was already on the timeline; putting a
+        // transition there would change material the user did not ask us to touch.
+        transitionIn: i === 0 ? undefined : p.transitionIn
       }))
       return {
         ...pushHistory(state),
