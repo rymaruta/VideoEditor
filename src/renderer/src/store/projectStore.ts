@@ -1675,14 +1675,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       if (template.jumpCutSeconds && duration > 0) {
         const newClips: Clip[] = []
+        const segmentsByClipId = new Map<string, Clip[]>()
         for (const c of project.clips) {
+          const segments: Clip[] = []
           let localStart = c.inPoint
           while (localStart < c.outPoint) {
             const localEnd = Math.min(localStart + template.jumpCutSeconds, c.outPoint)
             // Spread the source clip: rebuilding field by field dropped the crop
             // framing and, worse, the audioDetached flag — the recut clips then
             // played their embedded audio again on top of the separated track.
-            newClips.push({
+            segments.push({
               ...c,
               id: uuid(),
               inPoint: localStart,
@@ -1692,8 +1694,35 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             })
             localStart = localEnd
           }
+          segmentsByClipId.set(c.id, segments)
+          newClips.push(...segments)
         }
-        project = { ...project, clips: newClips }
+        // The recut clips get fresh ids, so detached audio linked to the originals was
+        // left pointing at clips that no longer exist. The link mirror then dropped the
+        // links and the audio silently stopped following its clip: a later trim moved
+        // the video but not the audio, desyncing everything after it with no warning.
+        // Rebuild one linked audio clip per segment, the same way replaceClipRange does.
+        const audioTracks = project.audioTracks.map((t) => {
+          if (!t.clips.some((c) => c.linkedClipId && segmentsByClipId.has(c.linkedClipId))) {
+            return t
+          }
+          return {
+            ...t,
+            clips: t.clips.flatMap((c) => {
+              const segments = c.linkedClipId ? segmentsByClipId.get(c.linkedClipId) : undefined
+              if (!segments) return [c]
+              // Positions and trims are filled in by the link mirror right after.
+              return segments.map((seg) => ({
+                ...c,
+                id: uuid(),
+                inPoint: seg.inPoint,
+                outPoint: seg.outPoint,
+                linkedClipId: seg.id
+              }))
+            })
+          }
+        })
+        project = { ...project, clips: newClips, audioTracks }
       }
 
       const total = totalDuration(project)
