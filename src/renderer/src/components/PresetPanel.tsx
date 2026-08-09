@@ -74,7 +74,8 @@ export function PresetPanel(): React.JSX.Element {
           hasAudio: true,
           hasVideo: false
         },
-        { trackName: 'SE' }
+        // テロップのプリセットと同じく再生位置へ置く。そこが埋まっていれば直後へずれる。
+        { trackName: 'SE', startTime: playheadTime }
       )
     } catch (e) {
       setError(formatIpcError(e))
@@ -158,7 +159,7 @@ export function PresetPanel(): React.JSX.Element {
             <div className="preset-item-actions">
               <button
                 className="icon-button"
-                title="音声トラック「SE」に追加"
+                title="現在の再生位置に効果音を追加(音声トラック「SE」。その位置が埋まっていれば重ならない直後へずらします)"
                 disabled={busyId === preset.id}
                 onClick={() => handleAddSe(preset)}
               >

@@ -31,3 +31,31 @@ export function findTimedClipAt(timedClips: TimedClip[], time: number): TimedCli
 export function totalTimelineDuration(timedClips: TimedClip[]): number {
   return timedClips.length === 0 ? 0 : timedClips[timedClips.length - 1].end
 }
+
+/**
+ * 音声トラックに `duration` 秒のクリップを `desiredStart` から置きたいとき、既存クリップと
+ * 重ならない最初の位置を返す。
+ *
+ * 重ねて置かないのは、音声クリップが `startTime` で絶対配置されるため。同じ時刻に同じ尺の
+ * クリップを重ねると後から置いた方が前を完全に覆い、**覆われた方は画面から見えず選択も
+ * 削除もできないのに音だけ二重に鳴る**。ワンクリックで足せるUIでは事故になる。
+ * 重ねたい場合は、置いたあとに手でドラッグして動かせる。
+ */
+export function findFreeAudioStart(
+  existing: { startTime: number; inPoint: number; outPoint: number }[],
+  desiredStart: number,
+  duration: number
+): number {
+  let start = Number.isFinite(desiredStart) ? Math.max(0, desiredStart) : 0
+  if (!Number.isFinite(duration) || duration <= 0) return start
+  const occupied = existing
+    .map((c) => ({ start: c.startTime, end: c.startTime + (c.outPoint - c.inPoint) }))
+    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start)
+    .sort((a, b) => a.start - b.start)
+  // 前から順に見て、ぶつかるたびにその相手の直後へ逃がす。開始順に並べてあるので、
+  // 一度で通り抜けたところが最初の空き。
+  for (const range of occupied) {
+    if (range.start < start + duration && range.end > start) start = range.end
+  }
+  return start
+}

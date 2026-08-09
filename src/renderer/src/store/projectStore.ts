@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
-import { buildTimedClips } from '../lib/timelineMath'
+import { buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
 import type {
   AspectRatio,
   AudioTrack,
@@ -106,7 +106,8 @@ interface ProjectState {
   removeAsset: (assetId: string) => void
   addAudioClipWithAsset: (
     asset: MediaAsset,
-    target: { trackId?: string; trackName: string }
+    /** `startTime` を渡すとその位置(空いていなければ直後)へ、省略するとトラック末尾へ置く */
+    target: { trackId?: string; trackName: string; startTime?: number }
   ) => void
   addClipToTimeline: (assetId: string) => void
   addTrimmedClipToTimeline: (assetId: string, inPoint: number, outPoint: number) => void
@@ -621,7 +622,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const clip: AudioTrackClip = {
         id: uuid(),
         assetId: effectiveAsset.id,
-        startTime: existing ? audioTrackEnd(existing) : 0,
+        startTime:
+          target.startTime === undefined
+            ? existing
+              ? audioTrackEnd(existing)
+              : 0
+            : findFreeAudioStart(existing?.clips ?? [], target.startTime, effectiveAsset.duration),
         inPoint: 0,
         outPoint: effectiveAsset.duration
       }
