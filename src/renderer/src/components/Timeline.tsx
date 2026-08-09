@@ -163,6 +163,7 @@ export function Timeline(): React.JSX.Element {
   const updateClipSpeed = useProjectStore((s) => s.updateClipSpeed)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
   const detachClipAudio = useProjectStore((s) => s.detachClipAudio)
+  const reattachClipAudio = useProjectStore((s) => s.reattachClipAudio)
   const updateClipTrim = useProjectStore((s) => s.updateClipTrim)
   const rollTrim = useProjectStore((s) => s.rollTrim)
   const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
@@ -1061,6 +1062,16 @@ export function Timeline(): React.JSX.Element {
               >
                 <MusicIcon width={13} height={13} />
                 音声を分離
+              </button>
+            )}
+            {selectedClip.audioDetached && (
+              <button
+                className="small-button"
+                title="分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください"
+                onClick={() => reattachClipAudio(selectedClip.id)}
+              >
+                <MusicIcon width={13} height={13} />
+                音声を戻す
               </button>
             )}
             <label

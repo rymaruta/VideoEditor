@@ -33,6 +33,7 @@ export function Inspector(): React.JSX.Element {
   const updateClipCrop = useProjectStore((s) => s.updateClipCrop)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
   const detachClipAudio = useProjectStore((s) => s.detachClipAudio)
+  const reattachClipAudio = useProjectStore((s) => s.reattachClipAudio)
   const seekTo = useProjectStore((s) => s.seekTo)
 
   const [detecting, setDetecting] = useState(false)
@@ -347,6 +348,16 @@ export function Inspector(): React.JSX.Element {
           <p className="hint-text">
             音声トラックに分離済みです。音量やタイミングは音声トラック側で調整します。
           </p>
+        ) : null}
+        {clip.audioDetached ? (
+          <button
+            className="small-button"
+            title="分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください"
+            onClick={() => reattachClipAudio(clip.id)}
+          >
+            <MusicIcon width={12} height={12} />
+            音声を戻す
+          </button>
         ) : (
           <>
             <button

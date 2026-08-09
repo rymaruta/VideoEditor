@@ -118,6 +118,7 @@ interface ProjectState {
   updateClipSpeed: (clipId: string, speed: number) => void
   updateClipTransition: (clipId: string, transition: Transition | undefined) => void
   detachClipAudio: (clipId: string) => void
+  reattachClipAudio: (clipId: string) => void
   updateClipCrop: (clipId: string, fillCrop: boolean, cropCenter?: { x: number; y: number }) => void
   replaceClipRange: (clipId: string, newClips: Clip[]) => void
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
@@ -815,6 +816,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             c.id === clipId ? { ...c, audioDetached: true } : c
           ),
           audioTracks: [...state.project.audioTracks, newTrack]
+        }
+      }
+    }),
+
+  // The counterpart to 音声を分離. `audioDetached` mutes the clip on export, and
+  // detachClipAudio refuses to run on an already-detached clip, so without a way back
+  // the flag is a one-way door. Removal of a *linked* audio clip clears it
+  // automatically, but the link can be severed first — splitting the separated audio,
+  // dragging it, or swapping its asset all unlink it — and deleting it afterwards then
+  // left the clip permanently silent (measured: -91.0 dB) with no way to recover.
+  reattachClipAudio: (clipId) =>
+    set((state) => {
+      const clip = state.project.clips.find((c) => c.id === clipId)
+      if (!clip || !clip.audioDetached) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          clips: state.project.clips.map((c) =>
+            c.id === clipId ? { ...c, audioDetached: false } : c
+          ),
+          // Audio still linked to this clip belongs to the separation we are undoing,
+          // so it goes with it. Anything the user has since unlinked and edited is
+          // left alone — deleting their work would be worse than a doubled track they
+          // can see and remove.
+          audioTracks: state.project.audioTracks
+            .map((t) => {
+              const clips = t.clips.filter((c) => c.linkedClipId !== clipId)
+              return clips.length === t.clips.length ? t : { ...t, clips }
+            })
+            // The "◯◯の音声" track the separation created has no reason to stay behind
+            // once it is empty. A track that was already empty is the user's, so it stays.
+            .filter((t, i) => t.clips.length > 0 || state.project.audioTracks[i].clips.length === 0)
         }
       }
     }),
