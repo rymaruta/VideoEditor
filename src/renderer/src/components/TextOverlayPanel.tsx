@@ -4,6 +4,7 @@ import { getTotalDuration } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
 import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } from '@shared/types'
 import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
+import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
 import { PlusIcon, TrashIcon, TypeIcon, CopyIcon, StarIcon } from './icons'
 
 function defaultPositionFraction(position: TextPosition): { x: number; y: number } {
@@ -34,9 +35,18 @@ export function TextOverlayPanel(): React.JSX.Element {
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
   const shiftAllTextOverlays = useProjectStore((s) => s.shiftAllTextOverlays)
+  const setTextOverlayLink = useProjectStore((s) => s.setTextOverlayLink)
   const addCaptionPreset = usePresetStore((s) => s.addCaptionPreset)
 
   const total = getTotalDuration(project)
+  const timedClips = buildTimedClips(project)
+
+  /** そのテロップが乗っているクリップ(何番目か)。どのクリップにも重ならなければ null */
+  function clipUnder(o: TextOverlay): { id: string; index: number } | null {
+    const tc = findTimedClipAt(timedClips, o.startTime)
+    if (!tc || o.startTime < tc.start || o.startTime >= tc.end) return null
+    return { id: tc.clip.id, index: timedClips.indexOf(tc) + 1 }
+  }
   const [presetNameDrafts, setPresetNameDrafts] = useState<Record<string, string>>({})
   const [shiftAmount, setShiftAmount] = useState(0.5)
 
@@ -152,6 +162,30 @@ export function TextOverlayPanel(): React.JSX.Element {
                 />
               </label>
               {o.source === 'auto' && <span className="project-badge">自動</span>}
+            </div>
+
+            <div className="overlay-item-row">
+              <label
+                className="checkbox-label"
+                title="手前のクリップを詰めても、このテロップが紐づいたクリップと一緒に動きます"
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(o.linkedClipId)}
+                  disabled={!o.linkedClipId && !clipUnder(o)}
+                  onChange={(e) =>
+                    setTextOverlayLink(o.id, e.target.checked ? (clipUnder(o)?.id ?? null) : null)
+                  }
+                />
+                クリップに追従
+              </label>
+              <span className="hint-text">
+                {o.linkedClipId
+                  ? `クリップ${timedClips.findIndex((t) => t.clip.id === o.linkedClipId) + 1 || '?'}の先頭から ${(o.linkOffset ?? 0).toFixed(1)}秒`
+                  : clipUnder(o)
+                    ? `クリップ${clipUnder(o)!.index}に紐づけます`
+                    : 'クリップの無い位置なので紐づけできません'}
+              </span>
             </div>
 
             {o.words && o.words.length > 0 && (

@@ -144,6 +144,8 @@ interface ProjectState {
   addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => void
   addTextOverlays: (overlays: Omit<TextOverlay, 'id'>[]) => void
   updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void
+  /** クリップへの追従を設定/解除する。`clipId` が null なら解除 */
+  setTextOverlayLink: (id: string, clipId: string | null) => void
   removeTextOverlay: (id: string) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
 
@@ -870,8 +872,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       const idx = state.project.clips.findIndex((c) => c.id === clipId)
       if (idx === -1) return state
+      const original = state.project.clips[idx]
       const clips = [...state.project.clips]
       clips.splice(idx, 1, ...newClips)
+      const textOverlays = remapOverlayLinks(state.project.textOverlays, original, newClips)
       // Silence/filler/text-based cuts replace one clip with several. Detached audio
       // linked to the original must be rebuilt to match the surviving segments —
       // otherwise the video loses the cut-out parts while its separated audio plays
@@ -893,7 +897,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           })
         }
       })
-      return { ...pushHistory(state), project: { ...state.project, clips, audioTracks } }
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, clips, audioTracks, textOverlays }
+      }
     }),
 
   splitClipAtTime: (clipId, absoluteTime) =>
@@ -901,26 +908,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       let elapsed = 0
       let didSplit = false
       let secondHalfId: string | null = null
+      let splitOriginal: Clip | null = null
+      const splitParts: Clip[] = []
       const clips: Clip[] = []
       for (const c of state.project.clips) {
         const dur = (c.outPoint - c.inPoint) / (c.speed || 1)
         if (c.id === clipId && absoluteTime > elapsed && absoluteTime < elapsed + dur) {
           didSplit = true
           secondHalfId = uuid()
+          splitOriginal = c
           const speed = c.speed || 1
           const splitLocal = c.inPoint + (absoluteTime - elapsed) * speed
           clips.push({ ...c, outPoint: splitLocal })
+          splitParts.push({ ...c, outPoint: splitLocal })
           // Spread the source clip so per-clip settings that aren't listed here
           // (crop/fill framing in particular) survive the split — rebuilding the
           // second half field by field silently dropped them.
-          clips.push({
+          const secondHalf = {
             ...c,
             id: secondHalfId,
             inPoint: splitLocal,
             outPoint: c.outPoint,
             speed,
             transitionIn: undefined
-          })
+          }
+          clips.push(secondHalf)
+          splitParts.push(secondHalf)
         } else {
           clips.push(c)
         }
@@ -951,7 +964,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           })
         }
       })
-      return { ...pushHistory(state), project: { ...state.project, clips, audioTracks } }
+      // 後半は新しいIDになるので、そこへ載っていた追従テロップを張り直す。
+      const textOverlays = splitOriginal
+        ? remapOverlayLinks(state.project.textOverlays, splitOriginal, splitParts)
+        : state.project.textOverlays
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, clips, audioTracks, textOverlays }
+      }
     }),
 
   removeClip: (clipId) =>
@@ -1161,13 +1181,52 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }),
 
   updateTextOverlay: (id, patch) =>
-    set((state) => ({
-      ...pushHistory(state, `overlay:${id}`),
-      project: {
-        ...state.project,
-        textOverlays: state.project.textOverlays.map((o) => (o.id === id ? { ...o, ...patch } : o))
+    set((state) => {
+      // 追従中に開始時刻を直接いじったら、相対位置の方を更新する。そうしないと
+      // 直後の追従補正が古い相対位置から計算し直して、編集をなかったことにしてしまう。
+      const timedById =
+        patch.startTime !== undefined
+          ? new Map(buildTimedClips(state.project).map((tc) => [tc.clip.id, tc]))
+          : null
+      return {
+        ...pushHistory(state, `overlay:${id}`),
+        project: {
+          ...state.project,
+          textOverlays: state.project.textOverlays.map((o) => {
+            if (o.id !== id) return o
+            const next = { ...o, ...patch }
+            if (timedById && next.linkedClipId && patch.startTime !== undefined) {
+              const tc = timedById.get(next.linkedClipId)
+              if (tc) next.linkOffset = patch.startTime - tc.start
+            }
+            return next
+          })
+        }
       }
-    })),
+    }),
+
+  // 追従のON/OFF。ONにするときだけ相対位置を測り直す。OFFはその時点の絶対時刻で固定
+  // されるので、時刻はいじらない。
+  setTextOverlayLink: (id, clipId) =>
+    set((state) => {
+      const overlay = state.project.textOverlays.find((o) => o.id === id)
+      if (!overlay) return state
+      const tc = clipId ? buildTimedClips(state.project).find((t) => t.clip.id === clipId) : null
+      if (clipId && !tc) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          textOverlays: state.project.textOverlays.map((o) =>
+            o.id === id
+              ? tc
+                ? { ...o, linkedClipId: tc.clip.id, linkOffset: o.startTime - tc.start }
+                : { ...o, linkedClipId: undefined, linkOffset: undefined }
+              : o
+          )
+        }
+      }
+    }),
 
   removeTextOverlay: (id) =>
     set((state) => ({
@@ -1917,13 +1976,72 @@ function syncLinkedAudioClips(project: Project): Project {
   return changed ? { ...project, audioTracks } : project
 }
 
+/**
+ * クリップを作り直す操作(無音カット・分割)で、追従テロップのリンクを新しい断片へ張り直す。
+ *
+ * IDが変わるとリンクは**エラーも出さずに切れる**ので、元クリップ内での位置(素材の秒数)から
+ * 行き先の断片を選び直す。切り捨てられた区間に載っていたテロップは、次に残った断片の先頭へ
+ * 寄せる(テロップだけ元の場所に取り残されるより、内容の続きに付いていく方が近い)。
+ */
+function remapOverlayLinks(
+  overlays: TextOverlay[],
+  original: Clip,
+  newClips: Clip[]
+): TextOverlay[] {
+  if (!overlays.some((o) => o.linkedClipId === original.id)) return overlays
+  const speed = original.speed || 1
+  return overlays.map((o) => {
+    if (o.linkedClipId !== original.id) return o
+    const sourceTime = original.inPoint + (o.linkOffset ?? 0) * speed
+    const inside = newClips.find((s) => sourceTime >= s.inPoint && sourceTime < s.outPoint)
+    if (inside) {
+      return {
+        ...o,
+        linkedClipId: inside.id,
+        linkOffset: (sourceTime - inside.inPoint) / (inside.speed || 1)
+      }
+    }
+    const after = newClips.find((s) => s.inPoint >= sourceTime)
+    if (after) return { ...o, linkedClipId: after.id, linkOffset: 0 }
+    return { ...o, linkedClipId: undefined, linkOffset: undefined }
+  })
+}
+
+/**
+ * 追従ONのテロップを、紐づけ先クリップの現在位置へ合わせ直す。
+ *
+ * テロップはタイムライン絶対秒を持つので、手前のクリップを詰めたり消したりすると
+ * 内容とズレる。追従中のものはクリップ開始 + `linkOffset` で位置を決め直し、尺は保つ。
+ * 紐づけ先が消えたら追従を外して、その時点の時刻で固定する(分離音声と同じ考え方)。
+ */
+function syncLinkedTextOverlays(project: Project): Project {
+  const hasLinks = project.textOverlays.some((o) => o.linkedClipId)
+  if (!hasLinks) return project
+  const timedById = new Map(buildTimedClips(project).map((tc) => [tc.clip.id, tc]))
+  let changed = false
+  const textOverlays = project.textOverlays.map((o) => {
+    if (!o.linkedClipId) return o
+    const tc = timedById.get(o.linkedClipId)
+    if (!tc) {
+      changed = true
+      return { ...o, linkedClipId: undefined, linkOffset: undefined }
+    }
+    const startTime = Math.max(0, tc.start + (o.linkOffset ?? 0))
+    const endTime = startTime + (o.endTime - o.startTime)
+    if (o.startTime === startTime && o.endTime === endTime) return o
+    changed = true
+    return { ...o, startTime, endTime }
+  })
+  return changed ? { ...project, textOverlays } : project
+}
+
 // Runs the mirror as a silent follow-up correction (no history entry of its own):
 // the triggering edit already pushed one, and undo restores an already-synced
 // snapshot so this stays a no-op on undo/redo. The clips-identity guard prevents
 // recursion — the correction only touches audioTracks.
 useProjectStore.subscribe((state, prevState) => {
   if (state.project === prevState.project) return
-  const synced = syncLinkedAudioClips(state.project)
+  const synced = syncLinkedTextOverlays(syncLinkedAudioClips(state.project))
   if (synced !== state.project) {
     useProjectStore.setState({ project: synced })
   }

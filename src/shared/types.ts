@@ -82,6 +82,10 @@ export interface TextOverlay {
   style: TextStyle
   source?: 'manual' | 'auto'
   words?: TranscriptWord[]
+  /** 追従先の本編クリップID。手前のクリップが伸縮してもこのクリップと一緒に動く */
+  linkedClipId?: string
+  /** 追従先クリップの開始からの相対秒。追従中はこちらが位置の基準になる */
+  linkOffset?: number
 }
 
 export interface AudioTrackClip {
