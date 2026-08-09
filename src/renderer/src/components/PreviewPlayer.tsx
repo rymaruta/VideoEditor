@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import {
+  audioClipDuration,
   buildTimedClips,
   findTimedClipAt,
   totalTimelineDuration,
@@ -232,13 +233,19 @@ function AudioTrackClipLayer({
   masterMuted: boolean
 }): React.JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
-  const localTime = clip.inPoint + (playheadTime - clip.startTime)
+  const speed = clip.speed || 1
+  // タイムライン秒 → 素材秒は速度を掛ける。等倍以外だと素材の進みが速く(遅く)なる。
+  const localTime = clip.inPoint + (playheadTime - clip.startTime) * speed
 
   useEffect(() => {
     if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.3) {
       ref.current.currentTime = localTime
     }
   }, [localTime])
+
+  useEffect(() => {
+    if (ref.current) ref.current.playbackRate = speed
+  }, [speed])
 
   useEffect(() => {
     if (isPlaying) {
@@ -613,8 +620,7 @@ export function PreviewPlayer(): React.JSX.Element {
               track.clips
                 .filter(
                   (c) =>
-                    playheadTime >= c.startTime &&
-                    playheadTime < c.startTime + (c.outPoint - c.inPoint)
+                    playheadTime >= c.startTime && playheadTime < c.startTime + audioClipDuration(c)
                 )
                 .map((clip) => {
                   const asset = project.assets.find((a) => a.id === clip.assetId)

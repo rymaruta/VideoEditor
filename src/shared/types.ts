@@ -97,6 +97,11 @@ export interface AudioTrackClip {
   volume?: number
   /** 音声分離で作られたクリップが追従する本編クリップのID。手動編集でリンク解除される */
   linkedClipId?: string
+  /**
+   * 再生速度。未設定は等倍。分離音声は追従先クリップの速度がそのままミラーされるので、
+   * 本編の速度を変えても音がズレない。タイムライン上の尺は (outPoint-inPoint)/speed。
+   */
+  speed?: number
 }
 
 export interface AudioTrack {

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
-import { buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
+import { audioClipDuration, buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
 import type {
   AspectRatio,
   AudioTrack,
@@ -225,7 +225,7 @@ function totalDuration(project: Project): number {
 }
 
 function audioTrackEnd(track: AudioTrack): number {
-  return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
+  return track.clips.reduce((max, c) => Math.max(max, c.startTime + audioClipDuration(c)), 0)
 }
 
 function videoOverlayTrackEnd(track: Project['videoOverlayTracks'][number]): number {
@@ -765,11 +765,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...pushHistory(state),
       project: {
         ...state.project,
-        // Clips with detached audio keep speed 1: the separated audio track has no
-        // speed adjustment of its own, so changing the video's speed would desync it.
-        clips: state.project.clips.map((c) =>
-          c.id === clipId && !c.audioDetached ? { ...c, speed } : c
-        )
+        // 分離音声にも同じ速度がミラーされる(syncLinkedAudioClips)ので、分離済みでも
+        // 速度を変えられる。
+        clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, speed } : c))
       }
     })),
 
@@ -806,6 +804,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             startTime: timedClip.start,
             inPoint: clip.inPoint,
             outPoint: clip.outPoint,
+            // 速度もそのまま引き継ぐ。等倍以外のクリップを分離しても音がズレない。
+            speed: clip.speed || 1,
             linkedClipId: clip.id
           }
         ]
@@ -1033,11 +1033,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...pushHistory(state),
         project: {
           ...state.project,
-          // Clips with detached audio keep speed 1: the separated audio track has no
-          // speed adjustment of its own, so changing the video's speed would desync it.
-          clips: state.project.clips.map((c) =>
-            idSet.has(c.id) && !c.audioDetached ? { ...c, speed } : c
-          )
+          // 分離音声にも同じ速度がミラーされるので、分離済みでも速度を変えられる。
+          clips: state.project.clips.map((c) => (idSet.has(c.id) ? { ...c, speed } : c))
         }
       }
     }),
@@ -1492,10 +1489,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           ...t,
           clips: t.clips.flatMap((c) => {
             if (c.id !== clipId) return [c]
-            const dur = c.outPoint - c.inPoint
+            const dur = audioClipDuration(c)
             if (absoluteTime <= c.startTime || absoluteTime >= c.startTime + dur) return [c]
             didSplit = true
-            const splitLocal = c.inPoint + (absoluteTime - c.startTime)
+            // タイムライン秒 → 素材秒は速度を掛ける。
+            const splitLocal = c.inPoint + (absoluteTime - c.startTime) * (c.speed || 1)
             return [
               { ...c, outPoint: splitLocal, linkedClipId: undefined },
               {
@@ -1960,15 +1958,24 @@ function syncLinkedAudioClips(project: Project): Project {
         trackChanged = true
         return { ...c, linkedClipId: undefined }
       }
+      // 速度もミラーする。これが無いと本編だけ速くなって音が置き去りになる。
+      const speed = tc.clip.speed || 1
       if (
         c.startTime === tc.start &&
         c.inPoint === tc.clip.inPoint &&
-        c.outPoint === tc.clip.outPoint
+        c.outPoint === tc.clip.outPoint &&
+        (c.speed || 1) === speed
       ) {
         return c
       }
       trackChanged = true
-      return { ...c, startTime: tc.start, inPoint: tc.clip.inPoint, outPoint: tc.clip.outPoint }
+      return {
+        ...c,
+        startTime: tc.start,
+        inPoint: tc.clip.inPoint,
+        outPoint: tc.clip.outPoint,
+        speed
+      }
     })
     if (trackChanged) changed = true
     return trackChanged ? { ...t, clips } : t

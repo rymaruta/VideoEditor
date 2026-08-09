@@ -210,11 +210,7 @@ export function Inspector(): React.JSX.Element {
           <GaugeIcon width={13} height={13} />
           再生速度
         </h3>
-        <select
-          value={speed}
-          disabled={clip.audioDetached}
-          onChange={(e) => updateClipSpeed(clip.id, Number(e.target.value))}
-        >
+        <select value={speed} onChange={(e) => updateClipSpeed(clip.id, Number(e.target.value))}>
           {SPEED_OPTIONS.map((s) => (
             <option key={s} value={s}>
               {s}x
@@ -222,9 +218,7 @@ export function Inspector(): React.JSX.Element {
           ))}
         </select>
         {clip.audioDetached && (
-          <p className="hint-text">
-            音声を分離済みのため変更できません(音声トラックとズレるため)。
-          </p>
+          <p className="hint-text">分離した音声トラックにも同じ速度が掛かります。</p>
         )}
       </div>
 
@@ -362,18 +356,12 @@ export function Inspector(): React.JSX.Element {
           <>
             <button
               className="small-button"
-              disabled={speed !== 1}
-              title={
-                speed !== 1
-                  ? '再生速度が1x以外のクリップは音声を分離できません'
-                  : '動画から音声を切り離し、独立した音声トラックに分けます'
-              }
+              title="動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)"
               onClick={() => detachClipAudio(clip.id)}
             >
               <MusicIcon width={12} height={12} />
               音声を分離
             </button>
-            {speed !== 1 && <p className="hint-text">再生速度が1x以外のため分離できません。</p>}
           </>
         )}
       </div>

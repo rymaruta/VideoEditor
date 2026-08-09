@@ -539,8 +539,11 @@ export function exportProject(options: ExportOptions): Promise<void> {
           const label = `atrk${trackIdx}_${clipIdx}`
           const delayMs = Math.max(0, Math.round(toExportTime(trackClip.startTime) * 1000))
           const clipVolume = track.volume * (trackClip.volume ?? 1)
+          // 分離音声は本編クリップの速度がミラーされている。ここで atempo を掛けないと
+          // 映像だけ速くなって音が置き去りになる(atempoChain が 0.5〜2.0 の定義域を連鎖で吸収)。
+          const clipSpeed = trackClip.speed || 1
           filterParts.push(
-            `[${myIndex}:a]asetpts=PTS-STARTPTS,volume=${clipVolume},adelay=${delayMs}|${delayMs}[${label}]`
+            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,volume=${clipVolume},adelay=${delayMs}|${delayMs}[${label}]`
           )
           clipLabels.push(label)
         })

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
+import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { snapTime } from '../lib/snapping'
 import {
   SHORTCUT_ACTIONS,
@@ -261,7 +261,7 @@ export function Timeline(): React.JSX.Element {
     })
     project.audioTracks.forEach((track) => {
       track.clips.forEach((c) => {
-        times.push(c.startTime, c.startTime + (c.outPoint - c.inPoint))
+        times.push(c.startTime, c.startTime + audioClipDuration(c))
       })
     })
     project.videoOverlayTracks.forEach((track) => {
@@ -1052,12 +1052,7 @@ export function Timeline(): React.JSX.Element {
             {timedClips[selectedIndex]?.asset.hasAudio && !selectedClip.audioDetached && (
               <button
                 className="small-button"
-                title={
-                  selectedClip.speed !== 1
-                    ? '再生速度が1x以外のクリップは音声を分離できません'
-                    : '動画から音声を切り離し、独立した音声トラックに分けます'
-                }
-                disabled={selectedClip.speed !== 1}
+                title="動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)"
                 onClick={() => detachClipAudio(selectedClip.id)}
               >
                 <MusicIcon width={13} height={13} />
@@ -1077,15 +1072,12 @@ export function Timeline(): React.JSX.Element {
             <label
               className="inline-select"
               title={
-                selectedClip.audioDetached
-                  ? '音声を分離済みのクリップは再生速度を変更できません(音声トラックとズレるため)'
-                  : undefined
+                selectedClip.audioDetached ? '分離した音声にも同じ速度が掛かります' : undefined
               }
             >
               <GaugeIcon width={13} height={13} />
               <select
                 value={selectedClip.speed || 1}
-                disabled={selectedClip.audioDetached}
                 onChange={(e) => updateClipSpeed(selectedClip.id, Number(e.target.value))}
               >
                 {SPEED_OPTIONS.map((s) => (
@@ -1697,7 +1689,7 @@ export function Timeline(): React.JSX.Element {
                   mediaTrimDrag?.kind === 'audio' && mediaTrimDrag.clipId === clip.id
                 const inPoint = isTrimmingThis ? mediaTrimDrag.liveInPoint : clip.inPoint
                 const outPoint = isTrimmingThis ? mediaTrimDrag.liveOutPoint : clip.outPoint
-                const dur = outPoint - inPoint
+                const dur = audioClipDuration({ inPoint, outPoint, speed: clip.speed })
                 const clipWidth = dur * pixelsPerSecond
                 const isDraggingThis = audioDrag?.clipId === clip.id
                 const displayStart = isTrimmingThis
@@ -2005,8 +1997,7 @@ export function Timeline(): React.JSX.Element {
             disabled={
               playheadTime <= selectedAudioClipData.startTime ||
               playheadTime >=
-                selectedAudioClipData.startTime +
-                  (selectedAudioClipData.outPoint - selectedAudioClipData.inPoint)
+                selectedAudioClipData.startTime + audioClipDuration(selectedAudioClipData)
             }
             onClick={() =>
               splitAudioClipAtTime(
