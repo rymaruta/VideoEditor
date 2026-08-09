@@ -446,6 +446,12 @@ h3 {
   max-width: 620px;
 }
 
+/* 編集方針は複数行で書くもの。既定幅のままだと1行あたり十数文字しか入らない。 */
+.long-form-note {
+  width: 100%;
+  resize: vertical;
+}
+
 .long-form-targets {
   display: flex;
   flex-wrap: wrap;
@@ -1014,7 +1020,6 @@ h3 {
   flex-wrap: wrap;
   padding-left: 67px;
 }
-
 
 .media-item:hover {
   border-color: var(--border);
@@ -3563,7 +3568,9 @@ h3 {
 .autoedit-card.director {
   grid-column: 1 / -1;
   border-color: var(--accent-1);
-  box-shadow: 0 0 0 1px var(--accent-1), 0 8px 24px rgba(34, 211, 238, 0.18);
+  box-shadow:
+    0 0 0 1px var(--accent-1),
+    0 8px 24px rgba(34, 211, 238, 0.18);
 }
 
 .autoedit-card.director .autoedit-thumb {

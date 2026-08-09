@@ -210,12 +210,68 @@ export function foldedOutputLength(
   return current
 }
 
+/** 直前の構成案に対する追加指示。両方そろって初めて「作り直し」になる */
+export interface ShortRefinement {
+  previousPlan: ShortPlan
+  instruction: string
+}
+
+export interface ScanCache {
+  assetId: string
+  filePath: string
+  windows: ScannedWindow[]
+}
+
+/**
+ * 前回の音声スキャン+文字起こしを使い回してよいかを判定する。
+ *
+ * ここを間違えると**別の動画の時刻で切る**ことになり、画面の構成案と出来上がりが
+ * 食い違う。素材の再リンクでは `id` が変わらず `filePath` だけ変わるので、両方を見る。
+ */
+export function canReuseScan(
+  cache: ScanCache | null,
+  asset: { id: string; filePath: string } | undefined
+): boolean {
+  if (!cache || !asset) return false
+  if (cache.windows.length === 0) return false
+  return cache.assetId === asset.id && cache.filePath === asset.filePath
+}
+
+function buildRefinementSection(refinement: ShortRefinement | undefined): string {
+  if (!refinement) return ''
+  const instruction = refinement.instruction.trim()
+  if (!instruction) return ''
+  const previous = refinement.previousPlan.segments
+    .map(
+      (s, i) =>
+        `[${i}] ${formatClock(s.start)}〜${formatClock(s.end)} (${s.role || '本編'}) ${s.reason}`
+    )
+    .join('\n')
+
+  return `
+
+# 前回つくった構成案
+タイトル: ${refinement.previousPlan.title}
+冒頭テロップ: ${refinement.previousPlan.hookLine}
+区間:
+${previous}
+
+# 前回の構成案への追加指示
+"""
+${instruction}
+"""
+
+**この構成案を土台にして直すこと。** 追加指示に関係のない区間は、時刻もそのまま残す。
+ゼロから選び直さない。`
+}
+
 function buildPrompt(
   windows: ScannedWindow[],
   targetSeconds: number,
   userNote: string,
   sourceDuration: number,
-  pace: ShortPace
+  pace: ShortPace,
+  refinement?: ShortRefinement
 ): string {
   const list = windows
     .map(
@@ -229,7 +285,7 @@ function buildPrompt(
   return `あなたはYouTube Shortsの構成作家です。${formatClock(sourceDuration)}の長い動画から、音声の盛り上がりで自動抽出した候補区間のリストを渡します。この中から${targetSeconds}秒前後のショート動画を1本組み立ててください。
 
 # 候補区間
-${list}${noteSection}
+${list}${noteSection}${buildRefinementSection(refinement)}
 
 # 守ること
 - **リストにある区間の中からだけ選ぶ**こと。リストに無い時刻を作り出さない。
@@ -260,7 +316,8 @@ export async function planShortFromWindows(
   targetSeconds: number,
   userNote: string,
   sourceDuration: number,
-  pace: ShortPace
+  pace: ShortPace,
+  refinement?: ShortRefinement
 ): Promise<ShortPlan> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
   const res = await fetch(url, {
@@ -268,7 +325,13 @@ export async function planShortFromWindows(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [
-        { parts: [{ text: buildPrompt(windows, targetSeconds, userNote, sourceDuration, pace) }] }
+        {
+          parts: [
+            {
+              text: buildPrompt(windows, targetSeconds, userNote, sourceDuration, pace, refinement)
+            }
+          ]
+        }
       ],
       generationConfig: { responseMimeType: 'application/json' }
     })

@@ -8,6 +8,7 @@ const GEMINI_STORAGE_KEY = 've-gemini-api-key'
 const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
 const SNAP_ENABLED_KEY = 've-snap-enabled'
 const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible'
+const SHORT_NOTE_KEY = 've-short-note'
 
 export interface EnvKeySources {
   youtubeApiKey: boolean
@@ -31,6 +32,9 @@ interface SettingsState {
   setSnapEnabled: (enabled: boolean) => void
   shortcutGuideVisible: boolean
   setShortcutGuideVisible: (visible: boolean) => void
+  /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
+  shortNote: string
+  setShortNote: (note: string) => void
   envKeySources: EnvKeySources
   loadEnvApiKeys: () => Promise<void>
 }
@@ -79,6 +83,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShortcutGuideVisible: (visible) => {
     localStorage.setItem(SHORTCUT_GUIDE_VISIBLE_KEY, String(visible))
     set({ shortcutGuideVisible: visible })
+  },
+  shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
+  setShortNote: (note) => {
+    localStorage.setItem(SHORT_NOTE_KEY, note)
+    set({ shortNote: note })
   },
   envKeySources: {
     youtubeApiKey: false,

@@ -6,9 +6,11 @@ import {
   BEAT_SNAP_TOLERANCE,
   MIN_CUT_SECONDS,
   PACE_PROFILES,
+  ScanCache,
   ShortPace,
   ScannedWindow,
   ShortPlan,
+  canReuseScan,
   foldedOutputLength,
   planShortFromWindows,
   snapCutsToBeat,
@@ -64,11 +66,15 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
   const beatGrid = useProjectStore((s) => s.project.beatGrid)
   const applyShortPlan = useProjectStore((s) => s.applyShortPlan)
   const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
+  // 編集方針は毎回書き直したくないので設定として残す(次回起動時も引き継がれる)
+  const note = useSettingsStore((s) => s.shortNote)
+  const setNote = useSettingsStore((s) => s.setShortNote)
 
   const videoAssets = assets.filter((a) => a.hasVideo).sort((a, b) => b.duration - a.duration)
   const [assetId, setAssetId] = useState(videoAssets[0]?.id ?? '')
   const [target, setTarget] = useState(30)
-  const [note, setNote] = useState('')
+  const [refineNote, setRefineNote] = useState('')
+  const [scanCache, setScanCache] = useState<ScanCache | null>(null)
   const [addHook, setAddHook] = useState(true)
   const [pace, setPace] = useState<ShortPace>('normal')
   const [tighten, setTighten] = useState(true)
@@ -94,37 +100,47 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
       return
     }
     setError(null)
+    // 追加指示があるときだけ、前回の構成案を土台としてAIへ渡す。
+    const previousPlan = plan
     setPlan(null)
     setCuts([])
     try {
-      setStage('scanning')
-      const windows = await window.api.scanLongFormWindows(
-        asset.filePath,
-        asset.duration,
-        MAX_WINDOWS
-      )
-      if (windows.length === 0) {
-        throw new Error(
-          '盛り上がっている箇所を見つけられませんでした。音声が無いか、音量が一定の動画の可能性があります。'
+      let scanned: ScannedWindow[]
+      if (canReuseScan(scanCache, asset)) {
+        // 作り直しのたびに全編スキャンと文字起こしをやり直すと、長尺では数分〜数十分
+        // 待たされる。候補区間は素材だけで決まるので、同じ素材なら使い回す。
+        scanned = scanCache!.windows
+      } else {
+        setStage('scanning')
+        const windows = await window.api.scanLongFormWindows(
+          asset.filePath,
+          asset.duration,
+          MAX_WINDOWS
         )
-      }
-
-      setStage('transcribing')
-      setProgress({ done: 0, total: windows.length })
-      const scanned: ScannedWindow[] = []
-      for (const [i, w] of windows.entries()) {
-        let transcript = ''
-        try {
-          const segments = await window.api.transcribe(asset.filePath, w.start, w.end, 'ja')
-          transcript = segments.map((s) => s.text).join(' ')
-        } catch {
-          // A window that fails to transcribe is still a usable candidate — its
-          // loudness score alone can carry it. Losing the whole run over one
-          // failed window would be far worse.
-          transcript = ''
+        if (windows.length === 0) {
+          throw new Error(
+            '盛り上がっている箇所を見つけられませんでした。音声が無いか、音量が一定の動画の可能性があります。'
+          )
         }
-        scanned.push({ ...w, transcript })
-        setProgress({ done: i + 1, total: windows.length })
+
+        setStage('transcribing')
+        setProgress({ done: 0, total: windows.length })
+        scanned = []
+        for (const [i, w] of windows.entries()) {
+          let transcript = ''
+          try {
+            const segments = await window.api.transcribe(asset.filePath, w.start, w.end, 'ja')
+            transcript = segments.map((s) => s.text).join(' ')
+          } catch {
+            // A window that fails to transcribe is still a usable candidate — its
+            // loudness score alone can carry it. Losing the whole run over one
+            // failed window would be far worse.
+            transcript = ''
+          }
+          scanned.push({ ...w, transcript })
+          setProgress({ done: i + 1, total: windows.length })
+        }
+        setScanCache({ assetId: asset.id, filePath: asset.filePath, windows: scanned })
       }
 
       setStage('planning')
@@ -134,7 +150,8 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
         target,
         note,
         asset.duration,
-        pace
+        pace,
+        previousPlan && refineNote.trim() ? { previousPlan, instruction: refineNote } : undefined
       )
 
       setStage('tightening')
@@ -319,12 +336,16 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
             <div className="trim-field">
               <label>どんなショートにしたいか(任意)</label>
               <textarea
-                rows={2}
+                className="long-form-note"
+                rows={4}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 disabled={running}
-                placeholder="例: 一番笑えるところだけ / 初見が驚く場面を中心に"
+                placeholder={
+                  '例: 一番笑えるところだけ\n初見が驚く場面を中心に\n専門用語の説明は入れない'
+                }
               />
+              <p className="hint-text">ここに書いた方針は保存され、次回起動時も残ります。</p>
             </div>
 
             <label className="checkbox-label">
@@ -348,9 +369,25 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
             </label>
 
             {plan && (
-              <p className="hint-text">
-                テンポと無音詰めの変更は「作り直す」で反映されます(つなぎはそのまま反映されます)。
-              </p>
+              <>
+                <div className="trim-field">
+                  <label>この構成案への追加指示(任意)</label>
+                  <textarea
+                    className="long-form-note"
+                    rows={3}
+                    value={refineNote}
+                    onChange={(e) => setRefineNote(e.target.value)}
+                    disabled={running}
+                    placeholder={'例: 1つ目はそのまま残して、あとをもっと短く\nオチをもう1つ足して'}
+                  />
+                  <p className="hint-text">
+                    書いて「追加指示で作り直す」を押すと、いまの構成案を土台にAIが直します。空のまま押すと同じ条件で作り直します。文字起こしはやり直しません。
+                  </p>
+                </div>
+                <p className="hint-text">
+                  テンポと無音詰めの変更も「作り直す」で反映されます(つなぎはそのまま反映されます)。
+                </p>
+              </>
             )}
 
             {running && (
@@ -424,7 +461,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
           {plan ? (
             <>
               <button onClick={handleRun} disabled={running}>
-                作り直す
+                {refineNote.trim() ? '追加指示で作り直す' : '作り直す'}
               </button>
               <button className="primary-button" onClick={handleApply}>
                 タイムラインに追加
