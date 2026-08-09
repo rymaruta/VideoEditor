@@ -1,5 +1,5 @@
 import { readJsonResponse } from './httpJson'
-import type { SilenceRange } from '@shared/types'
+import type { SilenceRange, TranscriptSegment, TranscriptWord } from '@shared/types'
 
 const GEMINI_MODEL = 'gemini-flash-latest'
 
@@ -57,7 +57,15 @@ export interface ScannedWindow {
   end: number
   score: number
   transcript: string
+  /**
+   * 文字起こしの生の結果(絶対秒)。AIへ渡すのは `transcript` だけだが、採用された区間へ
+   * 発言テロップを載せるのに使う。**ここに持っておくことで文字起こしを二度走らせない。**
+   */
+  segments: TranscriptSegment[]
 }
+
+/** これより短い断片はテロップにしても読めないまま消える */
+export const MIN_CAPTION_SECONDS = 0.3
 
 export interface ShortSegment {
   start: number
@@ -68,7 +76,8 @@ export interface ShortSegment {
 
 export interface ShortPlan {
   title: string
-  hookLine: string
+  /** 冒頭テロップの候補。先頭がAIの推し。必ず1件以上入る(空なら空配列) */
+  hookLines: string[]
   segments: ShortSegment[]
   caption: string
 }
@@ -210,6 +219,85 @@ export function foldedOutputLength(
   return current
 }
 
+export interface SpeechOverlay {
+  text: string
+  startTime: number
+  endTime: number
+  words?: TranscriptWord[]
+}
+
+/**
+ * 採用した区間に、既にある文字起こし結果から発言テロップを作る。
+ *
+ * **ここでは文字起こしを走らせない。** スキャン時に一度だけ取った `ScannedWindow.segments`
+ * を切り出して並べ替えるだけ。区間はタイムライン上に順に並ぶので、区間内の相対位置を
+ * タイムライン秒へ写す(速度は等倍)。区間からはみ出す発言は区間内へクランプし、
+ * クランプで短くなりすぎた断片は捨てる(一瞬光って消えるテロップになるため)。
+ *
+ * 返す時刻は**タイムライン秒**。つなぎ(xfade)による出力側のズレは書き出し時に
+ * `toExportTime` が吸収するので、ここでは考慮しない — 冒頭フックと同じ扱い。
+ */
+export function buildSpeechOverlays(
+  cuts: { start: number; end: number }[],
+  windows: ScannedWindow[],
+  timelineStart: number,
+  minSeconds: number = MIN_CAPTION_SECONDS
+): SpeechOverlay[] {
+  const all = windows
+    .flatMap((w) => w.segments ?? [])
+    .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
+  if (all.length === 0) return []
+
+  // 窓は重ならない作りだが、万一同じ発言が二重に入っていても二重字幕にしない。
+  const seen = new Set<string>()
+  const segments = all
+    .filter((s) => {
+      const key = `${s.start}|${s.end}|${s.text}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((a, b) => a.start - b.start)
+
+  const overlays: SpeechOverlay[] = []
+  let cursor = timelineStart
+  for (const cut of cuts) {
+    const duration = cut.end - cut.start
+    if (!Number.isFinite(duration) || duration <= 0) continue
+    for (const seg of segments) {
+      const start = Math.max(seg.start, cut.start)
+      const end = Math.min(seg.end, cut.end)
+      if (end - start < minSeconds) continue
+      const words = seg.words
+        ?.map((w) => ({
+          text: w.text,
+          start: Math.max(w.start, start),
+          end: Math.min(w.end, end)
+        }))
+        .filter((w) => w.end > w.start && w.text.length > 0)
+      // 端を切った区間では、読み上げられない語まで残すと文字と色が合わなくなる。
+      // 単語が取れているときは、残った単語だけを本文にする。
+      const text = words && words.length > 0 ? words.map((w) => w.text).join('') : seg.text
+      if (!text.trim()) continue
+      overlays.push({
+        text,
+        startTime: cursor + (start - cut.start),
+        endTime: cursor + (end - cut.start),
+        words:
+          words && words.length > 0
+            ? words.map((w) => ({
+                text: w.text,
+                start: cursor + (w.start - cut.start),
+                end: cursor + (w.end - cut.start)
+              }))
+            : undefined
+      })
+    }
+    cursor += duration
+  }
+  return overlays
+}
+
 /** 直前の構成案に対する追加指示。両方そろって初めて「作り直し」になる */
 export interface ShortRefinement {
   previousPlan: ShortPlan
@@ -252,7 +340,7 @@ function buildRefinementSection(refinement: ShortRefinement | undefined): string
 
 # 前回つくった構成案
 タイトル: ${refinement.previousPlan.title}
-冒頭テロップ: ${refinement.previousPlan.hookLine}
+冒頭テロップ案: ${refinement.previousPlan.hookLines.join(' / ')}
 区間:
 ${previous}
 
@@ -296,13 +384,14 @@ ${list}${noteSection}${buildRefinementSection(refinement)}
 - 各区間は言い終わりで切る。区間の頭とお尻の無音はこちらで自動的に詰めるので、多少余っていてよい。
 - 時系列は必ずしも守らなくてよい。フックを先頭に持ってくることを優先する。
 - 発言が空の区間ばかりの場合は、盛り上がり度だけを根拠に選んでよい。その旨をreasonに書く。
+- **冒頭テロップは切り口の違う3案**を出す(煽り / 疑問 / 結論の言い切り など)。似た言い回しを並べない。
 
 # 出力形式
 以下のJSON形式のみを出力してください。説明文やコードブロックの記法は不要です。
 秒数は元動画の先頭からの秒数(小数可)で書いてください。
 {
   "title": "この動画につけるタイトル(日本語30字以内)",
-  "hookLine": "冒頭に出すテロップ1行(日本語20字以内)",
+  "hookLines": ["冒頭に出すテロップ案1(日本語20字以内)", "案2(切り口を変える)", "案3(切り口を変える)"],
   "caption": "投稿時の説明文(日本語80字以内)",
   "segments": [
     { "start": 0, "end": 0, "role": "フック / 本編 / オチ のいずれか", "reason": "なぜこの区間を選んだか(日本語1文)" }
@@ -388,9 +477,16 @@ export async function planShortFromWindows(
     throw new Error('AIが有効な区間を選べませんでした。目標の長さを変えて再実行してください。')
   }
 
+  // 1案しか返さないモデル(古い形式の `hookLine`)でも1件の候補として扱えるようにする。
+  const rawHooks = Array.isArray(parsed.hookLines) ? parsed.hookLines : []
+  const hookLines = [...rawHooks, (parsed as { hookLine?: unknown }).hookLine]
+    .map(asString)
+    .map((h) => h.trim())
+    .filter((h, i, arr) => h.length > 0 && arr.indexOf(h) === i)
+
   return {
     title: asString(parsed.title),
-    hookLine: asString(parsed.hookLine),
+    hookLines,
     caption: asString(parsed.caption),
     segments
   }

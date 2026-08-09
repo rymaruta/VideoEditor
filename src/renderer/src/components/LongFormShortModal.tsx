@@ -10,14 +10,16 @@ import {
   ShortPace,
   ScannedWindow,
   ShortPlan,
+  buildSpeechOverlays,
   canReuseScan,
   foldedOutputLength,
   planShortFromWindows,
   snapCutsToBeat,
   tightenSegmentEdges
 } from '../lib/longFormShort'
+import { defaultTextStyle } from '@shared/textStyle'
 import { WandIcon, SparklesIcon } from './icons'
-import type { TextOverlay, TransitionType } from '@shared/types'
+import type { TextOverlay, TranscriptSegment, TransitionType } from '@shared/types'
 
 // How many windows are shortlisted from the audio scan. Every one of these costs a
 // transcription pass, so this is the main lever on how long the whole run takes:
@@ -35,6 +37,13 @@ const TRANSITION_OPTIONS: { value: TransitionType; label: string }[] = [
   { value: 'none', label: 'カット(推奨)' },
   { value: 'crossfade', label: 'クロスフェード' },
   { value: 'fade', label: 'フェード(黒)' }
+]
+// 発言テロップの単語ハイライト色。ASS の karaoke 描画(assSubtitle.ts)がこの色を使う。
+const HIGHLIGHT_COLORS: { value: string; label: string }[] = [
+  { value: '#ffe600', label: '黄' },
+  { value: '#ff5c5c', label: '赤' },
+  { value: '#4dd2ff', label: '水色' },
+  { value: '#7cff8a', label: '黄緑' }
 ]
 
 function formatClock(seconds: number): string {
@@ -76,6 +85,9 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
   const [refineNote, setRefineNote] = useState('')
   const [scanCache, setScanCache] = useState<ScanCache | null>(null)
   const [addHook, setAddHook] = useState(true)
+  const [hookIndex, setHookIndex] = useState(0)
+  const [addSpeechCaptions, setAddSpeechCaptions] = useState(true)
+  const [highlightColor, setHighlightColor] = useState(HIGHLIGHT_COLORS[0].value)
   const [pace, setPace] = useState<ShortPace>('normal')
   const [tighten, setTighten] = useState(true)
   const [transition, setTransition] = useState<TransitionType>('none')
@@ -84,6 +96,8 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
   const [error, setError] = useState<string | null>(null)
   const [plan, setPlan] = useState<ShortPlan | null>(null)
   const [cuts, setCuts] = useState<PreparedCut[]>([])
+  // 発言テロップの元。構成案を作ったときの文字起こしをそのまま持つ(再実行しない)。
+  const [scannedWindows, setScannedWindows] = useState<ScannedWindow[]>([])
 
   const asset = videoAssets.find((a) => a.id === assetId)
   const running = stage !== 'idle' && stage !== 'done'
@@ -128,8 +142,11 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
         scanned = []
         for (const [i, w] of windows.entries()) {
           let transcript = ''
+          let segments: TranscriptSegment[] = []
           try {
-            const segments = await window.api.transcribe(asset.filePath, w.start, w.end, 'ja')
+            // 単語タイミング付きで取る。回数は今までと同じ1パスで、採用した区間に
+            // 単語ハイライト付きのテロップを載せられるようになる。
+            segments = await window.api.transcribeWords(asset.filePath, w.start, w.end, 'ja')
             transcript = segments.map((s) => s.text).join(' ')
           } catch {
             // A window that fails to transcribe is still a usable candidate — its
@@ -137,7 +154,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
             // failed window would be far worse.
             transcript = ''
           }
-          scanned.push({ ...w, transcript })
+          scanned.push({ ...w, transcript, segments })
           setProgress({ done: i + 1, total: windows.length })
         }
         setScanCache({ assetId: asset.id, filePath: asset.filePath, windows: scanned })
@@ -192,6 +209,8 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
 
       setPlan(result)
       setCuts(snapped)
+      setHookIndex(0)
+      setScannedWindows(scanned)
       setStage('done')
     } catch (e) {
       setError(formatIpcError(e))
@@ -211,10 +230,27 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
           : { type: transition, duration: TRANSITION_SECONDS }
     }))
     const overlays: Omit<TextOverlay, 'id'>[] = []
-    if (addHook && plan.hookLine.trim()) {
+    // 発言テロップは画面下、フックは中央。同時に出ても重ならない。
+    if (addSpeechCaptions) {
+      for (const o of buildSpeechOverlays(cuts, scannedWindows, existingLength)) {
+        overlays.push({
+          text: o.text,
+          startTime: o.startTime,
+          endTime: o.endTime,
+          words: o.words,
+          source: 'auto',
+          style: defaultTextStyle({
+            position: 'bottom',
+            wordHighlight: Boolean(o.words && o.words.length > 0),
+            highlightColor
+          })
+        })
+      }
+    }
+    if (addHook && selectedHook.trim()) {
       const firstSegment = cuts[0].end - cuts[0].start
       overlays.push({
-        text: plan.hookLine,
+        text: selectedHook,
         startTime: existingLength,
         endTime: existingLength + Math.min(2.5, firstSegment),
         source: 'auto',
@@ -244,6 +280,9 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
     onClose()
   }
 
+  const selectedHook = plan?.hookLines[hookIndex] ?? plan?.hookLines[0] ?? ''
+  const speechOverlays =
+    plan && addSpeechCaptions ? buildSpeechOverlays(cuts, scannedWindows, existingLength) : []
   const cutDurations = cuts.map((c) => c.end - c.start)
   const timelineLength = cutDurations.reduce((sum, d) => sum + d, 0)
   // What the exported file will actually be: transitions overlap their two clips.
@@ -274,7 +313,16 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
               <label>元にする動画</label>
               <select
                 value={assetId}
-                onChange={(e) => setAssetId(e.target.value)}
+                onChange={(e) => {
+                  // 構成案・区間・文字起こしはすべて「今選んでいる動画」に紐づく。
+                  // 動画を変えたら捨てる。残すと、新しい動画に**古い動画の時刻で**
+                  // クリップを置き、古い動画の発言テロップまで載ってしまう。
+                  setAssetId(e.target.value)
+                  setPlan(null)
+                  setCuts([])
+                  setScannedWindows([])
+                  setHookIndex(0)
+                }}
                 disabled={running}
               >
                 {videoAssets.map((a) => (
@@ -368,6 +416,42 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
               冒頭にフックのテロップを自動で入れる
             </label>
 
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={addSpeechCaptions}
+                onChange={(e) => setAddSpeechCaptions(e.target.checked)}
+                disabled={running}
+              />
+              本編の発言にもテロップを入れる(文字起こし済みの結果を使います)
+            </label>
+
+            {addSpeechCaptions && (
+              <div className="trim-field">
+                <label>発言テロップの強調色</label>
+                <div className="long-form-targets">
+                  {HIGHLIGHT_COLORS.map((c) => (
+                    <button
+                      key={c.value}
+                      className={`small-button ${highlightColor === c.value ? 'active' : ''}`}
+                      onClick={() => setHighlightColor(c.value)}
+                      disabled={running}
+                    >
+                      <span
+                        className="long-form-color-chip"
+                        style={{ backgroundColor: c.value }}
+                        aria-hidden
+                      />
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="hint-text">
+                  読み上げに合わせて単語がこの色に変わります(単語のタイミングが取れた発言のみ)。
+                </p>
+              </div>
+            )}
+
             {plan && (
               <>
                 <div className="trim-field">
@@ -422,12 +506,34 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
             {plan && (
               <div className="long-form-plan">
                 <h4>{plan.title || '構成案'}</h4>
-                {plan.hookLine && <p className="long-form-hook">冒頭テロップ: {plan.hookLine}</p>}
+                {plan.hookLines.length > 0 && (
+                  <div className="trim-field">
+                    <label>冒頭テロップ(使う案を選ぶ)</label>
+                    {plan.hookLines.map((h, i) => (
+                      <label key={i} className="checkbox-label">
+                        <input
+                          type="radio"
+                          name="long-form-hook"
+                          checked={hookIndex === i}
+                          onChange={() => setHookIndex(i)}
+                          disabled={running || !addHook}
+                        />
+                        {h}
+                      </label>
+                    ))}
+                    {!addHook && (
+                      <p className="hint-text">
+                        「冒頭にフックのテロップを自動で入れる」がオフのため追加されません。
+                      </p>
+                    )}
+                  </div>
+                )}
                 <p className="hint-text">
                   {cuts.length}個の区間 ・ 書き出し尺 {outputLength.toFixed(1)}秒(目標 {target}秒)
                   {transition !== 'none' &&
                     ` ・ つなぎで ${(timelineLength - outputLength).toFixed(1)}秒ぶん重なります`}
                   {trimmedTotal > 0.05 && ` ・ 無音を ${trimmedTotal.toFixed(1)}秒詰めました`}
+                  {addSpeechCaptions && ` ・ 発言テロップ ${speechOverlays.length}枚`}
                 </p>
                 <ol className="long-form-segments">
                   {cuts.map((c, i) => (
