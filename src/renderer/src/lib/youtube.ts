@@ -17,20 +17,22 @@ interface ApiThumbnails {
 interface ApiSnippet {
   title: string
   channelTitle: string
-  publishedAt: string
-  thumbnails: ApiThumbnails
+  publishedAt?: string
+  thumbnails?: ApiThumbnails
 }
 
 interface VideosListItem {
   id: string
-  snippet: ApiSnippet
-  contentDetails: { duration: string }
+  // snippet / contentDetails are only present when the API actually returned that
+  // part for this video; typing them as required hid the crash below from tsc.
+  snippet?: ApiSnippet
+  contentDetails?: { duration: string }
   statistics?: { viewCount?: string }
 }
 
 interface SearchListItem {
-  id: { videoId?: string }
-  snippet: ApiSnippet
+  id?: { videoId?: string }
+  snippet?: ApiSnippet
 }
 
 interface ApiError {
@@ -46,8 +48,34 @@ function parseIsoDuration(iso: string): number {
   return h * 3600 + m * 60 + s
 }
 
-function pickThumbnail(thumbnails: ApiThumbnails): string {
-  return thumbnails.medium?.url ?? thumbnails.default?.url ?? ''
+function pickThumbnail(thumbnails: ApiThumbnails | undefined): string {
+  return thumbnails?.medium?.url ?? thumbnails?.default?.url ?? ''
+}
+
+// The API omits parts for videos that went private or were deleted between the chart
+// query and the response, and `items` can carry nulls. Reading `item.snippet.title`
+// straight off such an entry threw "Cannot read properties of undefined", and because
+// it happened inside `.map()` it took the **whole list** down — the trend panel showed
+// a raw JS error instead of the other 14 videos. Skip the unusable entry instead.
+// (`statistics` was already treated as optional: YouTube hides view counts on request.)
+function toVideoInfo(
+  item: VideosListItem | null | undefined,
+  details?: { duration: number; views: number }
+): YouTubeVideoInfo | null {
+  if (!item?.id || !item.snippet) return null
+  return {
+    id: item.id,
+    title: item.snippet.title ?? '',
+    channelTitle: item.snippet.channelTitle ?? '',
+    thumbnailUrl: pickThumbnail(item.snippet.thumbnails),
+    durationSeconds: details?.duration ?? parseIsoDuration(item.contentDetails?.duration ?? ''),
+    viewCount: details?.views ?? Number(item.statistics?.viewCount ?? 0),
+    publishedAt: item.snippet.publishedAt ?? ''
+  }
+}
+
+function isPresent<T>(value: T | null): value is T {
+  return value !== null
 }
 
 async function fetchVideoDetails(
@@ -61,8 +89,9 @@ async function fetchVideoDetails(
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
   const map = new Map<string, { duration: number; views: number }>()
   for (const item of data.items ?? []) {
+    if (!item?.id) continue
     map.set(item.id, {
-      duration: parseIsoDuration(item.contentDetails.duration),
+      duration: parseIsoDuration(item.contentDetails?.duration ?? ''),
       views: Number(item.statistics?.viewCount ?? 0)
     })
   }
@@ -74,15 +103,7 @@ export async function fetchTrendingVideos(apiKey: string): Promise<YouTubeVideoI
   const res = await fetch(url)
   const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
-  return (data.items ?? []).map((item) => ({
-    id: item.id,
-    title: item.snippet.title,
-    channelTitle: item.snippet.channelTitle,
-    thumbnailUrl: pickThumbnail(item.snippet.thumbnails),
-    durationSeconds: parseIsoDuration(item.contentDetails.duration),
-    viewCount: Number(item.statistics?.viewCount ?? 0),
-    publishedAt: item.snippet.publishedAt
-  }))
+  return (data.items ?? []).map((item) => toVideoInfo(item)).filter(isPresent)
 }
 
 const GAMING_CATEGORY_ID = '20'
@@ -92,15 +113,7 @@ export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTube
   const res = await fetch(url)
   const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
-  return (data.items ?? []).map((item) => ({
-    id: item.id,
-    title: item.snippet.title,
-    channelTitle: item.snippet.channelTitle,
-    thumbnailUrl: pickThumbnail(item.snippet.thumbnails),
-    durationSeconds: parseIsoDuration(item.contentDetails.duration),
-    viewCount: Number(item.statistics?.viewCount ?? 0),
-    publishedAt: item.snippet.publishedAt
-  }))
+  return (data.items ?? []).map((item) => toVideoInfo(item)).filter(isPresent)
 }
 
 export async function searchVideos(apiKey: string, query: string): Promise<YouTubeVideoInfo[]> {
@@ -109,20 +122,16 @@ export async function searchVideos(apiKey: string, query: string): Promise<YouTu
   const data = await readJsonResponse<ApiError & { items?: SearchListItem[] }>(res, 'YouTube API')
   if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
   const items = data.items ?? []
-  const ids = items.map((i) => i.id.videoId).filter((id): id is string => Boolean(id))
+  const ids = items.map((i) => i?.id?.videoId).filter((id): id is string => Boolean(id))
   const details = await fetchVideoDetails(apiKey, ids)
   return items
-    .filter((i): i is SearchListItem & { id: { videoId: string } } => Boolean(i.id.videoId))
     .map((item) => {
-      const d = details.get(item.id.videoId)
-      return {
-        id: item.id.videoId,
-        title: item.snippet.title,
-        channelTitle: item.snippet.channelTitle,
-        thumbnailUrl: pickThumbnail(item.snippet.thumbnails),
-        durationSeconds: d?.duration ?? 0,
-        viewCount: d?.views ?? 0,
-        publishedAt: item.snippet.publishedAt
-      }
+      const videoId = item?.id?.videoId
+      if (!videoId) return null
+      return toVideoInfo(
+        { id: videoId, snippet: item.snippet },
+        details.get(videoId) ?? { duration: 0, views: 0 }
+      )
     })
+    .filter(isPresent)
 }
