@@ -32,9 +32,10 @@ const api = {
   scanLongFormWindows: (
     filePath: string,
     duration: number,
-    maxWindows: number
+    maxWindows: number,
+    visualWeight: number
   ): Promise<LongFormWindow[]> =>
-    ipcRenderer.invoke(IPC.scanLongFormWindows, filePath, duration, maxWindows),
+    ipcRenderer.invoke(IPC.scanLongFormWindows, filePath, duration, maxWindows, visualWeight),
   ensurePreviewProxy: (filePath: string, assetId: string): Promise<string> =>
     ipcRenderer.invoke(IPC.ensurePreviewProxy, filePath, assetId),
   onPreviewProxyProgress: (

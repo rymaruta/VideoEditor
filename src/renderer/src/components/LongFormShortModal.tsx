@@ -28,6 +28,13 @@ import type { TextOverlay, TranscriptSegment, TransitionType } from '@shared/typ
 const MAX_WINDOWS = 24
 const TARGET_OPTIONS = [20, 30, 45, 60]
 const PACE_OPTIONS: ShortPace[] = ['fast', 'normal', 'relaxed']
+// 候補区間を選ぶときに、音量スコアへ映像の変化量をどれだけ混ぜるか。
+// 0 のときは映像を一切デコードしないので、所要時間は今までと変わらない。
+const VISUAL_WEIGHT_OPTIONS: { value: number; label: string; hint: string }[] = [
+  { value: 0, label: '音量だけ', hint: '映像を読まないので一番速い' },
+  { value: 0.4, label: '音量+映像', hint: '候補区間の代表フレームだけを読んで、画の動きも見る' },
+  { value: 0.7, label: '映像を重めに', hint: '画が動いている場面を優先する' }
+]
 // Deliberately short. A long dissolve between two highlight cuts reads as amateur
 // footage, which is the exact problem this feature exists to fix.
 const TRANSITION_SECONDS = 0.3
@@ -88,6 +95,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
   const [hookIndex, setHookIndex] = useState(0)
   const [addSpeechCaptions, setAddSpeechCaptions] = useState(true)
   const [highlightColor, setHighlightColor] = useState(HIGHLIGHT_COLORS[0].value)
+  const [visualWeight, setVisualWeight] = useState(VISUAL_WEIGHT_OPTIONS[1].value)
   const [pace, setPace] = useState<ShortPace>('normal')
   const [tighten, setTighten] = useState(true)
   const [transition, setTransition] = useState<TransitionType>('none')
@@ -120,7 +128,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
     setCuts([])
     try {
       let scanned: ScannedWindow[]
-      if (canReuseScan(scanCache, asset)) {
+      if (canReuseScan(scanCache, asset, visualWeight)) {
         // 作り直しのたびに全編スキャンと文字起こしをやり直すと、長尺では数分〜数十分
         // 待たされる。候補区間は素材だけで決まるので、同じ素材なら使い回す。
         scanned = scanCache!.windows
@@ -129,7 +137,8 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
         const windows = await window.api.scanLongFormWindows(
           asset.filePath,
           asset.duration,
-          MAX_WINDOWS
+          MAX_WINDOWS,
+          visualWeight
         )
         if (windows.length === 0) {
           throw new Error(
@@ -157,7 +166,12 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
           scanned.push({ ...w, transcript, segments })
           setProgress({ done: i + 1, total: windows.length })
         }
-        setScanCache({ assetId: asset.id, filePath: asset.filePath, windows: scanned })
+        setScanCache({
+          assetId: asset.id,
+          filePath: asset.filePath,
+          visualWeight,
+          windows: scanned
+        })
       }
 
       setStage('planning')
@@ -347,6 +361,26 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="trim-field">
+              <label>場面の選び方</label>
+              <div className="long-form-targets">
+                {VISUAL_WEIGHT_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    className={`small-button ${visualWeight === o.value ? 'active' : ''}`}
+                    onClick={() => setVisualWeight(o.value)}
+                    disabled={running}
+                    title={o.hint}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <p className="hint-text">
+                {VISUAL_WEIGHT_OPTIONS.find((o) => o.value === visualWeight)?.hint}
+              </p>
             </div>
 
             <div className="trim-field">

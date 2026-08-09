@@ -282,8 +282,8 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.probeMedia, async (_e, filePath: string) => probeMedia(filePath))
   ipcMain.handle(
     IPC.scanLongFormWindows,
-    async (_e, filePath: string, duration: number, maxWindows: number) =>
-      scanLongFormWindows(filePath, duration, maxWindows)
+    async (_e, filePath: string, duration: number, maxWindows: number, visualWeight: number) =>
+      scanLongFormWindows(filePath, duration, maxWindows, visualWeight)
   )
   ipcMain.handle(IPC.ensurePreviewProxy, async (event, filePath: string, assetId: string) =>
     ensurePreviewProxy(filePath, (percent) => {

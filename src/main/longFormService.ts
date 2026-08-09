@@ -1,4 +1,4 @@
-import { detectAudioLevels } from './highlightService'
+import { detectAudioLevels, measureVisualActivity } from './highlightService'
 import type { LongFormWindow } from '@shared/types'
 
 /**
@@ -17,10 +17,13 @@ const MAX_WINDOW = 22
 // Peaks closer together than this belong to the same moment, not two separate ones.
 const PEAK_GAP = 2
 
-export function buildWindowsFromLevels(
+// 映像を読む候補は、音で絞った上位のさらに数倍まで。ここを広げるほど選び直しの幅は
+// 増えるが、デコードする区間もそのぶん増える。
+const VISUAL_OVERSCAN = 2
+
+export function buildWindowCandidates(
   levels: { time: number; rmsDb: number }[],
-  duration: number,
-  maxWindows: number
+  duration: number
 ): LongFormWindow[] {
   const finite = levels.filter((l) => Number.isFinite(l.rmsDb) && l.rmsDb > -90)
   if (finite.length === 0) return []
@@ -49,17 +52,21 @@ export function buildWindowsFromLevels(
     }
   }
 
-  const windows = groups.map((g) => {
+  return groups.map((g) => {
     const start = Math.max(0, g.start - WINDOW_LEAD_IN)
     let end = Math.min(duration, Math.max(g.end + WINDOW_TAIL, start + MIN_WINDOW))
     if (end - start > MAX_WINDOW) end = start + MAX_WINDOW
     return { start, end, score: g.intensity }
   })
+}
 
-  // Pick greedily by score but skip anything overlapping an already-chosen window, so
-  // the shortlist spans the recording instead of clustering on one loud passage.
+/**
+ * Pick greedily by score but skip anything overlapping an already-chosen window, so
+ * the shortlist spans the recording instead of clustering on one loud passage.
+ */
+export function pickWindows(candidates: LongFormWindow[], maxWindows: number): LongFormWindow[] {
   const chosen: LongFormWindow[] = []
-  for (const w of [...windows].sort((a, b) => b.score - a.score)) {
+  for (const w of [...candidates].sort((a, b) => b.score - a.score)) {
     if (chosen.length >= maxWindows) break
     if (chosen.some((c) => w.start < c.end && w.end > c.start)) continue
     chosen.push(w)
@@ -67,11 +74,56 @@ export function buildWindowsFromLevels(
   return chosen.sort((a, b) => a.start - b.start)
 }
 
+/**
+ * 音量スコアと映像の変化量を混ぜ直す。
+ *
+ * 2つの尺度は単位がまるで違う(音量は z 値の積み上げ、映像は輝度差の平均)ので、
+ * それぞれ**その回の最大値で割って 0〜1 に揃えてから**重み付けする。
+ * 映像を測れなかった区間(`null`)は音量スコアだけで評価する — 0 として混ぜると、
+ * キーフレームが疎なだけの区間が確実に落ちてしまう。
+ */
+export function blendVisualScores(
+  windows: LongFormWindow[],
+  visualChanges: (number | null)[],
+  visualWeight: number
+): LongFormWindow[] {
+  const weight = Math.min(1, Math.max(0, visualWeight))
+  if (!(weight > 0)) return windows
+  const audioMax = Math.max(0, ...windows.map((w) => (Number.isFinite(w.score) ? w.score : 0)))
+  const visualMax = Math.max(
+    0,
+    ...visualChanges.map((v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0))
+  )
+  return windows.map((w, i) => {
+    const audioNorm = audioMax > 0 && Number.isFinite(w.score) ? w.score / audioMax : 0
+    const change = visualChanges[i]
+    if (typeof change !== 'number' || !Number.isFinite(change) || visualMax <= 0) {
+      return { ...w, score: audioNorm }
+    }
+    return { ...w, score: (1 - weight) * audioNorm + weight * (change / visualMax) }
+  })
+}
+
+export function buildWindowsFromLevels(
+  levels: { time: number; rmsDb: number }[],
+  duration: number,
+  maxWindows: number
+): LongFormWindow[] {
+  return pickWindows(buildWindowCandidates(levels, duration), maxWindows)
+}
+
 export async function scanLongFormWindows(
   filePath: string,
   duration: number,
-  maxWindows: number
+  maxWindows: number,
+  visualWeight = 0
 ): Promise<LongFormWindow[]> {
   const levels = await detectAudioLevels(filePath)
-  return buildWindowsFromLevels(levels, duration, maxWindows)
+  const candidates = buildWindowCandidates(levels, duration)
+  if (!(visualWeight > 0)) return pickWindows(candidates, maxWindows)
+
+  // 映像を読むのは、音で絞ったこの数件だけ。素材全体はデコードしない。
+  const shortlist = pickWindows(candidates, maxWindows * VISUAL_OVERSCAN)
+  const changes = await measureVisualActivity(filePath, shortlist)
+  return pickWindows(blendVisualScores(shortlist, changes, visualWeight), maxWindows)
 }

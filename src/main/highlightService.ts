@@ -164,6 +164,60 @@ export async function detectHighlights(
     .slice(0, highlightCandidateLimit(assetDuration))
 }
 
+/**
+ * 候補区間の「画がどれだけ動いたか」を測る。
+ *
+ * **区間の全フレームはデコードしない。** `-skip_frame nokey` でキーフレームだけを取り出し、
+ * 64x36 に縮めて `signalstats` の YDIF(前フレームとの平均差分)を読む。シーンの切り替わりも
+ * 動きの大きさも、同じ1つの値として拾える。
+ *
+ * 測れなかった区間(キーフレームが1枚以下)は `null` を返す。0 を返すと「動きが無い区間」と
+ * 区別できず、キーフレームが疎なだけの区間を不当に落としてしまう。
+ */
+export async function measureVisualActivity(
+  filePath: string,
+  ranges: { start: number; end: number }[]
+): Promise<(number | null)[]> {
+  const results: (number | null)[] = []
+  for (const range of ranges) {
+    const duration = range.end - range.start
+    if (!Number.isFinite(duration) || duration <= 0) {
+      results.push(null)
+      continue
+    }
+    const { stdout } = await runFfmpeg([
+      '-skip_frame',
+      'nokey',
+      '-ss',
+      String(range.start),
+      '-t',
+      String(duration),
+      '-i',
+      filePath,
+      '-an',
+      '-vf',
+      'scale=64:36,signalstats,metadata=print:key=lavfi.signalstats.YDIF:file=-',
+      '-fps_mode',
+      'passthrough',
+      '-f',
+      'null',
+      '-'
+    ])
+    const values: number[] = []
+    const regex = /lavfi\.signalstats\.YDIF=([\d.]+)/g
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(stdout))) {
+      const value = Number(match[1])
+      if (Number.isFinite(value)) values.push(value)
+    }
+    // 1枚目は比較相手がおらず必ず 0 になるので、差分として意味があるのは2枚目以降。
+    results.push(
+      values.length < 2 ? null : values.slice(1).reduce((s, v) => s + v, 0) / (values.length - 1)
+    )
+  }
+  return results
+}
+
 export async function analyzeReferenceStyle(filePath: string): Promise<ReferenceStyleAnalysis> {
   const cutTimes = await detectSceneChanges(filePath)
   return { cutTimes }

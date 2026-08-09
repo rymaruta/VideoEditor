@@ -307,6 +307,8 @@ export interface ShortRefinement {
 export interface ScanCache {
   assetId: string
   filePath: string
+  /** その候補区間を出したときの映像スコアの重み。変えたら測り直す必要がある */
+  visualWeight: number
   windows: ScannedWindow[]
 }
 
@@ -315,14 +317,21 @@ export interface ScanCache {
  *
  * ここを間違えると**別の動画の時刻で切る**ことになり、画面の構成案と出来上がりが
  * 食い違う。素材の再リンクでは `id` が変わらず `filePath` だけ変わるので、両方を見る。
+ * 映像スコアの重みは候補区間そのものを変えるので、これも一致していないと使い回せない
+ * (使い回すと、UIで重みを変えたのに結果が変わらない)。
  */
 export function canReuseScan(
   cache: ScanCache | null,
-  asset: { id: string; filePath: string } | undefined
+  asset: { id: string; filePath: string } | undefined,
+  visualWeight: number
 ): boolean {
   if (!cache || !asset) return false
   if (cache.windows.length === 0) return false
-  return cache.assetId === asset.id && cache.filePath === asset.filePath
+  return (
+    cache.assetId === asset.id &&
+    cache.filePath === asset.filePath &&
+    cache.visualWeight === visualWeight
+  )
 }
 
 function buildRefinementSection(refinement: ShortRefinement | undefined): string {
