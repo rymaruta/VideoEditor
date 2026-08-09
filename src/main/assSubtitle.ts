@@ -36,6 +36,9 @@ function toAssAlpha(opacity: number): string {
   return `&H${alpha.toString(16).padStart(2, '0').toUpperCase()}&`
 }
 
+// How far the background box extends past the text, in the same units as \bord.
+const BOX_PADDING = 6
+
 // ASS has no escape for a literal backslash — libass reads \N, \n and \h as control
 // sequences — so a caption typed as "C:\Nintendo" rendered as "C:" + a line break +
 // "intendo": the N was swallowed and an unwanted line appeared. A zero-width space
@@ -92,7 +95,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,3,3,0,5,40,40,40,1
+Style: Default,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1
+Style: Boxed,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,3,3,0,5,40,40,40,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
@@ -129,13 +133,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     const bold = style.bold ? 1 : 0
     const italic = style.italic ? 1 : 0
 
+    // BorderStyle=1 draws \bord as an outline in \3c and \shad as a shadow in \4c.
+    // The Default style used to be BorderStyle=3 (opaque box), which reads the very
+    // same tags as a *box* — so the default caption (outline on, background off)
+    // exported as white text inside a black box, a background box exported with no
+    // box at all, and \4a&HFF& silently made every shadow invisible too.
     const outlineTags = style.outline
       ? `\\3c${toAssColor(style.outlineColor)}\\bord${style.outlineWidth}`
       : '\\bord0'
-    const shadowTag = `\\shad${style.shadow ? 2 : 0}`
-    const backgroundTags = style.background
-      ? `\\4c${toAssColor(style.backgroundColor)}\\4a${toAssAlpha(style.backgroundOpacity)}`
-      : '\\4a&HFF&'
+    const shadowTags = style.shadow ? '\\shad2\\4c&H00000000\\4a&H60&' : '\\shad0'
     const spacingTag = style.letterSpacing ? `\\fsp${style.letterSpacing}` : ''
 
     let animationTag = ''
@@ -148,13 +154,33 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
         '\\fscx30\\fscy30\\t(0,250,\\fscx115\\fscy115)\\t(250,350,\\fscx92\\fscy92)\\t(350,500,\\fscx100\\fscy100)'
     }
 
-    const override = `{${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\1c${primaryColor}${secondaryTag}\\b${bold}\\i${italic}${spacingTag}${outlineTags}${shadowTag}${backgroundTags}${animationTag}}`
+    const common = `${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\b${bold}\\i${italic}${spacingTag}`
+    const override = `{${common}\\1c${primaryColor}${secondaryTag}${outlineTags}${shadowTags}${animationTag}}`
     const text = useKaraoke
       ? buildKaraokeText(o.words!, o.startTime)
       : style.animation === 'typewriter'
         ? buildTypewriterText(o.text, 40, 50)
         : escapeAssText(o.text)
-    return `Dialogue: 0,${toAssTime(o.startTime)},${toAssTime(o.endTime)},Default,,0,0,${marginVOf(style.position)},,${override}${text}`
+
+    const start = toAssTime(o.startTime)
+    const end = toAssTime(o.endTime)
+    const marginV = marginVOf(style.position)
+    if (!style.background) {
+      return `Dialogue: 0,${start},${end},Default,,0,0,${marginV},,${override}${text}`
+    }
+
+    // A box and an outline cannot come from the same ASS line: BorderStyle is a style
+    // property and \bord means "box padding" under BorderStyle=3. So the box is its own
+    // line underneath — same font, position and animation so the two move together —
+    // carrying invisible text (\1a&HFF&) purely to size the box. The visible text then
+    // draws on the layer above and keeps its outline.
+    const boxOverride =
+      `{${common}\\1a&HFF&\\3c${toAssColor(style.backgroundColor)}` +
+      `\\3a${toAssAlpha(style.backgroundOpacity)}\\bord${BOX_PADDING}\\shad0${animationTag}}`
+    return [
+      `Dialogue: 0,${start},${end},Boxed,,0,0,${marginV},,${boxOverride}${escapeAssText(o.text)}`,
+      `Dialogue: 1,${start},${end},Default,,0,0,${marginV},,${override}${text}`
+    ].join('\n')
   })
 
   return `${header}\n${lines.join('\n')}\n`
