@@ -8,6 +8,7 @@ import type {
   AutoEditPattern,
   BeatGrid,
   Clip,
+  ClipColorLabel,
   EditTemplate,
   MediaAsset,
   PipPosition,
@@ -126,6 +127,8 @@ interface ProjectState {
   removeClips: (clipIds: string[]) => void
   duplicateClips: (clipIds: string[]) => void
   updateClipsSpeed: (clipIds: string[], speed: number) => void
+  /** 分類用の色ラベルを付ける。`label` が undefined なら外す */
+  updateClipsColorLabel: (clipIds: string[], label: ClipColorLabel | undefined) => void
   moveClip: (clipId: string, direction: 'left' | 'right') => void
   moveClipToIndex: (clipId: string, targetIndex: number) => void
   setAspectRatio: (ratio: AspectRatio) => void
@@ -1035,6 +1038,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           ...state.project,
           // 分離音声にも同じ速度がミラーされるので、分離済みでも速度を変えられる。
           clips: state.project.clips.map((c) => (idSet.has(c.id) ? { ...c, speed } : c))
+        }
+      }
+    }),
+
+  // 単一選択も複数選択も同じアクションを通す(呼び出し側が [clip.id] を渡す)。
+  // 経路を分けると片方だけ直す事故が起きるため。
+  updateClipsColorLabel: (clipIds, label) =>
+    set((state) => {
+      const idSet = new Set(clipIds)
+      if (!state.project.clips.some((c) => idSet.has(c.id))) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          clips: state.project.clips.map((c) => (idSet.has(c.id) ? { ...c, colorLabel: label } : c))
         }
       }
     }),

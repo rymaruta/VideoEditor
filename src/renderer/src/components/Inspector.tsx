@@ -2,11 +2,53 @@ import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
 import { buildTimedClips } from '../lib/timelineMath'
-import type { TransitionType } from '@shared/types'
-import { GaugeIcon, LayersIcon, MusicIcon, ScissorsIcon, TargetIcon } from './icons'
+import { CLIP_COLORS } from '../lib/clipColors'
+import type { ClipColorLabel, TransitionType } from '@shared/types'
+import { GaugeIcon, LayersIcon, MusicIcon, ScissorsIcon, TagIcon, TargetIcon } from './icons'
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
 const MIN_CLIP_SOURCE_DURATION = 0.1
+
+/**
+ * 色ラベルの選択欄。単一選択でも複数選択でも同じものを使う。
+ * `current` は複数選択でばらばらのときに undefined になり、どれも選択中に見えない。
+ */
+function ClipColorPicker({
+  current,
+  mixed = false,
+  onPick
+}: {
+  current: ClipColorLabel | undefined
+  /** 複数選択で色がばらばらのとき。どのボタンも選択中にしない */
+  mixed?: boolean
+  onPick: (label: ClipColorLabel | undefined) => void
+}): React.JSX.Element {
+  return (
+    <div className="clip-color-row">
+      <button
+        type="button"
+        className={`clip-color-swatch clip-color-none ${
+          !mixed && current === undefined ? 'active' : ''
+        }`}
+        title="色ラベルを外す"
+        onClick={() => onPick(undefined)}
+      >
+        なし
+      </button>
+      {CLIP_COLORS.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          className={`clip-color-swatch ${!mixed && current === c.id ? 'active' : ''}`}
+          style={{ background: c.color }}
+          title={c.label}
+          aria-label={c.label}
+          onClick={() => onPick(c.id)}
+        />
+      ))}
+    </div>
+  )
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return '0:00.00'
@@ -30,6 +72,7 @@ export function Inspector(): React.JSX.Element {
   const updateClipTrim = useProjectStore((s) => s.updateClipTrim)
   const updateClipSpeed = useProjectStore((s) => s.updateClipSpeed)
   const updateClipsSpeed = useProjectStore((s) => s.updateClipsSpeed)
+  const updateClipsColorLabel = useProjectStore((s) => s.updateClipsColorLabel)
   const updateClipCrop = useProjectStore((s) => s.updateClipCrop)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
   const detachClipAudio = useProjectStore((s) => s.detachClipAudio)
@@ -44,6 +87,11 @@ export function Inspector(): React.JSX.Element {
   const timedClips = buildTimedClips(project)
   const index = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const timed = index >= 0 ? timedClips[index] : null
+
+  // 選択中の色がばらばらのときは undefined にして、どの色も選択中に見せない
+  const multiSelectedClips = project.clips.filter((c) => multiSelectedClipIds.includes(c.id))
+  const firstColorLabel = multiSelectedClips[0]?.colorLabel
+  const multiColorsMixed = !multiSelectedClips.every((c) => c.colorLabel === firstColorLabel)
 
   if (multiSelectedClipIds.length > 1) {
     return (
@@ -70,6 +118,20 @@ export function Inspector(): React.JSX.Element {
           </div>
           <p className="hint-text">
             音声を分離済みのクリップは、音声トラックとズレるため速度変更の対象から外れます。
+          </p>
+        </div>
+        <div className="inspector-section">
+          <h3>
+            <TagIcon width={13} height={13} />
+            色ラベル(一括)
+          </h3>
+          <ClipColorPicker
+            current={firstColorLabel}
+            mixed={multiColorsMixed}
+            onPick={(label) => updateClipsColorLabel(multiSelectedClipIds, label)}
+          />
+          <p className="hint-text">
+            選択中のクリップにまとめて色を付けます。書き出しの内容には影響しません。
           </p>
         </div>
       </div>
@@ -220,6 +282,20 @@ export function Inspector(): React.JSX.Element {
         {clip.audioDetached && (
           <p className="hint-text">分離した音声トラックにも同じ速度が掛かります。</p>
         )}
+      </div>
+
+      <div className="inspector-section">
+        <h3>
+          <TagIcon width={13} height={13} />
+          色ラベル
+        </h3>
+        <ClipColorPicker
+          current={clip.colorLabel}
+          onPick={(label) => updateClipsColorLabel([clip.id], label)}
+        />
+        <p className="hint-text">
+          タイムライン上で見分けるための色です。書き出しの内容には影響しません。
+        </p>
       </div>
 
       {mismatch && (

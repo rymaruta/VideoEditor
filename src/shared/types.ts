@@ -24,6 +24,9 @@ export interface Transition {
   duration: number
 }
 
+/** クリップの分類用の色ラベル。未設定(undefined)は「色なし」 */
+export type ClipColorLabel = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple'
+
 export interface Clip {
   id: string
   assetId: string
@@ -34,6 +37,7 @@ export interface Clip {
   fillCrop?: boolean
   cropCenter?: { x: number; y: number }
   audioDetached?: boolean
+  colorLabel?: ClipColorLabel
 }
 
 export type AspectRatio = '16:9' | '9:16'

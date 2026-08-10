@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { snapTime } from '../lib/snapping'
+import { clipColorOf } from '../lib/clipColors'
 import {
   SHORTCUT_ACTIONS,
   getActionLabel,
@@ -1578,6 +1579,12 @@ export function Timeline(): React.JSX.Element {
                         </div>
                       )}
                     </div>
+                  )}
+                  {clipColorOf(tc.clip.colorLabel) && (
+                    <span
+                      className="timeline-clip-color"
+                      style={{ background: clipColorOf(tc.clip.colorLabel) ?? undefined }}
+                    />
                   )}
                   <span className="timeline-clip-index">{i + 1}</span>
                   <span className="timeline-clip-label" title={tc.asset.fileName}>
