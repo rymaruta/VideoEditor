@@ -14,6 +14,7 @@ import type {
   TransitionType
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
+import { targetResolution } from '@shared/resolution'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -245,17 +246,6 @@ export function detectSilence(
       })
       .run()
   })
-}
-
-function targetResolution(
-  aspectRatio: AspectRatio,
-  standard: ResolutionHeight
-): { w: number; h: number } {
-  const longSide = Math.round((standard * 16) / 9 / 2) * 2
-  if (aspectRatio === '9:16') {
-    return { w: standard, h: longSide }
-  }
-  return { w: longSide, h: standard }
 }
 
 function crfForQuality(quality: QualityPreset): number {

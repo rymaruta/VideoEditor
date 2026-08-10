@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
+import { useSettingsStore } from '../store/settingsStore'
 import {
   DownloadIcon,
   FolderIcon,
@@ -68,7 +69,9 @@ export function ExportPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const missingAssetIds = useProjectStore((s) => s.missingAssetIds)
   const setAspectRatio = useProjectStore((s) => s.setAspectRatio)
-  const [resolutionHeight, setResolutionHeight] = useState<ResolutionHeight>(1080)
+  // プレビューのテロップも同じ解像度で換算するので、ストア経由で共有する
+  const resolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
+  const setResolutionHeight = useSettingsStore((s) => s.setExportResolutionHeight)
   const [quality, setQuality] = useState<QualityPreset>('standard')
   const [loudnessNormalization, setLoudnessNormalization] = useState(true)
   const [progress, setProgress] = useState<{ percent: number; stage: string } | null>(null)

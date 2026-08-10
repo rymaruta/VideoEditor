@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
+import type { ResolutionHeight } from '@shared/types'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
@@ -9,6 +10,16 @@ const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
 const SNAP_ENABLED_KEY = 've-snap-enabled'
 const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible'
 const SHORT_NOTE_KEY = 've-short-note'
+const EXPORT_RESOLUTION_KEY = 've-export-resolution'
+
+const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
+
+// プレビューのテロップは「出力ピクセル」を枠の大きさへ換算して描くため、
+// 書き出しの解像度をプレビュー側からも読める必要がある。
+function readExportResolution(): ResolutionHeight {
+  const n = Number(localStorage.getItem(EXPORT_RESOLUTION_KEY))
+  return RESOLUTION_HEIGHTS.includes(n as ResolutionHeight) ? (n as ResolutionHeight) : 1080
+}
 
 export interface EnvKeySources {
   youtubeApiKey: boolean
@@ -32,6 +43,9 @@ interface SettingsState {
   setSnapEnabled: (enabled: boolean) => void
   shortcutGuideVisible: boolean
   setShortcutGuideVisible: (visible: boolean) => void
+  /** 書き出しの解像度。プレビューのテロップ換算にも使うので画面をまたいで共有する */
+  exportResolutionHeight: ResolutionHeight
+  setExportResolutionHeight: (height: ResolutionHeight) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -83,6 +97,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShortcutGuideVisible: (visible) => {
     localStorage.setItem(SHORTCUT_GUIDE_VISIBLE_KEY, String(visible))
     set({ shortcutGuideVisible: visible })
+  },
+  exportResolutionHeight: readExportResolution(),
+  setExportResolutionHeight: (height) => {
+    localStorage.setItem(EXPORT_RESOLUTION_KEY, String(height))
+    set({ exportResolutionHeight: height })
   },
   shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {

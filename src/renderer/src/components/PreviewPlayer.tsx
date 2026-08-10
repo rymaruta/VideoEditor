@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
+import { targetResolution } from '@shared/resolution'
 import {
   audioClipDuration,
   buildTimedClips,
@@ -56,7 +58,16 @@ const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
   'Noto Serif JP': '"Noto Serif JP", serif'
 }
 
-function overlayPreviewStyle(style: TextStyle): CSSProperties {
+/**
+ * テロップの見た目を画面用に組み立てる。
+ *
+ * 書き出しは ASS の PlayResX/PlayResY を出力解像度に合わせているので、`fontSize` と
+ * `letterSpacing` は**出力ピクセル**の値になる。プレビュー枠は出力よりずっと小さいので、
+ * 「枠の高さ / 出力の高さ」を掛けて同じ比率で描く。ここを固定倍率にしていたときは、
+ * サイズ40のテロップが画面では枠高の 6.77% を占めるのに、1080p の書き出しでは 2.08%
+ * にしかならず、画面で決めたサイズが出力で使えなかった。
+ */
+function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
   const shadows: string[] = []
   if (style.outline) {
     const w = Math.max(1, Math.round(style.outlineWidth * 0.6))
@@ -73,11 +84,11 @@ function overlayPreviewStyle(style: TextStyle): CSSProperties {
   }
   return {
     fontFamily: FONT_STACKS[style.fontFamily],
-    fontSize: style.fontSize * 0.4,
+    fontSize: style.fontSize * scale,
     color: style.color,
     fontWeight: style.bold ? 700 : 400,
     fontStyle: style.italic ? 'italic' : 'normal',
-    letterSpacing: style.letterSpacing ? `${style.letterSpacing * 0.4}px` : undefined,
+    letterSpacing: style.letterSpacing ? `${style.letterSpacing * scale}px` : undefined,
     textShadow: shadows.length > 0 ? shadows.join(', ') : undefined,
     backgroundColor: style.background
       ? hexToRgba(style.backgroundColor, style.backgroundOpacity)
@@ -277,9 +288,13 @@ export function PreviewPlayer(): React.JSX.Element {
   const seekRequest = useProjectStore((s) => s.seekRequest)
   const seekTo = useProjectStore((s) => s.seekTo)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
+  const exportResolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const frameRef = useRef<HTMLDivElement>(null)
+  // 枠の高さは左右パネルのドラッグ・ウィンドウリサイズ・プレビューの拡大で変わるので、
+  // 実測して追従させる。テロップの換算倍率の分母になる。
+  const [frameHeight, setFrameHeight] = useState(0)
   const activeTimedClipRef = useRef<TimedClip | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
   const [showShortsUi, setShowShortsUi] = useState(false)
@@ -310,6 +325,27 @@ export function PreviewPlayer(): React.JSX.Element {
   // A file whose video stream can't be decoded but whose audio can (HEVC video + AAC
   // audio) loads "successfully" and fires no error — it just never produces a frame.
   // videoWidth is the only signal that separates it from a working clip.
+  // 枠の実寸を測って追従する。ResizeObserver なので、パネルのドラッグでも
+  // ウィンドウリサイズでも拡大表示の切り替えでも同じ経路で更新される。
+  // useEffect だと描画のあとに測ることになり、最初の1フレームだけ倍率0(文字が消える)
+  // で描かれてしまうため、描画前に走る useLayoutEffect を使う。
+  useLayoutEffect(() => {
+    const el = frameRef.current
+    if (!el) return
+    setFrameHeight(el.getBoundingClientRect().height)
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (rect) setFrameHeight(rect.height)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [isExpanded])
+
+  // 書き出しの ASS は PlayResY = 出力の高さ、文字サイズは出力ピクセル。
+  // 画面では「枠の高さ / 出力の高さ」倍で描くと、フレームに対する比率が出力と一致する。
+  const outputHeight = targetResolution(project.aspectRatio, exportResolutionHeight).h
+  const overlayScale = frameHeight > 0 && outputHeight > 0 ? frameHeight / outputHeight : 0
+
   function handleLoadedMetadata(): void {
     const video = videoRef.current
     if (!video) return
@@ -604,7 +640,7 @@ export function PreviewPlayer(): React.JSX.Element {
                 <div
                   key={o.id}
                   className={`overlay-text ${livePos ? '' : `overlay-${o.style.position}`} anim-${o.style.animation}`}
-                  style={{ ...overlayPreviewStyle(o.style), ...positionStyle }}
+                  style={{ ...overlayPreviewStyle(o.style, overlayScale), ...positionStyle }}
                   onMouseDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
