@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
@@ -145,6 +145,65 @@ interface OverlayDragState {
 
 const MIN_OVERLAY_DURATION = 0.2
 
+// The playhead is the only part of the timeline that has to follow `playheadTime`
+// every frame. Keeping the subscription in this small component means playback
+// re-renders these two divs instead of the whole timeline (clips, tracks, rulers).
+function TimelinePlayhead({
+  total,
+  pixelsPerSecond,
+  scrubbing,
+  onScrubStart
+}: {
+  total: number
+  pixelsPerSecond: number
+  scrubbing: boolean
+  onScrubStart: () => void
+}): React.JSX.Element {
+  const playheadTime = useProjectStore((s) => s.playheadTime)
+  return (
+    <div
+      className="timeline-playhead"
+      style={{ left: Math.min(playheadTime, total) * pixelsPerSecond }}
+    >
+      <div
+        className={`timeline-playhead-handle ${scrubbing ? 'active' : ''}`}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onScrubStart()
+        }}
+      />
+    </div>
+  )
+}
+
+// Same reason: the split button's disabled state depends on the live playhead, so it
+// subscribes on its own instead of forcing the timeline to re-render every frame.
+function SplitAtPlayheadButton({
+  title,
+  start,
+  end,
+  onSplit
+}: {
+  title: string
+  start: number
+  end: number
+  onSplit: (time: number) => void
+}): React.JSX.Element {
+  const playheadTime = useProjectStore((s) => s.playheadTime)
+  return (
+    <button
+      className="small-button"
+      title={title}
+      disabled={playheadTime <= start || playheadTime >= end}
+      onClick={() => onSplit(playheadTime)}
+    >
+      <ScissorsIcon width={13} height={13} />
+      カット
+    </button>
+  )
+}
+
 export function Timeline(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const selectedClipId = useProjectStore((s) => s.selectedClipId)
@@ -155,7 +214,6 @@ export function Timeline(): React.JSX.Element {
   const duplicateClips = useProjectStore((s) => s.duplicateClips)
   const updateClipsSpeed = useProjectStore((s) => s.updateClipsSpeed)
   const seekTo = useProjectStore((s) => s.seekTo)
-  const playheadTime = useProjectStore((s) => s.playheadTime)
   const removeClip = useProjectStore((s) => s.removeClip)
   const moveClip = useProjectStore((s) => s.moveClip)
   const moveClipToIndex = useProjectStore((s) => s.moveClipToIndex)
@@ -255,7 +313,7 @@ export function Timeline(): React.JSX.Element {
   const baseTimedClips = useMemo(() => buildTimedClips(project), [project])
 
   const snapCandidates = useMemo(() => {
-    const times: number[] = [0, playheadTime]
+    const times: number[] = [0]
     baseTimedClips.forEach((tc) => {
       times.push(tc.start, tc.end)
     })
@@ -273,13 +331,7 @@ export function Timeline(): React.JSX.Element {
       times.push(o.startTime, o.endTime)
     })
     return times
-  }, [
-    baseTimedClips,
-    playheadTime,
-    project.audioTracks,
-    project.videoOverlayTracks,
-    project.textOverlays
-  ])
+  }, [baseTimedClips, project.audioTracks, project.videoOverlayTracks, project.textOverlays])
 
   const beatTimes = useMemo(() => {
     const grid = project.beatGrid
@@ -300,8 +352,13 @@ export function Timeline(): React.JSX.Element {
     [snapCandidates, beatTimes]
   )
 
-  const activeSnapCandidates = useMemo(
-    () => (snapEnabled ? snapCandidatesWithBeat : []),
+  // Snap candidates include the playhead, but the playhead moves every frame during
+  // playback. Subscribing to it here would rebuild this array — and re-render the whole
+  // timeline — 60 times a second. Snapping only ever runs inside a drag handler, so the
+  // playhead is read live at that moment instead of being subscribed to.
+  const getSnapCandidates = useCallback(
+    (): number[] =>
+      snapEnabled ? [...snapCandidatesWithBeat, useProjectStore.getState().playheadTime] : [],
     [snapEnabled, snapCandidatesWithBeat]
   )
 
@@ -328,15 +385,16 @@ export function Timeline(): React.JSX.Element {
       // global keyboard shortcut hook (which only knows about the main clips track's
       // selectedClipId) — so split/delete for these clips has to be handled locally too.
       if (matchesBinding(e, keymap.split)) {
+        const now = useProjectStore.getState().playheadTime
         if (selectedAudioClip) {
           e.preventDefault()
-          splitAudioClipAtTime(selectedAudioClip.trackId, selectedAudioClip.clipId, playheadTime)
+          splitAudioClipAtTime(selectedAudioClip.trackId, selectedAudioClip.clipId, now)
         } else if (selectedVideoOverlayClip) {
           e.preventDefault()
           splitVideoOverlayClipAtTime(
             selectedVideoOverlayClip.trackId,
             selectedVideoOverlayClip.clipId,
-            playheadTime
+            now
           )
         }
         return
@@ -367,7 +425,6 @@ export function Timeline(): React.JSX.Element {
     removeVideoOverlayClip,
     splitAudioClipAtTime,
     splitVideoOverlayClipAtTime,
-    playheadTime,
     keymap.split
   ])
 
@@ -375,6 +432,8 @@ export function Timeline(): React.JSX.Element {
     if (!trimDrag) return
     const trimDragSnapshot = trimDrag
     function handleMouseMove(e: MouseEvent): void {
+      // Read the store outside the state updater: React runs updaters during render.
+      const candidates = getSnapCandidates()
       setTrimDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = ((e.clientX - prev.startX) / pixelsPerSecond) * prev.speed
@@ -393,11 +452,7 @@ export function Timeline(): React.JSX.Element {
         }
         const rawTcEnd = prev.clipStartInTimeline + (liveOutPoint - liveInPoint) / prev.speed
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
-        const { time: snappedTcEnd, snapped } = snapTime(
-          rawTcEnd,
-          activeSnapCandidates,
-          thresholdSeconds
-        )
+        const { time: snappedTcEnd, snapped } = snapTime(rawTcEnd, candidates, thresholdSeconds)
         if (snapped) {
           const snappedDuration = snappedTcEnd - prev.clipStartInTimeline
           if (prev.edge === 'left') {
@@ -434,7 +489,7 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [trimDrag, pixelsPerSecond, updateClipTrim, activeSnapCandidates])
+  }, [trimDrag, pixelsPerSecond, updateClipTrim, getSnapCandidates])
 
   // A / T / B pick the editing tool, matching the muscle memory of every NLE. Guarded
   // against firing while typing, and against modifier combos that belong to other
@@ -490,16 +545,18 @@ export function Timeline(): React.JSX.Element {
     if (!audioDrag) return
     const audioDragSnapshot = audioDrag
     function handleMouseMove(e: MouseEvent): void {
+      // Read the store outside the state updater: React runs updaters during render.
+      const candidates = getSnapCandidates()
       setAudioDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
         const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
-        const startSnap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
+        const startSnap = snapTime(rawStart, candidates, thresholdSeconds)
         if (startSnap.snapped) {
           return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
         }
-        const endSnap = snapTime(rawStart + prev.duration, activeSnapCandidates, thresholdSeconds)
+        const endSnap = snapTime(rawStart + prev.duration, candidates, thresholdSeconds)
         if (endSnap.snapped) {
           return {
             ...prev,
@@ -524,12 +581,14 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, activeSnapCandidates])
+  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, getSnapCandidates])
 
   useEffect(() => {
     if (!mediaTrimDrag) return
     const mediaTrimDragSnapshot = mediaTrimDrag
     function handleMouseMove(e: MouseEvent): void {
+      // Read the store outside the state updater: React runs updaters during render.
+      const candidates = getSnapCandidates()
       setMediaTrimDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
@@ -540,11 +599,7 @@ export function Timeline(): React.JSX.Element {
           const maxDelta = prev.originalOutPoint - prev.originalInPoint - MIN_CLIP_SOURCE_DURATION
           const minDelta = -Math.min(prev.originalInPoint, prev.originalStartTime)
           let delta = Math.min(maxDelta, Math.max(minDelta, deltaSeconds))
-          const snap = snapTime(
-            prev.originalStartTime + delta,
-            activeSnapCandidates,
-            thresholdSeconds
-          )
+          const snap = snapTime(prev.originalStartTime + delta, candidates, thresholdSeconds)
           if (snap.snapped) {
             delta = Math.min(maxDelta, Math.max(minDelta, snap.time - prev.originalStartTime))
           }
@@ -561,7 +616,7 @@ export function Timeline(): React.JSX.Element {
         let delta = Math.min(maxDelta, Math.max(minDelta, deltaSeconds))
         const rawEnd =
           prev.originalStartTime + (prev.originalOutPoint + delta - prev.originalInPoint)
-        const snap = snapTime(rawEnd, activeSnapCandidates, thresholdSeconds)
+        const snap = snapTime(rawEnd, candidates, thresholdSeconds)
         if (snap.snapped) {
           const snappedOutPoint = prev.originalInPoint + (snap.time - prev.originalStartTime)
           delta = Math.min(maxDelta, Math.max(minDelta, snappedOutPoint - prev.originalOutPoint))
@@ -604,7 +659,7 @@ export function Timeline(): React.JSX.Element {
   }, [
     mediaTrimDrag,
     pixelsPerSecond,
-    activeSnapCandidates,
+    getSnapCandidates,
     updateAudioClipStartAndTrim,
     updateVideoOverlayClipStartAndTrim
   ])
@@ -613,16 +668,18 @@ export function Timeline(): React.JSX.Element {
     if (!videoOverlayDrag) return
     const videoOverlayDragSnapshot = videoOverlayDrag
     function handleMouseMove(e: MouseEvent): void {
+      // Read the store outside the state updater: React runs updaters during render.
+      const candidates = getSnapCandidates()
       setVideoOverlayDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
         const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
-        const startSnap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
+        const startSnap = snapTime(rawStart, candidates, thresholdSeconds)
         if (startSnap.snapped) {
           return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
         }
-        const endSnap = snapTime(rawStart + prev.duration, activeSnapCandidates, thresholdSeconds)
+        const endSnap = snapTime(rawStart + prev.duration, candidates, thresholdSeconds)
         if (endSnap.snapped) {
           return {
             ...prev,
@@ -647,12 +704,14 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [videoOverlayDrag, pixelsPerSecond, updateVideoOverlayClipStart, activeSnapCandidates])
+  }, [videoOverlayDrag, pixelsPerSecond, updateVideoOverlayClipStart, getSnapCandidates])
 
   useEffect(() => {
     if (!overlayDrag) return
     const overlayDragSnapshot = overlayDrag
     function handleMouseMove(e: MouseEvent): void {
+      // Read the store outside the state updater: React runs updaters during render.
+      const candidates = getSnapCandidates()
       setOverlayDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
@@ -660,7 +719,7 @@ export function Timeline(): React.JSX.Element {
         const duration = prev.originalEndTime - prev.originalStartTime
         if (prev.mode === 'move') {
           const rawStart = Math.max(0, prev.originalStartTime + deltaSeconds)
-          const startSnap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
+          const startSnap = snapTime(rawStart, candidates, thresholdSeconds)
           if (startSnap.snapped) {
             return {
               ...prev,
@@ -669,7 +728,7 @@ export function Timeline(): React.JSX.Element {
               snapGuideTime: startSnap.time
             }
           }
-          const endSnap = snapTime(rawStart + duration, activeSnapCandidates, thresholdSeconds)
+          const endSnap = snapTime(rawStart + duration, candidates, thresholdSeconds)
           if (endSnap.snapped) {
             const liveStartTime = Math.max(0, endSnap.time - duration)
             return {
@@ -691,7 +750,7 @@ export function Timeline(): React.JSX.Element {
             prev.originalEndTime - MIN_OVERLAY_DURATION,
             Math.max(0, prev.originalStartTime + deltaSeconds)
           )
-          const snap = snapTime(rawStart, activeSnapCandidates, thresholdSeconds)
+          const snap = snapTime(rawStart, candidates, thresholdSeconds)
           return {
             ...prev,
             liveStartTime: snap.snapped ? snap.time : rawStart,
@@ -702,7 +761,7 @@ export function Timeline(): React.JSX.Element {
           prev.originalStartTime + MIN_OVERLAY_DURATION,
           prev.originalEndTime + deltaSeconds
         )
-        const snap = snapTime(rawEnd, activeSnapCandidates, thresholdSeconds)
+        const snap = snapTime(rawEnd, candidates, thresholdSeconds)
         return {
           ...prev,
           liveEndTime: snap.snapped ? snap.time : rawEnd,
@@ -723,7 +782,7 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [overlayDrag, pixelsPerSecond, updateTextOverlay, activeSnapCandidates])
+  }, [overlayDrag, pixelsPerSecond, updateTextOverlay, getSnapCandidates])
 
   function beginTrimDrag(
     e: React.MouseEvent,
@@ -1028,7 +1087,9 @@ export function Timeline(): React.JSX.Element {
             <button
               className="small-button"
               title={`分割 (${keymap.split.display})`}
-              onClick={() => splitClipAtTime(selectedClip.id, playheadTime)}
+              onClick={() =>
+                splitClipAtTime(selectedClip.id, useProjectStore.getState().playheadTime)
+              }
             >
               <ScissorsIcon width={13} height={13} />
               カット
@@ -1566,19 +1627,12 @@ export function Timeline(): React.JSX.Element {
                 メディアからクリップを追加してください
               </p>
             )}
-            <div
-              className="timeline-playhead"
-              style={{ left: Math.min(playheadTime, total) * pixelsPerSecond }}
-            >
-              <div
-                className={`timeline-playhead-handle ${scrubbing ? 'active' : ''}`}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setScrubbing(true)
-                }}
-              />
-            </div>
+            <TimelinePlayhead
+              total={total}
+              pixelsPerSecond={pixelsPerSecond}
+              scrubbing={scrubbing}
+              onScrubStart={() => setScrubbing(true)}
+            />
           </div>
 
           {project.videoOverlayTracks.map((track) => (
@@ -1991,25 +2045,14 @@ export function Timeline(): React.JSX.Element {
                 ))}
             </select>
           </label>
-          <button
-            className="small-button"
+          <SplitAtPlayheadButton
             title={`分割 (${keymap.split.display})`}
-            disabled={
-              playheadTime <= selectedAudioClipData.startTime ||
-              playheadTime >=
-                selectedAudioClipData.startTime + audioClipDuration(selectedAudioClipData)
+            start={selectedAudioClipData.startTime}
+            end={selectedAudioClipData.startTime + audioClipDuration(selectedAudioClipData)}
+            onSplit={(time) =>
+              splitAudioClipAtTime(selectedAudioClip.trackId, selectedAudioClip.clipId, time)
             }
-            onClick={() =>
-              splitAudioClipAtTime(
-                selectedAudioClip.trackId,
-                selectedAudioClip.clipId,
-                playheadTime
-              )
-            }
-          >
-            <ScissorsIcon width={13} height={13} />
-            カット
-          </button>
+          />
           <button
             className="icon-button danger"
             onClick={() => {
@@ -2100,26 +2143,21 @@ export function Timeline(): React.JSX.Element {
                 ))}
             </select>
           </label>
-          <button
-            className="small-button"
+          <SplitAtPlayheadButton
             title={`分割 (${keymap.split.display})`}
-            disabled={
-              playheadTime <= selectedVideoOverlayClipData.startTime ||
-              playheadTime >=
-                selectedVideoOverlayClipData.startTime +
-                  (selectedVideoOverlayClipData.outPoint - selectedVideoOverlayClipData.inPoint)
+            start={selectedVideoOverlayClipData.startTime}
+            end={
+              selectedVideoOverlayClipData.startTime +
+              (selectedVideoOverlayClipData.outPoint - selectedVideoOverlayClipData.inPoint)
             }
-            onClick={() =>
+            onSplit={(time) =>
               splitVideoOverlayClipAtTime(
                 selectedVideoOverlayClip.trackId,
                 selectedVideoOverlayClip.clipId,
-                playheadTime
+                time
               )
             }
-          >
-            <ScissorsIcon width={13} height={13} />
-            カット
-          </button>
+          />
           <button
             className="icon-button danger"
             onClick={() => {
