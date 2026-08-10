@@ -82,6 +82,14 @@ export function ChevronRightIcon(props: IconProps): React.JSX.Element {
   )
 }
 
+export function ChevronDownIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  )
+}
+
 export function UploadIcon(props: IconProps): React.JSX.Element {
   return (
     <svg {...base(props)}>

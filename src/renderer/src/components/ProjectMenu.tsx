@@ -1,15 +1,53 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { useRecentProjectsStore, projectFileName } from '../store/recentProjectsStore'
 import { formatIpcError } from '../lib/ipcError'
-import { saveProject, openProject, startNewProject } from '../lib/projectFileActions'
-import { SaveIcon, FolderOpenIcon, FilePlusIcon } from './icons'
+import {
+  saveProject,
+  openProject,
+  openRecentProject,
+  startNewProject
+} from '../lib/projectFileActions'
+import { SaveIcon, FolderOpenIcon, FilePlusIcon, ChevronDownIcon, TrashIcon } from './icons'
 
 export function ProjectMenu(): React.JSX.Element {
   const currentFilePath = useProjectStore((s) => s.currentFilePath)
   const isDirty = useProjectStore((s) => s.isDirty)
   const saveError = useProjectStore((s) => s.saveError)
   const setSaveError = useProjectStore((s) => s.setSaveError)
+  const recentProjects = useRecentProjectsStore((s) => s.recentProjects)
+  const forgetProject = useRecentProjectsStore((s) => s.forgetProject)
   const [error, setError] = useState<string | null>(null)
+  const [recentOpen, setRecentOpen] = useState(false)
+  const [missingPaths, setMissingPaths] = useState<string[]>([])
+  const recentRef = useRef<HTMLDivElement>(null)
+
+  // 一覧を開いたときだけ、実ファイルの有無を確かめる。移動・削除されたものに
+  // 印を付けるのが目的で、黙って一覧から消すことはしない(利用者が消す)。
+  useEffect(() => {
+    if (!recentOpen || recentProjects.length === 0) return
+    let canceled = false
+    window.api
+      .checkFilesExist(recentProjects.map((e) => e.filePath))
+      .then((missing) => {
+        if (!canceled) setMissingPaths(missing)
+      })
+      .catch(() => {
+        if (!canceled) setMissingPaths([])
+      })
+    return () => {
+      canceled = true
+    }
+  }, [recentOpen, recentProjects])
+
+  useEffect(() => {
+    if (!recentOpen) return
+    function handleOutside(e: MouseEvent): void {
+      if (!recentRef.current?.contains(e.target as Node)) setRecentOpen(false)
+    }
+    window.addEventListener('mousedown', handleOutside)
+    return () => window.removeEventListener('mousedown', handleOutside)
+  }, [recentOpen])
 
   async function handleSave(): Promise<void> {
     setError(null)
@@ -29,6 +67,16 @@ export function ProjectMenu(): React.JSX.Element {
     }
   }
 
+  async function handleOpenRecent(filePath: string): Promise<void> {
+    setError(null)
+    try {
+      await openRecentProject(filePath)
+      setRecentOpen(false)
+    } catch (e) {
+      setError(formatIpcError(e))
+    }
+  }
+
   return (
     <div className="project-menu">
       <div className="project-menu-buttons">
@@ -38,6 +86,45 @@ export function ProjectMenu(): React.JSX.Element {
         <button className="icon-button" title="プロジェクトを開く" onClick={handleOpen}>
           <FolderOpenIcon width={14} height={14} />
         </button>
+        <div className="recent-projects" ref={recentRef}>
+          <button
+            className="icon-button"
+            title="最近使ったプロジェクト"
+            disabled={recentProjects.length === 0}
+            onClick={() => setRecentOpen((v) => !v)}
+          >
+            <ChevronDownIcon width={14} height={14} />
+          </button>
+          {recentOpen && (
+            <div className="recent-projects-list">
+              {recentProjects.map((entry) => {
+                const missing = missingPaths.includes(entry.filePath)
+                return (
+                  <div
+                    key={entry.filePath}
+                    className={`recent-project-item ${missing ? 'missing' : ''}`}
+                  >
+                    <button
+                      className="recent-project-open"
+                      title={missing ? `見つかりません: ${entry.filePath}` : entry.filePath}
+                      onClick={() => handleOpenRecent(entry.filePath)}
+                    >
+                      <span className="recent-project-name">{projectFileName(entry.filePath)}</span>
+                      {missing && <span className="recent-project-missing">見つかりません</span>}
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      title="この項目を一覧から削除"
+                      onClick={() => forgetProject(entry.filePath)}
+                    >
+                      <TrashIcon width={12} height={12} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
         <button
           className="icon-button"
           title="保存 (Ctrl+S)"

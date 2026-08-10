@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import type { Project } from '@shared/types'
 
 export function saveProjectFile(filePath: string, project: Project): void {
@@ -6,6 +6,13 @@ export function saveProjectFile(filePath: string, project: Project): void {
 }
 
 export function loadProjectFile(filePath: string): Project {
+  // 最近使った一覧から開くと、移動・削除されたファイルを指すことがある。ここで止めないと
+  // 「ENOENT: no such file or directory, open '/...'」という生のエラーがそのまま画面に出る。
+  if (!existsSync(filePath)) {
+    throw new Error(
+      `プロジェクトファイルが見つかりません。移動または削除された可能性があります: ${filePath}`
+    )
+  }
   const raw = readFileSync(filePath, 'utf-8')
   let parsed: unknown
   try {
