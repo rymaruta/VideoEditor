@@ -15,6 +15,7 @@ import type {
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
 import { targetResolution } from '@shared/resolution'
+import { normalizeFades } from '@shared/audioFade'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -532,8 +533,23 @@ export function exportProject(options: ExportOptions): Promise<void> {
           // 分離音声は本編クリップの速度がミラーされている。ここで atempo を掛けないと
           // 映像だけ速くなって音が置き去りになる(atempoChain が 0.5〜2.0 の定義域を連鎖で吸収)。
           const clipSpeed = trackClip.speed || 1
+          // atempo のあとの尺 = タイムライン上の尺。フェードはこの時間軸で掛ける。
+          // asetpts でクリップ自身は0始まりに正規化されるので、フェードの位置に
+          // toExportTime は通さない(絶対位置は adelay 側が既に通している)。
+          const timelineDur = dur / clipSpeed
+          const { fadeIn, fadeOut } = normalizeFades(
+            trackClip.fadeIn,
+            trackClip.fadeOut,
+            timelineDur
+          )
+          const fadeParts: string[] = []
+          if (fadeIn > 0) fadeParts.push(`afade=t=in:st=0:d=${fadeIn}`)
+          if (fadeOut > 0) {
+            fadeParts.push(`afade=t=out:st=${Math.max(0, timelineDur - fadeOut)}:d=${fadeOut}`)
+          }
+          const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,volume=${clipVolume},adelay=${delayMs}|${delayMs}[${label}]`
+            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${fadeChain}volume=${clipVolume},adelay=${delayMs}|${delayMs}[${label}]`
           )
           clipLabels.push(label)
         })

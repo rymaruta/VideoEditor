@@ -4,6 +4,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { snapTime } from '../lib/snapping'
 import { clipColorOf } from '../lib/clipColors'
+import { normalizeFades } from '@shared/audioFade'
 import {
   SHORTCUT_ACTIONS,
   getActionLabel,
@@ -21,7 +22,7 @@ import { TextBasedEditModal } from './TextBasedEditModal'
 import { Waveform } from './Waveform'
 import { isAspectMismatch } from '../lib/aspect'
 import { formatIpcError } from '../lib/ipcError'
-import type { AudioTrack, Clip, PipPosition, TransitionType } from '@shared/types'
+import type { AudioTrack, AudioTrackClip, Clip, PipPosition, TransitionType } from '@shared/types'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -146,6 +147,16 @@ interface OverlayDragState {
 
 const MIN_OVERLAY_DURATION = 0.2
 
+// 入力された合計がクリップ尺を超えているかを、書き出しと同じ規則で判定する。
+// 画面に出す注意書きと実際の丸め方をズラさないため、判定にも normalizeFades を使う。
+function fadeExceedsClip(clip: AudioTrackClip): boolean {
+  const dur = audioClipDuration(clip)
+  const raw = Math.max(0, clip.fadeIn ?? 0) + Math.max(0, clip.fadeOut ?? 0)
+  if (raw <= 0) return false
+  const n = normalizeFades(clip.fadeIn, clip.fadeOut, dur)
+  return n.fadeIn + n.fadeOut < raw - 1e-9
+}
+
 // The playhead is the only part of the timeline that has to follow `playheadTime`
 // every frame. Keeping the subscription in this small component means playback
 // re-renders these two divs instead of the whole timeline (clips, tracks, rulers).
@@ -234,6 +245,7 @@ export function Timeline(): React.JSX.Element {
   const updateAudioClipTrim = useProjectStore((s) => s.updateAudioClipTrim)
   const updateAudioClipStartAndTrim = useProjectStore((s) => s.updateAudioClipStartAndTrim)
   const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
+  const updateAudioClipFade = useProjectStore((s) => s.updateAudioClipFade)
   const swapAudioClipAsset = useProjectStore((s) => s.swapAudioClipAsset)
   const removeAudioClip = useProjectStore((s) => s.removeAudioClip)
   const splitAudioClipAtTime = useProjectStore((s) => s.splitAudioClipAtTime)
@@ -2028,6 +2040,51 @@ export function Timeline(): React.JSX.Element {
               }
             />
           </label>
+          <div className="audio-fade-row">
+            <label>
+              フェードイン(秒)
+              <input
+                type="number"
+                step={0.1}
+                min={0}
+                max={audioClipDuration(selectedAudioClipData)}
+                value={selectedAudioClipData.fadeIn ?? 0}
+                onChange={(e) =>
+                  updateAudioClipFade(
+                    selectedAudioClip.trackId,
+                    selectedAudioClip.clipId,
+                    Number(e.target.value),
+                    selectedAudioClipData.fadeOut ?? 0
+                  )
+                }
+              />
+            </label>
+            <label>
+              フェードアウト(秒)
+              <input
+                type="number"
+                step={0.1}
+                min={0}
+                max={audioClipDuration(selectedAudioClipData)}
+                value={selectedAudioClipData.fadeOut ?? 0}
+                onChange={(e) =>
+                  updateAudioClipFade(
+                    selectedAudioClip.trackId,
+                    selectedAudioClip.clipId,
+                    selectedAudioClipData.fadeIn ?? 0,
+                    Number(e.target.value)
+                  )
+                }
+              />
+            </label>
+          </div>
+          {fadeExceedsClip(selectedAudioClipData) && (
+            <p className="hint-text">
+              フェードインとフェードアウトの合計がクリップの長さ(
+              {audioClipDuration(selectedAudioClipData).toFixed(1)}秒)を超えています。
+              比を保ったまま縮めて書き出します。
+            </p>
+          )}
           <label className="inline-select">
             差し替え
             <select

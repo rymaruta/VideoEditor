@@ -168,6 +168,8 @@ interface ProjectState {
     outPoint: number
   ) => void
   updateAudioClipVolume: (trackId: string, clipId: string, volume: number) => void
+  /** フェードイン/アウトの秒数(タイムライン上の秒)。クリップ尺を超える分は書き出し側で丸める */
+  updateAudioClipFade: (trackId: string, clipId: string, fadeIn: number, fadeOut: number) => void
   unlinkAudioClip: (trackId: string, clipId: string) => void
   swapAudioClipAsset: (trackId: string, clipId: string, assetId: string, outPoint: number) => void
   removeAudioClip: (trackId: string, clipId: string) => void
@@ -1442,6 +1444,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })),
 
+  updateAudioClipFade: (trackId, clipId, fadeIn, fadeOut) =>
+    set((state) => ({
+      // 音量と同じく合体キーを渡す。数値を続けて動かしても Undo は1件。
+      ...pushHistory(state, `audioFade:${clipId}`),
+      project: {
+        ...state.project,
+        audioTracks: state.project.audioTracks.map((t) =>
+          t.id === trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === clipId
+                    ? { ...c, fadeIn: Math.max(0, fadeIn), fadeOut: Math.max(0, fadeOut) }
+                    : c
+                )
+              }
+            : t
+        )
+      }
+    })),
+
   swapAudioClipAsset: (trackId, clipId, assetId, outPoint) =>
     set((state) => ({
       ...pushHistory(state),
@@ -1512,14 +1535,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             didSplit = true
             // タイムライン秒 → 素材秒は速度を掛ける。
             const splitLocal = c.inPoint + (absoluteTime - c.startTime) * (c.speed || 1)
+            // フェードを両方へそのまま配ると、切れ目で音が一度落ちてまた上がる。
+            // 全体の出入りが変わらないよう、前半にフェードイン・後半にフェードアウトだけ残す。
             return [
-              { ...c, outPoint: splitLocal, linkedClipId: undefined },
+              {
+                ...c,
+                outPoint: splitLocal,
+                linkedClipId: undefined,
+                fadeOut: undefined
+              },
               {
                 ...c,
                 id: uuid(),
                 startTime: absoluteTime,
                 inPoint: splitLocal,
-                linkedClipId: undefined
+                linkedClipId: undefined,
+                fadeIn: undefined
               }
             ]
           })

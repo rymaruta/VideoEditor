@@ -2180,6 +2180,14 @@ h3 {
   border-top: 1px solid var(--border-soft);
 }
 
+/* 操作欄は横一列なので、フェードの2項目はひとまとまりで折り返させる */
+.audio-fade-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .audio-clip-inspector label {
   display: flex;
   align-items: center;

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution } from '@shared/resolution'
+import { fadeGainAt } from '@shared/audioFade'
 import {
   audioClipDuration,
   buildTimedClips,
@@ -266,7 +267,18 @@ function AudioTrackClipLayer({
     }
   }, [isPlaying])
 
-  const effectiveVolume = Math.min(1, Math.max(0, masterVolume * trackVolume * (clip.volume ?? 1)))
+  // 書き出しの afade と同じ規則(共通モジュール)でゲインを掛ける。
+  // ここで別式にすると、画面で聞いた音と出来上がりが黙って食い違う。
+  const fadeGain = fadeGainAt(
+    playheadTime - clip.startTime,
+    audioClipDuration(clip),
+    clip.fadeIn,
+    clip.fadeOut
+  )
+  const effectiveVolume = Math.min(
+    1,
+    Math.max(0, masterVolume * trackVolume * (clip.volume ?? 1) * fadeGain)
+  )
   useEffect(() => {
     if (ref.current) {
       ref.current.volume = effectiveVolume

@@ -106,6 +106,10 @@ export interface AudioTrackClip {
    * 本編の速度を変えても音がズレない。タイムライン上の尺は (outPoint-inPoint)/speed。
    */
   speed?: number
+  /** フェードインの秒数(タイムライン上の秒)。未設定・0 はフェードなし */
+  fadeIn?: number
+  /** フェードアウトの秒数(タイムライン上の秒)。未設定・0 はフェードなし */
+  fadeOut?: number
 }
 
 export interface AudioTrack {
