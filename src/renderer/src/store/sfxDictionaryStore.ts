@@ -11,12 +11,27 @@ export interface SfxDictionaryEntry {
   volume: number
 }
 
-function loadJson<T>(key: string, fallback: T): T {
+// presetStore の loadArray と同じ理由: localStorage が配列でない値や壊れた要素を
+// 持っていると、それを .map() する画面ごと落ちる。使える要素だけ残す。
+function loadEntries(key: string): SfxDictionaryEntry[] {
   try {
     const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((e): e is SfxDictionaryEntry => {
+      if (typeof e !== 'object' || e === null) return false
+      const v = e as Record<string, unknown>
+      return (
+        typeof v.id === 'string' &&
+        typeof v.keyword === 'string' &&
+        typeof v.filePath === 'string' &&
+        typeof v.fileName === 'string' &&
+        typeof v.volume === 'number'
+      )
+    })
   } catch {
-    return fallback
+    return []
   }
 }
 
@@ -28,7 +43,7 @@ interface SfxDictionaryState {
 }
 
 export const useSfxDictionaryStore = create<SfxDictionaryState>((set, get) => ({
-  entries: loadJson(SFX_DICTIONARY_KEY, []),
+  entries: loadEntries(SFX_DICTIONARY_KEY),
 
   addEntry: (keyword, filePath, fileName) => {
     const next = [...get().entries, { id: uuid(), keyword, filePath, fileName, volume: 1 }]

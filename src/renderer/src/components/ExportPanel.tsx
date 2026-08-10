@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
-import { DownloadIcon, FolderIcon, PlayCircleIcon, PlusIcon, TrashIcon, LayersIcon } from './icons'
+import { usePresetStore } from '../store/presetStore'
+import {
+  DownloadIcon,
+  FolderIcon,
+  PlayCircleIcon,
+  PlusIcon,
+  TrashIcon,
+  LayersIcon,
+  StarIcon
+} from './icons'
 import { formatIpcError } from '../lib/ipcError'
 import type { AspectRatio, QualityPreset, ResolutionHeight } from '@shared/types'
+import type { ExportPreset } from '../store/presetStore'
 
 interface BatchJob {
   id: string
@@ -67,6 +77,12 @@ export function ExportPanel(): React.JSX.Element {
   const [doneMessage, setDoneMessage] = useState<string | null>(null)
   const [doneFilePath, setDoneFilePath] = useState<string | null>(null)
 
+  const exportPresets = usePresetStore((s) => s.exportPresets)
+  const addExportPreset = usePresetStore((s) => s.addExportPreset)
+  const removeExportPreset = usePresetStore((s) => s.removeExportPreset)
+  const [presetName, setPresetName] = useState('')
+  const [presetError, setPresetError] = useState<string | null>(null)
+
   const [batchJobs, setBatchJobs] = useState<BatchJob[]>([])
   const [batchStatus, setBatchStatus] = useState<Record<string, JobStatus>>({})
   const [batchRunning, setBatchRunning] = useState(false)
@@ -118,6 +134,31 @@ export function ExportPanel(): React.JSX.Element {
 
   async function handleCancelExport(): Promise<void> {
     await window.api.cancelExport()
+  }
+
+  function handleSavePreset(): void {
+    const ok = addExportPreset(presetName, {
+      resolutionHeight,
+      quality,
+      loudnessNormalization
+    })
+    if (!ok) {
+      setPresetError(
+        presetName.trim()
+          ? 'その名前のプリセットは既にあります。別の名前を付けてください。'
+          : '名前を入力してください。'
+      )
+      return
+    }
+    setPresetError(null)
+    setPresetName('')
+  }
+
+  function applyExportPreset(preset: ExportPreset): void {
+    setResolutionHeight(preset.resolutionHeight)
+    setQuality(preset.quality)
+    setLoudnessNormalization(preset.loudnessNormalization)
+    setPresetError(null)
   }
 
   function hasBatchJob(
@@ -259,6 +300,70 @@ export function ExportPanel(): React.JSX.Element {
           元動画・BGM・ナレーションの音量差を書き出し時に自動で揃えます(YouTube推奨値に合わせています)。
         </p>
       </div>
+      <div className="export-field export-preset-section">
+        <label>
+          <StarIcon width={13} height={13} />
+          書き出しプリセット
+        </label>
+        {exportPresets.length > 0 && (
+          <div className="export-preset-list">
+            {exportPresets.map((preset) => (
+              <div key={preset.id} className="preset-item">
+                <div className="preset-item-info">
+                  <span className="preset-item-name">{preset.name}</span>
+                  <span className="hint-text">
+                    {preset.resolutionHeight}p ・ {qualityLabel(preset.quality)} ・ 正規化
+                    {preset.loudnessNormalization ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+                <div className="preset-item-actions">
+                  <button
+                    className="small-button"
+                    disabled={exporting || batchRunning}
+                    onClick={() => applyExportPreset(preset)}
+                  >
+                    適用
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    title="このプリセットを削除"
+                    onClick={() => removeExportPreset(preset.id)}
+                  >
+                    <TrashIcon width={12} height={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="export-preset-add-row">
+          <input
+            type="text"
+            className="overlay-preset-name-input"
+            placeholder="プリセット名(例: YouTube用 1080p)"
+            value={presetName}
+            onChange={(e) => {
+              setPresetName(e.target.value)
+              setPresetError(null)
+            }}
+          />
+          <button
+            className="small-button"
+            title="いまの解像度・画質・ラウドネス正規化に名前を付けて保存"
+            disabled={!presetName.trim()}
+            onClick={handleSavePreset}
+          >
+            <PlusIcon width={13} height={13} />
+            保存
+          </button>
+        </div>
+        {presetError && <p className="error-text">{presetError}</p>}
+        <p className="hint-text">
+          いま選んでいる解像度・画質・ラウドネス正規化をまとめて保存します(アスペクト比は
+          プロジェクトの設定なので含みません)。
+        </p>
+      </div>
+
       <div className="export-button-row">
         <button
           className="primary-button export-button"

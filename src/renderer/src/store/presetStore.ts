@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
-import type { TextStyle } from '@shared/types'
+import type { QualityPreset, ResolutionHeight, TextStyle } from '@shared/types'
 
 const CAPTION_PRESETS_KEY = 've-caption-presets'
 const SE_PRESETS_KEY = 've-se-presets'
+const EXPORT_PRESETS_KEY = 've-export-presets'
 
 export interface CaptionPreset {
   id: string
@@ -18,27 +19,79 @@ export interface SePreset {
   fileName: string
 }
 
-function loadJson<T>(key: string, fallback: T): T {
+/** よく使う書き出し設定の組み合わせ。アスペクト比はプロジェクトの属性なので含めない */
+export interface ExportPreset {
+  id: string
+  name: string
+  resolutionHeight: ResolutionHeight
+  quality: QualityPreset
+  loudnessNormalization: boolean
+}
+
+const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
+const QUALITY_PRESETS: QualityPreset[] = ['high', 'standard', 'small']
+
+// localStorage は外部入力そのもの: 手で書き換えられるし、古い版が別の形で書いている
+// こともある。JSON.parse が通っただけの値をそのまま返すと、配列でなかったり要素が
+// null だったりしたときに、それを .map() する画面ごと落ちる(実測: 値が "null" や
+// "5" のとき「v.map is not a function」で パネル全体が表示できなくなる)。
+// 配列でなければ空にし、使えない要素は捨てて残りを返す。
+function loadArray<T>(key: string, isValid: (value: unknown) => value is T): T[] {
   try {
     const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(isValid)
   } catch {
-    return fallback
+    return []
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function hasIdAndName(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string'
+}
+
+function isCaptionPreset(value: unknown): value is CaptionPreset {
+  return hasIdAndName(value) && isRecord(value.style)
+}
+
+function isSePreset(value: unknown): value is SePreset {
+  return (
+    hasIdAndName(value) && typeof value.filePath === 'string' && typeof value.fileName === 'string'
+  )
+}
+
+function isExportPreset(value: unknown): value is ExportPreset {
+  return (
+    hasIdAndName(value) &&
+    RESOLUTION_HEIGHTS.includes(value.resolutionHeight as ResolutionHeight) &&
+    QUALITY_PRESETS.includes(value.quality as QualityPreset) &&
+    typeof value.loudnessNormalization === 'boolean'
+  )
 }
 
 interface PresetState {
   captionPresets: CaptionPreset[]
   sePresets: SePreset[]
+  exportPresets: ExportPreset[]
   addCaptionPreset: (name: string, style: TextStyle) => void
   removeCaptionPreset: (id: string) => void
   addSePreset: (name: string, filePath: string, fileName: string) => void
   removeSePreset: (id: string) => void
+  /** 同じ名前が既にあるときは追加せず false を返す(どちらを押したか区別できなくなるため) */
+  addExportPreset: (name: string, settings: Omit<ExportPreset, 'id' | 'name'>) => boolean
+  removeExportPreset: (id: string) => void
 }
 
 export const usePresetStore = create<PresetState>((set, get) => ({
-  captionPresets: loadJson(CAPTION_PRESETS_KEY, []),
-  sePresets: loadJson(SE_PRESETS_KEY, []),
+  captionPresets: loadArray(CAPTION_PRESETS_KEY, isCaptionPreset),
+  sePresets: loadArray(SE_PRESETS_KEY, isSePreset),
+  exportPresets: loadArray(EXPORT_PRESETS_KEY, isExportPreset),
 
   addCaptionPreset: (name, style) => {
     const next = [...get().captionPresets, { id: uuid(), name, style: { ...style } }]
@@ -62,5 +115,21 @@ export const usePresetStore = create<PresetState>((set, get) => ({
     const next = get().sePresets.filter((p) => p.id !== id)
     localStorage.setItem(SE_PRESETS_KEY, JSON.stringify(next))
     set({ sePresets: next })
+  },
+
+  addExportPreset: (name, settings) => {
+    const trimmed = name.trim()
+    if (!trimmed) return false
+    if (get().exportPresets.some((p) => p.name === trimmed)) return false
+    const next = [...get().exportPresets, { id: uuid(), name: trimmed, ...settings }]
+    localStorage.setItem(EXPORT_PRESETS_KEY, JSON.stringify(next))
+    set({ exportPresets: next })
+    return true
+  },
+
+  removeExportPreset: (id) => {
+    const next = get().exportPresets.filter((p) => p.id !== id)
+    localStorage.setItem(EXPORT_PRESETS_KEY, JSON.stringify(next))
+    set({ exportPresets: next })
   }
 }))
