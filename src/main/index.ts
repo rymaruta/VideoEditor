@@ -24,7 +24,13 @@ import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
-import type { AspectRatio, Project, QualityPreset, ResolutionHeight } from '@shared/types'
+import type {
+  AspectRatio,
+  HighlightSensitivity,
+  Project,
+  QualityPreset,
+  ResolutionHeight
+} from '@shared/types'
 
 loadEnvFile()
 
@@ -332,8 +338,10 @@ app.whenReady().then(() => {
     async (_e, filePath: string, rangeStart: number, rangeEnd: number) =>
       detectSilence(filePath, rangeStart, rangeEnd)
   )
-  ipcMain.handle(IPC.detectHighlights, async (_e, filePath: string, assetDuration: number) =>
-    detectHighlights(filePath, assetDuration)
+  ipcMain.handle(
+    IPC.detectHighlights,
+    async (_e, filePath: string, assetDuration: number, sensitivity?: HighlightSensitivity) =>
+      detectHighlights(filePath, assetDuration, sensitivity)
   )
   ipcMain.handle(IPC.analyzeBpm, async (_e, filePath: string, start: number, duration: number) =>
     analyzeBpm(filePath, start, duration)

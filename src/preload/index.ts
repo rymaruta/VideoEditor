@@ -7,6 +7,7 @@ import type {
   EnvApiKeys,
   ExportProgress,
   HighlightCandidate,
+  HighlightSensitivity,
   MediaProbeResult,
   Project,
   QualityPreset,
@@ -69,8 +70,13 @@ const api = {
     rangeEnd: number
   ): Promise<SilenceRange[]> =>
     ipcRenderer.invoke(IPC.detectSilence, filePath, rangeStart, rangeEnd),
-  detectHighlights: (filePath: string, assetDuration: number): Promise<HighlightCandidate[]> =>
-    ipcRenderer.invoke(IPC.detectHighlights, filePath, assetDuration),
+  detectHighlights: (
+    filePath: string,
+    assetDuration: number,
+    /** 省略時は従来の固定しきい値と同じ */
+    sensitivity?: HighlightSensitivity
+  ): Promise<HighlightCandidate[]> =>
+    ipcRenderer.invoke(IPC.detectHighlights, filePath, assetDuration, sensitivity),
   analyzeBpm: (filePath: string, start: number, duration: number): Promise<BpmAnalysisResult> =>
     ipcRenderer.invoke(IPC.analyzeBpm, filePath, start, duration),
   analyzeReferenceStyle: (filePath: string): Promise<ReferenceStyleAnalysis> =>

@@ -221,6 +221,9 @@ export interface LongFormWindow {
   score: number
 }
 
+/** ハイライト検出の感度。`normal` が従来の固定しきい値と同じ */
+export type HighlightSensitivity = 'low' | 'normal' | 'high'
+
 export interface HighlightCandidate {
   start: number
   end: number

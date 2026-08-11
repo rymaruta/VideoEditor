@@ -1,6 +1,11 @@
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
-import type { HighlightCandidate, ReferenceStyleAnalysis } from '@shared/types'
+import type {
+  HighlightCandidate,
+  HighlightSensitivity,
+  ReferenceStyleAnalysis
+} from '@shared/types'
+import { DEFAULT_HIGHLIGHT_SENSITIVITY, highlightThreshold, loudnessStats } from '@shared/highlight'
 
 function runFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -103,24 +108,16 @@ function highlightCandidateLimit(assetDuration: number): number {
 
 export async function detectHighlights(
   filePath: string,
-  assetDuration: number
+  assetDuration: number,
+  sensitivity: HighlightSensitivity = DEFAULT_HIGHLIGHT_SENSITIVITY
 ): Promise<HighlightCandidate[]> {
   const [sceneTimes, audioLevels] = await Promise.all([
     detectSceneChanges(filePath),
     detectAudioLevels(filePath)
   ])
 
-  const finiteLevels = audioLevels.filter((l) => l.rmsDb > -90)
-  const mean =
-    finiteLevels.length > 0
-      ? finiteLevels.reduce((sum, l) => sum + l.rmsDb, 0) / finiteLevels.length
-      : -50
-  const variance =
-    finiteLevels.length > 0
-      ? finiteLevels.reduce((sum, l) => sum + (l.rmsDb - mean) ** 2, 0) / finiteLevels.length
-      : 0
-  const stddev = Math.sqrt(variance)
-  const threshold = mean + Math.max(3, stddev)
+  const { mean, stddev } = loudnessStats(audioLevels.map((l) => l.rmsDb))
+  const threshold = highlightThreshold(mean, stddev, sensitivity)
 
   // Highlights are driven by loud/energetic audio moments; scene changes only
   // boost the score of a window they happen to fall within (cuts alone are too

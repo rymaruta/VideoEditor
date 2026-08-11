@@ -3672,6 +3672,13 @@ h3 {
   gap: 10px;
 }
 
+.highlight-sensitivity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .highlight-list {
   max-height: 320px;
   overflow-y: auto;
