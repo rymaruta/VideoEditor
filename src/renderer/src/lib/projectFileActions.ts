@@ -1,6 +1,18 @@
 import { useProjectStore } from '../store/projectStore'
 import { useRecentProjectsStore } from '../store/recentProjectsStore'
+import { useAutosaveStore } from '../store/autosaveStore'
 import { safeFileBaseName } from '@shared/fileName'
+
+/**
+ * 自動保存を退避してから、上部バーの「破棄した自動保存データを戻す」に反映する。
+ *
+ * 退避しただけで読み直さないと、**ファイルは残っているのにボタンが出ない**ため、
+ * 再起動するまで戻せない(モーダルの「破棄する」も同じ理由で refresh している)。
+ */
+async function setAsideAutosave(): Promise<void> {
+  await window.api.discardAutosave()
+  await useAutosaveStore.getState().refresh()
+}
 
 // 開く/保存の成功時にだけ記録する。ここに置いておけば、ボタン経由でも
 // Ctrl+S のショートカット経由でも同じように残る。
@@ -50,7 +62,11 @@ async function openProjectPath(filePath: string): Promise<void> {
   const loaded = await window.api.loadProject(filePath)
   loadProject(loaded, filePath)
   remember(filePath)
-  await window.api.clearAutosave()
+  // 消さずに退避する。ここで残っている自動保存は、起動時の確認を「あとで決める」で
+  // 見送ったぶん、つまり**まだどのファイルにもなっていない前回の作業**。保存後の
+  // 後始末(saveProject)と違って中身は他のどこにも無いので、消すと戻せない。
+  // 開く前は未変更(isDirty=false)なので確認も出ず、0クリックで失われていた。
+  await setAsideAutosave()
   await checkMissingAssets()
 }
 
@@ -76,5 +92,6 @@ export async function startNewProject(): Promise<void> {
   const { isDirty, newProject } = useProjectStore.getState()
   if (isDirty && !confirm('保存されていない変更があります。破棄して新規作成しますか?')) return
   newProject()
-  await window.api.clearAutosave()
+  // 開くときと同じ理由で退避に留める(見送った自動保存がここで消えると戻せない)
+  await setAsideAutosave()
 }
