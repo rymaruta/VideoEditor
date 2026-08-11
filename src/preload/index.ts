@@ -50,8 +50,11 @@ const api = {
     filePath: string,
     atSeconds: number,
     width: number,
-    height: number
-  ): Promise<string> => ipcRenderer.invoke(IPC.generateFrame, filePath, atSeconds, width, height),
+    height: number,
+    fillCrop?: boolean,
+    cropCenter?: { x: number; y: number }
+  ): Promise<string> =>
+    ipcRenderer.invoke(IPC.generateFrame, filePath, atSeconds, width, height, fillCrop, cropCenter),
   generateWaveform: (
     filePath: string,
     rangeStart: number,

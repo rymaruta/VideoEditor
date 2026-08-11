@@ -302,8 +302,15 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(
     IPC.generateFrame,
-    async (_e, filePath: string, atSeconds: number, width: number, height: number) =>
-      generateFrameDataUrl(filePath, atSeconds, width, height)
+    async (
+      _e,
+      filePath: string,
+      atSeconds: number,
+      width: number,
+      height: number,
+      fillCrop?: boolean,
+      cropCenter?: { x: number; y: number }
+    ) => generateFrameDataUrl(filePath, atSeconds, width, height, fillCrop, cropCenter)
   )
   ipcMain.handle(
     IPC.generateWaveform,

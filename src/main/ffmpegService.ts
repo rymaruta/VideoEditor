@@ -16,6 +16,7 @@ import type {
 import { buildAssContent } from './assSubtitle'
 import { targetResolution } from '@shared/resolution'
 import { normalizeFades } from '@shared/audioFade'
+import { scaleToFrameFilter } from '@shared/videoFrame'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -132,7 +133,9 @@ export async function generateFrameDataUrl(
   filePath: string,
   atSeconds: number,
   width: number,
-  height: number
+  height: number,
+  fillCrop?: boolean,
+  cropCenter?: { x: number; y: number }
 ): Promise<string> {
   const seekSeconds = await clampSeekSeconds(filePath, atSeconds)
   const dir = mkdtempSync(join(tmpdir(), 've-frame-'))
@@ -143,9 +146,7 @@ export async function generateFrameDataUrl(
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
       .inputOptions([`-ss ${seekSeconds}`])
-      .complexFilter([
-        `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[v]`
-      ])
+      .complexFilter([`[0:v]${scaleToFrameFilter(w, h, fillCrop, cropCenter)},setsar=1[v]`])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
       .on('error', (e) => {
@@ -377,13 +378,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         command.input(asset.filePath).inputOptions([`-ss ${clip.inPoint}`, `-t ${sourceDuration}`])
         const myIndex = inputIndex++
 
-        const scalePadFilter = clip.fillCrop
-          ? (() => {
-              const cx = clip.cropCenter?.x ?? 0.5
-              const cy = clip.cropCenter?.y ?? 0.5
-              return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:'min(max(0,(iw*${cx}-ow/2)),(iw-ow))':'min(max(0,(ih*${cy}-oh/2)),(ih-oh))'`
-            })()
-          : `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`
+        const scalePadFilter = scaleToFrameFilter(w, h, clip.fillCrop, clip.cropCenter)
         filterParts.push(
           `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,fps=30[v${i}]`
         )

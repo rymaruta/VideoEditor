@@ -3,10 +3,12 @@ import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { ImageIcon, DownloadIcon, SparklesIcon, WandIcon } from './icons'
+import { targetResolution } from '@shared/resolution'
 import type { TextPosition } from '@shared/types'
 
-const THUMB_WIDTH = 1280
-const THUMB_HEIGHT = 720
+// サムネイルの短辺。長辺はプロジェクトのアスペクト比から targetResolution() が決める
+// (9:16 なら 720x1280、16:9 なら 1280x720)。書き出しと同じ関数を使う。
+const THUMB_SHORT_SIDE = 720
 const CANDIDATE_COUNT = 6
 
 interface ThumbStyle {
@@ -32,6 +34,7 @@ export function ThumbnailPanel(): React.JSX.Element {
     outline: true
   })
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const { w: thumbWidth, h: thumbHeight } = targetResolution(project.aspectRatio, THUMB_SHORT_SIDE)
 
   async function generateCandidates(): Promise<void> {
     setError(null)
@@ -54,11 +57,14 @@ export function ThumbnailPanel(): React.JSX.Element {
         if (!tc) continue
         const speed = tc.clip.speed || 1
         const localTime = tc.clip.inPoint + (t - tc.start) * speed
+        // 書き出しと同じ画角にするため、そのクリップのクロップ設定をそのまま渡す
         const dataUrl = await window.api.generateFrame(
           tc.asset.filePath,
           localTime,
-          THUMB_WIDTH,
-          THUMB_HEIGHT
+          thumbWidth,
+          thumbHeight,
+          tc.clip.fillCrop,
+          tc.clip.cropCenter
         )
         frames.push(dataUrl)
       }
@@ -82,7 +88,13 @@ export function ThumbnailPanel(): React.JSX.Element {
     setCandidates([])
     try {
       const assetIds = Array.from(new Set(timedClips.map((tc) => tc.asset.id)))
-      const scored: { assetId: string; time: number; score: number }[] = []
+      const scored: {
+        assetId: string
+        time: number
+        score: number
+        fillCrop?: boolean
+        cropCenter?: { x: number; y: number }
+      }[] = []
       for (const assetId of assetIds) {
         const asset = project.assets.find((a) => a.id === assetId)
         if (!asset || !asset.hasVideo) continue
@@ -91,10 +103,18 @@ export function ThumbnailPanel(): React.JSX.Element {
           const highlights = await window.api.detectHighlights(asset.filePath, asset.duration)
           for (const h of highlights) {
             const mid = (h.start + h.end) / 2
-            const inTimeline = clipsForAsset.some(
+            const containing = clipsForAsset.find(
               (tc) => mid >= tc.clip.inPoint && mid <= tc.clip.outPoint
             )
-            if (inTimeline) scored.push({ assetId, time: mid, score: h.score })
+            if (containing) {
+              scored.push({
+                assetId,
+                time: mid,
+                score: h.score,
+                fillCrop: containing.clip.fillCrop,
+                cropCenter: containing.clip.cropCenter
+              })
+            }
           }
         } catch {
           // Skip assets whose highlight analysis fails; continue with the rest.
@@ -113,8 +133,10 @@ export function ThumbnailPanel(): React.JSX.Element {
         const dataUrl = await window.api.generateFrame(
           asset.filePath,
           entry.time,
-          THUMB_WIDTH,
-          THUMB_HEIGHT
+          thumbWidth,
+          thumbHeight,
+          entry.fillCrop,
+          entry.cropCenter
         )
         frames.push(dataUrl)
       }
@@ -185,7 +207,7 @@ export function ThumbnailPanel(): React.JSX.Element {
         </button>
       </div>
       <p className="hint-text">
-        「均等間隔で生成」はタイムラインを一定間隔で抽出、「ハイライトから生成」はAIが検出した音量変化やカット点などの見せ場からフレームを抽出してYouTubeサムネイル(1280x720)の候補にします。
+        「均等間隔で生成」はタイムラインを一定間隔で抽出、「ハイライトから生成」はAIが検出した音量変化やカット点などの見せ場からフレームを抽出してサムネイルの候補にします。プロジェクトのアスペクト比に合わせて、9:16なら720x1280(縦)、16:9なら1280x720で作ります。
       </p>
       {error && <p className="error-text">{error}</p>}
       {candidates.length === 0 && !loading && (
@@ -209,8 +231,8 @@ export function ThumbnailPanel(): React.JSX.Element {
           </div>
           <canvas
             ref={canvasRef}
-            width={THUMB_WIDTH}
-            height={THUMB_HEIGHT}
+            width={thumbWidth}
+            height={thumbHeight}
             className="thumbnail-canvas"
           />
           <input
