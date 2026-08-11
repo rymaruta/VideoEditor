@@ -405,6 +405,25 @@ h3 {
 .project-name {
   font-size: 12px;
   color: var(--text-2);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  cursor: text;
+  font-family: inherit;
+}
+
+.project-name:hover {
+  border-color: var(--border-soft);
+  color: var(--text-1);
+}
+
+.project-name-input {
+  font-size: 12px;
+  font-family: inherit;
+  padding: 2px 6px;
+  min-width: 160px;
+  max-width: 320px;
 }
 
 .project-badge {

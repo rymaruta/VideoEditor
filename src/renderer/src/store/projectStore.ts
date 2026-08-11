@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { audioClipDuration, buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
+import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
 import type {
   AspectRatio,
   AudioTrack,
@@ -84,6 +85,8 @@ interface ProjectState {
   loadProject: (project: Project, filePath: string) => void
   restoreAutosave: (project: Project) => void
   markSaved: (filePath: string) => void
+  /** プロジェクト名を変える。空白だけなら既定名に戻す */
+  setProjectName: (name: string) => void
 
   setMissingAssetIds: (ids: string[]) => void
   relinkAsset: (
@@ -527,6 +530,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }),
 
   markSaved: (filePath) => set({ currentFilePath: filePath, isDirty: false, saveError: null }),
+
+  setProjectName: (name) =>
+    set((state) => ({
+      // 音量などと同じ合体キー。1文字打つたびに Undo が積まれないようにする。
+      ...pushHistory(state, 'projectName'),
+      project: { ...state.project, name: name.trim() || DEFAULT_PROJECT_NAME }
+    })),
 
   addAsset: (asset) =>
     set((state) => ({

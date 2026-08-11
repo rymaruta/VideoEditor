@@ -4,6 +4,7 @@ import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/
 import { formatIpcError } from '../lib/ipcError'
 import { ImageIcon, DownloadIcon, SparklesIcon, WandIcon } from './icons'
 import { targetResolution } from '@shared/resolution'
+import { safeFileBaseName } from '@shared/fileName'
 import type { TextPosition } from '@shared/types'
 
 // サムネイルの短辺。長辺はプロジェクトのアスペクト比から targetResolution() が決める
@@ -186,7 +187,7 @@ export function ThumbnailPanel(): React.JSX.Element {
     const canvas = canvasRef.current
     if (!canvas) return
     const link = document.createElement('a')
-    link.download = `${project.name || 'thumbnail'}.png`
+    link.download = `${safeFileBaseName(project.name)}.png`
     link.href = canvas.toDataURL('image/png')
     link.click()
   }

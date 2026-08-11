@@ -1,5 +1,6 @@
 import { useProjectStore } from '../store/projectStore'
 import { useRecentProjectsStore } from '../store/recentProjectsStore'
+import { safeFileBaseName } from '@shared/fileName'
 
 // 開く/保存の成功時にだけ記録する。ここに置いておけば、ボタン経由でも
 // Ctrl+S のショートカット経由でも同じように残る。
@@ -20,7 +21,9 @@ export async function checkMissingAssets(): Promise<void> {
 
 export async function saveProjectAs(): Promise<void> {
   const { project, markSaved } = useProjectStore.getState()
-  const filePath = await window.api.selectProjectSavePath(`${project.name}.veproj`)
+  const filePath = await window.api.selectProjectSavePath(
+    `${safeFileBaseName(project.name)}.veproj`
+  )
   if (!filePath) return
   await window.api.saveProject(filePath, project)
   markSaved(filePath)

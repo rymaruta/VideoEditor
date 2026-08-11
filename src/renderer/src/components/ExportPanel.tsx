@@ -13,6 +13,7 @@ import {
   StarIcon
 } from './icons'
 import { formatIpcError } from '../lib/ipcError'
+import { safeFileBaseName } from '@shared/fileName'
 import type { AspectRatio, QualityPreset, ResolutionHeight } from '@shared/types'
 import type { ExportPreset } from '../store/presetStore'
 
@@ -44,8 +45,7 @@ function qualityLabel(q: QualityPreset): string {
 // the output into a directory that may not exist and fail the whole batch.
 function jobFileName(projectName: string, job: BatchJob): string {
   const aspect = job.aspectRatio === '9:16' ? '9x16' : '16x9'
-  const safeName = projectName.replace(/[/\\:*?"<>|]/g, '_').trim() || '無題のプロジェクト'
-  return `${safeName}_${aspect}_${job.resolutionHeight}p_${qualityLabel(job.quality)}.mp4`
+  return `${safeFileBaseName(projectName)}_${aspect}_${job.resolutionHeight}p_${qualityLabel(job.quality)}.mp4`
 }
 
 function usedMissingAssetCount(
@@ -111,7 +111,7 @@ export function ExportPanel(): React.JSX.Element {
       )
       return
     }
-    const outputPath = await window.api.selectExportPath(`${project.name}.mp4`)
+    const outputPath = await window.api.selectExportPath(`${safeFileBaseName(project.name)}.mp4`)
     if (!outputPath) return
     setExporting(true)
     setProgress({ percent: 0, stage: '準備中' })

@@ -15,6 +15,7 @@ import { MetadataPanel } from './components/MetadataPanel'
 import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { ProjectMenu } from './components/ProjectMenu'
+import { ProjectNameField } from './components/ProjectNameField'
 import { useProjectStore } from './store/projectStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
@@ -152,7 +153,6 @@ interface ResizeDragState {
 
 function App(): React.JSX.Element {
   const [tab, setTab] = useState<RightTab>('template')
-  const projectName = useProjectStore((s) => s.project.name)
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
   const canUndo = useProjectStore((s) => s.past.length > 0)
   const canRedo = useProjectStore((s) => s.future.length > 0)
@@ -384,10 +384,7 @@ function App(): React.JSX.Element {
           </div>
         </div>
         <div className="top-bar-project">
-          <span className="project-name">
-            {projectName}
-            {isDirty && <span className="dirty-dot" title="未保存の変更があります" />}
-          </span>
+          <ProjectNameField />
           <span className="project-badge">{aspectRatio}</span>
         </div>
       </header>
