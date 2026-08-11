@@ -35,6 +35,8 @@ export const IPC = {
   loadAutosave: 'project:loadAutosave',
   autosaveProject: 'project:autosave',
   clearAutosave: 'project:clearAutosave',
+  discardAutosave: 'project:discardAutosave',
+  loadDiscardedAutosave: 'project:loadDiscardedAutosave',
   cancelExport: 'export:cancel',
   checkFilesExist: 'media:checkFilesExist',
   selectRelinkFile: 'media:selectRelinkFile'

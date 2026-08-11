@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
@@ -19,6 +19,7 @@ import { transcribeRange, transcribeWordsRange } from './whisperService'
 import { analyzeSmartCropCenter } from './smartCropService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import { saveProjectFile, loadProjectFile } from './projectFileService'
+import { autosaveStatus, discardAutosaveFile, discardedPathFor } from './autosaveFiles'
 import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
@@ -105,7 +106,10 @@ function createWindow(): void {
   mainWindow.on('close', (e) => {
     saveWindowState(mainWindow)
     if (!hasUnsavedChanges) {
-      if (autosavePath && existsSync(autosavePath)) rmSync(autosavePath, { force: true })
+      // ここでファイルが残っているのは、前回の復元確認を「あとで決める」で見送った
+      // ぶんだけ(保存・開く・新規では clearAutosave が消している)。消してしまうと
+      // 見送っただけのつもりが、閉じた瞬間に確認もなく永久に失われる。退避に留める。
+      if (autosavePath) discardAutosaveFile(autosavePath)
       return
     }
     e.preventDefault()
@@ -394,10 +398,7 @@ app.whenReady().then(() => {
   ipcMain.on(IPC.setDirtyState, (_e, dirty: boolean) => {
     hasUnsavedChanges = dirty
   })
-  ipcMain.handle(IPC.checkAutosave, () => {
-    if (!existsSync(autosavePath)) return { exists: false }
-    return { exists: true, mtimeMs: statSync(autosavePath).mtimeMs }
-  })
+  ipcMain.handle(IPC.checkAutosave, () => autosaveStatus(autosavePath))
   ipcMain.handle(IPC.loadAutosave, () => loadProjectFile(autosavePath))
   ipcMain.handle(IPC.autosaveProject, (_e, project: Project) =>
     saveProjectFile(autosavePath, project)
@@ -405,6 +406,10 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.clearAutosave, () => {
     if (existsSync(autosavePath)) rmSync(autosavePath, { force: true })
   })
+  // 起動時の確認で「破棄する」を選んだときはこちら。消さずに退避するので、
+  // 押し間違えても上部バーから戻せる。
+  ipcMain.handle(IPC.discardAutosave, () => discardAutosaveFile(autosavePath))
+  ipcMain.handle(IPC.loadDiscardedAutosave, () => loadProjectFile(discardedPathFor(autosavePath)))
   ipcMain.handle(IPC.cancelExport, () => cancelExport())
 
   registerWindowScopedIpcHandlers()

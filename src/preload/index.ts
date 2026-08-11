@@ -146,12 +146,19 @@ const api = {
     ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName),
   getEnvApiKeys: (): Promise<EnvApiKeys> => ipcRenderer.invoke(IPC.getEnvApiKeys),
   setDirtyState: (dirty: boolean): void => ipcRenderer.send(IPC.setDirtyState, dirty),
-  checkAutosave: (): Promise<{ exists: boolean; mtimeMs?: number }> =>
-    ipcRenderer.invoke(IPC.checkAutosave),
+  checkAutosave: (): Promise<{
+    exists: boolean
+    mtimeMs?: number
+    discardedExists: boolean
+    discardedMtimeMs?: number
+  }> => ipcRenderer.invoke(IPC.checkAutosave),
   loadAutosave: (): Promise<Project> => ipcRenderer.invoke(IPC.loadAutosave),
   autosaveProject: (project: Project): Promise<void> =>
     ipcRenderer.invoke(IPC.autosaveProject, project),
   clearAutosave: (): Promise<void> => ipcRenderer.invoke(IPC.clearAutosave),
+  /** 消さずに退避する。戻り値は退避したかどうか */
+  discardAutosave: (): Promise<boolean> => ipcRenderer.invoke(IPC.discardAutosave),
+  loadDiscardedAutosave: (): Promise<Project> => ipcRenderer.invoke(IPC.loadDiscardedAutosave),
   cancelExport: (): Promise<void> => ipcRenderer.invoke(IPC.cancelExport)
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { useAutosaveStore } from '../store/autosaveStore'
 import { useRecentProjectsStore, projectFileName } from '../store/recentProjectsStore'
 import { formatIpcError } from '../lib/ipcError'
 import {
@@ -8,13 +9,23 @@ import {
   openRecentProject,
   startNewProject
 } from '../lib/projectFileActions'
-import { SaveIcon, FolderOpenIcon, FilePlusIcon, ChevronDownIcon, TrashIcon } from './icons'
+import { checkMissingAssets } from '../lib/projectFileActions'
+import {
+  SaveIcon,
+  FolderOpenIcon,
+  FilePlusIcon,
+  ChevronDownIcon,
+  TrashIcon,
+  UndoIcon
+} from './icons'
 
 export function ProjectMenu(): React.JSX.Element {
   const currentFilePath = useProjectStore((s) => s.currentFilePath)
   const isDirty = useProjectStore((s) => s.isDirty)
   const saveError = useProjectStore((s) => s.saveError)
   const setSaveError = useProjectStore((s) => s.setSaveError)
+  const restoreAutosave = useProjectStore((s) => s.restoreAutosave)
+  const discardedAutosave = useAutosaveStore((s) => s.discarded)
   const recentProjects = useRecentProjectsStore((s) => s.recentProjects)
   const forgetProject = useRecentProjectsStore((s) => s.forgetProject)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +73,20 @@ export function ProjectMenu(): React.JSX.Element {
     setError(null)
     try {
       await openProject()
+    } catch (e) {
+      setError(formatIpcError(e))
+    }
+  }
+
+  // 起動時の確認で「破棄する」を選んだデータを戻す。破棄は退避なので中身は残っている。
+  async function handleRestoreDiscarded(): Promise<void> {
+    setError(null)
+    if (isDirty && !confirm('保存されていない変更があります。破棄して自動保存データを戻しますか?'))
+      return
+    try {
+      const project = await window.api.loadDiscardedAutosave()
+      restoreAutosave(project)
+      await checkMissingAssets()
     } catch (e) {
       setError(formatIpcError(e))
     }
@@ -125,6 +150,15 @@ export function ProjectMenu(): React.JSX.Element {
             </div>
           )}
         </div>
+        {discardedAutosave && (
+          <button
+            className="icon-button"
+            title="破棄した自動保存データを戻す"
+            onClick={handleRestoreDiscarded}
+          >
+            <UndoIcon width={14} height={14} />
+          </button>
+        )}
         <button
           className="icon-button"
           title="保存 (Ctrl+S)"

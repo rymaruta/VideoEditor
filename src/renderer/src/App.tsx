@@ -16,10 +16,11 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { ProjectMenu } from './components/ProjectMenu'
 import { ProjectNameField } from './components/ProjectNameField'
+import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { useProjectStore } from './store/projectStore'
+import { useAutosaveStore } from './store/autosaveStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
-import { checkMissingAssets } from './lib/projectFileActions'
 import {
   ClapperboardIcon,
   SparklesIcon,
@@ -160,7 +161,7 @@ function App(): React.JSX.Element {
   const redo = useProjectStore((s) => s.redo)
   const isDirty = useProjectStore((s) => s.isDirty)
   const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
-  const restoreAutosave = useProjectStore((s) => s.restoreAutosave)
+  const refreshAutosave = useAutosaveStore((s) => s.refresh)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
 
   useEffect(() => {
@@ -170,21 +171,9 @@ function App(): React.JSX.Element {
 
   // Crash recovery: on launch, offer to restore a draft that was autosaved but
   // never cleanly saved/closed (e.g. after a crash or forced quit).
+  // 確認は AutosaveRestoreModal が出す。ここは状態を読み込むだけ。
   useEffect(() => {
-    ;(async () => {
-      const status = await window.api.checkAutosave()
-      if (!status.exists) return
-      const restore = confirm(
-        '自動保存されたデータが見つかりました。前回、保存せずに終了した可能性があります。復元しますか?'
-      )
-      if (restore) {
-        const project = await window.api.loadAutosave()
-        restoreAutosave(project)
-        await checkMissingAssets()
-      } else {
-        await window.api.clearAutosave()
-      }
-    })()
+    refreshAutosave()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -507,6 +496,7 @@ function App(): React.JSX.Element {
           </div>
         </div>
       </div>
+      <AutosaveRestoreModal />
     </div>
   )
 }
