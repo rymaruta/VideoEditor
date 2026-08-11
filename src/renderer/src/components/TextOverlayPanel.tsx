@@ -5,6 +5,7 @@ import { usePresetStore } from '../store/presetStore'
 import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } from '@shared/types'
 import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
 import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
+import { parseBulkFontSize } from '../lib/textOverlayInput'
 import { PlusIcon, TrashIcon, TypeIcon, CopyIcon, StarIcon } from './icons'
 
 function defaultPositionFraction(position: TextPosition): { x: number; y: number } {
@@ -36,6 +37,7 @@ export function TextOverlayPanel(): React.JSX.Element {
   const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
   const shiftAllTextOverlays = useProjectStore((s) => s.shiftAllTextOverlays)
   const setTextOverlayLink = useProjectStore((s) => s.setTextOverlayLink)
+  const updateTextOverlaysStyle = useProjectStore((s) => s.updateTextOverlaysStyle)
   const addCaptionPreset = usePresetStore((s) => s.addCaptionPreset)
 
   const total = getTotalDuration(project)
@@ -49,6 +51,34 @@ export function TextOverlayPanel(): React.JSX.Element {
   }
   const [presetNameDrafts, setPresetNameDrafts] = useState<Record<string, string>>({})
   const [shiftAmount, setShiftAmount] = useState(0.5)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  // 選択は「いま存在するテロップ」に絞って使う。削除された分のIDが残っていても、
+  // ここで落ちるので件数表示も一括適用も実物とズレない。
+  const selectedOverlays = project.textOverlays.filter((o) => selectedIds.has(o.id))
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  /** 選択中で値が揃っていればその値、混在していれば undefined */
+  function commonStyleValue<K extends keyof TextStyle>(key: K): TextStyle[K] | undefined {
+    if (selectedOverlays.length === 0) return undefined
+    const first = selectedOverlays[0].style[key]
+    return selectedOverlays.every((o) => o.style[key] === first) ? first : undefined
+  }
+
+  function applyToSelected(patch: Partial<TextStyle>): void {
+    updateTextOverlaysStyle(
+      selectedOverlays.map((o) => o.id),
+      patch
+    )
+  }
 
   function patchStyle(id: string, current: TextStyle, patch: Partial<TextStyle>): void {
     updateTextOverlay(id, { style: { ...current, ...patch } })
@@ -116,6 +146,83 @@ export function TextOverlayPanel(): React.JSX.Element {
           </button>
         </div>
       )}
+      {project.textOverlays.length > 0 && (
+        <div className="overlay-bulk-style">
+          <div className="overlay-bulk-row">
+            <span className="hint-text">まとめてスタイル変更</span>
+            <button
+              className="small-button"
+              onClick={() => setSelectedIds(new Set(project.textOverlays.map((o) => o.id)))}
+            >
+              全選択
+            </button>
+            <button className="small-button" onClick={() => setSelectedIds(new Set())}>
+              全解除
+            </button>
+            <span className="hint-text">{selectedOverlays.length}件選択中</span>
+          </div>
+          {selectedOverlays.length > 0 && (
+            <div className="overlay-bulk-row">
+              <label>
+                フォント
+                <select
+                  value={commonStyleValue('fontFamily') ?? ''}
+                  onChange={(e) => applyToSelected({ fontFamily: e.target.value as FontFamily })}
+                >
+                  {commonStyleValue('fontFamily') === undefined && <option value="">(混在)</option>}
+                  {FONT_FAMILY_OPTIONS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                サイズ
+                <input
+                  type="number"
+                  min={16}
+                  max={96}
+                  step={2}
+                  placeholder="混在"
+                  value={commonStyleValue('fontSize') ?? ''}
+                  onChange={(e) => {
+                    const size = parseBulkFontSize(e.target.value)
+                    if (size !== null) applyToSelected({ fontSize: size })
+                  }}
+                />
+              </label>
+              <label>
+                色
+                <input
+                  type="color"
+                  value={commonStyleValue('color') ?? '#ffffff'}
+                  onChange={(e) => applyToSelected({ color: e.target.value })}
+                />
+              </label>
+              <label>
+                位置
+                <select
+                  value={commonStyleValue('position') ?? ''}
+                  onChange={(e) =>
+                    // 1件用と同じ規則。自由配置が残っているとそちらが優先されて、
+                    // 位置を変えたのに画面が動かない。
+                    applyToSelected({
+                      position: e.target.value as TextPosition,
+                      customPosition: undefined
+                    })
+                  }
+                >
+                  {commonStyleValue('position') === undefined && <option value="">(混在)</option>}
+                  <option value="top">上</option>
+                  <option value="center">中央</option>
+                  <option value="bottom">下</option>
+                </select>
+              </label>
+            </div>
+          )}
+        </div>
+      )}
       <div className="overlay-list">
         {project.textOverlays.length === 0 && (
           <div className="empty-state">
@@ -124,7 +231,15 @@ export function TextOverlayPanel(): React.JSX.Element {
           </div>
         )}
         {project.textOverlays.map((o) => (
-          <div key={o.id} className="overlay-item">
+          <div key={o.id} className={`overlay-item ${selectedIds.has(o.id) ? 'selected' : ''}`}>
+            <label className="checkbox-label overlay-select-label">
+              <input
+                type="checkbox"
+                checked={selectedIds.has(o.id)}
+                onChange={() => toggleSelected(o.id)}
+              />
+              まとめて変更の対象
+            </label>
             <textarea
               className="overlay-text-input"
               rows={2}

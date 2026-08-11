@@ -15,6 +15,7 @@ import type {
   PipPosition,
   Project,
   TextOverlay,
+  TextStyle,
   Transition
 } from '@shared/types'
 
@@ -152,6 +153,8 @@ interface ProjectState {
   addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => void
   addTextOverlays: (overlays: Omit<TextOverlay, 'id'>[]) => void
   updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void
+  /** 選んだテロップのスタイルをまとめて更新する。何件でも履歴は1件 */
+  updateTextOverlaysStyle: (ids: string[], patch: Partial<TextStyle>) => void
   /** クリップへの追従を設定/解除する。`clipId` が null なら解除 */
   setTextOverlayLink: (id: string, clipId: string | null) => void
   removeTextOverlay: (id: string) => void
@@ -1214,6 +1217,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             }
             return next
           })
+        }
+      }
+    }),
+
+  updateTextOverlaysStyle: (ids, patch) =>
+    set((state) => {
+      const idSet = new Set(ids)
+      if (idSet.size === 0) return state
+      if (!state.project.textOverlays.some((o) => idSet.has(o.id))) return state
+      return {
+        // 何件掛けても履歴は1件。合体キーを付けているのは、色や数値を連続で
+        // 動かしたときに1回の調整で履歴が埋まらないようにするため(1件用と同じ考え方)。
+        ...pushHistory(state, 'overlaysStyle'),
+        project: {
+          ...state.project,
+          textOverlays: state.project.textOverlays.map((o) =>
+            idSet.has(o.id) ? { ...o, style: { ...o.style, ...patch } } : o
+          )
         }
       }
     }),
