@@ -280,7 +280,8 @@ export function Timeline(): React.JSX.Element {
   const keymap = getKeymap(keymapScheme)
 
   const [trimClipId, setTrimClipId] = useState<string | null>(null)
-  const [silenceCutClipId, setSilenceCutClipId] = useState<string | null>(null)
+  // 1本でも複数本でも同じモーダルを使う(選択が1本のときは長さ1の配列)
+  const [silenceCutClipIds, setSilenceCutClipIds] = useState<string[] | null>(null)
   const [fillerWordClipId, setFillerWordClipId] = useState<string | null>(null)
   const [autoCaptionClipId, setAutoCaptionClipId] = useState<string | null>(null)
   const [textEditClipId, setTextEditClipId] = useState<string | null>(null)
@@ -1055,6 +1056,20 @@ export function Timeline(): React.JSX.Element {
               </span>
             )}
             <button
+              className="small-button"
+              title="選択したクリップそれぞれで無音区間を検出し、まとめて削除します"
+              onClick={() =>
+                // 検出結果はタイムラインの並び順で見せたいので、クリック順ではなく
+                // クリップの並びから作り直す。
+                setSilenceCutClipIds(
+                  project.clips.filter((c) => multiSelectedClipIds.includes(c.id)).map((c) => c.id)
+                )
+              }
+            >
+              <WandIcon width={13} height={13} />
+              無音カット
+            </button>
+            <button
               className="icon-button"
               title={`コピー (${keymap.copy.display})`}
               onClick={() => copySelectedClip()}
@@ -1107,7 +1122,10 @@ export function Timeline(): React.JSX.Element {
               <ScissorsIcon width={13} height={13} />
               カット
             </button>
-            <button className="small-button" onClick={() => setSilenceCutClipId(selectedClip.id)}>
+            <button
+              className="small-button"
+              onClick={() => setSilenceCutClipIds([selectedClip.id])}
+            >
               <WandIcon width={13} height={13} />
               無音カット
             </button>
@@ -2238,8 +2256,8 @@ export function Timeline(): React.JSX.Element {
       )}
 
       {trimClipId && <TrimModal clipId={trimClipId} onClose={() => setTrimClipId(null)} />}
-      {silenceCutClipId && (
-        <SilenceCutModal clipId={silenceCutClipId} onClose={() => setSilenceCutClipId(null)} />
+      {silenceCutClipIds && (
+        <SilenceCutModal clipIds={silenceCutClipIds} onClose={() => setSilenceCutClipIds(null)} />
       )}
       {fillerWordClipId && (
         <FillerWordCutModal clipId={fillerWordClipId} onClose={() => setFillerWordClipId(null)} />

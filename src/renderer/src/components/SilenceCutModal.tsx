@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import type { Clip, SilenceRange } from '@shared/types'
-import { v4 as uuid } from 'uuid'
+import { buildCutSegments } from '../lib/silenceCut'
 import { formatIpcError } from '../lib/ipcError'
 import { WandIcon } from './icons'
 
@@ -11,124 +11,200 @@ function formatTime(seconds: number): string {
   return `${m}:${s.padStart(4, '0')}`
 }
 
+/** 1クリップぶんの検出結果。検出に失敗したものも `error` を持って並ぶ */
+type ClipDetection = {
+  clipId: string
+  fileName: string
+  /** 素材内の位置を画面ではクリップ先頭からの相対秒で出すため保持する */
+  inPoint: number
+  ranges: SilenceRange[]
+  error?: string
+}
+
+function rangeKey(clipId: string, index: number): string {
+  return `${clipId}:${index}`
+}
+
 export function SilenceCutModal({
-  clipId,
+  clipIds,
   onClose
 }: {
-  clipId: string
+  clipIds: string[]
   onClose: () => void
-}): React.JSX.Element | null {
-  const project = useProjectStore((s) => s.project)
-  const replaceClipRange = useProjectStore((s) => s.replaceClipRange)
+}): React.JSX.Element {
+  const replaceClipRanges = useProjectStore((s) => s.replaceClipRanges)
 
-  const clip = project.clips.find((c) => c.id === clipId)
-  const asset = clip ? project.assets.find((a) => a.id === clip.assetId) : undefined
+  const [detections, setDetections] = useState<ClipDetection[]>([])
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [total, setTotal] = useState(0)
+  const [running, setRunning] = useState(true)
+  const [aborted, setAborted] = useState(false)
+  // 中断は「次のクリップへ進まない」で実現する。実行中の ffmpeg は止められないので、
+  // 押した直後に終わるとは限らない旨を画面にも書く。
+  const abortRef = useRef(false)
 
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [ranges, setRanges] = useState<SilenceRange[]>([])
-  const [checked, setChecked] = useState<Set<number>>(new Set())
+  const key = clipIds.join(',')
 
   useEffect(() => {
-    if (!clip || !asset) return
-    // Kicks off an async IPC call to the main process on mount/clip change — an external
-    // system fetch, not state derivable from props.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true)
-    setError(null)
-    window.api
-      .detectSilence(asset.filePath, clip.inPoint, clip.outPoint)
-      .then((result) => {
-        setRanges(result)
-        setChecked(new Set(result.map((_, i) => i)))
+    // 対象は開いた時点のプロジェクトから決める。検出中に置き換えが起きても
+    // 走らせ直さない(開いている間に他の操作はできない)。
+    const { project } = useProjectStore.getState()
+    const targets = clipIds
+      .map((id) => {
+        const clip = project.clips.find((c) => c.id === id)
+        const asset = clip ? project.assets.find((a) => a.id === clip.assetId) : undefined
+        return clip && asset ? { clip, asset } : null
       })
-      .catch((e) => setError(formatIpcError(e)))
-      .finally(() => setLoading(false))
+      .filter((t): t is { clip: Clip; asset: (typeof project.assets)[number] } => t !== null)
+
+    let disposed = false
+    abortRef.current = false
+    // Kicks off async IPC calls to the main process on mount — an external system
+    // fetch, not state derivable from props.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTotal(targets.length)
+    setDetections([])
+    setChecked(new Set())
+    setAborted(false)
+    setRunning(targets.length > 0)
+    ;(async () => {
+      for (const { clip, asset } of targets) {
+        if (disposed || abortRef.current) break
+        let detection: ClipDetection
+        try {
+          const ranges = await window.api.detectSilence(asset.filePath, clip.inPoint, clip.outPoint)
+          detection = { clipId: clip.id, fileName: asset.fileName, inPoint: clip.inPoint, ranges }
+        } catch (e) {
+          // 1本失敗しても残りは検出して使えるようにする(まとめて掛けたときに
+          // 1本の失敗で全部やり直しになると手間が本数分に戻る)。
+          detection = {
+            clipId: clip.id,
+            fileName: asset.fileName,
+            inPoint: clip.inPoint,
+            ranges: [],
+            error: formatIpcError(e)
+          }
+        }
+        if (disposed) return
+        setDetections((prev) => [...prev, detection])
+        setChecked((prev) => {
+          const next = new Set(prev)
+          detection.ranges.forEach((_, i) => next.add(rangeKey(detection.clipId, i)))
+          return next
+        })
+      }
+      if (!disposed) {
+        setAborted(abortRef.current)
+        setRunning(false)
+      }
+    })()
+    return () => {
+      disposed = true
+      abortRef.current = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clipId])
+  }, [key])
 
-  if (!clip || !asset) return null
-
-  function toggle(i: number): void {
+  function toggle(k: string): void {
     setChecked((prev) => {
       const next = new Set(prev)
-      if (next.has(i)) next.delete(i)
-      else next.add(i)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
       return next
     })
   }
 
   function handleApply(): void {
-    if (!clip) return
-    const cutRanges = ranges.filter((_, i) => checked.has(i)).sort((a, b) => a.start - b.start)
-    // Spread the source clip so per-clip settings not listed here (crop/fill
-    // framing, detached-audio flag) carry over to every surviving segment.
-    const segments: Clip[] = []
-    let cursor = clip.inPoint
-    for (const range of cutRanges) {
-      const start = Math.max(clip.inPoint, range.start)
-      const end = Math.min(clip.outPoint, range.end)
-      if (start > cursor + 0.05) {
-        segments.push({
-          ...clip,
-          id: uuid(),
-          inPoint: cursor,
-          outPoint: start,
-          transitionIn: undefined
-        })
-      }
-      cursor = Math.max(cursor, end)
+    const { project } = useProjectStore.getState()
+    const replacements: { clipId: string; newClips: Clip[] }[] = []
+    for (const d of detections) {
+      const cutRanges = d.ranges.filter((_, i) => checked.has(rangeKey(d.clipId, i)))
+      if (cutRanges.length === 0) continue
+      const clip = project.clips.find((c) => c.id === d.clipId)
+      if (!clip) continue
+      replacements.push({ clipId: d.clipId, newClips: buildCutSegments(clip, cutRanges) })
     }
-    if (cursor < clip.outPoint - 0.05) {
-      segments.push({
-        ...clip,
-        id: uuid(),
-        inPoint: cursor,
-        outPoint: clip.outPoint,
-        transitionIn: undefined
-      })
-    }
-    if (segments.length === 0) {
-      segments.push({ ...clip })
-    } else {
-      segments[0].transitionIn = clip.transitionIn
-    }
-    replaceClipRange(clipId, segments)
+    // 何本掛けても履歴は1件(store 側でまとめて適用する)。
+    replaceClipRanges(replacements)
     onClose()
   }
+
+  const multi = clipIds.length > 1
+  const checkedCount = checked.size
+  const checkedSeconds = detections.reduce(
+    (sum, d) =>
+      sum +
+      d.ranges.reduce(
+        (s, r, i) => (checked.has(rangeKey(d.clipId, i)) ? s + (r.end - r.start) : s),
+        0
+      ),
+    0
+  )
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <WandIcon width={15} height={15} />
-          無音区間の検出: {asset.fileName}
+          無音区間の検出
+          {multi ? `: ${clipIds.length}個のクリップ` : `: ${detections[0]?.fileName ?? ''}`}
         </h3>
-        {loading && <p className="hint-text">検出中...</p>}
-        {error && <p className="error-text">{error}</p>}
-        {!loading && !error && ranges.length === 0 && (
-          <p className="hint-text">無音区間は検出されませんでした。</p>
+        {running && (
+          <p className="hint-text detect-progress">
+            検出中... ({detections.length}/{total})
+            <button className="small-button" onClick={() => (abortRef.current = true)}>
+              中断
+            </button>
+          </p>
         )}
-        {!loading && ranges.length > 0 && (
+        {aborted && (
+          <p className="hint-text">
+            中断しました({detections.length}/{total}
+            件まで検出)。検出済みの分はそのまま適用できます。
+          </p>
+        )}
+        {!running && total === 0 && <p className="hint-text">対象のクリップが見つかりません。</p>}
+        {detections.length > 0 && (
           <div className="silence-range-list">
-            {ranges.map((r, i) => (
-              <label key={i} className="silence-range-item">
-                <input type="checkbox" checked={checked.has(i)} onChange={() => toggle(i)} />
-                {formatTime(r.start - clip.inPoint)} 〜 {formatTime(r.end - clip.inPoint)}
-                <span className="hint-text">({(r.end - r.start).toFixed(1)}秒)</span>
-              </label>
+            {detections.map((d) => (
+              <div key={d.clipId} className="silence-clip-group">
+                {multi && (
+                  <div className="silence-clip-name">
+                    {d.fileName}
+                    <span className="hint-text">
+                      {formatTime(d.inPoint)}〜 / {d.ranges.length}件
+                    </span>
+                  </div>
+                )}
+                {d.error && <p className="error-text">{d.error}</p>}
+                {!d.error && d.ranges.length === 0 && (
+                  <p className="hint-text">無音区間は検出されませんでした。</p>
+                )}
+                {d.ranges.map((r, i) => (
+                  <label key={i} className="silence-range-item">
+                    <input
+                      type="checkbox"
+                      checked={checked.has(rangeKey(d.clipId, i))}
+                      onChange={() => toggle(rangeKey(d.clipId, i))}
+                    />
+                    {formatTime(r.start - d.inPoint)} 〜 {formatTime(r.end - d.inPoint)}
+                    <span className="hint-text">({(r.end - r.start).toFixed(1)}秒)</span>
+                  </label>
+                ))}
+              </div>
             ))}
           </div>
         )}
         <p className="hint-text">
           チェックした区間をクリップから削除します。誤検出があればチェックを外してください。
+          {checkedCount > 0 && ` (${checkedCount}区間 / 合計${checkedSeconds.toFixed(1)}秒)`}
         </p>
         <div className="modal-actions">
           <button onClick={onClose}>キャンセル</button>
           <button
             className="primary-button"
             onClick={handleApply}
-            disabled={loading || ranges.length === 0}
+            disabled={running || checkedCount === 0}
           >
             選択した区間を削除
           </button>

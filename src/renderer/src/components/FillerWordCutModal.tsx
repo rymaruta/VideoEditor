@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import type { Clip, TranscriptSegment } from '@shared/types'
-import { v4 as uuid } from 'uuid'
+import type { TranscriptSegment } from '@shared/types'
+import { buildCutSegments } from '../lib/silenceCut'
 import { formatIpcError } from '../lib/ipcError'
 import { isFillerWordText } from '../lib/fillerWords'
 import { WandIcon } from './icons'
@@ -62,40 +62,8 @@ export function FillerWordCutModal({
 
   function handleApply(): void {
     if (!clip) return
-    const cutRanges = ranges.filter((_, i) => checked.has(i)).sort((a, b) => a.start - b.start)
-    // Spread the source clip so per-clip settings not listed here (crop/fill
-    // framing, detached-audio flag) carry over to every surviving segment.
-    const segments: Clip[] = []
-    let cursor = clip.inPoint
-    for (const range of cutRanges) {
-      const start = Math.max(clip.inPoint, range.start)
-      const end = Math.min(clip.outPoint, range.end)
-      if (start > cursor + 0.05) {
-        segments.push({
-          ...clip,
-          id: uuid(),
-          inPoint: cursor,
-          outPoint: start,
-          transitionIn: undefined
-        })
-      }
-      cursor = Math.max(cursor, end)
-    }
-    if (cursor < clip.outPoint - 0.05) {
-      segments.push({
-        ...clip,
-        id: uuid(),
-        inPoint: cursor,
-        outPoint: clip.outPoint,
-        transitionIn: undefined
-      })
-    }
-    if (segments.length === 0) {
-      segments.push({ ...clip })
-    } else {
-      segments[0].transitionIn = clip.transitionIn
-    }
-    replaceClipRange(clipId, segments)
+    const cutRanges = ranges.filter((_, i) => checked.has(i))
+    replaceClipRange(clipId, buildCutSegments(clip, cutRanges))
     onClose()
   }
 

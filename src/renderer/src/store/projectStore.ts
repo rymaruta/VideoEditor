@@ -125,6 +125,8 @@ interface ProjectState {
   reattachClipAudio: (clipId: string) => void
   updateClipCrop: (clipId: string, fillCrop: boolean, cropCenter?: { x: number; y: number }) => void
   replaceClipRange: (clipId: string, newClips: Clip[]) => void
+  /** 複数クリップの置き換えをまとめて1件の履歴で適用する(一括無音カット) */
+  replaceClipRanges: (replacements: { clipId: string; newClips: Clip[] }[]) => void
   splitClipAtTime: (clipId: string, absoluteTime: number) => void
   removeClip: (clipId: string) => void
   removeClips: (clipIds: string[]) => void
@@ -885,37 +887,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   replaceClipRange: (clipId, newClips) =>
     set((state) => {
-      const idx = state.project.clips.findIndex((c) => c.id === clipId)
-      if (idx === -1) return state
-      const original = state.project.clips[idx]
-      const clips = [...state.project.clips]
-      clips.splice(idx, 1, ...newClips)
-      const textOverlays = remapOverlayLinks(state.project.textOverlays, original, newClips)
-      // Silence/filler/text-based cuts replace one clip with several. Detached audio
-      // linked to the original must be rebuilt to match the surviving segments —
-      // otherwise the video loses the cut-out parts while its separated audio plays
-      // on unchanged, desyncing everything from that point on.
-      const audioTracks = state.project.audioTracks.map((t) => {
-        if (!t.clips.some((c) => c.linkedClipId === clipId)) return t
-        return {
-          ...t,
-          clips: t.clips.flatMap((c) => {
-            if (c.linkedClipId !== clipId) return [c]
-            // Positions and trims are filled in by the link mirror right after.
-            return newClips.map((seg) => ({
-              ...c,
-              id: uuid(),
-              inPoint: seg.inPoint,
-              outPoint: seg.outPoint,
-              linkedClipId: seg.id
-            }))
-          })
-        }
-      })
-      return {
-        ...pushHistory(state),
-        project: { ...state.project, clips, audioTracks, textOverlays }
-      }
+      const project = applyClipReplacement(state.project, clipId, newClips)
+      if (project === state.project) return state
+      return { ...pushHistory(state), project }
+    }),
+
+  replaceClipRanges: (replacements) =>
+    set((state) => {
+      // 対象が何本でも履歴は1件。1本ずつ replaceClipRange を呼ぶと本数分の
+      // Undo が積まれ、まとめて掛けた操作を1回で戻せなくなる。
+      const project = replacements.reduce(
+        (acc, r) => applyClipReplacement(acc, r.clipId, r.newClips),
+        state.project
+      )
+      if (project === state.project) return state
+      return { ...pushHistory(state), project }
     }),
 
   splitClipAtTime: (clipId, absoluteTime) =>
@@ -2049,6 +2035,45 @@ function syncLinkedAudioClips(project: Project): Project {
  * 行き先の断片を選び直す。切り捨てられた区間に載っていたテロップは、次に残った断片の先頭へ
  * 寄せる(テロップだけ元の場所に取り残されるより、内容の続きに付いていく方が近い)。
  */
+/**
+ * クリップ1つを断片の並びに置き換えた新しい `Project` を返す(履歴は積まない)。
+ *
+ * 単発(`replaceClipRange`)と一括(`replaceClipRanges`)で同じ規則を通すためにここへ出す。
+ * 書き写すと、分離音声やテロップの張り直しが片方にだけ足されて差が開く。
+ * 置き換えるものが無ければ受け取った `project` をそのまま返す(呼び出し側が
+ * 参照の同一性で「変化なし」を判定する)。
+ */
+function applyClipReplacement(project: Project, clipId: string, newClips: Clip[]): Project {
+  const idx = project.clips.findIndex((c) => c.id === clipId)
+  if (idx === -1) return project
+  const original = project.clips[idx]
+  const clips = [...project.clips]
+  clips.splice(idx, 1, ...newClips)
+  const textOverlays = remapOverlayLinks(project.textOverlays, original, newClips)
+  // Silence/filler/text-based cuts replace one clip with several. Detached audio
+  // linked to the original must be rebuilt to match the surviving segments —
+  // otherwise the video loses the cut-out parts while its separated audio plays
+  // on unchanged, desyncing everything from that point on.
+  const audioTracks = project.audioTracks.map((t) => {
+    if (!t.clips.some((c) => c.linkedClipId === clipId)) return t
+    return {
+      ...t,
+      clips: t.clips.flatMap((c) => {
+        if (c.linkedClipId !== clipId) return [c]
+        // Positions and trims are filled in by the link mirror right after.
+        return newClips.map((seg) => ({
+          ...c,
+          id: uuid(),
+          inPoint: seg.inPoint,
+          outPoint: seg.outPoint,
+          linkedClipId: seg.id
+        }))
+      })
+    }
+  })
+  return { ...project, clips, audioTracks, textOverlays }
+}
+
 function remapOverlayLinks(
   overlays: TextOverlay[],
   original: Clip,
