@@ -36,6 +36,11 @@ export function ThumbnailPanel(): React.JSX.Element {
   })
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { w: thumbWidth, h: thumbHeight } = targetResolution(project.aspectRatio, THUMB_SHORT_SIDE)
+  // 表示枠も同じ寸法から決める。CSS 側に 16/9 を書くと、9:16 プロジェクトでは
+  // 720x1280 の絵を 16:9 の枠に押し込んで表示することになり、**保存される画像は
+  // 正しいのに編集中の画面だけが歪む**(実測で横方向に3.16倍)。候補一覧も
+  // object-fit: cover で中央の帯しか出ず、候補を見分けられなくなる。
+  const thumbAspect = { aspectRatio: `${thumbWidth} / ${thumbHeight}` }
 
   async function generateCandidates(): Promise<void> {
     setError(null)
@@ -225,6 +230,7 @@ export function ThumbnailPanel(): React.JSX.Element {
                 key={i}
                 src={c}
                 className={`thumbnail-candidate ${selected === c ? 'selected' : ''}`}
+                style={thumbAspect}
                 onClick={() => setSelected(c)}
                 alt={`候補${i + 1}`}
               />
@@ -235,6 +241,7 @@ export function ThumbnailPanel(): React.JSX.Element {
             width={thumbWidth}
             height={thumbHeight}
             className="thumbnail-canvas"
+            style={thumbAspect}
           />
           <input
             type="text"

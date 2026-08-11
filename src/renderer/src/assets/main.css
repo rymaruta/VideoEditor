@@ -3451,9 +3451,11 @@ h3 {
   margin-bottom: 10px;
 }
 
+/* aspect-ratio はここに書かない。サムネイルの縦横はプロジェクトのアスペクト比で
+   変わるので、ThumbnailPanel が出力寸法から算出して inline style で渡す。
+   ここに 16/9 を残すと、9:16 のときに保存される画像と画面の形が食い違う。 */
 .thumbnail-candidate {
   width: 100%;
-  aspect-ratio: 16 / 9;
   object-fit: cover;
   border-radius: var(--radius-sm);
   border: 2px solid transparent;
@@ -3466,7 +3468,6 @@ h3 {
 
 .thumbnail-canvas {
   width: 100%;
-  aspect-ratio: 16 / 9;
   border-radius: var(--radius-md);
   margin-bottom: 10px;
   background: #000;
