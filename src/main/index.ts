@@ -165,6 +165,27 @@ function showSaveDialogForSender(
   return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options)
 }
 
+/**
+ * 進捗などの通知を、その処理を頼んできたウィンドウにだけ返す。
+ * (別のウィンドウの進捗バーを動かさないため、`webContents.send` の直呼びはしない)
+ *
+ * `send` は**破棄済みの相手に送ると `TypeError: Object has been destroyed` を投げる**。
+ * ここは ffmpeg のイベントハンドラから呼ばれるので、投げてもどこにも捕まらず
+ * **main プロセスごと落ちる**。送り先が居なくなっただけで、進行中の処理を
+ * 道連れにしてはいけない。
+ * (実測: 1080p・40秒の書き出しの途中でウィンドウを閉じると、次の進捗で
+ * アプリが異常終了し、書き出し先には**48バイトの再生できないファイル**が残った。
+ * ウィンドウを閉じてもアプリが残る macOS では、そのまま利用者が踏む)
+ *
+ * **通知は必ずこの関数を通すこと。** 生の `sender.send` を書くと、その経路だけが
+ * 同じ落ち方に戻る(実際、プレビュープロキシ側にだけガードがあり、書き出し側は
+ * 無防備なままだった)。
+ */
+function notifySender(event: Electron.IpcMainInvokeEvent, channel: string, payload: unknown): void {
+  if (event.sender.isDestroyed()) return
+  event.sender.send(channel, payload)
+}
+
 function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectMediaFiles, async (event) => {
     const result = await showOpenDialogForSender(event, {
@@ -267,7 +288,7 @@ function registerWindowScopedIpcHandlers(): void {
         outputPath: payload.outputPath,
         loudnessNormalization: payload.loudnessNormalization,
         onProgress: (percent, stage) => {
-          event.sender.send(IPC.exportProgress, { percent, stage })
+          notifySender(event, IPC.exportProgress, { percent, stage })
         }
       })
       return { success: true }
@@ -297,11 +318,7 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.ensurePreviewProxy, async (event, filePath: string, assetId: string) =>
     ensurePreviewProxy(filePath, (percent) => {
-      // Sent back to the window that asked, so an import in one window can't
-      // drive a progress bar in another.
-      if (!event.sender.isDestroyed()) {
-        event.sender.send(IPC.previewProxyProgress, { assetId, percent })
-      }
+      notifySender(event, IPC.previewProxyProgress, { assetId, percent })
     })
   )
   ipcMain.handle(IPC.checkFilesExist, (_e, filePaths: string[]) =>

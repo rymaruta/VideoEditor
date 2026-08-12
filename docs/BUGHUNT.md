@@ -68,7 +68,7 @@
 | 書き出しパイプライン | `src/main/ffmpegService.ts` | 2026-08-12 | fps=30 決め打ちで60fps素材が半分のフレームで出力されていた |
 | テロップ・字幕 | `src/main/assSubtitle.ts` / `PreviewPlayer.tsx` | 2026-08-12 | 縁取り・影だけ換算されず既定設定で1.2〜5.3倍太かった |
 | 音声（ミックス・ダッキング・正規化・分離音声） | `ffmpegService.ts` の音声系 / `audioFade.ts` | 2026-08-12 | モノラル素材が1本混ざると出力全体がモノラル・44.1kHzに落ちていた |
-| IPC境界（main↔renderer・エラー処理・並行実行） | `src/main/index.ts` / `src/preload/index.ts` | 未 | — |
+| IPC境界（main↔renderer・エラー処理・並行実行） | `src/main/index.ts` / `src/preload/index.ts` | 2026-08-12 | 書き出し中にウィンドウを閉じるとアプリが異常終了していた |
 | ストア（履歴・ID再生成・リンク追従・一括操作） | `src/renderer/src/store/projectStore.ts` | 未 | — |
 | タイムラインUI（ドラッグ・トリム・スナップ・選択） | `src/renderer/src/components/Timeline.tsx` | 未 | — |
 | プロジェクト入出力（保存・読込・自動保存・再リンク） | `projectFileService.ts` / `autosaveFiles.ts` | 未 | — |
@@ -79,6 +79,30 @@
 ## 掃引の記録
 
 新しいものを上に足す。1回1ブロック。
+
+### 2026-08-12 IPC境界（main↔renderer・エラー処理・並行実行）
+main→renderer の通知は `event.sender.send` の2箇所だけで、**プレビュープロキシ側にだけ
+`isDestroyed()` ガードがあり、書き出しの進捗は無防備**だった。`send` は破棄済みの
+webContents に対して `TypeError: Object has been destroyed` を投げる（Electron 実機で確認。
+`win.close()` の直後は `isDestroyed()` がまだ false で、少し待つと true になる）。
+投げる場所が ffmpeg のイベントハンドラの中なので `ipcMain.handle` の外、つまり
+**どこにも捕まらず main プロセスごと落ちる**。
+実測（1080p・40秒・実機Electron / 書き出し開始1.0秒後にウィンドウを閉じる）:
+修正前 `uncaughtException: Object has been destroyed` でアプリ異常終了、書き出し先に
+**48バイト・moov atom not found の再生できないファイル**が残る。
+修正後は書き出しが最後まで走り、**1200フレーム / 映像40.000秒・音声40.000秒**で完走。
+対照（修正前のままウィンドウを閉じない）は 14.0秒・進捗21回で完走したので、
+原因が「閉じたこと」であることも確かめた。
+単体: 生きている相手には境界値（0 / 100 / -1 / 33.333333 / 空文字 / null / undefined）が
+そのまま届き例外0件、破棄済みの相手には1000回連続で送っても例外0件。
+ガード無しの式は1回で TypeError になることも並べて確認（テストが空振りしていないことの裏取り）。
+回帰: ウィンドウが生きている場合の進捗送信は修正前後とも21回、出力も同一。
+Linux/Windows は最後のウィンドウを閉じるとアプリ自体が終了するため、
+利用者が踏むのは**ウィンドウを閉じてもアプリが残る macOS**（`electron-builder.yml` の
+ビルド対象に含まれる）。実測はその挙動に合わせて `window-all-closed` を握って行った。
+同種を洗ったところ main→renderer の送信は他に無く、進捗コールバックを渡している
+IPCハンドラも書き出しとプレビュープロキシの2つだけだったので、両方を共通の
+`notifySender` に通す形にした。
 
 ### 2026-08-12 音声（ミックス・ダッキング・正規化・分離音声）
 書き出しの音声の枝がどこも形式を固定しておらず、libavfilter の形式交渉で
