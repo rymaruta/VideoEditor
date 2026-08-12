@@ -794,11 +794,20 @@ h3 {
 
 .source-viewer-track {
   position: relative;
-  height: 16px;
+  /* 波形を読める高さ。タイムラインのクリップ波形(28px)に合わせている */
+  height: 28px;
   border-radius: 4px;
   background: var(--bg-elevated-2);
   cursor: pointer;
   overflow: hidden;
+}
+
+/* 波形は一番下の層。クリックでシークするので、マウスは素通しにする */
+.source-viewer-waveform {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.75;
 }
 
 .source-viewer-selection {

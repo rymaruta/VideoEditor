@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { previewSourceUrl } from '../lib/previewSource'
 import { totalTimelineDuration, buildTimedClips } from '../lib/timelineMath'
+import { waveformRenderSize, type WaveformSize } from '../lib/waveformSize'
+import { Waveform } from './Waveform'
 import { targetFrameRate } from '@shared/frameRate'
 import {
   PlayIcon,
@@ -49,6 +51,7 @@ export function SourceViewer(): React.JSX.Element | null {
   const [playing, setPlaying] = useState(false)
   const [rate, setRate] = useState(1)
   const [scrubbing, setScrubbing] = useState(false)
+  const [waveSize, setWaveSize] = useState<WaveformSize | null>(null)
 
   const asset = assets.find((a) => a.id === sourceAssetId) ?? null
   const duration = asset?.duration ?? 0
@@ -166,6 +169,28 @@ export function SourceViewer(): React.JSX.Element | null {
     }
   })
 
+  // 波形は帯の実寸から作る。固定幅だと帯が広いときに引き伸ばされてぼやけ、
+  // パネル幅は利用者がドラッグで変えられるので一度測って終わりにはできない。
+  // 幅は `waveformRenderSize` が刻みへ切り上げるため、1px動かすたびの作り直しにはならない。
+  useLayoutEffect(() => {
+    const el = trackRef.current
+    if (!el) {
+      setWaveSize(null)
+      return
+    }
+    const measure = (): void => {
+      const rect = el.getBoundingClientRect()
+      const next = waveformRenderSize(rect.width, rect.height)
+      setWaveSize((prev) =>
+        prev && next && prev.width === next.width && prev.height === next.height ? prev : next
+      )
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [sourceAssetId])
+
   if (!asset) return null
 
   // An unmarked edge means "from the start" / "to the end", matching how in/out points
@@ -234,6 +259,19 @@ export function SourceViewer(): React.JSX.Element | null {
           setScrubbing(true)
         }}
       >
+        {asset.hasAudio && waveSize && duration > 0 && (
+          <div className="source-viewer-waveform">
+            {/* 素材を切り替えたときは App.tsx が `key={sourceAssetId}` で
+                このパネルごと作り直すので、前の素材の波形は残らない */}
+            <Waveform
+              filePath={asset.filePath}
+              start={0}
+              end={duration}
+              width={waveSize.width}
+              height={waveSize.height}
+            />
+          </div>
+        )}
         {duration > 0 && rangeDuration > 0 && (
           <div
             className="source-viewer-selection"
