@@ -4,6 +4,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { snapTime } from '../lib/snapping'
 import { clipColorOf } from '../lib/clipColors'
+import { autoScrollLeft } from '../lib/timelineScroll'
 import { normalizeFades } from '@shared/audioFade'
 import {
   SHORTCUT_ACTIONS,
@@ -164,19 +165,36 @@ function TimelinePlayhead({
   total,
   pixelsPerSecond,
   scrubbing,
-  onScrubStart
+  onScrubStart,
+  lanesRef
 }: {
   total: number
   pixelsPerSecond: number
   scrubbing: boolean
   onScrubStart: () => void
+  lanesRef: React.RefObject<HTMLDivElement | null>
 }): React.JSX.Element {
   const playheadTime = useProjectStore((s) => s.playheadTime)
+  const left = Math.min(playheadTime, total) * pixelsPerSecond
+
+  // 再生位置が表示範囲から出たら追従する。追従の判定もここに閉じておく:
+  // Timeline 本体で `playheadTime` を購読し直すと、クリップ数に比例して毎フレームの
+  // 再描画が重くなる(既知の性能問題)。
+  useEffect(() => {
+    if (scrubbing) return
+    const el = lanesRef.current
+    if (!el) return
+    const next = autoScrollLeft({
+      playheadX: left,
+      scrollLeft: el.scrollLeft,
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth
+    })
+    if (next !== null) el.scrollLeft = next
+  }, [left, scrubbing, lanesRef])
+
   return (
-    <div
-      className="timeline-playhead"
-      style={{ left: Math.min(playheadTime, total) * pixelsPerSecond }}
-    >
+    <div className="timeline-playhead" style={{ left }}>
       <div
         className={`timeline-playhead-handle ${scrubbing ? 'active' : ''}`}
         onMouseDown={(e) => {
@@ -1669,6 +1687,7 @@ export function Timeline(): React.JSX.Element {
               pixelsPerSecond={pixelsPerSecond}
               scrubbing={scrubbing}
               onScrubStart={() => setScrubbing(true)}
+              lanesRef={trackLanesColRef}
             />
           </div>
 
