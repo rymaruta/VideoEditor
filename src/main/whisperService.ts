@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { TranscriptSegment, TranscriptWord } from '@shared/types'
+import { retryableSingleton } from './retryableSingleton'
 
 const execFileAsync = promisify(execFile)
 
@@ -24,19 +25,13 @@ interface AsrResult {
 
 type Transcriber = (audio: Float32Array, options: Record<string, unknown>) => Promise<AsrResult>
 
-let transcriberPromise: Promise<Transcriber> | null = null
-
-async function getTranscriber(): Promise<Transcriber> {
-  if (!transcriberPromise) {
-    transcriberPromise = (async () => {
-      const { pipeline } = await import('@huggingface/transformers')
-      return (await pipeline('automatic-speech-recognition', MODEL_ID, {
-        dtype: 'fp32'
-      })) as unknown as Transcriber
-    })()
-  }
-  return transcriberPromise
-}
+// 失敗を覚えないキャッシュ。接続を直して押し直せばやり直せる(進行中は1本に束ねる)
+const getTranscriber = retryableSingleton<Transcriber>(async () => {
+  const { pipeline } = await import('@huggingface/transformers')
+  return (await pipeline('automatic-speech-recognition', MODEL_ID, {
+    dtype: 'fp32'
+  })) as unknown as Transcriber
+})
 
 // Async on purpose: a synchronous ffmpeg call here blocks the whole main process
 // (every IPC, dialog, even the close button) for the duration of the decode —
