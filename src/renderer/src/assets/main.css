@@ -1791,6 +1791,22 @@ h3 {
   white-space: nowrap;
 }
 
+.beat-grid-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.beat-grid-field input {
+  width: 52px;
+  padding: 2px 4px;
+  font-size: 11px;
+  text-align: right;
+}
+
 .timeline-bpm-error {
   margin: 0 14px 6px;
 }

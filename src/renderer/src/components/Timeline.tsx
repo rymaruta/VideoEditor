@@ -6,6 +6,16 @@ import { snapTime } from '../lib/snapping'
 import { clipColorOf } from '../lib/clipColors'
 import { autoScrollLeft } from '../lib/timelineScroll'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
+import {
+  BPM_MAX,
+  BPM_MIN,
+  clampBpm,
+  formatBpm,
+  formatOffset,
+  parseBpmInput,
+  parseOffsetInput,
+  scaleBpm
+} from '../lib/beatGrid'
 import { normalizeFades } from '@shared/audioFade'
 import {
   SHORTCUT_ACTIONS,
@@ -235,6 +245,126 @@ function SplitAtPlayheadButton({
   )
 }
 
+/**
+ * 検出した BPM とオフセットを手で直す欄。検出は外れることがある
+ * (実測: 140BPM の素材が 70BPM = ちょうど半分)ので、直せないと削除するしかなかった。
+ *
+ * 表示はストアの値そのままではなく**打ち込み中の文字列**を持つ。制御された入力欄で
+ * `onChange` のたびに丸めると、打った桁がその場で跳ねて別の数字になるため
+ * (再発防止チェックリスト「表示値がストア由来の入力欄で…」)。丸めるのは blur / Enter。
+ */
+function BeatGridControls({
+  bpm,
+  offsetSeconds,
+  onChange
+}: {
+  bpm: number
+  offsetSeconds: number
+  onChange: (patch: { bpm?: number; offsetSeconds?: number }, coalesceKey?: string) => void
+}): React.JSX.Element {
+  const [bpmText, setBpmText] = useState(() => formatBpm(bpm))
+  const [offsetText, setOffsetText] = useState(() => formatOffset(offsetSeconds))
+  const [editing, setEditing] = useState<'bpm' | 'offset' | null>(null)
+  const [synced, setSynced] = useState({ bpm, offsetSeconds })
+
+  // 打っていない間は、外からの変更(Undo・再解析・×2/÷2)を表示へ映す。
+  // 打っている最中の欄だけは触らない(上書きするとカーソルごと飛ぶ)。
+  // effect ではなくレンダー中に合わせる: effect にすると1フレーム古い値が見える。
+  if (synced.bpm !== bpm || synced.offsetSeconds !== offsetSeconds) {
+    setSynced({ bpm, offsetSeconds })
+    if (editing !== 'bpm') setBpmText(formatBpm(bpm))
+    if (editing !== 'offset') setOffsetText(formatOffset(offsetSeconds))
+  }
+
+  const halved = scaleBpm(bpm, 0.5)
+  const doubled = scaleBpm(bpm, 2)
+
+  function commitBpm(): void {
+    setEditing(null)
+    const parsed = parseBpmInput(bpmText)
+    const next = parsed === null ? bpm : clampBpm(parsed)
+    setBpmText(formatBpm(next))
+    if (next !== bpm) onChange({ bpm: next }, 'beatGridBpm')
+  }
+
+  function commitOffset(): void {
+    setEditing(null)
+    const parsed = parseOffsetInput(offsetText)
+    const next = parsed === null ? offsetSeconds : parsed
+    setOffsetText(formatOffset(next))
+    if (next !== offsetSeconds) onChange({ offsetSeconds: next }, 'beatGridOffset')
+  }
+
+  return (
+    <>
+      <label className="beat-grid-field" title={`BPM(${BPM_MIN}〜${BPM_MAX})`}>
+        <input
+          type="number"
+          min={BPM_MIN}
+          max={BPM_MAX}
+          step={1}
+          value={bpmText}
+          onFocus={() => setEditing('bpm')}
+          onChange={(e) => {
+            setBpmText(e.target.value)
+            const parsed = parseBpmInput(e.target.value)
+            // 打っている途中の値はクランプせずそのまま反映する。使えない値
+            // (空・0以下)のときだけ、直前の値を残してストアを触らない。
+            if (parsed !== null) onChange({ bpm: parsed }, 'beatGridBpm')
+          }}
+          onBlur={commitBpm}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+        />
+        <span>BPM</span>
+      </label>
+      <button
+        className="icon-button"
+        title={
+          halved === null
+            ? `半分にすると ${BPM_MIN} BPM を下回ります`
+            : `BPMを半分にする(${formatBpm(halved)} BPM)`
+        }
+        disabled={halved === null}
+        onClick={() => halved !== null && onChange({ bpm: halved })}
+      >
+        ÷2
+      </button>
+      <button
+        className="icon-button"
+        title={
+          doubled === null
+            ? `2倍にすると ${BPM_MAX} BPM を超えます`
+            : `BPMを2倍にする(${formatBpm(doubled)} BPM)`
+        }
+        disabled={doubled === null}
+        onClick={() => doubled !== null && onChange({ bpm: doubled })}
+      >
+        ×2
+      </button>
+      <label className="beat-grid-field" title="最初のビートの位置(秒)。グリッド全体がずれます">
+        <input
+          type="number"
+          step={0.01}
+          value={offsetText}
+          onFocus={() => setEditing('offset')}
+          onChange={(e) => {
+            setOffsetText(e.target.value)
+            const parsed = parseOffsetInput(e.target.value)
+            if (parsed !== null) onChange({ offsetSeconds: parsed }, 'beatGridOffset')
+          }}
+          onBlur={commitOffset}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur()
+          }}
+        />
+        <span>秒</span>
+      </label>
+    </>
+  )
+}
+
 export function Timeline(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const selectedClipId = useProjectStore((s) => s.selectedClipId)
@@ -289,6 +419,7 @@ export function Timeline(): React.JSX.Element {
   const clipboardClips = useProjectStore((s) => s.clipboardClips)
   const setBeatGrid = useProjectStore((s) => s.setBeatGrid)
   const clearBeatGrid = useProjectStore((s) => s.clearBeatGrid)
+  const updateBeatGrid = useProjectStore((s) => s.updateBeatGrid)
   const toggleBeatGridEnabled = useProjectStore((s) => s.toggleBeatGridEnabled)
   const keymapScheme = useSettingsStore((s) => s.keymapScheme)
   const setKeymapScheme = useSettingsStore((s) => s.setKeymapScheme)
@@ -1029,7 +1160,11 @@ export function Timeline(): React.JSX.Element {
             >
               <ActivityIcon width={13} height={13} />
             </button>
-            <span className="beat-grid-bpm">{project.beatGrid.bpm} BPM</span>
+            <BeatGridControls
+              bpm={project.beatGrid.bpm}
+              offsetSeconds={project.beatGrid.offsetSeconds}
+              onChange={updateBeatGrid}
+            />
             <button
               className="icon-button danger"
               title="ビートグリッドを削除"

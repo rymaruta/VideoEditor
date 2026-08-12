@@ -220,6 +220,7 @@ interface ProjectState {
   splitVideoOverlayClipAtTime: (trackId: string, clipId: string, absoluteTime: number) => void
 
   setBeatGrid: (grid: BeatGrid) => void
+  updateBeatGrid: (patch: Partial<BeatGrid>, coalesceKey?: string) => void
   clearBeatGrid: () => void
   toggleBeatGridEnabled: () => void
 
@@ -1831,6 +1832,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...pushHistory(state),
       project: { ...state.project, beatGrid: grid }
     })),
+
+  // 検出値を手で直す用。数値欄を打っている間は coalesceKey で1件の Undo にまとめる
+  // (1文字ごとに履歴が積まれると、打ち直す前の状態へ1回で戻れない)。
+  updateBeatGrid: (patch, coalesceKey) =>
+    set((state) => {
+      const grid = state.project.beatGrid
+      if (!grid) return {}
+      return {
+        ...pushHistory(state, coalesceKey),
+        project: { ...state.project, beatGrid: { ...grid, ...patch } }
+      }
+    }),
 
   clearBeatGrid: () =>
     set((state) => ({
