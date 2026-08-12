@@ -321,7 +321,7 @@ function buildInsertedClips(
   outPoint: number,
   atTime: number,
   overwrite: boolean
-): Clip[] | null {
+): InsertedClips | null {
   const asset = project.assets.find((a) => a.id === assetId)
   if (!asset) return null
   const from = Math.max(0, Math.min(inPoint, asset.duration))
@@ -333,8 +333,11 @@ function buildInsertedClips(
   const newClip: Clip = { id: uuid(), assetId, inPoint: from, outPoint: to, speed: 1 }
 
   // Split whatever sits under the insertion point into "before" and "after" halves.
+  // The second half gets a fresh id, so anything linked to the original clip has to be
+  // rebuilt afterwards — `split` carries what the caller needs for that.
   const before: Clip[] = []
   const after: Clip[] = []
+  let split: { original: Clip; parts: Clip[] } | null = null
   let elapsed = 0
   for (const c of project.clips) {
     const dur = clipDuration(c)
@@ -345,31 +348,68 @@ function buildInsertedClips(
     } else {
       const speed = c.speed || 1
       const splitLocal = c.inPoint + (atTime - elapsed) * speed
-      before.push({ ...c, outPoint: splitLocal })
-      after.push({ ...c, id: uuid(), inPoint: splitLocal, transitionIn: undefined })
+      const firstHalf = { ...c, outPoint: splitLocal }
+      const secondHalf = { ...c, id: uuid(), inPoint: splitLocal, transitionIn: undefined }
+      before.push(firstHalf)
+      after.push(secondHalf)
+      split = { original: c, parts: [firstHalf, secondHalf] }
     }
     elapsed += dur
   }
 
-  if (!overwrite) return [...before, newClip, ...after]
+  if (!overwrite) return { clips: [...before, newClip, ...after], split, removedClipIds: [] }
 
   // Consume `insertedDuration` worth of the following material, trimming the clip that
   // the consumed range ends inside rather than dropping it whole.
   let remaining = insertedDuration
   const kept: Clip[] = []
+  const removedClipIds: string[] = []
   for (const c of after) {
     const dur = clipDuration(c)
     if (remaining <= 1e-6) {
       kept.push(c)
     } else if (remaining >= dur - 1e-6) {
       remaining -= dur
+      removedClipIds.push(c.id)
     } else {
       const speed = c.speed || 1
       kept.push({ ...c, inPoint: c.inPoint + remaining * speed, transitionIn: undefined })
       remaining = 0
     }
   }
-  return [...before, newClip, ...kept]
+  return { clips: [...before, newClip, ...kept], split, removedClipIds }
+}
+
+/**
+ * インサート/上書きの結果を、`clips` の並びだけでなく**IDに起きたこと**まで返す。
+ *
+ * 並びだけ差し替えると、分割された後半の新しいIDと、丸ごと消えたクリップのIDを
+ * 参照しているもの(分離音声・追従テロップ)が黙って取り残される。
+ */
+interface InsertedClips {
+  clips: Clip[]
+  /** 挿入点の下で2つに割れたクリップ(割れなければ null) */
+  split: { original: Clip; parts: Clip[] } | null
+  /** 上書きで丸ごと消えたクリップのID */
+  removedClipIds: string[]
+}
+
+/**
+ * インサート/上書きで組み替えた `clips` を、参照の付け替えまで済ませて `Project` にする。
+ *
+ * 分割は `splitClipAtTime` と、消えたぶんは `removeClips` と同じ規則を通す
+ * (経路ごとに書くと、片方だけ直したときに黙ってズレる)。
+ */
+function applyInsertedClips(project: Project, built: InsertedClips): Project {
+  let next: Project = { ...project, clips: built.clips }
+  if (built.split) next = relinkForReplacedClip(next, built.split.original, built.split.parts)
+  if (built.removedClipIds.length > 0) {
+    next = {
+      ...next,
+      audioTracks: removeLinkedAudioFor(next.audioTracks, new Set(built.removedClipIds))
+    }
+  }
+  return next
 }
 
 function pushHistory(
@@ -724,14 +764,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, false)
       if (!built) return state
-      return { ...pushHistory(state), project: { ...state.project, clips: built } }
+      return { ...pushHistory(state), project: applyInsertedClips(state.project, built) }
     }),
 
   overwriteClipAtTime: (assetId, inPoint, outPoint, atTime) =>
     set((state) => {
       const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, true)
       if (!built) return state
-      return { ...pushHistory(state), project: { ...state.project, clips: built } }
+      return { ...pushHistory(state), project: applyInsertedClips(state.project, built) }
     }),
 
   updateClipTrim: (clipId, inPoint, outPoint) =>
@@ -2101,17 +2141,29 @@ function applyClipReplacement(project: Project, clipId: string, newClips: Clip[]
   const original = project.clips[idx]
   const clips = [...project.clips]
   clips.splice(idx, 1, ...newClips)
+  return relinkForReplacedClip({ ...project, clips }, original, newClips)
+}
+
+/**
+ * クリップ1本が断片の並びに置き換わったときに、そのIDを参照している物を作り直す。
+ * `clips` 自体は呼び出し側が組み立てたものをそのまま使う。
+ *
+ * **IDが変わると参照はエラーも出さずに切れる**ので、置き換えを行う経路は必ずここを通す。
+ * 置き換え後の並びを自分で組み立てる経路(インサート/上書き)からも呼べるように、
+ * `applyClipReplacement` から切り出してある。
+ */
+function relinkForReplacedClip(project: Project, original: Clip, newClips: Clip[]): Project {
   const textOverlays = remapOverlayLinks(project.textOverlays, original, newClips)
   // Silence/filler/text-based cuts replace one clip with several. Detached audio
   // linked to the original must be rebuilt to match the surviving segments —
   // otherwise the video loses the cut-out parts while its separated audio plays
   // on unchanged, desyncing everything from that point on.
   const audioTracks = project.audioTracks.map((t) => {
-    if (!t.clips.some((c) => c.linkedClipId === clipId)) return t
+    if (!t.clips.some((c) => c.linkedClipId === original.id)) return t
     return {
       ...t,
       clips: t.clips.flatMap((c) => {
-        if (c.linkedClipId !== clipId) return [c]
+        if (c.linkedClipId !== original.id) return [c]
         // Positions and trims are filled in by the link mirror right after.
         return newClips.map((seg) => ({
           ...c,
@@ -2123,7 +2175,7 @@ function applyClipReplacement(project: Project, clipId: string, newClips: Clip[]
       })
     }
   })
-  return { ...project, clips, audioTracks, textOverlays }
+  return { ...project, audioTracks, textOverlays }
 }
 
 function remapOverlayLinks(
