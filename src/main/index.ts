@@ -319,8 +319,10 @@ app.whenReady().then(() => {
       width: number,
       height: number,
       fillCrop?: boolean,
-      cropCenter?: { x: number; y: number }
-    ) => generateFrameDataUrl(filePath, atSeconds, width, height, fillCrop, cropCenter)
+      cropCenter?: { x: number; y: number },
+      blurBackground?: boolean
+    ) =>
+      generateFrameDataUrl(filePath, atSeconds, width, height, fillCrop, cropCenter, blurBackground)
   )
   ipcMain.handle(
     IPC.generateWaveform,

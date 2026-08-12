@@ -135,7 +135,8 @@ export async function generateFrameDataUrl(
   width: number,
   height: number,
   fillCrop?: boolean,
-  cropCenter?: { x: number; y: number }
+  cropCenter?: { x: number; y: number },
+  blurBackground?: boolean
 ): Promise<string> {
   const seekSeconds = await clampSeekSeconds(filePath, atSeconds)
   const dir = mkdtempSync(join(tmpdir(), 've-frame-'))
@@ -146,7 +147,9 @@ export async function generateFrameDataUrl(
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
       .inputOptions([`-ss ${seekSeconds}`])
-      .complexFilter([`[0:v]${scaleToFrameFilter(w, h, fillCrop, cropCenter)},setsar=1[v]`])
+      .complexFilter([
+        `[0:v]${scaleToFrameFilter(w, h, fillCrop, cropCenter, blurBackground)},setsar=1[v]`
+      ])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
       .on('error', (e) => {
@@ -203,6 +206,9 @@ export function generateWaveformDataUrl(
       .run()
   })
 }
+
+/** 書き出しの映像フレームレート。ぼかし背景の合成前に両系統を揃えるのにも使う */
+const OUTPUT_FPS = 30
 
 const SILENCE_NOISE_DB = -30
 const SILENCE_MIN_DURATION = 0.5
@@ -378,10 +384,17 @@ export function exportProject(options: ExportOptions): Promise<void> {
         command.input(asset.filePath).inputOptions([`-ss ${clip.inPoint}`, `-t ${sourceDuration}`])
         const myIndex = inputIndex++
 
-        const scalePadFilter = scaleToFrameFilter(w, h, clip.fillCrop, clip.cropCenter)
-        filterParts.push(
-          `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,fps=30[v${i}]`
+        const scalePadFilter = scaleToFrameFilter(
+          w,
+          h,
+          clip.fillCrop,
+          clip.cropCenter,
+          clip.blurBackground,
+          { labelSuffix: String(i), fps: OUTPUT_FPS }
         )
+        // `fps` は scaleToFrameFilter が中で付ける。ここで overlay の後ろに付けると
+        // ぼかし背景のときだけ最後の1フレームが落ちる(関数側のコメント参照)。
+        filterParts.push(`[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1[v${i}]`)
         if (asset.hasAudio && !clip.audioDetached) {
           filterParts.push(
             `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS[a${i}]`

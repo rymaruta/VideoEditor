@@ -1328,6 +1328,18 @@ h3 {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  position: relative;
+  z-index: 1;
+}
+
+/* 余白を素材のぼかしで埋めるクリップの背景。前景の下に敷く。
+   ぼかすと端の画素が薄くなって枠の縁に線が見えるので、少しだけ拡大して隠す。 */
+.preview-frame video.preview-blur-backdrop {
+  position: absolute;
+  inset: 0;
+  object-fit: cover;
+  transform: scale(1.1);
+  z-index: 0;
 }
 
 .preview-empty {

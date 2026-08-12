@@ -70,7 +70,8 @@ export function ThumbnailPanel(): React.JSX.Element {
           thumbWidth,
           thumbHeight,
           tc.clip.fillCrop,
-          tc.clip.cropCenter
+          tc.clip.cropCenter,
+          tc.clip.blurBackground
         )
         frames.push(dataUrl)
       }
@@ -100,6 +101,7 @@ export function ThumbnailPanel(): React.JSX.Element {
         score: number
         fillCrop?: boolean
         cropCenter?: { x: number; y: number }
+        blurBackground?: boolean
       }[] = []
       for (const assetId of assetIds) {
         const asset = project.assets.find((a) => a.id === assetId)
@@ -118,7 +120,8 @@ export function ThumbnailPanel(): React.JSX.Element {
                 time: mid,
                 score: h.score,
                 fillCrop: containing.clip.fillCrop,
-                cropCenter: containing.clip.cropCenter
+                cropCenter: containing.clip.cropCenter,
+                blurBackground: containing.clip.blurBackground
               })
             }
           }
@@ -142,7 +145,8 @@ export function ThumbnailPanel(): React.JSX.Element {
           thumbWidth,
           thumbHeight,
           entry.fillCrop,
-          entry.cropCenter
+          entry.cropCenter,
+          entry.blurBackground
         )
         frames.push(dataUrl)
       }

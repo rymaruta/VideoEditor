@@ -74,6 +74,7 @@ export function Inspector(): React.JSX.Element {
   const updateClipsSpeed = useProjectStore((s) => s.updateClipsSpeed)
   const updateClipsColorLabel = useProjectStore((s) => s.updateClipsColorLabel)
   const updateClipCrop = useProjectStore((s) => s.updateClipCrop)
+  const updateClipBlurBackground = useProjectStore((s) => s.updateClipBlurBackground)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
   const detachClipAudio = useProjectStore((s) => s.detachClipAudio)
   const reattachClipAudio = useProjectStore((s) => s.reattachClipAudio)
@@ -315,6 +316,22 @@ export function Inspector(): React.JSX.Element {
           <p className="hint-text">
             素材の比率がプロジェクトと異なります。有効にすると余白は消えますが、左右(または上下)が切り取られます。
           </p>
+          {!clip.fillCrop && (
+            <>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={clip.blurBackground ?? false}
+                  onChange={(e) => updateClipBlurBackground(clip.id, e.target.checked)}
+                />
+                余白を素材のぼかしで埋める(黒帯にしない)
+              </label>
+              <p className="hint-text">
+                切り取らずに余白だけを埋めます。端に情報がある素材でも、
+                黒帯を出さずに画面全体を使えます。
+              </p>
+            </>
+          )}
           {clip.fillCrop && (
             <>
               <div className="inspector-field">

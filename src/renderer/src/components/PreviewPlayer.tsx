@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution } from '@shared/resolution'
 import { fadeGainAt } from '@shared/audioFade'
+import { blurSigmaFor } from '@shared/videoFrame'
 import {
   audioClipDuration,
   buildTimedClips,
@@ -250,6 +251,49 @@ function VideoOverlayLayer({
   return <video ref={ref} src={previewSourceUrl(asset)} style={pipStyle(position, scale)} />
 }
 
+/**
+ * 余白を素材のぼかしで埋めるクリップ用の背景レイヤー。
+ *
+ * 書き出しは同じ入力を2つに分けて「拡大+ぼかし」と「収めた前景」を重ねている。
+ * プレビューでも同じ見た目にするため、同じ素材をもう1枚 `object-fit: cover` で敷いて
+ * CSS の blur を掛ける。位置合わせは PiP レイヤーと同じで、0.3秒以上ずれたときだけ
+ * 合わせ直す(ぼかしているので多少のズレは見えない。毎フレーム合わせると重い)。
+ */
+function PreviewBlurBackdrop({
+  src,
+  localTime,
+  isPlaying,
+  blurPx
+}: {
+  src: string
+  localTime: number
+  isPlaying: boolean
+  blurPx: number
+}): React.JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.3) {
+      ref.current.currentTime = localTime
+    }
+  }, [localTime])
+
+  useEffect(() => {
+    if (isPlaying) ref.current?.play().catch(() => {})
+    else ref.current?.pause()
+  }, [isPlaying])
+
+  return (
+    <video
+      ref={ref}
+      className="preview-blur-backdrop"
+      src={src}
+      muted
+      style={{ filter: `blur(${blurPx}px)` }}
+    />
+  )
+}
+
 // Plays one BGM/narration/SE clip during preview via a hidden <audio> element,
 // mounted only while the playhead is inside the clip's range. Ducking is an
 // export-time filter and is not simulated here.
@@ -432,6 +476,20 @@ export function PreviewPlayer(): React.JSX.Element {
   }, [overlayDrag, project.textOverlays, updateTextOverlay])
 
   const timedClips = useMemo(() => buildTimedClips(project), [project])
+  // 書き出しの `gblur=sigma` は出力ピクセル基準。画面では枠の実寸に合わせて換算する
+  // (固定倍率を書くと解像度や枠の大きさを変えたときに見た目が食い違う)。
+  // CSS の `blur(v)` は標準偏差 v/2 のガウスぼかしなので、sigma を2倍して渡す。
+  const blurBackdrop = ((): { localTime: number; blurPx: number } | null => {
+    const tc = findTimedClipAt(timedClips, playheadTime)
+    if (!tc || tc.clip.fillCrop || !tc.clip.blurBackground) return null
+    if (overlayScale <= 0) return null
+    const speed = tc.clip.speed || 1
+    return {
+      localTime: tc.clip.inPoint + (playheadTime - tc.start) * speed,
+      blurPx: blurSigmaFor(outputHeight) * overlayScale * 2
+    }
+  })()
+
   const total = totalTimelineDuration(timedClips)
 
   // Continuous drag-scrubbing on the preview's own progress bar: seekTo() already
@@ -626,6 +684,14 @@ export function PreviewPlayer(): React.JSX.Element {
       <div className={`panel preview-player ${isExpanded ? 'expanded' : ''}`}>
         <div className="preview-frame-wrapper">
           <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
+            {activeSrc && blurBackdrop && (
+              <PreviewBlurBackdrop
+                src={activeSrc}
+                localTime={blurBackdrop.localTime}
+                isPlaying={isPlaying}
+                blurPx={blurBackdrop.blurPx}
+              />
+            )}
             {activeSrc ? (
               <video
                 ref={videoRef}

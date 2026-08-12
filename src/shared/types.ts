@@ -36,6 +36,8 @@ export interface Clip {
   transitionIn?: Transition
   fillCrop?: boolean
   cropCenter?: { x: number; y: number }
+  /** 余白を黒帯ではなく、素材をぼかした背景で埋める(`fillCrop` がONなら余白が無いので無効) */
+  blurBackground?: boolean
   audioDetached?: boolean
   colorLabel?: ClipColorLabel
 }

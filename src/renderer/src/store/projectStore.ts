@@ -125,6 +125,8 @@ interface ProjectState {
   detachClipAudio: (clipId: string) => void
   reattachClipAudio: (clipId: string) => void
   updateClipCrop: (clipId: string, fillCrop: boolean, cropCenter?: { x: number; y: number }) => void
+  /** 余白を黒帯ではなくぼかし背景で埋めるかどうか */
+  updateClipBlurBackground: (clipId: string, blurBackground: boolean) => void
   replaceClipRange: (clipId: string, newClips: Clip[]) => void
   /** 複数クリップの置き換えをまとめて1件の履歴で適用する(一括無音カット) */
   replaceClipRanges: (replacements: { clipId: string; newClips: Clip[] }[]) => void
@@ -874,6 +876,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       }
     }),
+
+  updateClipBlurBackground: (clipId, blurBackground) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        // `...c` でスプレッドしないと、クロップ位置や色ラベルなどここに書いていない
+        // 設定が落ちる
+        clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, blurBackground } : c))
+      }
+    })),
 
   updateClipCrop: (clipId, fillCrop, cropCenter) =>
     set((state) => ({
