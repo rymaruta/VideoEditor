@@ -5,6 +5,7 @@ import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../li
 import { snapTime } from '../lib/snapping'
 import { clipColorOf } from '../lib/clipColors'
 import { autoScrollLeft } from '../lib/timelineScroll'
+import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
 import { normalizeFades } from '@shared/audioFade'
 import {
   SHORTCUT_ACTIONS,
@@ -2227,11 +2228,17 @@ export function Timeline(): React.JSX.Element {
               onChange={(e) => {
                 const asset = project.assets.find((a) => a.id === e.target.value)
                 if (!asset) return
+                // 追加時と同じ規則。ここだけ固定値のままにすると
+                // 「追加したら素材の全長・差し替えたら5秒」と食い違う
                 swapVideoOverlayClipAsset(
                   selectedVideoOverlayClip.trackId,
                   selectedVideoOverlayClip.clipId,
                   asset.id,
-                  Math.min(asset.duration, 5)
+                  videoOverlayClipOutPoint(
+                    asset.duration,
+                    selectedVideoOverlayClipData.startTime,
+                    total
+                  )
                 )
               }}
             >

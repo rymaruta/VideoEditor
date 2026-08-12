@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { audioClipDuration, buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
+import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
 import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
 import type {
   AspectRatio,
@@ -1655,7 +1656,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           videoOverlayTracks: state.project.videoOverlayTracks.map((t) => {
             if (t.id !== trackId) return t
             const startTime = videoOverlayTrackEnd(t)
-            const outPoint = Math.min(asset.duration, 5)
+            const outPoint = videoOverlayClipOutPoint(
+              asset.duration,
+              startTime,
+              totalDuration(state.project)
+            )
             return {
               ...t,
               clips: [...t.clips, { id: uuid(), assetId, startTime, inPoint: 0, outPoint }]
