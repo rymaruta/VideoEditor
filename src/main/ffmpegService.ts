@@ -17,6 +17,7 @@ import { buildAssContent } from './assSubtitle'
 import { targetResolution } from '@shared/resolution'
 import { normalizeFades } from '@shared/audioFade'
 import { scaleToFrameFilter } from '@shared/videoFrame'
+import { targetFrameRate } from '@shared/frameRate'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -207,9 +208,6 @@ export function generateWaveformDataUrl(
   })
 }
 
-/** 書き出しの映像フレームレート。ぼかし背景の合成前に両系統を揃えるのにも使う */
-const OUTPUT_FPS = 30
-
 const SILENCE_NOISE_DB = -30
 const SILENCE_MIN_DURATION = 0.5
 
@@ -361,6 +359,10 @@ export function exportProject(options: ExportOptions): Promise<void> {
     }
   }
   const exportStarts: number[] = new Array(clips.length).fill(0)
+  // 素材に合わせた出力フレームレート。畳み込み(concat/xfade)を通すため全クリップで共通。
+  const outputFps = targetFrameRate(
+    clips.map((c) => assetById.get(c.assetId)?.fps).filter((f): f is number => f !== undefined)
+  )
   exportCancelRequested = false
 
   return new Promise((resolve, reject) => {
@@ -390,7 +392,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
           clip.fillCrop,
           clip.cropCenter,
           clip.blurBackground,
-          { labelSuffix: String(i), fps: OUTPUT_FPS }
+          { labelSuffix: String(i), fps: outputFps }
         )
         // `fps` は scaleToFrameFilter が中で付ける。ここで overlay の後ろに付けると
         // ぼかし背景のときだけ最後の1フレームが落ちる(関数側のコメント参照)。
@@ -423,7 +425,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         if (!wantsTransition || t < 0.02) {
           const outV = `vcat${i}`
           const outA = `acat${i}`
-          filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/30[${outV}]`)
+          filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/${outputFps}[${outV}]`)
           filterParts.push(`[${curA}][a${i}]concat=n=2:v=0:a=1[${outA}]`)
           curV = outV
           curA = outA
@@ -434,7 +436,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
           const outV = `vxf${i}`
           const outA = `axf${i}`
           filterParts.push(
-            `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=1/30[${outV}]`
+            `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=1/${outputFps}[${outV}]`
           )
           filterParts.push(`[${curA}][a${i}]acrossfade=d=${t}[${outA}]`)
           curV = outV

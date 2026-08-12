@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { previewSourceUrl } from '../lib/previewSource'
 import { totalTimelineDuration, buildTimedClips } from '../lib/timelineMath'
+import { targetFrameRate } from '@shared/frameRate'
 import {
   PlayIcon,
   PauseIcon,
@@ -11,8 +12,6 @@ import {
   ScissorsIcon,
   PlusIcon
 } from './icons'
-
-const FRAME_SECONDS = 1 / 30
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return '0:00.00'
@@ -53,6 +52,9 @@ export function SourceViewer(): React.JSX.Element | null {
 
   const asset = assets.find((a) => a.id === sourceAssetId) ?? null
   const duration = asset?.duration ?? 0
+  // ここは素材そのものを見ている画面なので、プロジェクト全体ではなくこの素材の
+  // フレームレートで刻む。固定の 1/30 だと 60fps の素材で2フレーム飛んでいた。
+  const frameStep = 1 / targetFrameRate(asset ? [asset.fps] : [])
 
   useEffect(() => {
     const v = videoRef.current
@@ -250,7 +252,7 @@ export function SourceViewer(): React.JSX.Element | null {
       <div className="source-viewer-transport">
         <button
           className="icon-button"
-          onClick={() => seek(time - FRAME_SECONDS)}
+          onClick={() => seek(time - frameStep)}
           title="1フレーム戻る"
         >
           <StepBackIcon width={13} height={13} />
@@ -278,7 +280,7 @@ export function SourceViewer(): React.JSX.Element | null {
         </button>
         <button
           className="icon-button"
-          onClick={() => seek(time + FRAME_SECONDS)}
+          onClick={() => seek(time + frameStep)}
           title="1フレーム進む"
         >
           <StepForwardIcon width={13} height={13} />

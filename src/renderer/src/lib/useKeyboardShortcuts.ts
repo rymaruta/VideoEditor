@@ -4,9 +4,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { saveProject } from './projectFileActions'
 import { formatIpcError } from './ipcError'
 import { getKeymap, matchesBinding } from './keymap'
-
-const FRAME_SECONDS = 1 / 30
-const FRAME_JUMP_SECONDS = FRAME_SECONDS * 10
+import { frameSeconds } from '@shared/frameRate'
 
 function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
@@ -106,7 +104,10 @@ export function useKeyboardShortcuts(): void {
         (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
       ) {
         e.preventDefault()
-        const step = e.shiftKey ? FRAME_JUMP_SECONDS : FRAME_SECONDS
+        // 1フレームぶんは素材のフレームレートで決まる(書き出しと同じ関数)。
+        // 固定の 1/30 だと、60fps の素材で「1フレーム移動」が2フレーム飛んでいた。
+        const frame = frameSeconds(store.project.clips, store.project.assets)
+        const step = e.shiftKey ? frame * 10 : frame
         const direction = e.key === 'ArrowLeft' ? -1 : 1
         const total = getTotalDuration(store.project)
         const next = Math.max(0, Math.min(total, store.playheadTime + direction * step))

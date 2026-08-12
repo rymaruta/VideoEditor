@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution } from '@shared/resolution'
+import { frameSeconds } from '@shared/frameRate'
 import { fadeGainAt } from '@shared/audioFade'
 import { blurSigmaFor } from '@shared/videoFrame'
 import {
@@ -25,7 +26,6 @@ import {
   StepForwardIcon
 } from './icons'
 
-const FRAME_SECONDS = 1 / 30
 import { ShortsUiMockup } from './ShortsUiMockup'
 import type {
   AudioTrackClip,
@@ -650,7 +650,10 @@ export function PreviewPlayer(): React.JSX.Element {
   }, [volume, muted, activeSrc, activeClipAudioDetached])
 
   function stepFrame(direction: 1 | -1): void {
-    const next = Math.max(0, Math.min(total, playheadTime + direction * FRAME_SECONDS))
+    // 1フレームぶんは素材のフレームレートで決まる。60fps の素材で 1/30 秒動かすと
+    // 「1フレーム」と書いてあるのに2フレーム飛ぶ。書き出しと同じ関数から求める。
+    const step = frameSeconds(project.clips, project.assets)
+    const next = Math.max(0, Math.min(total, playheadTime + direction * step))
     seekTo(next)
   }
 
