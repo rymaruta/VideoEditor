@@ -317,6 +317,19 @@ export function atempoChain(speed: number): string {
   return steps.map((s) => `atempo=${Number(s.toFixed(6))}`).join(',')
 }
 
+// 書き出す音声の形式。合流フィルタ(concat / acrossfade / amix / sidechaincompress)は
+// libavfilter がグラフ全体で1つの形式に揃うよう交渉するので、枝の中に `aresample` の
+// ような変換フィルタがあると「変換の少ない側」が採られる。その結果、**モノラルや
+// 44.1kHz の素材が1本混ざっただけで、本編のステレオが黙ってモノラルに畳まれ、
+// サンプルレートも道連れで落ちる**(実測: 48kHz ステレオの本編にモノラルのナレーションを
+// 1本足すと出力が 44.1kHz・1ch になり、左だけに入れた音が中央に潰れた)。
+// エラーも警告も出ないので、書き出しの尺だけ見ていると気付けない。
+const OUTPUT_SAMPLE_RATE = 48000
+const OUTPUT_CHANNEL_LAYOUT = 'stereo'
+// 合流の手前で形式を固定して、交渉の余地を無くす。**音声の枝を足したら必ずこれを通す**
+// (通し忘れた枝が1本あれば、そこからグラフ全体が引きずられる)。
+const AUDIO_FORMAT = `aformat=sample_fmts=fltp:sample_rates=${OUTPUT_SAMPLE_RATE}:channel_layouts=${OUTPUT_CHANNEL_LAYOUT}`
+
 export function cancelExport(): void {
   if (!exportInProgress) return
   // Also covers the window before .run() assigns currentExportCommand: the flag
@@ -399,11 +412,11 @@ export function exportProject(options: ExportOptions): Promise<void> {
         filterParts.push(`[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1[v${i}]`)
         if (asset.hasAudio && !clip.audioDetached) {
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS[a${i}]`
+            `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,${AUDIO_FORMAT}[a${i}]`
           )
         } else {
           filterParts.push(
-            `anullsrc=channel_layout=stereo:sample_rate=44100:duration=${outputDuration}[a${i}]`
+            `anullsrc=channel_layout=${OUTPUT_CHANNEL_LAYOUT}:sample_rate=${OUTPUT_SAMPLE_RATE}:duration=${outputDuration},${AUDIO_FORMAT}[a${i}]`
           )
         }
       })
@@ -498,7 +511,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
             const delayMs = Math.max(0, Math.round(pipStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
             filterParts.push(
-              `[${myIndex}:a]asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs}[${audioLabel}]`
+              `[${myIndex}:a]asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs},${AUDIO_FORMAT}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })
           }
@@ -559,7 +572,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
           }
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${fadeChain}volume=${clipVolume},adelay=${delayMs}|${delayMs}[${label}]`
+            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${fadeChain}volume=${clipVolume},adelay=${delayMs}|${delayMs},${AUDIO_FORMAT}[${label}]`
           )
           clipLabels.push(label)
         })
@@ -608,7 +621,10 @@ export function exportProject(options: ExportOptions): Promise<void> {
       }
 
       if (loudnessNormalization) {
-        filterParts.push(`${audioLabel}loudnorm=I=-14:TP=-1.5:LRA=11[aloud]`)
+        // loudnorm は内部を 192kHz で回すため、後ろを固定しないと**出力が 96kHz になる**
+        // (実測: 48kHz の素材が 96kHz で書き出されていた)。既定でONなので既定のまま
+        // 書き出すと必ず踏む。ここでも形式を戻す。
+        filterParts.push(`${audioLabel}loudnorm=I=-14:TP=-1.5:LRA=11,${AUDIO_FORMAT}[aloud]`)
         audioLabel = '[aloud]'
       }
 
