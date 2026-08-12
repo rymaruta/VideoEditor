@@ -59,6 +59,20 @@ const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
   'Noto Serif JP': '"Noto Serif JP", serif'
 }
 
+// 書き出し側の `\shad2`(出力ピクセル)に合わせる。
+const SHADOW_OFFSET_OUTPUT_PX = 2
+
+/**
+ * `text-shadow` に入れる長さを安全な数値にする。
+ *
+ * NaN や負値がひとつでも混ざると `NaNpx` になって **text-shadow 宣言ごと無効**になり、
+ * 縁取りも影もまとめて消える(しかもエラーは出ない)。プロジェクトファイルは外から
+ * 来るので、描画直前で切り落とす。
+ */
+function normalizeLength(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
 /**
  * テロップの見た目を画面用に組み立てる。
  *
@@ -67,21 +81,35 @@ const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
  * 「枠の高さ / 出力の高さ」を掛けて同じ比率で描く。ここを固定倍率にしていたときは、
  * サイズ40のテロップが画面では枠高の 6.77% を占めるのに、1080p の書き出しでは 2.08%
  * にしかならず、画面で決めたサイズが出力で使えなかった。
+ *
+ * 縁取り・影も同じ「出力ピクセル」の値なので、フォントと同じ `scale` を掛ける。
  */
 function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
   const shadows: string[] = []
   if (style.outline) {
-    const w = Math.max(1, Math.round(style.outlineWidth * 0.6))
+    // 縁取りも出力ピクセルの値(書き出しは `\bord${outlineWidth}`)なので、フォントと
+    // 同じ `scale` を掛ける。ここだけ固定倍率のままだったため、文字は正しい比率なのに
+    // 縁取りだけが太すぎた(1080p を 320px 枠で見ると scale≈0.30、太さ6は本来1.78pxの
+    // ところ 3.6px で描かれていた)。
+    // 整数pxに丸めない・1px の下限も置かない。text-shadow は小数pxを受け付けて
+    // アンチエイリアスするので、丸めると縮小率が高いときにその丸めのほうが誤差の
+    // 主因になる(1920p を 240px 枠で見ると、下限1px が本来 0.25px の縁取りを 4倍に
+    // 太らせていた)。細く見えるのは書き出しでも実際に細いということ。
+    const w = normalizeLength(style.outlineWidth) * scale
     const c = style.outlineColor
-    shadows.push(
-      `-${w}px -${w}px 0 ${c}`,
-      `${w}px -${w}px 0 ${c}`,
-      `-${w}px ${w}px 0 ${c}`,
-      `${w}px ${w}px 0 ${c}`
-    )
+    if (w > 0) {
+      shadows.push(
+        `-${w}px -${w}px 0 ${c}`,
+        `${w}px -${w}px 0 ${c}`,
+        `-${w}px ${w}px 0 ${c}`,
+        `${w}px ${w}px 0 ${c}`
+      )
+    }
   }
   if (style.shadow) {
-    shadows.push('2px 3px 4px rgba(0,0,0,0.7)')
+    // 影も同じ。書き出しは `\shad2` = 出力2px 相当なので、画面でもその比率で置く。
+    const o = SHADOW_OFFSET_OUTPUT_PX * scale
+    if (o > 0) shadows.push(`${o}px ${o}px ${o * 2}px rgba(0,0,0,0.7)`)
   }
   return {
     fontFamily: FONT_STACKS[style.fontFamily],

@@ -10,8 +10,18 @@ export function loadTrendHistory(): TrendSnapshot[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    // 配列であることだけ見て中身を信じると、`[null]` のような値で compareTrend の
+    // `previous.gameNames` が落ちる(この関数には try がないのでトレンド画面ごと死ぬ)。
+    // 使える要素だけ残す。
+    return parsed.filter(
+      (v): v is TrendSnapshot =>
+        typeof v === 'object' &&
+        v !== null &&
+        typeof (v as TrendSnapshot).timestamp === 'number' &&
+        Array.isArray((v as TrendSnapshot).gameNames)
+    )
   } catch {
     return []
   }
