@@ -14,5 +14,15 @@ export function toFileUrl(filePath: string): string {
  * reading `filePath` so the output is never built from the downscaled copy.
  */
 export function previewSourceUrl(asset: MediaAsset): string {
-  return toFileUrl(asset.proxyPath ?? asset.filePath)
+  return toFileUrl(previewSourcePath(asset))
+}
+
+/**
+ * プレビューが実際に読むファイルの**パス**。
+ *
+ * 「再生できるか」を確かめる側は URL ではなくパスで受け取るので、
+ * `proxyPath ?? filePath` の規則をそれぞれの場所に書き写さずここから取る。
+ */
+export function previewSourcePath(asset: MediaAsset): string {
+  return asset.proxyPath ?? asset.filePath
 }

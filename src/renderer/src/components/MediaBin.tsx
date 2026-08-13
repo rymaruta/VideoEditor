@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
-import { canPreviewFile } from '../lib/canPreview'
+import { assetsNeedingPreviewProxy, canPreviewFile } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
 import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
@@ -36,6 +36,7 @@ function formatDuration(seconds: number): string {
 
 export function MediaBin(): React.JSX.Element {
   const assets = useProjectStore((s) => s.project.assets)
+  const projectId = useProjectStore((s) => s.project.id)
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const videoOverlayTracks = useProjectStore((s) => s.project.videoOverlayTracks)
@@ -110,6 +111,63 @@ export function MediaBin(): React.JSX.Element {
       })
     }
   }
+
+  /**
+   * 開いた/復元したプロジェクトの素材にも、必要ならプロキシを用意する。
+   *
+   * プロキシを作っていたのは**取り込みのときだけ**だった。取り込み直後は再生できるのに、
+   * 保存して開き直すと同じ素材が**プレビューで再生できなくなる**——変換が終わる前に保存
+   * すれば `proxyPath` は保存されず、変換が一度失敗した場合・別の環境で開いた場合も同じ。
+   * しかも開いたあとは**誰も作り直さない**ので、その状態から回復する手段が無い
+   * (実測: HEVC を取り込むと videoWidth 960 で再生できるのに、保存して開き直すと
+   * videoWidth 0 のまま「プレビューで再生できません」が出続け、60秒待っても変換は
+   * 始まらなかった)。
+   *
+   * 判定は取り込みと同じで、**実際に読み込ませてみる**(`canPreviewFile`)。
+   * コーデック名で決め打ちすると環境ごとに答えが変わる。
+   */
+  async function ensureLoadedAssetsPreviewable(
+    loaded: MediaAsset[],
+    stillCurrent: () => boolean
+  ): Promise<void> {
+    // 前のプロジェクトのメッセージを残したままにしない(取り込みの入り口と同じ扱い)。
+    setError(null)
+    for (const asset of await assetsNeedingPreviewProxy(loaded, canPreviewFile)) {
+      // 調べている間に別のプロジェクトを開かれたら、そこで止める。**遅れて返ってきた
+      // 結果を今の画面に書かない**(実測: 消えた素材を調べている最中に別のプロジェクトを
+      // 開くと、開いたあとの画面に前のプロジェクトのメッセージが出た)。
+      if (!stillCurrent()) return
+      // 取り込みと同じ「コーデックのせいか、壊れているか」の判定材料をここで取る
+      // (プレビューできなかった素材だけなので、ffprobe は最小限しか走らない)。
+      let codecSaysUnplayable = false
+      try {
+        codecSaysUnplayable = (await window.api.probeMedia(asset.filePath)).needsPreviewProxy
+      } catch {
+        if (!stillCurrent()) return
+        setError(
+          `${asset.fileName}: プレビューで読み込めませんでした。ファイルが移動・削除されていないか確認してください。`
+        )
+        continue
+      }
+      if (!stillCurrent()) return
+      await ensurePreviewable(asset.id, asset.filePath, codecSaysUnplayable, asset.hasVideo)
+    }
+  }
+
+  // プロジェクトを開いた/自動保存から復元したときだけ走る。`project.id` は保存・読込を
+  // 通して保たれ、素材を足しただけでは変わらないので、取り込みのたびに走り直さない。
+  // 見るのは**この描画時点の** `assets`。`getState()` で読み直すと、開いた直後に
+  // 取り込まれた素材まで拾って二重に調べにいく(取り込み側が既に面倒を見ている)。
+  useEffect(() => {
+    let canceled = false
+    // 画面の状態(進捗・メッセージ)を更新するのが目的の副作用。props から導ける値ではない。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void ensureLoadedAssetsPreviewable(assets, () => !canceled)
+    return () => {
+      canceled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
 
   // Deleting an asset also deletes every clip made from it, so the count is shown
   // before doing it — losing a cut you spent time on to a stray click is much worse

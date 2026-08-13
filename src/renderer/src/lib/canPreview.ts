@@ -1,4 +1,5 @@
-import { toFileUrl } from './previewSource'
+import { previewSourcePath, toFileUrl } from './previewSource'
+import type { MediaAsset } from '@shared/types'
 
 const PROBE_TIMEOUT_MS = 6000
 
@@ -46,4 +47,30 @@ export function canPreviewFile(filePath: string, expectVideo: boolean): Promise<
     el.onerror = () => finish(false)
     el.src = toFileUrl(filePath)
   })
+}
+
+/**
+ * 並びのうち、**いまのままではプレビューできない**素材を返す。
+ *
+ * プロキシを作るのは取り込みのときだけだったので、変換が終わる前に保存する・変換が
+ * 一度失敗する・別の環境で開く、のいずれでも**開き直した瞬間から再生できなくなり、
+ * 誰も作り直さなかった**。開いたときにも同じ判定を通すために切り出してある。
+ *
+ * 見るのは**プレビューが実際に読む側**(`proxyPath ?? filePath`)。保存されていた
+ * プロキシの実体が消えていることがあるので、`proxyPath` があるだけでは在るとみなさない。
+ * 作り直しは呼び出し側が**元ファイル**から行う。
+ *
+ * 判定関数を引数で受け取るのは、実際に読み込ませる `canPreviewFile` が DOM を使うため
+ * (試験では差し替える)。
+ */
+export async function assetsNeedingPreviewProxy(
+  assets: readonly MediaAsset[],
+  canPreview: (filePath: string, expectVideo: boolean) => Promise<boolean>
+): Promise<MediaAsset[]> {
+  const result: MediaAsset[] = []
+  for (const asset of assets) {
+    if (await canPreview(previewSourcePath(asset), asset.hasVideo)) continue
+    result.push(asset)
+  }
+  return result
 }
