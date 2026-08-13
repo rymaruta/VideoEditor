@@ -39,21 +39,50 @@ function createBlankProject(): Project {
   }
 }
 
-// Defends against project files saved by an older schema version (or a hand-edited /
-// partially corrupted file) that are missing fields added since — without this, loading
-// such a file would crash the whole app the moment any code accesses e.g.
-// project.audioTracks.forEach(...) on an undefined array.
+/** 配列でなければ空配列。要素は「オブジェクトであること」まで見て、使えない分は捨てる。 */
+function asRecordArray<T>(value: unknown): T[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((v): v is T => typeof v === 'object' && v !== null && !Array.isArray(v))
+}
+
+function asNonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length > 0 ? value : fallback
+}
+
+/**
+ * 読み込んだプロジェクトを、**この先のコードが前提にしている形**に整える。
+ *
+ * `.veproj` は利用者が持ち歩いて共有し、手で編集もできる**外から来た JSON**。
+ * 古い版のアプリが別の形で書いていることもあるし、書き込み途中で壊れることもある。
+ * `JSON.parse` が通ったことは「期待した形」を何も保証しない。
+ *
+ * 以前は `project.clips ?? []` のように **null と undefined しか見ていなかった**ため、
+ * `"clips": "こわれた"` のような**型違い**はそのまま state に入った。
+ * 実測: `clips` が文字列の `.veproj` を開くと**タイムラインのパネルごと画面から消え、
+ * しかもメッセージは何も出ない**。そのあと正しいファイルを開き直しても戻らず、
+ * アプリを再起動するまで編集できなくなった。
+ *
+ * `loadProjectFile` は**一番外側**が object かどうかだけ確かめている(同じ理由で足された)。
+ * ここはその続きで、**中身の型**を見る。配列の要素も、オブジェクトでないものは捨てる——
+ * `null` が1つ混ざるだけで `clips.map((c) => c.id)` が落ちるため。
+ */
 function normalizeLoadedProject(project: Project): Project {
+  const raw = project as unknown as Record<string, unknown>
   return {
-    id: project.id ?? uuid(),
-    name: project.name ?? '無題のプロジェクト',
-    aspectRatio: project.aspectRatio ?? '9:16',
-    assets: project.assets ?? [],
-    clips: project.clips ?? [],
-    audioTracks: project.audioTracks ?? [],
-    videoOverlayTracks: project.videoOverlayTracks ?? [],
-    textOverlays: project.textOverlays ?? [],
-    beatGrid: project.beatGrid ?? null
+    id: asNonEmptyString(raw.id, uuid()),
+    name: asNonEmptyString(raw.name, '無題のプロジェクト'),
+    // 知っている2つ以外は既定へ。画面の切り替えもこの値を見る。
+    aspectRatio:
+      raw.aspectRatio === '16:9' || raw.aspectRatio === '9:16' ? raw.aspectRatio : '9:16',
+    assets: asRecordArray(raw.assets),
+    clips: asRecordArray(raw.clips),
+    audioTracks: asRecordArray(raw.audioTracks),
+    videoOverlayTracks: asRecordArray(raw.videoOverlayTracks),
+    textOverlays: asRecordArray(raw.textOverlays),
+    beatGrid:
+      typeof raw.beatGrid === 'object' && raw.beatGrid !== null && !Array.isArray(raw.beatGrid)
+        ? (raw.beatGrid as Project['beatGrid'])
+        : null
   }
 }
 
