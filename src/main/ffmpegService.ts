@@ -483,8 +483,25 @@ export function exportProject(options: ExportOptions): Promise<void> {
         // ぼかし背景のときだけ最後の1フレームが落ちる(関数側のコメント参照)。
         filterParts.push(`[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1[v${i}]`)
         if (asset.hasAudio && !clip.audioDetached) {
+          // 音声も**映像と同じ尺ちょうど**に揃えてから畳み込む。
+          //
+          // 素材の音声ストリームは映像ストリームと同じ長さとは限らない(録画物では
+          // 音声だけ数十ms〜数秒短いことがよくある)。クリップは映像と音声を
+          // **別々に `concat`** して積み上げるので、1本ごとの差がそのまま累積し、
+          // **2本目以降の音が前へずれていく**。エラーも警告も出ず、尺は映像側で
+          // 決まるので「出力の長さは合っている」ように見える。
+          // (実測: 映像5秒・音声4秒の素材を3本並べると、映像 15.000秒に対し
+          //  音声 11.968秒。各クリップ先頭のビープが 0 / **3.99** / **7.98** 秒と、
+          //  本来の 0 / 5 / 10 から最大 2.02 秒ずれていた。音声も5秒の素材でも
+          //  AAC のフレーム境界のぶん 1本あたり約 0.02 秒ずれ、100本のジャンプカットなら
+          //  2秒の音ズレになる)
+          // `apad` で足りない分を無音で埋め、`atrim` で長すぎる分を切る——
+          // **どちらの向きのズレも同じ1本で塞ぐ**。音声を持たないクリップは
+          // 最初から `anullsrc` に `duration` を渡して尺ちょうどにしており、
+          // ここでも**片方にだけ揃える処理が育っていた**。
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,${AUDIO_FORMAT}[a${i}]`
+            `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+              `apad,atrim=0:${outputDuration},asetpts=PTS-STARTPTS,${AUDIO_FORMAT}[a${i}]`
           )
         } else {
           filterParts.push(
