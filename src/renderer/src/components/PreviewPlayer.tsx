@@ -17,6 +17,8 @@ import {
   audioClipDuration,
   buildTimedClips,
   findTimedClipAt,
+  findTimedClipById,
+  nextTimedClip,
   totalTimelineDuration,
   TimedClip
 } from '../lib/timelineMath'
@@ -680,8 +682,8 @@ export function PreviewPlayer(): React.JSX.Element {
   // detached clip until it happens to reach its old out-point.
   useEffect(() => {
     const activeId = activeTimedClipRef.current?.clip.id
-    const activeStillPresent = activeId != null && timedClips.some((tc) => tc.clip.id === activeId)
-    if (activeId != null && !activeStillPresent) {
+    const current = findTimedClipById(timedClips, activeId)
+    if (activeId != null && !current) {
       loadClipForTime(playheadTime, isPlaying)
       return
     }
@@ -692,10 +694,14 @@ export function PreviewPlayer(): React.JSX.Element {
     // The loaded clip's source file can change while it stays on the timeline: a
     // preview proxy finishing its transcode swaps the asset's playback path. Without
     // this the element keeps the old, undecodable src and never starts.
-    const current = timedClips.find((tc) => tc.clip.id === activeId)
     if (current && previewSourceUrl(current.asset) !== activeSrcRef.current) {
       loadClipForTime(playheadTime, isPlaying)
+      return
     }
+    // `timedClips` は project が変わるたび作り直されるので、ref が指しているのは常に
+    // 「1つ前の配列の」オブジェクト。中身(start / outPoint)も編集前のまま凍っている。
+    // 再生を止めずに、今の配列の同じクリップへ差し替える。
+    if (current) activeTimedClipRef.current = current
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timedClips])
 
@@ -734,8 +740,7 @@ export function PreviewPlayer(): React.JSX.Element {
         setPlayheadTime(globalTime)
 
         if (video.currentTime >= tc.clip.outPoint - 0.02) {
-          const idx = timedClips.indexOf(tc)
-          const next = timedClips[idx + 1]
+          const next = nextTimedClip(timedClips, tc)
           if (next) {
             loadClipForTime(next.start, isPlaying)
           } else {

@@ -28,6 +28,35 @@ export function findTimedClipAt(timedClips: TimedClip[], time: number): TimedCli
   return timedClips.length > 0 ? timedClips[timedClips.length - 1] : null
 }
 
+/**
+ * 並びの中から、id が一致するクリップを探す。
+ *
+ * `buildTimedClips` は呼ぶたびに新しいオブジェクトを作り直す。前に受け取った `TimedClip` を
+ * `indexOf` や `===` で照合すると、テロップを1つ足しただけで「同じクリップ」が見つからなく
+ * なる。どのクリップかの照合は必ず id で行う。
+ */
+export function findTimedClipById(
+  timedClips: TimedClip[],
+  clipId: string | null | undefined
+): TimedClip | null {
+  if (clipId == null) return null
+  return timedClips.find((tc) => tc.clip.id === clipId) ?? null
+}
+
+/**
+ * `current` の次に再生されるクリップ。`current` が並びに無い(消された)ときは null を返す。
+ * 「見つからない = 先頭」にはしない — 消えたクリップの次は決められない。
+ */
+export function nextTimedClip(
+  timedClips: TimedClip[],
+  current: TimedClip | null | undefined
+): TimedClip | null {
+  if (!current) return null
+  const index = timedClips.findIndex((tc) => tc.clip.id === current.clip.id)
+  if (index < 0) return null
+  return timedClips[index + 1] ?? null
+}
+
 export function totalTimelineDuration(timedClips: TimedClip[]): number {
   return timedClips.length === 0 ? 0 : timedClips[timedClips.length - 1].end
 }
