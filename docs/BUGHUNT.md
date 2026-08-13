@@ -74,11 +74,48 @@
 | プロジェクト入出力（保存・読込・自動保存・再リンク） | `projectFileService.ts` / `autosaveFiles.ts` | 2026-08-12 | 保存が直接上書きで、保存中に落ちると元のプロジェクトが失われていた |
 | プレビュー再生（同期・プロキシ・PiP） | `PreviewPlayer.tsx` / `previewProxyService.ts` | 2026-08-12 | PiPの縦の余白だけ基準の辺が違い、縦横比で逆向きにズレていた |
 | 解析系（ハイライト・BPM・無音・スマートクロップ） | `highlightService.ts` / `bpmService.ts` ほか | 2026-08-12 | 無音検出だけ絶対しきい値のままで、小さく録れた素材は全域が無音扱いだった |
-| AI連携（応答の取り扱い・失敗時の挙動） | `src/renderer/src/lib/` の gemini / youtube | 未 | — |
+| AI連携（応答の取り扱い・失敗時の挙動） | `src/renderer/src/lib/` の gemini / youtube | 2026-08-12 | 好み学習の localStorage だけ浅マージで、壊れた値だと自動編集の画面が落ちた |
 
 ## 掃引の記録
 
 新しいものを上に足す。1回1ブロック。
+
+### 2026-08-12 AI連携（応答の取り扱い・失敗時の挙動）
+Gemini の応答(ゲームトレンド・投稿メタデータ・AIショート構成案)は3経路とも
+**要素レベルで coerce 済み**で穴が無かった。YouTube の `items` も修正済み。
+代わりに見つかったのは、自動編集の**好み学習**(`editPreferenceStore`)が localStorage を
+`{ ...base.styleStats, ...parsed.styleStats }` と**スプレッドで浅く混ぜていた**こと。
+キーがあるかしか見ないので、値が `null` でもそのまま既定値を押しのけて state に入る。
+
+実測（実機・利用者と同じ操作。`ve-edit-preferences` に `{"styleStats":{"score":null}}` を
+入れて「AIおまかせ全自動編集」を押す）:
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| 画面が落ちたか | **はい**(ErrorBoundary) | **いいえ** |
+| エラー文 | `Cannot read properties of null (reading 'liked')` | なし |
+| モーダルが開いたか | **いいえ** | **はい** |
+
+`getSummaryText` は `useEditPreferenceStore((s) => s.getSummaryText())` としてモーダルの
+**レンダー中**に呼ばれるので、イベントハンドラのように握り潰せず画面ごと落ちる。
+
+単体18件すべて例外なし(トップレベルが null/配列/数値/文字列/壊れたJSON、
+`styleStats` が null/配列/文字列混じり、未知のスタイル、`liked` が文字列/null/負、
+`transitionCounts` が文字列/null、合計値が文字列)。
+**正常系(scoreに好評価2件・wipe 3回)では従来どおり `つなぎ=wipe`・要約に好みが出る**ことも
+毎回確認している——これが出ないとテストが空振りしていても気付けない。
+
+**測り方の失敗を1件記録**: 最初の単体は `localStorage` をグローバルに差し込んでから
+ストアを `import` する形で書いたが、**import はホイストされるので差し込みより先に
+`loadPrefs()` が走り**、全ケースが同じ結果(既定値)になって「壊れていない」ように見えた。
+`node -r setup.cjs` で先に差し込む形に変えたら、正常系で `つなぎ=wipe` が出て初めて
+テストが効いていると分かった。
+
+同種を洗ったところ、localStorage を読むのは他に プリセット・SE辞書・トレンド履歴・
+最近使ったプロジェクト(いずれも `Array.isArray` + 要素ごとの検証済み)、
+レイアウト寸法(`Number.isFinite`)、音量(`Number.isFinite` + クランプ)、
+書き出し解像度(`RESOLUTION_HEIGHTS.includes`)、キーマップ(`getKeymap` が
+`?? KEYMAPS.default`)で、**浅マージだったのは好み学習だけ**だった。
 
 ### 2026-08-12 解析系（ハイライト・BPM・無音・スマートクロップ）
 無音検出だけが `noise=-30dB` の**絶対しきい値の決め打ち**だった。素材の録音レベルは

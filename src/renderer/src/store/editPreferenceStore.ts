@@ -30,19 +30,49 @@ function emptyPrefs(): StoredPrefs {
   }
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** 0以上の有限な数だけ通す。それ以外(文字列・null・NaN・Infinity・負)は 0 */
+function asCount(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0
+}
+
+/**
+ * localStorage は外部入力。**`JSON.parse` が通ったことは「期待した形」を何も保証しない。**
+ *
+ * 以前はスプレッドで浅く混ぜていた(`{ ...base.styleStats, ...parsed.styleStats }`)ため、
+ * `{"styleStats":{"score":null}}` のような値がそのまま state に入り、読む側の
+ * `styleStats[s].liked` が落ちた。`getSummaryText` は AIおまかせ全自動編集モーダルの
+ * **レンダー中**に呼ばれるので、**モーダルを開いた瞬間に画面ごと落ちる**
+ * (実測: `Cannot read properties of null (reading 'liked')` で ErrorBoundary が出た)。
+ * 知っているキーだけを1件ずつ検証して取り込み、使えない分は既定値のままにする。
+ */
 function loadPrefs(): StoredPrefs {
   const base = emptyPrefs()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return base
-    const parsed = JSON.parse(raw)
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed)) return base
+    const rawStats = isRecord(parsed.styleStats) ? parsed.styleStats : {}
+    const rawTransitions = isRecord(parsed.transitionCounts) ? parsed.transitionCounts : {}
+    const styleStats = { ...base.styleStats }
+    for (const style of AUTO_EDIT_STYLES) {
+      const v = rawStats[style]
+      if (!isRecord(v)) continue
+      styleStats[style] = { liked: asCount(v.liked), disliked: asCount(v.disliked) }
+    }
+    const transitionCounts = { ...base.transitionCounts }
+    for (const t of TRANSITION_TYPES) {
+      transitionCounts[t] = asCount(rawTransitions[t])
+    }
     return {
-      styleStats: { ...base.styleStats, ...parsed.styleStats },
-      transitionCounts: { ...base.transitionCounts, ...parsed.transitionCounts },
-      likedSegmentSecondsSum:
-        typeof parsed.likedSegmentSecondsSum === 'number' ? parsed.likedSegmentSecondsSum : 0,
-      likedSegmentSampleCount:
-        typeof parsed.likedSegmentSampleCount === 'number' ? parsed.likedSegmentSampleCount : 0
+      styleStats,
+      transitionCounts,
+      likedSegmentSecondsSum: asCount(parsed.likedSegmentSecondsSum),
+      likedSegmentSampleCount: asCount(parsed.likedSegmentSampleCount)
     }
   } catch {
     return base
