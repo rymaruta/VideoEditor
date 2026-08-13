@@ -211,23 +211,76 @@ export function generateWaveformDataUrl(
 
 const SILENCE_NOISE_DB = -30
 const SILENCE_MIN_DURATION = 0.5
+/**
+ * 素材の一番大きい音から、これだけ下を「無音」とみなす。
+ *
+ * `-30dB` の決め打ちだけだと、**小さく録音された素材では話している区間まで無音**になる
+ * (実測: 音の最大が -44.1dB の素材で、無音カットの候補が**全域8.00秒の1件**になった。
+ * 同じ構造で音量だけ大きい素材では正しく2件・2.00秒)。素材の音量は撮り方で何十dBも
+ * 変わるので、絶対値だけで切ってはいけない——ハイライト検出が
+ * 「最大からの相対でも切る」を採っているのと同じ理由。
+ */
+const SILENCE_RELATIVE_MARGIN_DB = 12
+/**
+ * しきい値をここより下げない。**`silencedetect` は約 -96dB より下を指定すると
+ * 何も検出しなくなる**(実測: `-90dB` では検出できる素材が `-96.3dB` では0件。
+ * デジタル無音ですら拾わない)。相対で下げた値をそのまま渡すと、極端に小さく
+ * 録れた素材や全域が無音の素材で**候補が1件も出なくなる**。
+ * 16bit PCM の量子化下限(-90.3dB)ともほぼ一致する。
+ */
+const SILENCE_FLOOR_DB = -90
 
-export function detectSilence(
+/**
+ * 区間の最大音量(dBFS)を測る。取れなければ null(音声が無い・解析できない)。
+ * `silencedetect` のしきい値を素材に合わせるために先に1回だけ通す。
+ */
+function detectMaxVolumeDb(
+  filePath: string,
+  rangeStart: number,
+  duration: number
+): Promise<number | null> {
+  return new Promise((resolve) => {
+    let maxDb: number | null = null
+    ffmpeg(filePath)
+      .inputOptions([`-ss ${rangeStart}`, `-t ${duration}`])
+      .outputOptions(['-vn', '-af volumedetect', '-f null'])
+      .output('-')
+      .on('stderr', (line: string) => {
+        const m = /max_volume:\s*(-?[\d.]+)\s*dB/.exec(line)
+        if (m) {
+          const v = Number(m[1])
+          if (Number.isFinite(v)) maxDb = v
+        }
+      })
+      // 測れなかったら従来の絶対値で進む。ここで失敗を投げると、無音検出そのものが
+      // できなくなってしまう(本命の検出は次の pass で改めてエラーを報告する)。
+      .on('error', () => resolve(null))
+      .on('end', () => resolve(maxDb))
+      .run()
+  })
+}
+
+export async function detectSilence(
   filePath: string,
   rangeStart: number,
   rangeEnd: number
 ): Promise<SilenceRange[]> {
+  const duration = rangeEnd - rangeStart
+  const maxDb = await detectMaxVolumeDb(filePath, rangeStart, duration)
+  // 従来の絶対値より**厳しい側にしか動かさない**(min)。大きく録れている素材では
+  // 今までどおり -30dB で切り、小さく録れている素材だけ相対でしきい値が下がる。
+  const noiseDb =
+    maxDb === null
+      ? SILENCE_NOISE_DB
+      : Math.max(SILENCE_FLOOR_DB, Math.min(SILENCE_NOISE_DB, maxDb - SILENCE_RELATIVE_MARGIN_DB))
+
   return new Promise((resolve, reject) => {
     const ranges: SilenceRange[] = []
     let pendingStart: number | null = null
-    const duration = rangeEnd - rangeStart
 
     ffmpeg(filePath)
       .inputOptions([`-ss ${rangeStart}`, `-t ${duration}`])
-      .outputOptions([
-        `-af silencedetect=noise=${SILENCE_NOISE_DB}dB:d=${SILENCE_MIN_DURATION}`,
-        '-f null'
-      ])
+      .outputOptions([`-af silencedetect=noise=${noiseDb}dB:d=${SILENCE_MIN_DURATION}`, '-f null'])
       .output('-')
       .on('stderr', (line: string) => {
         const startMatch = /silence_start:\s*(-?[\d.]+)/.exec(line)
