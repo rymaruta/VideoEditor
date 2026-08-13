@@ -14,7 +14,7 @@ import type {
   TransitionType
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
-import { targetResolution } from '@shared/resolution'
+import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { normalizeFades } from '@shared/audioFade'
 import { scaleToFrameFilter } from '@shared/videoFrame'
 import { targetFrameRate } from '@shared/frameRate'
@@ -602,7 +602,15 @@ export function exportProject(options: ExportOptions): Promise<void> {
             end: toExportTime(word.end)
           }))
         }))
-        writeFileSync(assPath, buildAssContent(remappedOverlays, w, h), 'utf-8')
+        // テロップの仮想キャンバスは**出力解像度ではなく固定の基準**。libass が
+        // PlayRes から実フレームへ全体を拡大縮小するので、`\fs` や `MarginL/R` に
+        // 入れた数字が解像度によらず「枠に対する比」になる(理由は textCanvasSize)。
+        const textCanvas = textCanvasSize(aspectRatio)
+        writeFileSync(
+          assPath,
+          buildAssContent(remappedOverlays, textCanvas.w, textCanvas.h),
+          'utf-8'
+        )
         filterParts.push(`[${curV}]subtitles=filename='${escapeFilterPath(assPath)}'[vout]`)
         videoLabel = '[vout]'
       }

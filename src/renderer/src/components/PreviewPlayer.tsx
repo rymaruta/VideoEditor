@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { targetResolution } from '@shared/resolution'
+import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { frameSeconds } from '@shared/frameRate'
 import { fadeGainAt } from '@shared/audioFade'
 import {
@@ -86,13 +86,14 @@ function normalizeLength(value: number): number {
 /**
  * テロップの見た目を画面用に組み立てる。
  *
- * 書き出しは ASS の PlayResX/PlayResY を出力解像度に合わせているので、`fontSize` と
- * `letterSpacing` は**出力ピクセル**の値になる。プレビュー枠は出力よりずっと小さいので、
- * 「枠の高さ / 出力の高さ」を掛けて同じ比率で描く。ここを固定倍率にしていたときは、
+ * 書き出しは ASS の PlayResX/PlayResY を**固定のキャンバス**(`textCanvasSize`)にしていて、
+ * libass がそれを実フレームへ引き伸ばす。つまり `fontSize` と `letterSpacing` は
+ * **キャンバス上のピクセル = 枠に対する比**。プレビュー枠はキャンバスより小さいので、
+ * 「枠の高さ / キャンバスの高さ」を掛けて同じ比率で描く。ここを固定倍率にしていたときは、
  * サイズ40のテロップが画面では枠高の 6.77% を占めるのに、1080p の書き出しでは 2.08%
  * にしかならず、画面で決めたサイズが出力で使えなかった。
  *
- * 縁取り・影も同じ「出力ピクセル」の値なので、フォントと同じ `scale` を掛ける。
+ * 縁取り・影も同じキャンバス上の値なので、フォントと同じ `scale` を掛ける。
  */
 function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
   const shadows: string[] = []
@@ -530,10 +531,18 @@ export function PreviewPlayer(): React.JSX.Element {
     return () => observer.disconnect()
   }, [isExpanded])
 
-  // 書き出しの ASS は PlayResY = 出力の高さ、文字サイズは出力ピクセル。
-  // 画面では「枠の高さ / 出力の高さ」倍で描くと、フレームに対する比率が出力と一致する。
+  // 書き出しの ASS は PlayResY = **固定のキャンバス高**(出力解像度ではない)で、
+  // 文字サイズはそのキャンバス上のピクセル。画面では「枠の高さ / キャンバスの高さ」倍で
+  // 描くと、フレームに対する比率が出力と一致する。
+  // ここに出力解像度を使うと、**書き出し設定を変えただけで画面のテロップが伸び縮みする**
+  // (書き出し側は libass がキャンバスを引き伸ばすので変わらないのに、画面だけ動く)。
+  const textCanvasHeight = textCanvasSize(project.aspectRatio).h
+  const overlayScale = frameHeight > 0 && textCanvasHeight > 0 ? frameHeight / textCanvasHeight : 0
+
+  // ぼかし背景の強さは**出力の高さ**基準(書き出しは `gblur=sigma=blurSigmaFor(出力高)`)。
+  // テロップとは基準の辺が違うので、`overlayScale` を使い回してはいけない。
   const outputHeight = targetResolution(project.aspectRatio, exportResolutionHeight).h
-  const overlayScale = frameHeight > 0 && outputHeight > 0 ? frameHeight / outputHeight : 0
+  const outputScale = frameHeight > 0 && outputHeight > 0 ? frameHeight / outputHeight : 0
 
   function handleLoadedMetadata(): void {
     const video = videoRef.current
@@ -587,11 +596,11 @@ export function PreviewPlayer(): React.JSX.Element {
   const blurBackdrop = ((): { localTime: number; blurPx: number } | null => {
     const tc = findTimedClipAt(timedClips, playheadTime)
     if (!tc || tc.clip.fillCrop || !tc.clip.blurBackground) return null
-    if (overlayScale <= 0) return null
+    if (outputScale <= 0) return null
     const speed = tc.clip.speed || 1
     return {
       localTime: tc.clip.inPoint + (playheadTime - tc.start) * speed,
-      blurPx: blurSigmaFor(outputHeight) * overlayScale * 2
+      blurPx: blurSigmaFor(outputHeight) * outputScale * 2
     }
   })()
 

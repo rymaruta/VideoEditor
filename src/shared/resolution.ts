@@ -16,3 +16,24 @@ export function targetResolution(
   }
   return { w: longSide, h: standard }
 }
+
+/**
+ * テロップを描く仮想キャンバス(ASS の PlayResX/PlayResY)の短辺。
+ *
+ * ここを**出力解像度に合わせてはいけない**。合わせると `\fs` / `MarginL/R` / `\bord` に
+ * 入れた数字がそのまま出力ピクセルになり、**解像度を変えるとレイアウトが変わる**。
+ * 実測(既定スタイルのサイズ40・長めの一文): 文字の絶対幅は4解像度とも 865px で同じため、
+ * 枠に対する比が 480p で **101%(左右が切れる)**、1080p で 45.1%、4K で 22.5% と
+ * ばらばらだった。libass は PlayRes から実際のフレームへ全体を拡大縮小するので、
+ * **キャンバスを固定すれば中の数字は自動的に「枠に対する比」になる。**
+ *
+ * 値が 1080 なのは既定の書き出し解像度だから。こうすると既定のまま書き出した場合は
+ * 従来と**まったく同じ ASS** になり、保存済みプロジェクトの見た目が動かない
+ * (`fontSize` の意味を変えずに済むので、値の読み替えも要らない)。
+ */
+export const TEXT_CANVAS_STANDARD = 1080
+
+/** テロップの仮想キャンバスの大きさ。書き出しとプレビューが必ず同じ値を使うための共通の置き場。 */
+export function textCanvasSize(aspectRatio: AspectRatio): { w: number; h: number } {
+  return targetResolution(aspectRatio, TEXT_CANVAS_STANDARD)
+}
