@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { audioClipDuration, buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
+import { dropOrphanClips, orphanCleanupMessage } from '../lib/orphanClips'
 import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
 import type {
   AspectRatio,
@@ -620,13 +621,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
   },
 
-  loadProject: (project, filePath) =>
+  loadProject: (project, filePath) => {
+    // 形を整えたあとに、**素材がもう居ないクリップ**を落とす。残すと画面から
+    // 選ぶことも消すこともできないのに書き出しだけが毎回失敗する。
+    // 落としたぶんはファイルの内容と食い違うので、保存できるよう dirty にする。
+    const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
-      project: normalizeLoadedProject(project),
+      project: cleaned.project,
       past: [],
       future: [],
       currentFilePath: filePath,
-      isDirty: false,
+      isDirty: cleaned.droppedCount > 0,
+      saveError: cleaned.droppedCount > 0 ? orphanCleanupMessage(cleaned.droppedCount) : null,
       selectedClipId: null,
       multiSelectedClipIds: [],
       clipboardClips: [],
@@ -635,14 +641,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       seekRequest: null,
       missingAssetPaths: [],
       missingAssetIds: []
-    }),
+    })
+  },
 
-  restoreAutosave: (project) =>
+  restoreAutosave: (project) => {
+    const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
-      project: normalizeLoadedProject(project),
+      project: cleaned.project,
       past: [],
       future: [],
       currentFilePath: null,
+      saveError: cleaned.droppedCount > 0 ? orphanCleanupMessage(cleaned.droppedCount) : null,
       // The recovered draft doesn't exist on disk under a real save yet, so keep
       // it flagged dirty until the user explicitly saves it.
       isDirty: true,
@@ -654,7 +663,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       missingAssetIds: [],
       isPlaying: false,
       seekRequest: null
-    }),
+    })
+  },
 
   markSaved: (filePath) => set({ currentFilePath: filePath, isDirty: false, saveError: null }),
 
