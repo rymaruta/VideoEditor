@@ -499,6 +499,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ): T => (clip.assetId === assetId ? clampRange(clip) : clip)
 
       return {
+        // 再リンクは利用者の操作なので履歴を積む。積まないと `past` が伸びないまま
+        // `project` だけ進むので、**取り消し1回で2つ前まで戻ってしまう**。
+        // (実測: クリップを置く → 速度を2倍 → 再リンク、と進めて取り消しを1回押すと、
+        //  再リンクだけでなく**速度2倍の編集まで消えて 1倍に戻り**、やり直しを押しても
+        //  再リンク後へ飛ぶだけで「速度2倍・元ファイル」の状態には二度と戻れなかった)
+        // 上の `setAssetProxyPath` は裏で走る変換の結果なので積まない——**利用者が
+        // やったことかどうか**が分かれ目で、`project` を変えるかどうかではない。
+        ...pushHistory(state),
         project: {
           ...state.project,
           assets: state.project.assets.map((a) =>
