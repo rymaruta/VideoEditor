@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
 import { ScissorsIcon } from './icons'
 import { previewSourceUrl } from '../lib/previewSource'
+import { cropPreviewStyle } from '../lib/cropPreview'
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -81,14 +82,24 @@ export function TrimModal({
           <ScissorsIcon width={15} height={15} />
           クリップをトリム: {asset.fileName}
         </h3>
-        <video
-          src={previewSourceUrl(asset)}
-          controls
-          className="trim-preview-video"
-          onLoadedMetadata={(e) => {
-            e.currentTarget.currentTime = inPoint
-          }}
-        />
+        {/* プロジェクトの縦横比の枠に入れて、書き出しと同じ切り取り方で見せる。
+            素材そのままを出していた頃は、クロップを入れても自動検出を押しても
+            **適用するまで見た目が1画素も変わらなかった**。 */}
+        <div
+          className={`trim-preview-frame ${
+            project.aspectRatio === '9:16' ? 'aspect-9-16' : 'aspect-16-9'
+          }`}
+        >
+          <video
+            src={previewSourceUrl(asset)}
+            controls
+            className="trim-preview-video"
+            style={cropPreviewStyle(asset.width / asset.height, targetAspect, fillCrop, cropCenter)}
+            onLoadedMetadata={(e) => {
+              e.currentTarget.currentTime = inPoint
+            }}
+          />
+        </div>
         <div className="trim-field">
           <label>開始 (イン点): {formatTime(inPoint)}</label>
           <input
