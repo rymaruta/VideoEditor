@@ -12,7 +12,7 @@ import {
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
 import { TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
-import { blurSigmaFor } from '@shared/videoFrame'
+import { blurSigmaFor, cropObjectPosition } from '@shared/videoFrame'
 import {
   audioClipDuration,
   buildTimedClips,
@@ -606,6 +606,19 @@ export function PreviewPlayer(): React.JSX.Element {
     }
   })()
 
+  // 「クロップして画面いっぱいに表示」を画面にも反映する。書き出しは
+  // `scaleToFrameFilter` が枠を覆うまで拡大して切り抜くので、画面も同じ切り取り方に
+  // する(`contain` のままだと、切り取り位置のつまみも被写体の自動検出も
+  // **画面では何も変わらない**まま書き出しだけが変わる)。
+  const cropFit = ((): CSSProperties => {
+    const tc = findTimedClipAt(timedClips, playheadTime)
+    if (!tc || !tc.clip.fillCrop) return { objectFit: 'contain' }
+    const sourceAspect = tc.asset.width / tc.asset.height
+    const target = targetResolution(project.aspectRatio, exportResolutionHeight)
+    const pos = cropObjectPosition(sourceAspect, target.w / target.h, tc.clip.cropCenter)
+    return { objectFit: 'cover', objectPosition: `${pos.x * 100}% ${pos.y * 100}%` }
+  })()
+
   const total = totalTimelineDuration(timedClips)
 
   // Continuous drag-scrubbing on the preview's own progress bar: seekTo() already
@@ -818,6 +831,7 @@ export function PreviewPlayer(): React.JSX.Element {
               <video
                 ref={videoRef}
                 src={activeSrc}
+                style={cropFit}
                 onEnded={() => setIsPlaying(false)}
                 onError={handleVideoError}
                 onLoadedMetadata={handleLoadedMetadata}
