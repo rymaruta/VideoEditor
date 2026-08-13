@@ -11,7 +11,7 @@ import {
   toElementVolume
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
-import { TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
+import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { blurSigmaFor } from '@shared/videoFrame'
 import { cropPreviewStyle } from '../lib/cropPreview'
 import {
@@ -214,6 +214,17 @@ function verticalAnchorStyle(position: TextPosition): CSSProperties {
   if (position === 'top') return { top: margin }
   if (position === 'bottom') return { bottom: margin }
   return { top: '50%' }
+}
+
+/**
+ * テロップの左右の余白＝**折り返す幅**。書き出しの ASS `MarginL/R` と同じ比
+ * (`TEXT_MARGIN_H_RATIO`)から出す。縦と同じ理由で CSS には数字を書かない——
+ * ここが CSS の 5% と ASS の出力px固定に分かれていたため、**同じテロップが
+ * 画面では2行・書き出しでは1行**になっていた。
+ */
+const horizontalInsetStyle: CSSProperties = {
+  left: `${TEXT_MARGIN_H_RATIO * 100}%`,
+  right: `${TEXT_MARGIN_H_RATIO * 100}%`
 }
 
 /**
@@ -876,7 +887,7 @@ export function PreviewPlayer(): React.JSX.Element {
                     top: `${livePos.y * 100}%`,
                     right: 'auto'
                   }
-                : verticalAnchorStyle(o.style.position)
+                : { ...horizontalInsetStyle, ...verticalAnchorStyle(o.style.position) }
               const transforms: string[] = []
               if (livePos) transforms.push('translate(-50%, -50%)')
               else if (o.style.position === 'center') transforms.push('translateY(-50%)')

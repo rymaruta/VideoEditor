@@ -1,5 +1,5 @@
 import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
-import { textMarginVPx } from '@shared/textStyle'
+import { textMarginHPx, textMarginVPx } from '@shared/textStyle'
 
 function toAssTime(seconds: number): string {
   // A negative or non-finite time (an older project file, a hand-edited .veproj)
@@ -54,6 +54,78 @@ function escapeAssText(text: string): string {
   return escapeAssBackslash(text).replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/\n/g, '\\N')
 }
 
+/**
+ * 折り返しの見積もりに使う1文字の幅(フォントサイズに対する比)。
+ * 全角(CJK・かな・全角記号)はおよそ1em、半角はおよそ0.5em。
+ */
+function emWidthOf(ch: string): number {
+  const code = ch.codePointAt(0) ?? 0
+  const wide =
+    (code >= 0x1100 && code <= 0x115f) || // ハングル字母
+    (code >= 0x2e80 && code <= 0xa4cf) || // CJK 部首〜漢字・かな
+    (code >= 0xac00 && code <= 0xd7a3) || // ハングル
+    (code >= 0xf900 && code <= 0xfaff) || // CJK 互換漢字
+    (code >= 0xfe30 && code <= 0xfe4f) || // CJK 互換記号
+    (code >= 0xff00 && code <= 0xff60) || // 全角英数・記号
+    (code >= 0xffe0 && code <= 0xffe6)
+  return wide ? 1 : 0.5
+}
+
+/**
+ * **libass が折り返せない並びを、こちらで折り返す。**
+ *
+ * libass は空白でしか行を分けない。日本語のように空白の無い文章は
+ * **1行のまま伸び続け、フレームの外へはみ出して両端が切れる**
+ * (実測: 全角200文字のテロップが 1280x720 の出力で1行になり、
+ *  インクが左端 0% 〜 右端 100% まで届いて文字が読めなくなっていた。
+ *  画面側は CSS が文字単位で折り返すので5行で収まっている)。
+ * ゼロ幅空白(U+200B)を挟んでも libass は折り返さないことを実測で確認済み。
+ *
+ * 幅は**見積もり**で決める。main プロセスにはフォントの字送りを測る手段が無いため、
+ * 全角1em・半角0.5em として数える。実フォントより少し広めに見積もるので、
+ * **切れるより手前で折り返す**側に倒れる。
+ * 空白で区切られた並び(英文など)は libass 自身が折り返せるので、
+ * **1つの塊が入り切らないときだけ**その塊の中を割る——こちらで先回りして割ると、
+ * libass の折り返しと二重にかかって不自然な位置で切れる。
+ */
+export function wrapAssLines(text: string, maxEmPerLine: number): string[] {
+  if (!Number.isFinite(maxEmPerLine) || maxEmPerLine <= 0) return text.split('\n')
+  const out: string[] = []
+  for (const rawLine of text.split('\n')) {
+    // 空白で分けられる塊ごとに見て、入り切らない塊だけを文字単位で割る
+    let current = ''
+    let currentEm = 0
+    const flush = (): void => {
+      out.push(current)
+      current = ''
+      currentEm = 0
+    }
+    for (const chunk of rawLine.split(/(\s+)/)) {
+      if (chunk === '') continue
+      const chars = [...chunk]
+      const chunkEm = chars.reduce((sum, ch) => sum + emWidthOf(ch), 0)
+      // 塊そのものが1行に入らない = libass では絶対に折り返せない並び
+      if (chunkEm > maxEmPerLine) {
+        for (const ch of chars) {
+          const em = emWidthOf(ch)
+          if (currentEm + em > maxEmPerLine && current !== '') flush()
+          current += ch
+          currentEm += em
+        }
+        continue
+      }
+      if (currentEm + chunkEm > maxEmPerLine && current.trim() !== '') {
+        flush()
+        if (/^\s+$/.test(chunk)) continue // 行頭の空白は落とす
+      }
+      current += chunk
+      currentEm += chunkEm
+    }
+    out.push(current)
+  }
+  return out
+}
+
 function buildTypewriterText(text: string, charDelayMs: number, revealMs: number): string {
   const lines = text.split('\n')
   let index = 0
@@ -87,6 +159,10 @@ function buildKaraokeText(words: TranscriptWord[], dialogueStart: number): strin
 }
 
 export function buildAssContent(overlays: TextOverlay[], width: number, height: number): string {
+  // 左右の余白は画面(CSS)と同じ比から出す。ここに数字を書くと、片方だけ動いて
+  // 「画面では折り返るのに書き出しでは1行」のような食い違いに戻る。
+  const marginH = Math.round(textMarginHPx(width))
+  const textAreaWidth = Math.max(1, width - marginH * 2)
   const header = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${width}
@@ -96,8 +172,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1
-Style: Boxed,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,3,3,0,5,40,40,40,1
+Style: Default,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,1,3,0,5,${marginH},${marginH},40,1
+Style: Boxed,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H00000000,&HFF000000,0,0,0,0,100,100,0,0,3,3,0,5,${marginH},${marginH},40,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
@@ -157,11 +233,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 
     const common = `${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\b${bold}\\i${italic}${spacingTag}`
     const override = `{${common}\\1c${primaryColor}${secondaryTag}${outlineTags}${shadowTags}${animationTag}}`
+    // 1行に入る文字数は「文字入れできる幅 ÷ 文字サイズ」。`\\pos` を使うテロップは
+    // 余白の指定が効かないので、枠の幅そのものから同じ比で引く。
+    const fontSize = Number.isFinite(style.fontSize) && style.fontSize > 0 ? style.fontSize : 1
+    const maxEmPerLine = (style.customPosition ? width - marginH * 2 : textAreaWidth) / fontSize
+    const wrapped = wrapAssLines(o.text, maxEmPerLine)
     const text = useKaraoke
       ? buildKaraokeText(o.words!, o.startTime)
       : style.animation === 'typewriter'
-        ? buildTypewriterText(o.text, 40, 50)
-        : escapeAssText(o.text)
+        ? buildTypewriterText(wrapped.join('\n'), 40, 50)
+        : wrapped.map(escapeAssText).join('\\N')
 
     const start = toAssTime(o.startTime)
     const end = toAssTime(o.endTime)
@@ -179,7 +260,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       `{${common}\\1a&HFF&\\3c${toAssColor(style.backgroundColor)}` +
       `\\3a${toAssAlpha(style.backgroundOpacity)}\\bord${BOX_PADDING}\\shad0${animationTag}}`
     return [
-      `Dialogue: 0,${start},${end},Boxed,,0,0,${marginV},,${boxOverride}${escapeAssText(o.text)}`,
+      `Dialogue: 0,${start},${end},Boxed,,0,0,${marginV},,${boxOverride}${wrapped.map(escapeAssText).join('\\N')}`,
       `Dialogue: 1,${start},${end},Default,,0,0,${marginV},,${override}${text}`
     ].join('\n')
   })

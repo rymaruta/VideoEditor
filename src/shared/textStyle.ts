@@ -21,6 +21,20 @@ export function textMarginVPx(frameHeight: number): number {
   return frameHeight * TEXT_MARGIN_V_RATIO
 }
 
+/**
+ * テロップの左右の余白(**枠の幅**に対する比)。折り返す幅はこれで決まる。
+ *
+ * 画面は CSS の `left`/`right`、書き出しは ASS の MarginL/R と、**書く場所が違うだけで
+ * 同じ規則**なので、数字はここ1つに置く(縦の余白と同じ理由)。
+ */
+export const TEXT_MARGIN_H_RATIO = 0.05
+
+/** 枠の幅から左右の余白(px)を出す。書き出し側はこれを丸めて MarginL/R に入れる。 */
+export function textMarginHPx(frameWidth: number): number {
+  if (!Number.isFinite(frameWidth) || frameWidth <= 0) return 0
+  return frameWidth * TEXT_MARGIN_H_RATIO
+}
+
 export function defaultTextStyle(overrides: Partial<TextStyle> = {}): TextStyle {
   return {
     fontFamily: 'sans-serif',
