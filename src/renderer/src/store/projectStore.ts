@@ -1247,7 +1247,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   pasteClip: () =>
     set((state) => {
       if (state.clipboardClips.length === 0) return state
-      const newClips: Clip[] = state.clipboardClips.map((c) => ({
+      // **コピーした後に素材が消えることがある。** クリップボードは素材IDしか覚えていない
+      // ので、コピー後にその素材を削除してから貼り付けると、タイムラインにもプレビューにも
+      // 出ない（buildTimedClips が素材の無いクリップを捨てる）クリップが project.clips
+      // だけに残る。選ぶことも消すこともできないのに、以降の書き出しは毎回
+      // 「アセットが見つかりません」で失敗する（実測: 貼り付け直後にクリップ数2・画面のクリップ数1、
+      // 書き出しは Error: アセットが見つかりません: a1）。消えた素材のぶんは貼らない。
+      // 素材削除を取り消せば同じIDが戻るので、クリップボードは捨てずに残す。
+      const assetIds = new Set(state.project.assets.map((a) => a.id))
+      const pastable = state.clipboardClips.filter((c) => assetIds.has(c.assetId))
+      if (pastable.length === 0) return state
+      const newClips: Clip[] = pastable.map((c) => ({
         ...c,
         id: uuid(),
         transitionIn: undefined,
