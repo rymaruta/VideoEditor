@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
-import { snapTime } from '../lib/snapping'
+import { snapClamped, snapTime } from '../lib/snapping'
 import { clipColorOf } from '../lib/clipColors'
 import { autoScrollLeft } from '../lib/timelineScroll'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
@@ -919,26 +919,31 @@ export function Timeline(): React.JSX.Element {
             snapGuideTime: null
           }
         }
+        // スナップ先は候補の時刻なので、先にクランプしても範囲の外へ出る。
+        // `snapClamped` はスナップしてから挟み直す(本編クリップと音声/PiPの
+        // トリムは前からそうしていて、テロップだけ抜けていた)。
         if (prev.mode === 'trim-left') {
-          const rawStart = Math.min(
-            prev.originalEndTime - MIN_OVERLAY_DURATION,
-            Math.max(0, prev.originalStartTime + deltaSeconds)
-          )
-          const snap = snapTime(rawStart, candidates, thresholdSeconds)
+          const maxStart = prev.originalEndTime - MIN_OVERLAY_DURATION
+          const rawStart = Math.min(maxStart, Math.max(0, prev.originalStartTime + deltaSeconds))
+          const snap = snapClamped(rawStart, candidates, thresholdSeconds, 0, maxStart)
           return {
             ...prev,
-            liveStartTime: snap.snapped ? snap.time : rawStart,
+            liveStartTime: snap.time,
             snapGuideTime: snap.snapped ? snap.time : null
           }
         }
-        const rawEnd = Math.max(
-          prev.originalStartTime + MIN_OVERLAY_DURATION,
-          prev.originalEndTime + deltaSeconds
+        const minEnd = prev.originalStartTime + MIN_OVERLAY_DURATION
+        const rawEnd = Math.max(minEnd, prev.originalEndTime + deltaSeconds)
+        const snap = snapClamped(
+          rawEnd,
+          candidates,
+          thresholdSeconds,
+          minEnd,
+          Number.POSITIVE_INFINITY
         )
-        const snap = snapTime(rawEnd, candidates, thresholdSeconds)
         return {
           ...prev,
-          liveEndTime: snap.snapped ? snap.time : rawEnd,
+          liveEndTime: snap.time,
           snapGuideTime: snap.snapped ? snap.time : null
         }
       })
