@@ -384,6 +384,20 @@ const OUTPUT_CHANNEL_LAYOUT = 'stereo'
 // (通し忘れた枝が1本あれば、そこからグラフ全体が引きずられる)。
 const AUDIO_FORMAT = `aformat=sample_fmts=fltp:sample_rates=${OUTPUT_SAMPLE_RATE}:channel_layouts=${OUTPUT_CHANNEL_LAYOUT}`
 
+// 映像も同じ理由で固定する。**形式の交渉は音声だけの話ではない。**
+// `xfade` は yuv444p を好むため、4:2:0 の素材しか無いタイムラインでも、
+// 繋ぎを「クロスフェード」にしただけでグラフ全体が 4:4:4 に引き上げられ、
+// libx264 が **High 4:4:4 Predictive** で書き出す。エラーも警告も出ない。
+// 実測(1280x720 の 4:2:0 素材2本を 480p で書き出し):
+//   繋ぎなし        → High / yuv420p        971,468 bps
+//   クロスフェード  → High 4:4:4 / yuv444p 1,213,027 bps (同じ絵で +25%)
+//   さらにPiPを足す → High / yuv420p        982,998 bps (overlay が 4:2:0 に引き戻す)
+// つまり**利用者が使った機能の組み合わせ次第で、成果物の画素形式が黙って変わる**。
+// 4:4:4 はハードウェアデコーダや一般的な再生環境が扱えない profile で、
+// 元素材に無い色差情報が増えるわけでもないので、ここで 4:2:0 に固定する。
+// (`previewProxyService` は最初から `-pix_fmt yuv420p` を付けている。書き出しだけが素通しだった)
+const VIDEO_FORMAT = 'format=yuv420p'
+
 export function cancelExport(): void {
   if (!exportInProgress) return
   // Also covers the window before .run() assigns currentExportCommand: the flag
@@ -591,6 +605,10 @@ export function exportProject(options: ExportOptions): Promise<void> {
         filterParts.push(`[${curV}]subtitles=filename='${escapeFilterPath(assPath)}'[vout]`)
         videoLabel = '[vout]'
       }
+      // 出力の直前で画素形式を固定する。ここが最後の砦なので、映像の枝を足しても消しても
+      // 成果物の形式が変わらない(上の VIDEO_FORMAT のコメント参照)。
+      filterParts.push(`${videoLabel}${VIDEO_FORMAT}[vfmt]`)
+      videoLabel = '[vfmt]'
 
       // --- Extra audio tracks (BGM / narration) mixed on top of the main audio ---
       const perTrackAudio: { label: string; duck: boolean }[] = []
