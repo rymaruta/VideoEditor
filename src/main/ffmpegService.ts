@@ -19,6 +19,7 @@ import { normalizeFades } from '@shared/audioFade'
 import { scaleToFrameFilter } from '@shared/videoFrame'
 import { targetFrameRate } from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
+import { audioClipGain } from '@shared/audioGain'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -624,7 +625,8 @@ export function exportProject(options: ExportOptions): Promise<void> {
           const myIndex = inputIndex++
           const label = `atrk${trackIdx}_${clipIdx}`
           const delayMs = Math.max(0, Math.round(toExportTime(trackClip.startTime) * 1000))
-          const clipVolume = track.volume * (trackClip.volume ?? 1)
+          // 音量の式はプレビューと同じ共通モジュール(2箇所に書くと片方だけ育つ)。
+          const clipVolume = audioClipGain(track.volume, trackClip.volume)
           // 分離音声は本編クリップの速度がミラーされている。ここで atempo を掛けないと
           // 映像だけ速くなって音が置き去りになる(atempoChain が 0.5〜2.0 の定義域を連鎖で吸収)。
           const clipSpeed = trackClip.speed || 1

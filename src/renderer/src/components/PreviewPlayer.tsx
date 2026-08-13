@@ -4,6 +4,12 @@ import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution } from '@shared/resolution'
 import { frameSeconds } from '@shared/frameRate'
 import { fadeGainAt } from '@shared/audioFade'
+import {
+  audioClipGain,
+  MEDIA_ELEMENT_MAX_VOLUME,
+  needsWebAudioGain,
+  toElementVolume
+} from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
 import { TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { blurSigmaFor } from '@shared/videoFrame'
@@ -323,6 +329,48 @@ function PreviewBlurBackdrop({
   )
 }
 
+/**
+ * プレビューの音量を鳴らすための共通 `AudioContext`。
+ *
+ * 再生要素ごとに作ると出力デバイスを食い潰すので1つだけ持つ。**1倍を超える音量を
+ * 実際に要求されたときにだけ**作る(下の `attachGainNode` 参照)。
+ */
+let sharedAudioContext: AudioContext | null = null
+function getSharedAudioContext(): AudioContext | null {
+  if (sharedAudioContext) return sharedAudioContext
+  try {
+    sharedAudioContext = new AudioContext()
+  } catch {
+    sharedAudioContext = null
+  }
+  return sharedAudioContext
+}
+
+/**
+ * 再生要素を `GainNode` 経由に付け替えて、1倍を超える音量を出せるようにする。
+ *
+ * `createMediaElementSource` は**要素につき1回しか呼べず、呼んだら元に戻せない**。
+ * そのうえ `AudioContext` が動かない環境だと、付け替えた瞬間に音が消える——今の
+ * 頭打ち(音は出るが大きくならない)より悪い。なので **1倍を超える音量を実際に
+ * 要求されたときにだけ**付け替え、失敗したら今までどおり `el.volume` に倒す。
+ * 1倍以下しか使わない利用者の経路は、これまでと1バイトも変わらない。
+ */
+function attachGainNode(el: HTMLAudioElement): GainNode | null {
+  const ctx = getSharedAudioContext()
+  if (!ctx) return null
+  try {
+    const source = ctx.createMediaElementSource(el)
+    const gain = ctx.createGain()
+    source.connect(gain)
+    gain.connect(ctx.destination)
+    // 以後の音量は GainNode 側が持つ。要素側は素通しにしておく。
+    el.volume = MEDIA_ELEMENT_MAX_VOLUME
+    return gain
+  } catch {
+    return null
+  }
+}
+
 // Plays one BGM/narration/SE clip during preview via a hidden <audio> element,
 // mounted only while the playhead is inside the clip's range. Ducking is an
 // export-time filter and is not simulated here.
@@ -376,16 +424,37 @@ function AudioTrackClipLayer({
     clip.fadeIn,
     clip.fadeOut
   )
-  const effectiveVolume = Math.min(
-    1,
-    Math.max(0, masterVolume * trackVolume * (clip.volume ?? 1) * fadeGain)
+  // 音量の式は書き出しと同じ共通モジュール。マスター音量は「試聴の音量」なので
+  // 画面側にだけ掛ける(書き出しには入れない)。
+  const effectiveVolume = Math.max(
+    0,
+    masterVolume * audioClipGain(trackVolume, clip.volume) * fadeGain
   )
+  const gainNodeRef = useRef<GainNode | null>(null)
+
   useEffect(() => {
-    if (ref.current) {
-      ref.current.volume = effectiveVolume
-      ref.current.muted = masterMuted || trackMuted
+    const el = ref.current
+    if (!el) return
+    el.muted = masterMuted || trackMuted
+    // 一度 GainNode に付け替えたら、以後は必ずそちらで音量を持つ(戻せないため)。
+    if (!gainNodeRef.current && needsWebAudioGain(effectiveVolume)) {
+      gainNodeRef.current = attachGainNode(el)
     }
+    const gainNode = gainNodeRef.current
+    if (!gainNode) {
+      el.volume = toElementVolume(effectiveVolume)
+      return
+    }
+    void getSharedAudioContext()?.resume()
+    gainNode.gain.value = Number.isFinite(effectiveVolume) ? Math.max(0, effectiveVolume) : 0
   }, [effectiveVolume, masterMuted, trackMuted])
+
+  useEffect(() => {
+    return () => {
+      gainNodeRef.current?.disconnect()
+      gainNodeRef.current = null
+    }
+  }, [])
 
   // Hidden: this element exists only to play back the audio-track clip, and must
   // not take part in the preview frame's layout.
