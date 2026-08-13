@@ -21,14 +21,14 @@ function remember(filePath: string): void {
 }
 
 export async function checkMissingAssets(): Promise<void> {
-  const { project, setMissingAssetIds } = useProjectStore.getState()
+  const { project, setMissingAssetPaths } = useProjectStore.getState()
   if (project.assets.length === 0) {
-    setMissingAssetIds([])
+    setMissingAssetPaths([])
     return
   }
-  const missingPaths = await window.api.checkFilesExist(project.assets.map((a) => a.filePath))
-  const missingSet = new Set(missingPaths)
-  setMissingAssetIds(project.assets.filter((a) => missingSet.has(a.filePath)).map((a) => a.id))
+  // 見つからなかった**パス**をそのまま渡す。ID への変換はストア側でそのつど行う
+  // (IDで覚えると、取り消しでパスが戻っても印が戻らない)。
+  setMissingAssetPaths(await window.api.checkFilesExist(project.assets.map((a) => a.filePath)))
 }
 
 export async function saveProjectAs(): Promise<void> {

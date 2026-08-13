@@ -98,6 +98,15 @@ interface ProjectState {
   playheadTime: number
   isPlaying: boolean
   seekRequest: { time: number; token: number } | null
+  /**
+   * 実在しないと分かっている素材の**パス**。
+   *
+   * 印を「素材ID」だけで持つと、取り消しでパスが実在しないものに戻っても印が戻らない
+   * (履歴のスナップショットは `project` しか持っていないため)。**実在しないのはパス**
+   * なので、パスで覚えておいて、そのつどいまの `project` から ID を導く。
+   */
+  missingAssetPaths: string[]
+  /** `missingAssetPaths` といまの `project` から導いた、印を付ける素材のID */
   missingAssetIds: string[]
   saveError: string | null
 
@@ -119,7 +128,8 @@ interface ProjectState {
   /** プロジェクト名を変える。空白だけなら既定名に戻す */
   setProjectName: (name: string) => void
 
-  setMissingAssetIds: (ids: string[]) => void
+  /** 実在確認の結果(見つからなかったパス)を入れる。IDはここから導く */
+  setMissingAssetPaths: (paths: string[]) => void
   relinkAsset: (
     assetId: string,
     filePath: string,
@@ -333,6 +343,19 @@ function resetHistoryCoalescing(): void {
 }
 
 /**
+ * 「実在しないパス」の一覧から、いまのプロジェクトで印を付ける素材のIDを導く。
+ *
+ * IDを直接覚えると、取り消しで素材のパスが**実在しないものへ戻った**ときに印が戻らない
+ * (履歴は `project` しか巻き戻さないので、`project` の外の state は取り残される)。
+ * パスから毎回導けば、取り消し・やり直しのどちらでも自動的に辻褄が合う。
+ */
+function missingIdsFor(project: Project, missingPaths: readonly string[]): string[] {
+  if (missingPaths.length === 0) return []
+  const missing = new Set(missingPaths)
+  return project.assets.filter((a) => missing.has(a.filePath)).map((a) => a.id)
+}
+
+/**
  * Splices a source range into the main video track at a timeline position.
  *
  * Main-track clips are stored sequentially with no absolute start times, so a position
@@ -481,6 +504,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   playheadTime: 0,
   isPlaying: false,
   seekRequest: null,
+  missingAssetPaths: [],
   missingAssetIds: [],
   saveError: null,
 
@@ -507,7 +531,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setSaveError: (message) => set({ saveError: message }),
 
-  setMissingAssetIds: (ids) => set({ missingAssetIds: ids }),
+  setMissingAssetPaths: (paths) =>
+    set((state) => ({
+      missingAssetPaths: paths,
+      missingAssetIds: missingIdsFor(state.project, paths)
+    })),
 
   relinkAsset: (assetId, filePath, fileName, probe, thumbnailDataUrl) =>
     set((state) => {
@@ -587,6 +615,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       playheadTime: 0,
       isPlaying: false,
       seekRequest: null,
+      missingAssetPaths: [],
       missingAssetIds: []
     })
   },
@@ -604,6 +633,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       playheadTime: 0,
       isPlaying: false,
       seekRequest: null,
+      missingAssetPaths: [],
       missingAssetIds: []
     }),
 
@@ -620,6 +650,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       multiSelectedClipIds: [],
       clipboardClips: [],
       playheadTime: 0,
+      missingAssetPaths: [],
       missingAssetIds: [],
       isPlaying: false,
       seekRequest: null
@@ -1252,7 +1283,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // appears and no recovery draft is written — the undo is silently lost.
         isDirty: true,
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
-        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
+        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id)),
+        // 巻き戻したプロジェクトのパスで印を付け直す。ここを飛ばすと、再リンクを
+        // 取り消して**パスが実在しないものへ戻ったのに印だけ消えたまま**になり、
+        // 書き出し前の「再リンクしてください」の案内も出ずに ffmpeg が失敗する。
+        missingAssetIds: missingIdsFor(previous, state.missingAssetPaths)
       }
     })
   },
@@ -1269,7 +1304,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         project: next,
         isDirty: true,
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
-        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id))
+        multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id)),
+        missingAssetIds: missingIdsFor(next, state.missingAssetPaths)
       }
     })
   },
