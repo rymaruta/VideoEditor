@@ -1308,6 +1308,9 @@ h3 {
   justify-content: center;
   min-height: 0;
   width: 100%;
+  /* 枠の大きさを「この領域の実寸」から決めるための基準。
+     高さも参照する(`cqh`)ので `size`。`inline-size` では幅しか取れない。 */
+  container-type: size;
 }
 
 .preview-frame {
@@ -1323,14 +1326,24 @@ h3 {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
+/* 枠は「領域に収まる最大の、縦横比どおりの箱」。
+   `width: 100%` + `aspect-ratio` だと幅が確定値になるため、導かれた高さが
+   `max-height: 100%` で切られたときに**縦横比が黙って壊れる**(幅はそのまま)。
+   領域が横長のとき 16:9 の枠が 2.94 まで潰れ、`object-fit: contain` の映像が
+   左右に黒帯を作り、その黒帯の上に PiP が描かれていた。
+   高さ基準で決める 9:16 は逆向き(領域が縦長のとき)に同じ壊れ方をする。
+   幅を「領域の幅」と「領域の高さ×縦横比」の小さい方にすれば、導かれた高さは
+   必ず領域に収まるので、どちらの向きでも切られない。 */
 .preview-frame.aspect-16-9 {
   aspect-ratio: 16 / 9;
-  width: 100%;
+  width: min(100cqw, 100cqh * 16 / 9);
+  height: auto;
 }
 
 .preview-frame.aspect-9-16 {
   aspect-ratio: 9 / 16;
-  height: 100%;
+  width: min(100cqw, 100cqh * 9 / 16);
+  height: auto;
 }
 
 .preview-frame video {
