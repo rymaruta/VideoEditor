@@ -136,6 +136,12 @@ interface MediaTrimDragState {
   clipId: string
   edge: 'left' | 'right'
   startX: number
+  /**
+   * クリップの再生速度。`inPoint`/`outPoint` は**素材の秒**、`startTime` と画面の幅は
+   * **タイムラインの秒**なので、マウスの移動量(タイムライン秒)を素材の秒へ直すのに要る。
+   * 掛け忘れると等倍以外でマウスと端がズレる(本編の `TrimDragState` も同じ理由で持つ)。
+   */
+  speed: number
   assetDuration: number
   originalStartTime: number
   originalInPoint: number
@@ -755,14 +761,19 @@ export function Timeline(): React.JSX.Element {
       const candidates = getSnapCandidates()
       setMediaTrimDrag((prev) => {
         if (!prev) return prev
-        const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
+        // マウスの移動量は**タイムラインの秒**。`inPoint`/`outPoint` は**素材の秒**なので、
+        // 素材側へ渡すときだけ速度を掛ける(掛けないと等倍以外で端がマウスの 1/speed しか
+        // 動かず、左ハンドルでは固定されるはずの終端まで動いた)。
+        const deltaTimeline = (e.clientX - prev.startX) / pixelsPerSecond
+        const speed = prev.speed || 1
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
         if (prev.edge === 'left') {
           // Dragging the left handle moves startTime and inPoint together, keeping the
           // clip's end time fixed — the usual "ripple the in-point" trim behavior.
-          const maxDelta = prev.originalOutPoint - prev.originalInPoint - MIN_CLIP_SOURCE_DURATION
-          const minDelta = -Math.min(prev.originalInPoint, prev.originalStartTime)
-          let delta = Math.min(maxDelta, Math.max(minDelta, deltaSeconds))
+          const maxDelta =
+            (prev.originalOutPoint - prev.originalInPoint - MIN_CLIP_SOURCE_DURATION) / speed
+          const minDelta = -Math.min(prev.originalInPoint / speed, prev.originalStartTime)
+          let delta = Math.min(maxDelta, Math.max(minDelta, deltaTimeline))
           const snap = snapTime(prev.originalStartTime + delta, candidates, thresholdSeconds)
           if (snap.snapped) {
             delta = Math.min(maxDelta, Math.max(minDelta, snap.time - prev.originalStartTime))
@@ -770,27 +781,26 @@ export function Timeline(): React.JSX.Element {
           return {
             ...prev,
             liveStartTime: prev.originalStartTime + delta,
-            liveInPoint: prev.originalInPoint + delta,
+            liveInPoint: prev.originalInPoint + delta * speed,
             snapGuideTime: snap.snapped ? prev.originalStartTime + delta : null
           }
         }
         // Right handle: only the out-point (and therefore the clip's end time) moves.
-        const maxDelta = prev.assetDuration - prev.originalOutPoint
-        const minDelta = -(prev.originalOutPoint - prev.originalInPoint - MIN_CLIP_SOURCE_DURATION)
-        let delta = Math.min(maxDelta, Math.max(minDelta, deltaSeconds))
-        const rawEnd =
-          prev.originalStartTime + (prev.originalOutPoint + delta - prev.originalInPoint)
-        const snap = snapTime(rawEnd, candidates, thresholdSeconds)
+        const maxDelta = (prev.assetDuration - prev.originalOutPoint) / speed
+        const minDelta =
+          -(prev.originalOutPoint - prev.originalInPoint - MIN_CLIP_SOURCE_DURATION) / speed
+        let delta = Math.min(maxDelta, Math.max(minDelta, deltaTimeline))
+        // 終端はタイムライン秒なので、素材の尺を速度で割ってから足す。
+        const originalEnd =
+          prev.originalStartTime + (prev.originalOutPoint - prev.originalInPoint) / speed
+        const snap = snapTime(originalEnd + delta, candidates, thresholdSeconds)
         if (snap.snapped) {
-          const snappedOutPoint = prev.originalInPoint + (snap.time - prev.originalStartTime)
-          delta = Math.min(maxDelta, Math.max(minDelta, snappedOutPoint - prev.originalOutPoint))
+          delta = Math.min(maxDelta, Math.max(minDelta, snap.time - originalEnd))
         }
         return {
           ...prev,
-          liveOutPoint: prev.originalOutPoint + delta,
-          snapGuideTime: snap.snapped
-            ? prev.originalStartTime + (prev.originalOutPoint + delta - prev.originalInPoint)
-            : null
+          liveOutPoint: prev.originalOutPoint + delta * speed,
+          snapGuideTime: snap.snapped ? originalEnd + delta : null
         }
       })
     }
@@ -1887,6 +1897,7 @@ export function Timeline(): React.JSX.Element {
                           clipId: clip.id,
                           edge: 'left',
                           startX: e.clientX,
+                          speed: 1,
                           assetDuration: asset.duration,
                           originalStartTime: clip.startTime,
                           originalInPoint: clip.inPoint,
@@ -1909,6 +1920,7 @@ export function Timeline(): React.JSX.Element {
                           clipId: clip.id,
                           edge: 'right',
                           startX: e.clientX,
+                          speed: 1,
                           assetDuration: asset.duration,
                           originalStartTime: clip.startTime,
                           originalInPoint: clip.inPoint,
@@ -1982,6 +1994,7 @@ export function Timeline(): React.JSX.Element {
                           clipId: clip.id,
                           edge: 'left',
                           startX: e.clientX,
+                          speed: clip.speed || 1,
                           assetDuration: asset.duration,
                           originalStartTime: clip.startTime,
                           originalInPoint: clip.inPoint,
@@ -2015,6 +2028,7 @@ export function Timeline(): React.JSX.Element {
                           clipId: clip.id,
                           edge: 'right',
                           startX: e.clientX,
+                          speed: clip.speed || 1,
                           assetDuration: asset.duration,
                           originalStartTime: clip.startTime,
                           originalInPoint: clip.inPoint,

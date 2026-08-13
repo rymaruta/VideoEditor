@@ -70,7 +70,7 @@
 | 音声（ミックス・ダッキング・正規化・分離音声） | `ffmpegService.ts` の音声系 / `audioFade.ts` | 2026-08-12 | モノラル素材が1本混ざると出力全体がモノラル・44.1kHzに落ちていた |
 | IPC境界（main↔renderer・エラー処理・並行実行） | `src/main/index.ts` / `src/preload/index.ts` | 2026-08-12 | 書き出し中にウィンドウを閉じるとアプリが異常終了していた |
 | ストア（履歴・ID再生成・リンク追従・一括操作） | `src/renderer/src/store/projectStore.ts` | 2026-08-12 | インサート/上書きだけが分離音声・追従テロップを作り直していなかった |
-| タイムラインUI（ドラッグ・トリム・スナップ・選択） | `src/renderer/src/components/Timeline.tsx` | 未 | — |
+| タイムラインUI（ドラッグ・トリム・スナップ・選択） | `src/renderer/src/components/Timeline.tsx` | 2026-08-12 | 音声/PiPのトリムだけ速度換算が無く、2倍速で端がマウスの半分しか動かなかった |
 | プロジェクト入出力（保存・読込・自動保存・再リンク） | `projectFileService.ts` / `autosaveFiles.ts` | 未 | — |
 | プレビュー再生（同期・プロキシ・PiP） | `PreviewPlayer.tsx` / `previewProxyService.ts` | 未 | — |
 | 解析系（ハイライト・BPM・無音・スマートクロップ） | `highlightService.ts` / `bpmService.ts` ほか | 未 | — |
@@ -79,6 +79,40 @@
 ## 掃引の記録
 
 新しいものを上に足す。1回1ブロック。
+
+### 2026-08-12 タイムラインUI（ドラッグ・トリム・スナップ・選択）
+音声クリップ/PiPクリップのトリム(`mediaTrimDrag`)だけが、マウスの移動量
+(`px ÷ pixelsPerSecond` = **タイムライン秒**)を `inPoint`/`outPoint`(**素材秒**)へ
+そのまま足しており、**速度で換算していなかった**。本編クリップのトリム(`trimDrag`)には
+最初から `* prev.speed` がある。等倍では正しく動くので気付けない。
+分離音声は本編クリップの速度をミラーする(2倍速のクリップから分離すると `speed=2`)ため、
+**利用者が普通に踏む**経路。
+
+実測（実機Electron / xvfb / 40px per second のタイムライン / 素材10秒・in=2 out=6 start=2）:
+
+| 操作 | 修正前 | 修正後 | 期待 |
+|---|---|---|---|
+| speed=1 右へ+40px | 幅 +40px | 幅 +40px | +40px |
+| speed=1 左へ+40px | 左端+40px / 終端0px | 同左 | 終端は動かない |
+| **speed=2 右へ+40px** | **幅 +20px**(out 6→7) | **幅 +40px**(out 6→8) | +40px |
+| **speed=2 左へ+40px** | 終端が **+20px 動く** | **終端 0px** | 動かない |
+
+境界値も実機で確認: 右へ+400px → out=10(素材の終端でクランプ)、右へ-400px → out=2.2
+(最小尺0.2)、左へ-400px → in=0/start=1(素材先頭)、左へ+400px → in=5.8/start=3.9
+(最小尺。終端は 3.9+0.1=4.0 で元と同じ)、speed=0.5 右へ+40px → out=6.5(タイムライン+1秒)。
+回帰: PiP(速度を持たない型)は右+40px→out=7、左+40px→in=3/start=3 で従来どおり。
+
+**測り方の失敗を1件記録**: 最初の測定は out が素材の終端(10秒)に張り付いた状態で
+ドラッグしたため「幅の増分0px」となり、症状が出ていないように見えた。
+伸ばす余地を作ってから測り直して初めて 20px/40px の差が出た。
+「何も起きなかった」を正常と読まないこと。
+
+同種を洗った結果、タイムライン秒↔素材秒の換算は他に
+`trimDrag`(本編/`* prev.speed` あり)・`rollTrim`(ストア側で speed 込みでクランプ)・
+レーザー分割(`splitClipAtTime` がストア側で換算)・`splitAudioClipAtTime`
+(`* (c.speed || 1)` あり)・音声クリップの表示幅(`audioClipDuration` で `/speed`)があり、
+**すべて処理済み**。移動系のドラッグ(`audioDrag`/`videoOverlayDrag`/`overlayDrag`)は
+`startTime` しか触らないので換算不要。漏れていたのは `mediaTrimDrag` の1箇所だけだった。
 
 ### 2026-08-12 ストア（履歴・ID再生成・リンク追従・一括操作）
 ソースビューアの「インサート」「上書き」(`insertClipAtTime` / `overwriteClipAtTime`)だけが
