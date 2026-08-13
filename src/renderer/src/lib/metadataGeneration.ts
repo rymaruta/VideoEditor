@@ -1,4 +1,4 @@
-import { readJsonResponse } from './httpJson'
+import { fetchJson, parseModelJsonObject } from './httpJson'
 export interface TitleCandidate {
   title: string
   hookType: string
@@ -123,7 +123,7 @@ async function callGemini(
   apiKey: string,
   prompt: string,
   thumbnailDataUrls: string[]
-): Promise<unknown> {
+): Promise<Record<string, unknown>> {
   const images = thumbnailDataUrls
     .map(dataUrlToInlineImage)
     .filter((img): img is GeminiInlineImage => img !== null)
@@ -134,23 +134,21 @@ async function callGemini(
   ]
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { responseMimeType: 'application/json' }
-    })
-  })
-  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
-  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const data = await fetchJson<GeminiResponse>(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { responseMimeType: 'application/json' }
+      })
+    },
+    'Gemini API'
+  )
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Geminiからの応答が空でした')
-  try {
-    return JSON.parse(text)
-  } catch {
-    throw new Error('Geminiの応答を解析できませんでした')
-  }
+  return parseModelJsonObject(text, 'Gemini API')
 }
 
 // Element-level coercion: the model occasionally returns bare strings where

@@ -1,4 +1,4 @@
-import { readJsonResponse } from './httpJson'
+import { fetchJson, parseModelJsonObject } from './httpJson'
 import type { YouTubeVideoInfo } from './youtube'
 
 export interface GameTrendInsight {
@@ -129,13 +129,15 @@ export async function askAboutTrends(
   ]
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents })
-  })
-  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
-  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const data = await fetchJson<GeminiResponse>(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents })
+    },
+    'Gemini API'
+  )
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text || !text.trim()) throw new Error('Geminiからの応答が空でした')
   return text.trim()
@@ -188,24 +190,21 @@ export async function analyzeGamingTrends(
   ]
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { responseMimeType: 'application/json' }
-    })
-  })
-  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
-  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const data = await fetchJson<GeminiResponse>(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { responseMimeType: 'application/json' }
+      })
+    },
+    'Gemini API'
+  )
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Geminiからの応答が空でした')
-  let parsed: Partial<GameTrendAnalysis>
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new Error('Geminiの応答を解析できませんでした')
-  }
+  const parsed = parseModelJsonObject(text, 'Gemini API') as Partial<GameTrendAnalysis>
   // Element-level coercion: the model occasionally returns strings where objects
   // were requested, or omits a field — rendering such an element uncoerced throws
   // during render and blanks the whole app.

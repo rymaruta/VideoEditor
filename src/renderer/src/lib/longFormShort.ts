@@ -1,4 +1,4 @@
-import { readJsonResponse } from './httpJson'
+import { fetchJson, parseModelJsonObject } from './httpJson'
 import type { SilenceRange, TranscriptSegment, TranscriptWord } from '@shared/types'
 
 const GEMINI_MODEL = 'gemini-flash-latest'
@@ -418,33 +418,37 @@ export async function planShortFromWindows(
   refinement?: ShortRefinement
 ): Promise<ShortPlan> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: buildPrompt(windows, targetSeconds, userNote, sourceDuration, pace, refinement)
-            }
-          ]
-        }
-      ],
-      generationConfig: { responseMimeType: 'application/json' }
-    })
-  })
-  const data = await readJsonResponse<GeminiResponse>(res, 'Gemini API')
-  if (!res.ok) throw new Error(data.error?.message ?? 'Gemini API エラー')
+  const data = await fetchJson<GeminiResponse>(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: buildPrompt(
+                  windows,
+                  targetSeconds,
+                  userNote,
+                  sourceDuration,
+                  pace,
+                  refinement
+                )
+              }
+            ]
+          }
+        ],
+        generationConfig: { responseMimeType: 'application/json' }
+      })
+    },
+    'Gemini API'
+  )
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Geminiからの応答が空でした')
 
-  let parsed: Partial<ShortPlan>
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new Error('Geminiの応答を解析できませんでした')
-  }
+  const parsed = parseModelJsonObject(text, 'Gemini API') as Partial<ShortPlan>
 
   const asString = (v: unknown): string => (typeof v === 'string' ? v : '')
   const asNumber = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : NaN)

@@ -1,4 +1,4 @@
-import { readJsonResponse } from './httpJson'
+import { describeBodyFailure, fetchJson } from './httpJson'
 export interface MusicTrackInfo {
   id: string
   title: string
@@ -44,10 +44,14 @@ export async function searchJamendoMusic(
     audioformat: 'mp32',
     namesearch: query
   })
-  const res = await fetch(`https://api.jamendo.com/v3.0/tracks/?${params.toString()}`)
-  const data = await readJsonResponse<JamendoResponse>(res, 'Jamendo API')
-  if (!res.ok || data.headers?.status === 'failed') {
-    throw new Error(data.headers?.error_message ?? 'Jamendo API エラー')
+  const data = await fetchJson<JamendoResponse>(
+    `https://api.jamendo.com/v3.0/tracks/?${params.toString()}`,
+    undefined,
+    'Jamendo API'
+  )
+  // Jamendo は失敗しても HTTP 200 を返し、本文の `headers.status` にだけ書く。
+  if (data.headers?.status === 'failed') {
+    throw new Error(describeBodyFailure('Jamendo API', data.headers?.error_message))
   }
   return (data.results ?? []).map((t) => ({
     id: t.id,
@@ -84,9 +88,11 @@ export async function searchFreesoundEffects(
     page_size: '20',
     token: apiKey
   })
-  const res = await fetch(`https://freesound.org/apiv2/search/text/?${params.toString()}`)
-  const data = await readJsonResponse<FreesoundResponse>(res, 'Freesound API')
-  if (!res.ok) throw new Error(data.detail ?? 'Freesound API エラー')
+  const data = await fetchJson<FreesoundResponse>(
+    `https://freesound.org/apiv2/search/text/?${params.toString()}`,
+    undefined,
+    'Freesound API'
+  )
   return (data.results ?? [])
     .filter((r) => r.previews?.['preview-hq-mp3'] || r.previews?.['preview-lq-mp3'])
     .map((r) => ({

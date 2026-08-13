@@ -1,4 +1,4 @@
-import { readJsonResponse } from './httpJson'
+import { fetchJson } from './httpJson'
 export interface YouTubeVideoInfo {
   id: string
   title: string
@@ -84,9 +84,11 @@ async function fetchVideoDetails(
 ): Promise<Map<string, { duration: number; views: number }>> {
   if (ids.length === 0) return new Map()
   const url = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics&id=${ids.join(',')}&key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(url)
-  const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
-  if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
+  const data = await fetchJson<ApiError & { items?: VideosListItem[] }>(
+    url,
+    undefined,
+    'YouTube API'
+  )
   const map = new Map<string, { duration: number; views: number }>()
   for (const item of data.items ?? []) {
     if (!item?.id) continue
@@ -100,9 +102,11 @@ async function fetchVideoDetails(
 
 export async function fetchTrendingVideos(apiKey: string): Promise<YouTubeVideoInfo[]> {
   const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=JP&maxResults=15&key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(url)
-  const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
-  if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
+  const data = await fetchJson<ApiError & { items?: VideosListItem[] }>(
+    url,
+    undefined,
+    'YouTube API'
+  )
   return (data.items ?? []).map((item) => toVideoInfo(item)).filter(isPresent)
 }
 
@@ -110,17 +114,21 @@ const GAMING_CATEGORY_ID = '20'
 
 export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTubeVideoInfo[]> {
   const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=JP&videoCategoryId=${GAMING_CATEGORY_ID}&maxResults=25&key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(url)
-  const data = await readJsonResponse<ApiError & { items?: VideosListItem[] }>(res, 'YouTube API')
-  if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
+  const data = await fetchJson<ApiError & { items?: VideosListItem[] }>(
+    url,
+    undefined,
+    'YouTube API'
+  )
   return (data.items ?? []).map((item) => toVideoInfo(item)).filter(isPresent)
 }
 
 export async function searchVideos(apiKey: string, query: string): Promise<YouTubeVideoInfo[]> {
   const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=viewCount&maxResults=15&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`
-  const res = await fetch(searchUrl)
-  const data = await readJsonResponse<ApiError & { items?: SearchListItem[] }>(res, 'YouTube API')
-  if (!res.ok) throw new Error(data?.error?.message ?? 'YouTube API エラー')
+  const data = await fetchJson<ApiError & { items?: SearchListItem[] }>(
+    searchUrl,
+    undefined,
+    'YouTube API'
+  )
   const items = data.items ?? []
   const ids = items.map((i) => i?.id?.videoId).filter((id): id is string => Boolean(id))
   const details = await fetchVideoDetails(apiKey, ids)
