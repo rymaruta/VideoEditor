@@ -324,6 +324,16 @@ function buildInsertedClips(
 ): InsertedClips | null {
   const asset = project.assets.find((a) => a.id === assetId)
   if (!asset) return null
+  // 数値でない位置・区間は先に捨てる。下の振り分けは `atTime >= …` / `atTime <= …` の
+  // どちらも NaN では false になるので、**NaN は必ず最後の else(分割)へ落ちる**。
+  // 分割すると in/out が NaN のクリップができ、その尺も NaN になって以降のクリップの
+  // 開始位置まで NaN に汚染される。ミラー(`syncLinkedAudioClips`)の一致判定は
+  // `NaN === NaN` が false なので毎回「変わった」と見なされ、購読 → setState → 購読 が
+  // 止まらず `Maximum call stack size exceeded` でその場から操作不能になる。
+  // (`splitClipAtTime` は `>` / `<` で挟んでいるため NaN では何も起きず、ここだけが穴だった)
+  if (!Number.isFinite(atTime) || !Number.isFinite(inPoint) || !Number.isFinite(outPoint)) {
+    return null
+  }
   const from = Math.max(0, Math.min(inPoint, asset.duration))
   const to = Math.min(asset.duration, Math.max(outPoint, from))
   const insertedDuration = to - from
@@ -2081,6 +2091,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 // shifts every later clip's absolute start — and a frozen startTime would silently
 // export lip-synced audio seconds out of place. Mirror position and trim from the
 // live source clip; unlink (freezing current values) when the source is gone.
+/**
+ * ミラーの「変わっていない」判定。
+ *
+ * 素の `===` だと **`NaN === NaN` が false** なので、値に NaN が1つ紛れ込むだけで
+ * 毎回「変わった」と判定され、購読 → `setState` → 購読 … が止まらなくなる
+ * (`Maximum call stack size exceeded` でアプリがその場から操作不能になる)。
+ * 入口で NaN を弾くのが本筋だが、**入口を1つ増やすたびに同じ穴が開く**ので、
+ * ミラー側も NaN 同士は「同じ」と見なして必ず収束させる。
+ */
+function sameNumber(a: number, b: number): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b))
+}
+
 function syncLinkedAudioClips(project: Project): Project {
   const hasLinks = project.audioTracks.some((t) => t.clips.some((c) => c.linkedClipId))
   if (!hasLinks) return project
@@ -2098,10 +2121,10 @@ function syncLinkedAudioClips(project: Project): Project {
       // 速度もミラーする。これが無いと本編だけ速くなって音が置き去りになる。
       const speed = tc.clip.speed || 1
       if (
-        c.startTime === tc.start &&
-        c.inPoint === tc.clip.inPoint &&
-        c.outPoint === tc.clip.outPoint &&
-        (c.speed || 1) === speed
+        sameNumber(c.startTime, tc.start) &&
+        sameNumber(c.inPoint, tc.clip.inPoint) &&
+        sameNumber(c.outPoint, tc.clip.outPoint) &&
+        sameNumber(c.speed || 1, speed)
       ) {
         return c
       }
@@ -2223,7 +2246,7 @@ function syncLinkedTextOverlays(project: Project): Project {
     }
     const startTime = Math.max(0, tc.start + (o.linkOffset ?? 0))
     const endTime = startTime + (o.endTime - o.startTime)
-    if (o.startTime === startTime && o.endTime === endTime) return o
+    if (sameNumber(o.startTime, startTime) && sameNumber(o.endTime, endTime)) return o
     changed = true
     return { ...o, startTime, endTime }
   })
