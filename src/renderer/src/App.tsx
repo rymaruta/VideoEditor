@@ -186,7 +186,13 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const interval = setInterval(() => {
       const { project, isDirty } = useProjectStore.getState()
-      if (isDirty) window.api.autosaveProject(project)
+      // 見送った前回の自動保存を上書きする前に退避したときは、上部バーの復元ボタンを
+      // すぐ出す。退避したのにボタンが出ないと、再起動するまで戻せない。
+      if (isDirty) {
+        window.api.autosaveProject(project).then((setAside) => {
+          if (setAside) useAutosaveStore.getState().refresh()
+        })
+      }
     }, 60000)
     return () => clearInterval(interval)
   }, [])

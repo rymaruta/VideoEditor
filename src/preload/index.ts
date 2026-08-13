@@ -169,7 +169,8 @@ const api = {
     discardedMtimeMs?: number
   }> => ipcRenderer.invoke(IPC.checkAutosave),
   loadAutosave: (): Promise<Project> => ipcRenderer.invoke(IPC.loadAutosave),
-  autosaveProject: (project: Project): Promise<void> =>
+  /** 戻り値は「居座っていた前回の自動保存を退避したか」(退避したら復元ボタンを出し直す) */
+  autosaveProject: (project: Project): Promise<boolean> =>
     ipcRenderer.invoke(IPC.autosaveProject, project),
   clearAutosave: (): Promise<void> => ipcRenderer.invoke(IPC.clearAutosave),
   /** 消さずに退避する。戻り値は退避したかどうか */

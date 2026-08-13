@@ -19,7 +19,12 @@ import { transcribeRange, transcribeWordsRange } from './whisperService'
 import { analyzeSmartCropCenter } from './smartCropService'
 import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import { saveProjectFile, loadProjectFile } from './projectFileService'
-import { autosaveStatus, discardAutosaveFile, discardedPathFor } from './autosaveFiles'
+import {
+  autosaveStatus,
+  discardAutosaveFile,
+  discardedPathFor,
+  writeAutosaveFile
+} from './autosaveFiles'
 import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
@@ -36,6 +41,8 @@ loadEnvFile()
 
 let hasUnsavedChanges = false
 let autosavePath = ''
+/** このセッションで自動保存を1回でも書いたか(前回のぶんを退避するのは最初の1回だけ) */
+let autosaveOverwrittenThisSession = false
 let windowStatePath = ''
 
 interface WindowState {
@@ -427,9 +434,28 @@ app.whenReady().then(() => {
   })
   ipcMain.handle(IPC.checkAutosave, () => autosaveStatus(autosavePath))
   ipcMain.handle(IPC.loadAutosave, () => loadProjectFile(autosavePath))
-  ipcMain.handle(IPC.autosaveProject, (_e, project: Project) =>
-    saveProjectFile(autosavePath, project)
-  )
+  /**
+   * 60秒ごとの自動保存。**このセッションが初めて書くときだけ、居座っている自動保存を
+   * 退避してから上書きする。**
+   *
+   * 起動時の確認で「あとで決める」を選ぶと `autosave.veproj` はそのまま残る。ところが
+   * その後に何か編集すると、60秒後のタイマーが**前回の作業をそのまま上書き**していた。
+   * 見送ったぶんは**まだどのファイルにもなっていない前回の作業**で、消えると戻す手段が
+   * どこにも無い(確認モーダルは「あとで復元できます」と案内しているのに、実際には
+   * 退避も作られていなかった)。実測: 「前回の作業(クリップ3本)」の自動保存を残して
+   * 「あとで決める」を押し、新しい作業を1つすると、**60秒後に「新しい作業(1本)」で
+   * 上書きされ、退避も復元ボタンも無かった**。
+   *
+   * 退避先は「破棄する」と同じ1つ。**退避は1セッションに1回だけ**——毎回退避すると
+   * 2回目以降は「1分前の自分」で上書きされて、結局前回のぶんが消える。
+   *
+   * @returns 退避したら true(呼び出し側は上部バーの復元ボタンを出し直す)
+   */
+  ipcMain.handle(IPC.autosaveProject, (_e, project: Project) => {
+    const setAside = writeAutosaveFile(autosavePath, project, !autosaveOverwrittenThisSession)
+    autosaveOverwrittenThisSession = true
+    return setAside
+  })
   ipcMain.handle(IPC.clearAutosave, () => {
     if (existsSync(autosavePath)) rmSync(autosavePath, { force: true })
   })
