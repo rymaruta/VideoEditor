@@ -3,6 +3,7 @@ import { app } from 'electron'
 import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
+import { describeFfmpegError } from './ffmpegError'
 
 /**
  * Codecs Chromium's <video> can decode. Everything else has to be transcoded before
@@ -107,7 +108,7 @@ export function ensurePreviewProxy(
             })
             .on('error', (err) => {
               rmSync(tmpPath, { force: true })
-              reject(err)
+              reject(describeFfmpegError(err))
             })
             .on('end', () => {
               try {

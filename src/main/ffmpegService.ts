@@ -20,6 +20,7 @@ import { scaleToFrameFilter } from '@shared/videoFrame'
 import { targetFrameRate } from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
+import { describeFfmpegError } from './ffmpegError'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -34,7 +35,9 @@ ffmpeg.setFfprobePath(ffprobePath)
 export function probeMedia(filePath: string): Promise<MediaProbeResult> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, (err, data) => {
-      if (err) return reject(err)
+      // 生の失敗文は版数とビルド設定の羅列で、本当の原因は末尾の1行だけ。
+      // ここで短い日本語に直す(呼び出し元ごとに try/catch を足さない)。
+      if (err) return reject(describeFfmpegError(err))
       const videoStream = data.streams.find((s) => s.codec_type === 'video')
       const audioStream = data.streams.find((s) => s.codec_type === 'audio')
       if (!videoStream && !audioStream) {
@@ -112,7 +115,7 @@ export async function generateThumbnailDataUrl(
     ffmpeg(filePath)
       .on('error', (e) => {
         cleanup()
-        reject(e)
+        reject(describeFfmpegError(e))
       })
       .on('end', () => {
         try {
@@ -157,7 +160,7 @@ export async function generateFrameDataUrl(
       .output(outFile)
       .on('error', (e) => {
         cleanup()
-        reject(e)
+        reject(describeFfmpegError(e))
       })
       .on('end', () => {
         try {
@@ -194,7 +197,7 @@ export function generateWaveformDataUrl(
       .output(outFile)
       .on('error', (e) => {
         cleanup()
-        reject(e)
+        reject(describeFfmpegError(e))
       })
       .on('end', () => {
         try {
@@ -298,7 +301,7 @@ export async function detectSilence(
           pendingStart = null
         }
       })
-      .on('error', (err) => reject(err))
+      .on('error', (err) => reject(describeFfmpegError(err)))
       .on('end', () => {
         if (pendingStart !== null) {
           ranges.push({ start: rangeStart + pendingStart, end: rangeEnd })
@@ -734,10 +737,11 @@ export function exportProject(options: ExportOptions): Promise<void> {
           currentExportCommand = null
           exportInProgress = false
           if (exportCancelRequested) {
+            // 目印なのでそのまま(画面側が文字列で見分けている)
             rmSync(outputPath, { force: true })
             reject(new Error('EXPORT_CANCELED'))
           } else {
-            reject(err)
+            reject(describeFfmpegError(err))
           }
         })
         .on('end', () => {
