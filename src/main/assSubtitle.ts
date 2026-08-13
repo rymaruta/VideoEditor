@@ -1,4 +1,5 @@
 import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
+import { textMarginVPx } from '@shared/textStyle'
 
 function toAssTime(seconds: number): string {
   // A negative or non-finite time (an older project file, a hand-edited .veproj)
@@ -102,7 +103,7 @@ Style: Boxed,sans-serif,${Math.round(height * 0.05)},&H00FFFFFF,&H00FFFFFF,&H000
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 
   const marginVOf = (position: TextPosition): number =>
-    position === 'center' ? 0 : Math.round(height * 0.08)
+    position === 'center' ? 0 : Math.round(textMarginVPx(height))
 
   const lines = overlays.map((o) => {
     const style = o.style
@@ -110,9 +111,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     const target = style.customPosition
       ? { x: style.customPosition.x * width, y: style.customPosition.y * height }
       : alignCode === 8
-        ? { x: width / 2, y: height * 0.08 }
+        ? { x: width / 2, y: textMarginVPx(height) }
         : alignCode === 2
-          ? { x: width / 2, y: height - height * 0.08 }
+          ? { x: width / 2, y: height - textMarginVPx(height) }
           : { x: width / 2, y: height / 2 }
 
     let positionTag: string

@@ -1,5 +1,26 @@
 import type { FontFamily, TextStyle } from './types'
 
+/**
+ * テロップの上下の余白(**枠の高さ**に対する比)。
+ *
+ * 書き出し(ASS の MarginV)とプレビュー(CSS の `top`/`bottom`)が**同じ数字**を使うための
+ * 共通の置き場。書き写すと片方だけ育って黙ってズレる——実際、書き出しは上下とも 8% なのに
+ * CSS だけ `.overlay-top { top: 8% }` / `.overlay-bottom { bottom: 10% }` と**下だけ 10%**に
+ * なっていた。既定のテロップ位置が `bottom` なので、**既定のまま使うと必ず踏む**。
+ * 実測(1280x720・既定スタイル): 画面では文字の下端が枠下から 10.59% なのに、
+ * 書き出しでは 8.06% に焼かれていた(上と中央はズレていない)。
+ *
+ * `top`/`bottom` の `%` は親の**高さ**基準なので、高さ基準の書き出し側と単位は揃っている。
+ * ズレていたのは基準ではなく数字そのものだった。
+ */
+export const TEXT_MARGIN_V_RATIO = 0.08
+
+/** 枠の高さから上下の余白(px)を出す。書き出し側はこれを丸めて MarginV に入れる。 */
+export function textMarginVPx(frameHeight: number): number {
+  if (!Number.isFinite(frameHeight) || frameHeight <= 0) return 0
+  return frameHeight * TEXT_MARGIN_V_RATIO
+}
+
 export function defaultTextStyle(overrides: Partial<TextStyle> = {}): TextStyle {
   return {
     fontFamily: 'sans-serif',

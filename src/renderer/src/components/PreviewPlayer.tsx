@@ -5,6 +5,7 @@ import { targetResolution } from '@shared/resolution'
 import { frameSeconds } from '@shared/frameRate'
 import { fadeGainAt } from '@shared/audioFade'
 import { pipMarginPx } from '@shared/pipLayout'
+import { TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { blurSigmaFor } from '@shared/videoFrame'
 import {
   audioClipDuration,
@@ -33,6 +34,7 @@ import type {
   MediaAsset,
   PipPosition,
   TextOverlay,
+  TextPosition,
   TextStyle,
   VideoOverlayClip,
   VideoOverlayTrack
@@ -187,6 +189,21 @@ function findActiveOverlayClip(
     const duration = c.outPoint - c.inPoint
     return time >= c.startTime && time < c.startTime + duration
   })
+}
+
+/**
+ * テロップの縦位置。**書き出しと同じ数字**(`TEXT_MARGIN_V_RATIO`)から出す。
+ *
+ * ここは以前 CSS の `.overlay-top { top: 8% }` / `.overlay-bottom { bottom: 10% }` に
+ * 直接書かれていて、**下だけ書き出し(8%)と食い違っていた**。既定のテロップ位置が
+ * `bottom` なので、既定のまま使うと必ず踏む。数字を2箇所に書く形をやめて、
+ * 片方だけ動かせないようにする。
+ */
+function verticalAnchorStyle(position: TextPosition): CSSProperties {
+  const margin = `${TEXT_MARGIN_V_RATIO * 100}%`
+  if (position === 'top') return { top: margin }
+  if (position === 'bottom') return { bottom: margin }
+  return { top: '50%' }
 }
 
 /**
@@ -759,7 +776,7 @@ export function PreviewPlayer(): React.JSX.Element {
                     top: `${livePos.y * 100}%`,
                     right: 'auto'
                   }
-                : {}
+                : verticalAnchorStyle(o.style.position)
               const transforms: string[] = []
               if (livePos) transforms.push('translate(-50%, -50%)')
               else if (o.style.position === 'center') transforms.push('translateY(-50%)')

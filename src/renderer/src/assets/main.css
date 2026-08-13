@@ -1432,18 +1432,9 @@ h3 {
   outline-color: rgba(255, 255, 255, 0.5);
 }
 
-.overlay-top {
-  top: 8%;
-}
-
-.overlay-center {
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.overlay-bottom {
-  bottom: 10%;
-}
+/* テロップの縦位置は PreviewPlayer が @shared/textStyle の TEXT_MARGIN_V_RATIO から
+   インラインで付ける。ここに数字を書き戻さないこと——書き出し(ASS の MarginV)と
+   2箇所に分かれた結果、下だけ 10% と 8% で食い違っていた。 */
 
 .anim-fadeIn {
   animation: overlayFadeIn 0.3s ease;
