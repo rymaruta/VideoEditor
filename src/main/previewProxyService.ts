@@ -68,7 +68,17 @@ function proxyPathFor(filePath: string): string {
 
 // Concurrent imports of the same file would otherwise race on the same output path and
 // produce a truncated proxy; the second caller waits on the first one's promise instead.
-const inFlight = new Map<string, Promise<string>>()
+//
+// **進捗の宛先は1人ではなく全員。** 同じファイルを2回読み込むと素材は2件になり、
+// メディア一覧の行も2つ出る。変換は1回で済ませるのが正しいが、進捗を**最初の1人に
+// しか流さない**と、2つ目の行は**変換が終わるまで 0% のまま固まって見える**
+// (実測: 60秒のHEVCで 1人目は10回進捗を受け取り、2人目・3人目は**0回**)。
+// 待っている人が増えたら、その人の受け口も足す。
+interface ProxyJob {
+  promise: Promise<string>
+  listeners: Set<(percent: number) => void>
+}
+const inFlight = new Map<string, ProxyJob>()
 
 export function ensurePreviewProxy(
   filePath: string,
@@ -77,7 +87,22 @@ export function ensurePreviewProxy(
   const outPath = proxyPathFor(filePath)
   if (existsSync(outPath)) return Promise.resolve(outPath)
   const running = inFlight.get(outPath)
-  if (running) return running
+  if (running) {
+    if (onProgress) running.listeners.add(onProgress)
+    return running.promise
+  }
+  const listeners = new Set<(percent: number) => void>()
+  if (onProgress) listeners.add(onProgress)
+  // 1人の受け口が投げても、他の人への通知と変換そのものを巻き込まない。
+  const notifyProgress = (percent: number): void => {
+    for (const listener of listeners) {
+      try {
+        listener(percent)
+      } catch {
+        // 進捗を受け取れない相手が居ても、変換は続ける。
+      }
+    }
+  }
 
   // Written to a temporary name and renamed only on success, so an interrupted run
   // can never leave a half-written file that would later be treated as a valid cache.
@@ -102,8 +127,8 @@ export function ensurePreviewProxy(
           else command.audioCodec('aac').outputOptions(['-ac 2'])
           command
             .on('progress', (p) => {
-              if (onProgress && typeof p.percent === 'number') {
-                onProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
+              if (typeof p.percent === 'number') {
+                notifyProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
               }
             })
             .on('error', (err) => {
@@ -124,8 +149,9 @@ export function ensurePreviewProxy(
     )
     .finally(() => {
       inFlight.delete(outPath)
+      listeners.clear()
     })
 
-  inFlight.set(outPath, task)
+  inFlight.set(outPath, { promise: task, listeners })
   return task
 }
