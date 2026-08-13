@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { audioClipDuration, buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
+import {
+  audioClipDuration,
+  buildTimedClips,
+  rangeSelectionIds,
+  totalTimelineDuration
+} from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
 import { clipColorOf } from '../lib/clipColors'
 import { autoScrollLeft } from '../lib/timelineScroll'
@@ -476,7 +481,12 @@ export function Timeline(): React.JSX.Element {
   }
   const videoLaneRef = useRef<HTMLDivElement>(null)
   const trackLanesColRef = useRef<HTMLDivElement>(null)
-  const lastClickedClipIndexRef = useRef<number | null>(null)
+  // Shift+クリックの起点は**位置ではなくID**で覚える。`timedClips` は project が
+  // 変わるたびに作り直され、並び自体もドラッグ移動・分割・取り消しで変わるので、
+  // 位置で覚えると「最後に触ったクリップ」とは別のクリップが起点になる
+  // (実測: 4本目を選んでから1本目を末尾へ動かし、1本目を Shift+クリックすると、
+  // 触っていない5本目まで入って3本のはずが**4本**選ばれ、そのまま Delete で消える)。
+  const lastClickedClipIdRef = useRef<string | null>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
 
@@ -1646,10 +1656,10 @@ export function Timeline(): React.JSX.Element {
                       return
                     }
                     selectOnly('clip')
-                    if (e.shiftKey && lastClickedClipIndexRef.current !== null) {
-                      const lo = Math.min(lastClickedClipIndexRef.current, i)
-                      const hi = Math.max(lastClickedClipIndexRef.current, i)
-                      const ids = timedClips.slice(lo, hi + 1).map((t) => t.clip.id)
+                    // 起点が今の並びに居ないなら範囲は**決められない**ので、
+                    // クリックした1本だけを選ぶ(空が返る)。
+                    const ids = rangeSelectionIds(timedClips, lastClickedClipIdRef.current, i)
+                    if (e.shiftKey && ids.length > 0) {
                       selectClip(tc.clip.id)
                       setMultiSelectedClipIds(ids)
                     } else if (e.metaKey || e.ctrlKey) {
@@ -1659,10 +1669,10 @@ export function Timeline(): React.JSX.Element {
                         : [...multiSelectedClipIds, tc.clip.id]
                       selectClip(next.length > 0 ? next[next.length - 1] : null)
                       setMultiSelectedClipIds(next)
-                      lastClickedClipIndexRef.current = i
+                      lastClickedClipIdRef.current = tc.clip.id
                     } else {
                       selectClip(tc.clip.id)
-                      lastClickedClipIndexRef.current = i
+                      lastClickedClipIdRef.current = tc.clip.id
                     }
                   }}
                   onDragStart={(e) => {

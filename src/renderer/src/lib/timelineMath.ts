@@ -57,6 +57,29 @@ export function nextTimedClip(
   return timedClips[index + 1] ?? null
 }
 
+/**
+ * Shift+クリックで選ぶ範囲のクリップID。`anchorClipId` が起点、`clickedIndex` が今クリックした位置。
+ *
+ * 起点は**位置ではなく id** で受け取る。並びはドラッグ移動・分割・取り消しで変わるので、
+ * 位置で覚えると「最後に触ったクリップ」とは別のクリップが起点になり、
+ * **触っていないクリップまで選ばれて、そのまま Delete で消える**。
+ * 起点が今の並びに居ないときは範囲を**決められない**ので、先頭や -1 のような
+ * 「それらしい位置」を作らずに空を返す(呼び出し側はクリックした1本だけを選ぶ)。
+ */
+export function rangeSelectionIds(
+  timedClips: TimedClip[],
+  anchorClipId: string | null | undefined,
+  clickedIndex: number
+): string[] {
+  if (!Number.isInteger(clickedIndex)) return []
+  if (clickedIndex < 0 || clickedIndex >= timedClips.length) return []
+  const anchorIndex = timedClips.findIndex((tc) => tc.clip.id === anchorClipId)
+  if (anchorIndex < 0) return []
+  const lo = Math.min(anchorIndex, clickedIndex)
+  const hi = Math.max(anchorIndex, clickedIndex)
+  return timedClips.slice(lo, hi + 1).map((tc) => tc.clip.id)
+}
+
 export function totalTimelineDuration(timedClips: TimedClip[]): number {
   return timedClips.length === 0 ? 0 : timedClips[timedClips.length - 1].end
 }
