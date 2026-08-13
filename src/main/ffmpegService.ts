@@ -18,6 +18,7 @@ import { targetResolution } from '@shared/resolution'
 import { normalizeFades } from '@shared/audioFade'
 import { scaleToFrameFilter } from '@shared/videoFrame'
 import { targetFrameRate } from '@shared/frameRate'
+import { pipMarginPx } from '@shared/pipLayout'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -492,7 +493,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(
             `[${myIndex}:v]scale=${scaledWidth}:-2,setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
           )
-          const margin = Math.round(w * 0.04)
+          const margin = Math.round(pipMarginPx(w))
           const xExpr =
             track.position === 'top-left' || track.position === 'bottom-left'
               ? `${margin}`
