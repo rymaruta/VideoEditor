@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import type { Clip, SilenceRange } from '@shared/types'
 import { buildCutSegments } from '../lib/silenceCut'
+import { toTimelineSeconds } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { WandIcon } from './icons'
 
@@ -17,6 +18,8 @@ type ClipDetection = {
   fileName: string
   /** 素材内の位置を画面ではクリップ先頭からの相対秒で出すため保持する */
   inPoint: number
+  /** 表示をタイムラインの秒に直すための速度。検出結果は素材の秒で返ってくる */
+  speed?: number
   ranges: SilenceRange[]
   error?: string
 }
@@ -73,7 +76,13 @@ export function SilenceCutModal({
         let detection: ClipDetection
         try {
           const ranges = await window.api.detectSilence(asset.filePath, clip.inPoint, clip.outPoint)
-          detection = { clipId: clip.id, fileName: asset.fileName, inPoint: clip.inPoint, ranges }
+          detection = {
+            clipId: clip.id,
+            fileName: asset.fileName,
+            inPoint: clip.inPoint,
+            speed: clip.speed,
+            ranges
+          }
         } catch (e) {
           // 1本失敗しても残りは検出して使えるようにする(まとめて掛けたときに
           // 1本の失敗で全部やり直しになると手間が本数分に戻る)。
@@ -81,6 +90,7 @@ export function SilenceCutModal({
             clipId: clip.id,
             fileName: asset.fileName,
             inPoint: clip.inPoint,
+            speed: clip.speed,
             ranges: [],
             error: formatIpcError(e)
           }
@@ -135,7 +145,8 @@ export function SilenceCutModal({
     (sum, d) =>
       sum +
       d.ranges.reduce(
-        (s, r, i) => (checked.has(rangeKey(d.clipId, i)) ? s + (r.end - r.start) : s),
+        (s, r, i) =>
+          checked.has(rangeKey(d.clipId, i)) ? s + toTimelineSeconds(r.end - r.start, d.speed) : s,
         0
       ),
     0
@@ -187,8 +198,11 @@ export function SilenceCutModal({
                       checked={checked.has(rangeKey(d.clipId, i))}
                       onChange={() => toggle(rangeKey(d.clipId, i))}
                     />
-                    {formatTime(r.start - d.inPoint)} 〜 {formatTime(r.end - d.inPoint)}
-                    <span className="hint-text">({(r.end - r.start).toFixed(1)}秒)</span>
+                    {formatTime(toTimelineSeconds(r.start - d.inPoint, d.speed))} 〜{' '}
+                    {formatTime(toTimelineSeconds(r.end - d.inPoint, d.speed))}
+                    <span className="hint-text">
+                      ({toTimelineSeconds(r.end - r.start, d.speed).toFixed(1)}秒)
+                    </span>
                   </label>
                 ))}
               </div>

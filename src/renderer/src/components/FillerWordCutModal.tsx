@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import type { TranscriptSegment } from '@shared/types'
 import { buildCutSegments } from '../lib/silenceCut'
+import { toTimelineSeconds } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { isFillerWordText } from '../lib/fillerWords'
 import { WandIcon } from './icons'
@@ -88,7 +89,8 @@ export function FillerWordCutModal({
             {ranges.map((r, i) => (
               <label key={i} className="silence-range-item">
                 <input type="checkbox" checked={checked.has(i)} onChange={() => toggle(i)} />
-                {formatTime(r.start - clip.inPoint)} 〜 {formatTime(r.end - clip.inPoint)}
+                {formatTime(toTimelineSeconds(r.start - clip.inPoint, clip.speed))} 〜{' '}
+                {formatTime(toTimelineSeconds(r.end - clip.inPoint, clip.speed))}
                 <span className="hint-text">「{r.text}」</span>
               </label>
             ))}

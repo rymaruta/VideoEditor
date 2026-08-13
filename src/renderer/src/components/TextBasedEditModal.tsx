@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { toTimelineSeconds } from '../lib/timelineMath'
 import type { TranscriptWord } from '@shared/types'
 import { buildCutSegments } from '../lib/silenceCut'
 import { formatIpcError } from '../lib/ipcError'
@@ -70,8 +71,9 @@ export function TextBasedEditModal({
     }
   }
 
+  // 文字起こしの秒は素材の秒。画面に出すのはタイムラインで縮む秒なので速度で割る。
   const deletedDuration = words.reduce(
-    (sum, w, i) => sum + (deleted.has(i) ? w.end - w.start : 0),
+    (sum, w, i) => sum + (deleted.has(i) ? toTimelineSeconds(w.end - w.start, clip?.speed) : 0),
     0
   )
 

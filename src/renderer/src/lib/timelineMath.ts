@@ -85,6 +85,23 @@ export function totalTimelineDuration(timedClips: TimedClip[]): number {
 }
 
 /**
+ * 素材の秒数を、そのクリップのタイムライン上の秒数へ直す。
+ *
+ * 解析(無音検出・文字起こし)が返すのは**素材の秒**で、利用者が見ているタイムラインと
+ * 書き出しは**タイムラインの秒**。速度を変えたクリップでは両者が倍率ぶん食い違うので、
+ * **画面に数字を出すときは必ずここを通す**（2倍速のクリップで「4.0秒削除します」と
+ * 出しながら実際には 2.0秒しか縮まない、という食い違いが起きていた）。
+ * 削る位置そのものは素材の秒のままでよい（`buildCutSegments` は素材空間で動く）。
+ *
+ * 速度が未設定・0以下・数値でないときは等倍として扱う。0除算で Infinity を
+ * 画面に出さないため。
+ */
+export function toTimelineSeconds(sourceSeconds: number, speed?: number): number {
+  const rate = Number.isFinite(speed) && (speed as number) > 0 ? (speed as number) : 1
+  return sourceSeconds / rate
+}
+
+/**
  * 音声クリップがタイムライン上で占める秒数。速度を掛けたぶん短く(長く)なる。
  * 素材の秒数(`outPoint - inPoint`)とは別物なので、尺を測るときは必ずこちらを使う。
  */
