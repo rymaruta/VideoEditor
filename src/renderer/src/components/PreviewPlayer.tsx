@@ -48,10 +48,10 @@ import type {
   TextOverlay,
   TextPosition,
   TextStyle,
-  VideoOverlayClip,
-  VideoOverlayTrack
+  VideoOverlayClip
 } from '@shared/types'
 import { previewSourceUrl } from '../lib/previewSource'
+import { activeVideoOverlayClips } from '../lib/videoOverlay'
 import { toPlaybackRate } from '../lib/playbackRate'
 
 function formatTime(seconds: number): string {
@@ -179,16 +179,6 @@ function readStoredVolume(): number {
   const raw = localStorage.getItem(VOLUME_KEY)
   const n = raw ? Number(raw) : 1
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1
-}
-
-function findActiveOverlayClip(
-  track: VideoOverlayTrack,
-  time: number
-): VideoOverlayClip | undefined {
-  return track.clips.find((c) => {
-    const duration = c.outPoint - c.inPoint
-    return time >= c.startTime && time < c.startTime + duration
-  })
 }
 
 /**
@@ -1122,28 +1112,30 @@ export function PreviewPlayer(): React.JSX.Element {
               />
             )}
             {playbackError && <div className="preview-playback-error">{playbackError}</div>}
+            {/* 重なっている PiP は**全部**、書き出しと同じ並び順で重ねる
+                (後ろのものが上。1本だけ出していた頃は画面と書き出しで別の絵が映っていた) */}
             {project.videoOverlayTracks
               .filter((t) => !t.hidden)
-              .map((track) => {
-                const clip = findActiveOverlayClip(track, playheadTime)
-                if (!clip) return null
-                const asset = project.assets.find((a) => a.id === clip.assetId)
-                if (!asset) return null
-                return (
-                  <VideoOverlayLayer
-                    key={track.id}
-                    clip={clip}
-                    asset={asset}
-                    position={track.position}
-                    scale={track.scale}
-                    frameWidth={frameWidth}
-                    playheadTime={playheadTime}
-                    isPlaying={isPlaying}
-                    volume={volume}
-                    muted={muted}
-                  />
-                )
-              })}
+              .flatMap((track) =>
+                activeVideoOverlayClips(track.clips, playheadTime).map((clip) => {
+                  const asset = project.assets.find((a) => a.id === clip.assetId)
+                  if (!asset) return null
+                  return (
+                    <VideoOverlayLayer
+                      key={clip.id}
+                      clip={clip}
+                      asset={asset}
+                      position={track.position}
+                      scale={track.scale}
+                      frameWidth={frameWidth}
+                      playheadTime={playheadTime}
+                      isPlaying={isPlaying}
+                      volume={volume}
+                      muted={muted}
+                    />
+                  )
+                })
+              )}
             {activeOverlays.map((o) => {
               const livePos = overlayDrag?.id === o.id ? overlayDrag : o.style.customPosition
               const positionStyle: CSSProperties = livePos

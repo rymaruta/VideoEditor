@@ -1,5 +1,33 @@
+import type { VideoOverlayClip } from '@shared/types'
+
 /** PiPクリップとして残す最小の長さ(秒)。これ未満だとレーン上で掴めない */
 export const MIN_PIP_DURATION = 0.5
+
+/**
+ * その時刻に映る PiP クリップを、**トラックの並び順のまま全部**返す。
+ *
+ * PiPレーンは重なりを禁じていない(好きな位置へ落とせるし、ドラッグでも重ねられる)。
+ * 書き出しは `track.clips` を頭から1本ずつ `overlay` で重ねるので、
+ * **重なった区間では後ろのクリップが上**に映る。プレビューが `find` で
+ * 「最初に見つけた1本」だけを出していた頃は、同じ時刻で
+ * **画面は先に置いたほう・書き出しは後に置いたほう**が映っていた。
+ * (実測: 赤を0秒から・青を3秒から置いて 4.5秒を見ると、画面は赤、
+ *  書き出しは青(V=111.7 / U=229.6)だった)
+ *
+ * 返す順は書き出しと同じ並び順。呼び出し側はこの順で重ねること
+ * (絶対配置の兄弟要素は**後ろにあるものが上**に描かれるので、そのまま一致する)。
+ */
+export function activeVideoOverlayClips(
+  clips: readonly VideoOverlayClip[],
+  time: number
+): VideoOverlayClip[] {
+  return clips.filter((c) => {
+    const duration = c.outPoint - c.inPoint
+    // 尺0以下は書き出しも `dur <= 0` で読み飛ばすので、画面にも出さない。
+    if (!(duration > 0)) return false
+    return time >= c.startTime && time < c.startTime + duration
+  })
+}
 
 /**
  * PiP(ワイプ)トラックに素材を置くときの、既定のアウト点を決める。
