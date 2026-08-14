@@ -3,6 +3,7 @@ import { promisify } from 'util'
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { bestWindowCenter } from '@shared/cropWindow'
 import { ffmpegPath } from './ffmpegService'
 
 const execFileAsync = promisify(execFile)
@@ -71,24 +72,6 @@ function rowEnergy(frame: Buffer, w: number, h: number): number[] {
     }
   }
   return energy
-}
-
-function bestWindowCenter(energy: number[], windowFraction: number): number {
-  const n = energy.length
-  const windowSize = Math.min(n, Math.max(1, Math.round(n * windowFraction)))
-  if (windowSize >= n) return 0.5
-  const prefix = new Array<number>(n + 1).fill(0)
-  for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i] + energy[i]
-  let bestStart = 0
-  let bestSum = -Infinity
-  for (let start = 0; start <= n - windowSize; start++) {
-    const sum = prefix[start + windowSize] - prefix[start]
-    if (sum > bestSum) {
-      bestSum = sum
-      bestStart = start
-    }
-  }
-  return (bestStart + windowSize / 2) / n
 }
 
 /**
