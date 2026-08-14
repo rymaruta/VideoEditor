@@ -1,4 +1,5 @@
 import { detectAudioLevels, measureVisualActivity } from './highlightService'
+import { loudnessStats, STATS_FLOOR_DB } from '@shared/highlight'
 import type { LongFormWindow } from '@shared/types'
 
 /**
@@ -25,11 +26,15 @@ export function buildWindowCandidates(
   levels: { time: number; rmsDb: number }[],
   duration: number
 ): LongFormWindow[] {
-  const finite = levels.filter((l) => Number.isFinite(l.rmsDb) && l.rmsDb > -90)
+  const finite = levels.filter((l) => Number.isFinite(l.rmsDb) && l.rmsDb > STATS_FLOOR_DB)
   if (finite.length === 0) return []
-  const mean = finite.reduce((sum, l) => sum + l.rmsDb, 0) / finite.length
-  const variance = finite.reduce((sum, l) => sum + (l.rmsDb - mean) ** 2, 0) / finite.length
-  const stddev = Math.sqrt(variance)
+  // 平均とばらつきは**ハイライト検出と同じ関数**から求める。ここで自前に数えていたころは
+  // `-90dB` の絶対値でしか無音を外しておらず、**最大からの相対**で外す処理が入っていなかった。
+  // 録画の頭や末尾に**デジタル無音ではない静か**(暗騒音)が数秒あるだけで、平均が下がり
+  // ばらつきが跳ね上がり、しきい値が素材の最大音量を追い越して**1件も見つからなくなる**。
+  // (実測: 33秒・地の声 -44.1dB・山 -41.0dB の録画で3件。頭の3秒だけを -85dB にすると
+  //  ばらつきが 1.2 → 12.0、しきい値が -41.5 → -37.6 と山を追い越して **0件**になった)
+  const { mean, stddev } = loudnessStats(finite.map((l) => l.rmsDb))
   // A fixed dB threshold fails across recordings with different mastering; scoring
   // relative to the recording's own loudness keeps this comparable between sources.
   const threshold = mean + Math.max(2, stddev * 0.8)
