@@ -12,6 +12,7 @@ import {
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
 import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
+import { karaokeWords } from '@shared/captionWords'
 import { blurSigmaFor } from '@shared/videoFrame'
 import { duckTargetGain, rmsOf, smoothDuckGain } from '@shared/ducking'
 import { crossfadeOpacity, effectiveTransitionSeconds } from '@shared/transition'
@@ -134,8 +135,11 @@ function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
 }
 
 function renderOverlayText(o: TextOverlay, playheadTime: number): React.ReactNode {
-  if (o.style.wordHighlight && o.words && o.words.length > 0) {
-    return o.words.map((w, i) => (
+  // 単語ハイライトで描くのは**単語列がまだ本文を綴っているときだけ**。打ち直された本文を
+  // 無視して古い単語を出さないための判定で、書き出し側と同じ関数を通す(理由は karaokeWords)。
+  const words = karaokeWords(o)
+  if (words) {
+    return words.map((w, i) => (
       <span
         key={i}
         style={{

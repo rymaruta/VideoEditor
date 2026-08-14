@@ -1,5 +1,6 @@
 import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
 import { textBoxPaddingPx, textMarginHPx, textMarginVPx } from '@shared/textStyle'
+import { karaokeWords } from '@shared/captionWords'
 
 function toAssTime(seconds: number): string {
   // A negative or non-finite time (an older project file, a hand-edited .veproj)
@@ -317,7 +318,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     }
 
     const rotationTag = style.rotation ? `\\frz${-style.rotation}` : ''
-    const useKaraoke = style.wordHighlight && !!o.words && o.words.length > 0
+    // 単語ハイライトは**単語列がまだ本文を綴っているときだけ**。打ち直された本文を
+    // 無視して古い単語を焼かないための判定で、画面側と同じ関数を通す(理由は karaokeWords)。
+    const karaokeSource = karaokeWords(o)
+    const useKaraoke = karaokeSource !== null
     const primaryColor = toAssColor(useKaraoke ? style.highlightColor : style.color)
     const secondaryTag = useKaraoke ? `\\2c${toAssColor(style.color)}` : ''
     const bold = style.bold ? 1 : 0
@@ -358,8 +362,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     const wrapped = wrapAssLines(o.text, maxEmPerLine, metrics)
     // カラオケも同じ幅で折り返す。折らないと単語ハイライト付きのテロップだけが
     // 1行のまま伸びて枠の外へ出る(理由は buildKaraokeText)。
-    const karaoke = useKaraoke
-      ? buildKaraokeText(o.words!, o.startTime, maxEmPerLine, metrics)
+    const karaoke = karaokeSource
+      ? buildKaraokeText(karaokeSource, o.startTime, maxEmPerLine, metrics)
       : null
     const text = karaoke
       ? karaoke.text
