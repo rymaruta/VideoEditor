@@ -26,6 +26,47 @@ const MAX_HISTORY = 50
 // while still occupying an entry in the timeline.
 const MIN_CLIP_SOURCE_DURATION = 0.1
 
+function assetDurationOf(project: Project, assetId: string): number | undefined {
+  return project.assets.find((a) => a.id === assetId)?.duration
+}
+
+/**
+ * トリムの2点を**素材の中**へ収める。
+ *
+ * 以前は `Math.max(0, ...)` で**0側だけ**丸めていた。ドラッグは掴む前に素材の尺を
+ * 控えているので気づかないが、インスペクタの数値欄は素材より大きい数字をそのまま
+ * 通す(`min`/`max` 属性は手入力を止めない)。書き出しは `-ss inPoint -t (out-in)` を
+ * 渡すだけなので実尺は素材どまりになり、「タイムラインでは999秒・実際は12秒」という
+ * 食い違いが下流を壊す。実測(24秒の本編・12秒のBGM・6秒のPiP)では
+ *   - BGM のフェードアウト3秒が 996 秒地点に置かれて**一度も掛からない**
+ *   - PiP が素材の終わり(6秒)を過ぎても**最後の1枚のまま24秒まで出続ける**
+ * となった。素材が見つからない(オフライン)ときは尺を知りようがないので0側だけ丸める。
+ */
+function clampSourceRange<T extends { inPoint: number; outPoint: number }>(
+  clip: T,
+  inPoint: number,
+  outPoint: number,
+  assetDuration: number | undefined
+): T {
+  const limit =
+    typeof assetDuration === 'number' && Number.isFinite(assetDuration) && assetDuration > 0
+      ? assetDuration
+      : Number.POSITIVE_INFINITY
+  // NaN/Infinity(空欄や `e` を打った直後の数値欄)は「値なし」として今の値を残す。
+  // ここで通すと Math.min/Math.max がそのまま NaN を返し、クリップが消える。
+  let nextOut = Number.isFinite(outPoint) ? outPoint : clip.outPoint
+  let nextIn = Number.isFinite(inPoint) ? inPoint : clip.inPoint
+  nextOut = Math.min(Math.max(nextOut, 0), limit)
+  nextIn = Math.min(Math.max(nextIn, 0), Math.max(0, nextOut - MIN_CLIP_SOURCE_DURATION))
+  // 素材そのものが MIN_CLIP_SOURCE_DURATION より短いときは伸ばせないので素材の尺どまり。
+  if (nextOut - nextIn < MIN_CLIP_SOURCE_DURATION) {
+    nextOut = Math.min(limit, nextIn + MIN_CLIP_SOURCE_DURATION)
+  }
+  return nextIn === clip.inPoint && nextOut === clip.outPoint
+    ? clip
+    : { ...clip, inPoint: nextIn, outPoint: nextOut }
+}
+
 function createBlankProject(): Project {
   return {
     id: uuid(),
@@ -901,7 +942,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...pushHistory(state, `clipTrim:${clipId}`),
       project: {
         ...state.project,
-        clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, inPoint, outPoint } : c))
+        clips: state.project.clips.map((c) =>
+          c.id === clipId
+            ? clampSourceRange(c, inPoint, outPoint, assetDurationOf(state.project, c.assetId))
+            : c
+        )
       }
     })),
 
@@ -1619,9 +1664,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 clips: t.clips.map((c) =>
                   c.id === clipId
                     ? {
-                        ...c,
-                        inPoint: Math.max(0, inPoint),
-                        outPoint: Math.max(0, outPoint),
+                        ...clampSourceRange(
+                          c,
+                          inPoint,
+                          outPoint,
+                          assetDurationOf(state.project, c.assetId)
+                        ),
                         linkedClipId: undefined
                       }
                     : c
@@ -1647,10 +1695,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 clips: t.clips.map((c) =>
                   c.id === clipId
                     ? {
-                        ...c,
+                        ...clampSourceRange(
+                          c,
+                          inPoint,
+                          outPoint,
+                          assetDurationOf(state.project, c.assetId)
+                        ),
                         startTime: Math.max(0, startTime),
-                        inPoint: Math.max(0, inPoint),
-                        outPoint: Math.max(0, outPoint),
                         linkedClipId: undefined
                       }
                     : c
@@ -1904,7 +1955,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 ...t,
                 clips: t.clips.map((c) =>
                   c.id === clipId
-                    ? { ...c, inPoint: Math.max(0, inPoint), outPoint: Math.max(0, outPoint) }
+                    ? clampSourceRange(
+                        c,
+                        inPoint,
+                        outPoint,
+                        assetDurationOf(state.project, c.assetId)
+                      )
                     : c
                 )
               }
@@ -1925,10 +1981,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 clips: t.clips.map((c) =>
                   c.id === clipId
                     ? {
-                        ...c,
-                        startTime: Math.max(0, startTime),
-                        inPoint: Math.max(0, inPoint),
-                        outPoint: Math.max(0, outPoint)
+                        ...clampSourceRange(
+                          c,
+                          inPoint,
+                          outPoint,
+                          assetDurationOf(state.project, c.assetId)
+                        ),
+                        startTime: Math.max(0, startTime)
                       }
                     : c
                 )
