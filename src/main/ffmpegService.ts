@@ -1,6 +1,7 @@
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
+import { execFile } from 'child_process'
 import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -24,6 +25,7 @@ import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
 import { isMonoChannelCount, monoUpmixFilter } from '@shared/audioUpmix'
 import { describeFfmpegError } from './ffmpegError'
+import { durationFromPacketCsv, finiteSeconds } from './mediaDuration'
 import { needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
@@ -35,9 +37,34 @@ const ffprobePath = ffprobeStatic.path.replace('app.asar', 'app.asar.unpacked')
 ffmpeg.setFfmpegPath(ffmpegPath)
 ffmpeg.setFfprobePath(ffprobePath)
 
+/**
+ * コンテナが尺を持っていない素材の尺を、パケットの時刻から測る。
+ *
+ * デコードはしない(**復号すると5分の素材で3.7秒かかるが、パケットを読むだけなら
+ * 0.16秒**)。索引の無いコンテナでは末尾へ飛べないので、どのみち全体を読むことになる。
+ * ここへ来るのは尺の分からない素材だけなので、通常のファイルには一切影響しない。
+ *
+ * **ストリームを絞らない。** 尺はコンテナ全体の長さ＝一番遅くまで続くストリームの終端で、
+ * 映像と音声のどちらが長いかは素材による(実測: 尺の無い mkv は映像 5.000 秒に対し
+ * 音声 5.015 秒)。映像だけ見ると足りない分が切り落とされる。
+ *
+ * 測れなかったら `null`。**取り込みを失敗させる理由にはしない。**
+ */
+function measureDurationByScan(filePath: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile(
+      ffprobePath,
+      ['-v', 'error', '-show_entries', 'packet=pts_time,duration_time', '-of', 'csv=p=0', filePath],
+      // 3時間の30fpsで約324,000行(8MB程度)。既定の1MBだと途中で切れる。
+      { maxBuffer: 256 * 1024 * 1024 },
+      (err, stdout) => resolve(err ? null : durationFromPacketCsv(stdout))
+    )
+  })
+}
+
 export function probeMedia(filePath: string): Promise<MediaProbeResult> {
   return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, data) => {
+    ffmpeg.ffprobe(filePath, async (err, data) => {
       // 生の失敗文は版数とビルド設定の羅列で、本当の原因は末尾の1行だけ。
       // ここで短い日本語に直す(呼び出し元ごとに try/catch を足さない)。
       if (err) return reject(describeFfmpegError(err))
@@ -53,10 +80,15 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
       }
       const videoCodec = videoStream?.codec_name ?? ''
       const audioCodec = audioStream?.codec_name ?? ''
+      // `??` では防げない——`fluent-ffmpeg` は値が無いところに文字列 `'N/A'` を入れる
+      // ので、`?? 0` は素通りして `Number('N/A')` = `NaN` が外へ出る(理由は mediaDuration.ts)。
+      const declared =
+        finiteSeconds(data.format.duration) ??
+        finiteSeconds(videoStream?.duration) ??
+        finiteSeconds(audioStream?.duration)
+      const duration = declared ?? (await measureDurationByScan(filePath)) ?? 0
       resolve({
-        duration: Number(
-          data.format.duration ?? videoStream?.duration ?? audioStream?.duration ?? 0
-        ),
+        duration,
         width: videoStream?.width ?? 0,
         height: videoStream?.height ?? 0,
         fps,
