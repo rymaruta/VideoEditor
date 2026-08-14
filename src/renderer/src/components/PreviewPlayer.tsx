@@ -13,6 +13,7 @@ import {
 import { pipMarginPx } from '@shared/pipLayout'
 import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { blurSigmaFor } from '@shared/videoFrame'
+import { duckTargetGain, rmsOf, smoothDuckGain } from '@shared/ducking'
 import { cropPreviewStyle } from '../lib/cropPreview'
 import {
   audioClipDuration,
@@ -386,14 +387,109 @@ function attachGainNode(el: HTMLAudioElement): GainNode | null {
   }
 }
 
+/**
+ * ダッキングの「いま掛かっている倍率」を配る仕組み。
+ *
+ * 毎フレーム変わる値なので、**React の state に載せない**——載せるとプレビュー全体が
+ * 毎フレーム再描画される(クリップが増えるほど重くなる既知の問題)。倍率を欲しい
+ * `<audio>` 側が適用関数を登録し、測定ループがそれを呼ぶ。
+ */
+const duckAppliers = new Set<(duckGain: number) => void>()
+/** いま掛かっているダッキングの倍率。途中で生えた `<audio>` もこの値から始める */
+const duckGainRef = { current: 1 }
+
+/**
+ * 本編の音声レベルを測って、ダッキングの倍率を配り続ける。
+ *
+ * `createMediaElementSource` は**要素につき1回しか呼べず、戻せない**。しかも失敗すると
+ * 本編の音が消える——アプリの真ん中が壊れる。なので**ダッキングを実際に使っている
+ * ときだけ**付け替え、失敗したら倍率1(今までどおり=ダッキングなし)に倒す。
+ * 使っていない利用者の経路は1バイトも変わらない。
+ */
+function useMainAudioDucking(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  enabled: boolean,
+  masterVolume: number,
+  masterMuted: boolean
+): void {
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const attachFailedRef = useRef(false)
+  // 測定は毎フレーム走るので、最新値は ref で渡す(state にすると再描画が走る)
+  const volumeRef = useRef(masterVolume)
+  const mutedRef = useRef(masterMuted)
+  useEffect(() => {
+    volumeRef.current = masterVolume
+    mutedRef.current = masterMuted
+  }, [masterVolume, masterMuted])
+
+  useEffect(() => {
+    if (!enabled) {
+      // 掛かっていた分を戻してから止める(切り替えた瞬間に下がったままにしない)
+      duckGainRef.current = 1
+      duckAppliers.forEach((apply) => apply(1))
+      return
+    }
+    const el = videoRef.current
+    if (!el) return
+    if (!analyserRef.current && !attachFailedRef.current) {
+      const ctx = getSharedAudioContext()
+      try {
+        if (!ctx) throw new Error('no audio context')
+        const source = ctx.createMediaElementSource(el)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 1024
+        source.connect(analyser)
+        // **destination へも必ず繋ぐ。** 繋がないと本編の音がここで止まる。
+        source.connect(ctx.destination)
+        analyserRef.current = analyser
+      } catch {
+        attachFailedRef.current = true
+        analyserRef.current = null
+      }
+    }
+    const analyser = analyserRef.current
+    if (!analyser) {
+      duckAppliers.forEach((apply) => apply(1))
+      return
+    }
+    void getSharedAudioContext()?.resume()
+
+    const buffer = new Float32Array(analyser.fftSize)
+    let frame = 0
+    let last = performance.now()
+    const tick = (): void => {
+      const now = performance.now()
+      const dt = now - last
+      last = now
+      analyser.getFloatTimeDomainData(buffer)
+      // 測っているのは**試聴の音量を掛けたあと**の波形(要素の volume はノードより手前)。
+      // 書き出しのダッキングは試聴音量と無関係なので、掛かっていたぶんを割り戻す。
+      // ミュート中は本編の大きさが分からないので、掛けない(倍率1)。
+      const monitor = mutedRef.current ? 0 : volumeRef.current
+      const level = monitor > 0 ? rmsOf(buffer) / monitor : 0
+      const target = mutedRef.current ? 1 : duckTargetGain(level)
+      duckGainRef.current = smoothDuckGain(duckGainRef.current, target, dt)
+      duckAppliers.forEach((apply) => apply(duckGainRef.current))
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(frame)
+      duckGainRef.current = 1
+      duckAppliers.forEach((apply) => apply(1))
+    }
+  }, [enabled, videoRef])
+}
+
 // Plays one BGM/narration/SE clip during preview via a hidden <audio> element,
-// mounted only while the playhead is inside the clip's range. Ducking is an
-// export-time filter and is not simulated here.
+// mounted only while the playhead is inside the clip's range. Ducking is applied
+// live from the main track's measured level (see useMainAudioDucking).
 function AudioTrackClipLayer({
   clip,
   asset,
   trackVolume,
   trackMuted,
+  trackDucking,
   playheadTime,
   isPlaying,
   masterVolume,
@@ -403,6 +499,7 @@ function AudioTrackClipLayer({
   asset: MediaAsset
   trackVolume: number
   trackMuted: boolean
+  trackDucking: boolean
   playheadTime: number
   isPlaying: boolean
   masterVolume: number
@@ -447,6 +544,22 @@ function AudioTrackClipLayer({
   )
   const gainNodeRef = useRef<GainNode | null>(null)
 
+  // 素の倍率(ダッキング前)を毎フレームの適用側から読めるようにしておく。
+  // state にすると測定ループのたびに再描画が走る。
+  const baseGainRef = useRef(effectiveVolume)
+
+  const applyGain = (duckGain: number): void => {
+    const el = ref.current
+    if (!el) return
+    const total = baseGainRef.current * (Number.isFinite(duckGain) ? duckGain : 1)
+    const gainNode = gainNodeRef.current
+    if (gainNode) {
+      gainNode.gain.value = Number.isFinite(total) ? Math.max(0, total) : 0
+      return
+    }
+    el.volume = toElementVolume(total)
+  }
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -455,14 +568,24 @@ function AudioTrackClipLayer({
     if (!gainNodeRef.current && needsWebAudioGain(effectiveVolume)) {
       gainNodeRef.current = attachGainNode(el)
     }
-    const gainNode = gainNodeRef.current
-    if (!gainNode) {
-      el.volume = toElementVolume(effectiveVolume)
-      return
-    }
-    void getSharedAudioContext()?.resume()
-    gainNode.gain.value = Number.isFinite(effectiveVolume) ? Math.max(0, effectiveVolume) : 0
+    if (gainNodeRef.current) void getSharedAudioContext()?.resume()
+    baseGainRef.current = effectiveVolume
+    // ダッキング中は測定ループが毎フレーム掛け直すので、ここでは素の倍率だけ入れる
+    // (掛け算の相手は applyGain が持っている)。
+    applyGain(duckGainRef.current)
   }, [effectiveVolume, masterMuted, trackMuted])
+
+  // ダッキングが有効なトラックだけ、測定ループの配信先に登録する。
+  // 有効でないトラックの経路は今までと同じ(登録しないので誰も触らない)。
+  useEffect(() => {
+    if (!trackDucking) return
+    duckAppliers.add(applyGain)
+    return () => {
+      duckAppliers.delete(applyGain)
+      // 抜けるときは掛かっていたぶんを戻す
+      applyGain(1)
+    }
+  }, [trackDucking])
 
   useEffect(() => {
     return () => {
@@ -795,6 +918,11 @@ export function PreviewPlayer(): React.JSX.Element {
     }
   }, [volume, muted, activeSrc, activeClipAudioDetached])
 
+  // ダッキングを使っているトラックが1つでもあるときだけ、本編のレベル測定を始める。
+  // 使っていないプロジェクトでは本編の音声経路に一切触らない。
+  const duckingInUse = project.audioTracks.some((t) => t.duckingEnabled && !t.muted)
+  useMainAudioDucking(videoRef, duckingInUse, volume, muted)
+
   function stepFrame(direction: 1 | -1): void {
     // 1フレームぶんは素材のフレームレートで決まる。60fps の素材で 1/30 秒動かすと
     // 「1フレーム」と書いてあるのに2フレーム飛ぶ。書き出しと同じ関数から求める。
@@ -925,6 +1053,7 @@ export function PreviewPlayer(): React.JSX.Element {
                       asset={asset}
                       trackVolume={track.volume}
                       trackMuted={track.muted}
+                      trackDucking={track.duckingEnabled}
                       playheadTime={playheadTime}
                       isPlaying={isPlaying}
                       masterVolume={volume}

@@ -15,6 +15,7 @@ import type {
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
+import { duckingFilterArgs } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
 import { scaleToFrameFilter } from '@shared/videoFrame'
 import { targetFrameRate } from '@shared/frameRate'
@@ -702,9 +703,7 @@ export function exportProject(options: ExportOptions): Promise<void> {
         mainAudioForMix = `${curA}_mixcopy`
         duckTracks.forEach((t, i) => {
           const duckedLabel = `${t.label}_ducked`
-          filterParts.push(
-            `[${t.label}][${curA}_duck${i}]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=250[${duckedLabel}]`
-          )
+          filterParts.push(`[${t.label}][${curA}_duck${i}]${duckingFilterArgs()}[${duckedLabel}]`)
           t.label = duckedLabel
         })
       }
