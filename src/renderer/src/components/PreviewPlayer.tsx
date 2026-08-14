@@ -51,6 +51,7 @@ import type {
   VideoOverlayTrack
 } from '@shared/types'
 import { previewSourceUrl } from '../lib/previewSource'
+import { toPlaybackRate } from '../lib/playbackRate'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -301,12 +302,14 @@ function PreviewBlurBackdrop({
   src,
   localTime,
   isPlaying,
-  blurPx
+  blurPx,
+  speed
 }: {
   src: string
   localTime: number
   isPlaying: boolean
   blurPx: number
+  speed: number
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
 
@@ -315,6 +318,13 @@ function PreviewBlurBackdrop({
       ref.current.currentTime = localTime
     }
   }, [localTime])
+
+  // 前景と同じ速度で回す。ここが等倍のままだと、上の 0.3秒 の合わせ直しだけで
+  // 引きずられることになり、**再生中ずっとシークし続ける**(実測: 4倍速で背景の
+  // `playbackRate` は 1 のまま、本編とのズレが 0.29秒 まで開いてから戻るのを繰り返す)。
+  useEffect(() => {
+    if (ref.current) ref.current.playbackRate = toPlaybackRate(speed)
+  }, [speed])
 
   useEffect(() => {
     if (isPlaying) ref.current?.play().catch(() => {})
@@ -504,7 +514,7 @@ function AudioTrackClipLayer({
   }, [localTime])
 
   useEffect(() => {
-    if (ref.current) ref.current.playbackRate = speed
+    if (ref.current) ref.current.playbackRate = toPlaybackRate(speed)
   }, [speed])
 
   useEffect(() => {
@@ -717,14 +727,15 @@ export function PreviewPlayer(): React.JSX.Element {
   // 書き出しの `gblur=sigma` は出力ピクセル基準。画面では枠の実寸に合わせて換算する
   // (固定倍率を書くと解像度や枠の大きさを変えたときに見た目が食い違う)。
   // CSS の `blur(v)` は標準偏差 v/2 のガウスぼかしなので、sigma を2倍して渡す。
-  const blurBackdrop = ((): { localTime: number; blurPx: number } | null => {
+  const blurBackdrop = ((): { localTime: number; blurPx: number; speed: number } | null => {
     const tc = findTimedClipAt(timedClips, playheadTime)
     if (!tc || tc.clip.fillCrop || !tc.clip.blurBackground) return null
     if (outputScale <= 0) return null
     const speed = tc.clip.speed || 1
     return {
       localTime: tc.clip.inPoint + (playheadTime - tc.start) * speed,
-      blurPx: blurSigmaFor(outputHeight) * outputScale * 2
+      blurPx: blurSigmaFor(outputHeight) * outputScale * 2,
+      speed
     }
   })()
 
@@ -792,13 +803,13 @@ export function PreviewPlayer(): React.JSX.Element {
       requestAnimationFrame(() => {
         if (videoRef.current) {
           videoRef.current.currentTime = localTime
-          videoRef.current.playbackRate = speed
+          videoRef.current.playbackRate = toPlaybackRate(speed)
           if (resumePlaying) videoRef.current.play().catch(() => {})
         }
       })
     } else if (videoRef.current) {
       videoRef.current.currentTime = localTime
-      videoRef.current.playbackRate = speed
+      videoRef.current.playbackRate = toPlaybackRate(speed)
       if (resumePlaying) videoRef.current.play().catch(() => {})
     }
   }
@@ -838,7 +849,20 @@ export function PreviewPlayer(): React.JSX.Element {
     // `timedClips` は project が変わるたび作り直されるので、ref が指しているのは常に
     // 「1つ前の配列の」オブジェクト。中身(start / outPoint)も編集前のまま凍っている。
     // 再生を止めずに、今の配列の同じクリップへ差し替える。
-    if (current) activeTimedClipRef.current = current
+    if (current) {
+      activeTimedClipRef.current = current
+      // **速度もここで入れ直す。** `playbackRate` を書いているのは `loadClipForTime` だけで、
+      // それは読み込み直しかシークのときしか走らない。だから**いま映っているクリップの
+      // 速度を変えても要素は古い速度のまま**回り続ける。しかも再生位置の計算
+      // (`globalTime = start + (currentTime - inPoint) / speed`)は新しい速度を使うので、
+      // **速度を上げたのに再生位置がゆっくりになる**という逆の見え方になる。
+      // (実測: 再生しながら2倍にすると `playbackRate` は 1 のままで、再生位置の進みが
+      //  1.00 → **0.50 秒/秒**。止めて4倍にしてから再生しても `playbackRate` は 2 のままだった)
+      // 読み込み直しはしない——`currentTime` を入れ直すことになり、音が飛ぶ。
+      const video = videoRef.current
+      const rate = toPlaybackRate(current.clip.speed)
+      if (video && video.playbackRate !== rate) video.playbackRate = rate
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timedClips])
 
@@ -954,6 +978,7 @@ export function PreviewPlayer(): React.JSX.Element {
                 localTime={blurBackdrop.localTime}
                 isPlaying={isPlaying}
                 blurPx={blurBackdrop.blurPx}
+                speed={blurBackdrop.speed}
               />
             )}
             {activeSrc ? (
