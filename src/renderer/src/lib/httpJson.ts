@@ -134,6 +134,17 @@ export async function fetchJson<T>(
 }
 
 /**
+ * 外から来た「一覧」を配列として受け取る。
+ *
+ * `body.items ?? []` は **`null`/`undefined` しか見ない**ので、`items` が文字列や数値で
+ * 返ってきた応答はそのまま `.map()` に渡り、`(data.items ?? []).map is not a function` が
+ * 画面に出る(実測)。外部APIの応答を並べる箇所は必ずここを通す。
+ */
+export function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+/**
  * 生成AIが返した JSON 文字列を、**オブジェクトとして**読む。
  *
  * `JSON.parse` が通っただけでは形の保証にならない。`"null"` は素通りして `null` になり、

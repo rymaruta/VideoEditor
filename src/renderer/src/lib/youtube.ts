@@ -1,4 +1,4 @@
-import { fetchJson } from './httpJson'
+import { asArray, fetchJson } from './httpJson'
 export interface YouTubeVideoInfo {
   id: string
   title: string
@@ -90,7 +90,7 @@ async function fetchVideoDetails(
     'YouTube API'
   )
   const map = new Map<string, { duration: number; views: number }>()
-  for (const item of data.items ?? []) {
+  for (const item of asArray(data.items) as VideosListItem[]) {
     if (!item?.id) continue
     map.set(item.id, {
       duration: parseIsoDuration(item.contentDetails?.duration ?? ''),
@@ -107,7 +107,9 @@ export async function fetchTrendingVideos(apiKey: string): Promise<YouTubeVideoI
     undefined,
     'YouTube API'
   )
-  return (data.items ?? []).map((item) => toVideoInfo(item)).filter(isPresent)
+  return (asArray(data.items) as VideosListItem[])
+    .map((item) => toVideoInfo(item))
+    .filter(isPresent)
 }
 
 const GAMING_CATEGORY_ID = '20'
@@ -119,7 +121,9 @@ export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTube
     undefined,
     'YouTube API'
   )
-  return (data.items ?? []).map((item) => toVideoInfo(item)).filter(isPresent)
+  return (asArray(data.items) as VideosListItem[])
+    .map((item) => toVideoInfo(item))
+    .filter(isPresent)
 }
 
 export async function searchVideos(apiKey: string, query: string): Promise<YouTubeVideoInfo[]> {
@@ -129,7 +133,7 @@ export async function searchVideos(apiKey: string, query: string): Promise<YouTu
     undefined,
     'YouTube API'
   )
-  const items = data.items ?? []
+  const items = asArray(data.items) as SearchListItem[]
   const ids = items.map((i) => i?.id?.videoId).filter((id): id is string => Boolean(id))
   const details = await fetchVideoDetails(apiKey, ids)
   return items
