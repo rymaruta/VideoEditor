@@ -11,15 +11,11 @@ import {
   toElementVolume
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
-import {
-  TEXT_BOX_PADDING_H_EM,
-  TEXT_BOX_PADDING_V_EM,
-  TEXT_MARGIN_H_RATIO,
-  TEXT_MARGIN_V_RATIO
-} from '@shared/textStyle'
+import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { blurSigmaFor } from '@shared/videoFrame'
 import { duckTargetGain, rmsOf, smoothDuckGain } from '@shared/ducking'
 import { cropPreviewStyle } from '../lib/cropPreview'
+import { overlayBoxStyle } from '../lib/overlayBox'
 import {
   audioClipDuration,
   buildTimedClips,
@@ -60,14 +56,6 @@ function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${String(s).padStart(2, '0')}`
-}
-
-function hexToRgba(hex: string, alpha: number): string {
-  const clean = hex.replace('#', '')
-  const r = parseInt(clean.slice(0, 2), 16)
-  const g = parseInt(clean.slice(2, 4), 16)
-  const b = parseInt(clean.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
@@ -139,14 +127,6 @@ function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
     fontStyle: style.italic ? 'italic' : 'normal',
     letterSpacing: style.letterSpacing ? `${style.letterSpacing * scale}px` : undefined,
     textShadow: shadows.length > 0 ? shadows.join(', ') : undefined,
-    backgroundColor: style.background
-      ? hexToRgba(style.backgroundColor, style.backgroundOpacity)
-      : undefined,
-    // 箱の余白は書き出し(ASS の \xbord/\ybord)と同じ比を使う。ここに数字を書くと、
-    // 片方だけ動いて「画面の箱と出力の箱の大きさが違う」に戻る(縦横の余白と同じ理由)。
-    padding: style.background ? `${TEXT_BOX_PADDING_V_EM}em ${TEXT_BOX_PADDING_H_EM}em` : undefined,
-    borderRadius: style.background ? '4px' : undefined,
-    display: style.background ? 'inline-block' : undefined,
     whiteSpace: 'pre-line'
   }
 }
@@ -1039,7 +1019,16 @@ export function PreviewPlayer(): React.JSX.Element {
                     setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
                   }}
                 >
-                  {renderOverlayText(o, playheadTime)}
+                  {/* 背景箱は文字を包む内側に置く。外側は幅が確定した位置決めの箱なので、
+                      そこへ塗ると文字の量と無関係な帯になる(`overlayBoxStyle` 参照)。
+                      背景OFF のときは span を挟まず、今までと同じ木のまま描く。 */}
+                  {o.style.background ? (
+                    <span className="overlay-text-box" style={overlayBoxStyle(o.style)}>
+                      {renderOverlayText(o, playheadTime)}
+                    </span>
+                  ) : (
+                    renderOverlayText(o, playheadTime)
+                  )}
                 </div>
               )
             })}
