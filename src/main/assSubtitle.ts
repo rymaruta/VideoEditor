@@ -199,17 +199,64 @@ function buildTypewriterText(text: string, charDelayMs: number, revealMs: number
   return rendered.join('\\N')
 }
 
-function buildKaraokeText(words: TranscriptWord[], dialogueStart: number): string {
+/**
+ * 単語ハイライト(カラオケ)のテキストを組む。**ここでも折り返す。**
+ *
+ * `\k` を挟んだテキストは `wrapAssLines` を通せない(タグごと数えてしまう)ので、
+ * この関数の中で幅を数えながら `\N` を入れる。**通していなかったせいで、
+ * 単語ハイライトを付けたテロップだけが1行のまま伸びてフレームの外へ出ていた**
+ * (実測: 全角47文字・文字サイズ40 を 1080x1920 に焼くと、字面が左端 0.0% 〜
+ *  右端 100.0% まで届いて両端が切れる。ハイライト無しなら 14.4%〜85.8% の2行)。
+ * 自動テロップとAIショートの発言テロップは既定でハイライト付きなので、
+ * **文字起こしから作ったテロップは全部これを踏んでいた**。
+ *
+ * `\k` は `\N` をまたいでも効き続けるので、折り返しても色の付く順序と時刻は変わらない。
+ * 折るのは単語の頭が基本で、1単語が1行に入らないときだけ単語の中で折る。
+ *
+ * 背景箱は別の Dialogue 行に同じ文字を書いて大きさを決めているので、
+ * **箱が使う行分けもここで返す**(別々に折ると箱と本文の行が食い違う)。
+ */
+function buildKaraokeText(
+  words: TranscriptWord[],
+  dialogueStart: number,
+  maxEmPerLine: number,
+  metrics: WrapMetrics
+): { text: string; lines: string[] } {
+  const wrapAt = Number.isFinite(maxEmPerLine) && maxEmPerLine > 0 ? maxEmPerLine : Infinity
   let cursor = dialogueStart
-  return words
-    .map((w) => {
-      const gap = w.start - cursor
-      const gapTag = gap > 0.01 ? `{\\k${Math.max(1, Math.round(gap * 100))}}` : ''
-      const durCentis = Math.max(1, Math.round((w.end - w.start) * 100))
-      cursor = w.end
-      return `${gapTag}{\\k${durCentis}}${escapeAssText(w.text)}`
-    })
-    .join('')
+  let lineEm = 0
+  const parts: string[] = []
+  const lines: string[] = ['']
+  const newLine = (): void => {
+    lines.push('')
+    lineEm = 0
+  }
+  for (const w of words) {
+    const gap = w.start - cursor
+    const gapTag = gap > 0.01 ? `{\\k${Math.max(1, Math.round(gap * 100))}}` : ''
+    const durCentis = Math.max(1, Math.round((w.end - w.start) * 100))
+    cursor = w.end
+    const chars = [...w.text]
+    const wordEm = chars.reduce((sum, ch) => sum + emWidthOf(ch, metrics), 0)
+    let prefix = ''
+    if (lineEm > 0 && lineEm + wordEm > wrapAt && wordEm <= wrapAt) {
+      prefix = '\\N'
+      newLine()
+    }
+    let body = ''
+    for (const ch of chars) {
+      const em = emWidthOf(ch, metrics)
+      if (lineEm > 0 && lineEm + em > wrapAt) {
+        body += '\\N'
+        newLine()
+      }
+      body += escapeAssText(ch)
+      lines[lines.length - 1] += ch
+      lineEm += em
+    }
+    parts.push(`${prefix}${gapTag}{\\k${durCentis}}${body}`)
+  }
+  return { text: parts.join(''), lines }
 }
 
 export function buildAssContent(
@@ -307,12 +354,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     // 枠からはみ出す(全角を多めに見積もっていたぶんで今まで隠れていた)。
     const spacingEm = style.letterSpacing ? style.letterSpacing / fontSize : 0
     const wideEm = wideEmByFont?.get(fontMetricsKey(style.fontFamily, style.bold))
-    const wrapped = wrapAssLines(o.text, maxEmPerLine, { wideEm, spacingEm })
-    const text = useKaraoke
-      ? buildKaraokeText(o.words!, o.startTime)
+    const metrics = sanitizeMetrics({ wideEm, spacingEm })
+    const wrapped = wrapAssLines(o.text, maxEmPerLine, metrics)
+    // カラオケも同じ幅で折り返す。折らないと単語ハイライト付きのテロップだけが
+    // 1行のまま伸びて枠の外へ出る(理由は buildKaraokeText)。
+    const karaoke = useKaraoke
+      ? buildKaraokeText(o.words!, o.startTime, maxEmPerLine, metrics)
+      : null
+    const text = karaoke
+      ? karaoke.text
       : style.animation === 'typewriter'
         ? buildTypewriterText(wrapped.join('\n'), 40, 50)
         : wrapped.map(escapeAssText).join('\\N')
+    // 背景箱は本文と**同じ行分け**で組む。別々に折ると箱の行と本文の行が食い違う。
+    const boxLines = karaoke ? karaoke.lines : wrapped
 
     const start = toAssTime(o.startTime)
     const end = toAssTime(o.endTime)
@@ -335,7 +390,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       // 軸ごとに指定できる `\xbord`/`\ybord` を使う。
       `\\xbord${round2(boxPadding.x)}\\ybord${round2(boxPadding.y)}\\shad0${animationTag}}`
     return [
-      `Dialogue: 0,${start},${end},Boxed,,0,0,${marginV},,${boxOverride}${wrapped.map(escapeAssText).join('\\N')}`,
+      `Dialogue: 0,${start},${end},Boxed,,0,0,${marginV},,${boxOverride}${boxLines.map(escapeAssText).join('\\N')}`,
       `Dialogue: 1,${start},${end},Default,,0,0,${marginV},,${override}${text}`
     ].join('\n')
   })
