@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -30,6 +30,7 @@ import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
+import { fitWindowStateToDisplays, type WindowState } from './windowState'
 import type {
   AspectRatio,
   HighlightSensitivity,
@@ -46,18 +47,16 @@ let autosavePath = ''
 let autosaveOverwrittenThisSession = false
 let windowStatePath = ''
 
-interface WindowState {
-  width: number
-  height: number
-  x?: number
-  y?: number
-  isMaximized: boolean
-}
-
 function loadWindowState(): WindowState | null {
   try {
     if (!windowStatePath || !existsSync(windowStatePath)) return null
-    return JSON.parse(readFileSync(windowStatePath, 'utf-8'))
+    // 保存した座標は「前回のディスプレイ構成」の座標。副ディスプレイを外して起動すると
+    // 実在しない場所に開き、**画面のどこにも見えない**まま動く(理由は windowState.ts)。
+    // `screen` は `app.whenReady()` の後だけ使える——`createWindow()` はその中から呼ばれる。
+    return fitWindowStateToDisplays(
+      JSON.parse(readFileSync(windowStatePath, 'utf-8')),
+      screen.getAllDisplays().map((d) => d.workArea)
+    )
   } catch {
     return null
   }

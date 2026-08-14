@@ -342,6 +342,12 @@ function App(): React.JSX.Element {
       setLeftWidth((w) => clamp(w, MIN_LEFT_WIDTH, maxLeftWidth))
       setRightWidth((w) => clamp(w, MIN_RIGHT_WIDTH, maxRightWidth))
     }
+    // **復元した直後にも1回掛ける。** 幅は前回のウィンドウの幅で決めた値なので、
+    // 次に狭い画面で開くと今の幅に収まっている保証がどこにも無い。`resize` を待つと
+    // 「利用者がウィンドウを動かすまで中央が無い」状態が続く
+    // (実測: 1360px のウィンドウに前回の左1200pxを復元すると、
+    //  中央の列が **0px**・プレビューも **0px** で、編集する場所そのものが無かった)。
+    handleWindowResize()
     window.addEventListener('resize', handleWindowResize)
     return () => window.removeEventListener('resize', handleWindowResize)
   }, [])
