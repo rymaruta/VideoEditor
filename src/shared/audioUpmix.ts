@@ -24,11 +24,51 @@ export const MONO_UPMIX_GAIN = Math.SQRT2
  * 素材にだけ**前置きする(2ch 以上に通すと全体が 3dB 持ち上がる)。
  */
 export function monoUpmixFilter(sampleRate?: number): string {
-  const rate = typeof sampleRate === 'number' && sampleRate > 0 ? `${sampleRate}:` : ''
-  return `aresample=${rate}osf=fltp:ochl=stereo:rematrix_volume=${MONO_UPMIX_GAIN}`
+  return `aresample=${ratePart(sampleRate)}osf=fltp:ochl=stereo:rematrix_volume=${MONO_UPMIX_GAIN}`
+}
+
+/**
+ * `aresample` の先頭に置くサンプルレート。**ここを1箇所にしておく**——
+ * 広げる側と畳む側で書き写すと、片方だけ `Infinity` や `NaN` をそのまま
+ * ffmpeg へ渡す形に戻る(数値でない値は「指定なし」として落とす)。
+ */
+function ratePart(sampleRate?: number): string {
+  return typeof sampleRate === 'number' && Number.isFinite(sampleRate) && sampleRate > 0
+    ? `${sampleRate}:`
+    : ''
 }
 
 /** ffprobe の `channels` が 1ch を指しているか。整数以外・0以下・欠落はすべて「不明」＝false。 */
 export function isMonoChannelCount(channels: unknown): boolean {
   return channels === 1
+}
+
+/**
+ * 3ch 以上の素材をステレオへ畳むときの規則。
+ *
+ * swresample は畳み込みの行列が 1 を超えるとき、**出力が整数形式なら行列を
+ * 正規化して割れないようにする**(`rematrix_maxval` の既定が 1.0)。ところが
+ * **浮動小数(`fltp`)では既定が無制限**になり、正規化が外れる。
+ * このアプリは形式の交渉を止めるために出力を `fltp` で固定しているので、
+ * **その副作用で 3ch 以上の素材だけが持ち上がる**。狙って上げたわけではない。
+ *
+ * 実測(同じ 4000Hz を 2ch と 5.1ch の2ファイルにして、書き出しと同じ
+ * `aformat=sample_fmts=fltp:...:channel_layouts=stereo` を通す):
+ *   2ch                       mean -18.1 dB / peak -15.0 dB
+ *   5.1ch(いまの経路)         mean  -7.4 dB / peak  -4.4 dB  ← **+10.7 dB**
+ *   5.1ch(整数形式に落とす)   mean -15.1 dB / peak -12.1 dB  ← 本来の畳み込み
+ * つまり `fltp` の固定だけで **7.7 dB** ぶん余計に持ち上がっていた。
+ * 素材が大きければそのまま 0 dBFS を越えて割れる。
+ *
+ * `rematrix_maxval=1.0` を明示して、整数形式のときと同じ正規化に戻す。
+ * **2ch の素材に通しても畳み込み自体が起きない**ので値は変わらない(実測 -18.1 dB のまま)が、
+ * モノラルの `rematrix_volume` と混ざらないよう、3ch 以上と分かっている素材にだけ通す。
+ */
+export function multiChannelDownmixFilter(sampleRate?: number): string {
+  return `aresample=${ratePart(sampleRate)}osf=fltp:ochl=stereo:rematrix_maxval=1.0`
+}
+
+/** ffprobe の `channels` が 3ch 以上を指しているか。整数以外・欠落はすべて「不明」＝false。 */
+export function isMultiChannelCount(channels: unknown): boolean {
+  return typeof channels === 'number' && Number.isInteger(channels) && channels > 2
 }

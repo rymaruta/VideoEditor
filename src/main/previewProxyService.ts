@@ -4,7 +4,12 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
 import { describeFfmpegError } from './ffmpegError'
-import { isMonoChannelCount, monoUpmixFilter } from '@shared/audioUpmix'
+import {
+  isMonoChannelCount,
+  isMultiChannelCount,
+  monoUpmixFilter,
+  multiChannelDownmixFilter
+} from '@shared/audioUpmix'
 
 /**
  * Codecs Chromium's <video> can decode. Everything else has to be transcoded before
@@ -141,6 +146,15 @@ export function ensurePreviewProxy(
             // この一段を足すと -23.7 dB(AAC の誤差ぶんを含めて等倍)。
             if (isMonoChannelCount(audioChannels)) {
               command.audioFilters(monoUpmixFilter())
+            } else if (isMultiChannelCount(audioChannels)) {
+              // 3ch 以上を畳むときは、`-ac 2` の裏の swresample が**浮動小数の出力では
+              // 行列の正規化を外す**ので、試聴だけが持ち上がって割れる。書き出しと
+              // 同じく明示して戻す(理由は `@shared/audioUpmix`)。
+              // 実測(無相関な5.1): `-ac 2` だけだと mean -10.9 dB・ピーク 0.0 dB で
+              // **430サンプルが 0dBFS に張り付く**。この一段を足すと -18.6 dB・-5.6 dB。
+              // ここを通るのは AC-3 / DTS のように**そのまま再生できない音声**で、
+              // それはまさに 5.1 を運んでいる形式でもある。
+              command.audioFilters(multiChannelDownmixFilter())
             }
           }
           command

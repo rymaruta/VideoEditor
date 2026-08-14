@@ -24,7 +24,12 @@ import { scaleToFrameFilter } from '@shared/videoFrame'
 import { targetFrameRate } from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
-import { isMonoChannelCount, monoUpmixFilter } from '@shared/audioUpmix'
+import {
+  isMonoChannelCount,
+  isMultiChannelCount,
+  monoUpmixFilter,
+  multiChannelDownmixFilter
+} from '@shared/audioUpmix'
 import { describeFfmpegError } from './ffmpegError'
 import { durationFromPacketCsv, finiteSeconds } from './mediaDuration'
 import { needsPreviewProxy } from './previewProxyService'
@@ -444,8 +449,15 @@ const VIDEO_FORMAT = 'format=yuv420p'
  * 今までどおりの経路にする。
  */
 function audioFormatFor(channels: number | undefined): string {
-  if (!isMonoChannelCount(channels)) return AUDIO_FORMAT
-  return `${monoUpmixFilter(OUTPUT_SAMPLE_RATE)},${AUDIO_FORMAT}`
+  if (isMonoChannelCount(channels)) {
+    return `${monoUpmixFilter(OUTPUT_SAMPLE_RATE)},${AUDIO_FORMAT}`
+  }
+  // 3ch 以上は、出力を `fltp` で固定しているせいで畳み込みの正規化が外れている。
+  // 明示して戻す(理由は `@shared/audioUpmix` の `multiChannelDownmixFilter`)。
+  if (isMultiChannelCount(channels)) {
+    return `${multiChannelDownmixFilter(OUTPUT_SAMPLE_RATE)},${AUDIO_FORMAT}`
+  }
+  return AUDIO_FORMAT
 }
 
 /**
