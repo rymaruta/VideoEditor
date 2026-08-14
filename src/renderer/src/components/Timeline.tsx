@@ -499,6 +499,34 @@ export function Timeline(): React.JSX.Element {
     if (kind !== 'videoOverlay') setSelectedVideoOverlayClip(null)
     if (kind !== 'caption') setSelectedOverlayId(null)
   }
+  // 選択は**常に1種類だけ**、という決まりをここで守る。
+  //
+  // 音声・PiP・テロップの選択はこのコンポーネントのローカル state で、本編クリップの選択は
+  // ストアにある。キーボードの担当も割れていて、Delete と分割は
+  // 「ローカル選択ぶん(このファイルの handleDeleteKey)」と
+  // 「本編クリップぶん(useKeyboardShortcuts)」の**2つの window リスナ**が別々に処理する。
+  // 片方が `preventDefault()` してももう片方は走るので、2種類が同時に選ばれていると
+  // **1回のキーで2件消える/2箇所が分かれる**。
+  // クリックの経路は `selectOnly` が揃えているが、貼り付け(Ctrl+V)と複製(Ctrl+D)は
+  // ストアの中で `selectedClipId` を張り替えるので**そこを通らない**。
+  // (実測: 音声クリップを選んでから Ctrl+V → Delete で、貼った本編クリップと
+  //  音声クリップが2件とも消え、履歴は2件積まれるので取り消し1回では戻らなかった)
+  //
+  // 見張るのは**「本編クリップの選択が立った瞬間」**の1点だけ。描画のたびに判定するのでは
+  // なく、ストアが変わった時にローカル側を落とす(取り残した値が後から生き返らない)。
+  useEffect(
+    () =>
+      useProjectStore.subscribe((state, prev) => {
+        const active = state.selectedClipId !== null || state.multiSelectedClipIds.length > 0
+        const wasActive = prev.selectedClipId !== null || prev.multiSelectedClipIds.length > 0
+        if (!active || wasActive) return
+        setSelectedAudioClip(null)
+        setSelectedVideoOverlayClip(null)
+        setSelectedOverlayId(null)
+      }),
+    []
+  )
+
   const videoLaneRef = useRef<HTMLDivElement>(null)
   const trackLanesColRef = useRef<HTMLDivElement>(null)
   // Shift+クリックの起点は**位置ではなくID**で覚える。`timedClips` は project が
@@ -2316,6 +2344,12 @@ export function Timeline(): React.JSX.Element {
                     title={overlay.text}
                     onMouseDown={(e) => {
                       e.stopPropagation()
+                      // 端のつまみと同じく、他の種類の選択を外してから選ぶ。
+                      // ここだけ外していなかったため、本編クリップを選んだあとテロップを
+                      // 掴むと**両方が選ばれたまま**になり、Delete を1回押すと
+                      // テロップと本編クリップが2件とも消えていた
+                      // (貼り付け・複製の経路は上の `useProjectStore.subscribe` で塞いでいる)。
+                      selectOnly('caption')
                       setSelectedOverlayId(overlay.id)
                       setOverlayDrag({
                         overlayId: overlay.id,
