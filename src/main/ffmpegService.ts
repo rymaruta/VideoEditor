@@ -14,6 +14,7 @@ import type {
   TransitionType
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
+import { measureWideAdvances } from './fontMetrics'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
@@ -500,6 +501,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   // (この await より前に立てておくのが条件)。調べるのは使う素材だけで、失敗しても
   // 例外にしない——書き出しがチャンネル数のせいで落ちるのは本末転倒。
   const audioChannelsByPath = await probeUsedAudioChannels(project)
+  // テロップの折り返し幅は**見積もりではなく実測**で決める。libass に1度描かせて
+  // 全角の送り幅を測る(結果はフォントごとに使い回すので、2回目以降は測らない)。
+  // 上の probe と同じで、測れなくても例外にしない——折り返しが少し広いだけの話で、
+  // 書き出せなくなるほうがはるかに悪い。
+  const wideEmByFont = await measureWideAdvances(ffmpegPath, project.textOverlays)
 
   return new Promise((resolve, reject) => {
     let command: ffmpeg.FfmpegCommand
@@ -698,7 +704,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         const textCanvas = textCanvasSize(aspectRatio)
         writeFileSync(
           assPath,
-          buildAssContent(remappedOverlays, textCanvas.w, textCanvas.h),
+          buildAssContent(remappedOverlays, textCanvas.w, textCanvas.h, wideEmByFont),
           'utf-8'
         )
         filterParts.push(`[${curV}]subtitles=filename='${escapeFilterPath(assPath)}'[vout]`)

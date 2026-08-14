@@ -56,13 +56,44 @@ function escapeAssText(text: string): string {
   return escapeAssBackslash(text).replace(/\{/g, '\\{').replace(/\}/g, '\\}').replace(/\n/g, '\\N')
 }
 
+/** 折り返しに使う1文字あたりの幅(どれもフォントサイズに対する比) */
+export interface WrapMetrics {
+  /**
+   * 全角1文字の送り幅。**libass に実際に描かせて測った値**を渡す
+   * (`fontMetrics.wideAdvanceEm`)。測れなかったときだけ既定の 1 に倒す——
+   * 1 は「実フォントより広め」に倒した見積もりで、切れるより手前で折る側。
+   */
+  wideEm: number
+  /**
+   * 半角1文字の送り幅。ここは測っていない: 半角の送り幅は文字ごとに大きく違い
+   * (実測 `a` 0.526em / `0` 0.547em / `W` 0.849em)、1つの数字では表せない。
+   * 一方で**空白のある並びは libass 自身が折り返せる**ので、多少ずれても
+   * フレームからはみ出すところまでは行かない。狭めの 0.5 のままにしてある。
+   */
+  narrowEm: number
+  /**
+   * 1文字ごとに足される字間(`\fsp` = `letterSpacing` ÷ 文字サイズ)。
+   * **入れ忘れると、字間を広げたテロップだけが枠からはみ出す。**
+   * 今までは全角を 1em と多めに見積もっていたぶんで隠れていたが、
+   * 実測値(この環境では 0.812em)を使うと余裕が無くなるので必ず数に入れる。
+   */
+  spacingEm: number
+}
+
+export const DEFAULT_WRAP_METRICS: WrapMetrics = { wideEm: 1, narrowEm: 0.5, spacingEm: 0 }
+
 /**
- * 折り返しの見積もりに使う1文字の幅(フォントサイズに対する比)。
- * 全角(CJK・かな・全角記号)はおよそ1em、半角はおよそ0.5em。
+ * 送り幅の表を引くキー。太字は別のフォントとして扱う(実測で半角は
+ * `a` 0.526em → 太字 0.580em と変わる)。**測る側と引く側で必ずこの関数を通す**——
+ * 片方だけキーの作り方が変わると、黙って引けなくなって見積もりに戻る。
  */
-function emWidthOf(ch: string): number {
+export function fontMetricsKey(fontFamily: string, bold: boolean): string {
+  return `${fontFamily}|${bold ? 'b' : ''}`
+}
+
+function isWideChar(ch: string): boolean {
   const code = ch.codePointAt(0) ?? 0
-  const wide =
+  return (
     (code >= 0x1100 && code <= 0x115f) || // ハングル字母
     (code >= 0x2e80 && code <= 0xa4cf) || // CJK 部首〜漢字・かな
     (code >= 0xac00 && code <= 0xd7a3) || // ハングル
@@ -70,7 +101,23 @@ function emWidthOf(ch: string): number {
     (code >= 0xfe30 && code <= 0xfe4f) || // CJK 互換記号
     (code >= 0xff00 && code <= 0xff60) || // 全角英数・記号
     (code >= 0xffe0 && code <= 0xffe6)
-  return wide ? 1 : 0.5
+  )
+}
+
+/** 折り返しの見積もりに使う1文字の幅(フォントサイズに対する比)。 */
+function emWidthOf(ch: string, m: WrapMetrics): number {
+  return (isWideChar(ch) ? m.wideEm : m.narrowEm) + m.spacingEm
+}
+
+/** 外から来た数字をそのまま掛け算に入れない(NaN が1つ混ざると全部の幅が NaN になる) */
+function sanitizeMetrics(m?: Partial<WrapMetrics>): WrapMetrics {
+  const pick = (v: number | undefined, fallback: number, min: number, max: number): number =>
+    typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : fallback
+  return {
+    wideEm: pick(m?.wideEm, DEFAULT_WRAP_METRICS.wideEm, 0.1, 5),
+    narrowEm: pick(m?.narrowEm, DEFAULT_WRAP_METRICS.narrowEm, 0.05, 5),
+    spacingEm: pick(m?.spacingEm, DEFAULT_WRAP_METRICS.spacingEm, 0, 5)
+  }
 }
 
 /**
@@ -83,15 +130,20 @@ function emWidthOf(ch: string): number {
  *  画面側は CSS が文字単位で折り返すので5行で収まっている)。
  * ゼロ幅空白(U+200B)を挟んでも libass は折り返さないことを実測で確認済み。
  *
- * 幅は**見積もり**で決める。main プロセスにはフォントの字送りを測る手段が無いため、
- * 全角1em・半角0.5em として数える。実フォントより少し広めに見積もるので、
- * **切れるより手前で折り返す**側に倒れる。
+ * 幅は `metrics` で決める。**全角の送り幅は libass 自身に描かせて実測した値**を渡すこと
+ * (`fontMetrics.wideAdvanceEm`)。渡さなければ従来どおり全角1em・半角0.5emの見積もりで、
+ * 実フォントより広めなので**切れるより手前で折り返す**側に倒れる。
  * 空白で区切られた並び(英文など)は libass 自身が折り返せるので、
  * **1つの塊が入り切らないときだけ**その塊の中を割る——こちらで先回りして割ると、
  * libass の折り返しと二重にかかって不自然な位置で切れる。
  */
-export function wrapAssLines(text: string, maxEmPerLine: number): string[] {
+export function wrapAssLines(
+  text: string,
+  maxEmPerLine: number,
+  metrics?: Partial<WrapMetrics>
+): string[] {
   if (!Number.isFinite(maxEmPerLine) || maxEmPerLine <= 0) return text.split('\n')
+  const m = sanitizeMetrics(metrics)
   const out: string[] = []
   for (const rawLine of text.split('\n')) {
     // 空白で分けられる塊ごとに見て、入り切らない塊だけを文字単位で割る
@@ -105,11 +157,11 @@ export function wrapAssLines(text: string, maxEmPerLine: number): string[] {
     for (const chunk of rawLine.split(/(\s+)/)) {
       if (chunk === '') continue
       const chars = [...chunk]
-      const chunkEm = chars.reduce((sum, ch) => sum + emWidthOf(ch), 0)
+      const chunkEm = chars.reduce((sum, ch) => sum + emWidthOf(ch, m), 0)
       // 塊そのものが1行に入らない = libass では絶対に折り返せない並び
       if (chunkEm > maxEmPerLine) {
         for (const ch of chars) {
-          const em = emWidthOf(ch)
+          const em = emWidthOf(ch, m)
           if (currentEm + em > maxEmPerLine && current !== '') flush()
           current += ch
           currentEm += em
@@ -160,7 +212,19 @@ function buildKaraokeText(words: TranscriptWord[], dialogueStart: number): strin
     .join('')
 }
 
-export function buildAssContent(overlays: TextOverlay[], width: number, height: number): string {
+export function buildAssContent(
+  overlays: TextOverlay[],
+  width: number,
+  height: number,
+  /**
+   * 全角1文字の送り幅(フォントサイズに対する比)を、フォントごとに引ける表。
+   * `fontMetrics` が **libass に実際に描かせて測った値**を入れる。
+   * 引けなかったフォントは従来どおりの見積もり(1em)に倒れる。
+   * **1つの数字で代表させない**——フォントを混ぜたプロジェクトで、別のフォントの
+   * 送り幅を当てはめると、狭いほうへ外したときに枠からはみ出す。
+   */
+  wideEmByFont?: ReadonlyMap<string, number>
+): string {
   // 左右の余白は画面(CSS)と同じ比から出す。ここに数字を書くと、片方だけ動いて
   // 「画面では折り返るのに書き出しでは1行」のような食い違いに戻る。
   const marginH = Math.round(textMarginHPx(width))
@@ -239,7 +303,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     // 余白の指定が効かないので、枠の幅そのものから同じ比で引く。
     const fontSize = Number.isFinite(style.fontSize) && style.fontSize > 0 ? style.fontSize : 1
     const maxEmPerLine = (style.customPosition ? width - marginH * 2 : textAreaWidth) / fontSize
-    const wrapped = wrapAssLines(o.text, maxEmPerLine)
+    // `\fsp` は1文字ごとに幅を足す。数に入れないと、字間を広げたテロップだけが
+    // 枠からはみ出す(全角を多めに見積もっていたぶんで今まで隠れていた)。
+    const spacingEm = style.letterSpacing ? style.letterSpacing / fontSize : 0
+    const wideEm = wideEmByFont?.get(fontMetricsKey(style.fontFamily, style.bold))
+    const wrapped = wrapAssLines(o.text, maxEmPerLine, { wideEm, spacingEm })
     const text = useKaraoke
       ? buildKaraokeText(o.words!, o.startTime)
       : style.animation === 'typewriter'
