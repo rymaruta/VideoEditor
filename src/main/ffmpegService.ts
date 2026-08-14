@@ -482,7 +482,24 @@ export function exportProject(options: ExportOptions): Promise<void> {
         )
         // `fps` は scaleToFrameFilter が中で付ける。ここで overlay の後ろに付けると
         // ぼかし背景のときだけ最後の1フレームが落ちる(関数側のコメント参照)。
-        filterParts.push(`[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1[v${i}]`)
+        //
+        // **映像も音声と同じく、尺ちょうどに揃えてから畳み込む。**
+        //
+        // 素材の映像ストリームは音声ストリームと同じ長さとは限らない。長さの判定に使う
+        // `duration` は**コンテナ全体の長さ**なので、映像だけ先に終わる素材(末尾に音声だけが
+        // 残る録画物)では、クリップの尺として渡した秒数ぶんの映像が**そもそも無い**。
+        // 映像と音声は**別々に `concat`** して積み上げるので、足りない分が1本ごとに累積し、
+        // **2本目以降の映像が音声より前へずれていく**。エラーも警告も出ない。
+        // (実測: 映像4秒・音声5秒の素材を尺5秒で3本並べると、音声 15.000秒に対して
+        //  映像 12.000秒(360フレーム)。音声のビープは 0/5/10秒と正しい位置なのに、
+        //  映像は1本ごとに1秒ずつ先行し、最後の3秒は絵が無かった)
+        // `tpad` で足りない分を**最後のフレームのまま**引き伸ばし、`trim` で長すぎる分を
+        // 切る——音声側の `apad`+`atrim` と対になる、どちらの向きのズレも塞ぐ1本。
+        filterParts.push(
+          `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,` +
+            `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
+            `trim=duration=${outputDuration}[v${i}]`
+        )
         if (asset.hasAudio && !clip.audioDetached) {
           // 音声も**映像と同じ尺ちょうど**に揃えてから畳み込む。
           //
