@@ -4,6 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
+import { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/mediaExtensions'
 import { ensurePreviewProxy } from './previewProxyService'
 import { scanLongFormWindows } from './longFormService'
 import {
@@ -197,7 +198,7 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectMediaFiles, async (event) => {
     const result = await showOpenDialogForSender(event, {
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: '動画ファイル', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'] }]
+      filters: [{ name: '動画ファイル', extensions: [...VIDEO_EXTENSIONS] }]
     })
     if (result.canceled) return []
     return result.filePaths
@@ -206,7 +207,7 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectAudioFiles, async (event) => {
     const result = await showOpenDialogForSender(event, {
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: '音声ファイル', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] }]
+      filters: [{ name: '音声ファイル', extensions: [...AUDIO_EXTENSIONS] }]
     })
     if (result.canceled) return []
     return result.filePaths
@@ -215,25 +216,7 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectRelinkFile, async (event) => {
     const result = await showOpenDialogForSender(event, {
       properties: ['openFile'],
-      filters: [
-        {
-          name: 'メディアファイル',
-          extensions: [
-            'mp4',
-            'mov',
-            'mkv',
-            'avi',
-            'webm',
-            'm4v',
-            'mp3',
-            'wav',
-            'm4a',
-            'aac',
-            'ogg',
-            'flac'
-          ]
-        }
-      ]
+      filters: [{ name: 'メディアファイル', extensions: [...MEDIA_EXTENSIONS] }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]

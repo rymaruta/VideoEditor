@@ -3941,3 +3941,41 @@ h3 {
   margin-top: 6px;
   color: var(--success);
 }
+
+/* ファイルをウィンドウにドラッグしている間の案内。ドロップ自体は window 側で受けるため、
+   この層はクリック判定を持たない(持たせるとドロップを吸ってしまう)。 */
+.file-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 5, 8, 0.5);
+  pointer-events: none;
+}
+
+.file-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 40px;
+  border: 2px dashed var(--accent-1);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-panel);
+  color: var(--accent-1);
+}
+
+.file-drop-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+/* 生成が続いていることが、モーダルを閉じた後もここから分かるようにする */
+.autoedit-trigger.running {
+  border-color: var(--accent-1);
+  color: var(--accent-1);
+}

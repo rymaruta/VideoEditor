@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
 import type {
@@ -21,6 +21,20 @@ import type {
 
 // Custom APIs for renderer
 const api = {
+  /**
+   * ドロップされた File の実ファイルパス。
+   *
+   * Electron 32 で `File.path` が廃止されたため、これを経由しないとドロップされた素材の
+   * 場所が分からない(ffmpeg も probe も絶対パスしか受け取らない)。実ファイルに紐づかない
+   * ドラッグ(ブラウザからの画像など)では空文字が返る。
+   */
+  getPathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
   selectMediaFiles: (): Promise<string[]> => ipcRenderer.invoke(IPC.selectMediaFiles),
   selectAudioFiles: (): Promise<string[]> => ipcRenderer.invoke(IPC.selectAudioFiles),
   selectRelinkFile: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectRelinkFile),

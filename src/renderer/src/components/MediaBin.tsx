@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
+import { useAutoEditRunStore } from '../store/autoEditRunStore'
 import { formatIpcError } from '../lib/ipcError'
 import { assetsNeedingPreviewProxy, canPreviewFile } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
+import { isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
 import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
 import { RoughCutModal } from './RoughCutModal'
@@ -23,6 +26,10 @@ import {
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
+}
+
+function unsupportedMessage(names: string[]): string {
+  return `対応していない形式のため${names.length}件を取り込みませんでした(${MEDIA_EXTENSIONS.join(' / ')}) — ${names.join(' / ')}`
 }
 
 function formatDuration(seconds: number): string {
@@ -61,7 +68,12 @@ export function MediaBin(): React.JSX.Element {
   const [showLongForm, setShowLongForm] = useState(false)
   const [relinkingId, setRelinkingId] = useState<string | null>(null)
   const [proxyProgress, setProxyProgress] = useState<Record<string, number>>({})
+  const [fileDragActive, setFileDragActive] = useState(false)
   const hasVideoAssets = assets.some((a) => a.hasVideo)
+  // 全自動編集はモーダルを閉じても走り続けるので、走っていることがここから分かるようにする
+  const autoEditRunning = useAutoEditRunStore(
+    (s) => s.status === 'running' || s.finishingId !== null
+  )
 
   // Progress arrives on a main-process channel keyed by asset id, so several files
   // being transcoded at once each drive their own row.
@@ -235,8 +247,11 @@ export function MediaBin(): React.JSX.Element {
     }
   }
 
-  async function importFiles(paths: string[]): Promise<void> {
-    if (paths.length === 0) return
+  async function importFiles(paths: string[], unsupported: string[] = []): Promise<void> {
+    if (paths.length === 0) {
+      if (unsupported.length > 0) setError(unsupportedMessage(unsupported))
+      return
+    }
     setImporting(true)
     // One bad file must not abort the batch: the files after it would silently
     // never be imported while the user assumes every valid selection was added.
@@ -282,9 +297,14 @@ export function MediaBin(): React.JSX.Element {
     for (const { asset, codecSaysUnplayable } of proxyCandidates) {
       void ensurePreviewable(asset.id, asset.filePath, codecSaysUnplayable, asset.hasVideo)
     }
+    const messages: string[] = []
+    if (unsupported.length > 0) messages.push(unsupportedMessage(unsupported))
     if (failures.length > 0) {
-      setError(`${failures.length}件のファイルを読み込めませんでした — ${failures.join(' / ')}`)
+      messages.push(
+        `${failures.length}件のファイルを読み込めませんでした — ${failures.join(' / ')}`
+      )
     }
+    if (messages.length > 0) setError(messages.join(' / '))
     setImporting(false)
   }
 
@@ -297,6 +317,77 @@ export function MediaBin(): React.JSX.Element {
     setError(null)
     await importFiles(await window.api.selectAudioFiles())
   }
+
+  // ドロップされたものの取り込み。取り込み経路はダイアログと同じ importFiles に集約する
+  // (プロキシ生成・履歴1件・失敗の集約が経路ごとにばらけないようにするため)。
+  async function importDroppedFiles(files: File[]): Promise<void> {
+    if (importing) return
+    setError(null)
+    const paths: string[] = []
+    const unsupported: string[] = []
+    for (const file of files) {
+      // 実ファイルに紐づかないドラッグ(ブラウザからの画像など)は空文字が返る。
+      // フォルダはパスが取れても拡張子が無いのでここで落ちる。
+      const filePath = window.api.getPathForFile(file)
+      if (!filePath || !isSupportedMediaPath(filePath)) {
+        unsupported.push(file.name)
+        continue
+      }
+      paths.push(filePath)
+    }
+    await importFiles(paths, unsupported)
+  }
+
+  // ウィンドウ全体でファイルのドロップを受ける。メディアパネルだけを的にすると、
+  // 畳んでいるときや外した場所へ落としたときに Electron が既定動作でその動画へ
+  // 画面遷移してしまい、編集中のプロジェクトごと表示が飛ぶ。
+  const dropHandlerRef = useRef(importDroppedFiles)
+  useEffect(() => {
+    dropHandlerRef.current = importDroppedFiles
+  })
+  useEffect(() => {
+    // クリップの並び替えなどアプリ内のドラッグには反応しない
+    const isFileDrag = (e: DragEvent): boolean =>
+      Array.from(e.dataTransfer?.types ?? []).includes('Files')
+    let depth = 0
+    const onDragEnter = (e: DragEvent): void => {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      depth += 1
+      setFileDragActive(true)
+    }
+    const onDragOver = (e: DragEvent): void => {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    }
+    const onDragLeave = (e: DragEvent): void => {
+      if (!isFileDrag(e)) return
+      // ウィンドウの外へ出た場合は relatedTarget が無い。取りこぼすと案内が出たまま残る。
+      depth = e.relatedTarget ? depth - 1 : 0
+      if (depth <= 0) {
+        depth = 0
+        setFileDragActive(false)
+      }
+    }
+    const onDrop = (e: DragEvent): void => {
+      if (!isFileDrag(e)) return
+      e.preventDefault()
+      depth = 0
+      setFileDragActive(false)
+      void dropHandlerRef.current(Array.from(e.dataTransfer?.files ?? []))
+    }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [])
 
   return (
     <div className="panel media-bin">
@@ -328,12 +419,18 @@ export function MediaBin(): React.JSX.Element {
             長尺からショートを自動生成
           </button>
           <button
-            className="small-button autoedit-trigger"
+            className={`small-button autoedit-trigger ${autoEditRunning ? 'running' : ''}`}
             onClick={() => setShowAutoEdit(true)}
-            title="配置した動画素材から5種類の編集パターンをAIが自動生成します。良し悪しを評価すると次回以降の生成に反映されます"
+            title={
+              autoEditRunning
+                ? '生成中です。押すと進み具合と結果を開けます(閉じても生成は続きます)'
+                : '配置した動画素材から5種類の編集パターンをAIが自動生成します。良し悪しを評価すると次回以降の生成に反映されます'
+            }
           >
             <WandIcon width={13} height={13} />
-            AIおまかせ全自動編集(5パターン)
+            {autoEditRunning
+              ? 'AIおまかせ全自動編集(生成中...)'
+              : 'AIおまかせ全自動編集(5パターン)'}
           </button>
           <button
             className="small-button roughcut-trigger"
@@ -352,6 +449,7 @@ export function MediaBin(): React.JSX.Element {
           <div className="empty-state">
             <ClapperboardIcon width={28} height={28} />
             <p className="hint-text">動画・音声ファイルを追加してください</p>
+            <p className="hint-text">ファイルをこのウィンドウにドロップしても追加できます</p>
           </div>
         )}
         {assets.map((asset) => {
@@ -529,6 +627,19 @@ export function MediaBin(): React.JSX.Element {
       {showRoughCut && <RoughCutModal onClose={() => setShowRoughCut(false)} />}
       {showAutoEdit && <AutoEditModal onClose={() => setShowAutoEdit(false)} />}
       {showLongForm && <LongFormShortModal onClose={() => setShowLongForm(false)} />}
+      {/* メディアパネルは折りたためるので、案内はパネルの中ではなく body に出す。
+          pointer-events を切ってあるので、案内自体がドロップを吸うことはない。 */}
+      {fileDragActive &&
+        createPortal(
+          <div className="file-drop-overlay">
+            <div className="file-drop-card">
+              <UploadIcon width={26} height={26} />
+              <p className="file-drop-title">ドロップして素材に追加</p>
+              <p className="hint-text">{MEDIA_EXTENSIONS.join(' / ')}</p>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

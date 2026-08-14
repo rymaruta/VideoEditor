@@ -1,10 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useEditPreferenceStore } from '../store/editPreferenceStore'
-import { generateAutoEditPatterns } from '../lib/autoEdit'
-import { autoFinishTimeline, type AutoFinishResult } from '../lib/autoFinish'
-import { formatIpcError } from '../lib/ipcError'
+import { autoEditSourceKey, useAutoEditRunStore } from '../store/autoEditRunStore'
 import { TRANSITION_LABELS } from '../lib/autoEditStyles'
 import type { AutoEditPattern } from '@shared/types'
 import {
@@ -30,83 +28,74 @@ function basename(filePath: string): string {
 }
 
 export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.Element {
-  const project = useProjectStore((s) => s.project)
+  const assets = useProjectStore((s) => s.project.assets)
+  const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const applyAutoEditPattern = useProjectStore((s) => s.applyAutoEditPattern)
   const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
   const recordFeedback = useEditPreferenceStore((s) => s.recordFeedback)
   const preferenceSummary = useEditPreferenceStore((s) => s.getSummaryText())
 
-  const [useGemini, setUseGemini] = useState(Boolean(geminiApiKey))
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [patterns, setPatterns] = useState<AutoEditPattern[]>([])
-  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
-  const [recommendedId, setRecommendedId] = useState<string | undefined>(undefined)
-  const [feedback, setFeedback] = useState<Record<string, 'liked' | 'disliked'>>({})
-  const [appliedId, setAppliedId] = useState<string | null>(null)
-  const [regenToken, setRegenToken] = useState(0)
-  const [aiScoredCount, setAiScoredCount] = useState(0)
-  const [bgmBeat, setBgmBeat] = useState<{ bpm: number; assetName: string } | null>(null)
-  const [referencePath, setReferencePath] = useState<string | null>(null)
-  const [referenceStyle, setReferenceStyle] = useState<{
-    avgCutSeconds: number
-    cutCount: number
-  } | null>(null)
-  const [finishingId, setFinishingId] = useState<string | null>(null)
-  const [finishResult, setFinishResult] = useState<AutoFinishResult | null>(null)
-  const [finishError, setFinishError] = useState<string | null>(null)
+  // 生成の状態はストアが持つ。このモーダルは表示と操作の受け口だけで、閉じても処理は続く。
+  const status = useAutoEditRunStore((s) => s.status)
+  const patterns = useAutoEditRunStore((s) => s.patterns)
+  const thumbnails = useAutoEditRunStore((s) => s.thumbnails)
+  const recommendedId = useAutoEditRunStore((s) => s.recommendedId)
+  const aiScoredCount = useAutoEditRunStore((s) => s.aiScoredCount)
+  const bgmBeat = useAutoEditRunStore((s) => s.bgmBeat)
+  const referenceStyle = useAutoEditRunStore((s) => s.referenceStyle)
+  const error = useAutoEditRunStore((s) => s.error)
+  const useGemini = useAutoEditRunStore((s) => s.useGemini)
+  const referencePath = useAutoEditRunStore((s) => s.referencePath)
+  const feedback = useAutoEditRunStore((s) => s.feedback)
+  const appliedId = useAutoEditRunStore((s) => s.appliedId)
+  const finishingId = useAutoEditRunStore((s) => s.finishingId)
+  const finishResult = useAutoEditRunStore((s) => s.finishResult)
+  const finishError = useAutoEditRunStore((s) => s.finishError)
+  const setUseGemini = useAutoEditRunStore((s) => s.setUseGemini)
+  const setReferencePath = useAutoEditRunStore((s) => s.setReferencePath)
+  const setFeedback = useAutoEditRunStore((s) => s.setFeedback)
+  const markApplied = useAutoEditRunStore((s) => s.markApplied)
+  const startFinish = useAutoEditRunStore((s) => s.startFinish)
 
+  const loading = status === 'running'
+
+  function startRun(): void {
+    void useAutoEditRunStore.getState().start({ assets, audioTracks, geminiApiKey })
+  }
+
+  // 開いたときの扱い:
+  // - 走っている最中なら何もしない(閉じている間も進んでいた続きをそのまま見せる)
+  // - 一度も走っていなければ生成する
+  // - 前回の結果が今の素材と合っていなければ作り直す(消した素材の案を見せない)
   useEffect(() => {
-    let cancelled = false
-    async function run(): Promise<void> {
-      setLoading(true)
-      setError(null)
-      setPatterns([])
-      setThumbnails({})
-      setFeedback({})
-      setAppliedId(null)
-      setAiScoredCount(0)
-      setBgmBeat(null)
-      setReferenceStyle(null)
-      try {
-        const result = await generateAutoEditPatterns(project.assets, {
-          seed: Date.now(),
-          geminiApiKey: useGemini ? geminiApiKey : undefined,
-          audioTracks: project.audioTracks,
-          referenceFilePath: referencePath ?? undefined
-        })
-        if (cancelled) return
-        setPatterns(result.patterns)
-        setThumbnails(result.thumbnails)
-        setRecommendedId(result.recommendedPatternId)
-        setAiScoredCount(result.aiScoredCandidateCount)
-        setBgmBeat(result.bgmBeat)
-        setReferenceStyle(result.referenceStyle)
-      } catch (e) {
-        if (!cancelled) setError(formatIpcError(e))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+    const run = useAutoEditRunStore.getState()
+    if (run.status === 'running') return
+    if (run.status === 'idle') {
+      run.setUseGemini(Boolean(geminiApiKey))
+      void useAutoEditRunStore.getState().start({ assets, audioTracks, geminiApiKey })
+      return
     }
-    run()
-    return () => {
-      cancelled = true
+    if (run.sourceKey !== autoEditSourceKey(assets, run.referencePath)) {
+      void run.start({ assets, audioTracks, geminiApiKey })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [regenToken, referencePath])
+  }, [])
 
   async function handlePickReference(): Promise<void> {
     const paths = await window.api.selectMediaFiles()
-    if (paths.length > 0) setReferencePath(paths[0])
+    if (paths.length === 0) return
+    setReferencePath(paths[0])
+    startRun()
   }
 
   function handleClearReference(): void {
     setReferencePath(null)
+    startRun()
   }
 
   function handleFeedback(pattern: AutoEditPattern, liked: boolean): void {
     recordFeedback(pattern, liked)
-    setFeedback((prev) => ({ ...prev, [pattern.id]: liked ? 'liked' : 'disliked' }))
+    setFeedback(pattern.id, liked)
   }
 
   // Applying appends the pattern's clips to the timeline. The button used to stay
@@ -123,24 +112,14 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
   function handleApply(pattern: AutoEditPattern): void {
     if (!confirmApply(pattern)) return
     applyAutoEditPattern(pattern)
-    setAppliedId(pattern.id)
+    markApplied(pattern.id)
   }
 
-  async function handleApplyAndFinish(pattern: AutoEditPattern): Promise<void> {
+  function handleApplyAndFinish(pattern: AutoEditPattern): void {
     if (!confirmApply(pattern)) return
     applyAutoEditPattern(pattern)
-    setAppliedId(pattern.id)
-    setFinishingId(pattern.id)
-    setFinishError(null)
-    setFinishResult(null)
-    try {
-      const result = await autoFinishTimeline(geminiApiKey || undefined, 'japanese')
-      setFinishResult(result)
-    } catch (e) {
-      setFinishError(formatIpcError(e))
-    } finally {
-      setFinishingId(null)
-    }
+    markApplied(pattern.id)
+    void startFinish(pattern.id, geminiApiKey)
   }
 
   return (
@@ -156,11 +135,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
         </p>
         <p className="hint-text autoedit-preference">好みの傾向: {preferenceSummary}</p>
         <div className="autoedit-toolbar">
-          <button
-            className="small-button"
-            onClick={() => setRegenToken((t) => t + 1)}
-            disabled={loading}
-          >
+          <button className="small-button" onClick={startRun} disabled={loading}>
             <RefreshIcon width={13} height={13} />
             {loading ? '生成中...' : '再生成'}
           </button>
@@ -218,7 +193,12 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
             参考動画からカットのテンポを検出できませんでした。別の動画を試してください。
           </p>
         )}
-        {loading && <p className="hint-text">解析中... 素材のハイライトを検出しています</p>}
+        {loading && (
+          <p className="hint-text">
+            解析中...
+            素材のハイライトを検出しています(この画面は閉じても構いません。生成は続き、終わったら「AIおまかせ全自動編集」からいつでも結果を開けます)
+          </p>
+        )}
         {error && <p className="error-text">{error}</p>}
         {!loading && !error && patterns.length === 0 && (
           <p className="hint-text">編集パターンを生成できませんでした。</p>
@@ -296,7 +276,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                     <button
                       className="small-button autoedit-finish-button"
                       onClick={() => handleApplyAndFinish(p)}
-                      disabled={finishingId === p.id || appliedId === p.id}
+                      disabled={finishingId !== null || appliedId === p.id}
                       title="タイムラインに適用した上で、字幕の自動文字起こしと投稿メタデータ生成まで一括で行います"
                     >
                       <MicIcon width={12} height={12} />
@@ -304,6 +284,9 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                         ? '字幕・メタデータを生成中...'
                         : '適用して自動で仕上げる'}
                     </button>
+                    {appliedId === p.id && finishingId === p.id && (
+                      <p className="hint-text">この画面は閉じても構いません。生成は続きます。</p>
+                    )}
                     {appliedId === p.id && finishResult && (
                       <p className="hint-text autoedit-finish-result">
                         字幕を{finishResult.captionCount}件追加しました
