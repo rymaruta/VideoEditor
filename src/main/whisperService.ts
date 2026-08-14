@@ -6,6 +6,7 @@ import { join } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
 import type { TranscriptSegment, TranscriptWord } from '@shared/types'
 import { retryableSingleton } from './retryableSingleton'
+import { describeFfmpegExit } from './ffmpegError'
 
 const execFileAsync = promisify(execFile)
 
@@ -40,22 +41,31 @@ async function extractPcm16k(filePath: string, start: number, end: number): Prom
   const dir = mkdtempSync(join(tmpdir(), 've-whisper-'))
   const rawPath = join(dir, 'audio.f32le')
   try {
-    await execFileAsync(ffmpegPath, [
-      '-y',
-      '-ss',
-      String(start),
-      '-t',
-      String(end - start),
-      '-i',
-      filePath,
-      '-ar',
-      '16000',
-      '-ac',
-      '1',
-      '-f',
-      'f32le',
-      rawPath
-    ])
+    try {
+      await execFileAsync(ffmpegPath, [
+        '-y',
+        '-ss',
+        String(start),
+        '-t',
+        String(end - start),
+        '-i',
+        filePath,
+        '-ar',
+        '16000',
+        '-ac',
+        '1',
+        '-f',
+        'f32le',
+        rawPath
+      ])
+    } catch (e) {
+      // `execFile` の失敗はそのままだと **`Command failed: ` + コマンドライン全文 +
+      // ffmpeg の版数とビルド設定の羅列**で、実測 **1,724文字・16行**が画面に出ていた。
+      // 同じ原因(ファイルが無い)でも `probeMedia` は 31文字の日本語で出る。
+      // ffmpeg を直に動かす経路は必ずここを通すこと(理由は `ffmpegError`)。
+      const failure = e as { code?: number | null; stderr?: unknown }
+      throw describeFfmpegExit(failure?.code, failure?.stderr)
+    }
     const buf = readFileSync(rawPath)
     return new Float32Array(buf.buffer, buf.byteOffset, buf.length / 4)
   } finally {

@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
+import { describeFfmpegExit } from './ffmpegError'
 import type {
   HighlightCandidate,
   HighlightSensitivity,
@@ -23,13 +24,11 @@ function runFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> 
       // Swallowing a non-zero exit here used to surface as "no highlights found"
       // for e.g. corrupt files or videos without an audio stream — report the real
       // failure instead of sending users hunting through fine footage.
-      const lastLine =
-        stderr
-          .trim()
-          .split('\n')
-          .filter((l) => l.trim() !== '')
-          .pop() ?? ''
-      reject(new Error(`ffmpegによる解析に失敗しました (exit ${code}): ${lastLine}`))
+      //
+      // 文面は**自前で組まない**。組んでいたころは標準エラー出力の最終行をそのまま
+      // 尾に付けており、「ファイルが見つかりません」のような見慣れた原因も英語のまま
+      // 出ていた(実測 83文字。同じ原因で `probeMedia` は 31文字の日本語)。
+      reject(describeFfmpegExit(code, stderr))
     })
   })
 }

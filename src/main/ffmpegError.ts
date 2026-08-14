@@ -70,6 +70,26 @@ function stripLeadingPath(line: string): string {
   return line.replace(/^(\/|[A-Za-z]:\\)[^\s:]*:\s*/, '')
 }
 
+/**
+ * `spawn` / `execFile` で**直に**動かした ffmpeg の失敗を日本語にする。
+ *
+ * `describeFfmpegError` は fluent-ffmpeg が投げるエラー(`ffmpeg exited with code N` +
+ * 標準エラー出力)の形を前提にしているので、直に動かした側はここを通すこと。
+ * **経路ごとに自前のメッセージを組み立てない**——組み立てた瞬間、その経路だけ
+ * 「見慣れた原因を日本語にする」表からも、長さの上限からも外れる。
+ *
+ * (実測: 同じ「ファイルが見つからない」で、`probeMedia` は **31文字**の
+ *  「ファイルが見つかりません。移動または削除された可能性があります」なのに、
+ *  文字起こしは `execFile` の失敗がそのまま出て **1,724文字・16行**——
+ *  コマンドライン全文と ffmpeg の版数・ビルド設定の羅列まで画面に並んでいた。
+ *  ハイライト検出・参考動画の解析・長尺スキャンの3つは自前の文面を組んでおり、
+ *  日本語の前置きは付くが英語の生ログがそのまま尾に付いていた(83文字))
+ */
+export function describeFfmpegExit(code: number | null | undefined, stderr: unknown): Error {
+  const tail = typeof stderr === 'string' ? stderr : ''
+  return describeFfmpegError(new Error(`ffmpeg exited with code ${code ?? '?'}\n${tail}`))
+}
+
 export function describeFfmpegError(err: unknown): Error {
   const original = err instanceof Error ? err : new Error(String(err))
   const message = original.message ?? ''
