@@ -1386,6 +1386,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           textOverlays: state.project.textOverlays.map((o) => {
             if (o.id !== id) return o
             const next = { ...o, ...patch }
+            // 位置を動かす更新なら単語も連れていく。`patch.words` を明示的に渡された
+            // ときはそちらが正なので触らない(自動テロップの作り直しなど)。
+            if (patch.startTime !== undefined && patch.words === undefined) {
+              next.words = shiftOverlayWords(o.words, patch.startTime - o.startTime)
+            }
             if (timedById && next.linkedClipId && patch.startTime !== undefined) {
               const tc = timedById.get(next.linkedClipId)
               if (tc) next.linkOffset = patch.startTime - tc.start
@@ -1454,7 +1459,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         textOverlays: state.project.textOverlays.map((o) => {
           const duration = o.endTime - o.startTime
           const startTime = Math.max(0, o.startTime + deltaSeconds)
-          return { ...o, startTime, endTime: startTime + duration }
+          return {
+            ...o,
+            startTime,
+            endTime: startTime + duration,
+            // 頭打ちで動けなかった分は単語も動かさない(実際に動いた量で揃える)。
+            words: shiftOverlayWords(o.words, startTime - o.startTime)
+          }
         })
       }
     })),
@@ -2337,6 +2348,30 @@ function remapOverlayLinks(
 }
 
 /**
+ * テロップを動かしたとき、カラオケ(単語ごとの色替え)の時刻も同じだけ動かす。
+ *
+ * `words` の `start`/`end` は**テロップと同じタイムラインの絶対秒**。プレビューは
+ * `playheadTime >= w.start && playheadTime < w.end` で直接見比べ、書き出しは
+ * `buildKaraokeText(words, o.startTime)` で**テロップの開始からの差**を `\k` に変換する。
+ * どちらも絶対秒を前提にしているので、**テロップだけ動かすと単語が置き去りになる**。
+ *
+ * 動かす経路は3つ(タイムラインでのドラッグ・一括ずらし・追従先クリップの移動)あり、
+ * **どれも同じだけ壊れる**ので規則はここ1箇所に置く。書き写すと片方だけ直る。
+ *
+ * 実測(テロップ 2.00〜4.00 / 単語 あ2.50〜3.00・い3.00〜3.50 を +3秒 動かす):
+ *   書き出しASS `\k=[50, 50, 50]` → **`[50, 50]`**（先頭 0.5 秒の間が消え、色が早く始まる）
+ *   プレビュー   2.50でカラオケ開始 → **どの時刻でも1語も色が付かない**
+ * 追従先が -4 秒動いた場合はさらに露骨で、`\k=[450, 50, 50]` と
+ * **2秒のテロップに 4.5 秒の前置き**が入り、色は最後まで一度も始まらなかった。
+ */
+function shiftOverlayWords(words: TextOverlay['words'], delta: number): TextOverlay['words'] {
+  if (!words || words.length === 0) return words
+  // 動いていない・動かせない量なら触らない(参照も変えない=無駄な再描画を出さない)。
+  if (!Number.isFinite(delta) || delta === 0) return words
+  return words.map((w) => ({ ...w, start: w.start + delta, end: w.end + delta }))
+}
+
+/**
  * 追従ONのテロップを、紐づけ先クリップの現在位置へ合わせ直す。
  *
  * テロップはタイムライン絶対秒を持つので、手前のクリップを詰めたり消したりすると
@@ -2359,7 +2394,8 @@ function syncLinkedTextOverlays(project: Project): Project {
     const endTime = startTime + (o.endTime - o.startTime)
     if (sameNumber(o.startTime, startTime) && sameNumber(o.endTime, endTime)) return o
     changed = true
-    return { ...o, startTime, endTime }
+    // クランプ後の実際の移動量で単語も動かす(0 で頭打ちになった分だけずれない)。
+    return { ...o, startTime, endTime, words: shiftOverlayWords(o.words, startTime - o.startTime) }
   })
   return changed ? { ...project, textOverlays } : project
 }
