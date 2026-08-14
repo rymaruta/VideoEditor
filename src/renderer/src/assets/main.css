@@ -1115,6 +1115,8 @@ h3 {
   flex-wrap: wrap;
   align-items: center;
   gap: 9px;
+  /* タイムラインへ引きずれることが、掴む前に分かるように */
+  cursor: grab;
   background-color: var(--bg-elevated-2);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -3978,4 +3980,28 @@ h3 {
 .autoedit-trigger.running {
   border-color: var(--accent-1);
   color: var(--accent-1);
+}
+
+/* メディアパネルから素材を引きずっている間の、置けるトラックの示し方 */
+.track-lane.drop-target {
+  outline: 1px dashed var(--accent-1);
+  outline-offset: -2px;
+  background-image: linear-gradient(var(--accent-soft), var(--accent-soft));
+}
+
+.track-lane.drop-active {
+  background-image: linear-gradient(rgba(34, 211, 238, 0.22), rgba(34, 211, 238, 0.22));
+}
+
+/* 落とす位置(本編は挿入する切れ目、音声・PiPはその時刻) */
+.timeline-drop-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent-1);
+  box-shadow: 0 0 6px var(--accent-1);
+  pointer-events: none;
+  z-index: 7;
 }

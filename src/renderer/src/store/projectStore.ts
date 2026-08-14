@@ -116,6 +116,15 @@ interface ProjectState {
   sourceAssetId: string | null
   sourceIn: number | null
   sourceOut: number | null
+  /**
+   * メディアパネルから引きずっている素材のID。
+   *
+   * ドラッグ中に `dataTransfer` の中身は読めない(仕様上、読めるのは drop のときだけ)ので、
+   * 「この素材は映像を持つか/音を持つか」をタイムライン側が知る手段がこれしかない。
+   * 置けるトラックだけを光らせるのに使う。編集内容ではないのでプロジェクトには保存しない。
+   */
+  draggingAssetId: string | null
+  setDraggingAssetId: (assetId: string | null) => void
   openInSourceViewer: (assetId: string) => void
   closeSourceViewer: () => void
   setSourceIn: (t: number | null) => void
@@ -155,7 +164,8 @@ interface ProjectState {
     /** `startTime` を渡すとその位置(空いていなければ直後)へ、省略するとトラック末尾へ置く */
     target: { trackId?: string; trackName: string; startTime?: number }
   ) => void
-  addClipToTimeline: (assetId: string) => void
+  /** `index` を渡すとその位置へ挿入する(省略時は末尾に足す) */
+  addClipToTimeline: (assetId: string, index?: number) => void
   addTrimmedClipToTimeline: (assetId: string, inPoint: number, outPoint: number) => void
   insertClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
   overwriteClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
@@ -235,7 +245,8 @@ interface ProjectState {
   toggleVideoOverlayTrackHidden: (trackId: string) => void
   setVideoOverlayTrackPosition: (trackId: string, position: PipPosition) => void
   setVideoOverlayTrackScale: (trackId: string, scale: number) => void
-  addClipToVideoOverlayTrack: (trackId: string, assetId: string) => void
+  /** `startTime` を渡すとその位置へ、省略するとトラック末尾へ置く */
+  addClipToVideoOverlayTrack: (trackId: string, assetId: string, startTime?: number) => void
   updateVideoOverlayClipStart: (trackId: string, clipId: string, startTime: number) => void
   updateVideoOverlayClipTrim: (
     trackId: string,
@@ -512,6 +523,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   sourceAssetId: null,
   sourceIn: null,
   sourceOut: null,
+  draggingAssetId: null,
+  setDraggingAssetId: (assetId) => set({ draggingAssetId: assetId }),
   // Marks reset with the clip: they describe a range inside one asset and mean
   // nothing once a different one is loaded.
   openInSourceViewer: (assetId) => set({ sourceAssetId: assetId, sourceIn: null, sourceOut: null }),
@@ -811,7 +824,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     }),
 
-  addClipToTimeline: (assetId) =>
+  addClipToTimeline: (assetId, index) =>
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
       if (!asset) return state
@@ -822,9 +835,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         outPoint: asset.duration,
         speed: 1
       }
+      const clips = [...state.project.clips]
+      // 範囲外の index は末尾扱い。ドロップ位置から出す値なので、末尾より後ろは普通に起きる。
+      const at = index === undefined ? clips.length : Math.max(0, Math.min(clips.length, index))
+      clips.splice(at, 0, newClip)
       return {
         ...pushHistory(state),
-        project: { ...state.project, clips: [...state.project.clips, newClip] }
+        project: { ...state.project, clips }
       }
     }),
 
@@ -1789,7 +1806,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })),
 
-  addClipToVideoOverlayTrack: (trackId, assetId) =>
+  addClipToVideoOverlayTrack: (trackId, assetId, requestedStart) =>
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
       if (!asset) return state
@@ -1799,7 +1816,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           ...state.project,
           videoOverlayTracks: state.project.videoOverlayTracks.map((t) => {
             if (t.id !== trackId) return t
-            const startTime = videoOverlayTrackEnd(t)
+            const startTime =
+              requestedStart === undefined ? videoOverlayTrackEnd(t) : Math.max(0, requestedStart)
             const outPoint = videoOverlayClipOutPoint(
               asset.duration,
               startTime,

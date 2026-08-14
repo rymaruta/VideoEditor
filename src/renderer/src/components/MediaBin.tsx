@@ -7,6 +7,7 @@ import { formatIpcError } from '../lib/ipcError'
 import { assetsNeedingPreviewProxy, canPreviewFile } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
 import { isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
+import { ASSET_DRAG_TYPE } from '../lib/assetDrag'
 import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
 import { RoughCutModal } from './RoughCutModal'
@@ -58,6 +59,7 @@ export function MediaBin(): React.JSX.Element {
   const removeAsset = useProjectStore((s) => s.removeAsset)
   const textOverlays = useProjectStore((s) => s.project.textOverlays)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
+  const setDraggingAssetId = useProjectStore((s) => s.setDraggingAssetId)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
@@ -461,7 +463,16 @@ export function MediaBin(): React.JSX.Element {
                 sourceAssetId === asset.id ? 'media-item-in-source' : ''
               }`}
               onDoubleClick={() => !isMissing && openInSourceViewer(asset.id)}
-              title="ダブルクリックでソースビューアで開く"
+              title="タイムラインへドラッグして配置。ダブルクリックでソースビューアで開く"
+              // 見つからない素材は掴めない(置いた先で「素材がありません」になるだけなので)
+              draggable={!isMissing}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'copy'
+                e.dataTransfer.setData(ASSET_DRAG_TYPE, asset.id)
+                // ドラッグ中に中身は読めないので、どの素材かはストア越しに伝える
+                setDraggingAssetId(asset.id)
+              }}
+              onDragEnd={() => setDraggingAssetId(null)}
             >
               <div className="media-thumb">
                 {asset.thumbnailDataUrl ? (

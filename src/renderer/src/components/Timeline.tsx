@@ -8,6 +8,7 @@ import {
   totalTimelineDuration
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
+import { ASSET_DRAG_TYPE, isAssetDrag } from '../lib/assetDrag'
 import { clipColorOf } from '../lib/clipColors'
 import { autoScrollLeft } from '../lib/timelineScroll'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
@@ -39,7 +40,14 @@ import { TextBasedEditModal } from './TextBasedEditModal'
 import { Waveform } from './Waveform'
 import { isAspectMismatch } from '../lib/aspect'
 import { formatIpcError } from '../lib/ipcError'
-import type { AudioTrack, AudioTrackClip, Clip, PipPosition, TransitionType } from '@shared/types'
+import type {
+  AudioTrack,
+  AudioTrackClip,
+  Clip,
+  MediaAsset,
+  PipPosition,
+  TransitionType
+} from '@shared/types'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -389,6 +397,11 @@ export function Timeline(): React.JSX.Element {
   const removeClip = useProjectStore((s) => s.removeClip)
   const moveClip = useProjectStore((s) => s.moveClip)
   const moveClipToIndex = useProjectStore((s) => s.moveClipToIndex)
+  const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
+  const addClipToVideoOverlayTrack = useProjectStore((s) => s.addClipToVideoOverlayTrack)
+  const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
+  const draggingAssetId = useProjectStore((s) => s.draggingAssetId)
+  const setDraggingAssetId = useProjectStore((s) => s.setDraggingAssetId)
   const splitClipAtTime = useProjectStore((s) => s.splitClipAtTime)
   const updateClipSpeed = useProjectStore((s) => s.updateClipSpeed)
   const updateClipTransition = useProjectStore((s) => s.updateClipTransition)
@@ -460,6 +473,14 @@ export function Timeline(): React.JSX.Element {
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  /**
+   * メディアパネルから引きずってきた素材が、いまどこに落ちるか。
+   * 本編トラックは詰めて並べる作りなので「何番目に挿すか」、
+   * 音声とPiPは自由に置けるので「何秒の位置か」で示す。
+   */
+  const [dropIndicator, setDropIndicator] = useState<
+    { kind: 'index'; index: number } | { kind: 'time'; laneId: string; time: number } | null
+  >(null)
   const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null)
   const [editTool, setEditTool] = useState<EditTool>('select')
   const [rollDrag, setRollDrag] = useState<RollDragState | null>(null)
@@ -1046,6 +1067,74 @@ export function Timeline(): React.JSX.Element {
     seekTo(time)
   }
 
+  // --- メディアパネルからの素材ドロップ ---------------------------------------
+  // ドラッグ中は `dataTransfer` の中身を読めないので、置けるかどうかの判定は
+  // ストアに預けた `draggingAssetId` から引いた素材で行う(drop のときだけ中身が読める)。
+  const draggedAsset = draggingAssetId
+    ? (project.assets.find((a) => a.id === draggingAssetId) ?? null)
+    : null
+
+  /**
+   * いま引きずっている素材を**ストアから直に**引く。
+   *
+   * 描画時の `draggedAsset` を判定に使うと、掴んでから最初の `dragover` までに React の
+   * 再描画が間に合わないことがある。`dragover` で `preventDefault` を呼ばなかった回は
+   * ブラウザがドロップ自体を認めないので、**素早く掴んで落とすと何も起きない**。
+   * ストアは `dragstart` の中で同期的に更新されるため、最初の1回から正しく引ける。
+   * (見た目のハイライトは再描画が要るので、そちらは `draggedAsset` のままでよい)
+   */
+  function draggingAssetNow(): MediaAsset | null {
+    const id = useProjectStore.getState().draggingAssetId
+    if (!id) return null
+    return project.assets.find((a) => a.id === id) ?? null
+  }
+
+  function dropTimeAt(e: React.DragEvent<HTMLDivElement>): number {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const raw = Math.max(0, (e.clientX - rect.left) / pixelsPerSecond)
+    // 置いた瞬間からクリップの切れ目・再生位置に揃うほうが、置いてから直すより速い。
+    // 既存のドラッグ移動と同じ候補・同じしきい値を使う。
+    return snapClamped(raw, getSnapCandidates(), SNAP_PIXELS / pixelsPerSecond, 0, Infinity).time
+  }
+
+  /** 本編トラックのどのクリップとクリップの間に落ちたか(端は 0 と件数) */
+  function dropIndexAt(e: React.DragEvent<HTMLDivElement>): number {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const time = x / pixelsPerSecond
+    let index = timedClips.length
+    for (let i = 0; i < timedClips.length; i++) {
+      const tc = timedClips[i]
+      if (time < tc.start + (tc.end - tc.start) / 2) {
+        index = i
+        break
+      }
+    }
+    return index
+  }
+
+  function assetIdFromDrop(e: React.DragEvent<HTMLDivElement>): string | null {
+    const id = e.dataTransfer.getData(ASSET_DRAG_TYPE)
+    return id || null
+  }
+
+  function endAssetDrag(): void {
+    setDropIndicator(null)
+    setDraggingAssetId(null)
+  }
+
+  // ドラッグをやめた(Escで取り消した・トラックの外で離した)ときにも印を消す。
+  // 落とした時にしか消していないと、**置いていないのに落ちる位置の線が残り続ける**。
+  useEffect(() => {
+    const clear = (): void => setDropIndicator(null)
+    window.addEventListener('dragend', clear)
+    window.addEventListener('drop', clear)
+    return () => {
+      window.removeEventListener('dragend', clear)
+      window.removeEventListener('drop', clear)
+    }
+  }, [])
+
   function handleWheelZoom(e: React.WheelEvent<HTMLDivElement>): void {
     if (!e.ctrlKey && !e.metaKey) return
     e.preventDefault()
@@ -1625,10 +1714,47 @@ export function Timeline(): React.JSX.Element {
           )}
           <div
             ref={videoLaneRef}
-            className="track-lane video-lane"
+            className={`track-lane video-lane ${
+              draggedAsset?.hasVideo ? 'drop-target' : ''
+            } ${dropIndicator?.kind === 'index' ? 'drop-active' : ''}`}
             style={{ width: timelineWidth }}
             onClick={handleTrackClick}
+            onDragOver={(e) => {
+              // 映像を持たない素材(BGM等)は本編トラックに置けない。受けない印として
+              // dropEffect を none にすると、カーソルもそう変わる。
+              if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+              setDropIndicator({ kind: 'index', index: dropIndexAt(e) })
+            }}
+            onDragLeave={(e) => {
+              // 子のクリップへ移っただけの dragleave では消さない(印がちらつく)
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+              setDropIndicator(null)
+            }}
+            onDrop={(e) => {
+              if (!isAssetDrag(e.dataTransfer.types)) return
+              e.preventDefault()
+              e.stopPropagation()
+              const assetId = assetIdFromDrop(e)
+              const index = dropIndexAt(e)
+              endAssetDrag()
+              const asset = project.assets.find((a) => a.id === assetId)
+              if (!assetId || !asset?.hasVideo) return
+              addClipToTimeline(assetId, index)
+            }}
           >
+            {dropIndicator?.kind === 'index' && (
+              <div
+                className="timeline-drop-marker"
+                style={{
+                  left:
+                    (dropIndicator.index >= timedClips.length
+                      ? total
+                      : timedClips[dropIndicator.index].start) * pixelsPerSecond
+                }}
+              />
+            )}
             {timedClips.map((tc, i) => {
               const clipWidth = (tc.end - tc.start) * pixelsPerSecond
               return (
@@ -1680,11 +1806,15 @@ export function Timeline(): React.JSX.Element {
                     setDraggedClipId(tc.clip.id)
                   }}
                   onDragOver={(e) => {
+                    // メディアパネルからの素材はクリップではなくトラックが受ける。
+                    // ここで止めると、クリップの上に落とした場合だけ何も起きなくなる。
+                    if (isAssetDrag(e.dataTransfer.types)) return
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'move'
                     setDragOverIndex(i)
                   }}
                   onDrop={(e) => {
+                    if (isAssetDrag(e.dataTransfer.types)) return
                     e.preventDefault()
                     e.stopPropagation()
                     if (draggedClipId) moveClipToIndex(draggedClipId, i)
@@ -1840,7 +1970,7 @@ export function Timeline(): React.JSX.Element {
             })}
             {timedClips.length === 0 && (
               <p className="hint-text timeline-empty-hint">
-                メディアからクリップを追加してください
+                メディアの素材をここへドラッグして並べてください
               </p>
             )}
             <TimelinePlayhead
@@ -1855,9 +1985,41 @@ export function Timeline(): React.JSX.Element {
           {project.videoOverlayTracks.map((track) => (
             <div
               key={track.id}
-              className={`track-lane video-overlay-lane ${track.hidden ? 'hidden' : ''}`}
+              className={`track-lane video-overlay-lane ${track.hidden ? 'hidden' : ''} ${
+                draggedAsset?.hasVideo ? 'drop-target' : ''
+              } ${
+                dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id
+                  ? 'drop-active'
+                  : ''
+              }`}
               style={{ width: timelineWidth }}
+              onDragOver={(e) => {
+                if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setDropIndicator({ kind: 'time', laneId: track.id, time: dropTimeAt(e) })
+              }}
+              onDragLeave={(e) => {
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                setDropIndicator(null)
+              }}
+              onDrop={(e) => {
+                if (!isAssetDrag(e.dataTransfer.types)) return
+                e.preventDefault()
+                const assetId = assetIdFromDrop(e)
+                const startTime = dropTimeAt(e)
+                endAssetDrag()
+                const asset = project.assets.find((a) => a.id === assetId)
+                if (!assetId || !asset?.hasVideo) return
+                addClipToVideoOverlayTrack(track.id, assetId, startTime)
+              }}
             >
+              {dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id && (
+                <div
+                  className="timeline-drop-marker"
+                  style={{ left: dropIndicator.time * pixelsPerSecond }}
+                />
+              )}
               {track.clips.map((clip) => {
                 const asset = project.assets.find((a) => a.id === clip.assetId)
                 if (!asset) return null
@@ -1954,7 +2116,47 @@ export function Timeline(): React.JSX.Element {
           ))}
 
           {project.audioTracks.map((track) => (
-            <div key={track.id} className="track-lane audio-lane" style={{ width: timelineWidth }}>
+            <div
+              key={track.id}
+              className={`track-lane audio-lane ${draggedAsset?.hasAudio ? 'drop-target' : ''} ${
+                dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id
+                  ? 'drop-active'
+                  : ''
+              }`}
+              style={{ width: timelineWidth }}
+              onDragOver={(e) => {
+                if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasAudio) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'copy'
+                setDropIndicator({ kind: 'time', laneId: track.id, time: dropTimeAt(e) })
+              }}
+              onDragLeave={(e) => {
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                setDropIndicator(null)
+              }}
+              onDrop={(e) => {
+                if (!isAssetDrag(e.dataTransfer.types)) return
+                e.preventDefault()
+                const assetId = assetIdFromDrop(e)
+                const startTime = dropTimeAt(e)
+                endAssetDrag()
+                const asset = project.assets.find((a) => a.id === assetId)
+                if (!asset?.hasAudio) return
+                // 素材はもうプロジェクトに居るので、この呼び出しは既存の素材を使い回す。
+                // 置き場所が埋まっていれば直後の空きへずらすのも既存の実装に任せる。
+                addAudioClipWithAsset(asset, {
+                  trackId: track.id,
+                  trackName: track.name,
+                  startTime
+                })
+              }}
+            >
+              {dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id && (
+                <div
+                  className="timeline-drop-marker"
+                  style={{ left: dropIndicator.time * pixelsPerSecond }}
+                />
+              )}
               {track.clips.map((clip) => {
                 const asset = project.assets.find((a) => a.id === clip.assetId)
                 if (!asset) return null
