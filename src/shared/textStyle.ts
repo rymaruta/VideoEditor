@@ -35,6 +35,32 @@ export function textMarginHPx(frameWidth: number): number {
   return frameWidth * TEXT_MARGIN_H_RATIO
 }
 
+/**
+ * 背景箱が文字からはみ出す量(**文字サイズに対する比**)。
+ *
+ * 画面は CSS の `padding`、書き出しは ASS の `\xbord`/`\ybord` と**書く場所が違うだけで
+ * 同じ規則**なので、数字はここ1つに置く(上下左右の余白と同じ理由)。
+ * 比で持つのが肝心——書き出し側は `\bord6` と**出力ピクセルの決め打ち**だったため、
+ * 文字サイズを変えても箱の余白が変わらず、画面と食い違っていた。
+ * 実測(1280 のキャンバス基準・左右): 文字サイズ 20/40/80 で画面は 8.0/16.0/32.0 なのに
+ * 書き出しは **6/6/6** のまま。既定の 40 でも **2.67倍**の開きがあった。
+ *
+ * ASS の `\bord` は上下左右が同じ値になるが、`\xbord`/`\ybord` なら軸ごとに指定できる
+ * (この libass で動くことを実測済み: `\xbord16\ybord6` で箱が 44x52 → 64x52px)。
+ */
+export const TEXT_BOX_PADDING_H_EM = 0.4
+export const TEXT_BOX_PADDING_V_EM = 0.15
+
+/**
+ * 文字サイズから背景箱の余白を出す。単位は**渡した文字サイズと同じ**
+ * (書き出しなら ASS キャンバスのピクセル)。
+ * 文字サイズが数値でない・0以下なら余白なし(負の `\xbord` を書き出さない)。
+ */
+export function textBoxPaddingPx(fontSize: number): { x: number; y: number } {
+  const size = Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 0
+  return { x: size * TEXT_BOX_PADDING_H_EM, y: size * TEXT_BOX_PADDING_V_EM }
+}
+
 export function defaultTextStyle(overrides: Partial<TextStyle> = {}): TextStyle {
   return {
     fontFamily: 'sans-serif',

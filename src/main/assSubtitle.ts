@@ -1,5 +1,5 @@
 import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
-import { textMarginHPx, textMarginVPx } from '@shared/textStyle'
+import { textBoxPaddingPx, textMarginHPx, textMarginVPx } from '@shared/textStyle'
 
 function toAssTime(seconds: number): string {
   // A negative or non-finite time (an older project file, a hand-edited .veproj)
@@ -37,9 +37,6 @@ function toAssAlpha(opacity: number): string {
   return `&H${alpha.toString(16).padStart(2, '0').toUpperCase()}&`
 }
 
-// How far the background box extends past the text, in the same units as \bord.
-const BOX_PADDING = 6
-
 // ASS has no escape for a literal backslash — libass reads \N, \n and \h as control
 // sequences — so a caption typed as "C:\Nintendo" rendered as "C:" + a line break +
 // "intendo": the N was swallowed and an unwanted line appeared. A zero-width space
@@ -48,6 +45,11 @@ const BOX_PADDING = 6
 // backslashes those escapes introduce.
 function escapeAssBackslash(text: string): string {
   return text.replace(/\\/g, '\\\u200B')
+}
+
+/** ASS に書く小数。0.4×文字サイズのような値がそのまま長い小数にならないよう2桁で丸める */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
 }
 
 function escapeAssText(text: string): string {
@@ -247,6 +249,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     const start = toAssTime(o.startTime)
     const end = toAssTime(o.endTime)
     const marginV = marginVOf(style.position)
+    const boxPadding = textBoxPaddingPx(style.fontSize)
     if (!style.background) {
       return `Dialogue: 0,${start},${end},Default,,0,0,${marginV},,${override}${text}`
     }
@@ -258,7 +261,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     // draws on the layer above and keeps its outline.
     const boxOverride =
       `{${common}\\1a&HFF&\\3c${toAssColor(style.backgroundColor)}` +
-      `\\3a${toAssAlpha(style.backgroundOpacity)}\\bord${BOX_PADDING}\\shad0${animationTag}}`
+      `\\3a${toAssAlpha(style.backgroundOpacity)}` +
+      // 箱の余白は**文字サイズに対する比**。`\bord6` の決め打ちだと、文字を大きくしても
+      // 箱だけ太らず画面と食い違う。`\bord` は上下左右が同じ値になるので、
+      // 軸ごとに指定できる `\xbord`/`\ybord` を使う。
+      `\\xbord${round2(boxPadding.x)}\\ybord${round2(boxPadding.y)}\\shad0${animationTag}}`
     return [
       `Dialogue: 0,${start},${end},Boxed,,0,0,${marginV},,${boxOverride}${wrapped.map(escapeAssText).join('\\N')}`,
       `Dialogue: 1,${start},${end},Default,,0,0,${marginV},,${override}${text}`

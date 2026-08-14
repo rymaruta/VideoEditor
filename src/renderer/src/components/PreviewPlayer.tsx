@@ -11,7 +11,12 @@ import {
   toElementVolume
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
-import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
+import {
+  TEXT_BOX_PADDING_H_EM,
+  TEXT_BOX_PADDING_V_EM,
+  TEXT_MARGIN_H_RATIO,
+  TEXT_MARGIN_V_RATIO
+} from '@shared/textStyle'
 import { blurSigmaFor } from '@shared/videoFrame'
 import { duckTargetGain, rmsOf, smoothDuckGain } from '@shared/ducking'
 import { cropPreviewStyle } from '../lib/cropPreview'
@@ -137,7 +142,9 @@ function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
     backgroundColor: style.background
       ? hexToRgba(style.backgroundColor, style.backgroundOpacity)
       : undefined,
-    padding: style.background ? '0.15em 0.4em' : undefined,
+    // 箱の余白は書き出し(ASS の \xbord/\ybord)と同じ比を使う。ここに数字を書くと、
+    // 片方だけ動いて「画面の箱と出力の箱の大きさが違う」に戻る(縦横の余白と同じ理由)。
+    padding: style.background ? `${TEXT_BOX_PADDING_V_EM}em ${TEXT_BOX_PADDING_H_EM}em` : undefined,
     borderRadius: style.background ? '4px' : undefined,
     display: style.background ? 'inline-block' : undefined,
     whiteSpace: 'pre-line'
