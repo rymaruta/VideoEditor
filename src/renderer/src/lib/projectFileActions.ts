@@ -38,7 +38,8 @@ export async function saveProjectAs(): Promise<void> {
   )
   if (!filePath) return
   await window.api.saveProject(filePath, project)
-  markSaved(filePath)
+  // 書いたのは `project`。保存中に編集が入っていたら未保存のままにする(markSaved の理由)。
+  markSaved(filePath, project)
   remember(filePath)
   await window.api.clearAutosave()
 }
@@ -50,7 +51,7 @@ export async function saveProject(): Promise<void> {
     return
   }
   await window.api.saveProject(currentFilePath, project)
-  markSaved(currentFilePath)
+  markSaved(currentFilePath, project)
   remember(currentFilePath)
   await window.api.clearAutosave()
 }

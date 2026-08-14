@@ -134,7 +134,11 @@ interface ProjectState {
   newProject: () => void
   loadProject: (project: Project, filePath: string) => void
   restoreAutosave: (project: Project) => void
-  markSaved: (filePath: string) => void
+  /**
+   * 保存が終わったことを記録する。`savedProject` には**実際にディスクへ書いた企画**を
+   * 渡すこと(保存中に編集が入ったかどうかの判定に使う)。
+   */
+  markSaved: (filePath: string, savedProject: Project) => void
   /** プロジェクト名を変える。空白だけなら既定名に戻す */
   setProjectName: (name: string) => void
 
@@ -679,7 +683,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
   },
 
-  markSaved: (filePath) => set({ currentFilePath: filePath, isDirty: false, saveError: null }),
+  markSaved: (filePath, savedProject) =>
+    set((state) => ({
+      currentFilePath: filePath,
+      // **ディスクに書いたのは `savedProject`。** 保存は IPC を跨ぐので、書いている
+      // 途中の編集は成果物に入らない。それでも一律 `false` にすると、その編集だけが
+      // 「保存済み」の顔をして残り、閉じるときの警告も出ず、`clearAutosave` で
+      // 復元用の控えまで消えるので**どこにも無くなる**。
+      // (実測: 保存に 465ms かかる状態で、保存を始めた直後にクリップを1本足すと、
+      //  画面は ABCD・`isDirty=false`・警告なしなのに、ファイルの中身は **ABC** だった)
+      // 編集があれば `project` は必ず別のオブジェクトに差し替わる(どの操作も
+      // `{...state.project}` を作る)ので、参照が同じかどうかで判定できる。
+      isDirty: state.project !== savedProject,
+      saveError: null
+    })),
 
   setProjectName: (name) =>
     set((state) => ({
