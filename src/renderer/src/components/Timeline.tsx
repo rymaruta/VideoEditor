@@ -563,8 +563,13 @@ export function Timeline(): React.JSX.Element {
 
   const beatTimes = useMemo(() => {
     const grid = project.beatGrid
-    if (!grid || !grid.enabled || grid.bpm <= 0) return []
-    const interval = 60 / grid.bpm
+    if (!grid || !Number.isFinite(grid.bpm) || !grid.enabled || grid.bpm <= 0) return []
+    // 線の本数は `尺 ÷ (60/BPM)` なので、BPM をそのまま使うと**外から来た数字が
+    // 引く本数を決める**。入力欄と同じ範囲(20〜300)へ収めてから間隔を出す。
+    // 打っている途中の値はストアには丸めずに入る決まりなので(欄の桁が跳ねるため)、
+    // 収めるのは**描く側**の責任。
+    // 実測: BPM 100000 と打つと線が 62本 → **50,002本**になり、描き直しに 1,503ms。
+    const interval = 60 / clampBpm(grid.bpm)
     const maxTime = Math.max(30, ...snapCandidates) + interval
     let phase = grid.offsetSeconds % interval
     if (phase < 0) phase += interval

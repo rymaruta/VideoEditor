@@ -3,7 +3,9 @@ import { v4 as uuid } from 'uuid'
 import { audioClipDuration, buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
 import { dropOrphanClips, orphanCleanupMessage } from '../lib/orphanClips'
+import { clampBpm } from '../lib/beatGrid'
 import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
+import { defaultTextStyle } from '@shared/textStyle'
 import type {
   AspectRatio,
   AudioTrack,
@@ -13,12 +15,18 @@ import type {
   Clip,
   ClipColorLabel,
   EditTemplate,
+  FontFamily,
   MediaAsset,
   PipPosition,
   Project,
+  TextAnimation,
   TextOverlay,
+  TextPosition,
   TextStyle,
-  Transition
+  TranscriptWord,
+  Transition,
+  VideoOverlayClip,
+  VideoOverlayTrack
 } from '@shared/types'
 
 const MAX_HISTORY = 50
@@ -91,6 +99,258 @@ function asNonEmptyString(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.length > 0 ? value : fallback
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** 数値として使える値だけ通す。`'12'` のような文字列も NaN も既定値へ落とす。 */
+function asFinite(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function asNonNegative(value: unknown, fallback: number): number {
+  return Math.max(0, asFinite(value, fallback))
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+/** 決められた文字列のどれかなら通す。知らない値は既定へ(CSSのクラス名やASSの指定に使うため) */
+function asOneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback
+}
+
+const FONT_FAMILIES: readonly FontFamily[] = [
+  'sans-serif',
+  'serif',
+  'M PLUS Rounded 1c',
+  'Noto Sans JP',
+  'Noto Serif JP'
+]
+const TEXT_POSITIONS: readonly TextPosition[] = ['top', 'center', 'bottom']
+const TEXT_ANIMATIONS: readonly TextAnimation[] = [
+  'none',
+  'fadeIn',
+  'popIn',
+  'slideInUp',
+  'slideInDown',
+  'bounce',
+  'typewriter'
+]
+const PIP_POSITIONS: readonly PipPosition[] = [
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right'
+]
+
+/**
+ * 直す方針は共通で「**指す手段が無いものだけ捨て、あとは使える値に直して残す**」。
+ * 数値が壊れているだけのクリップを捨てると、利用者が作ったものが黙って減る。
+ * 逆に `assetId` の無いクリップは、どの素材か分からないので画面にも出せない。
+ *
+ * どの関数も `...raw` を先に広げてから既知の項目だけ上書きする。項目を並べ直すと、
+ * ここに書き忘れた任意項目(`fillCrop` / `cropCenter` / `transitionIn` / `colorLabel` など)が
+ * **読み込むたびに消える**——直したつもりで別の失い方をする。
+ */
+function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
+  if (typeof raw.filePath !== 'string' || raw.filePath === '') return null
+  return {
+    ...(raw as unknown as MediaAsset),
+    id: asNonEmptyString(raw.id, uuid()),
+    filePath: raw.filePath,
+    fileName: asNonEmptyString(raw.fileName, raw.filePath),
+    // 尺0は「まだ分からない」の意味で通す(尺の無い録画物で実際に起きる)。
+    duration: asNonNegative(raw.duration, 0),
+    width: asNonNegative(raw.width, 0),
+    height: asNonNegative(raw.height, 0),
+    // fps だけは 0 を通せない。1フレームの秒数が Infinity になり、コマ送りが効かなくなる。
+    fps: asFinite(raw.fps, 30) > 0 ? asFinite(raw.fps, 30) : 30,
+    hasVideo: asBoolean(raw.hasVideo, true),
+    hasAudio: asBoolean(raw.hasAudio, false),
+    proxyPath: typeof raw.proxyPath === 'string' ? raw.proxyPath : undefined
+  }
+}
+
+/** 素材の秒で持つ区間(本編・音声・PiP に共通)。壊れた尺は素材の尺で埋める */
+function normalizeRange(
+  raw: Record<string, unknown>,
+  assetDuration: number
+): { inPoint: number; outPoint: number } {
+  return {
+    inPoint: asNonNegative(raw.inPoint, 0),
+    // 数値でないときに 0 を入れると、尺0の「画面に出ないのに消せないクリップ」になる。
+    outPoint: asNonNegative(raw.outPoint, assetDuration)
+  }
+}
+
+function normalizeClip(
+  raw: Record<string, unknown>,
+  durationOf: (id: string) => number
+): Clip | null {
+  if (typeof raw.assetId !== 'string' || raw.assetId === '') return null
+  const speed = asFinite(raw.speed, 1)
+  return {
+    ...(raw as unknown as Clip),
+    id: asNonEmptyString(raw.id, uuid()),
+    assetId: raw.assetId,
+    ...normalizeRange(raw, durationOf(raw.assetId)),
+    // 速度0は尺が Infinity になる(0除算)。負の速度も再生手段が無い。
+    speed: speed > 0 ? speed : 1
+  }
+}
+
+function normalizeAudioClip(
+  raw: Record<string, unknown>,
+  durationOf: (id: string) => number
+): AudioTrackClip | null {
+  if (typeof raw.assetId !== 'string' || raw.assetId === '') return null
+  const speed = asFinite(raw.speed, 1)
+  return {
+    ...(raw as unknown as AudioTrackClip),
+    id: asNonEmptyString(raw.id, uuid()),
+    assetId: raw.assetId,
+    startTime: asNonNegative(raw.startTime, 0),
+    ...normalizeRange(raw, durationOf(raw.assetId)),
+    volume: raw.volume === undefined ? undefined : asNonNegative(raw.volume, 1),
+    speed: raw.speed === undefined ? undefined : speed > 0 ? speed : 1,
+    fadeIn: raw.fadeIn === undefined ? undefined : asNonNegative(raw.fadeIn, 0),
+    fadeOut: raw.fadeOut === undefined ? undefined : asNonNegative(raw.fadeOut, 0),
+    linkedClipId: typeof raw.linkedClipId === 'string' ? raw.linkedClipId : undefined
+  }
+}
+
+function normalizeVideoOverlayClip(
+  raw: Record<string, unknown>,
+  durationOf: (id: string) => number
+): VideoOverlayClip | null {
+  if (typeof raw.assetId !== 'string' || raw.assetId === '') return null
+  return {
+    ...(raw as unknown as VideoOverlayClip),
+    id: asNonEmptyString(raw.id, uuid()),
+    assetId: raw.assetId,
+    startTime: asNonNegative(raw.startTime, 0),
+    ...normalizeRange(raw, durationOf(raw.assetId))
+  }
+}
+
+function normalizeTextStyle(raw: unknown): TextStyle {
+  const base = defaultTextStyle()
+  if (!isRecord(raw)) return base
+  const custom = raw.customPosition
+  return {
+    ...base,
+    // 知らない項目も残す(将来増えた項目を読み込みで落とさない)
+    ...(raw as Partial<TextStyle>),
+    fontFamily: asOneOf(raw.fontFamily, FONT_FAMILIES, base.fontFamily),
+    fontSize: asFinite(raw.fontSize, base.fontSize),
+    color: asNonEmptyString(raw.color, base.color),
+    position: asOneOf(raw.position, TEXT_POSITIONS, base.position),
+    customPosition:
+      isRecord(custom) && typeof custom.x === 'number' && typeof custom.y === 'number'
+        ? { x: asFinite(custom.x, 0.5), y: asFinite(custom.y, 0.5) }
+        : undefined,
+    rotation: asFinite(raw.rotation, base.rotation),
+    bold: asBoolean(raw.bold, base.bold),
+    italic: asBoolean(raw.italic, base.italic),
+    outline: asBoolean(raw.outline, base.outline),
+    outlineColor: asNonEmptyString(raw.outlineColor, base.outlineColor),
+    outlineWidth: asNonNegative(raw.outlineWidth, base.outlineWidth),
+    shadow: asBoolean(raw.shadow, base.shadow),
+    background: asBoolean(raw.background, base.background),
+    backgroundColor: asNonEmptyString(raw.backgroundColor, base.backgroundColor),
+    backgroundOpacity: asFinite(raw.backgroundOpacity, base.backgroundOpacity),
+    letterSpacing: asFinite(raw.letterSpacing, base.letterSpacing),
+    animation: asOneOf(raw.animation, TEXT_ANIMATIONS, base.animation),
+    wordHighlight: asBoolean(raw.wordHighlight, base.wordHighlight),
+    highlightColor: asNonEmptyString(raw.highlightColor, base.highlightColor)
+  }
+}
+
+function normalizeWords(raw: unknown): TranscriptWord[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const words = asRecordArray<Record<string, unknown>>(raw).map((w) => ({
+    ...(w as unknown as TranscriptWord),
+    start: asNonNegative(w.start, 0),
+    end: asNonNegative(w.end, 0),
+    text: typeof w.text === 'string' ? w.text : ''
+  }))
+  return words.length > 0 ? words : undefined
+}
+
+function normalizeTextOverlay(raw: Record<string, unknown>): TextOverlay {
+  const startTime = asNonNegative(raw.startTime, 0)
+  return {
+    ...(raw as unknown as TextOverlay),
+    id: asNonEmptyString(raw.id, uuid()),
+    text: typeof raw.text === 'string' ? raw.text : '',
+    startTime,
+    endTime: asNonNegative(raw.endTime, startTime),
+    source: asOneOf(raw.source, ['manual', 'auto'] as const, 'manual'),
+    style: normalizeTextStyle(raw.style),
+    words: normalizeWords(raw.words),
+    linkedClipId: typeof raw.linkedClipId === 'string' ? raw.linkedClipId : undefined,
+    linkOffset: raw.linkOffset === undefined ? undefined : asFinite(raw.linkOffset, 0)
+  }
+}
+
+function normalizeAudioTrack(
+  raw: Record<string, unknown>,
+  durationOf: (id: string) => number
+): AudioTrack {
+  return {
+    ...(raw as unknown as AudioTrack),
+    id: asNonEmptyString(raw.id, uuid()),
+    name: asNonEmptyString(raw.name, '音声トラック'),
+    muted: asBoolean(raw.muted, false),
+    duckingEnabled: asBoolean(raw.duckingEnabled, false),
+    volume: asNonNegative(raw.volume, 1),
+    clips: asRecordArray<Record<string, unknown>>(raw.clips)
+      .map((c) => normalizeAudioClip(c, durationOf))
+      .filter((c): c is AudioTrackClip => c !== null)
+  }
+}
+
+function normalizeVideoOverlayTrack(
+  raw: Record<string, unknown>,
+  durationOf: (id: string) => number
+): VideoOverlayTrack {
+  const scale = asFinite(raw.scale, 0.3)
+  return {
+    ...(raw as unknown as VideoOverlayTrack),
+    id: asNonEmptyString(raw.id, uuid()),
+    name: asNonEmptyString(raw.name, 'PiP'),
+    hidden: asBoolean(raw.hidden, false),
+    position: asOneOf(raw.position, PIP_POSITIONS, 'top-right'),
+    // 0以下だと `scale=0:-2` で書き出しが失敗する。1超は枠からはみ出す。
+    scale: scale > 0 && scale <= 1 ? scale : 0.3,
+    clips: asRecordArray<Record<string, unknown>>(raw.clips)
+      .map((c) => normalizeVideoOverlayClip(c, durationOf))
+      .filter((c): c is VideoOverlayClip => c !== null)
+  }
+}
+
+/**
+ * ビートグリッド。**BPM は必ず入力欄と同じ範囲(20〜300)へ収める。**
+ * ここを素通しにすると、線を引く数が `尺 ÷ (60/BPM)` で青天井になる
+ * (実測: BPM 100000 の `.veproj` を開くと線が **50,002本**できて、
+ *  開くのに 3,066ms かかった——正常なファイルは 602ms)。
+ */
+function normalizeBeatGrid(raw: unknown): BeatGrid | null {
+  if (!isRecord(raw)) return null
+  const bpm = asFinite(raw.bpm, 0)
+  if (bpm <= 0) return null
+  return {
+    bpm: clampBpm(bpm),
+    offsetSeconds: asFinite(raw.offsetSeconds, 0),
+    enabled: asBoolean(raw.enabled, false),
+    sourceLabel: typeof raw.sourceLabel === 'string' ? raw.sourceLabel : ''
+  }
+}
+
 /**
  * 読み込んだプロジェクトを、**この先のコードが前提にしている形**に整える。
  *
@@ -107,24 +367,44 @@ function asNonEmptyString(value: unknown, fallback: string): string {
  * `loadProjectFile` は**一番外側**が object かどうかだけ確かめている(同じ理由で足された)。
  * ここはその続きで、**中身の型**を見る。配列の要素も、オブジェクトでないものは捨てる——
  * `null` が1つ混ざるだけで `clips.map((c) => c.id)` が落ちるため。
+ *
+ * **検査は一段で止めない。** 以前はここまで(一番外側の配列と「要素がオブジェクトか」)
+ * だったため、**その中**は誰も見ていなかった。実測(実機で開く):
+ * - テロップに `style` が無いファイル → 開いた瞬間に**アプリ全体がエラー画面**
+ *   (`Cannot read properties of undefined (reading 'position')`)。タイムラインも消え、
+ *   再読み込みするまで編集できない。
+ * - 音声トラックの `clips` が文字列のファイル → `t.clips.filter is not a function` という
+ *   **生の英語**が画面に出て、**開けないまま前のプロジェクトが残る**。
+ * - ビートグリッドの BPM が 100000 のファイル → 線を **50,002本**引いて開くのに 3,066ms。
  */
 function normalizeLoadedProject(project: Project): Project {
   const raw = project as unknown as Record<string, unknown>
+  const assets = asRecordArray<Record<string, unknown>>(raw.assets)
+    .map(normalizeAsset)
+    .filter((a): a is MediaAsset => a !== null)
+  // 壊れた尺を埋めるのに使う。素材を先に整えてから、それを見てクリップを整える。
+  const durationById = new Map(assets.map((a) => [a.id, a.duration]))
+  const durationOf = (assetId: string): number => durationById.get(assetId) ?? 0
   return {
     id: asNonEmptyString(raw.id, uuid()),
     name: asNonEmptyString(raw.name, '無題のプロジェクト'),
     // 知っている2つ以外は既定へ。画面の切り替えもこの値を見る。
     aspectRatio:
       raw.aspectRatio === '16:9' || raw.aspectRatio === '9:16' ? raw.aspectRatio : '9:16',
-    assets: asRecordArray(raw.assets),
-    clips: asRecordArray(raw.clips),
-    audioTracks: asRecordArray(raw.audioTracks),
-    videoOverlayTracks: asRecordArray(raw.videoOverlayTracks),
-    textOverlays: asRecordArray(raw.textOverlays),
-    beatGrid:
-      typeof raw.beatGrid === 'object' && raw.beatGrid !== null && !Array.isArray(raw.beatGrid)
-        ? (raw.beatGrid as Project['beatGrid'])
-        : null
+    assets,
+    clips: asRecordArray<Record<string, unknown>>(raw.clips)
+      .map((c) => normalizeClip(c, durationOf))
+      .filter((c): c is Clip => c !== null),
+    audioTracks: asRecordArray<Record<string, unknown>>(raw.audioTracks).map((t) =>
+      normalizeAudioTrack(t, durationOf)
+    ),
+    videoOverlayTracks: asRecordArray<Record<string, unknown>>(raw.videoOverlayTracks).map((t) =>
+      normalizeVideoOverlayTrack(t, durationOf)
+    ),
+    textOverlays: asRecordArray<Record<string, unknown>>(raw.textOverlays).map(
+      normalizeTextOverlay
+    ),
+    beatGrid: normalizeBeatGrid(raw.beatGrid)
   }
 }
 
