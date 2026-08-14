@@ -1229,15 +1229,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return { ...pushHistory(state), project: { ...state.project, clips } }
     }),
 
+  /**
+   * `targetIndex` は**動かす前の並びでの挿入位置**——「ここに線が出た」位置そのもの。
+   * `0` なら先頭、`clips.length` なら末尾。
+   *
+   * 抜いてから同じ番号に挿すと、**後ろへ動かすときだけ1つ行き過ぎる**。自分を抜いたぶん
+   * 並びが1つ詰まるためで、案内線は落とし先クリップの左端に出ているのに、実際は
+   * その右へ入る。前へ動かすときは詰まらないので正しく、**向きによって意味が変わる**。
+   * (実測 ABCDE: A を D の左端へ落とすと `BCDAE`(期待 `BCADE`)、
+   *  A を B の左端へ落とすと——線は「動かない」位置なのに——`BACDE` と入れ替わった)
+   * 挿す位置は「抜いたあとの並び」で数え直す。
+   */
   moveClipToIndex: (clipId, targetIndex) =>
     set((state) => {
       const clips = [...state.project.clips]
       const fromIndex = clips.findIndex((c) => c.id === clipId)
       if (fromIndex === -1) return state
-      const clamped = Math.max(0, Math.min(targetIndex, clips.length - 1))
-      if (clamped === fromIndex) return state
+      // NaN だけ先に落とす。`Math.min/max` は NaN を素通しして `splice` が 0 扱いにするので、
+      // 「先頭に入った」ように見えて理由が追えなくなる。±Infinity はそのまま挟めば端に着く。
+      const wanted = Number.isNaN(targetIndex) ? 0 : targetIndex
+      const insertAt = Math.max(0, Math.min(Math.trunc(wanted), clips.length))
+      const adjusted = insertAt > fromIndex ? insertAt - 1 : insertAt
+      if (adjusted === fromIndex) return state
       const [moved] = clips.splice(fromIndex, 1)
-      clips.splice(clamped, 0, moved)
+      clips.splice(adjusted, 0, moved)
       return { ...pushHistory(state), project: { ...state.project, clips } }
     }),
 

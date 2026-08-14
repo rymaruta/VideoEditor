@@ -472,7 +472,6 @@ export function Timeline(): React.JSX.Element {
   const [videoOverlayDrag, setVideoOverlayDrag] = useState<VideoOverlayDragState | null>(null)
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   /**
    * メディアパネルから引きずってきた素材が、いまどこに落ちるか。
    * 本編トラックは詰めて並べる作りなので「何番目に挿すか」、
@@ -1720,11 +1719,18 @@ export function Timeline(): React.JSX.Element {
             style={{ width: timelineWidth }}
             onClick={handleTrackClick}
             onDragOver={(e) => {
+              // 並べ替えも素材の追加も**同じ「挿す位置」の印**で受ける。片方だけ別の
+              // 出し方にすると、線の位置と実際に入る位置が食い違う(理由は下の onDrop)。
+              const reordering = !isAssetDrag(e.dataTransfer.types) && draggedClipId !== null
               // 映像を持たない素材(BGM等)は本編トラックに置けない。受けない印として
               // dropEffect を none にすると、カーソルもそう変わる。
-              if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo) return
+              if (
+                !reordering &&
+                (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo)
+              )
+                return
               e.preventDefault()
-              e.dataTransfer.dropEffect = 'copy'
+              e.dataTransfer.dropEffect = reordering ? 'move' : 'copy'
               setDropIndicator({ kind: 'index', index: dropIndexAt(e) })
             }}
             onDragLeave={(e) => {
@@ -1733,11 +1739,20 @@ export function Timeline(): React.JSX.Element {
               setDropIndicator(null)
             }}
             onDrop={(e) => {
-              if (!isAssetDrag(e.dataTransfer.types)) return
+              const reorderingId = isAssetDrag(e.dataTransfer.types) ? null : draggedClipId
+              if (!reorderingId && !isAssetDrag(e.dataTransfer.types)) return
               e.preventDefault()
               e.stopPropagation()
-              const assetId = assetIdFromDrop(e)
               const index = dropIndexAt(e)
+              if (reorderingId) {
+                // 並べ替えも**線が出た位置へ入れる**。以前はクリップごとに落として
+                // 「その番号へ splice」していたため、後ろへ動かすときだけ1つ行き過ぎていた。
+                moveClipToIndex(reorderingId, index)
+                setDraggedClipId(null)
+                setDropIndicator(null)
+                return
+              }
+              const assetId = assetIdFromDrop(e)
               endAssetDrag()
               const asset = project.assets.find((a) => a.id === assetId)
               if (!assetId || !asset?.hasVideo) return
@@ -1765,10 +1780,8 @@ export function Timeline(): React.JSX.Element {
                       ? 'selected'
                       : ''
                   } ${draggedClipId === tc.clip.id ? 'dragging' : ''} ${
-                    dragOverIndex === i && draggedClipId && draggedClipId !== tc.clip.id
-                      ? 'drag-over'
-                      : ''
-                  } ${trimDrag?.clipId === tc.clip.id ? 'trimming' : ''} tool-${editTool}`}
+                    trimDrag?.clipId === tc.clip.id ? 'trimming' : ''
+                  } tool-${editTool}`}
                   style={{ width: clipWidth }}
                   draggable={editTool === 'select'}
                   onClick={(e) => {
@@ -1805,25 +1818,13 @@ export function Timeline(): React.JSX.Element {
                     e.dataTransfer.effectAllowed = 'move'
                     setDraggedClipId(tc.clip.id)
                   }}
-                  onDragOver={(e) => {
-                    // メディアパネルからの素材はクリップではなくトラックが受ける。
-                    // ここで止めると、クリップの上に落とした場合だけ何も起きなくなる。
-                    if (isAssetDrag(e.dataTransfer.types)) return
-                    e.preventDefault()
-                    e.dataTransfer.dropEffect = 'move'
-                    setDragOverIndex(i)
-                  }}
-                  onDrop={(e) => {
-                    if (isAssetDrag(e.dataTransfer.types)) return
-                    e.preventDefault()
-                    e.stopPropagation()
-                    if (draggedClipId) moveClipToIndex(draggedClipId, i)
-                    setDraggedClipId(null)
-                    setDragOverIndex(null)
-                  }}
+                  // 並べ替えの受け口はクリップではなく**トラック**に置く。素材の追加と
+                  // 同じ「挿す位置」の計算(`dropIndexAt`)と同じ案内線を通すため。
+                  // クリップ側でも受けると、落とし先クリップの左端に線が出ているのに
+                  // その右へ入る、という食い違いが**後ろへ動かすときだけ**起きる。
                   onDragEnd={() => {
                     setDraggedClipId(null)
-                    setDragOverIndex(null)
+                    setDropIndicator(null)
                   }}
                 >
                   {editTool === 'trim' && i > 0 && (

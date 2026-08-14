@@ -2341,10 +2341,6 @@ h3 {
   opacity: 0.4;
 }
 
-.timeline-clip.drag-over {
-  box-shadow: -3px 0 0 0 var(--accent-2);
-}
-
 .timeline-clip.trimming {
   border-color: var(--accent-1);
   box-shadow: 0 0 0 2px var(--accent-soft);
