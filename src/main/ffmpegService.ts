@@ -21,6 +21,7 @@ import { scaleToFrameFilter } from '@shared/videoFrame'
 import { targetFrameRate } from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
+import { isMonoChannelCount, monoUpmixFilter } from '@shared/audioUpmix'
 import { describeFfmpegError } from './ffmpegError'
 import { needsPreviewProxy } from './previewProxyService'
 
@@ -403,6 +404,51 @@ const AUDIO_FORMAT = `aformat=sample_fmts=fltp:sample_rates=${OUTPUT_SAMPLE_RATE
 // (`previewProxyService` は最初から `-pix_fmt yuv420p` を付けている。書き出しだけが素通しだった)
 const VIDEO_FORMAT = 'format=yuv420p'
 
+/**
+ * 音声の枝の終端に置く形式固定。モノラルの素材だけ、`@shared/audioUpmix` の理由で
+ * 等倍に直してから固定する。チャンネル数が分からない素材(ffprobe が答えなかった)は
+ * 今までどおりの経路にする。
+ */
+function audioFormatFor(channels: number | undefined): string {
+  if (!isMonoChannelCount(channels)) return AUDIO_FORMAT
+  return `${monoUpmixFilter(OUTPUT_SAMPLE_RATE)},${AUDIO_FORMAT}`
+}
+
+/**
+ * 素材の音声チャンネル数を調べる。**書き出しを止める理由にはしない**ので、
+ * 失敗しても `undefined` を返す(呼び出し側が今までどおりの経路に倒す)。
+ */
+function probeAudioChannels(filePath: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err || !data) return resolve(undefined)
+      const audio = data.streams.find((s) => s.codec_type === 'audio')
+      const channels = audio?.channels
+      resolve(typeof channels === 'number' && channels > 0 ? channels : undefined)
+    })
+  })
+}
+
+/** タイムラインが実際に使う音声素材だけを、パス単位で1回ずつ調べる。 */
+async function probeUsedAudioChannels(project: Project): Promise<Map<string, number>> {
+  const used = new Set<string>()
+  const add = (assetId: string): void => {
+    const asset = project.assets.find((a) => a.id === assetId)
+    if (asset?.hasAudio) used.add(asset.filePath)
+  }
+  project.clips.forEach((c) => add(c.assetId))
+  project.audioTracks.forEach((t) => t.clips.forEach((c) => add(c.assetId)))
+  project.videoOverlayTracks.forEach((t) => t.clips.forEach((c) => add(c.assetId)))
+  const paths = [...used]
+  const results = await Promise.all(paths.map((p) => probeAudioChannels(p)))
+  const map = new Map<string, number>()
+  paths.forEach((p, i) => {
+    const ch = results[i]
+    if (ch !== undefined) map.set(p, ch)
+  })
+  return map
+}
+
 export function cancelExport(): void {
   if (!exportInProgress) return
   // Also covers the window before .run() assigns currentExportCommand: the flag
@@ -411,7 +457,7 @@ export function cancelExport(): void {
   currentExportCommand?.kill('SIGKILL')
 }
 
-export function exportProject(options: ExportOptions): Promise<void> {
+export async function exportProject(options: ExportOptions): Promise<void> {
   const { project, aspectRatio, resolutionHeight, quality, outputPath, onProgress } = options
   const loudnessNormalization = options.loudnessNormalization ?? false
   const { w, h } = targetResolution(aspectRatio, resolutionHeight)
@@ -450,6 +496,10 @@ export function exportProject(options: ExportOptions): Promise<void> {
     clips.map((c) => assetById.get(c.assetId)?.fps).filter((f): f is number => f !== undefined)
   )
   exportCancelRequested = false
+  // `exportInProgress` はここまでに同期で立っているので、同じ tick の2回目は上で弾かれる
+  // (この await より前に立てておくのが条件)。調べるのは使う素材だけで、失敗しても
+  // 例外にしない——書き出しがチャンネル数のせいで落ちるのは本末転倒。
+  const audioChannelsByPath = await probeUsedAudioChannels(project)
 
   return new Promise((resolve, reject) => {
     let command: ffmpeg.FfmpegCommand
@@ -519,7 +569,8 @@ export function exportProject(options: ExportOptions): Promise<void> {
           // ここでも**片方にだけ揃える処理が育っていた**。
           filterParts.push(
             `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
-              `apad,atrim=0:${outputDuration},asetpts=PTS-STARTPTS,${AUDIO_FORMAT}[a${i}]`
+              `apad,atrim=0:${outputDuration},asetpts=PTS-STARTPTS,` +
+              `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )
         } else {
           filterParts.push(
@@ -618,7 +669,8 @@ export function exportProject(options: ExportOptions): Promise<void> {
             const delayMs = Math.max(0, Math.round(pipStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
             filterParts.push(
-              `[${myIndex}:a]asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs},${AUDIO_FORMAT}[${audioLabel}]`
+              `[${myIndex}:a]asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs},` +
+                `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })
           }
@@ -692,7 +744,9 @@ export function exportProject(options: ExportOptions): Promise<void> {
           }
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${fadeChain}volume=${clipVolume},adelay=${delayMs}|${delayMs},${AUDIO_FORMAT}[${label}]`
+            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${fadeChain}` +
+              `volume=${clipVolume},adelay=${delayMs}|${delayMs},` +
+              `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
           )
           clipLabels.push(label)
         })

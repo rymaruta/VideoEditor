@@ -4,6 +4,7 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
 import { describeFfmpegError } from './ffmpegError'
+import { isMonoChannelCount, monoUpmixFilter } from '@shared/audioUpmix'
 
 /**
  * Codecs Chromium's <video> can decode. Everything else has to be transcoded before
@@ -31,14 +32,20 @@ export function needsPreviewProxy(
 interface ProxyStreamInfo {
   audioCodec: string
   hasAudio: boolean
+  /** 0 は「分からなかった」。等倍のモノラル展開を掛けてよいのは 1 のときだけ。 */
+  audioChannels: number
 }
 
 function probeStreams(filePath: string): Promise<ProxyStreamInfo> {
   return new Promise((resolve) => {
     ffmpeg.ffprobe(filePath, (err, data) => {
-      if (err || !data) return resolve({ audioCodec: '', hasAudio: false })
+      if (err || !data) return resolve({ audioCodec: '', hasAudio: false, audioChannels: 0 })
       const audio = data.streams.find((s) => s.codec_type === 'audio')
-      resolve({ audioCodec: audio?.codec_name ?? '', hasAudio: Boolean(audio) })
+      resolve({
+        audioCodec: audio?.codec_name ?? '',
+        hasAudio: Boolean(audio),
+        audioChannels: audio?.channels ?? 0
+      })
     })
   })
 }
@@ -109,7 +116,7 @@ export function ensurePreviewProxy(
   const tmpPath = `${outPath}.partial.mp4`
   const task = probeStreams(filePath)
     .then(
-      ({ audioCodec, hasAudio }) =>
+      ({ audioCodec, hasAudio, audioChannels }) =>
         new Promise<string>((resolve, reject) => {
           const command = ffmpeg(filePath).videoCodec('libx264').outputOptions([
             '-preset veryfast',
@@ -124,7 +131,18 @@ export function ensurePreviewProxy(
           // video stream is actually the problem in the common HEVC case.
           if (!hasAudio) command.noAudio()
           else if (PREVIEWABLE_AUDIO_CODECS.has(audioCodec)) command.audioCodec('copy')
-          else command.audioCodec('aac').outputOptions(['-ac 2'])
+          else {
+            command.audioCodec('aac').outputOptions(['-ac 2'])
+            // `-ac 2` の裏の swresample は**モノラルを左右へ 1/√2 で配る**ので、
+            // 変換した素材だけ試聴が 3dB 小さくなる。同じモノラルでも H.264 の素材は
+            // そのまま再生されて等倍なので、**素材の符号化方式で音量が変わる**——
+            // しかも書き出しは等倍で出る(理由は `@shared/audioUpmix`)。
+            // 実測: mono の 200Hz を `-ac 2` だけで変換すると max -24.1 → -26.6 dB、
+            // この一段を足すと -23.7 dB(AAC の誤差ぶんを含めて等倍)。
+            if (isMonoChannelCount(audioChannels)) {
+              command.audioFilters(monoUpmixFilter())
+            }
+          }
           command
             .on('progress', (p) => {
               if (typeof p.percent === 'number') {
