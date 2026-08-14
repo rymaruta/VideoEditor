@@ -676,11 +676,17 @@ export function Timeline(): React.JSX.Element {
       // (React logs "Cannot update a component while rendering a different one") and
       // gets replayed when StrictMode double-invokes the updater. The effect re-runs
       // on every trimDrag change, so this closure always sees the live values.
-      updateClipTrim(
-        trimDragSnapshot.clipId,
-        trimDragSnapshot.liveInPoint,
-        trimDragSnapshot.liveOutPoint
-      )
+      // 動いていないなら確定しない(つまみを掴んだだけで離したときの空の履歴を作らない)。
+      if (
+        trimDragSnapshot.liveInPoint !== trimDragSnapshot.originalInPoint ||
+        trimDragSnapshot.liveOutPoint !== trimDragSnapshot.originalOutPoint
+      ) {
+        updateClipTrim(
+          trimDragSnapshot.clipId,
+          trimDragSnapshot.liveInPoint,
+          trimDragSnapshot.liveOutPoint
+        )
+      }
       setTrimDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
@@ -768,11 +774,20 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      updateAudioClipStart(
-        audioDragSnapshot.trackId,
-        audioDragSnapshot.clipId,
-        audioDragSnapshot.liveStartTime
-      )
+      // 1ミリも動いていないなら確定しない。**ただ選ぶだけのクリックでも mouseup は来る**ので、
+      // ここで無条件に書き込むと、動かしていない利用者に2つのことが起きる:
+      // (1) 何も変わらない履歴が1件積まれ、次の Ctrl+Z が「何も戻らない」ように見える。
+      // (2) `updateAudioClipStart` は `linkedClipId` を消すので、**分離音声と映像の追従が
+      //     黙って切れる**。以降そのクリップをトリムしても音声は取り残される。
+      // 実測: 分離した音声を1回クリックしてから映像を20秒→10秒に縮めると、
+      // 音声だけ20秒のまま残った(触らなければ一緒に10秒になる)。
+      if (audioDragSnapshot.liveStartTime !== audioDragSnapshot.originalStartTime) {
+        updateAudioClipStart(
+          audioDragSnapshot.trackId,
+          audioDragSnapshot.clipId,
+          audioDragSnapshot.liveStartTime
+        )
+      }
       setAudioDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
@@ -835,6 +850,15 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
+      // 動いていないなら確定しない(上の音声クリップと同じ理由)。
+      const moved =
+        mediaTrimDragSnapshot.liveStartTime !== mediaTrimDragSnapshot.originalStartTime ||
+        mediaTrimDragSnapshot.liveInPoint !== mediaTrimDragSnapshot.originalInPoint ||
+        mediaTrimDragSnapshot.liveOutPoint !== mediaTrimDragSnapshot.originalOutPoint
+      if (!moved) {
+        setMediaTrimDrag(null)
+        return
+      }
       if (mediaTrimDragSnapshot.kind === 'audio') {
         updateAudioClipStartAndTrim(
           mediaTrimDragSnapshot.trackId,
@@ -895,11 +919,14 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      updateVideoOverlayClipStart(
-        videoOverlayDragSnapshot.trackId,
-        videoOverlayDragSnapshot.clipId,
-        videoOverlayDragSnapshot.liveStartTime
-      )
+      // 動いていないなら確定しない(上の音声クリップと同じ理由)。
+      if (videoOverlayDragSnapshot.liveStartTime !== videoOverlayDragSnapshot.originalStartTime) {
+        updateVideoOverlayClipStart(
+          videoOverlayDragSnapshot.trackId,
+          videoOverlayDragSnapshot.clipId,
+          videoOverlayDragSnapshot.liveStartTime
+        )
+      }
       setVideoOverlayDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
@@ -979,10 +1006,16 @@ export function Timeline(): React.JSX.Element {
       })
     }
     function handleMouseUp(): void {
-      updateTextOverlay(overlayDragSnapshot.overlayId, {
-        startTime: overlayDragSnapshot.liveStartTime,
-        endTime: overlayDragSnapshot.liveEndTime
-      })
+      // 動いていないなら確定しない(上の音声クリップと同じ理由)。
+      if (
+        overlayDragSnapshot.liveStartTime !== overlayDragSnapshot.originalStartTime ||
+        overlayDragSnapshot.liveEndTime !== overlayDragSnapshot.originalEndTime
+      ) {
+        updateTextOverlay(overlayDragSnapshot.overlayId, {
+          startTime: overlayDragSnapshot.liveStartTime,
+          endTime: overlayDragSnapshot.liveEndTime
+        })
+      }
       setOverlayDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)

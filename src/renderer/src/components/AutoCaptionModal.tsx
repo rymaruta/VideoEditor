@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import { buildTimedClips } from '../lib/timelineMath'
+import { buildTimedClips, toTimelineSeconds } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { defaultTextStyle } from '@shared/textStyle'
 import type { TextOverlay, TranscriptSegment } from '@shared/types'
@@ -146,7 +146,10 @@ export function AutoCaptionModal({
                 <label className="checkbox-label">
                   <input type="checkbox" checked={checked.has(i)} onChange={() => toggle(i)} />
                   <span className="hint-text">
-                    {formatTime(seg.start - clip.inPoint)} 〜 {formatTime(seg.end - clip.inPoint)}
+                    {/* 文字起こしが返すのは素材の秒。貼る位置は速度で割っているので、
+                        画面の時刻も割らないと「0:04.0」と出して 2.0秒の位置に貼られる。 */}
+                    {formatTime(toTimelineSeconds(seg.start - clip.inPoint, clip.speed))} 〜{' '}
+                    {formatTime(toTimelineSeconds(seg.end - clip.inPoint, clip.speed))}
                   </span>
                 </label>
                 <input
