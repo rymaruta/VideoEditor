@@ -1,12 +1,9 @@
 import { useProjectStore } from '../store/projectStore'
-import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from './timelineMath'
+import { buildTimedClips, totalTimelineDuration } from './timelineMath'
+import { captureAiFrames } from './aiFrames'
 import { defaultTextStyle } from '@shared/textStyle'
 import { generateVideoMetadata, type VideoMetadata } from './metadataGeneration'
 import type { TextOverlay } from '@shared/types'
-
-const FRAME_FRACTIONS = [0.15, 0.5, 0.85]
-const FRAME_WIDTH = 320
-const FRAME_HEIGHT = 568
 
 export interface AutoFinishResult {
   captionCount: number
@@ -61,21 +58,7 @@ export async function autoFinishTimeline(
         .map((o) => o.text)
         .join('\n')
       const total = totalTimelineDuration(timedClips)
-      const frames: string[] = []
-      for (const fraction of FRAME_FRACTIONS) {
-        const globalTime = Math.min(total - 0.05, total * fraction)
-        const tc = findTimedClipAt(timedClips, globalTime)
-        if (!tc || !tc.asset.hasVideo) continue
-        const speed = tc.clip.speed || 1
-        const localTime = tc.clip.inPoint + (globalTime - tc.start) * speed
-        try {
-          frames.push(
-            await window.api.generateFrame(tc.asset.filePath, localTime, FRAME_WIDTH, FRAME_HEIGHT)
-          )
-        } catch {
-          // Skip frames that fail to extract (e.g. right at a clip boundary).
-        }
-      }
+      const frames = await captureAiFrames(timedClips, total, latestProject.aspectRatio)
       metadata = await generateVideoMetadata(geminiApiKey, transcript, '', language, frames)
     } catch {
       // Metadata generation is best-effort; the captions added above are still kept.

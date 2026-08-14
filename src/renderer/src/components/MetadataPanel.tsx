@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
-import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
+import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
+import { captureAiFrames } from '../lib/aiFrames'
 import {
   generateVideoMetadata,
   regenerateTitles,
@@ -10,10 +11,6 @@ import {
 } from '../lib/metadataGeneration'
 import { formatIpcError } from '../lib/ipcError'
 import { KeyIcon, SparklesIcon, CopyIcon, MegaphoneIcon, ShuffleIcon } from './icons'
-
-const FRAME_FRACTIONS = [0.15, 0.5, 0.85]
-const FRAME_WIDTH = 320
-const FRAME_HEIGHT = 568
 
 function buildTranscript(project: ReturnType<typeof useProjectStore.getState>['project']): string {
   return project.textOverlays
@@ -86,25 +83,7 @@ export function MetadataPanel(): React.JSX.Element {
     setLoading(true)
     setError(null)
     try {
-      const capturedFrames: string[] = []
-      for (const fraction of FRAME_FRACTIONS) {
-        const globalTime = Math.min(total - 0.05, total * fraction)
-        const tc = findTimedClipAt(timedClips, globalTime)
-        if (!tc || !tc.asset.hasVideo) continue
-        const speed = tc.clip.speed || 1
-        const localTime = tc.clip.inPoint + (globalTime - tc.start) * speed
-        try {
-          const dataUrl = await window.api.generateFrame(
-            tc.asset.filePath,
-            localTime,
-            FRAME_WIDTH,
-            FRAME_HEIGHT
-          )
-          capturedFrames.push(dataUrl)
-        } catch {
-          // Skip frames that fail to extract (e.g. right at a clip boundary).
-        }
-      }
+      const capturedFrames = await captureAiFrames(timedClips, total, project.aspectRatio)
       setFrames(capturedFrames)
       const transcript = buildTranscript(project)
       const metadata = await generateVideoMetadata(

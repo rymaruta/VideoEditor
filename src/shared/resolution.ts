@@ -1,14 +1,18 @@
-import type { AspectRatio, ResolutionHeight } from './types'
+import type { AspectRatio } from './types'
 
 /**
- * 書き出しの出力サイズ。`standard` は短辺(9:16なら幅、16:9なら高さ)。
+ * 書き出しの出力サイズ。`standard` は短辺(9:16なら幅、16:9なら高さ)で、偶数を渡すこと。
  *
  * プレビューのテロップも同じ値で換算する必要があるため、書き出し側だけが持っていると
  * 片方を直したときに黙ってズレる。main と renderer の共通の置き場に置く。
+ *
+ * 短辺は `ResolutionHeight` に限定しない。書き出し以外にも**同じ画角で撮りたい**ものが
+ * あり(サムネ候補は短辺720、生成AIへ渡す絵は短辺320)、そこで型が合わないからと
+ * 各自が `* 16 / 9` を書き写すと、画角の規則が3箇所に散る。
  */
 export function targetResolution(
   aspectRatio: AspectRatio,
-  standard: ResolutionHeight
+  standard: number
 ): { w: number; h: number } {
   const longSide = Math.round((standard * 16) / 9 / 2) * 2
   if (aspectRatio === '9:16') {
