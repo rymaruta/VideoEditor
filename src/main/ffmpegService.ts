@@ -21,7 +21,7 @@ import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
 import { scaleToFrameFilter } from '@shared/videoFrame'
-import { targetFrameRate } from '@shared/frameRate'
+import { frameCountForDuration, targetFrameRate } from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
 import {
@@ -596,10 +596,16 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         //  映像は1本ごとに1秒ずつ先行し、最後の3秒は絵が無かった)
         // `tpad` で足りない分を**最後のフレームのまま**引き伸ばし、`trim` で長すぎる分を
         // 切る——音声側の `apad`+`atrim` と対になる、どちらの向きのズレも塞ぐ1本。
+        // 切る長さは**秒ではなくフレーム数**で渡す。`trim=duration` は「表示時刻が
+        // その秒数未満」の判定なので、`overlay`(ぼかし背景)を通って時間基準が細かく
+        // なると、ちょうど境目にある1枚が丸めで滑り込んで**映像だけ1フレーム多くなる**
+        // (実測: 20秒の書き出しで黒帯 600フレーム・20.000000秒に対し、ぼかし背景だけ
+        //  601フレーム・20.033984秒)。フレーム数なら判定に時刻が入らないので、
+        //  どの組み方でも同じ数になる(数え方は `frameCountForDuration`)。
         filterParts.push(
           `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,` +
             `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
-            `trim=duration=${outputDuration}[v${i}]`
+            `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)}[v${i}]`
         )
         if (asset.hasAudio && !clip.audioDetached) {
           // 音声も**映像と同じ尺ちょうど**に揃えてから畳み込む。

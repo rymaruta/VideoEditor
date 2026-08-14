@@ -46,3 +46,28 @@ export function projectFrameRate(clips: Clip[], assets: MediaAsset[]): number {
 export function frameSeconds(clips: Clip[], assets: MediaAsset[]): number {
   return 1 / projectFrameRate(clips, assets)
 }
+
+/**
+ * 尺(秒)を**フレーム数**に直す。書き出しで1本ぶんの映像を切り出す長さに使う。
+ *
+ * 秒で切ると、**同じ尺でもフィルタの組み方によってフレーム数が変わる**。
+ * `trim=duration=D` は「表示時刻が D 未満のフレームを残す」判定なので、
+ * `overlay`(ぼかし背景)を通って時間基準が細かくなると、ちょうど D にあるはずの
+ * 1枚が丸めで D をわずかに下回り、**滑り込んで1フレーム多くなる**。
+ * (実測: 20秒・30fps の書き出しで、黒帯は 600フレーム・20.000000秒なのに
+ *  ぼかし背景だけ **601フレーム・20.033984秒** と音声からずれていた。
+ *  4.16秒では 125 に対し 126、4.20秒では 126 に対し 127)
+ *
+ * フレーム数で切れば判定に時刻が入らないので、どの組み方でも同じ数になる。
+ * 丸めは**四捨五入**。黒帯の経路が今出している数(実測 9通りとも `round(尺×fps)` と
+ * 一致)がこれなので、**今までの経路の出力を変えずに**ぼかしだけ揃えられる。
+ * 切り上げにすると全経路が1フレームずつ伸び、切り捨てにすると全経路が縮む。
+ *
+ * 数値でない尺・0以下は 0(フレーム無し)。`trim=end_frame=NaN` は ffmpeg が
+ * 受け付けず、**書き出しごと失敗する**。
+ */
+export function frameCountForDuration(durationSeconds: number, fps: number): number {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0
+  if (!Number.isFinite(fps) || fps <= 0) return 0
+  return Math.max(0, Math.round(durationSeconds * fps))
+}
