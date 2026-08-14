@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
@@ -25,6 +25,7 @@ function buildTranscript(project: ReturnType<typeof useProjectStore.getState>['p
 
 export function MetadataPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
+  const projectId = useProjectStore((s) => s.project.id)
   const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
   const setGeminiApiKey = useSettingsStore((s) => s.setGeminiApiKey)
   const envKeySources = useSettingsStore((s) => s.envKeySources)
@@ -39,6 +40,30 @@ export function MetadataPanel(): React.JSX.Element {
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [regeneratingTitles, setRegeneratingTitles] = useState(false)
   const [regeneratingPinned, setRegeneratingPinned] = useState(false)
+
+  /**
+   * 別のプロジェクトを開いた/新規作成したら、AIが作った結果を捨てる。
+   *
+   * この画面はタブを切り替えても**ずっとマウントされたまま**なので、結果は
+   * 明示的に捨てないと残り続ける。残ったままだと、**別の動画の画面で前の動画の
+   * タイトル案・概要欄が出て、そのままコピーできてしまう**
+   * (実測: Aで生成したあとBを開くと、画面のプロジェクト名は「Bのプロジェクト」なのに
+   * タイトル案は「A案のタイトル1/2」、概要欄は「Aの概要欄」のままだった)。
+   * `frames` も同じ——再生成のときに**前の動画のサムネ画像**をAIへ送ってしまう。
+   *
+   * 捨てるのは**AIが作った結果だけ**。言語・補足情報は利用者が打った値なので残す
+   * (AIショートの編集方針を残しているのと同じ扱い)。
+   * 判定は `project.id`。保存・読込を通して保たれ、素材やテロップを足しただけでは
+   * 変わらないので、編集のたびに消えることはない。
+   */
+  useEffect(() => {
+    // 外部から取ってきた結果を捨てる副作用。props から導ける値ではない。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResult(null)
+    setDescription('')
+    setFrames([])
+    setError(null)
+  }, [projectId])
 
   function copy(key: string, text: string): void {
     navigator.clipboard.writeText(text).then(() => {

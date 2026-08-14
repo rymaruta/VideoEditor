@@ -22,6 +22,7 @@ interface ThumbStyle {
 
 export function ThumbnailPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
+  const projectId = useProjectStore((s) => s.project.id)
   const [candidates, setCandidates] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -41,6 +42,22 @@ export function ThumbnailPanel(): React.JSX.Element {
   // 正しいのに編集中の画面だけが歪む**(実測で横方向に3.16倍)。候補一覧も
   // object-fit: cover で中央の帯しか出ず、候補を見分けられなくなる。
   const thumbAspect = { aspectRatio: `${thumbWidth} / ${thumbHeight}` }
+
+  /**
+   * 別のプロジェクトを開いた/新規作成したら、前の動画から抜いた候補を捨てる。
+   *
+   * この画面はタブを切り替えてもマウントされたままなので、明示的に捨てないと
+   * **別の動画の画面に前の動画のサムネ候補が並び、そのまま書き出せてしまう**
+   * (実測: Aで6件作ったあとBを開いても6件のまま残っていた)。
+   * 文字・スタイルは利用者が決めた値なので残す(結果だけ捨てる)。
+   */
+  useEffect(() => {
+    // 外部から取ってきた結果を捨てる副作用。props から導ける値ではない。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCandidates([])
+    setSelected(null)
+    setError(null)
+  }, [projectId])
 
   async function generateCandidates(): Promise<void> {
     setError(null)
