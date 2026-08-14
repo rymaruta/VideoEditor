@@ -14,6 +14,7 @@ import { pipMarginPx } from '@shared/pipLayout'
 import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { blurSigmaFor } from '@shared/videoFrame'
 import { duckTargetGain, rmsOf, smoothDuckGain } from '@shared/ducking'
+import { crossfadeOpacity, effectiveTransitionSeconds } from '@shared/transition'
 import { cropPreviewStyle } from '../lib/cropPreview'
 import { overlayBoxStyle } from '../lib/overlayBox'
 import {
@@ -338,6 +339,61 @@ function PreviewBlurBackdrop({
       src={src}
       muted
       style={{ filter: `blur(${blurPx}px)` }}
+    />
+  )
+}
+
+/**
+ * クロスフェードで**消えていく側**(前のクリップ)を上に重ねる1枚。
+ *
+ * 作りは `PreviewBlurBackdrop` と同じ(2枚目の `<video>` を local time で回す)。
+ * 違いは合わせ直しのしきい値で、ぼかし背景と違って**混ざった絵がそのまま見える**ので
+ * 0.3秒では甘い。短い窓(最長2秒)しか映らないぶん、合わせ直しが多少増えても構わない。
+ *
+ * 音は鳴らさない(`muted`)。書き出しは `acrossfade` で音も混ぜるが、画面側の音は
+ * 本編の1枚が持っているので、ここで鳴らすと**二重に聞こえる**。
+ */
+function PreviewCrossfadeLayer({
+  src,
+  localTime,
+  isPlaying,
+  opacity,
+  speed,
+  fit
+}: {
+  src: string
+  localTime: number
+  isPlaying: boolean
+  opacity: number
+  speed: number
+  fit: CSSProperties
+}): React.JSX.Element {
+  const ref = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.12) {
+      ref.current.currentTime = localTime
+    }
+  }, [localTime])
+
+  // 速度は**それ自身の依存を持つ effect** で入れ直す。読み込みの経路だけで書くと、
+  // 再生しながら速度を変えたときに古い値のまま回り続ける(前に本編と背景で踏んでいる)。
+  useEffect(() => {
+    if (ref.current) ref.current.playbackRate = toPlaybackRate(speed)
+  }, [speed])
+
+  useEffect(() => {
+    if (isPlaying) ref.current?.play().catch(() => {})
+    else ref.current?.pause()
+  }, [isPlaying])
+
+  return (
+    <video
+      ref={ref}
+      className="preview-crossfade-layer"
+      src={src}
+      muted
+      style={{ ...fit, opacity }}
     />
   )
 }
@@ -739,6 +795,62 @@ export function PreviewPlayer(): React.JSX.Element {
     }
   })()
 
+  /**
+   * クロスフェードの重ね合わせ。**前のクリップの終わりを、次のクリップの頭に重ねて薄く消す。**
+   *
+   * 書き出し(`xfade`)は2本を**重ねて**混ぜるので出力はそのぶん短くなるが、
+   * タイムラインはクリップを隙間なく並べた形のまま(尺の持ち方を変えるのは別の話)。
+   * そのため重なりぶんの「余った時間」がどうしても片方に出る。**次のクリップ側に置く**
+   * のは、こちらなら**今見ているショットが途切れずに正しく進む**から——逆に前の
+   * クリップの終わりに置くと、次のショットの頭が重なりのぶん巻き戻って見える。
+   * 混ぜている絵の中身(前の終わり t 秒 × 次の頭 t 秒)と混ぜ方(線形)は書き出しと同じ。
+   *
+   * 実効の長さは書き出しと**同じ関数**から出す(`effectiveTransitionSeconds`)。
+   * 指定した長さがそのまま掛かるとは限らず、隣が短いと詰められる。
+   */
+  const targetSize = targetResolution(project.aspectRatio, exportResolutionHeight)
+  const crossfade = ((): {
+    src: string
+    localTime: number
+    opacity: number
+    speed: number
+    fit: CSSProperties
+  } | null => {
+    const tc = findTimedClipAt(timedClips, playheadTime)
+    if (!tc) return null
+    const index = timedClips.findIndex((c) => c.clip.id === tc.clip.id)
+    if (index <= 0) return null
+    const seconds = effectiveTransitionSeconds(
+      timedClips.map((c) => c.end - c.start),
+      timedClips.map((c) => c.clip.transitionIn)
+    )
+    const t = seconds[index]
+    if (t <= 0) return null
+    // 範囲はまずクロスフェードだけ。`fade`(黒を挟む)と `wipe` は書き出し側の
+    // 見た目が別物なので、中途半端に似せずハードカットのままにしてある。
+    if (tc.clip.transitionIn?.type !== 'crossfade') return null
+    const elapsed = playheadTime - tc.start
+    if (elapsed < 0 || elapsed >= t) return null
+    const prev = timedClips[index - 1]
+    const prevSpeed = prev.clip.speed || 1
+    return {
+      src: previewSourceUrl(prev.asset),
+      // 前のクリップの**最後の t 秒**を流す(書き出しが混ぜているのと同じ範囲)
+      localTime: prev.clip.outPoint - (t - elapsed) * prevSpeed,
+      // 出てくる側の不透明度が `crossfadeOpacity`。重ねているのは消える側なので裏返す
+      opacity: 1 - crossfadeOpacity(elapsed, t),
+      speed: prevSpeed,
+      // **前のクリップ自身の**収め方で描く。今のクリップの収め方を使い回すと、
+      // 片方だけ「画面いっぱい」のときに切り替わった瞬間に絵の大きさが飛ぶ。
+      fit: cropPreviewStyle(
+        prev.asset.width / prev.asset.height,
+        targetSize.w / targetSize.h,
+        prev.clip.fillCrop,
+        prev.clip.cropCenter
+      )
+    }
+  })()
+
   // 「クロップして画面いっぱいに表示」を画面にも反映する。式は `cropPreviewStyle` に
   // まとめてある(トリムのモーダルも同じ関数を呼ぶ。書き写すと片方だけ直したときに
   // 「画面では切れているのにモーダルでは切れていない」という食い違いが黙って生まれる)。
@@ -995,6 +1107,19 @@ export function PreviewPlayer(): React.JSX.Element {
                 <ClapperboardIcon width={32} height={32} />
                 <p>タイムラインにクリップを追加してください</p>
               </div>
+            )}
+            {/* 消えていく前のクリップは本編の**上**に重ねる。下に敷くと、本編が
+                不透明なので何も見えない(不透明度を動かしているのはこちら側)。
+                PiP・テロップより手前に出ないよう、重ね順は本編のすぐ上に留める。 */}
+            {activeSrc && crossfade && (
+              <PreviewCrossfadeLayer
+                src={crossfade.src}
+                localTime={crossfade.localTime}
+                isPlaying={isPlaying}
+                opacity={crossfade.opacity}
+                speed={crossfade.speed}
+                fit={crossfade.fit}
+              />
             )}
             {playbackError && <div className="preview-playback-error">{playbackError}</div>}
             {project.videoOverlayTracks

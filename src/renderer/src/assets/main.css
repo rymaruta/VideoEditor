@@ -1366,6 +1366,16 @@ h3 {
   z-index: 0;
 }
 
+/* クロスフェードで消えていく前のクリップ。本編の**上**に重ねて不透明度を下げる。
+   `z-index` は本編と同じ 1 のままで、DOM 上で本編より後ろに置くことで上に出す
+   (2 にすると PiP やテロップより手前に来てしまう)。 */
+.preview-frame video.preview-crossfade-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .preview-empty {
   display: flex;
   flex-direction: column;

@@ -16,6 +16,7 @@ import type {
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
 import { measureWideAdvances } from './fontMetrics'
+import { effectiveTransitionSeconds } from '@shared/transition'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
@@ -618,6 +619,15 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       })
 
       // --- Fold clips together sequentially, applying transitions where set ---
+      // 実効の長さは**画面と同じ関数**から出す(`@shared/transition`)。ここに数字を
+      // 書くと、片方だけ動いて「画面では重なるのに書き出しでは切り替わる」に戻る。
+      // A crossfade must be strictly shorter than both neighbors: xfade/acrossfade
+      // reject a duration exceeding either input and abort the whole encode. When a
+      // neighbor is too short (e.g. a tiny split fragment), it falls back to a hard cut.
+      const transitionSeconds = effectiveTransitionSeconds(
+        clipOutputDurations,
+        clips.map((c) => c.transitionIn)
+      )
       let curV = 'v0'
       let curA = 'a0'
       let curDuration = clipOutputDurations[0]
@@ -625,13 +635,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         const clip = clips[i]
         const incomingDuration = clipOutputDurations[i]
         const transition = clip.transitionIn
-        // A crossfade must be strictly shorter than both neighbors: xfade/acrossfade
-        // reject a duration exceeding either input and abort the whole encode. When a
-        // neighbor is too short (e.g. a tiny split fragment), fall back to a hard cut.
-        const maxDur = Math.min(curDuration, incomingDuration) - 0.05
-        const wantsTransition = transition && transition.type !== 'none' && transition.duration > 0
-        const t = wantsTransition ? Math.min(transition.duration, maxDur) : 0
-        if (!wantsTransition || t < 0.02) {
+        const t = transitionSeconds[i]
+        if (t <= 0 || !transition) {
           const outV = `vcat${i}`
           const outA = `acat${i}`
           filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/${outputFps}[${outV}]`)
