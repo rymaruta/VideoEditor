@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import type { Project } from '@shared/types'
 
 // 同じプロセス内で保存が重なっても衝突しない一時ファイル名を作るための連番。
@@ -19,13 +20,31 @@ let saveSequence = 0
  * (別のファイルシステムへ跨ると rename が `EXDEV` で失敗する)。
  */
 export function saveProjectFile(filePath: string, project: Project): void {
-  const tmpPath = `${filePath}.saving-${process.pid}-${saveSequence++}.tmp`
+  // **一時ファイルの名前は、保存先の名前から作らない。**
+  // `${filePath}.saving-…` のように後ろへ足すと、一時ファイルだけが名前の長さの上限
+  // (1要素 255バイト)を先に超えて、**利用者が付けられる名前なのに保存だけできない**
+  // という状態になる。付け足す約22バイトぶん、使える名前が短くなっていた。
+  // (実測: 日本語の名前は **76文字(235バイト)までは保存でき、77文字(238バイト)から
+  //  `ENAMETOOLONG` で失敗**した。同じ名前へ直に書けば 255バイトまで通るので、
+  //  失われていたのは一時ファイルのぶんだけ。半角なら 232文字までしか保存できなかった)
+  // 同じディレクトリに**長さの決まった**名前で置く。rename が不可分なのは同一
+  // ファイルシステム内という条件だけなので、ディレクトリさえ変えなければよい。
+  const tmpPath = join(dirname(filePath), `.ve-save-${process.pid}-${saveSequence++}.tmp`)
   try {
     writeFileSync(tmpPath, JSON.stringify(project, null, 2), 'utf-8')
     renameSync(tmpPath, filePath)
   } catch (e) {
     // 書けなかったぶんを残すと、保存先の隣にゴミが溜まり続ける。
-    rmSync(tmpPath, { force: true })
+    // **後始末で投げないこと。** `force: true` は「無かったことにする」だけで、
+    // `lstat` の失敗(長すぎるパスなど)は投げるので、そのまま書くと**本当の原因が
+    // 後始末の失敗にすり替わって外へ出る**。実測では、保存できなかったときの文言が
+    // `open` ではなく **`lstat` の `ENAMETOOLONG`** になっており、書き込みが
+    // なぜ失敗したのかは残っていなかった。
+    try {
+      rmSync(tmpPath, { force: true })
+    } catch {
+      /* 消せなくても、報告すべきは元の失敗のほう */
+    }
     throw e
   }
 }
