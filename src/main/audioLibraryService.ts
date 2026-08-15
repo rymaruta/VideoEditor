@@ -103,13 +103,53 @@ function describeDownloadFailure(e: unknown): Error {
   return new Error(`音源を取得できませんでした: ${detail}`)
 }
 
-function sanitizeFileName(name: string): string {
-  return (
-    name
-      .replace(/[\\/:*?"<>|]/g, '_')
-      .trim()
-      .slice(0, 80) || 'audio'
-  )
+/**
+ * ファイル名の1要素に使える上限。**バイト数で効く**(ext4 などの `NAME_MAX` は 255)。
+ * パス全体の上限とは別物で、フォルダがどれだけ浅くても関係なく当たる。
+ */
+const MAX_FILE_NAME_BYTES = 255
+/**
+ * 名前の部分に許す文字数。今までと同じ値で、日本語の曲名でも見出しとして読める長さ。
+ * バイト上限だけにすると半角の名前が 200文字超まで伸びて、Windows の
+ * パス長(260文字)に別口で当たりうるので、**文字数の上限も残す**。
+ */
+const MAX_FILE_NAME_CHARS = 80
+
+/**
+ * ファイル名の一部に埋める文字列を、**文字数とバイト数の両方**で切り詰める。
+ *
+ * `slice(0, 80)` は**文字数しか見ない**。日本語は1文字3バイトなので 240バイトまで通り、
+ * UUID と拡張子を足した時点で 255バイトを超えて `ENAMETOOLONG` になる——
+ * 曲名を長くしただけで、ダウンロードは始まったのに書き込みで落ちる。
+ * (実測: `${UUID}-${曲名}.mp3` の形で、日本語 **71文字(254バイト)までは書けて、
+ *  72文字(257バイト)から `ENAMETOOLONG`**。同じフォルダへ 255バイトちょうどの名前を
+ *  直に書けば通るので、超えているぶんがそのまま原因)
+ *
+ * 切る単位は**コードポイント**にする。`slice` は UTF-16 の符号単位で切るので
+ * **サロゲートペアを半分に割り**、絵文字入りの曲名から壊れた文字が残る。
+ */
+function truncateFileNamePart(name: string, maxBytes: number): string {
+  // NaN との比較は必ず false なので、素で書くと**上限が無いのと同じ**になる
+  // (「切り詰めたつもり」で全部通る側へ落ちる)。数でないなら何も通さない。
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) return ''
+  let bytes = 0
+  let chars = 0
+  let out = ''
+  for (const ch of name) {
+    if (chars >= MAX_FILE_NAME_CHARS) break
+    const size = Buffer.byteLength(ch)
+    if (bytes + size > maxBytes) break
+    bytes += size
+    chars += 1
+    out += ch
+  }
+  return out
+}
+
+function sanitizeFileName(name: string, maxBytes: number): string {
+  const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim()
+  // 切った末尾に空白が残ることがある。Windows は末尾の空白を黙って落とすので揃えておく
+  return truncateFileNamePart(cleaned, maxBytes).trim() || 'audio'
 }
 
 function extensionFromUrl(url: string): string {
@@ -124,7 +164,12 @@ export async function downloadAudioAsset(
   const dir = join(app.getPath('userData'), 'audio-library')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const ext = extensionFromUrl(url)
-  const filePath = join(dir, `${randomUUID()}-${sanitizeFileName(suggestedName)}.${ext}`)
+  // 曲名に使えるバイト数は、**先に決まっているぶんを引いた残り**。
+  // UUID(36バイト)と区切りの `-`、それに `.${拡張子}` は動かせない。
+  const prefix = `${randomUUID()}-`
+  const suffix = `.${ext}`
+  const nameBudget = MAX_FILE_NAME_BYTES - Buffer.byteLength(prefix) - Buffer.byteLength(suffix)
+  const filePath = join(dir, `${prefix}${sanitizeFileName(suggestedName, nameBudget)}${suffix}`)
   try {
     await download(url, filePath)
     const meta = await probeMedia(filePath)
