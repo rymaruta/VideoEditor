@@ -74,6 +74,27 @@ function overflowRatio(center: number | undefined, windowFraction: number): numb
   return Math.min(1, Math.max(0, (c - windowFraction / 2) / overflow))
 }
 
+/**
+ * **画素を正方形に直してから**寸法を扱うためのフィルタ。どの経路でも最初に通す。
+ *
+ * 画素が正方形でない素材(SAR≠1)は、**符号化されている画素数と実際に見える寸法が違う**。
+ * 例: `SAR 2:1` の `320x360` は、横に2倍伸ばして `640x360`(16:9)として見せる決まり。
+ * デコードしただけでは伸びない——ffmpeg は SAR を**メタデータのまま持ち回る**ので、
+ * `scale=…:force_original_aspect_ratio=…` は `iw/ih` = 320/360(8:9)を素材の縦横比だと
+ * 判断し、16:9 の枠へ「収める」ために左右へ黒帯を入れる。そのうえ後段の `setsar=1` が
+ * 「2倍に伸ばす」という情報ごと捨てるので、**絵が縦長に潰れたまま帯が付く**。
+ * 画面(Chromium)は DAR を見て 640x360 で出すため、**画面は正しく書き出しだけ壊れる**。
+ * (実測: 左1/4が赤・右3/4が青の `SAR 2:1` 素材を 16:9 で書き出すと、
+ *  x=0.02〜0.22 が**黒**・赤青の境目が **x≈0.44**。通したあとは端まで絵が埋まり、
+ *  境目は **x=0.2500**(160/640)——素材本来の 1/4 と一致する)
+ *
+ * SAR が分からない素材は `sar` が **0** になる。そのまま掛けると幅が 0 になって
+ * フィルタごと失敗するので、1(正方形)として扱う。
+ * **SAR が 1 の素材では出力が1バイトも変わらない**(実測: 854x480 の素材を
+ * 黒帯・切り抜きの両方で30フレーム書き出し、通す前と 20,736,000 バイト完全一致)。
+ */
+export const SQUARE_PIXEL_FILTER = "scale='iw*if(gt(sar,0),sar,1)':ih,setsar=1"
+
 export function scaleToFrameFilter(
   w: number,
   h: number,
@@ -102,6 +123,9 @@ export function scaleToFrameFilter(
   const labelSuffix = options.labelSuffix ?? ''
   const fps = options.fps
   const fpsPart = fps ? `,fps=${fps}` : ''
+  // 画素を正方形に直すのは**この関数の責任**にする。呼び出し側の先頭に足す形にすると、
+  // 分岐した経路(ぼかし背景・切り抜き)や、あとから増えた呼び出し元だけが素通しになる。
+  const square = `${SQUARE_PIXEL_FILTER},`
   if (!fillCrop && blurBackground) {
     // 同じ入力を2つに分け、片方を枠いっぱいに広げてぼかした背景に、
     // もう片方を収まるように縮めた前景として重ねる。
@@ -113,7 +137,7 @@ export function scaleToFrameFilter(
     const bgOut = `bgblur${labelSuffix}`
     const fgOut = `fgfit${labelSuffix}`
     return (
-      `split=2[${bg}][${fg}];` +
+      `${square}split=2[${bg}][${fg}];` +
       `[${bg}]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},` +
       `gblur=sigma=${blurSigmaFor(h)}${fpsPart}[${bgOut}];` +
       `[${fg}]scale=${w}:${h}:force_original_aspect_ratio=decrease${fpsPart}[${fgOut}];` +
@@ -121,9 +145,9 @@ export function scaleToFrameFilter(
     )
   }
   if (!fillCrop) {
-    return `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black${fpsPart}`
+    return `${square}scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black${fpsPart}`
   }
   const cx = cropCenter?.x ?? 0.5
   const cy = cropCenter?.y ?? 0.5
-  return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:'min(max(0,(iw*${cx}-ow/2)),(iw-ow))':'min(max(0,(ih*${cy}-oh/2)),(ih-oh))'${fpsPart}`
+  return `${square}scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:'min(max(0,(iw*${cx}-ow/2)),(iw-ow))':'min(max(0,(ih*${cy}-oh/2)),(ih-oh))'${fpsPart}`
 }

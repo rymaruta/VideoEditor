@@ -20,7 +20,7 @@ import { effectiveTransitionSeconds } from '@shared/transition'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
-import { scaleToFrameFilter } from '@shared/videoFrame'
+import { SQUARE_PIXEL_FILTER, scaleToFrameFilter } from '@shared/videoFrame'
 import { frameCountForDuration, targetFrameRate } from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
@@ -853,7 +853,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           const pipLabel = `pip${pipCounter}`
           const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
           filterParts.push(
-            `[${myIndex}:v]scale=${scaledWidth}:-2,setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
+            // PiP も**画素を正方形に直してから**幅を決める。`scale=幅:-2` は
+            // `iw/ih` から高さを出すので、SAR≠1 の素材はここでも縦長に潰れる。
+            `[${myIndex}:v]${SQUARE_PIXEL_FILTER},scale=${scaledWidth}:-2,` +
+              `setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
           )
           const margin = Math.round(pipMarginPx(w))
           const xExpr =
