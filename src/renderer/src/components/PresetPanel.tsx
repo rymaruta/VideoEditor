@@ -1,17 +1,36 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore, CaptionPreset, SePreset } from '../store/presetStore'
 import { useSfxDictionaryStore } from '../store/sfxDictionaryStore'
 import { formatIpcError } from '../lib/ipcError'
+import { toFileUrl } from '../lib/previewSource'
 import { KeywordSeModal } from './KeywordSeModal'
-import { PlusIcon, TrashIcon, TypeIcon, MusicIcon, StarIcon, WandIcon } from './icons'
+import {
+  PlusIcon,
+  TrashIcon,
+  TypeIcon,
+  MusicIcon,
+  StarIcon,
+  WandIcon,
+  PlayIcon,
+  PauseIcon
+} from './icons'
 
 // Presets and the SE dictionary live in localStorage, outside the project's undo
 // history — deleting one is permanent, so a single click on a small trash icon
 // must not be the whole interaction.
 function confirmDeletePreset(label: string): boolean {
   return confirm(`「${label}」を削除しますか?この操作は元に戻せません。`)
+}
+
+/**
+ * 試聴に失敗したときの文面。**2つの経路(`play()` の失敗と要素の `error`)で同じ文を出す。**
+ * 別々に書くと、同じ原因なのに押し方で違う文が出る。
+ */
+function previewFailedMessage(name?: string): string {
+  const target = name ? `「${name}」` : 'この効果音'
+  return `${target}を再生できませんでした。ファイルが移動・削除されていないか確認してください`
 }
 
 export function PresetPanel(): React.JSX.Element {
@@ -32,6 +51,12 @@ export function PresetPanel(): React.JSX.Element {
 
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * 試聴中のお気に入りの id。**追加ボタンの `busyId` とは分けている**——
+   * 同じ入れ物を使うと、試聴しているだけで隣の「追加」まで押せなくなる。
+   */
+  const [playingId, setPlayingId] = useState<string | null>(null)
+  const previewAudioRef = useRef<HTMLAudioElement>(null)
   const [newKeyword, setNewKeyword] = useState('')
   const [newEntrySePresetId, setNewEntrySePresetId] = useState('')
   const [showKeywordSeModal, setShowKeywordSeModal] = useState(false)
@@ -53,6 +78,79 @@ export function PresetPanel(): React.JSX.Element {
       source: 'manual'
     })
   }
+
+  /**
+   * お気に入りの効果音を、**タイムラインに置かずに**その場で鳴らす。
+   *
+   * 「BGM/SE」タブの試聴は `downloadAudioAsset` で落としてから鳴らすが、
+   * お気に入りは登録済みの `filePath` を既に持っているので、そのまま読ませる。
+   * (ここを同じ経路にすると、ローカルのファイルをわざわざコピーしに行くことになる)
+   *
+   * **プロジェクトには一切触らない。** 追加と違ってクリップも素材も作らないので、
+   * 取り消し履歴も動かない——試聴のたびに Undo が1つ積まれる、を起こさないこと。
+   *
+   * 鳴らす要素は1枚だけ使い回す。別のお気に入りを押したら前の音は自動で止まる
+   * (2つ同時に鳴ると、どちらの音を聴いているのか分からなくなる)。
+   */
+  async function handlePreviewSe(preset: SePreset): Promise<void> {
+    const el = previewAudioRef.current
+    if (!el) return
+    setError(null)
+    // 鳴っているものをもう一度押したら止める(トグル)
+    if (playingId === preset.id) {
+      el.pause()
+      setPlayingId(null)
+      return
+    }
+    try {
+      // `file://` + そのままのパスだと、空白や `#` を含むファイル名で読めない。
+      // 組み立ては `toFileUrl` に任せる(プレビューの映像・音声と同じ関数)。
+      el.src = toFileUrl(preset.filePath)
+      el.currentTime = 0
+      setPlayingId(preset.id)
+      await el.play()
+    } catch {
+      // **生の英語を後ろに足さない。** `play()` が返すのは
+      // 「Failed to load because no supported source was found.」のような
+      // ブラウザの文言で、日本語の前置きを付けても利用者の次の一手は増えない
+      // (増えるのは読む量だけ)。原因の切り分けに要る情報はここには無い。
+      setPlayingId(null)
+      setError(previewFailedMessage(preset.name))
+    }
+  }
+
+  /**
+   * 別のタブへ移ったら試聴を止める。
+   *
+   * **タブは付け替えではなく `display: none` の出し分け**なので、切り替えても
+   * このパネルは**居たまま**で、`useEffect` の後片付けも走らない。実測: 鳴らしたまま
+   * 「書き出し」タブへ移ると、パネルは画面から消えているのに
+   * `presetAudio: 1 / playingAnywhere: 1`——**音だけ鳴り続けていた**。
+   * 見えなくなったことを自分で気付く必要があるので、枠を見張って
+   * 表示されなくなったら止める(`display: none` の要素は交差しない)。
+   * 上位から「今どのタブか」を渡す形にしなかったのは、この1画面のために
+   * 親の受け渡しを増やさないため。
+   */
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    // 後片付けで `ref.current` を読むと、そのときには別の要素を指しているかもしれない。
+    // 試聴用の `<audio>` は常に描いているので、ここで捕まえた1枚を使い続けてよい。
+    const audio = previewAudioRef.current
+    const stop = (): void => {
+      audio?.pause()
+      setPlayingId(null)
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => !e.isIntersecting)) stop()
+    })
+    observer.observe(panel)
+    return () => {
+      observer.disconnect()
+      stop()
+    }
+  }, [])
 
   async function handleAddSe(preset: SePreset): Promise<void> {
     setBusyId(preset.id)
@@ -85,7 +183,7 @@ export function PresetPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="panel preset-panel">
+    <div className="panel preset-panel" ref={panelRef}>
       <div className="panel-header">
         <h2>マイプリセット</h2>
       </div>
@@ -148,6 +246,18 @@ export function PresetPanel(): React.JSX.Element {
           効果音(SE)お気に入り
         </h3>
         {sePresets.length === 0 && <p className="hint-text">まだ登録されていません。</p>}
+        {/* 試聴用の1枚。鳴り終わったら再生中の印を戻す(押しっぱなしの見た目にしない)。
+            読み込めなかったときは `play()` の失敗を待たずにここで拾う——ファイルが
+            無いと `play()` が解決してしまい、無言で「再生中」のまま止まることがある。 */}
+        <audio
+          ref={previewAudioRef}
+          style={{ display: 'none' }}
+          onEnded={() => setPlayingId(null)}
+          onError={() => {
+            setError(previewFailedMessage(sePresets.find((p) => p.id === playingId)?.name))
+            setPlayingId(null)
+          }}
+        />
         {sePresets.map((preset) => (
           <div key={preset.id} className="preset-item">
             <div className="preset-item-info">
@@ -157,6 +267,21 @@ export function PresetPanel(): React.JSX.Element {
               </span>
             </div>
             <div className="preset-item-actions">
+              <button
+                className="icon-button"
+                title={
+                  playingId === preset.id
+                    ? '試聴を止める'
+                    : 'タイムラインに置かずに、この効果音を鳴らして確かめる'
+                }
+                onClick={() => handlePreviewSe(preset)}
+              >
+                {playingId === preset.id ? (
+                  <PauseIcon width={13} height={13} />
+                ) : (
+                  <PlayIcon width={13} height={13} />
+                )}
+              </button>
               <button
                 className="icon-button"
                 title="現在の再生位置に効果音を追加(音声トラック「SE」。その位置が埋まっていれば重ならない直後へずらします)"

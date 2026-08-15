@@ -1,9 +1,19 @@
 import type { MediaAsset } from '@shared/types'
 
+/**
+ * ファイルのパスを `file://` の URL にする。
+ *
+ * `encodeURI` は **`#` と `?` を残す**。どちらも URL では区切り記号なので、
+ * `Hit #3.mp3` は `file:///…/Hit%20#3.mp3` になり、`#3` から先が**断片指定**として
+ * 切り落とされて**そのファイルは読めない**(エラーは出ず、無言で鳴らない/映らない)。
+ * 効果音ライブラリのファイル名は `\ / : * ? " < > |` しか伏せ字にしないので、
+ * **`#` を含む名前はそのままここへ来る**(Freesound の「Hit #3」など)。
+ * `encodeURI` の後ろでこの2つだけ追加で伏せる。
+ */
 export function toFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/')
   const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`
-  return `file://${encodeURI(withSlash)}`
+  return `file://${encodeURI(withSlash).replace(/#/g, '%23').replace(/\?/g, '%3F')}`
 }
 
 /**
