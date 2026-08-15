@@ -20,6 +20,42 @@ export const DUCKING = {
   releaseMs: 250
 } as const
 
+/**
+ * 「本編の音」に数える音声クリップかどうか。
+ *
+ * ダッキングが下げる相手を決める基準は**本編がしゃべっているか**なので、
+ * 「本編の音」がどこにあるかを画面と書き出しがそれぞれ決め打ちしてはいけない。
+ * 音声分離(`audioDetached`)を使うと、本編クリップの音声は**音声トラックへ移る**
+ * (移った先のクリップは `linkedClipId` で本編クリップに紐付き、位置も速度も追従する)。
+ * 移ったことを見ていないと、画面は `muted` の `<video>`、書き出しは `anullsrc` の枝を
+ * 測ることになり、**どちらも無音を測って一度も反応しなくなる**
+ * (実測: 書き出しの下がり幅 6.90dB → -0.70dB、画面の倍率 0.1526/0.9924 → 1.0000/1.0000)。
+ *
+ * リンクが外れたクリップ(利用者が手で動かした・分割した)は、もう本編の音ではなく
+ * ただの音声素材なので数えない。
+ */
+export function isMainVoiceClip(clip: { linkedClipId?: string }): boolean {
+  return Boolean(clip.linkedClipId)
+}
+
+/**
+ * 複数の測り口の実効値を1つにまとめる。
+ *
+ * 無相関な音を重ねたときの実効値は**二乗和の平方根**(電力が足し算になる)。
+ * 単純な足し算にすると、同じ音を2箇所から測っただけで 2倍(+6dB)に見えてしまう。
+ * 数でない値は 0 として捨てる(1つ混ざるだけで全体が NaN になり、
+ * BGM が下がりっぱなしにも上がりっぱなしにもなり得る)。
+ */
+export function combineLevels(levels: ArrayLike<number>): number {
+  let sum = 0
+  for (let i = 0; i < levels.length; i++) {
+    const v = levels[i]
+    if (!Number.isFinite(v)) continue
+    sum += v * v
+  }
+  return Math.sqrt(sum)
+}
+
 /** 書き出しのフィルタ式。数字を直接書かず、必ずここから組み立てる。 */
 export function duckingFilterArgs(): string {
   return `sidechaincompress=threshold=${DUCKING.threshold}:ratio=${DUCKING.ratio}:attack=${DUCKING.attackMs}:release=${DUCKING.releaseMs}`

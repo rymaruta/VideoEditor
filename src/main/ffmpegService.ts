@@ -18,7 +18,7 @@ import { buildAssContent } from './assSubtitle'
 import { measureWideAdvances } from './fontMetrics'
 import { effectiveTransitionSeconds } from '@shared/transition'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
-import { duckingFilterArgs } from '@shared/ducking'
+import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
 import { scaleToFrameFilter } from '@shared/videoFrame'
 import { frameCountForDuration, targetFrameRate } from '@shared/frameRate'
@@ -874,6 +874,19 @@ export async function exportProject(options: ExportOptions): Promise<void> {
 
       // --- Extra audio tracks (BGM / narration) mixed on top of the main audio ---
       const perTrackAudio: { label: string; duck: boolean }[] = []
+      /**
+       * 「本編の音」のうち、**音声トラックへ移っているぶん**の枝。
+       *
+       * 音声分離(`audioDetached`)を使うと、本編クリップの音声の枝は `anullsrc`
+       * (デジタル無音)になり、実際の声は `linkedClipId` を持つ音声クリップへ移る。
+       * サイドチェインの入力を `curA` に決め打ちすると、**無音を測ることになり
+       * `sidechaincompress` が一度も反応しない**(設定は ON のまま、下がり幅 0)。
+       */
+      const mainVoiceLabels: string[] = []
+      // 枝を割るかどうかは**サイドチェインが要るときだけ**。ダッキングを使っていない
+      // プロジェクトの枝は1本も変えない(割った出力を誰も受け取らないと、
+      // `Error binding filtergraph inputs/outputs` で書き出しごと落ちる)。
+      const duckingInUse = project.audioTracks.some((t) => t.duckingEnabled && !t.muted)
       project.audioTracks.forEach((track, trackIdx) => {
         if (track.muted) return
         const clipLabels: string[] = []
@@ -911,6 +924,15 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               `volume=${clipVolume},${adelayFilter(delayMs)},` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
           )
+          if (duckingInUse && isMainVoiceClip(trackClip)) {
+            // 分離された本編の音。**出力へ混ぜる枝とサイドチェインへ渡す枝の2本**に割る
+            // (同じラベルを2箇所へ繋ぐことはできない)。測るのは音量・フェードを
+            // 通したあと——利用者が声を小さくしたら、下がり方もそのぶん弱くなるのが正しい。
+            filterParts.push(`[${label}]asplit=2[${label}_mix][${label}_voice]`)
+            mainVoiceLabels.push(`${label}_voice`)
+            clipLabels.push(`${label}_mix`)
+            return
+          }
           clipLabels.push(label)
         })
         if (clipLabels.length === 0) return
@@ -929,17 +951,39 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       const duckTracks = perTrackAudio.filter((t) => t.duck)
       let mainAudioForMix = curA
       if (duckTracks.length > 0) {
-        const splitOutputs = [
-          `[${curA}_mixcopy]`,
-          ...duckTracks.map((_, i) => `[${curA}_duck${i}]`)
-        ]
-        filterParts.push(`[${curA}]asplit=${duckTracks.length + 1}${splitOutputs.join('')}`)
-        mainAudioForMix = `${curA}_mixcopy`
+        // サイドチェインに渡すのは「本編の音」= 本編クリップの音声 + 分離された音声クリップ。
+        // 分離が無ければ枝は今までと1本も変わらない(`mainVoiceLabels` が空)。
+        if (mainVoiceLabels.length > 0) {
+          filterParts.push(`[${curA}]asplit=2[${curA}_mixcopy][${curA}_voice]`)
+          mainAudioForMix = `${curA}_mixcopy`
+          const voiceInputs = [`[${curA}_voice]`, ...mainVoiceLabels.map((l) => `[${l}]`)].join('')
+          // 尺は本編に合わせる(`duration=first`)。分離音声はその一部にしか無い。
+          filterParts.push(
+            `${voiceInputs}amix=inputs=${mainVoiceLabels.length + 1}:duration=first:` +
+              `dropout_transition=0:normalize=0,${AUDIO_FORMAT}[mainvoice]`
+          )
+          filterParts.push(
+            `[mainvoice]asplit=${duckTracks.length}` +
+              duckTracks.map((_, i) => `[${curA}_duck${i}]`).join('')
+          )
+        } else {
+          const splitOutputs = [
+            `[${curA}_mixcopy]`,
+            ...duckTracks.map((_, i) => `[${curA}_duck${i}]`)
+          ]
+          filterParts.push(`[${curA}]asplit=${duckTracks.length + 1}${splitOutputs.join('')}`)
+          mainAudioForMix = `${curA}_mixcopy`
+        }
         duckTracks.forEach((t, i) => {
           const duckedLabel = `${t.label}_ducked`
           filterParts.push(`[${t.label}][${curA}_duck${i}]${duckingFilterArgs()}[${duckedLabel}]`)
           t.label = duckedLabel
         })
+      } else {
+        // 「ダッキングを使っている」と見て枝を割ったのに、下げる相手が1本も残らなかった
+        // (そのトラックにクリップが無い・素材が見つからない)。**割った出力は必ず誰かが
+        // 受け取らなければならない**ので、ここで捨てる。
+        mainVoiceLabels.forEach((label) => filterParts.push(`[${label}]anullsink`))
       }
 
       const extraAudioLabels = perTrackAudio.map((t) => t.label)

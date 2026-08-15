@@ -14,7 +14,13 @@ import { pipMarginPx } from '@shared/pipLayout'
 import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { karaokeWords } from '@shared/captionWords'
 import { blurSigmaFor } from '@shared/videoFrame'
-import { duckTargetGain, rmsOf, smoothDuckGain } from '@shared/ducking'
+import {
+  combineLevels,
+  duckTargetGain,
+  isMainVoiceClip,
+  rmsOf,
+  smoothDuckGain
+} from '@shared/ducking'
 import { crossfadeOpacity, effectiveTransitionSeconds } from '@shared/transition'
 import { cropPreviewStyle } from '../lib/cropPreview'
 import { overlayBoxStyle } from '../lib/overlayBox'
@@ -419,6 +425,27 @@ function getSharedAudioContext(): AudioContext | null {
  * 1倍以下しか使わない利用者の経路は、これまでと1バイトも変わらない。
  */
 function attachGainNode(el: HTMLAudioElement): GainNode | null {
+  const nodes = attachAudioNodes(el)
+  if (!nodes) return null
+  // 以後の音量は GainNode 側が持つ。要素側は素通しにしておく。
+  el.volume = MEDIA_ELEMENT_MAX_VOLUME
+  return nodes.gain
+}
+
+/**
+ * 1つの再生要素に対して作る WebAudio のノード一式。
+ *
+ * `createMediaElementSource` は**要素につき1回しか呼べず、2回目は必ず投げる**。
+ * 音量用の `GainNode` と、ダッキングの測定用の `AnalyserNode` は**同じ要素に両方
+ * 要ることがある**(分離した本編の音声を、聞かせながら測る)ので、
+ * 作った `source` を要素ごとに覚えておいて使い回す。
+ */
+type ElementAudioNodes = { source: MediaElementAudioSourceNode; gain: GainNode }
+const audioNodesByElement = new WeakMap<HTMLMediaElement, ElementAudioNodes>()
+
+function attachAudioNodes(el: HTMLMediaElement): ElementAudioNodes | null {
+  const existing = audioNodesByElement.get(el)
+  if (existing) return existing
   const ctx = getSharedAudioContext()
   if (!ctx) return null
   try {
@@ -426,9 +453,9 @@ function attachGainNode(el: HTMLAudioElement): GainNode | null {
     const gain = ctx.createGain()
     source.connect(gain)
     gain.connect(ctx.destination)
-    // 以後の音量は GainNode 側が持つ。要素側は素通しにしておく。
-    el.volume = MEDIA_ELEMENT_MAX_VOLUME
-    return gain
+    const nodes = { source, gain }
+    audioNodesByElement.set(el, nodes)
+    return nodes
   } catch {
     return null
   }
@@ -447,6 +474,21 @@ const duckGainRef = { current: 1 }
 
 /** 測定の窓。`analyser.fftSize` と読み出しバッファで同じ値を使う。 */
 const DUCK_FFT_SIZE = 1024
+
+/**
+ * 「本編の音」のうち、**音声トラックへ移っているぶん**の測り口。
+ *
+ * 音声分離を使うと本編の `<video>` は `muted` になり、声は `linkedClipId` を持つ
+ * 音声クリップの `<audio>` へ移る。本編の要素だけを測っていると**無音を測る**ことになり、
+ * ダッキングは掛かったまま一度も反応しない(倍率 1.0000 のまま)。
+ * 書き出し側と同じ「本編の音 = 本編クリップの音声 + `linkedClipId` を持つ音声クリップ」に
+ * するため、リンク付きのクリップが自分の測り口をここへ置く。
+ *
+ * `gain` は**マスター音量を除いた**倍率(トラック音量 × クリップ音量 × フェード)。
+ * 測っているのは `el.volume` を通す前の生の波形なので、書き出しと同じ大きさに直すために
+ * ここで掛ける。試聴の音量でダッキングの強さが変わってはいけない。
+ */
+const mainVoiceProbes = new Set<{ analyser: AnalyserNode; gain: () => number }>()
 
 /**
  * 本編の音声レベルを測って、ダッキングの倍率を配り続ける。
@@ -533,19 +575,29 @@ function useMainAudioDucking(
       const dt = now - last
       last = now
       const analyser = analyserForCurrentElement()
-      if (!analyser) {
+      if (!analyser && mainVoiceProbes.size === 0) {
         // 付け替えられない間は今までどおり素通し(ダッキングなし)。
         duckGainRef.current = 1
         duckAppliers.forEach((apply) => apply(1))
         frame = requestAnimationFrame(tick)
         return
       }
-      analyser.getFloatTimeDomainData(buffer)
       // 測っているのは**試聴の音量を掛けたあと**の波形(要素の volume はノードより手前)。
       // 書き出しのダッキングは試聴音量と無関係なので、掛かっていたぶんを割り戻す。
       // ミュート中は本編の大きさが分からないので、掛けない(倍率1)。
       const monitor = mutedRef.current ? 0 : volumeRef.current
-      const level = monitor > 0 ? rmsOf(buffer) / monitor : 0
+      const levels: number[] = []
+      if (analyser && monitor > 0) {
+        analyser.getFloatTimeDomainData(buffer)
+        levels.push(rmsOf(buffer) / monitor)
+      }
+      // 分離された本編の音声を足す。**二重には数えない**——分離中の `<video>` は
+      // `muted` なので上の測定は 0 になり、分離していなければリンク付きのクリップが無い。
+      mainVoiceProbes.forEach((probe) => {
+        probe.analyser.getFloatTimeDomainData(buffer)
+        levels.push(rmsOf(buffer) * probe.gain())
+      })
+      const level = combineLevels(levels)
       const target = mutedRef.current ? 1 : duckTargetGain(level)
       duckGainRef.current = smoothDuckGain(duckGainRef.current, target, dt)
       duckAppliers.forEach((apply) => apply(duckGainRef.current))
@@ -569,6 +621,7 @@ function AudioTrackClipLayer({
   trackVolume,
   trackMuted,
   trackDucking,
+  isMainVoice,
   playheadTime,
   isPlaying,
   masterVolume,
@@ -579,6 +632,8 @@ function AudioTrackClipLayer({
   trackVolume: number
   trackMuted: boolean
   trackDucking: boolean
+  /** 分離された本編の音声で、いまダッキングが測り口を必要としているか */
+  isMainVoice: boolean
   playheadTime: number
   isPlaying: boolean
   masterVolume: number
@@ -617,11 +672,11 @@ function AudioTrackClipLayer({
   )
   // 音量の式は書き出しと同じ共通モジュール。マスター音量は「試聴の音量」なので
   // 画面側にだけ掛ける(書き出しには入れない)。
-  const effectiveVolume = Math.max(
-    0,
-    masterVolume * audioClipGain(trackVolume, clip.volume) * fadeGain
-  )
+  const exportGain = Math.max(0, audioClipGain(trackVolume, clip.volume) * fadeGain)
+  const effectiveVolume = Math.max(0, masterVolume * exportGain)
   const gainNodeRef = useRef<GainNode | null>(null)
+  // ダッキングの測定に渡す「書き出しと同じ大きさ」の倍率(マスター音量を含まない)
+  const exportGainRef = useRef(exportGain)
 
   // 素の倍率(ダッキング前)を毎フレームの適用側から読めるようにしておく。
   // state にすると測定ループのたびに再描画が走る。
@@ -644,15 +699,39 @@ function AudioTrackClipLayer({
     if (!el) return
     el.muted = masterMuted || trackMuted
     // 一度 GainNode に付け替えたら、以後は必ずそちらで音量を持つ(戻せないため)。
-    if (!gainNodeRef.current && needsWebAudioGain(effectiveVolume)) {
+    // 分離した本編の音声は**測るために必ず付け替える**——付けないと要素側の `volume` に
+    // 音量が乗り、測った波形に試聴音量やクリップ音量が二重に掛かる。
+    if (!gainNodeRef.current && (needsWebAudioGain(effectiveVolume) || isMainVoice)) {
       gainNodeRef.current = attachGainNode(el)
     }
     if (gainNodeRef.current) void getSharedAudioContext()?.resume()
     baseGainRef.current = effectiveVolume
+    exportGainRef.current = exportGain
     // ダッキング中は測定ループが毎フレーム掛け直すので、ここでは素の倍率だけ入れる
     // (掛け算の相手は applyGain が持っている)。
     applyGain(duckGainRef.current)
-  }, [effectiveVolume, masterMuted, trackMuted])
+  }, [effectiveVolume, exportGain, masterMuted, trackMuted, isMainVoice])
+
+  // 分離された本編の音声は、鳴らしながら測り口を出す(書き出しのサイドチェインと同じ集合)。
+  // リンクが外れたクリップ・ダッキングを使っていないときは登録しないので、
+  // その経路は今までと1バイトも変わらない。
+  useEffect(() => {
+    if (!isMainVoice) return
+    const el = ref.current
+    if (!el) return
+    const ctx = getSharedAudioContext()
+    const nodes = attachAudioNodes(el)
+    if (!ctx || !nodes) return
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = DUCK_FFT_SIZE
+    nodes.source.connect(analyser)
+    const probe = { analyser, gain: (): number => exportGainRef.current }
+    mainVoiceProbes.add(probe)
+    return () => {
+      mainVoiceProbes.delete(probe)
+      analyser.disconnect()
+    }
+  }, [isMainVoice])
 
   // ダッキングが有効なトラックだけ、測定ループの配信先に登録する。
   // 有効でないトラックの経路は今までと同じ(登録しないので誰も触らない)。
@@ -1241,6 +1320,7 @@ export function PreviewPlayer(): React.JSX.Element {
                       trackVolume={track.volume}
                       trackMuted={track.muted}
                       trackDucking={track.duckingEnabled}
+                      isMainVoice={isMainVoiceClip(clip) && duckingInUse}
                       playheadTime={playheadTime}
                       isPlaying={isPlaying}
                       masterVolume={volume}
