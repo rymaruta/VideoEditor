@@ -104,6 +104,57 @@ export function saveProjectFile(filePath: string, project: Project): void {
   }
 }
 
+/**
+ * 読み込みが失敗したときの、Node のエラーコードごとの日本語。
+ *
+ * **上の保存側と対になる表。** 片方を直したらもう片方も見ること
+ * (`SAVE_ERROR_MESSAGES` と重なるのは「見つからない」「権限」「使用中」の3行だが、
+ * 書けないのか読めないのかで利用者の次の一手が違うので文言は分けてある)。
+ */
+const LOAD_ERROR_MESSAGES: [RegExp, string][] = [
+  [/^(ENOENT|ENOTDIR)$/, 'ファイルが見つかりません。移動または削除された可能性があります'],
+  [/^(EACCES|EPERM)$/, 'このファイルを読み込む権限がありません'],
+  [/^EISDIR$/, '指定された場所はフォルダです。プロジェクトファイル(.veproj)を選んでください'],
+  [/^EBUSY$/, 'ファイルが他のアプリで使用中です'],
+  [/^ENAMETOOLONG$/, 'ファイルの場所が長すぎて開けません'],
+  [/^(EIO|ENXIO|ENODEV)$/, 'ファイルを読み取れませんでした。ディスクや接続を確認してください']
+]
+
+/**
+ * 読み込みの失敗を、利用者に見せられる短い日本語にする。
+ *
+ * **「無い」「壊れている」だけを日本語にしていて、`readFileSync` そのものの失敗は
+ * 生のままだった。** 同じファイルの `saveProjectFile` はコード別の表を持っているのに、
+ * 対になる読み込み側はここだけ抜けていた——**逆方向を対にしたつもりで、
+ * 後から片方にだけ表が育った**形。
+ *
+ * 入口は**最近使ったプロジェクト一覧**。ダイアログを通さずに覚えていたパスを直接開くので、
+ * ファイルが別の物に置き換わっていることがある。しかも一覧の「見つかりません」印は
+ * `existsSync` で付けるので、**同じ名前のフォルダができていると「在る」と判定されて
+ * 印すら付かない**。
+ * (実測: そのパスがフォルダのとき、画面に出るのは
+ *  **`EISDIR: illegal operation on a directory, read`——46文字・日本語なし**。
+ *  同じ状況で `probeMedia` は 35文字の日本語、保存の失敗は 158文字の日本語で出ており、
+ *  IPC 21経路のうち生の英語が出るのはここだけだった)
+ *
+ * 見慣れない原因は**捨てずに**、1行にして長さで切って残す(保存側と同じ扱い)。
+ */
+function describeLoadFailure(filePath: string, e: unknown): Error {
+  const code =
+    typeof (e as { code?: unknown } | null)?.code === 'string' ? (e as { code: string }).code : ''
+  if (code) {
+    for (const [pattern, message] of LOAD_ERROR_MESSAGES) {
+      if (pattern.test(code)) {
+        return new Error(`プロジェクトファイルを開けませんでした。${message}: ${filePath}`)
+      }
+    }
+  }
+  const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, ' ').trim()
+  const detail =
+    raw.length > MAX_SAVE_DETAIL_LENGTH ? `${raw.slice(0, MAX_SAVE_DETAIL_LENGTH)}…` : raw
+  return new Error(`プロジェクトファイルを開けませんでした: ${detail}`)
+}
+
 export function loadProjectFile(filePath: string): Project {
   // 最近使った一覧から開くと、移動・削除されたファイルを指すことがある。ここで止めないと
   // 「ENOENT: no such file or directory, open '/...'」という生のエラーがそのまま画面に出る。
@@ -112,7 +163,14 @@ export function loadProjectFile(filePath: string): Project {
       `プロジェクトファイルが見つかりません。移動または削除された可能性があります: ${filePath}`
     )
   }
-  const raw = readFileSync(filePath, 'utf-8')
+  let raw: string
+  try {
+    raw = readFileSync(filePath, 'utf-8')
+  } catch (e) {
+    // 存在は確かめたのに読めない——フォルダだった・権限が無い・他のアプリが掴んでいる・
+    // ネットワークドライブが切れた。**どれも `existsSync` は通る。**
+    throw describeLoadFailure(filePath, e)
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
