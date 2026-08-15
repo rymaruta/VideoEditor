@@ -2595,10 +2595,23 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         outPoint: p.end,
         speed: 1
       }))
+      // **今のタイムラインを丸ごと置き換える＝今のクリップを全部消すということ。**
+      // 消す経路(`removeClip` / `removeClips` / 素材の削除 / 断片への置き換え)は
+      // どれも紐づいた分離音声を一緒に連れていくのに、ここだけ `audioTracks` を
+      // そのまま持ち越していた。持ち越すと、リンク先が消えたぶんはミラーが
+      // リンクだけ外し、**クリップは古い絶対位置に居座る**——つまり
+      // **カットで捨てたはずの音が、新しい絵の上でそのまま鳴る**。
+      // (実測: 0.5秒にだけビープがある8秒の素材で音声を分離し、無音の 4〜6秒を
+      //  1本だけ採用して書き出すと、2秒の出力に **0.479〜0.598秒のビープ
+      //  (max -9.0dB)** が入っていた。本来は全域が無音。直すと -91.0dB)
+      // 利用者が手で動かした音声(リンクを外したもの)は残す——`removeLinkedAudioFor`
+      // が見るのは `linkedClipId` が生きているものだけ。
+      const removedClipIds = new Set(state.project.clips.map((c) => c.id))
       const project: Project = {
         ...state.project,
         aspectRatio: '9:16',
-        clips
+        clips,
+        audioTracks: removeLinkedAudioFor(state.project.audioTracks, removedClipIds)
       }
       const total = totalDuration(project)
       const overlays: TextOverlay[] = template.segments.map((segment, i) => {
