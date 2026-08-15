@@ -102,6 +102,26 @@ export function toTimelineSeconds(sourceSeconds: number, speed?: number): number
 }
 
 /**
+ * タイムライン上の秒数を、そのクリップの**素材の秒数**へ直す(`toTimelineSeconds` の逆)。
+ *
+ * **切る位置は必ずこの向きの換算が要る。** 利用者が押すのはタイムライン上の位置で、
+ * `inPoint`/`outPoint` は素材の秒だからで、等倍のクリップでだけ両者が一致する。
+ * 同じ式が分割の経路に3つ(本編・音声レーン・分離音声)あり、**そのうち1つだけ
+ * 掛け忘れていた**ので、規則はここ1箇所に置く。
+ * (実測: 素材8秒を0.5倍速(タイムライン16秒)にして音声を分離し、タイムライン12秒で
+ *  分割すると、分離音声側だけ切る位置が素材 12秒と算出される。素材は8秒しか無いので
+ *  「範囲外なので切らない」に落ち、**後半のクリップだけ紐づく音声が無くなる**——
+ *  後半は `audioDetached` のままなので書き出しは無音になり、素材7秒にあったビープが
+ *  出力から丸ごと消えていた。掛け直すと素材6秒で正しく割れる)
+ *
+ * 速度が未設定・0以下・数値でないときは等倍として扱う(`toTimelineSeconds` と同じ規則)。
+ */
+export function toSourceSeconds(timelineSeconds: number, speed?: number): number {
+  const rate = Number.isFinite(speed) && (speed as number) > 0 ? (speed as number) : 1
+  return timelineSeconds * rate
+}
+
+/**
  * 音声クリップがタイムライン上で占める秒数。速度を掛けたぶん短く(長く)なる。
  * 素材の秒数(`outPoint - inPoint`)とは別物なので、尺を測るときは必ずこちらを使う。
  */

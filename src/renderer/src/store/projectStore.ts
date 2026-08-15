@@ -1,7 +1,12 @@
 import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { sameProjectContent } from '../lib/projectEquality'
-import { audioClipDuration, buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
+import {
+  audioClipDuration,
+  buildTimedClips,
+  findFreeAudioStart,
+  toSourceSeconds
+} from '../lib/timelineMath'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
 import { dropOrphanClips, orphanCleanupMessage } from '../lib/orphanClips'
 import { clampBpm } from '../lib/beatGrid'
@@ -1506,7 +1511,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           secondHalfId = uuid()
           splitOriginal = c
           const speed = c.speed || 1
-          const splitLocal = c.inPoint + (absoluteTime - elapsed) * speed
+          const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - elapsed, speed)
           clips.push({ ...c, outPoint: splitLocal })
           splitParts.push({ ...c, outPoint: splitLocal })
           // Spread the source clip so per-clip settings that aren't listed here
@@ -1537,7 +1542,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           ...t,
           clips: t.clips.flatMap((c) => {
             if (c.linkedClipId !== clipId) return [c]
-            const splitLocal = c.inPoint + (absoluteTime - c.startTime)
+            // **タイムライン秒 → 素材秒は速度を掛ける。** 掛け忘れると、スロー再生の
+            // クリップで切る位置が素材の外へ出て「範囲外なので切らない」に落ち、
+            // 後半のクリップだけ紐づく音声が無くなる(理由は toSourceSeconds)。
+            const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - c.startTime, c.speed)
             if (splitLocal <= c.inPoint || splitLocal >= c.outPoint) return [c]
             return [
               { ...c, outPoint: splitLocal },
@@ -2241,8 +2249,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             const dur = audioClipDuration(c)
             if (absoluteTime <= c.startTime || absoluteTime >= c.startTime + dur) return [c]
             didSplit = true
-            // タイムライン秒 → 素材秒は速度を掛ける。
-            const splitLocal = c.inPoint + (absoluteTime - c.startTime) * (c.speed || 1)
+            // タイムライン秒 → 素材秒は速度を掛ける(規則は toSourceSeconds)。
+            const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - c.startTime, c.speed)
             // フェードを両方へそのまま配ると、切れ目で音が一度落ちてまた上がる。
             // 全体の出入りが変わらないよう、前半にフェードイン・後半にフェードアウトだけ残す。
             return [
