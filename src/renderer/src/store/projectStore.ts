@@ -1808,24 +1808,56 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })),
 
+  /**
+   * 全テロップをまとめてずらす。**頭打ちは1件ずつではなく、まとまり全体に掛ける。**
+   *
+   * `Math.max(0, o.startTime + delta)` を1件ずつ掛けると、0 にぶつかったものだけが
+   * その場に残り、**テロップ同士の間隔が壊れる**。しかも壊れるのは「動かしすぎた」
+   * ときだけなので、行き過ぎたと気付いて同じ量を逆へ適用しても**元に戻らない**。
+   * 自動テロップは1件ずつが発話に合わせた時刻を持っているので、間隔が縮んだぶん
+   * **そのテロップだけ音とずれたまま**になる。エラーも警告も出ない。
+   * (実測: 1〜3 / 5〜7 / 9〜11 の3件(間隔 4,4)を「逆方向に3秒」→
+   *  **0〜2 / 2〜4 / 6〜8(間隔 2,4)**。そのまま「正方向に3秒」で戻しても
+   *  **3〜5 / 5〜7 / 9〜11(間隔 2,4)** で、先頭が 1 秒から 3 秒へずれたまま)
+   *
+   * 動かせる量は「一番早いテロップが 0 まで下がれる分」。そこで頭打ちにすれば
+   * **全員が同じ量だけ動く**ので間隔は保たれ、逆へ適用すれば同じ量だけ戻る
+   * (0 で止めた分は原理的に戻らないが、**崩れるのは位置だけで並びは保たれる**)。
+   *
+   * 動かす量が 0 になるとき(0 秒を指定した・これ以上左へ動かせない)は
+   * **何も変えない**。同じ中身で履歴を1件積むと、取り消しを押しても
+   * 何も起きないように見えるだけになる。
+   */
   shiftAllTextOverlays: (deltaSeconds) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        textOverlays: state.project.textOverlays.map((o) => {
-          const duration = o.endTime - o.startTime
-          const startTime = Math.max(0, o.startTime + deltaSeconds)
-          return {
+    set((state) => {
+      const overlays = state.project.textOverlays
+      if (overlays.length === 0) return state
+      // 数値でない値をそのまま足すと、全テロップの時刻が NaN / Infinity になって
+      // 画面からも書き出しからも消える。入口(数値欄)は空欄を 0 にするが、
+      // `1e309` のような指数表記は `Infinity` になって通ってしまう。
+      if (!Number.isFinite(deltaSeconds) || deltaSeconds === 0) return state
+      // 一番早いテロップは `reduce` で求める。`Math.min(...arr)` は件数が増えると
+      // 引数の上限に当たりうるので、件数に依らない形にしておく。
+      const earliest = overlays.reduce(
+        (min, o) => (Number.isFinite(o.startTime) && o.startTime < min ? o.startTime : min),
+        Infinity
+      )
+      const room = Number.isFinite(earliest) ? Math.max(0, earliest) : 0
+      const shift = deltaSeconds < 0 ? Math.max(deltaSeconds, -room) : deltaSeconds
+      if (shift === 0) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          textOverlays: overlays.map((o) => ({
             ...o,
-            startTime,
-            endTime: startTime + duration,
-            // 頭打ちで動けなかった分は単語も動かさない(実際に動いた量で揃える)。
-            words: shiftOverlayWords(o.words, startTime - o.startTime)
-          }
-        })
+            startTime: o.startTime + shift,
+            endTime: o.endTime + shift,
+            words: shiftOverlayWords(o.words, shift)
+          }))
+        }
       }
-    })),
+    }),
 
   addAudioTrack: (name) =>
     set((state) => ({
