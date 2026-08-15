@@ -5,6 +5,60 @@ import type { Project } from '@shared/types'
 // 同じプロセス内で保存が重なっても衝突しない一時ファイル名を作るための連番。
 let saveSequence = 0
 
+/** 見慣れない原因を原文で残すときの上限 */
+const MAX_SAVE_DETAIL_LENGTH = 120
+
+/**
+ * 書き込みが失敗したときの、Node のエラーコードごとの日本語。
+ *
+ * **同じ形の表が `audioLibraryService` にもある**(あちらは音源のダウンロード用で、
+ * 通信の失敗が主なので文言が違う)。重なっているのは `ENOSPC` と権限系の2行だけ。
+ * 片方を直したらもう片方も見ること。
+ */
+const SAVE_ERROR_MESSAGES: [RegExp, string][] = [
+  [/^(ENOENT|ENOTDIR)$/, '保存先のフォルダが見つかりません。移動または削除された可能性があります'],
+  [/^(EACCES|EPERM|EROFS)$/, '保存先に書き込む権限がありません'],
+  [/^(ENOSPC|EDQUOT)$/, 'ディスクの空き容量が足りません'],
+  [/^ENAMETOOLONG$/, 'ファイル名が長すぎます。短い名前を付けてください'],
+  [/^EISDIR$/, '同じ名前のフォルダがあります。別の名前を付けてください'],
+  [/^EBUSY$/, 'ファイルが他のアプリで使用中です']
+]
+
+/**
+ * 保存の失敗を、利用者に見せられる短い日本語にする。
+ *
+ * **読み込みだけが日本語になっていて、保存は生のままだった。** 同じ機能の逆方向なのに、
+ * 片方にしか手当てが育っていない典型。`writeFileSync` / `renameSync` が投げるのは
+ * Node の生のシステムエラーで、そのまま画面に出ていた。
+ * (実測: 保存先のフォルダが消えていると **92文字・日本語なし**の
+ *  `ENOENT: no such file or directory, open '/…/.ve-save-7492-0.tmp'`。
+ *  フォルダのはずの場所がファイルなら 78文字の `ENOTDIR:`、保存先がフォルダなら
+ *  118文字の `EISDIR:`。同じファイルの `loadProjectFile` は3通りとも
+ *  23〜72文字の日本語で出ている)
+ *
+ * **出すのは利用者が付けたパス。** 生のエラーに載っているのは
+ * `.ve-save-<pid>-<連番>.tmp` という**利用者が一度も見たことのない名前**で、
+ * 自分が保存しようとしたファイルの名前はどこにも出てこない。アプリの不具合にしか
+ * 見えないうえ、「フォルダが消えている」という直せる原因にも辿り着けない。
+ *
+ * 見慣れない原因は**捨てずに**、1行にして長さで切って残す(唯一の手がかりになる)。
+ */
+function describeSaveFailure(filePath: string, e: unknown): Error {
+  const code =
+    typeof (e as { code?: unknown } | null)?.code === 'string' ? (e as { code: string }).code : ''
+  if (code) {
+    for (const [pattern, message] of SAVE_ERROR_MESSAGES) {
+      if (pattern.test(code)) {
+        return new Error(`プロジェクトを保存できませんでした。${message}: ${filePath}`)
+      }
+    }
+  }
+  const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, ' ').trim()
+  const detail =
+    raw.length > MAX_SAVE_DETAIL_LENGTH ? `${raw.slice(0, MAX_SAVE_DETAIL_LENGTH)}…` : raw
+  return new Error(`プロジェクトを保存できませんでした: ${detail}`)
+}
+
 /**
  * プロジェクトを保存する。**隣に書いてから rename する**。
  *
@@ -45,7 +99,8 @@ export function saveProjectFile(filePath: string, project: Project): void {
     } catch {
       /* 消せなくても、報告すべきは元の失敗のほう */
     }
-    throw e
+    // 投げるのは**元の失敗**を日本語にしたもの(後始末の失敗ではない)。
+    throw describeSaveFailure(filePath, e)
   }
 }
 
