@@ -95,6 +95,31 @@ function overflowRatio(center: number | undefined, windowFraction: number): numb
  */
 export const SQUARE_PIXEL_FILTER = "scale='iw*if(gt(sar,0),sar,1)':ih,setsar=1"
 
+/** 素材一覧に並べるサムネイルの幅(画素)。高さは素材の見える比から決まる。 */
+export const THUMBNAIL_WIDTH = 320
+
+/**
+ * 素材一覧のサムネイル用に、**枠へ収めずに比のまま縮める**フィルタ。
+ *
+ * `scaleToFrameFilter` は出力枠へ収める(足りない分を黒帯で埋める)ものなので、ここには
+ * 使えない。サムネイルは素材の形のまま小さくしたいだけ。
+ * ただし**画素を正方形に直す一手は同じく要る**——`fluent-ffmpeg` の
+ * `.screenshots({ size: '320x?' })` は `?` の高さを**符号化された画素数**から出すので、
+ * 画素が正方形でない素材だけ形が変わる。
+ * (実測: `SAR 2:1` の `640x360`〈表示は 1280x360 = 32:9〉のサムネイルは **320x180**。
+ *  本来は **320x90** で、縦に2倍伸びた絵が一覧に並んでいた。回転素材は ffmpeg が
+ *  回してから縮めるので正しく、**回転だけ通って SAR だけ落ちていた**)
+ *
+ * 高さは `-2`(偶数へ丸める)。JPEG の色差の間引きは偶数を前提にしているので、
+ * 奇数になりうる `-1` は避ける。
+ */
+export function thumbnailScaleFilter(width: number = THUMBNAIL_WIDTH): string {
+  // 幅が数でない・小さすぎるときは既定へ倒す。`scale=NaN:-2` は ffmpeg が受け付けず、
+  // **サムネイルの生成ごと失敗する**(一覧には「取り込めなかった」としか出ない)。
+  const w = Number.isFinite(width) && width >= 2 ? Math.round(width) : THUMBNAIL_WIDTH
+  return `${SQUARE_PIXEL_FILTER},scale=${w}:-2`
+}
+
 export function scaleToFrameFilter(
   w: number,
   h: number,

@@ -20,7 +20,7 @@ import { effectiveTransitionSeconds } from '@shared/transition'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
-import { SQUARE_PIXEL_FILTER, scaleToFrameFilter } from '@shared/videoFrame'
+import { SQUARE_PIXEL_FILTER, scaleToFrameFilter, thumbnailScaleFilter } from '@shared/videoFrame'
 import { frameCountForDuration, targetFrameRate } from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
@@ -226,8 +226,15 @@ export async function generateThumbnailDataUrl(
   const dir = mkdtempSync(join(tmpdir(), 've-thumb-'))
   const outFile = join(dir, 'thumb.jpg')
   const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
+  // `.screenshots({ size: '320x?' })` は使わない。`?` の高さを**符号化された画素数**から
+  // 出すので、画素が正方形でない素材だけ縦横比が変わる(理由と実測は thumbnailScaleFilter)。
+  // 組み立ては下の `generateFrameDataUrl` と同じ形にそろえる。
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
+      .inputOptions([`-ss ${seekSeconds}`])
+      .complexFilter([`[0:v]${thumbnailScaleFilter()}[v]`])
+      .outputOptions(['-map [v]', '-frames:v 1'])
+      .output(outFile)
       .on('error', (e) => {
         cleanup()
         reject(describeFfmpegError(e))
@@ -241,12 +248,7 @@ export async function generateThumbnailDataUrl(
           cleanup()
         }
       })
-      .screenshots({
-        timestamps: [seekSeconds],
-        filename: 'thumb.jpg',
-        folder: dir,
-        size: '320x?'
-      })
+      .run()
   })
 }
 
