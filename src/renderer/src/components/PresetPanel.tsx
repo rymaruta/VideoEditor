@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore, CaptionPreset, SePreset } from '../store/presetStore'
 import { useSfxDictionaryStore } from '../store/sfxDictionaryStore'
 import { formatIpcError } from '../lib/ipcError'
 import { toFileUrl } from '../lib/previewSource'
+import { usePausePreviewWhenHidden } from '../lib/pausePreviewWhenHidden'
 import { KeywordSeModal } from './KeywordSeModal'
 import {
   PlusIcon,
@@ -119,38 +120,9 @@ export function PresetPanel(): React.JSX.Element {
     }
   }
 
-  /**
-   * 別のタブへ移ったら試聴を止める。
-   *
-   * **タブは付け替えではなく `display: none` の出し分け**なので、切り替えても
-   * このパネルは**居たまま**で、`useEffect` の後片付けも走らない。実測: 鳴らしたまま
-   * 「書き出し」タブへ移ると、パネルは画面から消えているのに
-   * `presetAudio: 1 / playingAnywhere: 1`——**音だけ鳴り続けていた**。
-   * 見えなくなったことを自分で気付く必要があるので、枠を見張って
-   * 表示されなくなったら止める(`display: none` の要素は交差しない)。
-   * 上位から「今どのタブか」を渡す形にしなかったのは、この1画面のために
-   * 親の受け渡しを増やさないため。
-   */
+  // 別のタブへ移ったら試聴を止める。規則は共通の置き場(理由は pausePreviewWhenHidden)。
   const panelRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const panel = panelRef.current
-    if (!panel) return
-    // 後片付けで `ref.current` を読むと、そのときには別の要素を指しているかもしれない。
-    // 試聴用の `<audio>` は常に描いているので、ここで捕まえた1枚を使い続けてよい。
-    const audio = previewAudioRef.current
-    const stop = (): void => {
-      audio?.pause()
-      setPlayingId(null)
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((e) => !e.isIntersecting)) stop()
-    })
-    observer.observe(panel)
-    return () => {
-      observer.disconnect()
-      stop()
-    }
-  }, [])
+  usePausePreviewWhenHidden(panelRef, previewAudioRef, () => setPlayingId(null))
 
   async function handleAddSe(preset: SePreset): Promise<void> {
     setBusyId(preset.id)

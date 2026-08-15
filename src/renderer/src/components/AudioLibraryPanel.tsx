@@ -10,6 +10,7 @@ import {
   SoundEffectInfo
 } from '../lib/audioLibrary'
 import { formatIpcError } from '../lib/ipcError'
+import { usePausePreviewWhenHidden } from '../lib/pausePreviewWhenHidden'
 import {
   KeyIcon,
   SearchIcon,
@@ -43,6 +44,10 @@ export function AudioLibraryPanel(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  // 試聴を鳴らしたまま別のタブへ移ると、パネルは `display: none` で居たままなので
+  // **音だけ鳴り続ける**。見えなくなったら止める(規則は pausePreviewWhenHidden)。
+  const panelRef = useRef<HTMLDivElement>(null)
+  usePausePreviewWhenHidden(panelRef, audioRef)
 
   const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
   const addSePreset = usePresetStore((s) => s.addSePreset)
@@ -133,7 +138,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="panel audio-library-panel">
+    <div className="panel audio-library-panel" ref={panelRef}>
       <div className="panel-header">
         <h2>BGM・効果音ライブラリ</h2>
       </div>
