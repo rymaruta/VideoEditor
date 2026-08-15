@@ -461,6 +461,30 @@ function audioFormatFor(channels: number | undefined): string {
 }
 
 /**
+ * クリップを置いた位置まで音声をずらす `adelay`。**チャンネル数によらず全部ずらす。**
+ *
+ * `adelay=1000|1000` は「1ch目を1000ms、2ch目を1000ms」という**チャンネルごとの**指定で、
+ * 数が足りない残りのチャンネルは**既定でずらされない**(`all` の既定が 0)。
+ * ステレオへ畳むのはこの後ろの `audioFormatFor` なので、`adelay` の時点では
+ * **素材のチャンネル数のまま**——5.1ch の素材なら 3〜6ch目(センター・LFE・リア)だけが
+ * **0秒地点から鳴り始める**。畳んだあとはステレオに混ざって出てくるので、
+ * チャンネル数を気にしていない利用者からは「置いていない場所で音が鳴る」としか見えない。
+ * エラーも警告も出ず、尺も音量も一見まともなまま。
+ *
+ * (実測: 全チャンネルに 1kHz を入れた 5.1ch の BGM を **2秒地点**に置いて書き出すと、
+ *  無音のはずの 0〜2秒が **mean -39.8dB / max -34.8dB**。2ch の同じ素材は -91.0dB。
+ *  1.0〜1.2秒だけビープを入れた 5.1ch では、鳴る区間が **1.00秒と3.00秒の2回**になり、
+ *  ずれた4チャンネルが**2秒早いこだま**として重なっていた。直すと 3.00秒の1回だけ)
+ *
+ * `all=1` は「最後に書いた遅延を残りのチャンネル全部に使う」指定。チャンネル数を
+ * 調べなくてよいので、**数が分からなかった素材でも取りこぼさない**。
+ * 1ch・2ch では今までと同じ結果になる(余った `|` は元々無視されていた)。
+ */
+function adelayFilter(delayMs: number): string {
+  return `adelay=${delayMs}:all=1`
+}
+
+/**
  * 素材の音声チャンネル数を調べる。**書き出しを止める理由にはしない**ので、
  * 失敗しても `undefined` を返す(呼び出し側が今までどおりの経路に倒す)。
  */
@@ -756,7 +780,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             const delayMs = Math.max(0, Math.round(pipStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
             filterParts.push(
-              `[${myIndex}:a]asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs},` +
+              `[${myIndex}:a]asetpts=PTS-STARTPTS,${adelayFilter(delayMs)},` +
                 `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })
@@ -832,7 +856,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
             `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${fadeChain}` +
-              `volume=${clipVolume},adelay=${delayMs}|${delayMs},` +
+              `volume=${clipVolume},${adelayFilter(delayMs)},` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
           )
           clipLabels.push(label)
