@@ -1,5 +1,6 @@
-import { create } from 'zustand'
+import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
+import { sameProjectContent } from '../lib/projectEquality'
 import { audioClipDuration, buildTimedClips, findFreeAudioStart } from '../lib/timelineMath'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
 import { dropOrphanClips, orphanCleanupMessage } from '../lib/orphanClips'
@@ -412,6 +413,12 @@ interface ProjectState {
   project: Project
   past: Project[]
   future: Project[]
+  /**
+   * `pushHistory` が付ける目印。**この印が付いた書き込みだけ**が
+   * 「中身が変わっていなければ捨てる」関門(`skipNoOpHistory`)を通る。
+   * 関門が必ず剥がすので、ストアの中に残ることはない。
+   */
+  __historyPush?: true
   currentFilePath: string | null
   isDirty: boolean
   selectedClipId: string | null
@@ -814,22 +821,74 @@ function applyInsertedClips(project: Project, built: InsertedClips): Project {
 function pushHistory(
   state: ProjectState,
   coalesceKey?: string
-): Pick<ProjectState, 'past' | 'future' | 'isDirty'> {
+): Pick<ProjectState, 'past' | 'future' | 'isDirty' | '__historyPush'> {
   if (coalesceKey) {
     const now = Date.now()
     const continuing = lastCoalesceKey === coalesceKey && now - lastCoalesceAt < COALESCE_MS
     lastCoalesceKey = coalesceKey
     lastCoalesceAt = now
     if (continuing) {
-      return { past: state.past, future: [], isDirty: true }
+      return { __historyPush: true, past: state.past, future: [], isDirty: true }
     }
   } else {
     lastCoalesceKey = null
   }
-  return { past: [...state.past, state.project].slice(-MAX_HISTORY), future: [], isDirty: true }
+  return {
+    __historyPush: true,
+    past: [...state.past, state.project].slice(-MAX_HISTORY),
+    future: [],
+    isDirty: true
+  }
 }
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
+/**
+ * 「いまと同じ値を入れ直しただけ」の書き込みから、履歴と未保存の印を落とす関門。
+ *
+ * 押せば必ず届くボタン(選ばれている方の縦横比など)は、値が変わらなくてもアクションを
+ * 呼ぶ。すると `pushHistory` が**中身が1バイトも違わないスナップショット**を積み、
+ * `isDirty` も立つ——取り消しを押しても画面は何も変わらず(空の1件を消しているだけ)、
+ * 閉じるときの警告と自動保存だけが走り出す。
+ *
+ * 各アクションの入口に「今と同じなら return」を書くと同じ形が20箇所以上に散るので、
+ * `pushHistory` の目印を見て**ここ1箇所**で落とす。
+ * 目印の無い書き込み(新規作成・開く・自動保存の復元・取り消し/やり直し・裏で走る
+ * プロキシのパス書き込み)は**素通し**——履歴を捨てる側の操作まで捨ててしまうと、
+ * 同じ内容の企画を開き直したときに古い履歴が残る。
+ */
+function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<ProjectState> {
+  return (set, get, api) => {
+    const guardedSet: typeof set = (partial) => {
+      set((state) => {
+        const patch = (typeof partial === 'function' ? partial(state) : partial) as
+          Partial<ProjectState> | undefined
+        if (!patch || patch.__historyPush !== true) return patch as Partial<ProjectState>
+        if (!patch.project || !sameProjectContent(patch.project, state.project)) {
+          return omitKeys(patch, ['__historyPush'])
+        }
+        // 中身が同じなら、履歴・未保存・企画の差し替えを丸ごと落とす。
+        // `project` を差し替えないことで**参照も保たれる**ので、保存済み判定
+        // (`markSaved` の `state.project !== savedProject`)も巻き添えにならない。
+        const others = omitKeys(patch, ['__historyPush', 'project', 'past', 'future', 'isDirty'])
+        // 何も残らないときは `state` をそのまま返す。zustand は同じ参照なら
+        // 購読者に通知しないので、余計な再描画も起きない。
+        return Object.keys(others).length === 0 ? state : others
+      })
+    }
+    return creator(guardedSet, get, api)
+  }
+}
+
+function omitKeys(
+  patch: Partial<ProjectState>,
+  keys: readonly (keyof ProjectState)[]
+): Partial<ProjectState> {
+  const dropped = new Set<string>(keys)
+  return Object.fromEntries(
+    Object.entries(patch).filter(([key]) => !dropped.has(key))
+  ) as Partial<ProjectState>
+}
+
+const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   project: createBlankProject(),
   past: [],
   future: [],
@@ -2609,7 +2668,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         project: { ...state.project, clips: [...state.project.clips, ...newClips] }
       }
     })
-}))
+})
+
+export const useProjectStore = create<ProjectState>(skipNoOpHistory(projectStateCreator))
 
 // Detached-audio clips (linkedClipId set) must follow their source clip: the main
 // track lays clips back-to-back, so trimming/reordering/deleting ANY earlier clip
