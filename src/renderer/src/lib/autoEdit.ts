@@ -9,6 +9,7 @@ import type {
 } from '@shared/types'
 import { useEditPreferenceStore } from '../store/editPreferenceStore'
 import { STYLE_DESCRIPTIONS, STYLE_LABELS } from './autoEditStyles'
+import { beatGridFromAnalysis } from './beatGrid'
 
 interface FlatCandidate {
   assetId: string
@@ -281,7 +282,18 @@ async function detectBgmBeat(
       const duration = Math.min(BEATSYNC_ANALYZE_MAX_SECONDS, clip.outPoint - clip.inPoint)
       const result = await window.api.analyzeBpm(asset.filePath, clip.inPoint, duration)
       if (result.bpm > 0) {
-        return { bpm: result.bpm, offsetSeconds: result.offsetSeconds, assetName: asset.fileName }
+        // 解析が返すのは**素材の秒**での BPM。カット間隔も画面に出す数字も
+        // **タイムラインの秒**なので、速度を変えたクリップでは倍率ぶん食い違う
+        // (規則は `beatGridFromAnalysis`。ビートグリッドと同じ換算をここでも通す)。
+        // 実測: 120BPM の音源を速度2倍で置くと、実際に聞こえるのは 239.8BPM
+        // (書き出しのクリック間隔 0.2502秒)なのに、案の説明は「約120 BPM」と出て、
+        // カット間隔も 1.000秒(意図した2拍ぶんではなく4拍ぶん)になっていた。
+        const timeline = beatGridFromAnalysis(result, clip)
+        return {
+          bpm: timeline.bpm,
+          offsetSeconds: timeline.offsetSeconds,
+          assetName: asset.fileName
+        }
       }
     } catch {
       // Try the next audio track if BPM analysis fails for this one.
