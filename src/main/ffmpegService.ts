@@ -733,8 +733,17 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       // A crossfade must be strictly shorter than both neighbors: xfade/acrossfade
       // reject a duration exceeding either input and abort the whole encode. When a
       // neighbor is too short (e.g. a tiny split fragment), it falls back to a hard cut.
+      //
+      // 渡すのは**書き出し側の尺**(`clipExportDurations`)。この関数が言う「隣より短く
+      // しておいた」は、**渡した尺に対しての保証**でしかない。枝を1フレームに丸めて
+      // 短くしたのに画面の秒を渡すと、`acrossfade` が受け取る1本目より繋ぎのほうが
+      // 長くなり、**音声ストリームが丸ごと落ちた出力が、エラーも出さずに出来上がる**。
+      // (実測: 0.0499秒×4本 + 5秒に1秒のフェード。画面の秒だと繋ぎ 0.1496秒に対して
+      //  1本目の実長は 0.1333秒しかなく、出来上がった mp4 は**映像だけ**。書き出し側の
+      //  尺を渡すと繋ぎ 0.0833秒 < 0.1333秒 に収まり、音声が付く)
+      // 尺が整数秒なら両者は完全に同じ値なので、今までの出力は動かない。
       const transitionSeconds = effectiveTransitionSeconds(
-        clipOutputDurations,
+        clipExportDurations,
         clips.map((c) => c.transitionIn)
       )
       let curV = 'v0'
