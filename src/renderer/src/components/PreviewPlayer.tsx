@@ -1181,11 +1181,24 @@ export function PreviewPlayer(): React.JSX.Element {
                     right: 'auto'
                   }
                 : { ...horizontalInsetStyle, ...verticalAnchorStyle(o.style.position) }
-              const transforms: string[] = []
-              if (livePos) transforms.push('translate(-50%, -50%)')
-              else if (o.style.position === 'center') transforms.push('translateY(-50%)')
-              if (o.style.rotation) transforms.push(`rotate(${o.style.rotation}deg)`)
-              if (transforms.length > 0) positionStyle.transform = transforms.join(' ')
+              // **位置合わせと回転は `transform` ではなく `translate`/`rotate` に書く。**
+              // 登場アニメーション(`anim-*`)のキーフレームは `transform` を指定していて、
+              // **アニメーションの宣言はインラインの style より強い**。同じ `transform` に
+              // 書くと、走っている 0.2〜0.5 秒のあいだ**こちらの指定が丸ごと消える**。
+              // 消えるのは「中央ぞろえの -50%」「自由配置の -50%,-50%」「回転」で、
+              // どれも**位置そのもの**なので、出てくる瞬間だけ別の場所に描かれて跳ねる。
+              // (実測・枠 420x236: 中央ぞろえ+popIn は中心が縦 50% → **52.4%**、
+              //  自由配置(0.5,0.5)+popIn は **(54.26%, 52.4%)**、
+              //  自由配置(0.3,0.3)+slideInUp は **(34.26%, 39.57%)** と、
+              //  本来の (30%, 30%) から縦に **17.83%** ずれる。回転15度は
+              //  アニメ中の行列に回転成分が無く、**傾きが消えて**いた。
+              //  下ぞろえだけはインラインの指定が無いので前からズレ 0)
+              // `translate`/`rotate` は `transform` とは別のプロパティなので、
+              // キーフレームの `transform` と**掛け合わさる**(適用順は
+              // translate → rotate → transform)。CSS 側は触らない。
+              if (livePos) positionStyle.translate = '-50% -50%'
+              else if (o.style.position === 'center') positionStyle.translate = '0 -50%'
+              if (o.style.rotation) positionStyle.rotate = `${o.style.rotation}deg`
               return (
                 <div
                   key={o.id}
