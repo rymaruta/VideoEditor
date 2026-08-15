@@ -445,6 +445,9 @@ const duckAppliers = new Set<(duckGain: number) => void>()
 /** いま掛かっているダッキングの倍率。途中で生えた `<audio>` もこの値から始める */
 const duckGainRef = { current: 1 }
 
+/** 測定の窓。`analyser.fftSize` と読み出しバッファで同じ値を使う。 */
+const DUCK_FFT_SIZE = 1024
+
 /**
  * 本編の音声レベルを測って、ダッキングの倍率を配り続ける。
  *
@@ -452,6 +455,19 @@ const duckGainRef = { current: 1 }
  * 本編の音が消える——アプリの真ん中が壊れる。なので**ダッキングを実際に使っている
  * ときだけ**付け替え、失敗したら倍率1(今までどおり=ダッキングなし)に倒す。
  * 使っていない利用者の経路は1バイトも変わらない。
+ *
+ * **付け替えは effect の入口ではなく、測定ループの中で「いまの要素」に対して行う。**
+ * 入口で `videoRef.current` を1回読むだけだと、`<video>` がまだ生えていない瞬間に
+ * 走ったときに何も起きず、**二度と試されない**——ref は依存に書けないので、要素が
+ * 現れたことを effect は知れない。これは例外的な順序ではなく**保存したプロジェクトを
+ * 開いた既定の順序**で、`<video>` は `activeSrc` が入った次の描画で初めて生える。
+ * (実測: ダッキングを入れたまま保存したプロジェクトを開いて再生すると、本編が
+ *  鳴っている間も BGM の倍率は **1.0000 のまま**。ダッキングを切って入れ直すと
+ *  同じ再生で **0.599〜0.606** に下がった——設定は最初から `true` のまま)
+ * 要素は**作り直されることもある**(クリップを全部消すと `<video>` ごと消え、置き直すと
+ * 別の要素になる)。死んだ要素に付いた analyser を持ち続けると、読み取る波形が無音に
+ * なって同じく倍率1に戻る(実測: 消して置き直したあとの倍率は **1.0000**)。
+ * どちらも「いま画面にある要素に付いているか」を毎フレーム見れば起きない。
  */
 function useMainAudioDucking(
   videoRef: React.RefObject<HTMLVideoElement | null>,
@@ -460,7 +476,12 @@ function useMainAudioDucking(
   masterMuted: boolean
 ): void {
   const analyserRef = useRef<AnalyserNode | null>(null)
-  const attachFailedRef = useRef(false)
+  /**
+   * `analyserRef` がぶら下がっている要素。**付け替えを試した要素**でもある(成否は問わない)。
+   * 失敗した要素をここに残さないと、`createMediaElementSource` を毎フレーム呼び直して
+   * 2回目の呼び出しで必ず投げる。
+   */
+  const attachedElRef = useRef<HTMLVideoElement | null>(null)
   // 測定は毎フレーム走るので、最新値は ref で渡す(state にすると再描画が走る)
   const volumeRef = useRef(masterVolume)
   const mutedRef = useRef(masterMuted)
@@ -476,38 +497,49 @@ function useMainAudioDucking(
       duckAppliers.forEach((apply) => apply(1))
       return
     }
-    const el = videoRef.current
-    if (!el) return
-    if (!analyserRef.current && !attachFailedRef.current) {
+    /**
+     * いま画面にある `<video>` に付いた analyser を返す。付いていなければ付け替える。
+     * 同じ要素なら ref の比較1回で返るので、毎フレーム呼んでよい。
+     */
+    const analyserForCurrentElement = (): AnalyserNode | null => {
+      const el = videoRef.current
+      if (el === attachedElRef.current) return analyserRef.current
+      // 要素が変わった(初めて生えた / 作り直された)。前の analyser は死んだ要素のもの。
+      analyserRef.current = null
+      attachedElRef.current = el
+      if (!el) return null
       const ctx = getSharedAudioContext()
       try {
         if (!ctx) throw new Error('no audio context')
         const source = ctx.createMediaElementSource(el)
         const analyser = ctx.createAnalyser()
-        analyser.fftSize = 1024
+        analyser.fftSize = DUCK_FFT_SIZE
         source.connect(analyser)
         // **destination へも必ず繋ぐ。** 繋がないと本編の音がここで止まる。
         source.connect(ctx.destination)
         analyserRef.current = analyser
       } catch {
-        attachFailedRef.current = true
         analyserRef.current = null
       }
+      void ctx?.resume()
+      return analyserRef.current
     }
-    const analyser = analyserRef.current
-    if (!analyser) {
-      duckAppliers.forEach((apply) => apply(1))
-      return
-    }
-    void getSharedAudioContext()?.resume()
 
-    const buffer = new Float32Array(analyser.fftSize)
+    const buffer = new Float32Array(DUCK_FFT_SIZE)
     let frame = 0
     let last = performance.now()
     const tick = (): void => {
       const now = performance.now()
       const dt = now - last
       last = now
+      const analyser = analyserForCurrentElement()
+      if (!analyser) {
+        // 付け替えられない間は今までどおり素通し(ダッキングなし)。
+        duckGainRef.current = 1
+        duckAppliers.forEach((apply) => apply(1))
+        frame = requestAnimationFrame(tick)
+        return
+      }
       analyser.getFloatTimeDomainData(buffer)
       // 測っているのは**試聴の音量を掛けたあと**の波形(要素の volume はノードより手前)。
       // 書き出しのダッキングは試聴音量と無関係なので、掛かっていたぶんを割り戻す。
