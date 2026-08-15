@@ -2117,13 +2117,17 @@ export function Timeline(): React.JSX.Element {
                     key={clip.id}
                     className={`timeline-video-overlay-clip ${
                       selectedVideoOverlayClip?.clipId === clip.id ? 'selected' : ''
-                    } ${isDraggingThis ? 'dragging' : ''} ${isTrimmingThis ? 'trimming' : ''}`}
+                    } ${isDraggingThis ? 'dragging' : ''} ${
+                      isTrimmingThis ? 'trimming' : ''
+                    } tool-${editTool}`}
                     style={{
                       left: displayStart * pixelsPerSecond,
                       width: clipWidth
                     }}
                     onMouseDown={(e) => {
                       e.stopPropagation()
+                      // カミソリ中は掴ませない(音声クリップと同じ理由)。
+                      if (editTool === 'razor') return
                       setVideoOverlayDrag({
                         trackId: track.id,
                         clipId: clip.id,
@@ -2136,6 +2140,17 @@ export function Timeline(): React.JSX.Element {
                     }}
                     onClick={(e) => {
                       e.stopPropagation()
+                      // カミソリは押した位置で切る(本編クリップと同じ規則)。
+                      if (editTool === 'razor') {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const localSeconds = (e.clientX - rect.left) / pixelsPerSecond
+                        splitVideoOverlayClipAtTime(
+                          track.id,
+                          clip.id,
+                          clip.startTime + localSeconds
+                        )
+                        return
+                      }
                       selectOnly('videoOverlay')
                       setSelectedVideoOverlayClip({ trackId: track.id, clipId: clip.id })
                     }}
@@ -2254,13 +2269,18 @@ export function Timeline(): React.JSX.Element {
                     key={clip.id}
                     className={`timeline-audio-clip ${
                       selectedAudioClip?.clipId === clip.id ? 'selected' : ''
-                    } ${isDraggingThis ? 'dragging' : ''} ${isTrimmingThis ? 'trimming' : ''}`}
+                    } ${isDraggingThis ? 'dragging' : ''} ${
+                      isTrimmingThis ? 'trimming' : ''
+                    } tool-${editTool}`}
                     style={{
                       left: displayStart * pixelsPerSecond,
                       width: clipWidth
                     }}
                     onMouseDown={(e) => {
                       e.stopPropagation()
+                      // カミソリ中は掴ませない(本編クリップが `draggable` を切っているのと
+                      // 同じ理由)。切るつもりの数ピクセルの揺れでクリップが動いてしまう。
+                      if (editTool === 'razor') return
                       setAudioDrag({
                         trackId: track.id,
                         clipId: clip.id,
@@ -2273,6 +2293,13 @@ export function Timeline(): React.JSX.Element {
                     }}
                     onClick={(e) => {
                       e.stopPropagation()
+                      // カミソリは押した位置で切る(本編クリップと同じ規則)。
+                      if (editTool === 'razor') {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const localSeconds = (e.clientX - rect.left) / pixelsPerSecond
+                        splitAudioClipAtTime(track.id, clip.id, clip.startTime + localSeconds)
+                        return
+                      }
                       selectOnly('audio')
                       setSelectedAudioClip({ trackId: track.id, clipId: clip.id })
                     }}

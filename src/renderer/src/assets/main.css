@@ -500,8 +500,11 @@ h3 {
 }
 
 /* The razor's cursor has to sit on the clip itself: the whole clip surface is the
-   cut target in that mode, not just an edge. */
-.timeline-clip.tool-razor {
+   cut target in that mode, not just an edge. 音声・PiP のクリップも同じ的なので
+   同じカーソルにする(掴めるように見えて実は切る、では逆に迷わせる)。 */
+.timeline-clip.tool-razor,
+.timeline-audio-clip.tool-razor,
+.timeline-video-overlay-clip.tool-razor {
   cursor: crosshair;
 }
 
