@@ -2425,14 +2425,31 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     set((state) => {
       const existingTrack = state.project.audioTracks.find((t) => t.name === 'SE')
       const trackId = existingTrack?.id ?? uuid()
-      const newClips: AudioTrackClip[] = placements.map((p) => ({
-        id: uuid(),
-        assetId: p.assetId,
-        startTime: Math.max(0, p.startTime),
-        inPoint: 0,
-        outPoint: p.outPoint,
-        volume: p.volume
-      }))
+      // **ワンクリックで足す経路は重ねて置かない。** 同じ規則が
+      // `addAudioClipWithAsset`(効果音ライブラリの「追加」)にだけ育っており、
+      // ここは素の `startTime` で置いていた。完全に覆われたクリップは画面では
+      // 手前の1本と見分けが付かないのに、書き出しでは**そのまま足し算される**。
+      // (実測: テロップ5件のスキャンを2回。クリップは 5本 → **10本**に増えるのに
+      //  画面のクリップの位置は **5箇所のまま**。書き出しの SE 区間は
+      //  **-27.1dB → -21.1dB(ちょうど +6.0dB = 2本ぶん)**、
+      //  1回のスキャンの中でも 0.4秒差の2件が重なって **-21.1dB**、
+      //  2回目の後はそこが **-15.1dB(+12.0dB = 4本ぶん)**になった。
+      //  SEの無い区間は前後とも -61.1dB で変わらない=全体の音量が変わったのではない)
+      // 一括で置くので、**この回に置いたぶんも積み上げながら**空きを探す
+      // (でないと同じスキャンの中の近接した2件が重なる)。
+      const placed = existingTrack ? [...existingTrack.clips] : []
+      const newClips: AudioTrackClip[] = placements.map((p) => {
+        const clip: AudioTrackClip = {
+          id: uuid(),
+          assetId: p.assetId,
+          startTime: findFreeAudioStart(placed, Math.max(0, p.startTime), p.outPoint),
+          inPoint: 0,
+          outPoint: p.outPoint,
+          volume: p.volume
+        }
+        placed.push(clip)
+        return clip
+      })
       const audioTracks = existingTrack
         ? state.project.audioTracks.map((t) =>
             t.id === trackId ? { ...t, clips: [...t.clips, ...newClips] } : t
