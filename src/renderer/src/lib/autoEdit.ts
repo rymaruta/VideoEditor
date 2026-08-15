@@ -436,8 +436,14 @@ async function scoreHighlightsWithGemini(
   const map = new Map<FlatCandidate, number>()
   if (Array.isArray(parsed.scores)) {
     for (const s of parsed.scores) {
-      const frame = frames[s.index - 1]
-      if (frame && typeof s.score === 'number') {
+      // **要素を1件ずつ確かめる。** モデルは採点できなかった1件を `null` で返すことがあり、
+      // `s.index` を直に読むとそこで例外になる。この呼び出しは呼び出し側が
+      // `try/catch` で包んでいるので**画面は壊れないが、同じ応答に入っていた他の採点も
+      // まとめて捨てられる**——エラーも出ないので「AIが効いていない」ようにしか見えない。
+      // (実測: 5件中1件を `null` にすると、採点された候補が **5件 → 0件**になり、
+      //  「Geminiが候補シーン◯件を採点し…」の帯ごと消えた)
+      const frame = frames[(s?.index ?? 0) - 1]
+      if (frame && typeof s?.score === 'number') {
         map.set(frame.candidate, Math.max(0, Math.min(100, s.score)))
       }
     }
@@ -520,7 +526,10 @@ ${preferenceSummary}
   const segments: FlatCandidate[] = []
   const transitions: TransitionType[] = []
   for (const s of parsed.segments) {
-    const candidate = pool[s.index - 1]
+    // 採点と同じ理由で、要素が `null` でも読めるようにする。ここで例外になると
+    // **「AIディレクター」の案が丸ごと出なくなる**(実測: 3件中1件を `null` にすると
+    // 案が6件 → 5件になり、ディレクターの札だけが消えた)。
+    const candidate = pool[(s?.index ?? 0) - 1]
     if (!candidate) continue
     segments.push(candidate)
     transitions.push(
