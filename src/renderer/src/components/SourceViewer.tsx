@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { ASSET_DRAG_TYPE, SOURCE_RANGE_DRAG_TYPE } from '../lib/assetDrag'
 import { previewSourceUrl } from '../lib/previewSource'
 import { totalTimelineDuration, buildTimedClips } from '../lib/timelineMath'
 import { waveformRenderSize, type WaveformSize } from '../lib/waveformSize'
@@ -42,6 +43,7 @@ export function SourceViewer(): React.JSX.Element | null {
   const closeSourceViewer = useProjectStore((s) => s.closeSourceViewer)
   const addTrimmedClipToTimeline = useProjectStore((s) => s.addTrimmedClipToTimeline)
   const insertClipAtTime = useProjectStore((s) => s.insertClipAtTime)
+  const setDraggingAssetId = useProjectStore((s) => s.setDraggingAssetId)
   const overwriteClipAtTime = useProjectStore((s) => s.overwriteClipAtTime)
   const playheadTime = useProjectStore((s) => s.playheadTime)
 
@@ -237,7 +239,24 @@ export function SourceViewer(): React.JSX.Element | null {
 
       <div className="source-viewer-times">
         <span>{formatTime(time)}</span>
-        <span className="source-viewer-range">
+        {/* この帯をつまんでタイムラインへ落とすと、決めた範囲がそのままクリップになる。
+            ボタン(末尾へ追加/インサート)と同じ操作を、置く場所を選びながらできる。 */}
+        <span
+          className="source-viewer-range"
+          draggable={rangeDuration > 0}
+          title="タイムラインへドラッグすると、この範囲を落とした位置に挿入します"
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'copy'
+            e.dataTransfer.setData(
+              SOURCE_RANGE_DRAG_TYPE,
+              JSON.stringify({ assetId: asset.id, inPoint: rangeStart, outPoint: rangeEnd })
+            )
+            // 本編トラックの受け入れ判定は素材のドラッグと同じ仕組みに乗せる
+            e.dataTransfer.setData(ASSET_DRAG_TYPE, asset.id)
+            setDraggingAssetId(asset.id)
+          }}
+          onDragEnd={() => setDraggingAssetId(null)}
+        >
           {sourceIn !== null || sourceOut !== null ? (
             <>
               イン {formatTime(rangeStart)} / アウト {formatTime(rangeEnd)} ・ 長さ{' '}

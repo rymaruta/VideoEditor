@@ -498,7 +498,13 @@ interface ProjectState {
   ) => void
   /** `index` を渡すとその位置へ挿入する(省略時は末尾に足す) */
   addClipToTimeline: (assetId: string, index?: number) => void
-  addTrimmedClipToTimeline: (assetId: string, inPoint: number, outPoint: number) => void
+  /** `index` を渡すとその位置へ挿入する(省略時は末尾に足す) */
+  addTrimmedClipToTimeline: (
+    assetId: string,
+    inPoint: number,
+    outPoint: number,
+    index?: number
+  ) => void
   insertClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
   overwriteClipAtTime: (assetId: string, inPoint: number, outPoint: number, atTime: number) => void
   updateClipTrim: (clipId: string, inPoint: number, outPoint: number) => void
@@ -552,6 +558,13 @@ interface ProjectState {
   setAudioTrackVolume: (trackId: string, volume: number) => void
   addClipToAudioTrack: (trackId: string, assetId: string) => void
   updateAudioClipStart: (trackId: string, clipId: string, startTime: number) => void
+  /** 音声クリップを別の音声トラックへ移す(位置も同時に決める)。1操作=履歴1件 */
+  moveAudioClipToTrack: (
+    fromTrackId: string,
+    clipId: string,
+    toTrackId: string,
+    startTime: number
+  ) => void
   updateAudioClipTrim: (trackId: string, clipId: string, inPoint: number, outPoint: number) => void
   updateAudioClipStartAndTrim: (
     trackId: string,
@@ -580,6 +593,13 @@ interface ProjectState {
   /** `startTime` を渡すとその位置へ、省略するとトラック末尾へ置く */
   addClipToVideoOverlayTrack: (trackId: string, assetId: string, startTime?: number) => void
   updateVideoOverlayClipStart: (trackId: string, clipId: string, startTime: number) => void
+  /** PiPクリップを別の動画トラックへ移す(位置も同時に決める)。1操作=履歴1件 */
+  moveVideoOverlayClipToTrack: (
+    fromTrackId: string,
+    clipId: string,
+    toTrackId: string,
+    startTime: number
+  ) => void
   updateVideoOverlayClipTrim: (
     trackId: string,
     clipId: string,
@@ -1242,7 +1262,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  addTrimmedClipToTimeline: (assetId, inPoint, outPoint) =>
+  addTrimmedClipToTimeline: (assetId, inPoint, outPoint, index) =>
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
       if (!asset) return state
@@ -1253,9 +1273,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         outPoint: Math.min(asset.duration, outPoint),
         speed: 1
       }
+      const clips = [...state.project.clips]
+      const at = index === undefined ? clips.length : Math.max(0, Math.min(clips.length, index))
+      clips.splice(at, 0, newClip)
       return {
         ...pushHistory(state),
-        project: { ...state.project, clips: [...state.project.clips, newClip] }
+        project: { ...state.project, clips }
       }
     }),
 
@@ -2023,6 +2046,34 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     })),
 
+  // トラックをまたぐ移動は「元から外す」と「先へ足す」の2手だが、利用者にとっては
+  // 1回のドラッグなので履歴も1件にまとめる。手で動かした時点で本編への追従は切れる
+  // (`updateAudioClipStart` と同じ扱い。追従したまま別トラックへ移すと、元クリップを
+  // トリムした瞬間に戻ってきてしまう)。
+  moveAudioClipToTrack: (fromTrackId, clipId, toTrackId, startTime) =>
+    set((state) => {
+      const from = state.project.audioTracks.find((t) => t.id === fromTrackId)
+      const clip = from?.clips.find((c) => c.id === clipId)
+      if (!clip || fromTrackId === toTrackId) return state
+      if (!state.project.audioTracks.some((t) => t.id === toTrackId)) return state
+      const moved = { ...clip, startTime: Math.max(0, startTime), linkedClipId: undefined }
+      return {
+        ...pushHistory(state),
+        project: reattachClipsWithoutLinkedAudio(
+          {
+            ...state.project,
+            audioTracks: state.project.audioTracks.map((t) => {
+              if (t.id === fromTrackId)
+                return { ...t, clips: t.clips.filter((c) => c.id !== clipId) }
+              if (t.id === toTrackId) return { ...t, clips: [...t.clips, moved] }
+              return t
+            })
+          },
+          clip.linkedClipId ? [clip.linkedClipId] : []
+        )
+      }
+    }),
+
   updateAudioClipTrim: (trackId, clipId, inPoint, outPoint) =>
     set((state) => ({
       ...pushHistory(state, `audioTrim:${clipId}`),
@@ -2314,6 +2365,26 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         )
       }
     })),
+
+  moveVideoOverlayClipToTrack: (fromTrackId, clipId, toTrackId, startTime) =>
+    set((state) => {
+      const from = state.project.videoOverlayTracks.find((t) => t.id === fromTrackId)
+      const clip = from?.clips.find((c) => c.id === clipId)
+      if (!clip || fromTrackId === toTrackId) return state
+      if (!state.project.videoOverlayTracks.some((t) => t.id === toTrackId)) return state
+      const moved = { ...clip, startTime: Math.max(0, startTime) }
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          videoOverlayTracks: state.project.videoOverlayTracks.map((t) => {
+            if (t.id === fromTrackId) return { ...t, clips: t.clips.filter((c) => c.id !== clipId) }
+            if (t.id === toTrackId) return { ...t, clips: [...t.clips, moved] }
+            return t
+          })
+        }
+      }
+    }),
 
   updateVideoOverlayClipTrim: (trackId, clipId, inPoint, outPoint) =>
     set((state) => ({

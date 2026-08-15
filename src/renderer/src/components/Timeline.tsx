@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import {
@@ -8,7 +9,17 @@ import {
   totalTimelineDuration
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
-import { ASSET_DRAG_TYPE, isAssetDrag } from '../lib/assetDrag'
+import {
+  ASSET_DRAG_TYPE,
+  SFX_DRAG_TYPE,
+  SOURCE_RANGE_DRAG_TYPE,
+  isAssetDrag,
+  isSfxDrag,
+  isSourceRangeDrag,
+  readDragPayload,
+  type SfxDragPayload,
+  type SourceRangeDragPayload
+} from '../lib/assetDrag'
 import { clipColorOf } from '../lib/clipColors'
 import { autoScrollLeft } from '../lib/timelineScroll'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
@@ -33,6 +44,7 @@ import {
   type KeymapScheme
 } from '../lib/keymap'
 import { isModalOpen } from '../lib/useKeyboardShortcuts'
+import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
 import { FillerWordCutModal } from './FillerWordCutModal'
@@ -92,6 +104,18 @@ const MAX_ZOOM = 4
 const MIN_CLIP_SOURCE_DURATION = 0.2
 const SNAP_PIXELS = 8
 
+/**
+ * その座標にあるトラックのID。クリップを縦に動かして別のトラックへ移すのに使う。
+ *
+ * レーンの矩形を自前で集めて比べるのではなく、実際に描かれている要素から引く。
+ * 折りたたみ・縦スクロール・トラックの増減で位置が変わっても、これなら常に今の見た目と一致する。
+ */
+function laneTrackIdAt(x: number, y: number, kind: 'audio' | 'videoOverlay'): string | null {
+  const el = document.elementFromPoint(x, y)
+  const lane = el?.closest(`[data-track-kind="${kind}"]`)
+  return lane?.getAttribute('data-track-id') ?? null
+}
+
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
 const TRANSITION_LABELS: Record<TransitionType, string> = {
@@ -132,6 +156,8 @@ interface AudioDragState {
   originalStartTime: number
   liveStartTime: number
   snapGuideTime: number | null
+  /** カーソルが乗っているトラック。元と違えばそちらへ移す */
+  hoverTrackId: string | null
 }
 
 interface VideoOverlayDragState {
@@ -142,6 +168,8 @@ interface VideoOverlayDragState {
   originalStartTime: number
   liveStartTime: number
   snapGuideTime: number | null
+  /** カーソルが乗っているトラック。元と違えばそちらへ移す */
+  hoverTrackId: string | null
 }
 
 interface MediaTrimDragState {
@@ -401,6 +429,7 @@ export function Timeline(): React.JSX.Element {
   const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
   const addClipToVideoOverlayTrack = useProjectStore((s) => s.addClipToVideoOverlayTrack)
   const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
+  const addTrimmedClipToTimeline = useProjectStore((s) => s.addTrimmedClipToTimeline)
   const draggingAssetId = useProjectStore((s) => s.draggingAssetId)
   const setDraggingAssetId = useProjectStore((s) => s.setDraggingAssetId)
   const splitClipAtTime = useProjectStore((s) => s.splitClipAtTime)
@@ -416,6 +445,7 @@ export function Timeline(): React.JSX.Element {
   const toggleAudioTrackDucking = useProjectStore((s) => s.toggleAudioTrackDucking)
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
+  const moveAudioClipToTrack = useProjectStore((s) => s.moveAudioClipToTrack)
   const updateAudioClipTrim = useProjectStore((s) => s.updateAudioClipTrim)
   const updateAudioClipStartAndTrim = useProjectStore((s) => s.updateAudioClipStartAndTrim)
   const updateAudioClipVolume = useProjectStore((s) => s.updateAudioClipVolume)
@@ -430,6 +460,7 @@ export function Timeline(): React.JSX.Element {
   const setVideoOverlayTrackPosition = useProjectStore((s) => s.setVideoOverlayTrackPosition)
   const setVideoOverlayTrackScale = useProjectStore((s) => s.setVideoOverlayTrackScale)
   const updateVideoOverlayClipStart = useProjectStore((s) => s.updateVideoOverlayClipStart)
+  const moveVideoOverlayClipToTrack = useProjectStore((s) => s.moveVideoOverlayClipToTrack)
   const updateVideoOverlayClipTrim = useProjectStore((s) => s.updateVideoOverlayClipTrim)
   const updateVideoOverlayClipStartAndTrim = useProjectStore(
     (s) => s.updateVideoOverlayClipStartAndTrim
@@ -478,6 +509,14 @@ export function Timeline(): React.JSX.Element {
    * 本編トラックは詰めて並べる作りなので「何番目に挿すか」、
    * 音声とPiPは自由に置けるので「何秒の位置か」で示す。
    */
+  /** 右クリックで開く操作メニュー(座標と中身) */
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    items: ContextMenuItem[]
+  } | null>(null)
+  /** 効果音のドロップが失敗したとき(ファイルが消えている等)の案内 */
+  const [sfxDropError, setSfxDropError] = useState<string | null>(null)
   const [dropIndicator, setDropIndicator] = useState<
     { kind: 'index'; index: number } | { kind: 'time'; laneId: string; time: number } | null
   >(null)
@@ -485,6 +524,8 @@ export function Timeline(): React.JSX.Element {
   const [editTool, setEditTool] = useState<EditTool>('select')
   const [rollDrag, setRollDrag] = useState<RollDragState | null>(null)
   const [audioDrag, setAudioDrag] = useState<AudioDragState | null>(null)
+  const audioHoverTrackRef = useRef<string | null>(null)
+  const videoOverlayHoverTrackRef = useRef<string | null>(null)
   const [mediaTrimDrag, setMediaTrimDrag] = useState<MediaTrimDragState | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
@@ -527,6 +568,104 @@ export function Timeline(): React.JSX.Element {
       }),
     []
   )
+
+  // 右クリックで出す操作の一覧。ショートカットと同じ動きをそのまま呼ぶだけで、
+  // ここに独自の処理は書かない(片方だけ挙動が変わるのを防ぐため)。
+  function openClipMenu(e: React.MouseEvent, clipId: string, index: number): void {
+    e.preventDefault()
+    e.stopPropagation()
+    selectOnly('clip')
+    selectClip(clipId)
+    const clip = project.clips.find((c) => c.id === clipId)
+    const asset = project.assets.find((a) => a.id === clip?.assetId)
+    if (!clip) return
+    const targets = multiSelectedClipIds.includes(clipId) ? multiSelectedClipIds : [clipId]
+    const items: ContextMenuItem[] = [
+      {
+        label: '再生位置で分割',
+        shortcut: keymap.split.display,
+        onSelect: () => splitClipAtTime(clipId, useProjectStore.getState().playheadTime)
+      },
+      {
+        label: targets.length > 1 ? `複製(${targets.length}件)` : '複製',
+        shortcut: keymap.duplicate.display,
+        onSelect: () => duplicateClips(targets)
+      },
+      { label: 'コピー', shortcut: keymap.copy.display, onSelect: copySelectedClip },
+      {
+        label: '貼り付け',
+        shortcut: keymap.paste.display,
+        disabled: clipboardClips.length === 0,
+        onSelect: pasteClip
+      },
+      { label: 'トリム画面を開く', onSelect: () => setTrimClipId(clipId) }
+    ]
+    if (asset?.hasAudio) {
+      items.push(
+        clip.audioDetached
+          ? { label: '音声の分離をやめる', onSelect: () => reattachClipAudio(clipId) }
+          : { label: '音声を分離', onSelect: () => detachClipAudio(clipId) }
+      )
+    }
+    items.push({
+      label: targets.length > 1 ? `削除(${targets.length}件)` : '削除',
+      shortcut: keymap.delete.display,
+      danger: true,
+      onSelect: () => (targets.length > 1 ? removeClips(targets) : removeClip(clipId))
+    })
+    void index
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
+
+  function openAudioClipMenu(e: React.MouseEvent, trackId: string, clipId: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    selectOnly('audio')
+    setSelectedAudioClip({ trackId, clipId })
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: '再生位置で分割',
+          shortcut: keymap.split.display,
+          onSelect: () =>
+            splitAudioClipAtTime(trackId, clipId, useProjectStore.getState().playheadTime)
+        },
+        {
+          label: '削除',
+          shortcut: keymap.delete.display,
+          danger: true,
+          onSelect: () => removeAudioClip(trackId, clipId)
+        }
+      ]
+    })
+  }
+
+  function openVideoOverlayClipMenu(e: React.MouseEvent, trackId: string, clipId: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    selectOnly('videoOverlay')
+    setSelectedVideoOverlayClip({ trackId, clipId })
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          label: '再生位置で分割',
+          shortcut: keymap.split.display,
+          onSelect: () =>
+            splitVideoOverlayClipAtTime(trackId, clipId, useProjectStore.getState().playheadTime)
+        },
+        {
+          label: '削除',
+          shortcut: keymap.delete.display,
+          danger: true,
+          onSelect: () => removeVideoOverlayClip(trackId, clipId)
+        }
+      ]
+    })
+  }
 
   const videoLaneRef = useRef<HTMLDivElement>(null)
   const trackLanesColRef = useRef<HTMLDivElement>(null)
@@ -787,6 +926,10 @@ export function Timeline(): React.JSX.Element {
     function handleMouseMove(e: MouseEvent): void {
       // Read the store outside the state updater: React runs updaters during render.
       const candidates = getSnapCandidates()
+      const hoverTrackId = laneTrackIdAt(e.clientX, e.clientY, 'audio')
+      // mouseup は effect 開始時のスナップショットしか見えないので、最後に重ねていた
+      // トラックは ref で持つ(state だと1つ前の値で移し先を決めてしまう)。
+      audioHoverTrackRef.current = hoverTrackId
       setAudioDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
@@ -794,28 +937,44 @@ export function Timeline(): React.JSX.Element {
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
         const startSnap = snapTime(rawStart, candidates, thresholdSeconds)
         if (startSnap.snapped) {
-          return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
+          return {
+            ...prev,
+            liveStartTime: startSnap.time,
+            snapGuideTime: startSnap.time,
+            hoverTrackId
+          }
         }
         const endSnap = snapTime(rawStart + prev.duration, candidates, thresholdSeconds)
         if (endSnap.snapped) {
           return {
             ...prev,
             liveStartTime: Math.max(0, endSnap.time - prev.duration),
-            snapGuideTime: endSnap.time
+            snapGuideTime: endSnap.time,
+            hoverTrackId
           }
         }
-        return { ...prev, liveStartTime: rawStart, snapGuideTime: null }
+        return { ...prev, liveStartTime: rawStart, snapGuideTime: null, hoverTrackId }
       })
     }
     function handleMouseUp(): void {
-      // 1ミリも動いていないなら確定しない。**ただ選ぶだけのクリックでも mouseup は来る**ので、
-      // ここで無条件に書き込むと、動かしていない利用者に2つのことが起きる:
-      // (1) 何も変わらない履歴が1件積まれ、次の Ctrl+Z が「何も戻らない」ように見える。
-      // (2) `updateAudioClipStart` は `linkedClipId` を消すので、**分離音声と映像の追従が
-      //     黙って切れる**。以降そのクリップをトリムしても音声は取り残される。
-      // 実測: 分離した音声を1回クリックしてから映像を20秒→10秒に縮めると、
-      // 音声だけ20秒のまま残った(触らなければ一緒に10秒になる)。
-      if (audioDragSnapshot.liveStartTime !== audioDragSnapshot.originalStartTime) {
+      // 離した先が別のトラックなら、位置と移動をまとめて1件の履歴で適用する
+      // (先に位置だけ確定させると、Undo1回では戻り切らない)。
+      const target = audioHoverTrackRef.current
+      if (target && target !== audioDragSnapshot.trackId) {
+        moveAudioClipToTrack(
+          audioDragSnapshot.trackId,
+          audioDragSnapshot.clipId,
+          target,
+          audioDragSnapshot.liveStartTime
+        )
+        // 1ミリも動いていないなら確定しない。**ただ選ぶだけのクリックでも mouseup は来る**ので、
+        // ここで無条件に書き込むと、動かしていない利用者に2つのことが起きる:
+        // (1) 何も変わらない履歴が1件積まれ、次の Ctrl+Z が「何も戻らない」ように見える。
+        // (2) `updateAudioClipStart` は `linkedClipId` を消すので、**分離音声と映像の追従が
+        //     黙って切れる**。以降そのクリップをトリムしても音声は取り残される。
+        // 実測: 分離した音声を1回クリックしてから映像を20秒→10秒に縮めると、
+        // 音声だけ20秒のまま残った(触らなければ一緒に10秒になる)。
+      } else if (audioDragSnapshot.liveStartTime !== audioDragSnapshot.originalStartTime) {
         updateAudioClipStart(
           audioDragSnapshot.trackId,
           audioDragSnapshot.clipId,
@@ -830,7 +989,7 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, getSnapCandidates])
+  }, [audioDrag, pixelsPerSecond, updateAudioClipStart, moveAudioClipToTrack, getSnapCandidates])
 
   useEffect(() => {
     if (!mediaTrimDrag) return
@@ -932,6 +1091,8 @@ export function Timeline(): React.JSX.Element {
     function handleMouseMove(e: MouseEvent): void {
       // Read the store outside the state updater: React runs updaters during render.
       const candidates = getSnapCandidates()
+      const hoverTrackId = laneTrackIdAt(e.clientX, e.clientY, 'videoOverlay')
+      videoOverlayHoverTrackRef.current = hoverTrackId
       setVideoOverlayDrag((prev) => {
         if (!prev) return prev
         const deltaSeconds = (e.clientX - prev.startX) / pixelsPerSecond
@@ -939,22 +1100,38 @@ export function Timeline(): React.JSX.Element {
         const thresholdSeconds = SNAP_PIXELS / pixelsPerSecond
         const startSnap = snapTime(rawStart, candidates, thresholdSeconds)
         if (startSnap.snapped) {
-          return { ...prev, liveStartTime: startSnap.time, snapGuideTime: startSnap.time }
+          return {
+            ...prev,
+            liveStartTime: startSnap.time,
+            snapGuideTime: startSnap.time,
+            hoverTrackId
+          }
         }
         const endSnap = snapTime(rawStart + prev.duration, candidates, thresholdSeconds)
         if (endSnap.snapped) {
           return {
             ...prev,
             liveStartTime: Math.max(0, endSnap.time - prev.duration),
-            snapGuideTime: endSnap.time
+            snapGuideTime: endSnap.time,
+            hoverTrackId
           }
         }
-        return { ...prev, liveStartTime: rawStart, snapGuideTime: null }
+        return { ...prev, liveStartTime: rawStart, snapGuideTime: null, hoverTrackId }
       })
     }
     function handleMouseUp(): void {
-      // 動いていないなら確定しない(上の音声クリップと同じ理由)。
-      if (videoOverlayDragSnapshot.liveStartTime !== videoOverlayDragSnapshot.originalStartTime) {
+      const target = videoOverlayHoverTrackRef.current
+      if (target && target !== videoOverlayDragSnapshot.trackId) {
+        moveVideoOverlayClipToTrack(
+          videoOverlayDragSnapshot.trackId,
+          videoOverlayDragSnapshot.clipId,
+          target,
+          videoOverlayDragSnapshot.liveStartTime
+        )
+        // 動いていないなら確定しない(上の音声クリップと同じ理由)。
+      } else if (
+        videoOverlayDragSnapshot.liveStartTime !== videoOverlayDragSnapshot.originalStartTime
+      ) {
         updateVideoOverlayClipStart(
           videoOverlayDragSnapshot.trackId,
           videoOverlayDragSnapshot.clipId,
@@ -969,7 +1146,13 @@ export function Timeline(): React.JSX.Element {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [videoOverlayDrag, pixelsPerSecond, updateVideoOverlayClipStart, getSnapCandidates])
+  }, [
+    videoOverlayDrag,
+    pixelsPerSecond,
+    updateVideoOverlayClipStart,
+    moveVideoOverlayClipToTrack,
+    getSnapCandidates
+  ])
 
   useEffect(() => {
     if (!overlayDrag) return
@@ -1192,6 +1375,41 @@ export function Timeline(): React.JSX.Element {
   function assetIdFromDrop(e: React.DragEvent<HTMLDivElement>): string | null {
     const id = e.dataTransfer.getData(ASSET_DRAG_TYPE)
     return id || null
+  }
+
+  /**
+   * お気に入りの効果音を音声トラックへ落としたとき。
+   *
+   * まだプロジェクトに無いファイルなので尺を測る必要があり、ここだけ非同期になる。
+   * 置く処理は「プリセット」タブのボタンと同じ `addAudioClipWithAsset` に任せる
+   * (素材の再利用・重ならない位置への送り・履歴1件が、経路ごとにばらけないように)。
+   */
+  async function dropSfxOnTrack(
+    payload: SfxDragPayload,
+    trackId: string,
+    trackName: string,
+    startTime: number
+  ): Promise<void> {
+    try {
+      const known = project.assets.find((a) => a.filePath === payload.filePath)
+      const duration = known?.duration ?? (await window.api.probeMedia(payload.filePath)).duration
+      addAudioClipWithAsset(
+        {
+          id: known?.id ?? uuid(),
+          filePath: payload.filePath,
+          fileName: payload.fileName,
+          duration,
+          width: 0,
+          height: 0,
+          fps: 0,
+          hasAudio: true,
+          hasVideo: false
+        },
+        { trackId, trackName, startTime }
+      )
+    } catch (e) {
+      setSfxDropError(`${payload.fileName}: ${formatIpcError(e)}`)
+    }
   }
 
   function endAssetDrag(): void {
@@ -1656,6 +1874,15 @@ export function Timeline(): React.JSX.Element {
       </div>
       {bpmError && <p className="error-text timeline-bpm-error">{bpmError}</p>}
 
+      {sfxDropError && (
+        <p className="error-text timeline-drop-error">
+          {sfxDropError}
+          <button className="small-button" onClick={() => setSfxDropError(null)}>
+            閉じる
+          </button>
+        </p>
+      )}
+
       <div className="timeline-tracks">
         <div className="track-labels-col">
           <div className="track-label track-label-video">動画</div>
@@ -1802,6 +2029,7 @@ export function Timeline(): React.JSX.Element {
               const reordering = !isAssetDrag(e.dataTransfer.types) && draggedClipId !== null
               // 映像を持たない素材(BGM等)は本編トラックに置けない。受けない印として
               // dropEffect を none にすると、カーソルもそう変わる。
+              // ソースビューアで決めた範囲(イン/アウト付き)もここが受ける。
               if (
                 !reordering &&
                 (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo)
@@ -1831,9 +2059,20 @@ export function Timeline(): React.JSX.Element {
                 return
               }
               const assetId = assetIdFromDrop(e)
+              // 範囲付きなら、その範囲だけをクリップにする(ソースビューアからのドラッグ)
+              const range = isSourceRangeDrag(e.dataTransfer.types)
+                ? readDragPayload<SourceRangeDragPayload>(
+                    e.dataTransfer.getData(SOURCE_RANGE_DRAG_TYPE)
+                  )
+                : null
               endAssetDrag()
-              const asset = project.assets.find((a) => a.id === assetId)
-              if (!assetId || !asset?.hasVideo) return
+              const asset = project.assets.find((a) => a.id === (range?.assetId ?? assetId))
+              if (!asset?.hasVideo) return
+              if (range && range.outPoint > range.inPoint) {
+                addTrimmedClipToTimeline(asset.id, range.inPoint, range.outPoint, index)
+                return
+              }
+              if (!assetId) return
               addClipToTimeline(assetId, index)
             }}
           >
@@ -1892,6 +2131,7 @@ export function Timeline(): React.JSX.Element {
                       lastClickedClipIdRef.current = tc.clip.id
                     }
                   }}
+                  onContextMenu={(e) => openClipMenu(e, tc.clip.id, i)}
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = 'move'
                     setDraggedClipId(tc.clip.id)
@@ -2064,15 +2304,21 @@ export function Timeline(): React.JSX.Element {
           {project.videoOverlayTracks.map((track) => (
             <div
               key={track.id}
+              data-track-kind="videoOverlay"
+              data-track-id={track.id}
               className={`track-lane video-overlay-lane ${track.hidden ? 'hidden' : ''} ${
                 draggedAsset?.hasVideo ? 'drop-target' : ''
               } ${
-                dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id
+                (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
+                (videoOverlayDrag !== null &&
+                  videoOverlayDrag.hoverTrackId === track.id &&
+                  videoOverlayDrag.trackId !== track.id)
                   ? 'drop-active'
                   : ''
               }`}
               style={{ width: timelineWidth }}
               onDragOver={(e) => {
+                if (isSourceRangeDrag(e.dataTransfer.types)) return
                 if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo) return
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'copy'
@@ -2126,10 +2372,14 @@ export function Timeline(): React.JSX.Element {
                       left: displayStart * pixelsPerSecond,
                       width: clipWidth
                     }}
+                    onContextMenu={(e) => openVideoOverlayClipMenu(e, track.id, clip.id)}
                     onMouseDown={(e) => {
+                      // 右クリックはメニュー用。ここで掴むとメニューを出しながらクリップが動く。
+                      if (e.button !== 0) return
                       e.stopPropagation()
                       // カミソリ中は掴ませない(音声クリップと同じ理由)。
                       if (editTool === 'razor') return
+                      videoOverlayHoverTrackRef.current = track.id
                       setVideoOverlayDrag({
                         trackId: track.id,
                         clipId: clip.id,
@@ -2137,7 +2387,8 @@ export function Timeline(): React.JSX.Element {
                         duration: dur,
                         originalStartTime: clip.startTime,
                         liveStartTime: clip.startTime,
-                        snapGuideTime: null
+                        snapGuideTime: null,
+                        hoverTrackId: track.id
                       })
                     }}
                     onClick={(e) => {
@@ -2212,14 +2463,21 @@ export function Timeline(): React.JSX.Element {
           {project.audioTracks.map((track) => (
             <div
               key={track.id}
+              data-track-kind="audio"
+              data-track-id={track.id}
               className={`track-lane audio-lane ${draggedAsset?.hasAudio ? 'drop-target' : ''} ${
-                dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id
+                (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
+                (audioDrag !== null &&
+                  audioDrag.hoverTrackId === track.id &&
+                  audioDrag.trackId !== track.id)
                   ? 'drop-active'
                   : ''
               }`}
               style={{ width: timelineWidth }}
               onDragOver={(e) => {
-                if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasAudio) return
+                const sfx = isSfxDrag(e.dataTransfer.types)
+                if (!sfx && (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasAudio))
+                  return
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'copy'
                 setDropIndicator({ kind: 'time', laneId: track.id, time: dropTimeAt(e) })
@@ -2229,11 +2487,18 @@ export function Timeline(): React.JSX.Element {
                 setDropIndicator(null)
               }}
               onDrop={(e) => {
-                if (!isAssetDrag(e.dataTransfer.types)) return
+                const sfxPayload = isSfxDrag(e.dataTransfer.types)
+                  ? readDragPayload<SfxDragPayload>(e.dataTransfer.getData(SFX_DRAG_TYPE))
+                  : null
+                if (!sfxPayload && !isAssetDrag(e.dataTransfer.types)) return
                 e.preventDefault()
                 const assetId = assetIdFromDrop(e)
                 const startTime = dropTimeAt(e)
                 endAssetDrag()
+                if (sfxPayload) {
+                  void dropSfxOnTrack(sfxPayload, track.id, track.name, startTime)
+                  return
+                }
                 const asset = project.assets.find((a) => a.id === assetId)
                 if (!asset?.hasAudio) return
                 // 素材はもうプロジェクトに居るので、この呼び出しは既存の素材を使い回す。
@@ -2278,11 +2543,14 @@ export function Timeline(): React.JSX.Element {
                       left: displayStart * pixelsPerSecond,
                       width: clipWidth
                     }}
+                    onContextMenu={(e) => openAudioClipMenu(e, track.id, clip.id)}
                     onMouseDown={(e) => {
+                      if (e.button !== 0) return
                       e.stopPropagation()
                       // カミソリ中は掴ませない(本編クリップが `draggable` を切っているのと
                       // 同じ理由)。切るつもりの数ピクセルの揺れでクリップが動いてしまう。
                       if (editTool === 'razor') return
+                      audioHoverTrackRef.current = track.id
                       setAudioDrag({
                         trackId: track.id,
                         clipId: clip.id,
@@ -2290,7 +2558,8 @@ export function Timeline(): React.JSX.Element {
                         duration: dur,
                         originalStartTime: clip.startTime,
                         liveStartTime: clip.startTime,
-                        snapGuideTime: null
+                        snapGuideTime: null,
+                        hoverTrackId: track.id
                       })
                     }}
                     onClick={(e) => {
@@ -2470,6 +2739,15 @@ export function Timeline(): React.JSX.Element {
           音声トラック
         </button>
       </div>
+
+      {contextMenu && (
+        <ClipContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
       {selectedAudioClipData && selectedAudioClip && (
         <div className="audio-clip-inspector">

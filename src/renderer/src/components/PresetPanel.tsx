@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore, CaptionPreset, SePreset } from '../store/presetStore'
 import { useSfxDictionaryStore } from '../store/sfxDictionaryStore'
+import { SFX_DRAG_TYPE } from '../lib/assetDrag'
 import { formatIpcError } from '../lib/ipcError'
 import { toFileUrl } from '../lib/previewSource'
 import { usePausePreviewWhenHidden } from '../lib/pausePreviewWhenHidden'
@@ -231,7 +232,21 @@ export function PresetPanel(): React.JSX.Element {
           }}
         />
         {sePresets.map((preset) => (
-          <div key={preset.id} className="preset-item">
+          <div
+            key={preset.id}
+            className="preset-item"
+            // 音声トラックへ直接落とせるようにする。ボタンは再生位置に置くので、
+            // 「別の場所へ置きたい」ときに一度置いてから動かす手間が消える。
+            draggable
+            title="音声トラックへドラッグすると、落とした位置に効果音を置きます"
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'copy'
+              e.dataTransfer.setData(
+                SFX_DRAG_TYPE,
+                JSON.stringify({ filePath: preset.filePath, fileName: preset.fileName })
+              )
+            }}
+          >
             <div className="preset-item-info">
               <span className="preset-item-name">
                 <StarIcon width={11} height={11} />
