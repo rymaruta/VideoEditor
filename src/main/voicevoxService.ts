@@ -54,16 +54,31 @@ export async function synthesizeSpeech(text: string, speakerId: number): Promise
   }
   const query = await queryRes.json()
 
-  const synthRes = await fetch(`${ENGINE_BASE}/synthesis?speaker=${speakerId}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(query)
-  })
+  // **ここも `try` で包む。** 上2つの `fetch` だけ包んでいて、合成の呼び出しだけ
+  // 素通しだった。合成は音声を作るぶん一番時間がかかる=**その最中に VOICEVOX を
+  // 閉じられる可能性が一番高い**呼び出しなのに、そこだけ生の
+  // `TypeError: fetch failed`(23文字・日本語なし)が画面に出ていた。
+  // 本文の読み出し(`arrayBuffer`)も同じ接続の上なので、まとめて包む。
+  let synthRes: Response
+  try {
+    synthRes = await fetch(`${ENGINE_BASE}/synthesis?speaker=${speakerId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query)
+    })
+  } catch (e) {
+    throw connectionError(e)
+  }
   if (!synthRes.ok) {
     throw new Error(`音声合成に失敗しました (status ${synthRes.status})`)
   }
 
-  const buf = Buffer.from(await synthRes.arrayBuffer())
+  let buf: Buffer
+  try {
+    buf = Buffer.from(await synthRes.arrayBuffer())
+  } catch (e) {
+    throw connectionError(e)
+  }
   // Narration is saved project content, not scratch: writing it to the OS temp
   // directory meant a reboot (which clears /tmp) silently emptied the narration
   // track of any project that referenced it.
