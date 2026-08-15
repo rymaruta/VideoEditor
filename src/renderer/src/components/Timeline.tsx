@@ -1098,9 +1098,19 @@ export function Timeline(): React.JSX.Element {
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
+  // 案内線を出す元は**`snapGuideTime` を持つドラッグ状態の全部**。1つでも書き漏らすと、
+  // そのレーンだけ「スナップはするのに線が出ない」——クリップが勝手に飛んだようにしか
+  // 見えず、何に揃ったのかを確かめる手段が無くなる。**新しいドラッグを足したらここにも足す。**
+  // (実測: 本編クリップ 0〜4秒を置いて、音声クリップと PiP クリップを同じ 6秒から
+  //  同じだけ左へ引くと、**どちらも 4秒へスナップして落ちる**のに、案内線は音声だけ
+  //  `left: 160px`(=4.0秒)に出て、**PiP は最後まで出なかった**)
+  // 動いているドラッグは常に1つなので、`??` の連鎖でどれが先でも結果は変わらない
+  // (掴んでいない状態は `undefined`、掴んでいてスナップしていない状態は `null`。
+  //  どちらも次へ流れて、最後は `null` になる)。
   const activeSnapGuideTime =
     trimDrag?.snapGuideTime ??
     audioDrag?.snapGuideTime ??
+    videoOverlayDrag?.snapGuideTime ??
     overlayDrag?.snapGuideTime ??
     mediaTrimDrag?.snapGuideTime ??
     null
