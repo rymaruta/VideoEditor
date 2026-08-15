@@ -557,11 +557,44 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   }
   exportInProgress = true
 
+  // 素材に合わせた出力フレームレート。畳み込み(concat/xfade)を通すため全クリップで共通。
+  // **長さの丸めに使うので、長さより先に決める。**
+  const outputFps = targetFrameRate(
+    clips.map((c) => assetById.get(c.assetId)?.fps).filter((f): f is number => f !== undefined)
+  )
+  /** タイムライン(画面)の上での1本の長さ。テロップ・BGM の位置はこの秒で来る。 */
   const clipOutputDurations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
-  let totalDuration = clipOutputDurations.reduce((sum, d) => sum + d, 0)
+  /**
+   * **書き出しの中での1本の長さ。フレーム数から作り直す。**
+   *
+   * 映像は1本ぶんを `trim=end_frame=round(尺×fps)` で切るので、出来上がる長さは
+   * **必ずフレームの整数倍**になる。ところが音声は `atrim=0:尺`、無音は
+   * `anullsrc duration=尺` と**秒でそのまま**切っていた。尺がフレーム境界に
+   * 乗っていないと1本ごとに最大 1/(2×fps) 秒(30fpsで16.7ms)の差が生まれ、
+   * 映像と音声は**別々に `concat`** されるので、その差が**本数ぶん積み上がる**。
+   * 尺が整数秒のときは差が 0 なので、手で置いたクリップでは一生出ない——
+   * **境界が生の秒で来る経路**(無音カットは `silencedetect` の生値、フィラーカット・
+   * テキスト編集・AI編集・長尺ショートも同じ)でだけ出る。
+   * (実測: 2.345秒×10本で、映像 23.334秒(700フレーム)に対し音声 23.450秒。
+   *  各クリップ先頭のビープが絵より **11.67ms ずつ遅れて積み上がり**、10本目で
+   *  **117ms**。50断片なら約0.58秒、100断片なら約1.17秒になる)
+   *
+   * 同じ理由で、**テロップ・BGM・PiP を置く位置**(`exportStarts` → `toExportTime`)も
+   * この長さで数える。ここだけ秒のままだと、後ろのクリップに紐づいた効果音が
+   * 絵より遅れて鳴る(実測: 10本目の頭に置いた効果音が **105ms 遅れ**た)。
+   *
+   * 揃える先を**映像側**にするのは、出力が CFR で映像の枚数が動かせないから。
+   * 1本あたりの調整は最大でも半フレームで、**積み上がらない**のがここの要点。
+   */
+  const clipExportDurations = clipOutputDurations.map(
+    (d) => frameCountForDuration(d, outputFps) / outputFps
+  )
+  let totalDuration = clipExportDurations.reduce((sum, d) => sum + d, 0)
   // Where each clip begins on the app's timeline (clips laid back-to-back). A
   // crossfade overlaps two clips, so the exported video is shorter than this by the
   // transition duration — exportStarts below tracks the real output positions.
+  // **こちらは画面の秒のまま**。`toExportTime` の入口は画面から来た秒なので、
+  // ここをフレームに丸めると入口の目盛りが画面とずれる。
   const timelineStarts: number[] = []
   {
     let acc = 0
@@ -571,10 +604,6 @@ export async function exportProject(options: ExportOptions): Promise<void> {
     }
   }
   const exportStarts: number[] = new Array(clips.length).fill(0)
-  // 素材に合わせた出力フレームレート。畳み込み(concat/xfade)を通すため全クリップで共通。
-  const outputFps = targetFrameRate(
-    clips.map((c) => assetById.get(c.assetId)?.fps).filter((f): f is number => f !== undefined)
-  )
   exportCancelRequested = false
   // `exportInProgress` はここまでに同期で立っているので、同じ tick の2回目は上で弾かれる
   // (この await より前に立てておくのが条件)。調べるのは使う素材だけで、失敗しても
@@ -603,7 +632,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         if (!asset) throw new Error(`アセットが見つかりません: ${clip.assetId}`)
         const speed = clip.speed || 1
         const sourceDuration = clip.outPoint - clip.inPoint
-        const outputDuration = clipOutputDurations[i]
+        // 枝の長さは**フレーム数から作り直したほう**を使う(映像・音声・無音のどれも
+        // 同じ数から切るので、1本ごとの差が生まれない)。
+        const outputDuration = clipExportDurations[i]
         command.input(asset.filePath).inputOptions([`-ss ${clip.inPoint}`, `-t ${sourceDuration}`])
         const myIndex = inputIndex++
 
@@ -708,10 +739,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       )
       let curV = 'v0'
       let curA = 'a0'
-      let curDuration = clipOutputDurations[0]
+      // 畳み込みの累積も**書き出し側の長さ**で数える。`exportStarts` はこの累積から
+      // 作られ、テロップ・BGM・PiP の位置(`toExportTime`)がここに乗る。
+      let curDuration = clipExportDurations[0]
       for (let i = 1; i < clips.length; i++) {
         const clip = clips[i]
-        const incomingDuration = clipOutputDurations[i]
+        const incomingDuration = clipExportDurations[i]
         const transition = clip.transitionIn
         const t = transitionSeconds[i]
         if (t <= 0 || !transition) {
