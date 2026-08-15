@@ -15,6 +15,7 @@ import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
 import {
   BPM_MAX,
   BPM_MIN,
+  beatGridFromAnalysis,
   clampBpm,
   formatBpm,
   formatOffset,
@@ -1237,9 +1238,10 @@ export function Timeline(): React.JSX.Element {
         clip.inPoint,
         clip.outPoint - clip.inPoint
       )
+      // 解析が返すのは**素材の秒**。タイムラインの目盛りへ直してから入れる
+      // (速度を変えたクリップでは倍率ぶん食い違う。規則は `beatGridFromAnalysis`)。
       setBeatGrid({
-        bpm: result.bpm,
-        offsetSeconds: clip.startTime + result.offsetSeconds,
+        ...beatGridFromAnalysis(result, clip),
         enabled: true,
         sourceLabel: track.name
       })
