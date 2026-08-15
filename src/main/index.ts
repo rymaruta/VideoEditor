@@ -438,8 +438,35 @@ app.whenReady().then(() => {
     autosaveOverwrittenThisSession = true
     return setAside
   })
+  /**
+   * 保存・開く・新規のあとの後始末。**「このセッションが書いたぶん」だけ消す。**
+   *
+   * 保存が済めば復元用の控えは要らない——という理屈が成り立つのは、そこに入って
+   * いるのが**いま保存した内容**のときだけ。起動時の確認を「あとで決める」で見送ると
+   * `autosave.veproj` は**前回の作業のまま**残るので、そこから1回も自動保存が走らない
+   * うちに保存すると、**まだどのファイルにもなっていない前回の作業を、確認もなく
+   * 消していた**。60秒のタイマーが一度でも回れば退避されるので、
+   * **保存が早かったときだけ**失われる。
+   * (実測: 「前回の作業(クリップ3本)」を残して「あとで決める」→ 新しい企画を保存。
+   *  自動保存あり **true → false**、退避あり **false のまま**、上部バーの
+   *  「破棄した自動保存データを戻す」も**出ない**。ディスクにも `.veproj` は0件)
+   *
+   * `close` ハンドラは同じ理由で既に「消さずに退避」へ直してあり、ここだけが
+   * `rmSync` のまま残っていた。
+   *
+   * **このセッションが書いたぶんは消してよい**——中身はいま保存したものと同じで、
+   * ここで退避すると、以前「破棄する」で取っておいたぶんを**冗長な控えで上書き**して
+   * しまう(退避先は1つしかない)。
+   *
+   * @returns 退避したら true(呼び出し側は上部バーの復元ボタンを出し直す)
+   */
   ipcMain.handle(IPC.clearAutosave, () => {
-    if (existsSync(autosavePath)) rmSync(autosavePath, { force: true })
+    if (!existsSync(autosavePath)) return false
+    if (autosaveOverwrittenThisSession) {
+      rmSync(autosavePath, { force: true })
+      return false
+    }
+    return discardAutosaveFile(autosavePath)
   })
   // 起動時の確認で「破棄する」を選んだときはこちら。消さずに退避するので、
   // 押し間違えても上部バーから戻せる。

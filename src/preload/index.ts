@@ -186,7 +186,11 @@ const api = {
   /** 戻り値は「居座っていた前回の自動保存を退避したか」(退避したら復元ボタンを出し直す) */
   autosaveProject: (project: Project): Promise<boolean> =>
     ipcRenderer.invoke(IPC.autosaveProject, project),
-  clearAutosave: (): Promise<void> => ipcRenderer.invoke(IPC.clearAutosave),
+  /**
+   * 保存後の後始末。**前回のぶんが居座っているときは消さずに退避する。**
+   * 戻り値は退避したかどうか(退避したら復元ボタンを出し直す)
+   */
+  clearAutosave: (): Promise<boolean> => ipcRenderer.invoke(IPC.clearAutosave),
   /** 消さずに退避する。戻り値は退避したかどうか */
   discardAutosave: (): Promise<boolean> => ipcRenderer.invoke(IPC.discardAutosave),
   loadDiscardedAutosave: (): Promise<Project> => ipcRenderer.invoke(IPC.loadDiscardedAutosave),

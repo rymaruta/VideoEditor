@@ -14,6 +14,19 @@ async function setAsideAutosave(): Promise<void> {
   await useAutosaveStore.getState().refresh()
 }
 
+/**
+ * 保存後の後始末。**退避になったときは復元ボタンを出し直す。**
+ *
+ * `clearAutosave` は、居座っているのが「前回の作業」なら消さずに退避する。
+ * 退避しただけで読み直さないと、**ファイルは残っているのにボタンが出ない**ので、
+ * 再起動するまで戻せない(`setAsideAutosave` と 60秒の自動保存が同じ形)。
+ */
+async function clearAutosaveAfterSave(): Promise<void> {
+  if (await window.api.clearAutosave()) {
+    await useAutosaveStore.getState().refresh()
+  }
+}
+
 // 開く/保存の成功時にだけ記録する。ここに置いておけば、ボタン経由でも
 // Ctrl+S のショートカット経由でも同じように残る。
 function remember(filePath: string): void {
@@ -41,7 +54,7 @@ export async function saveProjectAs(): Promise<void> {
   // 書いたのは `project`。保存中に編集が入っていたら未保存のままにする(markSaved の理由)。
   markSaved(filePath, project)
   remember(filePath)
-  await window.api.clearAutosave()
+  await clearAutosaveAfterSave()
 }
 
 export async function saveProject(): Promise<void> {
@@ -53,7 +66,7 @@ export async function saveProject(): Promise<void> {
   await window.api.saveProject(currentFilePath, project)
   markSaved(currentFilePath, project)
   remember(currentFilePath)
-  await window.api.clearAutosave()
+  await clearAutosaveAfterSave()
 }
 
 // ダイアログで選ぶ経路と最近使った一覧から選ぶ経路で、確認・読み込み・後始末を
