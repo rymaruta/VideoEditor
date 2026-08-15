@@ -69,7 +69,22 @@ function measureDurationByScan(filePath: string): Promise<number | null> {
 }
 
 /**
- * 素材の**画面に出る寸法**。回転が付いていれば縦横を入れ替える。
+ * 画素の縦横比(SAR)。分からない値・壊れた値は 1(正方形)として扱う。
+ *
+ * `ffprobe` は分からないとき `'0:1'` を返し、`fluent-ffmpeg` は項目が無いところに
+ * 文字列 `'N/A'` を入れる。どちらも「比」として使うと 0 や NaN になり、
+ * 掛けた先の幅が消える。**`SQUARE_PIXEL_FILTER` の `if(gt(sar,0),sar,1)` と同じ規則**。
+ */
+function pixelAspectRatio(stream: Record<string, unknown> | undefined): number {
+  const raw = stream?.sample_aspect_ratio
+  if (typeof raw !== 'string') return 1
+  const [num, den] = raw.split(':').map(Number)
+  if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) return 1
+  return num / den
+}
+
+/**
+ * 素材の**画面に出る寸法**。画素が正方形でなければ幅を伸ばし、回転が付いていれば縦横を入れ替える。
  *
  * スマホの縦撮りは、中身が `1920x1080` のまま「表示するときに90度回す」という
  * 情報(display matrix)を持っている形が普通。`ffprobe` の `width`/`height` は
@@ -88,13 +103,30 @@ function measureDurationByScan(filePath: string): Promise<number | null> {
  * 寸法を使っているのは**全部「見えている絵」を欲しがっている側**
  * (切り抜き位置の計算・トリムのモーダル・縦横比の警告・一覧の表示)なので、
  * 入口のここで直す。書き出しは寸法ではなくフィルタで組み立てているので影響しない。
+ *
+ * **回転と同じことが画素の縦横比(SAR≠1)でも起きる。** `ffprobe` の `width` は
+ * 「符号化されている画素数」で、`SAR 2:1` の `640x360` は横に2倍伸ばして
+ * `1280x360`(32:9)として見せる決まり。書き出しは `SQUARE_PIXEL_FILTER` で
+ * 伸ばしてから切り、Chromium も DAR を見て伸ばした絵を出すので、
+ * **アプリが持っている数字だけが伸ばす前のまま**になる。
+ * (実測: `SAR 2:1` の `640x360` を 16:9 の企画で「クロップして画面いっぱい」にし、
+ *  切り抜き位置を右寄り 0.75 にすると——`probeMedia` は **640x360**、
+ *  プレビューの `videoWidth/videoHeight` は **1280x360**。
+ *  アプリの数字だと縦横比が 1.778 で出力枠と同じになるため `cropObjectPosition` が
+ *  「はみ出さない＝動かしようが無い」と判断し、`object-position` が
+ *  **50% 50% に固定**される。8色の縦縞を並べた素材で、画面には中央の
+ *  黄・緑・水色・青が出るのに、書き出しは指定どおり右端の水色・青・紫・白。
+ *  **切り抜き位置のつまみを動かしても画面が一切動かない**——0.0/0.5/0.75/1.0 の
+ *  どれでも 50% 50%。直すと 0%/50%/100%/100% と動き、画面と書き出しが一致する)
  */
 function displayDimensions(stream: Record<string, unknown> | undefined): {
   width: number
   height: number
 } {
-  const width = typeof stream?.width === 'number' ? stream.width : 0
+  const coded = typeof stream?.width === 'number' ? stream.width : 0
   const height = typeof stream?.height === 'number' ? stream.height : 0
+  // 伸ばすのは**幅**。`SQUARE_PIXEL_FILTER`(`scale='iw*sar':ih`)と同じ向きに揃える。
+  const width = Math.round(coded * pixelAspectRatio(stream))
   // 新しい ffprobe は display matrix を `rotation`(数値)で、古い形は
   // `tags.rotate`(文字列)で出す。符号や 90/270 の別は入れ替えの判定に要らない
   // ——**奇数倍の90度かどうか**だけ見る。
