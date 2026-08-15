@@ -68,6 +68,47 @@ function measureDurationByScan(filePath: string): Promise<number | null> {
   })
 }
 
+/**
+ * 素材の**画面に出る寸法**。回転が付いていれば縦横を入れ替える。
+ *
+ * スマホの縦撮りは、中身が `1920x1080` のまま「表示するときに90度回す」という
+ * 情報(display matrix)を持っている形が普通。`ffprobe` の `width`/`height` は
+ * **回す前の数字**なので、そのまま持つと縦の素材を横だと思い込む。
+ * ffmpeg も Chromium の `<video>` も**回してから**絵を出すので、
+ * 実際に見えている絵とアプリが持っている数字だけが食い違う。
+ *
+ * (実測: 回転90度を付けた素材で `ffprobe` は **640x360**、しかし ffmpeg が出す1枚も
+ *  プレビューの `videoWidth/videoHeight` も **360x640**。この 640x360 が
+ *  `asset.width/height` に入るため、16:9 の企画で「クロップして画面いっぱい」に
+ *  すると、`cropObjectPosition` が「縦横比が同じ＝はみ出さない」と判断して
+ *  切り抜き位置を **50% 50%** に固定していた。書き出しは回した絵を切るので
+ *  指定どおり上端が出る——**同じ設定で画面と出力に別の場所が映る**。
+ *  実測の色: 書き出しは上下とも青(0,0,255)＝上端、画面は下側が赤(254,0,0)＝中央)
+ *
+ * 寸法を使っているのは**全部「見えている絵」を欲しがっている側**
+ * (切り抜き位置の計算・トリムのモーダル・縦横比の警告・一覧の表示)なので、
+ * 入口のここで直す。書き出しは寸法ではなくフィルタで組み立てているので影響しない。
+ */
+function displayDimensions(stream: Record<string, unknown> | undefined): {
+  width: number
+  height: number
+} {
+  const width = typeof stream?.width === 'number' ? stream.width : 0
+  const height = typeof stream?.height === 'number' ? stream.height : 0
+  // 新しい ffprobe は display matrix を `rotation`(数値)で、古い形は
+  // `tags.rotate`(文字列)で出す。符号や 90/270 の別は入れ替えの判定に要らない
+  // ——**奇数倍の90度かどうか**だけ見る。
+  const tags = stream?.tags as { rotate?: unknown } | undefined
+  const raw =
+    typeof stream?.rotation === 'number'
+      ? stream.rotation
+      : typeof tags?.rotate === 'string'
+        ? Number(tags.rotate)
+        : 0
+  const degrees = Number.isFinite(raw) ? Math.abs(raw) % 180 : 0
+  return degrees === 90 ? { width: height, height: width } : { width, height }
+}
+
 export function probeMedia(filePath: string): Promise<MediaProbeResult> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, async (err, data) => {
@@ -93,10 +134,11 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
         finiteSeconds(videoStream?.duration) ??
         finiteSeconds(audioStream?.duration)
       const duration = declared ?? (await measureDurationByScan(filePath)) ?? 0
+      const display = displayDimensions(videoStream as Record<string, unknown> | undefined)
       resolve({
         duration,
-        width: videoStream?.width ?? 0,
-        height: videoStream?.height ?? 0,
+        width: display.width,
+        height: display.height,
         fps,
         hasAudio: Boolean(audioStream),
         hasVideo: Boolean(videoStream),
