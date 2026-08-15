@@ -34,3 +34,28 @@ export function karaokeWords(
   const spelled = words.map((w) => w.text).join('')
   return spelled.trim() === (overlay.text ?? '').trim() ? words : null
 }
+
+/**
+ * その単語が**もう強調色に変わっているか**。画面と書き出しで同じ規則を使うための共通の置き場。
+ *
+ * 書き出しは ASS の `\k`(カラオケ)で組んでいる。`\k` は
+ * **その単語の開始時刻に色が切り替わり、行が消えるまで戻らない**——つまり
+ * 「ここまで読んだ」が後ろへ伸びていく塗りで、名前のとおりカラオケの歌詞と同じ。
+ * ところが画面側は `start <= t < end` と**今の1語だけ**を塗っており、読み終わった語が
+ * 元の色に戻っていた。**同じ設定で画面と出力に別の絵が出る**。
+ * (実測: 4語×1秒・通常色 白 / 強調色 赤。書き出した絵の赤い画素の割合は
+ *  0.05秒 **24.3%** → 1.5秒 **52.9%** → 2.5秒 **71.8%** → 3.5秒 **100.0%** と伸びていくのに、
+ *  画面は同じ4時点とも「1語だけ赤・残り3語は白」。3.5秒では**画面 1/4 に対し出力は全部**が
+ *  赤だった。境目も実測: 50fps で焼いて 0.98秒 24.3% / **1.00秒 52.9%**——
+ *  切り替わるのは**その語の開始時刻ちょうど**で、`>=` で数える)
+ *
+ * 数でない時刻(壊れた `.veproj`・未設定)は「まだ」に倒す。塗りっぱなしにすると
+ * 行全体が強調色になり、**通常色の設定が画面から消えて見える**。
+ */
+export function isKaraokeWordSung(
+  word: Pick<TranscriptWord, 'start'>,
+  timeSeconds: number
+): boolean {
+  if (!Number.isFinite(word.start) || !Number.isFinite(timeSeconds)) return false
+  return timeSeconds >= word.start
+}

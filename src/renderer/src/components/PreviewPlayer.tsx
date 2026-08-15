@@ -12,7 +12,7 @@ import {
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
 import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
-import { karaokeWords } from '@shared/captionWords'
+import { isKaraokeWordSung, karaokeWords } from '@shared/captionWords'
 import { blurSigmaFor } from '@shared/videoFrame'
 import {
   combineLevels,
@@ -149,8 +149,9 @@ function renderOverlayText(o: TextOverlay, playheadTime: number): React.ReactNod
       <span
         key={i}
         style={{
-          color:
-            playheadTime >= w.start && playheadTime < w.end ? o.style.highlightColor : undefined
+          // 色が変わる条件も**書き出しと同じ関数**を通す(理由は isKaraokeWordSung)。
+          // 「今の1語だけ」にすると、読み終わった語が元の色へ戻って出力と食い違う。
+          color: isKaraokeWordSung(w, playheadTime) ? o.style.highlightColor : undefined
         }}
       >
         {w.text}

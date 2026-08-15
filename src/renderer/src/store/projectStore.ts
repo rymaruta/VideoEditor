@@ -2832,7 +2832,7 @@ function remapOverlayLinks(
  * テロップを動かしたとき、カラオケ(単語ごとの色替え)の時刻も同じだけ動かす。
  *
  * `words` の `start`/`end` は**テロップと同じタイムラインの絶対秒**。プレビューは
- * `playheadTime >= w.start && playheadTime < w.end` で直接見比べ、書き出しは
+ * `isKaraokeWordSung(w, playheadTime)`(＝開始時刻を過ぎたか)で直接見比べ、書き出しは
  * `buildKaraokeText(words, o.startTime)` で**テロップの開始からの差**を `\k` に変換する。
  * どちらも絶対秒を前提にしているので、**テロップだけ動かすと単語が置き去りになる**。
  *
