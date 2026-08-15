@@ -61,6 +61,19 @@ export async function detectAudioLevels(filePath: string): Promise<AudioLevel[]>
   const { stdout } = await runFfmpeg([
     '-i',
     filePath,
+    // **映像をデコードさせない。** 見るのは音量だけなのに、指定が無いと ffmpeg は
+    // 映像も既定で拾って**全フレームをデコードして再エンコードし直す**(`-f null` は
+    // 捨てるだけで、そこへ辿り着く手前の仕事は全部やっている)。
+    // 実測(1920x1080・120秒): **4.94秒 → 0.23秒**。出力は1バイトも変わらない。
+    // 長尺スキャンはこの関数1本で素材全体を舐めるので、そのまま尺に比例して効く
+    // (2時間の録画なら 約5分 → 約14秒)。
+    // **`-vn` は使わない。** 映像しか無いファイル(音声なしの録画)で出力ストリームが
+    // 0本になり、**いままで「0件」で済んでいたものが `Error opening output files:
+    // Invalid argument` という生の英語の失敗に変わる**(実測: 終了コード 234)。
+    // `-c:v copy` ならデコードだけをやめられて、ストリームの選ばれ方も終了コードも
+    // 従来どおり(実測: 音声なしの素材は現状と同じ rc=0・0件)。
+    '-c:v',
+    'copy',
     '-af',
     'asetnsamples=n=44100,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-',
     '-f',

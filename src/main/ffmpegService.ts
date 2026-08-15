@@ -325,7 +325,17 @@ export async function detectSilence(
 
     ffmpeg(filePath)
       .inputOptions([`-ss ${rangeStart}`, `-t ${duration}`])
-      .outputOptions([`-af silencedetect=noise=${noiseDb}dB:d=${SILENCE_MIN_DURATION}`, '-f null'])
+      // **映像をデコードさせない。** 1パス目(`detectMaxVolumeDb`)には最初から
+      // 指定があるのに、本命のこちらには無く、**同じ関数の2つのパスで片方だけ**
+      // 映像を全フレームデコード＆再エンコードしていた。
+      // 実測(1920x1080・120秒): **5.17秒 → 0.14秒**。検出結果は同一。
+      // `-vn` ではなく `-c:v copy` にする理由は `detectAudioLevels` と同じ
+      // (音声が無い素材で出力ストリームが0本になり、生の英語の失敗に変わるため)。
+      .outputOptions([
+        '-c:v copy',
+        `-af silencedetect=noise=${noiseDb}dB:d=${SILENCE_MIN_DURATION}`,
+        '-f null'
+      ])
       .output('-')
       .on('stderr', (line: string) => {
         const startMatch = /silence_start:\s*(-?[\d.]+)/.exec(line)
