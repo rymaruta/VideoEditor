@@ -129,23 +129,41 @@ function computeBpm(samples: Int16Array): BpmAnalysisResult {
   // the true period, so the strongest peak can land on 2x/3x the real beat
   // interval (a classic "half-tempo" octave error). Prefer the fastest lag among
   // the winner and its divisors whose score is still comparably strong.
+  //
+  // **強さは1点ではなく、隣り合う3つをまとめて比べる。** lag は整数だが本当の周期は
+  // そうとは限らず、間に落ちると相関は**両隣の2つに割れる**。しかもその2倍・3倍は
+  // 誤差も2倍・3倍されるので、**遅いほうだけ整数に近く**なって強く出ることがある。
+  // 1点で比べると、割れた側（＝本当の速さ）だけが不当に弱く見えて門を通れない。
+  // (実測・175BPM のクリック音源: 本当の lag は 29.53 で、lag 29 が最良比 **0.560**、
+  //  lag 30 が **0.641**。門は 0.65 なので**どちらも通らず**、2倍の lag 59
+  //  (＝87.6BPM) が勝って **88BPM** と答えていた。3つまとめると 29 も 30 も
+  //  **0.983** になり、素直に 175 側が選ばれる)
+  const lagWindowScore = (lag: number): number =>
+    (scoreByLag.get(lag - 1) ?? 0) + (scoreByLag.get(lag) ?? 0) + (scoreByLag.get(lag + 1) ?? 0)
+
   const originalBestLag = bestLag
-  const originalBestScore = bestScore
+  const originalBestWindow = lagWindowScore(originalBestLag)
   let chosenLag = originalBestLag
   for (const divisor of [2, 3]) {
-    for (const candidate of [
+    // 割った先は整数にならないので、**両隣を候補にして、通った中から一番近いほうを採る**。
+    // 先に見たほうを即採用すると、`候補 < chosenLag` の条件で**もう片方を見られなくなる**。
+    // 割り算は必ず切り捨て側が先に来るので、常に「速すぎるほう」に倒れてしまう。
+    // (実測・145BPM のクリック音源: 本当の lag は 35.64 で、lag 35 の強さが 0.516、
+    //  lag 36 が **0.912**。近いのは 36 なのに 35 を先に採ってしまい **148BPM**
+    //  ——真値より速い側へ 3 も外れていた。近いほうを採れば **144BPM**)
+    const candidates = [
       Math.floor(originalBestLag / divisor),
       Math.ceil(originalBestLag / divisor)
-    ]) {
-      if (candidate < minLag || candidate >= chosenLag) continue
-      const candidateScore = scoreByLag.get(candidate)
-      if (
-        candidateScore !== undefined &&
-        candidateScore >= originalBestScore * OCTAVE_SCORE_RATIO
-      ) {
-        chosenLag = candidate
-      }
-    }
+    ].filter((c) => c >= minLag && c < chosenLag && scoreByLag.has(c))
+    // 門(「まだ十分強いか」)は隣を含めた強さで、**選ぶ**のは1点の強さで。
+    // 門は割れに強く、選択は本当の周期に近いほうを採る、と役割を分ける。
+    const passing = candidates.filter(
+      (c) => lagWindowScore(c) >= originalBestWindow * OCTAVE_SCORE_RATIO
+    )
+    if (passing.length === 0) continue
+    chosenLag = passing.reduce((a, b) =>
+      (scoreByLag.get(b) ?? -Infinity) > (scoreByLag.get(a) ?? -Infinity) ? b : a
+    )
   }
   bestLag = chosenLag
 
