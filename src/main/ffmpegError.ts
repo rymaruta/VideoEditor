@@ -29,6 +29,30 @@ const NOISE = [
   /^At least one output file must be specified$/i
 ]
 
+/**
+ * 「出力に入れるストリームが1本も無かった」失敗。
+ *
+ * 素材から**特定の種類だけを取り出す**経路(BPM解析は音声だけを `-f s16le` へ出す)では、
+ * これは道具の失敗ではなく**その素材にその種類が無い**という意味になる。呼び出し側が
+ * 素材に即した案内(「音声データを取得できませんでした」)へ倒せるように、
+ * 判定をここへ置いて**同じ正規表現を1つだけ持つ**(各所で英文を照合し直さない)。
+ */
+// 版によって `Output file #0 does not contain any stream`(添字つき)と
+// `Output file does not contain any stream`(添字なし・ffmpeg 7)の両方がある。
+// **`.*` を挟む形だと添字が無い側に当たらない**——実測でこの表が一度も引けておらず、
+// 音声を持たない動画に BPM解析を掛けると
+// 「メディアファイルを処理できませんでした: Error opening output files: Invalid argument」
+// (65文字・英語混じり)が出ていた。
+const NO_OUTPUT_STREAM = /Output file(?: #\d+)? does not contain any stream/i
+
+/**
+ * その標準エラー出力が「出力に入れるストリームが無かった」を言っているか。
+ * 直に `spawn` した側が、自分の素材に即した案内へ差し替えるかを決めるために使う。
+ */
+export function isNoOutputStreamFailure(stderr: string): boolean {
+  return NO_OUTPUT_STREAM.test(stderr)
+}
+
 /** 見慣れた原因は、その場で何をすればよいか分かる日本語に置き換える */
 const KNOWN: [RegExp, string][] = [
   [/No such file or directory/i, 'ファイルが見つかりません。移動または削除された可能性があります'],
@@ -40,7 +64,7 @@ const KNOWN: [RegExp, string][] = [
   ],
   [/No space left on device/i, 'ディスクの空き容量が足りません'],
   [/Unknown encoder|Encoder .* not found/i, 'この形式の書き出しに必要な機能が見つかりませんでした'],
-  [/Output file .* does not contain any stream/i, '出力に入れる映像・音声がありませんでした']
+  [NO_OUTPUT_STREAM, '出力に入れる映像・音声がありませんでした']
 ]
 
 /** 原因が分からないときに残す長さの上限。これ以上出しても読めない。 */

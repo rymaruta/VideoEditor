@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
+import { describeFfmpegExit, isNoOutputStreamFailure } from './ffmpegError'
 import type { BpmAnalysisResult } from '@shared/types'
 
 const SAMPLE_RATE = 22050
@@ -9,6 +10,35 @@ const MAX_BPM = 190
 const MAX_ANALYZE_SECONDS = 60
 const OCTAVE_SCORE_RATIO = 0.65
 
+/**
+ * 標準エラー出力から手元に残す長さ。原因の行は**一番最後**にあるので末尾を取る。
+ * 読まずに捨てると、失敗の理由がどこにも残らない。
+ */
+const STDERR_TAIL_LIMIT = 8192
+
+/**
+ * 音声を PCM に落とす。**ffmpeg の終了コードを見る。**
+ *
+ * 見ないと、`close` は失敗でも必ず来るので**取れたバイト数だけ**で判断することになり、
+ * 「ファイルが無い」「壊れている」「音声トラックが無い」の**3つの別々の原因が
+ * ひとつの案内に潰れる**。しかもその案内は「音声データを取得できませんでした」なので、
+ * ファイルが移動しただけの人が**音の問題を疑って探し回る**ことになる。
+ * (実測: 存在しないファイル・乱数で埋めた `.mp4`・音声を持たない動画の3つとも
+ *  **同じ16文字**。同じ入力で取り込みとハイライト検出は
+ *  **31文字「ファイルが見つかりません…」/ 22文字「対応していない形式か…」**を出していた)
+ *
+ * 変換は**直に `spawn` した側の共通の入口**(`describeFfmpegExit`)を通す。ここで自前の
+ * 文面を組むと、その経路だけが「見慣れた原因の表」からも長さの上限からも外れる。
+ *
+ * **ただし「出力に入れるストリームが無かった」だけは通さない。** 音声だけを取り出す
+ * この経路では、それは道具の失敗ではなく**その素材に音が無い**という意味なので、
+ * 空の結果として返して呼び出し側の案内(「音声データを取得できませんでした」)に倒す
+ * ——ここが今まででいちばん正しく案内できていた1件で、直すついでに壊さない。
+ *
+ * 範囲が素材より長い・完全に範囲外のときは ffmpeg が**終了コード0**で返す
+ * (実測: 12秒の素材に 60秒を要求→0、20秒地点から要求→0・出力0バイト)ので、
+ * 今までどおり尺の判定に落ちる。
+ */
 function decodePcm(filePath: string, start: number, duration: number): Promise<Int16Array> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -28,9 +58,17 @@ function decodePcm(filePath: string, start: number, duration: number): Promise<I
     ]
     const proc = spawn(ffmpegPath, args)
     const chunks: Buffer[] = []
+    let stderr = ''
     proc.stdout.on('data', (chunk) => chunks.push(chunk))
+    proc.stderr.on('data', (chunk) => {
+      stderr = (stderr + String(chunk)).slice(-STDERR_TAIL_LIMIT)
+    })
     proc.on('error', reject)
-    proc.on('close', () => {
+    proc.on('close', (code) => {
+      if (code !== 0 && !isNoOutputStreamFailure(stderr)) {
+        reject(describeFfmpegExit(code, stderr))
+        return
+      }
       const buf = Buffer.concat(chunks)
       const sampleCount = Math.floor(buf.length / 2)
       const samples = new Int16Array(sampleCount)
@@ -154,7 +192,13 @@ export async function analyzeBpm(
   duration: number
 ): Promise<BpmAnalysisResult> {
   const clampedDuration = Math.min(duration, MAX_ANALYZE_SECONDS)
-  if (clampedDuration < 2) {
+  // **`< 2` ではなく `>= 2` の否定で見る。** NaN はどちらの比較でも false なので、
+  // `< 2` だとこの門を素通りして `-t NaN` のまま ffmpeg へ渡る。終了コードを見るように
+  // した今は、それが「メディアファイルを処理できませんでした: Error opening input files:
+  // Invalid argument」(64文字・英語混じり)として画面に出てしまう
+  // (見ていなかった頃は「音声データを取得できませんでした」に潰れて隠れていた)。
+  // 範囲で挟む形にすれば NaN は自然にこの案内へ落ちる。
+  if (!(clampedDuration >= 2)) {
     throw new Error('BPM解析には2秒以上の音声が必要です')
   }
   const samples = await decodePcm(filePath, start, clampedDuration)
