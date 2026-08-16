@@ -863,13 +863,45 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       // timeline. Text overlays, audio-track clips and PiP clips are all anchored to
       // timeline seconds, so without this remap everything after the first
       // transition would be burned in / delayed by the accumulated overlap.
-      const toExportTime = (timelineTime: number): number => {
+      const clipIndexAt = (timelineTime: number): number => {
         let idx = 0
         for (let i = 0; i < timelineStarts.length; i++) {
           if (timelineStarts[i] <= timelineTime) idx = i
           else break
         }
+        return idx
+      }
+      const toExportTime = (timelineTime: number): number => {
+        const idx = clipIndexAt(timelineTime)
         return Math.max(0, timelineTime - (timelineStarts[idx] - exportStarts[idx]))
+      }
+      /**
+       * **区間の「終わり」の換算。始まりと必ず対で使う。**
+       *
+       * `toExportTime` は**単調ではない**。繋ぎは2本のクリップを重ねるので、
+       * クリップの変わり目で戻る値が**繋ぎの秒数ぶん巻き戻る**
+       * (実測・4秒+4秒に1秒のクロスフェード: `toExportTime(3.99)` = 3.99 に対し
+       *  `toExportTime(4.0)` = **3.0**)。そのため**繋ぎをまたぐ区間**を端ごとに
+       * 換算すると、終わりが始まりより**前**になる。
+       *
+       * これを ASS の `Dialogue` にそのまま書くと、libass は行を消す時刻を見失い
+       * **動画の最後まで出しっぱなし**にする(実測: タイムライン [3.7, 4.3] に置いた
+       * テロップが、7.000秒の出力で **3.733秒から 6.967秒＝最後まで**焼き込まれた。
+       * `toAssTime` は負数と非有限は潰すが、**始まり>終わりは素通し**していた)。
+       * PiP 側は逆に、始まりだけ換算して**終わりは `始まり + 素材の尺` のまま**だったので、
+       * 繋ぎのぶん長く残っていた(同じ企画で PiP は 6.000秒まで、同じ区間に置いた
+       * テロップは 4.967秒まで——**同じ区間なのに 31フレーム＝1.033秒ちがう**)。
+       *
+       * 正しい終わりは「その区間が覆う**書き出し時刻の集合**」の右端。区間が
+       * 繋ぎをまたいでいるなら、少なくとも**始まりのクリップの終わりまで**は覆っている。
+       * 戻り値が始まりより前になることは無い。
+       */
+      const toExportEndTime = (startTimeline: number, endTimeline: number): number => {
+        const startExport = toExportTime(startTimeline)
+        const endExport = toExportTime(endTimeline)
+        if (endExport >= startExport) return endExport
+        const idx = clipIndexAt(startTimeline)
+        return Math.max(startExport, exportStarts[idx] + clipExportDurations[idx])
       }
       // The encoded video's real length; the raw timeline sum would stall progress short of 100%.
       totalDuration = curDuration
@@ -904,7 +936,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             track.position === 'top-left' || track.position === 'top-right'
               ? `${margin}`
               : `H-h-${margin}`
-          const endTime = pipStart + dur
+          // **終わりも同じ換算を通す。** ここだけ「始まり + 素材の尺」のままだと、
+          // 繋ぎをまたぐ PiP が繋ぎのぶん長く残り、置いた覚えのない絵の上に居座る
+          // (理由と実測は `toExportEndTime`)。
+          const endTime = toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur)
           const outV = `vpip${pipCounter}`
           filterParts.push(
             `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${pipStart}\\,${endTime})'[${outV}]`
@@ -927,14 +962,17 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       if (project.textOverlays.length > 0) {
         assDir = mkdtempSync(join(tmpdir(), 've-subs-'))
         const assPath = join(assDir, 'overlay.ass')
+        // 端ごとに `toExportTime` を掛けると、繋ぎをまたぐ区間で**終わりが始まりより前**に
+        // なる。ASS はそれを消せず**最後まで出しっぱなし**になるので、終わりは対で換算する
+        // (理由と実測は `toExportEndTime`)。カラオケの語も同じ理由で同じ換算を通す。
         const remappedOverlays = project.textOverlays.map((o) => ({
           ...o,
           startTime: toExportTime(o.startTime),
-          endTime: toExportTime(o.endTime),
+          endTime: toExportEndTime(o.startTime, o.endTime),
           words: o.words?.map((word) => ({
             ...word,
             start: toExportTime(word.start),
-            end: toExportTime(word.end)
+            end: toExportEndTime(word.start, word.end)
           }))
         }))
         // テロップの仮想キャンバスは**出力解像度ではなく固定の基準**。libass が
