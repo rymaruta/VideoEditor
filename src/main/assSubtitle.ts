@@ -2,6 +2,8 @@ import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
 import {
   TEXT_ANIMATION_MS,
   TEXT_FADE_IN_MS,
+  TEXT_SHADOW_OFFSET_PX,
+  TEXT_SHADOW_OPACITY,
   textBoxPaddingPx,
   textMarginHPx,
   textMarginVPx,
@@ -346,7 +348,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     const outlineTags = style.outline
       ? `\\3c${toAssColor(style.outlineColor)}\\bord${style.outlineWidth}`
       : '\\bord0'
-    const shadowTags = style.shadow ? '\\shad2\\4c&H00000000\\4a&H60&' : '\\shad0'
+    // 落とし幅と濃さは共通の置き場から(画面の `text-shadow` と同じ数字を使う理由は
+    // `TEXT_SHADOW_OFFSET_PX`)。ここに直に書いていたので、画面だけ濃くなっていた。
+    const shadowTags = style.shadow
+      ? `\\shad${TEXT_SHADOW_OFFSET_PX}\\4c&H00000000\\4a${toAssAlpha(TEXT_SHADOW_OPACITY)}`
+      : '\\shad0'
     const spacingTag = style.letterSpacing ? `\\fsp${style.letterSpacing}` : ''
 
     // 透明から出るぶんは**画面と同じ長さ**で `\\fad` を掛ける。

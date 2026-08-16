@@ -15,6 +15,8 @@ import {
   TEXT_ANIMATION_MS,
   TEXT_MARGIN_H_RATIO,
   TEXT_MARGIN_V_RATIO,
+  TEXT_SHADOW_OFFSET_PX,
+  TEXT_SHADOW_OPACITY,
   textSlideOffsetPx
 } from '@shared/textStyle'
 import { isKaraokeWordSung, karaokeWords } from '@shared/captionWords'
@@ -87,9 +89,6 @@ const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
   'Noto Serif JP': '"Noto Serif JP", serif'
 }
 
-// 書き出し側の `\shad2`(出力ピクセル)に合わせる。
-const SHADOW_OFFSET_OUTPUT_PX = 2
-
 /**
  * `text-shadow` に入れる長さを安全な数値にする。
  *
@@ -136,9 +135,12 @@ function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
     }
   }
   if (style.shadow) {
-    // 影も同じ。書き出しは `\shad2` = 出力2px 相当なので、画面でもその比率で置く。
-    const o = SHADOW_OFFSET_OUTPUT_PX * scale
-    if (o > 0) shadows.push(`${o}px ${o}px ${o * 2}px rgba(0,0,0,0.7)`)
+    // 影も同じ。**落とし幅も濃さも共通の置き場から取る**——ここに直に書いていたので、
+    // 濃さが書き出しと食い違っていた(実測: 画面 0.7 / 書き出し 0.6235。白地に置くと
+    // 芯が 77 対 95 で**画面のほうが濃い**)。理由と実測は `TEXT_SHADOW_OFFSET_PX`。
+    // **ぼかさない。** ASS の `\shad` は硬い影で、ぼかし半径を入れていたのは画面だけ。
+    const o = TEXT_SHADOW_OFFSET_PX * scale
+    if (o > 0) shadows.push(`${o}px ${o}px 0 rgba(0,0,0,${TEXT_SHADOW_OPACITY})`)
   }
   return {
     fontFamily: FONT_STACKS[style.fontFamily],
