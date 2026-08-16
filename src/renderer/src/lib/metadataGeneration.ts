@@ -128,8 +128,28 @@ async function callGemini(
     .map(dataUrlToInlineImage)
     .filter((img): img is GeminiInlineImage => img !== null)
 
+  /**
+   * **名乗る枚数は実際に添付した数に合わせる。**
+   *
+   * 3つの依頼文はどれも「添付されたサムネイル候補画像**だけ**を根拠に」と名乗るが、
+   * 絵は `captureAiFrames` が**取れなかった1枚を黙って飛ばす**ので、0枚になりうる。
+   * そのときモデルは**在りもしない絵を根拠にしろ**と言われることになり、
+   * 「テロップにない出来事を創作しないでください」と釘を刺している依頼文自身が、
+   * 見ていない絵を前提にした作文を促してしまう。
+   * (実測・映像が5秒で終わるのに音声は20秒続く素材の 10〜20秒をクリップにした企画
+   *  ＝頭・中・終盤のどれも映像の外: 添付した画像は **0枚**なのに、依頼文は
+   *  「…添付されたサムネイル候補画像だけを根拠に…」のまま送られていた)
+   *
+   * 同じ画面のゲームトレンド分析は**実際の枚数を名乗り、0枚なら断る**形に直っている。
+   * ここは3つの依頼文が同じ文を持つので、組み立ての手前ではなく**送る直前の1箇所**で足す。
+   */
+  const imageNote =
+    images.length > 0
+      ? `\n\n(サムネイル候補画像を${images.length}枚添付しています。)`
+      : '\n\n(サムネイル候補画像は添付されていません。テロップ内容と補足情報だけを根拠にしてください。)'
+
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
-    { text: prompt },
+    { text: `${prompt}${imageNote}` },
     ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.data } }))
   ]
 

@@ -566,15 +566,49 @@ async function enhanceWithGemini(
   apiKey: string
 ): Promise<Record<string, string>> {
   const GEMINI_MODEL = 'gemini-flash-latest'
+  /**
+   * **添付できる画像を先に確定させる。** 依頼文は「並べたパターンと画像が1対1で対応する」
+   * 前提で書かれているのに、画像は `thumbnails` にあるものだけを後から並べていたので、
+   * **サムネイルの生成に失敗したパターンがあるとその前提が崩れていた**。
+   * しかも画像には id が付いていないので、モデルは「k枚目 = k番目のパターン」と読むしかなく、
+   * 穴より後ろの画像は**全部1つ手前のパターンの絵**として扱われる。
+   * (実測・映像が5秒で終わるのに音声は20秒続く素材3本＝先頭カットの絵が取れない企画:
+   *  依頼文に並べたパターン **5件**に対し添付した画像は **0枚**。それでも依頼文は
+   *  「それぞれの先頭カットのサムネイル画像です。**画像から読み取れる内容を根拠に
+   *  判断してください**」と名乗り、**画像が無いときの断り書きも無かった**
+   *  ——モデルは在りもしない絵を根拠に説明文を書くことになる。
+   *  素材1本だけが同じ状態のときは 5件に対し **4枚**で、こちらは穴の位置しだいで
+   *  画像が1つずつずれて別のパターンの絵として読まれる)
+   *
+   * 同じ画面の**ゲームトレンド分析はこの手当てが済んでいる**(実際に添付した枚数を名乗り、
+   * 0枚なら「添付されていない」と断る)。こちらだけ育っていなかった。
+   */
+  const attachable = patterns
+    .map((p) => {
+      const dataUrl = thumbnails[p.id]
+      if (!dataUrl) return null
+      const commaIdx = dataUrl.indexOf(',')
+      const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : ''
+      // 中身の無いデータURLを「画像1枚」として数えない(名乗る枚数が実物とずれる)。
+      if (!base64) return null
+      return { p, mimeType: dataUrl.match(/^data:([^;]+);/)?.[1] ?? 'image/png', data: base64 }
+    })
+    .filter((x): x is { p: AutoEditPattern; mimeType: string; data: string } => x !== null)
+
   const infoLines = patterns
     .map(
       (p, i) =>
-        `${i + 1}. id=${p.id} / スタイル=${STYLE_LABELS[p.style]} / カット数=${p.segments.length} / 尺=${p.totalDuration.toFixed(1)}秒`
+        `${i + 1}. id=${p.id} / スタイル=${STYLE_LABELS[p.style]} / カット数=${p.segments.length} / 尺=${p.totalDuration.toFixed(1)}秒 / サムネイル画像=${thumbnails[p.id] ? 'あり' : 'なし'}`
     )
     .join('\n')
+  // 名乗るのは**実際に添付する枚数**。0枚なら画像を根拠にしろとは言わない。
+  const imageNote =
+    attachable.length > 0
+      ? `あわせて、先頭カットのサムネイル画像を${attachable.length}枚添付しています。**各画像の直前に、それがどのidのものかを書いてあります**(画像が取れなかったパターンには画像がありません)。画像があるものは画像の内容も根拠にし、無いものは文字情報だけで判断してください。`
+      : 'サムネイル画像は添付されていません。文字情報だけで判断してください。'
   const parts: GeminiPart[] = [
     {
-      text: `あなたはYouTube Shorts編集AIです。以下は動画素材から自動生成した編集パターンの情報と、それぞれの先頭カットのサムネイル画像です。画像から読み取れる内容を根拠に判断してください。
+      text: `あなたはYouTube Shorts編集AIです。以下は動画素材から自動生成した編集パターンの情報です。${imageNote}
 
 # ユーザーの編集の好み傾向(これまでのフィードバックの蓄積)
 ${preferenceSummary}
@@ -583,19 +617,17 @@ ${preferenceSummary}
 ${infoLines}
 
 # 依頼内容
-各パターンについて、画像の内容とスタイル・好み傾向を踏まえた日本語1文の短いキャッチーな説明文(description)を作ってください。好み傾向に最も合いそうなパターンのidを1つ選んでrecommendedIdとしてください。
+各パターンについて、スタイル・好み傾向(と、あれば画像の内容)を踏まえた日本語1文の短いキャッチーな説明文(description)を作ってください。好み傾向に最も合いそうなパターンのidを1つ選んでrecommendedIdとしてください。
 
 # 出力形式(このJSONのみを出力してください)
 { "descriptions": [{ "id": "string", "description": "string" }], "recommendedId": "string" }`
     }
   ]
-  for (const p of patterns) {
-    const dataUrl = thumbnails[p.id]
-    if (!dataUrl) continue
-    const commaIdx = dataUrl.indexOf(',')
-    const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : ''
-    const mimeMatch = dataUrl.match(/^data:([^;]+);/)
-    parts.push({ inlineData: { mimeType: mimeMatch?.[1] ?? 'image/png', data: base64 } })
+  for (const item of attachable) {
+    // 画像そのものには id を持たせられないので、**直前の一行で結び付ける**。
+    // 並び順に頼ると、穴が1つ空いた瞬間に後ろが全部ずれる。
+    parts.push({ text: `次の画像は id=${item.p.id} のパターンの先頭カットです。` })
+    parts.push({ inlineData: { mimeType: item.mimeType, data: item.data } })
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
