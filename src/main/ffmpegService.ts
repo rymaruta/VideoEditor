@@ -17,6 +17,7 @@ import type {
 import { buildAssContent } from './assSubtitle'
 import { measureWideAdvances } from './fontMetrics'
 import { effectiveTransitionSeconds } from '@shared/transition'
+import { createExportTimeMap } from '@shared/exportTimeline'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
@@ -863,46 +864,14 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       // timeline. Text overlays, audio-track clips and PiP clips are all anchored to
       // timeline seconds, so without this remap everything after the first
       // transition would be burned in / delayed by the accumulated overlap.
-      const clipIndexAt = (timelineTime: number): number => {
-        let idx = 0
-        for (let i = 0; i < timelineStarts.length; i++) {
-          if (timelineStarts[i] <= timelineTime) idx = i
-          else break
-        }
-        return idx
-      }
-      const toExportTime = (timelineTime: number): number => {
-        const idx = clipIndexAt(timelineTime)
-        return Math.max(0, timelineTime - (timelineStarts[idx] - exportStarts[idx]))
-      }
-      /**
-       * **区間の「終わり」の換算。始まりと必ず対で使う。**
-       *
-       * `toExportTime` は**単調ではない**。繋ぎは2本のクリップを重ねるので、
-       * クリップの変わり目で戻る値が**繋ぎの秒数ぶん巻き戻る**
-       * (実測・4秒+4秒に1秒のクロスフェード: `toExportTime(3.99)` = 3.99 に対し
-       *  `toExportTime(4.0)` = **3.0**)。そのため**繋ぎをまたぐ区間**を端ごとに
-       * 換算すると、終わりが始まりより**前**になる。
-       *
-       * これを ASS の `Dialogue` にそのまま書くと、libass は行を消す時刻を見失い
-       * **動画の最後まで出しっぱなし**にする(実測: タイムライン [3.7, 4.3] に置いた
-       * テロップが、7.000秒の出力で **3.733秒から 6.967秒＝最後まで**焼き込まれた。
-       * `toAssTime` は負数と非有限は潰すが、**始まり>終わりは素通し**していた)。
-       * PiP 側は逆に、始まりだけ換算して**終わりは `始まり + 素材の尺` のまま**だったので、
-       * 繋ぎのぶん長く残っていた(同じ企画で PiP は 6.000秒まで、同じ区間に置いた
-       * テロップは 4.967秒まで——**同じ区間なのに 31フレーム＝1.033秒ちがう**)。
-       *
-       * 正しい終わりは「その区間が覆う**書き出し時刻の集合**」の右端。区間が
-       * 繋ぎをまたいでいるなら、少なくとも**始まりのクリップの終わりまで**は覆っている。
-       * 戻り値が始まりより前になることは無い。
-       */
-      const toExportEndTime = (startTimeline: number, endTimeline: number): number => {
-        const startExport = toExportTime(startTimeline)
-        const endExport = toExportTime(endTimeline)
-        if (endExport >= startExport) return endExport
-        const idx = clipIndexAt(startTimeline)
-        return Math.max(startExport, exportStarts[idx] + clipExportDurations[idx])
-      }
+      // 換算の規則は共通の置き場(`@shared/exportTimeline`)に1つだけ置く。
+      // ここに書くと単体で確かめられず(このファイルは electron を引く経路を持つ)、
+      // 「区間の両端を対で換算する」という決まりも**呼び出し側の作法**になってしまう。
+      const { toExportTime, toExportEndTime } = createExportTimeMap(
+        timelineStarts,
+        clipOutputDurations,
+        exportStarts
+      )
       // The encoded video's real length; the raw timeline sum would stall progress short of 100%.
       totalDuration = curDuration
 
@@ -1018,7 +987,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           command.input(asset.filePath).inputOptions([`-ss ${trackClip.inPoint}`, `-t ${dur}`])
           const myIndex = inputIndex++
           const label = `atrk${trackIdx}_${clipIdx}`
-          const delayMs = Math.max(0, Math.round(toExportTime(trackClip.startTime) * 1000))
+          const clipStartExport = toExportTime(trackClip.startTime)
+          const delayMs = Math.max(0, Math.round(clipStartExport * 1000))
           // 音量の式はプレビューと同じ共通モジュール(2箇所に書くと片方だけ育つ)。
           const clipVolume = audioClipGain(track.volume, trackClip.volume)
           // 分離音声は本編クリップの速度がミラーされている。ここで atempo を掛けないと
@@ -1028,19 +998,45 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // asetpts でクリップ自身は0始まりに正規化されるので、フェードの位置に
           // toExportTime は通さない(絶対位置は adelay 側が既に通している)。
           const timelineDur = dur / clipSpeed
+          /**
+           * **鳴り終わりも書き出しの秒へ換算する。**
+           *
+           * 始まり(`adelay`)だけ換算して終わりを「換算した始まり + 素材の尺」の
+           * ままにすると、繋ぎをまたぐ BGM・効果音が**繋ぎの秒数ぶん長く鳴る**。
+           * 同じ区間に置いた PiP とテロップは終わりも換算済みなので、
+           * **同じ区間の3つが揃わない**(実測: タイムライン [2.0, 6.0] の BGM が
+           * 正しい 5.0秒を過ぎて 6.0秒まで鳴り、PiP とテロップだけ 5.0秒で終わった)。
+           *
+           * 揃え方は**詰める(切る)**。`enable` の窓を狭める PiP と同じで、
+           * 繋ぎに食われた秒数ぶん**後ろが落ちる**。自動でフェードを足すことはしない
+           * ——アウト点で切ったときと同じ挙動に揃えるため、そして利用者が
+           * フェードアウトを 0 にしている意図を勝手に覆さないため。
+           * 代わりに、**利用者が付けたフェードアウトは詰めたあとの終わりに掛ける**
+           * (詰める前の位置のままだと、フェードごと切り落とされて全音量で止まる)。
+           */
+          const clipEndExport = toExportEndTime(
+            trackClip.startTime,
+            trackClip.startTime + timelineDur
+          )
+          const exportDur = clipEndExport - clipStartExport
+          // 引き算の誤差(1e-16 の桁)で切りにいかないための余裕。ここより短い差は
+          // 音として存在しないので、繋ぎをまたがない今までの書き出しは1バイトも変わらない。
+          const TRIM_EPSILON = 1e-6
+          const audibleDur = exportDur < timelineDur - TRIM_EPSILON ? exportDur : timelineDur
+          const trimChain = audibleDur < timelineDur ? `atrim=0:${audibleDur},` : ''
           const { fadeIn, fadeOut } = normalizeFades(
             trackClip.fadeIn,
             trackClip.fadeOut,
-            timelineDur
+            audibleDur
           )
           const fadeParts: string[] = []
           if (fadeIn > 0) fadeParts.push(`afade=t=in:st=0:d=${fadeIn}`)
           if (fadeOut > 0) {
-            fadeParts.push(`afade=t=out:st=${Math.max(0, timelineDur - fadeOut)}:d=${fadeOut}`)
+            fadeParts.push(`afade=t=out:st=${Math.max(0, audibleDur - fadeOut)}:d=${fadeOut}`)
           }
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${fadeChain}` +
+            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${trimChain}${fadeChain}` +
               `volume=${clipVolume},${adelayFilter(delayMs)},` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
           )
