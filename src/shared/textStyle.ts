@@ -1,4 +1,4 @@
-import type { FontFamily, TextStyle } from './types'
+import type { FontFamily, TextAnimation, TextStyle } from './types'
 
 /**
  * テロップの上下の余白(**枠の高さ**に対する比)。
@@ -58,6 +58,44 @@ export const TEXT_SLIDE_OFFSET_RATIO = 0.06
 export function textSlideOffsetPx(frameHeight: number): number {
   if (!Number.isFinite(frameHeight) || frameHeight <= 0) return 0
   return frameHeight * TEXT_SLIDE_OFFSET_RATIO
+}
+
+/**
+ * 登場アニメーションの長さ(ミリ秒)。
+ *
+ * 画面は CSS の `animation`、書き出しは ASS の `\move` / `\t` / `\fad` と**書く場所が
+ * 違うだけで同じ規則**なので、数字はここ1つに置く(余白・飛び込む距離と同じ理由)。
+ * `none` と `typewriter` は「1枚まるごとの登場」を持たない(後者は文字ごとに出る)ので 0。
+ */
+export const TEXT_ANIMATION_MS: Record<TextAnimation, number> = {
+  none: 0,
+  fadeIn: 300,
+  popIn: 200,
+  slideInUp: 350,
+  slideInDown: 350,
+  bounce: 500,
+  typewriter: 0
+}
+
+/**
+ * 登場時に**透明から不透明へ変わる**長さ(ミリ秒)。0 ならフェードしない。
+ *
+ * 画面の `@keyframes` は「下から出る」「上から出る」で `opacity: 0 → 1` を全体に、
+ * 「弾む」では前半(50% = 250ms)で掛けている。書き出しには `\fad` が
+ * **`fadeIn` にしか無かった**ので、同じ演出なのに画面だけふわっと出ていた。
+ * (実測・下から出る: 開始時点の不透明度が画面 **0** / 87.5ms で **0.409** /
+ *  175ms で **0.802** なのに、書き出しは同じ3点とも**完全に不透明**)
+ * 拡大だけの `popIn` は画面側も透明度を触らないので 0。
+ */
+export const TEXT_FADE_IN_MS: Record<TextAnimation, number> = {
+  none: 0,
+  fadeIn: 300,
+  popIn: 0,
+  slideInUp: 350,
+  slideInDown: 350,
+  // 画面のキーフレームは 50%(=500ms の半分)で不透明になる
+  bounce: 250,
+  typewriter: 0
 }
 
 /**

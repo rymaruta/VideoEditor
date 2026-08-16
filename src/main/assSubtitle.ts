@@ -1,5 +1,7 @@
 import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
 import {
+  TEXT_ANIMATION_MS,
+  TEXT_FADE_IN_MS,
   textBoxPaddingPx,
   textMarginHPx,
   textMarginVPx,
@@ -317,7 +319,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       // 片方だけ動いて、画面と書き出しで飛び込む距離が食い違う(理由は TEXT_SLIDE_OFFSET_RATIO)。
       const offset = Math.round(textSlideOffsetPx(height))
       const yFrom = style.animation === 'slideInUp' ? target.y + offset : target.y - offset
-      positionTag = `\\an${alignCode}\\move(${Math.round(target.x)},${Math.round(yFrom)},${Math.round(target.x)},${Math.round(target.y)},0,350)`
+      // 動く時間も画面と同じ置き場から(数字をこちらに書くと片方だけ動く)
+      const moveMs = TEXT_ANIMATION_MS[style.animation]
+      positionTag = `\\an${alignCode}\\move(${Math.round(target.x)},${Math.round(yFrom)},${Math.round(target.x)},${Math.round(target.y)},0,${moveMs})`
     } else if (style.customPosition) {
       positionTag = `\\an5\\pos(${Math.round(target.x)},${Math.round(target.y)})`
     } else {
@@ -345,14 +349,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     const shadowTags = style.shadow ? '\\shad2\\4c&H00000000\\4a&H60&' : '\\shad0'
     const spacingTag = style.letterSpacing ? `\\fsp${style.letterSpacing}` : ''
 
-    let animationTag = ''
-    if (style.animation === 'fadeIn') {
-      animationTag = '\\fad(300,0)'
-    } else if (style.animation === 'popIn') {
-      animationTag = '\\fscx60\\fscy60\\t(0,200,\\fscx100\\fscy100)'
+    // 透明から出るぶんは**画面と同じ長さ**で `\\fad` を掛ける。
+    // 「下から出る」「上から出る」「弾む」は画面のキーフレームが `opacity: 0 → 1` を
+    // 持っているのに、書き出しには `\\fad` が `fadeIn` にしか無く、**同じ演出なのに
+    // 画面だけふわっと出て**いた(理由と実測は TEXT_FADE_IN_MS)。
+    const fadeMs = TEXT_FADE_IN_MS[style.animation]
+    const fadeTag = fadeMs > 0 ? `\\fad(${fadeMs},0)` : ''
+    let animationTag = fadeTag
+    if (style.animation === 'popIn') {
+      animationTag = `${fadeTag}\\fscx60\\fscy60\\t(0,${TEXT_ANIMATION_MS.popIn},\\fscx100\\fscy100)`
     } else if (style.animation === 'bounce') {
+      // 拡大の折り返しは画面のキーフレーム(0% / 50% / 70% / 100%)と同じ時刻に置く
+      const total = TEXT_ANIMATION_MS.bounce
+      const half = Math.round(total * 0.5)
+      const dip = Math.round(total * 0.7)
       animationTag =
-        '\\fscx30\\fscy30\\t(0,250,\\fscx115\\fscy115)\\t(250,350,\\fscx92\\fscy92)\\t(350,500,\\fscx100\\fscy100)'
+        `${fadeTag}\\fscx30\\fscy30\\t(0,${half},\\fscx115\\fscy115)` +
+        `\\t(${half},${dip},\\fscx92\\fscy92)\\t(${dip},${total},\\fscx100\\fscy100)`
     }
 
     const common = `${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\b${bold}\\i${italic}${spacingTag}`

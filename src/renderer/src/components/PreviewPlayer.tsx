@@ -11,7 +11,12 @@ import {
   toElementVolume
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
-import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO, textSlideOffsetPx } from '@shared/textStyle'
+import {
+  TEXT_ANIMATION_MS,
+  TEXT_MARGIN_H_RATIO,
+  TEXT_MARGIN_V_RATIO,
+  textSlideOffsetPx
+} from '@shared/textStyle'
 import { isKaraokeWordSung, karaokeWords } from '@shared/captionWords'
 import { blurSigmaFor } from '@shared/videoFrame'
 import {
@@ -1344,6 +1349,10 @@ export function PreviewPlayer(): React.JSX.Element {
               // キーフレーム側はこの変数だけを読む——数字を CSS へ書き戻さないため。
               ;(positionStyle as Record<string, string>)['--overlay-slide-offset'] =
                 `${textSlideOffsetPx(frameHeight)}px`
+              // 登場アニメーションの長さも同じ置き場から。CSS に秒を書き戻すと、
+              // 書き出し(ASS の時刻)と2箇所に分かれる(理由は TEXT_ANIMATION_MS)。
+              ;(positionStyle as Record<string, string>)['--overlay-anim-duration'] =
+                `${TEXT_ANIMATION_MS[o.style.animation]}ms`
               return (
                 <div
                   key={o.id}
