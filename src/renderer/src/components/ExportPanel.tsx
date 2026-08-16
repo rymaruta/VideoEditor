@@ -97,6 +97,33 @@ export function ExportPanel(): React.JSX.Element {
     return unsubscribe
   }, [])
 
+  /**
+   * 書き出したファイルを開く。**失敗を握りつぶさない。**
+   *
+   * ここは `onClick={() => window.api.openPath(...)}` と**待たずに呼び捨て**にしていたので、
+   * main 側が投げても受け取る人がおらず、**押しても何も起きない**まま終わっていた
+   * (書き出したあとにファイルを消して押しても、画面は「完了しました」のまま無反応)。
+   */
+  async function handleOpenFile(): Promise<void> {
+    if (!doneFilePath) return
+    setError(null)
+    try {
+      await window.api.openPath(doneFilePath)
+    } catch (e) {
+      setError(formatIpcError(e))
+    }
+  }
+
+  async function handleShowInFolder(): Promise<void> {
+    if (!doneFilePath) return
+    setError(null)
+    try {
+      await window.api.showItemInFolder(doneFilePath)
+    } catch (e) {
+      setError(formatIpcError(e))
+    }
+  }
+
   async function handleExport(): Promise<void> {
     setError(null)
     setDoneMessage(null)
@@ -395,17 +422,11 @@ export function ExportPanel(): React.JSX.Element {
         <div className="export-done">
           <p className="success-text">{doneMessage}</p>
           <div className="export-done-actions">
-            <button
-              className="small-button"
-              onClick={() => doneFilePath && window.api.openPath(doneFilePath)}
-            >
+            <button className="small-button" onClick={handleOpenFile}>
               <PlayCircleIcon width={13} height={13} />
               再生
             </button>
-            <button
-              className="small-button"
-              onClick={() => doneFilePath && window.api.showItemInFolder(doneFilePath)}
-            >
+            <button className="small-button" onClick={handleShowInFolder}>
               <FolderIcon width={13} height={13} />
               フォルダを表示
             </button>

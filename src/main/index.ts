@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { describeOpenPathFailure, missingFileError } from './openPathError'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
@@ -395,11 +396,18 @@ app.whenReady().then(() => {
     await shell.openExternal(url)
   })
   ipcMain.handle(IPC.showItemInFolder, (_e, filePath: string) => {
+    // `showItemInFolder` は**戻り値も例外も無い**ので、失敗しても何も起きない
+    // (書き出したファイルを消したあとに押すと、押した手応えすら無かった)。
+    // こちらで実在だけ確かめて、他の経路と同じ文言で知らせる。
+    if (!existsSync(filePath)) throw missingFileError()
     shell.showItemInFolder(filePath)
   })
   ipcMain.handle(IPC.openPath, async (_e, filePath: string) => {
-    const errorMessage = await shell.openPath(filePath)
-    if (errorMessage) throw new Error(errorMessage)
+    // 「無い」の判定は**呼ぶ前に自分でやる**。`openPath` の戻り値は OS が作った英語で、
+    // 版によって文言が変わるため当てにできない(理由は describeOpenPathFailure)。
+    const exists = existsSync(filePath)
+    const errorMessage = exists ? await shell.openPath(filePath) : ''
+    if (!exists || errorMessage) throw describeOpenPathFailure(exists, errorMessage)
   })
   ipcMain.handle(IPC.saveProject, (_e, filePath: string, project: Project) => {
     saveProjectFile(filePath, project)
