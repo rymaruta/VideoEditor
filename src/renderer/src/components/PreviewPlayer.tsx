@@ -60,6 +60,11 @@ import type {
 import { previewSourceUrl } from '../lib/previewSource'
 import { activeVideoOverlayClips } from '../lib/videoOverlay'
 import { toPlaybackRate } from '../lib/playbackRate'
+import {
+  PREVIEW_BLEND_FOLLOW_TOLERANCE_SEC,
+  followPreviewTime,
+  seekPreviewTime
+} from '../lib/previewSync'
 import { applyPendingPreviewLoad, type PendingPreviewLoad } from '../lib/pendingPreviewLoad'
 
 function formatTime(seconds: number): string {
@@ -252,7 +257,8 @@ function VideoOverlayLayer({
   playheadTime,
   isPlaying,
   volume,
-  muted
+  muted,
+  seekToken
 }: {
   clip: VideoOverlayClip
   asset: MediaAsset
@@ -263,15 +269,26 @@ function VideoOverlayLayer({
   isPlaying: boolean
   volume: number
   muted: boolean
+  /** 明示的なシークの合図(`seekRequest.token`)。変わったら位置をぴったり入れ直す */
+  seekToken: number
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
   const localTime = clip.inPoint + (playheadTime - clip.startTime)
 
+  // 連続再生中の追従はゆるく(毎フレーム書き込まない)。理由は previewSync。
   useEffect(() => {
-    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.3) {
-      ref.current.currentTime = localTime
-    }
+    followPreviewTime(ref.current, localTime)
   }, [localTime])
+
+  // **明示的なシークはぴったり入れ直す。** 上の追従は許容(0.3秒)より小さいズレを
+  // 直さないので、これが無いと**許容より小さくシークしたときだけ PiP が前の絵のまま**
+  // 取り残される(本編は `seekRequest` で必ず入れ直すので、絵が2つに割れる)。
+  useEffect(() => {
+    seekPreviewTime(ref.current, localTime)
+    // localTime はシークのたびに再計算されるが、依存に入れると連続再生でも毎フレーム
+    // 走ってしまう。入れ直すのは「シークした」という合図が来たときだけ。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekToken])
 
   useEffect(() => {
     if (isPlaying) {
@@ -306,21 +323,29 @@ function PreviewBlurBackdrop({
   localTime,
   isPlaying,
   blurPx,
-  speed
+  speed,
+  seekToken
 }: {
   src: string
   localTime: number
   isPlaying: boolean
   blurPx: number
   speed: number
+  /** 明示的なシークの合図(`seekRequest.token`)。変わったら位置をぴったり入れ直す */
+  seekToken: number
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.3) {
-      ref.current.currentTime = localTime
-    }
+    followPreviewTime(ref.current, localTime)
   }, [localTime])
+
+  // **明示的なシークはぴったり入れ直す**(理由は previewSync)。ぼかしていても、
+  // 前景と別の瞬間を映していることに変わりはない。
+  useEffect(() => {
+    seekPreviewTime(ref.current, localTime)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekToken])
 
   // 前景と同じ速度で回す。ここが等倍のままだと、上の 0.3秒 の合わせ直しだけで
   // 引きずられることになり、**再生中ずっとシークし続ける**(実測: 4倍速で背景の
@@ -361,7 +386,8 @@ function PreviewCrossfadeLayer({
   isPlaying,
   opacity,
   speed,
-  fit
+  fit,
+  seekToken
 }: {
   src: string
   localTime: number
@@ -369,14 +395,21 @@ function PreviewCrossfadeLayer({
   opacity: number
   speed: number
   fit: CSSProperties
+  /** 明示的なシークの合図(`seekRequest.token`)。変わったら位置をぴったり入れ直す */
+  seekToken: number
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.12) {
-      ref.current.currentTime = localTime
-    }
+    followPreviewTime(ref.current, localTime, PREVIEW_BLEND_FOLLOW_TOLERANCE_SEC)
   }, [localTime])
+
+  // **明示的なシークはぴったり入れ直す**(理由は previewSync)。許容(0.12秒)より
+  // 小さくシークすると、混ざる相手だけ前の絵のまま取り残される。
+  useEffect(() => {
+    seekPreviewTime(ref.current, localTime)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekToken])
 
   // 速度は**それ自身の依存を持つ effect** で入れ直す。読み込みの経路だけで書くと、
   // 再生しながら速度を変えたときに古い値のまま回り続ける(前に本編と背景で踏んでいる)。
@@ -627,7 +660,8 @@ function AudioTrackClipLayer({
   playheadTime,
   isPlaying,
   masterVolume,
-  masterMuted
+  masterMuted,
+  seekToken
 }: {
   clip: AudioTrackClip
   asset: MediaAsset
@@ -640,17 +674,26 @@ function AudioTrackClipLayer({
   isPlaying: boolean
   masterVolume: number
   masterMuted: boolean
+  /** 明示的なシークの合図(`seekRequest.token`)。変わったら位置をぴったり入れ直す */
+  seekToken: number
 }): React.JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
   const speed = clip.speed || 1
   // タイムライン秒 → 素材秒は速度を掛ける。等倍以外だと素材の進みが速く(遅く)なる。
   const localTime = clip.inPoint + (playheadTime - clip.startTime) * speed
 
+  // 連続再生中の追従はゆるく(毎フレーム書き込むと音が飛ぶ)。理由は previewSync。
   useEffect(() => {
-    if (ref.current && Math.abs(ref.current.currentTime - localTime) > 0.3) {
-      ref.current.currentTime = localTime
-    }
+    followPreviewTime(ref.current, localTime)
   }, [localTime])
+
+  // **明示的なシークはぴったり入れ直す。** 上の追従は許容(0.3秒)より小さいズレを
+  // 直さないので、これが無いと**許容より小さくシークしたときだけ音が前の位置に
+  // 取り残され、そのまま再生してもズレたまま**進む(絵は本編が必ず入れ直すので合っている)。
+  useEffect(() => {
+    seekPreviewTime(ref.current, localTime)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekToken])
 
   useEffect(() => {
     if (ref.current) ref.current.playbackRate = toPlaybackRate(speed)
@@ -766,6 +809,9 @@ export function PreviewPlayer(): React.JSX.Element {
   const setPlayheadTime = useProjectStore((s) => s.setPlayheadTime)
   const playheadTime = useProjectStore((s) => s.playheadTime)
   const seekRequest = useProjectStore((s) => s.seekRequest)
+  // 脇役(BGM・効果音・分離音声・PiP)へ配る「シークした」の合図。
+  // 本編と同じ合図から出すので、入れ直す時刻が食い違わない(理由は previewSync)。
+  const seekToken = seekRequest?.token ?? 0
   const seekTo = useProjectStore((s) => s.seekTo)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const exportResolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
@@ -1207,6 +1253,7 @@ export function PreviewPlayer(): React.JSX.Element {
                 isPlaying={isPlaying}
                 blurPx={blurBackdrop.blurPx}
                 speed={blurBackdrop.speed}
+                seekToken={seekToken}
               />
             )}
             {activeSrc ? (
@@ -1235,6 +1282,7 @@ export function PreviewPlayer(): React.JSX.Element {
                 opacity={crossfade.opacity}
                 speed={crossfade.speed}
                 fit={crossfade.fit}
+                seekToken={seekToken}
               />
             )}
             {playbackError && <div className="preview-playback-error">{playbackError}</div>}
@@ -1258,6 +1306,7 @@ export function PreviewPlayer(): React.JSX.Element {
                       isPlaying={isPlaying}
                       volume={volume}
                       muted={muted}
+                      seekToken={seekToken}
                     />
                   )
                 })
@@ -1342,6 +1391,7 @@ export function PreviewPlayer(): React.JSX.Element {
                       isPlaying={isPlaying}
                       masterVolume={volume}
                       masterMuted={muted}
+                      seekToken={seekToken}
                     />
                   )
                 })
