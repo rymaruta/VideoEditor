@@ -694,8 +694,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   return new Promise((resolve, reject) => {
     let command: ffmpeg.FfmpegCommand
     let assDir: string | null = null
-    const cleanupAssDir = (): void => {
+    /** フィルタグラフを書いたファイルの置き場(理由は `-filter_complex_script` を渡す箇所) */
+    let graphDir: string | null = null
+    const cleanupTempDirs = (): void => {
       if (assDir) rmSync(assDir, { recursive: true, force: true })
+      if (graphDir) rmSync(graphDir, { recursive: true, force: true })
     }
     try {
       command = ffmpeg()
@@ -1086,8 +1089,32 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         audioLabel = '[aloud]'
       }
 
+      // **フィルタグラフはコマンドラインに載せず、ファイルで渡す。**
+      //
+      // `complexFilter()` はグラフ全体を `-filter_complex <巨大な1引数>` として渡すが、
+      // OS には**引数1つあたりの上限**がある。Linux は `MAX_ARG_STRLEN` = 32ページ
+      // = **131,072 バイト**、Windows はコマンドライン全体で **32,767 文字**。
+      // グラフはクリップ1本あたり約 590 文字増えるので、上限は本数で決まる
+      // (実測: 40本で 28,448 / 50本で 35,518 / 215本で 128,592 文字)。
+      //
+      // 超えると `child_process.spawn` が **同期的に `E2BIG` を投げる**。これは
+      // fluent-ffmpeg の `.on('error')` には渡らず、非同期コールバックの中から
+      // 投げられるので `ipcMain.handle` にも捕まらない——**main プロセスごと落ちる**
+      // (実測: 215本は成功、**220本でアプリが異常終了**。書き出し先には何も残らない)。
+      // 無音カット・フィラーカット・ジャンプカット・AIおまかせはどれも断片を
+      // 数十〜数百本作るので、**この本数は普通に届く**。
+      //
+      // `-filter_complex_script` は非推奨の警告が出るが、`-/filter_complex`(ffmpeg 7.0〜)
+      // と違って**古い ffmpeg でも通る**。`ffmpeg-static` は `^5.3.0` で入る実体の版が
+      // 動きうるので、通る範囲の広いほうを選ぶ。
+      graphDir = mkdtempSync(join(tmpdir(), 've-graph-'))
+      const graphPath = join(graphDir, 'filtergraph.txt')
+      // `complexFilter()` が作るのと同じ文字列(`;` 区切り)をそのまま書く。
+      writeFileSync(graphPath, filterParts.join(';'), 'utf-8')
       command
-        .complexFilter(filterParts)
+        // **引数を2つに分けて渡す。** 配列で渡すと fluent-ffmpeg が空白で切るので、
+        // 一時ディレクトリの途中に空白が入る環境(Windows のユーザー名など)で壊れる。
+        .outputOptions('-filter_complex_script', graphPath)
         .outputOptions([
           `-map ${videoLabel}`,
           `-map ${audioLabel}`,
@@ -1106,7 +1133,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           onProgress(percent, 'エンコード中')
         })
         .on('error', (err) => {
-          cleanupAssDir()
+          cleanupTempDirs()
           currentExportCommand = null
           exportInProgress = false
           if (exportCancelRequested) {
@@ -1118,7 +1145,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           }
         })
         .on('end', () => {
-          cleanupAssDir()
+          cleanupTempDirs()
           currentExportCommand = null
           exportInProgress = false
           onProgress(100, '完了')
@@ -1130,7 +1157,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       // command to kill yet, so honour it as soon as the handle exists.
       if (exportCancelRequested) command.kill('SIGKILL')
     } catch (e) {
-      cleanupAssDir()
+      cleanupTempDirs()
       currentExportCommand = null
       exportInProgress = false
       reject(e)
