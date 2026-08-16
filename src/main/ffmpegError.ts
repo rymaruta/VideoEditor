@@ -57,11 +57,25 @@ export function isNoOutputStreamFailure(stderr: string): boolean {
 const KNOWN: [RegExp, string][] = [
   [/No such file or directory/i, 'ファイルが見つかりません。移動または削除された可能性があります'],
   [/Permission denied/i, 'ファイルを開く権限がありません'],
-  [/Invalid data found when processing input/i, '対応していない形式か、ファイルが壊れています'],
+  // **「途中で切れた」は「対応していない形式」より先に置く。**
+  // 表は上から順に当て、しかも `cause` だけでなく**標準エラー出力の全文**を見るので、
+  // 後ろに置くと先に当たった方が勝つ。切れた mp4 は `moov atom not found` と
+  // `Invalid data found when processing input` を**両方**出すため、この行が下にあった
+  // あいだ**一度も当たっていなかった**——「書き込みが最後まで終わっていない」という
+  // 具体的な案内が、誰にも出ないまま表に載っていた。
+  // (実測: 8秒の mp4 を 90% / 50% / 0バイトに切って取り込みと解析に掛けると、
+  //  4通りとも 22文字「対応していない形式か、ファイルが壊れています」。
+  //  上へ移すと 39文字の具体的な案内になる)
+  //
+  // `End of file` は**行末に限って**当てる。AVERROR_EOF の文言で、切れ方によっては
+  // `moov atom not found` ではなくこちらだけが出る(`Error opening input files: End of
+  // file`)。語がありふれているので、文中にたまたま出てきただけの行を拾わないよう
+  // 行末で縛る。
   [
-    /moov atom not found/i,
+    /moov atom not found|End of file\s*$/im,
     '動画ファイルが壊れています(書き込みが最後まで終わっていない可能性があります)'
   ],
+  [/Invalid data found when processing input/i, '対応していない形式か、ファイルが壊れています'],
   [/No space left on device/i, 'ディスクの空き容量が足りません'],
   [/Unknown encoder|Encoder .* not found/i, 'この形式の書き出しに必要な機能が見つかりませんでした'],
   [NO_OUTPUT_STREAM, '出力に入れる映像・音声がありませんでした']
