@@ -60,6 +60,7 @@ import type {
 import { previewSourceUrl } from '../lib/previewSource'
 import { activeVideoOverlayClips } from '../lib/videoOverlay'
 import { toPlaybackRate } from '../lib/playbackRate'
+import { applyPendingPreviewLoad, type PendingPreviewLoad } from '../lib/pendingPreviewLoad'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -843,6 +844,9 @@ export function PreviewPlayer(): React.JSX.Element {
   function handleLoadedMetadata(): void {
     const video = videoRef.current
     if (!video) return
+    // 読み込み直しを待っていた位置をここで入れる。差し替えの直後に入れると
+    // 読み込みの `emptied` に流されるため(理由は pendingPreviewLoad)。
+    if (applyPendingPreviewLoad(video, pendingLoadRef.current)) pendingLoadRef.current = null
     const expectsVideo = activeTimedClipRef.current?.asset.hasVideo ?? true
     if (expectsVideo && video.videoWidth === 0) {
       setIsPlaying(false)
@@ -997,6 +1001,8 @@ export function PreviewPlayer(): React.JSX.Element {
   }, [scrubbingPreview, total, seekTo])
 
   const [activeSrc, setActiveSrc] = useState<string | null>(null)
+  /** `src` を差し替えたときに、読み込み終わってから入れる位置(理由は pendingPreviewLoad) */
+  const pendingLoadRef = useRef<PendingPreviewLoad | null>(null)
   // Long-lived closures (the rAF playback loop below) call loadClipForTime across many
   // renders without being recreated, so they'd otherwise compare against a stale
   // snapshot of `activeSrc` state. A ref is always current regardless of which
@@ -1017,15 +1023,19 @@ export function PreviewPlayer(): React.JSX.Element {
     const localTime = tc.clip.inPoint + (time - tc.start) * speed
     if (activeSrcRef.current !== url) {
       activeSrcRef.current = url
+      // **読み込み直しを挟むときは、ここで位置を入れない。** `src` を差し替えると
+      // ブラウザは別のタスクで読み込みを始め、その中の `emptied` で再生位置が 0 に戻る。
+      // つまり差し替えた直後の代入は**まだ前の素材に対するもの**で、直後に流される。
+      // `requestAnimationFrame` を1回挟んでも順序は保証されない
+      // (実測: 別素材のクリップへ飛ぶと `seeking`/`seeked` が一度も出ず、
+      //  `emptied → loadstart → loadedmetadata → canplay` のあと **currentTime は 0 のまま**。
+      //  A(0〜6秒)+B(0〜6秒)の並びで 7.5秒へ飛ぶと、B の 1.5秒ではなく **B の先頭**が映った)。
+      // 新しい素材に対して確実に入れられるのは `loadedmetadata` の時点なので、そこまで控える。
+      pendingLoadRef.current = { url, time: localTime, speed, play: resumePlaying }
       setActiveSrc(url)
-      requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.currentTime = localTime
-          videoRef.current.playbackRate = toPlaybackRate(speed)
-          if (resumePlaying) videoRef.current.play().catch(() => {})
-        }
-      })
     } else if (videoRef.current) {
+      // 同じ素材なら読み込み直しは起きないので、その場で入れてよい(控えは捨てる)。
+      pendingLoadRef.current = null
       videoRef.current.currentTime = localTime
       videoRef.current.playbackRate = toPlaybackRate(speed)
       if (resumePlaying) videoRef.current.play().catch(() => {})
