@@ -43,7 +43,7 @@ import {
   KEYMAP_SCHEME_LABELS,
   type KeymapScheme
 } from '../lib/keymap'
-import { isModalOpen } from '../lib/useKeyboardShortcuts'
+import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
 import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
@@ -875,14 +875,15 @@ export function Timeline(): React.JSX.Element {
   // shortcuts (Ctrl+A etc.).
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
-      const target = e.target as HTMLElement | null
-      const typing =
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      if (typing || e.ctrlKey || e.metaKey || e.altKey) return
+      // **モーダルが開いている間は道具を切り替えない。** 切り替えはモーダルの裏で
+      // 起きるので画面では気付けず、**閉じたあとも切り替わったまま残る**。
+      // カミソリに変わっていると、次にクリップを選ぼうとしたクリックが**分割**になる。
+      // (実測: トリムのモーダルを開いた状態で b → 道具が **A → B**、t → **T**。
+      //  モーダルを閉じても **T のまま**。同じ場面の Delete は守られていて何も起きない)
+      // 判定は**共有の関数を呼ぶ**。ここに書き写したせいで、あとから足された
+      // `isModalOpen` の門が届かなかった(理由は useKeyboardShortcuts)。
+      if (isModalOpen()) return
+      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       const key = e.key.toLowerCase()
       if (key === 'a') setEditTool('select')
       else if (key === 't') setEditTool('trim')

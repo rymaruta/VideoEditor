@@ -6,7 +6,12 @@ import { formatIpcError } from './ipcError'
 import { getKeymap, matchesBinding } from './keymap'
 import { frameSeconds } from '@shared/frameRate'
 
-function isTypingTarget(el: EventTarget | null): boolean {
+/**
+ * 文字を打っている最中か。**この判定は必ずここから呼ぶこと。**
+ * 各リスナが自前で書き写すと、あとから足した門(下の `isModalOpen`)が
+ * 書き写した側に届かない——実際そうなっていた(理由は `SourceViewer` の keydown)。
+ */
+export function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
