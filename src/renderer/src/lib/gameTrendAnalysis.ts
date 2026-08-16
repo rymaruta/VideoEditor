@@ -33,6 +33,7 @@ export interface GameTrendAnalysis {
 }
 
 const GEMINI_MODEL = 'gemini-flash-latest'
+/** サムネイルを取りに行く上限。**実際に添付できた枚数とは別物**(下の buildPrompt 参照) */
 const THUMBNAIL_SAMPLE_COUNT = 5
 
 function buildVideoList(videos: YouTubeVideoInfo[]): string {
@@ -43,23 +44,44 @@ function buildVideoList(videos: YouTubeVideoInfo[]): string {
     .join('\n')
 }
 
+/**
+ * 分析の依頼文を組み立てる。
+ *
+ * `thumbnailCount` は**実際に添付できた画像の枚数**。取りに行く上限
+ * (`THUMBNAIL_SAMPLE_COUNT`)を書いてはいけない——両者はふつうに食い違う。
+ * 急上昇の一覧が5件に満たないこともあるし、サムネイルの取得は1枚ずつ失敗しうる
+ * (取れなかった分は `null` として捨てられる)。定数を名乗ると、**モデルには
+ * 「5件を見て傾向をまとめろ」と言いながら2枚しか見せない**ことになる。
+ * 依頼文では「リストにない情報を創作しないこと」と求めているのに、こちらが
+ * 事実でない件数を宣言している状態で、しかもエラーは出ない。
+ * (実測: 急上昇3件・サムネイル取得成功2件で、添付した画像は **2枚**なのに
+ *  依頼文は「再生数上位**5**件のサムネイル画像を添付しています」と名乗っていた)
+ *
+ * ハイライト採点(`autoEdit`)の依頼文は最初から `${frames.length}` と実数を名乗っており、
+ * ここだけ定数のままだった。
+ */
 function buildPrompt(
   videos: YouTubeVideoInfo[],
-  includeThumbnails: boolean,
+  thumbnailCount: number,
   userInstruction: string
 ): string {
+  // 件数として文面に出す値なので、整数に落としてから使う(`2.5件` と書かないため)。
+  const attached =
+    Number.isFinite(thumbnailCount) && thumbnailCount > 0 ? Math.floor(thumbnailCount) : 0
   const list = buildVideoList(videos)
   // The user's own words are quoted into the prompt rather than concatenated as bare
   // instructions, so a long note can't read as a replacement for the output contract below.
   const instructionSection = userInstruction.trim()
     ? `\n\n# 利用者からの補足指示\n利用者が次の指示を出しています。分析の観点や語り口をこれに寄せてください。ただし出力形式と「リストにない情報を創作しない」原則は必ず守ること。\n"""\n${userInstruction.trim()}\n"""`
     : ''
-  const thumbnailSection = includeThumbnails
-    ? `\n\n# サムネイル画像\n再生数上位${THUMBNAIL_SAMPLE_COUNT}件のサムネイル画像を添付しています。画像から読み取れる範囲でのみ視覚的傾向を分析してください。`
-    : ''
-  const thumbnailInstruction = includeThumbnails
-    ? '4. 添付したサムネイル画像から読み取れる視覚的傾向(thumbnailInsight)を、配色の傾向(colorTendency)・構図の傾向(compositionTendency、例: 顔のアップが多い等)・文字入れの傾向(textOverlayTendency)の3項目で、それぞれ日本語1文でまとめてください。画像がない場合はthumbnailInsightをnullにしてください。'
-    : '4. サムネイル画像は添付されていないため、thumbnailInsightはnullにしてください。'
+  const thumbnailSection =
+    attached > 0
+      ? `\n\n# サムネイル画像\n再生数上位${attached}件のサムネイル画像を添付しています。画像から読み取れる範囲でのみ視覚的傾向を分析してください。`
+      : ''
+  const thumbnailInstruction =
+    attached > 0
+      ? '4. 添付したサムネイル画像から読み取れる視覚的傾向(thumbnailInsight)を、配色の傾向(colorTendency)・構図の傾向(compositionTendency、例: 顔のアップが多い等)・文字入れの傾向(textOverlayTendency)の3項目で、それぞれ日本語1文でまとめてください。画像がない場合はthumbnailInsightをnullにしてください。'
+      : '4. サムネイル画像は添付されていないため、thumbnailInsightはnullにしてください。'
 
   return `あなたはYouTube Shortsの編集アドバイザーです。以下はYouTube Data API(公式)で取得した「日本のゲームカテゴリ急上昇動画」の実際のタイトル・チャンネル名・再生数のリストです。このリストと添付画像に書かれている情報だけを根拠にして分析してください。リストにないゲームや情報を推測・創作しないでください。
 
@@ -185,7 +207,8 @@ export async function analyzeGamingTrends(
   ).filter((img): img is GeminiInlineImage => img !== null)
 
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
-    { text: buildPrompt(videos, images.length > 0, userInstruction) },
+    // 名乗る件数は**実際に添付する枚数**。取りに行った上限ではない(理由は buildPrompt)。
+    { text: buildPrompt(videos, images.length, userInstruction) },
     ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.data } }))
   ]
 
