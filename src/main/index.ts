@@ -194,6 +194,31 @@ function notifySender(event: Electron.IpcMainInvokeEvent, channel: string, paylo
   event.sender.send(channel, payload)
 }
 
+/**
+ * このセッションの自動保存を片付ける。**退避先は1つしかないので、より取り返しの
+ * つかないほうで埋めておく。**
+ *
+ * - **まだこのセッションが1回も書いていない**なら、そこに居るのは*前回の作業*。
+ *   まだどのファイルにもなっていないので、消さずに退避する。
+ * - **もう書いたあと**なら、そこに居るのは*今回の作業*。保存済みか、利用者が
+ *   「破棄して開く/新規作成」で捨てると答えたぶんなので、**消してよい**。
+ *   ここで退避すると、前回のぶんを取っておいた退避先を**1分前の自分で上書き**して
+ *   しまう(`writeAutosaveFile` が「退避は1セッションに1回だけ」にしているのと同じ理由)。
+ *
+ * 終了時(`close`)はこの関門を通さない。あちらは**その回の作業をこれから失う**場面で、
+ * 退避しておかないと次回の起動で戻せなくなる。
+ *
+ * @returns 退避したら true(呼び出し側は上部バーの復元ボタンを出し直す)
+ */
+function releaseAutosave(): boolean {
+  if (!existsSync(autosavePath)) return false
+  if (autosaveOverwrittenThisSession) {
+    rmSync(autosavePath, { force: true })
+    return false
+  }
+  return discardAutosaveFile(autosavePath)
+}
+
 function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectMediaFiles, async (event) => {
     const result = await showOpenDialogForSender(event, {
@@ -468,17 +493,20 @@ app.whenReady().then(() => {
    *
    * @returns 退避したら true(呼び出し側は上部バーの復元ボタンを出し直す)
    */
-  ipcMain.handle(IPC.clearAutosave, () => {
-    if (!existsSync(autosavePath)) return false
-    if (autosaveOverwrittenThisSession) {
-      rmSync(autosavePath, { force: true })
-      return false
-    }
-    return discardAutosaveFile(autosavePath)
-  })
-  // 起動時の確認で「破棄する」を選んだときはこちら。消さずに退避するので、
-  // 押し間違えても上部バーから戻せる。
-  ipcMain.handle(IPC.discardAutosave, () => discardAutosaveFile(autosavePath))
+  ipcMain.handle(IPC.clearAutosave, () => releaseAutosave())
+  /**
+   * 起動時の確認で「破棄する」を選んだとき、および**開く・新規作成**の前始末。
+   * 消さずに退避するので、押し間違えても上部バーから戻せる。
+   *
+   * **上の `clearAutosave` と同じ関門を通す。** ここだけ素の `discardAutosaveFile` を
+   * 呼んでいたので、**このセッションの自動保存が、前回の作業を取っておいた退避先を
+   * 上書きしていた**。退避先は1つしかないので、上書きされた前回のぶんは戻せない。
+   * (実測: 「前回の作業」の自動保存を残して起動 →「あとで決める」→ 編集して60秒の
+   *  自動保存が1回走る。ここまでは正しく、退避先は **「前回の作業」**。
+   *  その状態で「新規作成」を押すと退避先が **「今回の作業」** に変わり、
+   *  **前回の作業はディスクのどこにも残らなかった**)
+   */
+  ipcMain.handle(IPC.discardAutosave, () => releaseAutosave())
   ipcMain.handle(IPC.loadDiscardedAutosave, () => loadProjectFile(discardedPathFor(autosavePath)))
   ipcMain.handle(IPC.cancelExport, () => cancelExport())
 
