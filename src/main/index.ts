@@ -2,6 +2,11 @@ import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
+import {
+  LINUX_OPENER_COMMAND,
+  describeOpenExternalFailure,
+  openExternalProblem
+} from './externalLink'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
@@ -318,6 +323,22 @@ function registerWindowScopedIpcHandlers(): void {
 // keeps reporting HEVC as unplayable and falls back to the proxy.
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
 
+/**
+ * Linux でブラウザを起こせるか(`xdg-open` が PATH に居るか)。
+ *
+ * 一度調べたら覚えておく。**PATH は起動中に変わらない**うえ、リンクを押すたびに
+ * ディレクトリを舐めると押し心地が悪くなる。Linux 以外は OS 自身が開くので調べない。
+ */
+let linuxOpenerFound: boolean | null = null
+function hasLinuxOpener(): boolean {
+  if (process.platform !== 'linux') return true
+  if (linuxOpenerFound === null) {
+    const dirs = (process.env.PATH ?? '').split(':').filter(Boolean)
+    linuxOpenerFound = dirs.some((dir) => existsSync(join(dir, LINUX_OPENER_COMMAND)))
+  }
+  return linuxOpenerFound
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.videoeditor.app')
 
@@ -418,7 +439,16 @@ app.whenReady().then(() => {
     synthesizeSpeech(text, speakerId)
   )
   ipcMain.handle(IPC.openExternal, async (_e, url: string) => {
-    await shell.openExternal(url)
+    // 開く前に分かる問題(URLの形・開く手立ての有無)は、ここで日本語にして返す。
+    // `shell.openExternal` は**開けなくても成功を返す**ので、呼んでからでは分からない
+    // (理由と実測は externalLink.ts)。
+    const problem = openExternalProblem(url, process.platform, hasLinuxOpener())
+    if (problem) throw new Error(problem)
+    try {
+      await shell.openExternal(url)
+    } catch (e) {
+      throw describeOpenExternalFailure(url, e)
+    }
   })
   ipcMain.handle(IPC.showItemInFolder, (_e, filePath: string) => {
     // `showItemInFolder` は**戻り値も例外も無い**ので、失敗しても何も起きない

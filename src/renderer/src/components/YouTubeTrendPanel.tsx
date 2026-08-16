@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
 import { fetchTrendingVideos, searchVideos, YouTubeVideoInfo } from '../lib/youtube'
 import { formatIpcError } from '../lib/ipcError'
+import { openExternalLink } from '../lib/openExternalLink'
 import { KeyIcon, SearchIcon, SparklesIcon, ExternalLinkIcon } from './icons'
 
 function formatDuration(seconds: number): string {
@@ -112,7 +113,9 @@ export function YouTubeTrendPanel(): React.JSX.Element {
               </div>
               <button
                 className="small-button"
-                onClick={() => window.api.openExternal(`https://www.youtube.com/watch?v=${v.id}`)}
+                onClick={() =>
+                  void openExternalLink(`https://www.youtube.com/watch?v=${v.id}`, setError)
+                }
               >
                 <ExternalLinkIcon width={12} height={12} />
                 YouTubeで見る

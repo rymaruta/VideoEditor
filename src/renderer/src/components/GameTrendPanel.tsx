@@ -9,6 +9,7 @@ import {
 } from '../lib/gameTrendAnalysis'
 import { compareTrend, saveTrendSnapshot, TrendComparison } from '../lib/trendHistory'
 import { formatIpcError } from '../lib/ipcError'
+import { openExternalLink } from '../lib/openExternalLink'
 import {
   KeyIcon,
   SparklesIcon,
@@ -419,7 +420,7 @@ export function GameTrendPanel(): React.JSX.Element {
                   <button
                     className="small-button"
                     onClick={() =>
-                      window.api.openExternal(`https://www.youtube.com/watch?v=${v.id}`)
+                      void openExternalLink(`https://www.youtube.com/watch?v=${v.id}`, setError)
                     }
                   >
                     <ExternalLinkIcon width={12} height={12} />

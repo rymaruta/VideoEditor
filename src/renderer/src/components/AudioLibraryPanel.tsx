@@ -10,6 +10,7 @@ import {
   SoundEffectInfo
 } from '../lib/audioLibrary'
 import { formatIpcError } from '../lib/ipcError'
+import { openExternalLink } from '../lib/openExternalLink'
 import { usePausePreviewWhenHidden } from '../lib/pausePreviewWhenHidden'
 import {
   KeyIcon,
@@ -206,7 +207,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault()
-                      window.api.openExternal(t.licenseUrl)
+                      void openExternalLink(t.licenseUrl, setError)
                     }}
                   >
                     <ExternalLinkIcon width={10} height={10} />
@@ -258,7 +259,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                     href="#"
                     onClick={(e) => {
                       e.preventDefault()
-                      window.api.openExternal(s.licenseUrl)
+                      void openExternalLink(s.licenseUrl, setError)
                     }}
                   >
                     <ExternalLinkIcon width={10} height={10} />
