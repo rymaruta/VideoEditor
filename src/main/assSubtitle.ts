@@ -1,5 +1,10 @@
 import type { TextOverlay, TextPosition, TranscriptWord } from '@shared/types'
-import { textBoxPaddingPx, textMarginHPx, textMarginVPx } from '@shared/textStyle'
+import {
+  textBoxPaddingPx,
+  textMarginHPx,
+  textMarginVPx,
+  textSlideOffsetPx
+} from '@shared/textStyle'
 import { karaokeWords } from '@shared/captionWords'
 
 function toAssTime(seconds: number): string {
@@ -308,7 +313,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
 
     let positionTag: string
     if (style.animation === 'slideInUp' || style.animation === 'slideInDown') {
-      const offset = Math.round(height * 0.06)
+      // 移動距離は画面(CSS の `@keyframes`)と**同じ比**から出す。ここに数字を書くと
+      // 片方だけ動いて、画面と書き出しで飛び込む距離が食い違う(理由は TEXT_SLIDE_OFFSET_RATIO)。
+      const offset = Math.round(textSlideOffsetPx(height))
       const yFrom = style.animation === 'slideInUp' ? target.y + offset : target.y - offset
       positionTag = `\\an${alignCode}\\move(${Math.round(target.x)},${Math.round(yFrom)},${Math.round(target.x)},${Math.round(target.y)},0,350)`
     } else if (style.customPosition) {

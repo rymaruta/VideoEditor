@@ -36,6 +36,31 @@ export function textMarginHPx(frameWidth: number): number {
 }
 
 /**
+ * 登場アニメーション「下から出る」「上から出る」が動く距離(**枠の高さ**に対する比)。
+ *
+ * 書き出しは ASS の `\move`(キャンバス高の 6%)、画面は CSS の `@keyframes` と、
+ * 上下左右の余白と同じく**書く場所が違うだけで同じ規則**なので、数字はここ1つに置く。
+ * 画面側だけ `translateY(40px)` と**プレビュー枠のピクセルで固定**されていたため、
+ * 枠の大きさが変わるたびに書き出しとの比が動き、既定のレイアウトでは
+ * **2.8倍**遠くから飛び込んでいた。しかも `.preview-frame` は `overflow: hidden` なので、
+ * 出だしはテロップが**枠の外に出て1画素も見えない**(実測: 枠 132.97x236.38 の 9:16 で
+ * 移動距離が画面 40px = 枠高の **16.92%** に対し書き出しは **5.97%**。
+ * 画面写真の枠の中の白い画素は開始時点で **0個**、書き出しは同じ時点で枠の中に収まっている)。
+ */
+export const TEXT_SLIDE_OFFSET_RATIO = 0.06
+
+/**
+ * 枠の高さから登場アニメーションの移動距離(px)を出す。単位は**渡した高さと同じ**
+ * (書き出しなら ASS キャンバスのピクセル、画面ならプレビュー枠のピクセル)。
+ * **画面側では整数に丸めないこと**——`translate` は小数pxを受け付けるので、
+ * 丸めると縮小率が高いときに丸めのほうが誤差の主因になる(縁取りと同じ理由)。
+ */
+export function textSlideOffsetPx(frameHeight: number): number {
+  if (!Number.isFinite(frameHeight) || frameHeight <= 0) return 0
+  return frameHeight * TEXT_SLIDE_OFFSET_RATIO
+}
+
+/**
  * 背景箱が文字からはみ出す量(**文字サイズに対する比**)。
  *
  * 画面は CSS の `padding`、書き出しは ASS の `\xbord`/`\ybord` と**書く場所が違うだけで

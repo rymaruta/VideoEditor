@@ -11,7 +11,7 @@ import {
   toElementVolume
 } from '@shared/audioGain'
 import { pipMarginPx } from '@shared/pipLayout'
-import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
+import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO, textSlideOffsetPx } from '@shared/textStyle'
 import { isKaraokeWordSung, karaokeWords } from '@shared/captionWords'
 import { blurSigmaFor } from '@shared/videoFrame'
 import {
@@ -1289,6 +1289,12 @@ export function PreviewPlayer(): React.JSX.Element {
               if (livePos) positionStyle.translate = '-50% -50%'
               else if (o.style.position === 'center') positionStyle.translate = '0 -50%'
               if (o.style.rotation) positionStyle.rotate = `${o.style.rotation}deg`
+              // 「下から出る/上から出る」が動く距離は**枠の実寸から**出す。CSS に
+              // `translateY(40px)` と固定px で書いてあったため、枠の大きさが変わるたびに
+              // 書き出しとの比が動いていた(理由は TEXT_SLIDE_OFFSET_RATIO)。
+              // キーフレーム側はこの変数だけを読む——数字を CSS へ書き戻さないため。
+              ;(positionStyle as Record<string, string>)['--overlay-slide-offset'] =
+                `${textSlideOffsetPx(frameHeight)}px`
               return (
                 <div
                   key={o.id}
