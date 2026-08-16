@@ -6,6 +6,7 @@ import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } 
 import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
 import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
 import { parseBulkFontSize } from '../lib/textOverlayInput'
+import { MIN_OVERLAY_DURATION, newOverlayRange } from '../lib/textOverlayPlacement'
 import { PlusIcon, TrashIcon, TypeIcon, CopyIcon, StarIcon } from './icons'
 
 function defaultPositionFraction(position: TextPosition): { x: number; y: number } {
@@ -13,8 +14,6 @@ function defaultPositionFraction(position: TextPosition): { x: number; y: number
   if (position === 'bottom') return { x: 0.5, y: 0.9 }
   return { x: 0.5, y: 0.5 }
 }
-
-const MIN_OVERLAY_DURATION = 0.1
 
 // The min/max attributes only constrain the spinner — a typed value still reaches
 // onChange. Unclamped, a negative start produced a malformed ASS timestamp and an
@@ -39,6 +38,7 @@ export function TextOverlayPanel(): React.JSX.Element {
   const setTextOverlayLink = useProjectStore((s) => s.setTextOverlayLink)
   const updateTextOverlaysStyle = useProjectStore((s) => s.updateTextOverlaysStyle)
   const addCaptionPreset = usePresetStore((s) => s.addCaptionPreset)
+  const playheadTime = useProjectStore((s) => s.playheadTime)
 
   const total = getTotalDuration(project)
   const timedClips = buildTimedClips(project)
@@ -110,8 +110,9 @@ export function TextOverlayPanel(): React.JSX.Element {
           onClick={() =>
             addTextOverlay({
               text: '新しいテキスト',
-              startTime: 0,
-              endTime: Math.min(3, total || 3),
+              // 置く位置は**再生位置**。0 秒固定だと、見ている場所と関係ないところに入り、
+              // 続けて押すたびに同じ区間へ積み上がる(規則は newOverlayRange)。
+              ...newOverlayRange(playheadTime, total),
               style: defaultTextStyle(),
               source: 'manual'
             })

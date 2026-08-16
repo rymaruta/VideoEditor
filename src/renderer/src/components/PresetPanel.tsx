@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
-import { useProjectStore } from '../store/projectStore'
+import { getTotalDuration, useProjectStore } from '../store/projectStore'
 import { usePresetStore, CaptionPreset, SePreset } from '../store/presetStore'
 import { useSfxDictionaryStore } from '../store/sfxDictionaryStore'
 import { SFX_DRAG_TYPE } from '../lib/assetDrag'
 import { formatIpcError } from '../lib/ipcError'
 import { toFileUrl } from '../lib/previewSource'
+import { newOverlayRange } from '../lib/textOverlayPlacement'
 import { usePausePreviewWhenHidden } from '../lib/pausePreviewWhenHidden'
 import { KeywordSeModal } from './KeywordSeModal'
 import {
@@ -74,8 +75,8 @@ export function PresetPanel(): React.JSX.Element {
   function handleAddCaption(preset: CaptionPreset): void {
     addTextOverlay({
       text: preset.name,
-      startTime: playheadTime,
-      endTime: playheadTime + 3,
+      // 置く位置の規則は「テキスト」タブの追加と共通(片方だけ尺を超えて置けていた)
+      ...newOverlayRange(playheadTime, getTotalDuration(project)),
       style: { ...preset.style },
       source: 'manual'
     })
