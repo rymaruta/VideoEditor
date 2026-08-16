@@ -61,6 +61,26 @@ export const STATS_FLOOR_DB = -90
 export const STATS_DYNAMIC_RANGE_DB = 40
 
 /**
+ * 上の窓を適用してよい下限(残るフレームの割合)。
+ *
+ * **外れ値として外してよいのは少数派だけ。過半数が窓の外なら、それは外れ値ではなく
+ * 素材そのもの。** 静かな部屋で録った素材は、地の音が山より 40dB 以上低いのが普通で
+ * (良い録り方をしているほどそうなる)、そこで窓を当てると**残るのは山だけ**になる。
+ * すると平均は山そのもの・ばらつきは 0 へ潰れ、しきい値 `平均 + 下限dB` が
+ * **必ず最大値より上**に来る——構造的に1件も超えられない。
+ * 上の窓が防ごうとしたのと**同じ壊れ方が、窓のせいで逆向きに起きる**。
+ *
+ * (実測: 20秒の素材の 6.0〜12.0秒だけ大きい音。地の音を下げていくと、
+ *  山との差 37.0dB までは 20/20フレームを採用して平均 -49.97・ばらつき 16.95・
+ *  しきい値 -33.02 で**1件**検出できるのに、42.0dB になった途端 **6/20** しか
+ *  採用されず、平均 **-24.07**(＝山そのもの)・ばらつき **0.00**・しきい値 **-21.07** と
+ *  山の -24.1 を追い越して **0件**。感度を low/normal/high のどれにしても 0件で、
+ *  画面の「感度を『多く拾う』にすると見つかることがあります」という案内どおりにしても
+ *  直らなかった。長尺スキャンも同じ素材で 1件 → 0件)
+ */
+export const STATS_MIN_KEPT_RATIO = 0.5
+
+/**
  * ハイライト判定に使う平均と標準偏差を、無音に近いフレームを外して求める。
  * 使える値が1つも無ければ、従来どおり平均 -50dB・ばらつき0として扱う。
  */
@@ -74,7 +94,9 @@ export function loudnessStats(rmsDbValues: number[]): {
   if (finite.length === 0) return { mean: -50, stddev: 0, used: 0 }
   const peak = Math.max(...finite)
   const kept = finite.filter((v) => v >= peak - STATS_DYNAMIC_RANGE_DB)
-  const mean = kept.reduce((sum, v) => sum + v, 0) / kept.length
-  const variance = kept.reduce((sum, v) => sum + (v - mean) ** 2, 0) / kept.length
-  return { mean, stddev: Math.sqrt(variance), used: kept.length }
+  // 窓の外が過半数なら窓を使わない(理由は STATS_MIN_KEPT_RATIO)。
+  const sample = kept.length > finite.length * STATS_MIN_KEPT_RATIO ? kept : finite
+  const mean = sample.reduce((sum, v) => sum + v, 0) / sample.length
+  const variance = sample.reduce((sum, v) => sum + (v - mean) ** 2, 0) / sample.length
+  return { mean, stddev: Math.sqrt(variance), used: sample.length }
 }
