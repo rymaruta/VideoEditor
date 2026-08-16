@@ -712,6 +712,23 @@ function resetHistoryCoalescing(): void {
 }
 
 /**
+ * まとめ判定の目印を控える／戻す。
+ *
+ * `pushHistory` は呼ばれた時点で「この burst の起点はここ」と目印を書き換えるが、
+ * その書き込みは下の `skipNoOpHistory` で**丸ごと落とされる**ことがある
+ * (いまと同じ中身だったとき)。落としたぶんの目印を残すと、**次に来た本物の
+ * 書き込みが「起点はもう積んである」と思い込んで、履歴を1件も積まない**。
+ */
+function historyCoalescingMark(): { key: string | null; at: number } {
+  return { key: lastCoalesceKey, at: lastCoalesceAt }
+}
+
+function restoreHistoryCoalescing(mark: { key: string | null; at: number }): void {
+  lastCoalesceKey = mark.key
+  lastCoalesceAt = mark.at
+}
+
+/**
  * 「実在しないパス」の一覧から、いまのプロジェクトで印を付ける素材のIDを導く。
  *
  * IDを直接覚えると、取り消しで素材のパスが**実在しないものへ戻った**ときに印が戻らない
@@ -884,12 +901,21 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
   return (set, get, api) => {
     const guardedSet: typeof set = (partial) => {
       set((state) => {
+        // 落とすことになったときに戻せるよう、まとめ判定の目印を先に控える。
+        // `partial` を評価すると、その中の `pushHistory` が目印を書き換えてしまう。
+        const coalescingMark = historyCoalescingMark()
         const patch = (typeof partial === 'function' ? partial(state) : partial) as
           Partial<ProjectState> | undefined
         if (!patch || patch.__historyPush !== true) return patch as Partial<ProjectState>
         if (!patch.project || !sameProjectContent(patch.project, state.project)) {
           return omitKeys(patch, ['__historyPush'])
         }
+        // **落とすなら、まとめ判定の目印も落とす。** 残すと、この直後に来た本物の
+        // 編集が「起点はもう積んである」と誤って判断し、**履歴を1件も積まないまま
+        // 企画だけが変わる**——取り消しを押しても何も起きず、その編集は永久に戻せない。
+        // (実測: 素材の端まで引いたトリム(値が頭打ちで同じ値の書き込みになる)の直後に
+        //  引き戻すと `past` が **0 のまま** 0..6 → 0..4 に変わり、取り消しが効かなかった)
+        restoreHistoryCoalescing(coalescingMark)
         // 中身が同じなら、履歴・未保存・企画の差し替えを丸ごと落とす。
         // `project` を差し替えないことで**参照も保たれる**ので、保存済み判定
         // (`markSaved` の `state.project !== savedProject`)も巻き添えにならない。
@@ -1047,6 +1073,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 形を整えたあとに、**素材がもう居ないクリップ**を落とす。残すと画面から
     // 選ぶことも消すこともできないのに書き出しだけが毎回失敗する。
     // 落としたぶんはファイルの内容と食い違うので、保存できるよう dirty にする。
+    // **履歴を捨てるなら、まとめ判定の目印も捨てる。** 残すと、開いた直後の編集が
+    // 「起点はもう積んである」と誤って判断して履歴を1件も積まない(`newProject` と
+    // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
+    resetHistoryCoalescing()
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
       project: cleaned.project,
@@ -1067,6 +1097,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   },
 
   restoreAutosave: (project) => {
+    // **履歴を捨てるなら、まとめ判定の目印も捨てる。** 残すと、開いた直後の編集が
+    // 「起点はもう積んである」と誤って判断して履歴を1件も積まない(`newProject` と
+    // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
+    resetHistoryCoalescing()
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
       project: cleaned.project,
