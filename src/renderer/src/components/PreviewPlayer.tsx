@@ -67,6 +67,7 @@ import { activeVideoOverlayClips } from '../lib/videoOverlay'
 import { toPlaybackRate } from '../lib/playbackRate'
 import {
   PREVIEW_BLEND_FOLLOW_TOLERANCE_SEC,
+  applyPreviewRate,
   followPreviewTime,
   seekPreviewTime
 } from '../lib/previewSync'
@@ -355,9 +356,11 @@ function PreviewBlurBackdrop({
   // 前景と同じ速度で回す。ここが等倍のままだと、上の 0.3秒 の合わせ直しだけで
   // 引きずられることになり、**再生中ずっとシークし続ける**(実測: 4倍速で背景の
   // `playbackRate` は 1 のまま、本編とのズレが 0.29秒 まで開いてから戻るのを繰り返す)。
+  // **`src` も依存に入れる。** 差し替えると `playbackRate` は既定へ戻されるので、
+  // 速度が同じまま別素材のクリップへ移ると等倍のまま取り残される(理由は previewSync)。
   useEffect(() => {
-    if (ref.current) ref.current.playbackRate = toPlaybackRate(speed)
-  }, [speed])
+    applyPreviewRate(ref.current, speed)
+  }, [speed, src])
 
   useEffect(() => {
     if (isPlaying) ref.current?.play().catch(() => {})
@@ -418,9 +421,11 @@ function PreviewCrossfadeLayer({
 
   // 速度は**それ自身の依存を持つ effect** で入れ直す。読み込みの経路だけで書くと、
   // 再生しながら速度を変えたときに古い値のまま回り続ける(前に本編と背景で踏んでいる)。
+  // **`src` も依存に入れる。** 差し替えると `playbackRate` は既定へ戻されるので、
+  // 速度が同じまま別素材が混ざる側に来ると等倍のまま取り残される(理由は previewSync)。
   useEffect(() => {
-    if (ref.current) ref.current.playbackRate = toPlaybackRate(speed)
-  }, [speed])
+    applyPreviewRate(ref.current, speed)
+  }, [speed, src])
 
   useEffect(() => {
     if (isPlaying) ref.current?.play().catch(() => {})
@@ -683,6 +688,7 @@ function AudioTrackClipLayer({
   seekToken: number
 }): React.JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
+  const audioSrc = previewSourceUrl(asset)
   const speed = clip.speed || 1
   // タイムライン秒 → 素材秒は速度を掛ける。等倍以外だと素材の進みが速く(遅く)なる。
   const localTime = clip.inPoint + (playheadTime - clip.startTime) * speed
@@ -700,9 +706,11 @@ function AudioTrackClipLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekToken])
 
+  // `src` も依存に入れる理由はぼかし背景と同じ。ここはプロキシの変換が終わった
+  // ときに差し替わる(理由は previewSync)。
   useEffect(() => {
-    if (ref.current) ref.current.playbackRate = toPlaybackRate(speed)
-  }, [speed])
+    applyPreviewRate(ref.current, speed)
+  }, [speed, audioSrc])
 
   useEffect(() => {
     if (isPlaying) {
@@ -804,7 +812,7 @@ function AudioTrackClipLayer({
 
   // Hidden: this element exists only to play back the audio-track clip, and must
   // not take part in the preview frame's layout.
-  return <audio ref={ref} src={previewSourceUrl(asset)} style={{ display: 'none' }} />
+  return <audio ref={ref} src={audioSrc} style={{ display: 'none' }} />
 }
 
 export function PreviewPlayer(): React.JSX.Element {

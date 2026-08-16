@@ -1,4 +1,5 @@
 import { toMediaTime } from './pendingPreviewLoad'
+import { toPlaybackRate } from './playbackRate'
 
 /**
  * プレビューの脇役(BGM・効果音・分離音声・PiP)を再生位置へ合わせる規則。
@@ -55,6 +56,40 @@ export function followPreviewTime(
   if (Math.abs(el.currentTime - t) <= tol) return false
   el.currentTime = t
   return true
+}
+
+export interface PreviewRateElement {
+  playbackRate: number
+  defaultPlaybackRate: number
+}
+
+/**
+ * 脇役の要素に再生速度を入れる。**`defaultPlaybackRate` も一緒に入れること。**
+ *
+ * `src` を差し替えると、`playbackRate` は **`defaultPlaybackRate`(既定 1)に戻される**。
+ * 戻るのは代入した**その場**で、読み込みの完了を待たない
+ * (実測・Electron 39: `playbackRate` を 2 にしてから `src` を差し替えると、
+ *  差し替えた直後・`loadedmetadata`・その300ms後の**3時点とも 1**。
+ *  先に `defaultPlaybackRate` も 2 にしておくと**差し替えても 2 のまま**)。
+ *
+ * 速度を「速度が変わったとき」だけ入れていると、**別の素材のクリップへ移った瞬間に
+ * 等倍へ戻る**。速度の値そのものは変わっていないので入れ直す機会が来ず、
+ * そのクリップの間ずっと等倍で回り続ける。
+ * 本編の `<video>` は読み込み完了時に必ず入れ直す経路(`applyPendingPreviewLoad`)を
+ * 持っているので影響が無く、**脇役の層だけが取り残されていた**。
+ *
+ * (実測・2倍速のクリップを別素材で2本並べ、2本目へ移る: ぼかし背景の
+ *  `playbackRate` が **2 → 1**(本編は 2 のまま)。等倍で回る背景は追従の許容
+ *  0.3秒に引きずられ、本編との再生位置の差が **0.299秒**まで開いては戻るのを
+ *  繰り返していた)
+ *
+ * `defaultPlaybackRate` まで入れておけば、この先どこで読み込みが起きても戻らない。
+ */
+export function applyPreviewRate(el: PreviewRateElement | null, speed: number): void {
+  if (!el) return
+  const rate = toPlaybackRate(speed)
+  el.defaultPlaybackRate = rate
+  el.playbackRate = rate
 }
 
 /**
