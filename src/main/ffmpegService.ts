@@ -236,9 +236,9 @@ export async function generateThumbnailDataUrl(
       .complexFilter([`[0:v]${thumbnailScaleFilter()}[v]`])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
-      .on('error', (e) => {
+      .on('error', (e, _stdout, stderr) => {
         cleanup()
-        reject(describeFfmpegError(e))
+        reject(describeFfmpegError(e, stderr))
       })
       .on('end', () => {
         try {
@@ -276,9 +276,9 @@ export async function generateFrameDataUrl(
       ])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
-      .on('error', (e) => {
+      .on('error', (e, _stdout, stderr) => {
         cleanup()
-        reject(describeFfmpegError(e))
+        reject(describeFfmpegError(e, stderr))
       })
       .on('end', () => {
         try {
@@ -313,9 +313,9 @@ export function generateWaveformDataUrl(
       ])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
-      .on('error', (e) => {
+      .on('error', (e, _stdout, stderr) => {
         cleanup()
-        reject(describeFfmpegError(e))
+        reject(describeFfmpegError(e, stderr))
       })
       .on('end', () => {
         try {
@@ -429,7 +429,7 @@ export async function detectSilence(
           pendingStart = null
         }
       })
-      .on('error', (err) => reject(describeFfmpegError(err)))
+      .on('error', (err, _stdout, stderr) => reject(describeFfmpegError(err, stderr)))
       .on('end', () => {
         if (pendingStart !== null) {
           ranges.push({ start: rangeStart + pendingStart, end: rangeEnd })
@@ -1166,7 +1166,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           const percent = totalDuration > 0 ? Math.min(99, (seconds / totalDuration) * 100) : 0
           onProgress(percent, 'エンコード中')
         })
-        .on('error', (err) => {
+        .on('error', (err, _stdout, stderr) => {
           cleanupTempDirs()
           currentExportCommand = null
           exportInProgress = false
@@ -1175,7 +1175,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             rmSync(outputPath, { force: true })
             reject(new Error('EXPORT_CANCELED'))
           } else {
-            reject(describeFfmpegError(err))
+            reject(describeFfmpegError(err, stderr))
           }
         })
         .on('end', () => {

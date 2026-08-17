@@ -128,14 +128,31 @@ export function describeFfmpegExit(code: number | null | undefined, stderr: unkn
   return describeFfmpegError(new Error(`ffmpeg exited with code ${code ?? '?'}\n${tail}`))
 }
 
-export function describeFfmpegError(err: unknown): Error {
+/**
+ * @param stderr fluent-ffmpeg の `.on('error', (err, stdout, stderr))` の**第3引数**。
+ *   渡すこと。渡さないと、この表の**上のほうの行が丸ごと死ぬ**。
+ *
+ *   `err.message` に入っているのは **標準エラー出力の末尾2行だけ**で、原因を名指しする
+ *   行(`moov atom not found` など)は**その前に出ている**ため入っていない。
+ *   直に `spawn` した側(`describeFfmpegExit`)は全文を渡しているので、
+ *   **同じ表に通していても、経路によって渡している証拠の量が違う**——結果、
+ *   同じファイルなのに押したボタンで診断が変わっていた。
+ *   (実測: 途中で切れた mp4 で、`err.message` は **222文字/3行**、
+ *    第3引数の標準エラー出力は **1,564文字/16行**。`moov atom not found` は
+ *    後者にしか入っていない)
+ */
+export function describeFfmpegError(err: unknown, stderr?: unknown): Error {
   const original = err instanceof Error ? err : new Error(String(err))
   const message = original.message ?? ''
   if (!looksLikeFfmpegFailure(message)) return original
 
+  // 表を当てる相手は「message + 標準エラー出力の全文」。**`cause` は message から取る**
+  // ——原因の1行は末尾にあり、そこは `err.message` にも入っているので、
+  // 全文から取り直すと分からないときの文面が経路ごとに揺れる。
+  const evidence = typeof stderr === 'string' && stderr ? `${message}\n${stderr}` : message
   const cause = causeLine(message)
   for (const [re, text] of KNOWN) {
-    if (re.test(cause) || re.test(message)) return new Error(text)
+    if (re.test(cause) || re.test(evidence)) return new Error(text)
   }
   const detail = stripLeadingPath(cause)
   if (!detail) return new Error('メディアファイルを処理できませんでした')

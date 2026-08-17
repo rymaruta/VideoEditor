@@ -163,9 +163,9 @@ export function ensurePreviewProxy(
                 notifyProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
               }
             })
-            .on('error', (err) => {
+            .on('error', (err, _stdout, stderr) => {
               rmSync(tmpPath, { force: true })
-              reject(describeFfmpegError(err))
+              reject(describeFfmpegError(err, stderr))
             })
             .on('end', () => {
               try {
