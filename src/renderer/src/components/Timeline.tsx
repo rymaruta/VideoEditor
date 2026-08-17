@@ -2090,6 +2090,16 @@ export function Timeline(): React.JSX.Element {
             )}
             {timedClips.map((tc, i) => {
               const clipWidth = (tc.end - tc.start) * pixelsPerSecond
+              // **置く位置は時刻から出す。** 音声・PiP・テロップの3レーンは前から
+              // `left = 秒 × 1秒あたりの画素` で置いており、本編だけが**並べた順に流し込む**
+              // 形だった。流し込みでは**幅がそのまま次の位置になる**ので、CSS 側の飾り
+              // (レーンの `gap: 3px`、短いクリップの `min-width: 44px`)が
+              // **そのまま位置のズレになり、しかも後ろへ積み上がる**。
+              // (実測: 3秒+0.5秒×6+10秒+7秒 の並びで、最後のクリップの左端のズレが
+              //  100%ズーム(40px/秒)で **168px＝4.20秒**、最小ズーム(10px/秒)で
+              //  **258px＝25.80秒**。飾りが効かない最大ズームでも `gap` ぶんの
+              //  **24px(3px×8)** が残っていた。同じ時刻の音声クリップと再生位置の線は
+              //  正しい位置なので、**本編だけが他の全部とズレる**)
               return (
                 <div
                   key={tc.clip.id}
@@ -2100,7 +2110,7 @@ export function Timeline(): React.JSX.Element {
                   } ${draggedClipId === tc.clip.id ? 'dragging' : ''} ${
                     trimDrag?.clipId === tc.clip.id ? 'trimming' : ''
                   } tool-${editTool}`}
-                  style={{ width: clipWidth }}
+                  style={{ left: tc.start * pixelsPerSecond, width: clipWidth }}
                   draggable={editTool === 'select'}
                   onClick={(e) => {
                     e.stopPropagation()

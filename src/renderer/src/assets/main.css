@@ -2288,9 +2288,17 @@ h3 {
   width: 80px;
 }
 
+/* 本編クリップは**時刻で置く**(`left` は JSX が秒から出す)。音声・PiP・テロップの
+   3レーンと同じ規則。並べた順に流し込む形に戻さないこと——流し込みにすると
+   `min-width` やレーンの `gap` が**そのまま位置のズレになり、後ろへ積み上がる**
+   (実測: 0.5秒のクリップ3本で最後のクリップが 84px = 2.1秒 ずれ、再生位置の線と
+   音声クリップだけが正しい位置に残った)。
+   **`min-width` を戻さないこと。** 他の3レーンも持っていない。掴みやすさのために
+   広げると、広げたぶんがそのまま「時刻の嘘」になる。 */
 .timeline-clip {
+  position: absolute;
+  top: 0;
   height: 100%;
-  min-width: 44px;
   background: linear-gradient(160deg, #37374a, #26262f);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2299,8 +2307,6 @@ h3 {
   gap: 6px;
   padding: 0 8px;
   overflow: hidden;
-  flex-shrink: 0;
-  position: relative;
   transition: transform 0.1s ease;
 }
 
