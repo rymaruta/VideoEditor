@@ -885,9 +885,26 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           if (!asset) return
           const dur = overlayClip.outPoint - overlayClip.inPoint
           if (dur <= 0) return
-          command.input(asset.filePath).inputOptions([`-ss ${overlayClip.inPoint}`, `-t ${dur}`])
-          const myIndex = inputIndex++
           const pipStart = toExportTime(overlayClip.startTime)
+          // **本編より後ろへはみ出したぶんは、graph へ渡す前に切る。**
+          //
+          // `overlay` は入力が**全部**終わるまで出力を続ける(framesync の既定は
+          // `shortest=0`)。本編が先に終わると、その**最後の1枚が凍ったまま**
+          // PiP の残りぶん引き伸ばされ、**出力が本編の尺より長くなる**。
+          // 音声側は `amix` の `duration=first` で本編の尺に収まるので、
+          // **映像と音声のストリーム長が食い違った mp4** が、エラーも警告も無く出来上がる。
+          // (実測: 本編5秒の企画に 3.0秒から4秒の PiP を置くと、映像 **7.000秒/210枚**・
+          //  音声 **5.000秒**。5〜7秒は本編の最後の1枚が凍ったまま PiP だけが動き、
+          //  その2秒間の実効値は **0.00101**＝ほぼ無音だった)
+          //
+          // テロップは尺を超えたぶんが単に描かれないだけなので、PiP も同じ扱いに揃える。
+          // `totalDuration` はこの直前に本編の実尺で確定しているので、それを上限にする。
+          const pipVisibleDuration = Math.min(dur, totalDuration - pipStart)
+          if (pipVisibleDuration <= 0) return
+          command
+            .input(asset.filePath)
+            .inputOptions([`-ss ${overlayClip.inPoint}`, `-t ${pipVisibleDuration}`])
+          const myIndex = inputIndex++
           const pipLabel = `pip${pipCounter}`
           const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
           filterParts.push(
@@ -908,7 +925,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // **終わりも同じ換算を通す。** ここだけ「始まり + 素材の尺」のままだと、
           // 繋ぎをまたぐ PiP が繋ぎのぶん長く残り、置いた覚えのない絵の上に居座る
           // (理由と実測は `toExportEndTime`)。
-          const endTime = toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur)
+          // 見せる区間の終わりも本編の尺で頭打ちにする(入力を切ったのと同じ上限)。
+          const endTime = Math.min(
+            toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur),
+            totalDuration
+          )
           const outV = `vpip${pipCounter}`
           filterParts.push(
             `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${pipStart}\\,${endTime})'[${outV}]`
