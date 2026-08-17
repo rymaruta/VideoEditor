@@ -672,6 +672,32 @@ function removeLinkedAudioFor(
   })
 }
 
+/**
+ * 1本の音声クリップが複数の断片に割れたとき、**フェードを配り直す**。
+ *
+ * 断片は `{ ...c }` で作るので、何もしないと**フェードイン・フェードアウトが全部の断片へ
+ * 複製される**。すると切れ目ごとに音が落ちてまた上がる——**続きの音として鳴っていたものが、
+ * 割った瞬間に途切れる。** 全体の出入りを変えないよう、**先頭にフェードインだけ・
+ * 末尾にフェードアウトだけ**を残し、間の断片からは両方外す。
+ *
+ * (実測: 10秒の分離音声にフェードイン2秒・フェードアウト3秒を付けて 5.0秒でカミソリを
+ *  入れると、書き出した音の実効値が平坦部 **0.1245 に対し 4.75秒地点で 0.0060**
+ *  ——**-26.3 dB まで落ちてから鳴り直していた**。無音カットで3断片に割ると
+ *  同じ落ち込みが **3回**繰り返される)
+ *
+ * **並びはタイムライン順であること。** 先頭・末尾を位置で決めているので、順不同で渡すと
+ * フェードが別の断片に付く。
+ */
+function splitFades<T extends { fadeIn?: number; fadeOut?: number }>(pieces: T[]): T[] {
+  if (pieces.length <= 1) return pieces
+  const last = pieces.length - 1
+  return pieces.map((p, i) => ({
+    ...p,
+    fadeIn: i === 0 ? p.fadeIn : undefined,
+    fadeOut: i === last ? p.fadeOut : undefined
+  }))
+}
+
 // Deleting a detached-audio clip (or the whole track it sits on) has to hand the
 // audio back to its source clip. `audioDetached` only means "this clip's audio is
 // playing from a separate track"; once that track is gone the flag is a dead end —
@@ -1581,7 +1607,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             // 後半のクリップだけ紐づく音声が無くなる(理由は toSourceSeconds)。
             const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - c.startTime, c.speed)
             if (splitLocal <= c.inPoint || splitLocal >= c.outPoint) return [c]
-            return [
+            // フェードは配り直す(そのまま複製すると切れ目で音が落ちる。理由は splitFades)
+            return splitFades([
               { ...c, outPoint: splitLocal },
               {
                 ...c,
@@ -1590,7 +1617,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                 inPoint: splitLocal,
                 linkedClipId: secondHalfId ?? undefined
               }
-            ]
+            ])
           })
         }
       })
@@ -2286,23 +2313,19 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             // タイムライン秒 → 素材秒は速度を掛ける(規則は toSourceSeconds)。
             const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - c.startTime, c.speed)
             // フェードを両方へそのまま配ると、切れ目で音が一度落ちてまた上がる。
-            // 全体の出入りが変わらないよう、前半にフェードイン・後半にフェードアウトだけ残す。
-            return [
-              {
-                ...c,
-                outPoint: splitLocal,
-                linkedClipId: undefined,
-                fadeOut: undefined
-              },
+            // 規則は `splitFades` 1箇所に置く——ここに書き写していたころ、同じ割り方を
+            // する他の3経路(本編のカミソリ・無音カットなどの置き換え・ジャンプカット)は
+            // **どれも複製したままだった**。
+            return splitFades([
+              { ...c, outPoint: splitLocal, linkedClipId: undefined },
               {
                 ...c,
                 id: uuid(),
                 startTime: absoluteTime,
                 inPoint: splitLocal,
-                linkedClipId: undefined,
-                fadeIn: undefined
+                linkedClipId: undefined
               }
-            ]
+            ])
           })
         }
       })
@@ -2670,13 +2693,16 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               const segments = c.linkedClipId ? segmentsByClipId.get(c.linkedClipId) : undefined
               if (!segments) return [c]
               // Positions and trims are filled in by the link mirror right after.
-              return segments.map((seg) => ({
-                ...c,
-                id: uuid(),
-                inPoint: seg.inPoint,
-                outPoint: seg.outPoint,
-                linkedClipId: seg.id
-              }))
+              // フェードは配り直す(理由は splitFades)。断片は素材の並び順＝タイムライン順。
+              return splitFades(
+                segments.map((seg) => ({
+                  ...c,
+                  id: uuid(),
+                  inPoint: seg.inPoint,
+                  outPoint: seg.outPoint,
+                  linkedClipId: seg.id
+                }))
+              )
             })
           }
         })
@@ -2917,13 +2943,16 @@ function relinkForReplacedClip(project: Project, original: Clip, newClips: Clip[
       clips: t.clips.flatMap((c) => {
         if (c.linkedClipId !== original.id) return [c]
         // Positions and trims are filled in by the link mirror right after.
-        return newClips.map((seg) => ({
-          ...c,
-          id: uuid(),
-          inPoint: seg.inPoint,
-          outPoint: seg.outPoint,
-          linkedClipId: seg.id
-        }))
+        // フェードは配り直す(理由は splitFades)。断片は `newClips` の順＝タイムライン順。
+        return splitFades(
+          newClips.map((seg) => ({
+            ...c,
+            id: uuid(),
+            inPoint: seg.inPoint,
+            outPoint: seg.outPoint,
+            linkedClipId: seg.id
+          }))
+        )
       })
     }
   })
