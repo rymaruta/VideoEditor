@@ -4,6 +4,15 @@ export interface OrphanCleanup {
   project: Project
   /** 取り除いたクリップの本数(本編・音声・PiP の合計) */
   droppedCount: number
+  /**
+   * **取り除いた分離音声が紐づいていた本編クリップのID。**
+   *
+   * 並びを組み直すだけでなく「IDに何が起きたか」も返す。紐づき先が生き残るのに
+   * 音声だけ落ちると、その本編クリップは `audioDetached` が立ったまま
+   * **鳴らす相手が居ない**状態になり、書き出しが無音になる。
+   * 呼び出し側が `reattachClipsWithoutLinkedAudio` へ渡して印を下ろす。
+   */
+  unlinkedClipIds: string[]
 }
 
 /**
@@ -30,10 +39,14 @@ export function dropOrphanClips(project: Project): OrphanCleanup {
   const clips = project.clips.filter(alive)
   let dropped = project.clips.length - clips.length
 
+  const unlinkedClipIds: string[] = []
   const audioTracks = project.audioTracks.map((t) => {
     const kept = t.clips.filter(alive)
     if (kept.length === t.clips.length) return t
     dropped += t.clips.length - kept.length
+    for (const c of t.clips) {
+      if (!alive(c) && c.linkedClipId != null) unlinkedClipIds.push(c.linkedClipId)
+    }
     return { ...t, clips: kept }
   })
 
@@ -44,10 +57,11 @@ export function dropOrphanClips(project: Project): OrphanCleanup {
     return { ...t, clips: kept }
   })
 
-  if (dropped === 0) return { project, droppedCount: 0 }
+  if (dropped === 0) return { project, droppedCount: 0, unlinkedClipIds: [] }
   return {
     project: { ...project, clips, audioTracks, videoOverlayTracks },
-    droppedCount: dropped
+    droppedCount: dropped,
+    unlinkedClipIds
   }
 }
 

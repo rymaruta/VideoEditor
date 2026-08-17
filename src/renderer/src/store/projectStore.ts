@@ -1103,9 +1103,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 「起点はもう積んである」と誤って判断して履歴を1件も積まない(`newProject` と
     // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
     resetHistoryCoalescing()
+    // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
-      project: cleaned.project,
+      project: reattachClipsWithoutLinkedAudio(cleaned.project, cleaned.unlinkedClipIds),
       past: [],
       future: [],
       currentFilePath: filePath,
@@ -1127,9 +1128,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 「起点はもう積んである」と誤って判断して履歴を1件も積まない(`newProject` と
     // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
     resetHistoryCoalescing()
+    // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
-      project: cleaned.project,
+      project: reattachClipsWithoutLinkedAudio(cleaned.project, cleaned.unlinkedClipIds),
       past: [],
       future: [],
       currentFilePath: null,
@@ -1214,6 +1216,23 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         .filter((c) => c.assetId === assetId)
         .map((c) => c.id)
       const clips = state.project.clips.filter((c) => c.assetId !== assetId)
+      // **消える分離音声が、どの本編クリップに紐づいていたか**を控える。
+      // 紐づき先が生き残るのに音声だけ消えると、その本編クリップは `audioDetached` が
+      // 立ったまま「鳴らす相手が居ない」状態になり、**書き出しが digital silence になる**。
+      // (実測: 本編に440Hz・分離音声にナレーション(別素材)という企画で、メディア一覧から
+      //  ナレーション素材を削除して書き出すと、出力の実効値が **0.00000**＝完全な無音。
+      //  同じ形を作る `removeAudioClip` / `removeAudioTrack` は印を下ろすので
+      //  内蔵の440Hzが 0.17610 で戻る)
+      const unlinkedClipIds = state.project.audioTracks.flatMap((t) =>
+        t.clips
+          .filter(
+            (c) =>
+              c.assetId === assetId ||
+              (c.linkedClipId != null && removedClipIds.includes(c.linkedClipId))
+          )
+          .map((c) => c.linkedClipId)
+          .filter((id): id is string => id != null)
+      )
       const audioTracks = state.project.audioTracks
         .map((t) => ({
           ...t,
@@ -1238,13 +1257,18 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         state.selectedClipId != null && clips.some((c) => c.id === state.selectedClipId)
       return {
         ...pushHistory(state),
-        project: {
-          ...state.project,
-          assets: state.project.assets.filter((a) => a.id !== assetId),
-          clips,
-          audioTracks,
-          videoOverlayTracks
-        },
+        // 紐づく分離音声が消えた本編クリップは、印を下ろして内蔵の音へ戻す
+        // (`removeAudioClip` / `removeAudioTrack` / `moveAudioClipToTrack` と同じ関門)。
+        project: reattachClipsWithoutLinkedAudio(
+          {
+            ...state.project,
+            assets: state.project.assets.filter((a) => a.id !== assetId),
+            clips,
+            audioTracks,
+            videoOverlayTracks
+          },
+          unlinkedClipIds
+        ),
         selectedClipId: stillSelected ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) =>
           clips.some((c) => c.id === id)
