@@ -100,9 +100,17 @@ export async function analyzeSmartCropCenter(
   )
 
   const energies: number[][] = []
+  const frameBytes = sampleW * sampleH * 3
   for (const t of timestamps) {
     try {
       const frame = await extractRawFrame(filePath, t, sampleW, sampleH)
+      // 映像ストリームが尽きた位置(容器の尺より映像が短い録画物の尾や EOF 直前)では、
+      // ffmpeg は**終了コード0のまま0バイトの出力**を書くので catch に来ない(実測)。
+      // 足りないバッファを energy 計算へ通すと添字外読みが NaN を作り、平均が全列
+      // NaN になって**測れた他のフレームの情報ごと捨てられる**(bestWindowCenter は
+      // NaN を 0 と読むので、結果は必ず中央 0.5 に戻る)。取れなかったフレームとして
+      // 読み飛ばす(catch と同じ扱い)。
+      if (frame.length < frameBytes) continue
       energies.push(
         cropHorizontal ? columnEnergy(frame, sampleW, sampleH) : rowEnergy(frame, sampleW, sampleH)
       )
