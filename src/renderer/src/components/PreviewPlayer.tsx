@@ -22,11 +22,11 @@ import {
 import { isKaraokeWordSung, karaokeWords } from '@shared/captionWords'
 import { blurSigmaFor } from '@shared/videoFrame'
 import {
-  combineLevels,
-  duckTargetGain,
-  isMainVoiceClip,
-  rmsOf,
-  smoothDuckGain
+  advanceDuckDetector,
+  createDuckDetector,
+  duckDetectorLevel,
+  duckGainForLevel,
+  isMainVoiceClip
 } from '@shared/ducking'
 import { crossfadeOpacity, effectiveTransitionSeconds } from '@shared/transition'
 import { cropPreviewStyle } from '../lib/cropPreview'
@@ -520,8 +520,12 @@ const duckAppliers = new Set<(duckGain: number) => void>()
 /** いま掛かっているダッキングの倍率。途中で生えた `<audio>` もこの値から始める */
 const duckGainRef = { current: 1 }
 
-/** 測定の窓。`analyser.fftSize` と読み出しバッファで同じ値を使う。 */
-const DUCK_FFT_SIZE = 1024
+/**
+ * 測定の窓。`analyser.fftSize` と読み出しバッファで同じ値を使う。
+ * 検出器は「経過時間ぶんの末尾」を読むので、コマ間隔より長い時間を
+ * 持てる大きさにする(2048 = 48kHz で約43ms。30fps のコマ間隔でも収まる)。
+ */
+const DUCK_FFT_SIZE = 2048
 
 /**
  * 「本編の音」のうち、**音声トラックへ移っているぶん**の測り口。
@@ -615,7 +619,12 @@ function useMainAudioDucking(
       return analyserRef.current
     }
 
-    const buffer = new Float32Array(DUCK_FFT_SIZE)
+    // 検出器は書き出し(`sidechaincompress`)と同じ非対称追従器(@shared/ducking)。
+    // 以前の「実効値 → 静特性 → 倍率をなます」だと、書き出しだけ常に約2dB深く
+    // 下がっていた(検出器まで同じにしないと、同じ数字を配っても揃わない)。
+    const detector = createDuckDetector()
+    const sampleBuf = new Float32Array(DUCK_FFT_SIZE)
+    const powerBuf = new Float32Array(DUCK_FFT_SIZE)
     let frame = 0
     let last = performance.now()
     const tick = (): void => {
@@ -634,21 +643,36 @@ function useMainAudioDucking(
       // 書き出しのダッキングは試聴音量と無関係なので、掛かっていたぶんを割り戻す。
       // ミュート中は本編の大きさが分からないので、掛けない(倍率1)。
       const monitor = mutedRef.current ? 0 : volumeRef.current
-      const levels: number[] = []
+      const sampleRate = getSharedAudioContext()?.sampleRate ?? 48000
+      // 検出器は1サンプルずつ進む。バッファは「直近 DUCK_FFT_SIZE 本」なので、
+      // 前回のコマから経過した時間ぶんの**末尾だけ**を流す(コマ落ちしても
+      // 同じサンプルを二重に食わせない。時定数は経過時間で守られる)
+      const count = Math.min(DUCK_FFT_SIZE, Math.max(1, Math.round((dt / 1000) * sampleRate)))
+      const offset = DUCK_FFT_SIZE - count
+      powerBuf.fill(0, 0, count)
       if (analyser && monitor > 0) {
-        analyser.getFloatTimeDomainData(buffer)
-        levels.push(rmsOf(buffer) / monitor)
+        analyser.getFloatTimeDomainData(sampleBuf)
+        for (let i = 0; i < count; i++) {
+          const v = sampleBuf[offset + i] / monitor
+          if (Number.isFinite(v)) powerBuf[i] += v * v
+        }
       }
       // 分離された本編の音声を足す。**二重には数えない**——分離中の `<video>` は
       // `muted` なので上の測定は 0 になり、分離していなければリンク付きのクリップが無い。
+      // 無相関な音の合成は**電力の足し算**(振幅で足すと同じ音が2倍=+6dBに見える)。
       mainVoiceProbes.forEach((probe) => {
-        probe.analyser.getFloatTimeDomainData(buffer)
-        levels.push(rmsOf(buffer) * probe.gain())
+        probe.analyser.getFloatTimeDomainData(sampleBuf)
+        const g = probe.gain()
+        if (!Number.isFinite(g) || g === 0) return
+        for (let i = 0; i < count; i++) {
+          const v = sampleBuf[offset + i] * g
+          if (Number.isFinite(v)) powerBuf[i] += v * v
+        }
       })
-      const level = combineLevels(levels)
-      const target = mutedRef.current ? 1 : duckTargetGain(level)
-      duckGainRef.current = smoothDuckGain(duckGainRef.current, target, dt)
-      duckAppliers.forEach((apply) => apply(duckGainRef.current))
+      advanceDuckDetector(detector, powerBuf, count, sampleRate)
+      const gain = mutedRef.current ? 1 : duckGainForLevel(duckDetectorLevel(detector))
+      duckGainRef.current = gain
+      duckAppliers.forEach((apply) => apply(gain))
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)

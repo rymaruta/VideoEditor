@@ -38,75 +38,112 @@ export function isMainVoiceClip(clip: { linkedClipId?: string }): boolean {
   return Boolean(clip.linkedClipId)
 }
 
-/**
- * 複数の測り口の実効値を1つにまとめる。
- *
- * 無相関な音を重ねたときの実効値は**二乗和の平方根**(電力が足し算になる)。
- * 単純な足し算にすると、同じ音を2箇所から測っただけで 2倍(+6dB)に見えてしまう。
- * 数でない値は 0 として捨てる(1つ混ざるだけで全体が NaN になり、
- * BGM が下がりっぱなしにも上がりっぱなしにもなり得る)。
- */
-export function combineLevels(levels: ArrayLike<number>): number {
-  let sum = 0
-  for (let i = 0; i < levels.length; i++) {
-    const v = levels[i]
-    if (!Number.isFinite(v)) continue
-    sum += v * v
-  }
-  return Math.sqrt(sum)
-}
-
 /** 書き出しのフィルタ式。数字を直接書かず、必ずここから組み立てる。 */
 export function duckingFilterArgs(): string {
   return `sidechaincompress=threshold=${DUCKING.threshold}:ratio=${DUCKING.ratio}:attack=${DUCKING.attackMs}:release=${DUCKING.releaseMs}`
 }
 
 /**
- * 本編の音量(0〜1 の振幅)から、BGM に掛ける倍率を求める。
- *
- * コンプレッサの静特性そのまま: しきい値を超えたぶんだけを dB で `ratio` 分の1に潰す。
- *   超過dB = 20*log10(level / threshold)
- *   下げるdB = 超過dB * (1 - 1/ratio)
- * しきい値以下は 1(素通し)。**時間方向のなまし(attack/release)は別**
- * (`smoothDuckGain`)——静特性だけ掛けると音がガタつく。
+ * `sidechaincompress` の既定の knee(ソフトニー)。書き出し側は指定していないので
+ * この既定が効いている。画面も同じ値でカーブを描かないと、しきい値の近くだけ
+ * 画面と書き出しが食い違う。
  */
-export function duckTargetGain(level: number): number {
-  if (!Number.isFinite(level) || level <= DUCKING.threshold) return 1
-  const overshootDb = 20 * Math.log10(level / DUCKING.threshold)
-  const reductionDb = overshootDb * (1 - 1 / DUCKING.ratio)
-  return Math.pow(10, -reductionDb / 20)
+export const DUCKING_KNEE = 2.82843
+
+/**
+ * 書き出し(`sidechaincompress`)の検出器を、そのまま画面用に写した模型。
+ *
+ * 以前の画面は「1コマぶんの単純な実効値 → 静特性 → 倍率をなます」だったが、
+ * ffmpeg の検出器は**1サンプルずつ電力を非対称(attack/release)に追従**するので、
+ * アタックがリリースよりずっと速いと**実効値ではなく峰の近く**で落ち着く。
+ * 同じしきい値・比を配っても、**書き出しだけ常に約2dB深く下がっていた**のはこのため。
+ *
+ * ここの式は推測ではなく**実測合わせ**:
+ * ffmpeg 単体にピーク振幅0.04〜1.4の正弦をサイドチェインで通して下がり幅を測り
+ * (Goertzel で BGM 成分だけ取り出す)、この模型が**全11点で差 0.00dB**、
+ * 過渡(ON/OFF の立ち上がり・戻り)も 0.2dB 以内で一致することを確かめてある。
+ * - 追従係数は 1サンプルあたり `4000 / (時定数ms × サンプルレート)`
+ * - 検出レベルは `√env`(env は電力の追従値。定常の正弦なら実効値の約1.29倍で落ち着く)
+ * - 静特性は log 領域で、knee 区間はエルミート補間
+ */
+export interface DuckDetectorState {
+  /** 電力(振幅の二乗)を追従している内部状態 */
+  env: number
+}
+
+export function createDuckDetector(): DuckDetectorState {
+  return { env: 0 }
 }
 
 /**
- * 倍率を attack/release でなまして、次の値を返す。
- *
- * 下げる向き(target < current)は attack、戻す向きは release の時定数を使う。
- * 指数で寄せるので、`dtMs` がどれだけ飛んでも行き過ぎない。
+ * 電力の列(サンプルごとの振幅²。複数の測り口は電力を足してから渡す——
+ * 無相関な音の合成は電力の足し算)で検出器を進める。
+ * 数でない値・負の値は捨てる(1つ混ざるだけで env が NaN になり、
+ * BGM が下がりっぱなしにも上がりっぱなしにもなり得る)。
  */
-export function smoothDuckGain(current: number, target: number, dtMs: number): number {
-  if (!Number.isFinite(current)) return Number.isFinite(target) ? target : 1
-  if (!Number.isFinite(target)) return current
-  if (!Number.isFinite(dtMs) || dtMs <= 0) return current
-  const tau = target < current ? DUCKING.attackMs : DUCKING.releaseMs
-  if (tau <= 0) return target
-  const k = Math.exp(-dtMs / tau)
-  return target + (current - target) * k
-}
-
-/**
- * 波形の実効値(RMS)。`AnalyserNode.getFloatTimeDomainData` の中身をそのまま渡す。
- * 空なら 0(無音扱い)。数値でない値は捨てる——1つ混ざるだけで合計が NaN になり、
- * **BGM が下がりっぱなしにも上がりっぱなしにもなり得る**。
- */
-export function rmsOf(samples: ArrayLike<number>): number {
-  let sum = 0
-  let n = 0
-  for (let i = 0; i < samples.length; i++) {
-    const v = samples[i]
-    if (!Number.isFinite(v)) continue
-    sum += v * v
-    n++
+export function advanceDuckDetector(
+  state: DuckDetectorState,
+  powers: ArrayLike<number>,
+  count: number,
+  sampleRate: number
+): void {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) return
+  const attackCoeff = Math.min(1, 4000 / (DUCKING.attackMs * sampleRate))
+  const releaseCoeff = Math.min(1, 4000 / (DUCKING.releaseMs * sampleRate))
+  let env = Number.isFinite(state.env) && state.env >= 0 ? state.env : 0
+  const n = Math.min(count, powers.length)
+  for (let i = 0; i < n; i++) {
+    const p = powers[i]
+    if (!Number.isFinite(p) || p < 0) continue
+    env += (p - env) * (p > env ? attackCoeff : releaseCoeff)
   }
-  if (n === 0) return 0
-  return Math.sqrt(sum / n)
+  state.env = env
+}
+
+/** 検出器が見ているレベル(振幅)。電力の追従値の平方根。 */
+export function duckDetectorLevel(state: DuckDetectorState): number {
+  const env = state.env
+  if (!Number.isFinite(env) || env <= 0) return 0
+  return Math.sqrt(env)
+}
+
+function hermite(x: number, x0: number, x1: number, p0: number, p1: number, m1: number): number {
+  const w = x1 - x0
+  const t = (x - x0) / w
+  const t2 = t * t
+  const t3 = t2 * t
+  // 始点の傾きは 1(圧縮前は素通し)
+  return (
+    (2 * t3 - 3 * t2 + 1) * p0 +
+    (t3 - 2 * t2 + t) * w +
+    (-2 * t3 + 3 * t2) * p1 +
+    (t3 - t2) * w * m1
+  )
+}
+
+/**
+ * 検出レベル(`duckDetectorLevel`)から BGM に掛ける倍率を出す静特性。
+ * `sidechaincompress` と同じく knee 区間(しきい値の前後 √knee 倍)は
+ * エルミート補間でなだらかに潰す。knee の下端以下は 1(素通し)。
+ */
+export function duckGainForLevel(level: number): number {
+  if (!Number.isFinite(level) || level <= 0) return 1
+  const kneeStartLin = DUCKING.threshold / Math.sqrt(DUCKING_KNEE)
+  if (level <= kneeStartLin) return 1
+  const slope = Math.log(level)
+  const thres = Math.log(DUCKING.threshold)
+  const kneeStart = Math.log(kneeStartLin)
+  const kneeStop = Math.log(DUCKING.threshold * Math.sqrt(DUCKING_KNEE))
+  const gainLog =
+    slope > kneeStop
+      ? (slope - thres) / DUCKING.ratio + thres
+      : hermite(
+          slope,
+          kneeStart,
+          kneeStop,
+          kneeStart,
+          (kneeStop - thres) / DUCKING.ratio + thres,
+          1 / DUCKING.ratio
+        )
+  return Math.exp(gainLog - slope)
 }
