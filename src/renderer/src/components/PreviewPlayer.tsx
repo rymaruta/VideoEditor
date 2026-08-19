@@ -17,6 +17,7 @@ import {
   TEXT_MARGIN_V_RATIO,
   TEXT_SHADOW_OFFSET_PX,
   TEXT_SHADOW_OPACITY,
+  textAnchorOriginCss,
   textSlideOffsetPx
 } from '@shared/textStyle'
 import { isKaraokeWordSung, karaokeWords } from '@shared/captionWords'
@@ -1383,6 +1384,14 @@ export function PreviewPlayer(): React.JSX.Element {
               if (livePos) positionStyle.translate = '-50% -50%'
               else if (o.style.position === 'center') positionStyle.translate = '0 -50%'
               if (o.style.rotation) positionStyle.rotate = `${o.style.rotation}deg`
+              // **回して・拡大する軸は、書き出しと同じ「配置のアンカー」に置く。**
+              // ASS は `\frz` も登場アニメの `\fscx/\fscy` も `\an` のアンカー(下ぞろえなら
+              // 行の下端中央)を軸に掛けるが、CSS の既定は**箱の中心**。同じ設定なのに
+              // 画面と出力で別の場所に描かれていた(理由と実測は textAnchorOriginCss)。
+              positionStyle.transformOrigin = textAnchorOriginCss(
+                o.style.position,
+                Boolean(livePos)
+              )
               // 「下から出る/上から出る」が動く距離は**枠の実寸から**出す。CSS に
               // `translateY(40px)` と固定px で書いてあったため、枠の大きさが変わるたびに
               // 書き出しとの比が動いていた(理由は TEXT_SLIDE_OFFSET_RATIO)。
