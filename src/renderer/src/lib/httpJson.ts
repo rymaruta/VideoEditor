@@ -36,12 +36,19 @@ function errorInfo(body: unknown): { message: string; status: string; reason: st
  */
 const MAX_RAW_LENGTH = 120
 
-function sanitize(message: string): string {
-  const flat = message
+function flatten(message: string): string {
+  return message
     .replace(/<[^>]*>/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function truncate(flat: string): string {
   return flat.length > MAX_RAW_LENGTH ? `${flat.slice(0, MAX_RAW_LENGTH)}…` : flat
+}
+
+function sanitize(message: string): string {
+  return truncate(flatten(message))
 }
 
 /**
@@ -88,10 +95,14 @@ function describeApiFailure(apiLabel: string, status: number, body: unknown): st
  * 「どのAPIの話か」を添えて、タグと長さを整えてから出す。
  */
 export function describeBodyFailure(apiLabel: string, message: unknown): string {
-  const raw = sanitize(typeof message === 'string' ? message : '')
-  if (/credential|api ?key|client ?id|token|unauthor/i.test(raw)) {
+  // 原因の判定は**表示用に切り詰める前の全文**に掛ける。120文字で切った後ろに
+  // credential などの語が来る本文だと、判定に届かず原文の切れ端だけが出ていた
+  // (タグ落とし・1行化は判定にも掛ける——タグの中の token 等で誤判定しないため)
+  const full = flatten(typeof message === 'string' ? message : '')
+  if (/credential|api ?key|client ?id|token|unauthor/i.test(full)) {
     return `${apiLabel}のキーが受け付けられませんでした。入力したAPIキー(Client ID)を確認してください。`
   }
+  const raw = truncate(full)
   return raw ? `${apiLabel}がエラーを返しました: ${raw}` : `${apiLabel}がエラーを返しました`
 }
 
