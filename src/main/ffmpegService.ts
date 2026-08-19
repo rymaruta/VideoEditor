@@ -692,19 +692,23 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   // 書き出せなくなるほうがはるかに悪い。
   const wideEmByFont = await measureWideAdvances(ffmpegPath, project.textOverlays)
 
-  return new Promise((resolve, reject) => {
-    let command: ffmpeg.FfmpegCommand
-    let assDir: string | null = null
-    /** フィルタグラフを書いたファイルの置き場(理由は `-filter_complex_script` を渡す箇所) */
-    let graphDir: string | null = null
-    const cleanupTempDirs = (): void => {
-      if (assDir) rmSync(assDir, { recursive: true, force: true })
-      if (graphDir) rmSync(graphDir, { recursive: true, force: true })
-    }
-    try {
-      command = ffmpeg()
+  /**
+   * フィルタグラフの組み立て。**本番の書き出しと、ラウドネス測定パスの2回呼ばれる。**
+   *
+   * 測定パス(`includeVideo = false`)は入力と音声の枝を本番と**同じ順序・同じ引数**で
+   * 組み、映像の枝だけを持たない。別々に書くと、測る音と書き出す音が黙ってズレる
+   * (2パス化の前提は「書き出すのと同じ音を測る」こと)。入力の並びも共有する——
+   * PiP の「丸ごと外なら入力に足さない」判定まで同じでないと、入力番号がずれて
+   * 別のファイルを測ることになる。
+   */
+  const buildGraph = (
+    command: ffmpeg.FfmpegCommand,
+    includeVideo: boolean
+  ): { filterParts: string[]; videoLabel: string; audioLabel: string; assDir: string | null } => {
+    {
       const filterParts: string[] = []
       let inputIndex = 0
+      let assDir: string | null = null
 
       // --- Main video track: per-clip decode + scale/pad + speed ---
       clips.forEach((clip, i) => {
@@ -772,12 +776,14 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 既定の 25fps で書き出され、**出力全体が 25fps に化ける**
         // (実測: 750枚のはずが **626枚/25fps/25.040秒**)。時刻がちょうど格子に
         // 乗っているので、この `fps` は素通しで、枚数を増やしも減らしもしない。
-        filterParts.push(
-          `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,` +
-            `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
-            `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)},` +
-            `settb=1/${outputFps},setpts=N,fps=${outputFps}[v${i}]`
-        )
+        if (includeVideo) {
+          filterParts.push(
+            `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,` +
+              `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
+              `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)},` +
+              `settb=1/${outputFps},setpts=N,fps=${outputFps}[v${i}]`
+          )
+        }
         if (asset.hasAudio && !clip.audioDetached) {
           // 音声も**映像と同じ尺ちょうど**に揃えてから畳み込む。
           //
@@ -839,7 +845,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         if (t <= 0 || !transition) {
           const outV = `vcat${i}`
           const outA = `acat${i}`
-          filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/${outputFps}[${outV}]`)
+          if (includeVideo) {
+            filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/${outputFps}[${outV}]`)
+          }
           filterParts.push(`[${curA}][a${i}]concat=n=2:v=0:a=1[${outA}]`)
           curV = outV
           curA = outA
@@ -849,9 +857,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           const offset = Math.max(0, curDuration - t)
           const outV = `vxf${i}`
           const outA = `axf${i}`
-          filterParts.push(
-            `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=1/${outputFps}[${outV}]`
-          )
+          if (includeVideo) {
+            filterParts.push(
+              `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=1/${outputFps}[${outV}]`
+            )
+          }
           filterParts.push(`[${curA}][a${i}]acrossfade=d=${t}[${outA}]`)
           curV = outV
           curA = outA
@@ -905,36 +915,38 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             .input(asset.filePath)
             .inputOptions([`-ss ${overlayClip.inPoint}`, `-t ${pipVisibleDuration}`])
           const myIndex = inputIndex++
-          const pipLabel = `pip${pipCounter}`
-          const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
-          filterParts.push(
-            // PiP も**画素を正方形に直してから**幅を決める。`scale=幅:-2` は
-            // `iw/ih` から高さを出すので、SAR≠1 の素材はここでも縦長に潰れる。
-            `[${myIndex}:v]${SQUARE_PIXEL_FILTER},scale=${scaledWidth}:-2,` +
-              `setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
-          )
-          const margin = Math.round(pipMarginPx(w))
-          const xExpr =
-            track.position === 'top-left' || track.position === 'bottom-left'
-              ? `${margin}`
-              : `W-w-${margin}`
-          const yExpr =
-            track.position === 'top-left' || track.position === 'top-right'
-              ? `${margin}`
-              : `H-h-${margin}`
-          // **終わりも同じ換算を通す。** ここだけ「始まり + 素材の尺」のままだと、
-          // 繋ぎをまたぐ PiP が繋ぎのぶん長く残り、置いた覚えのない絵の上に居座る
-          // (理由と実測は `toExportEndTime`)。
-          // 見せる区間の終わりも本編の尺で頭打ちにする(入力を切ったのと同じ上限)。
-          const endTime = Math.min(
-            toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur),
-            totalDuration
-          )
-          const outV = `vpip${pipCounter}`
-          filterParts.push(
-            `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${pipStart}\\,${endTime})'[${outV}]`
-          )
-          curV = outV
+          if (includeVideo) {
+            const pipLabel = `pip${pipCounter}`
+            const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
+            filterParts.push(
+              // PiP も**画素を正方形に直してから**幅を決める。`scale=幅:-2` は
+              // `iw/ih` から高さを出すので、SAR≠1 の素材はここでも縦長に潰れる。
+              `[${myIndex}:v]${SQUARE_PIXEL_FILTER},scale=${scaledWidth}:-2,` +
+                `setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
+            )
+            const margin = Math.round(pipMarginPx(w))
+            const xExpr =
+              track.position === 'top-left' || track.position === 'bottom-left'
+                ? `${margin}`
+                : `W-w-${margin}`
+            const yExpr =
+              track.position === 'top-left' || track.position === 'top-right'
+                ? `${margin}`
+                : `H-h-${margin}`
+            // **終わりも同じ換算を通す。** ここだけ「始まり + 素材の尺」のままだと、
+            // 繋ぎをまたぐ PiP が繋ぎのぶん長く残り、置いた覚えのない絵の上に居座る
+            // (理由と実測は `toExportEndTime`)。
+            // 見せる区間の終わりも本編の尺で頭打ちにする(入力を切ったのと同じ上限)。
+            const endTime = Math.min(
+              toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur),
+              totalDuration
+            )
+            const outV = `vpip${pipCounter}`
+            filterParts.push(
+              `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${pipStart}\\,${endTime})'[${outV}]`
+            )
+            curV = outV
+          }
           if (asset.hasAudio) {
             const delayMs = Math.max(0, Math.round(pipStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
@@ -949,7 +961,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       })
 
       let videoLabel = `[${curV}]`
-      if (project.textOverlays.length > 0) {
+      if (includeVideo && project.textOverlays.length > 0) {
         assDir = mkdtempSync(join(tmpdir(), 've-subs-'))
         const assPath = join(assDir, 'overlay.ass')
         // 端ごとに `toExportTime` を掛けると、繋ぎをまたぐ区間で**終わりが始まりより前**に
@@ -979,8 +991,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       }
       // 出力の直前で画素形式を固定する。ここが最後の砦なので、映像の枝を足しても消しても
       // 成果物の形式が変わらない(上の VIDEO_FORMAT のコメント参照)。
-      filterParts.push(`${videoLabel}${VIDEO_FORMAT}[vfmt]`)
-      videoLabel = '[vfmt]'
+      if (includeVideo) {
+        filterParts.push(`${videoLabel}${VIDEO_FORMAT}[vfmt]`)
+        videoLabel = '[vfmt]'
+      }
 
       // --- Extra audio tracks (BGM / narration) mixed on top of the main audio ---
       const perTrackAudio: { label: string; duck: boolean }[] = []
@@ -1136,11 +1150,111 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         audioLabel = '[aout]'
       }
 
+      return { filterParts, videoLabel, audioLabel, assDir }
+    }
+  }
+
+  // --- ラウドネス正規化の測定パス(2パスの1回目) ---
+  //
+  // loudnorm を1パス(dynamic)で使うと、素材が平坦なら正確だが、音量差(LRA)の大きい
+  // 素材ほど目標の -14 LUFS から遠ざかり、音の幅も潰れる(実測: LRA 18.5 の素材で
+  // -14.66 LUFS・LRA 14.5 に圧縮。ズレは LRA に比例して広がる)。
+  // 書き出しと同じ音声グラフを `-f null` で流して measured_* を測り、本番は
+  // linear(一定ゲイン)で掛ける。測定に失敗したとき(解析不能・全編無音の -inf など)は
+  // 従来の1パスへ落とす——正規化の精度のために書き出し自体を失敗させない。
+  let measured: LoudnessMeasurement | null = null
+  if (loudnessNormalization) {
+    measured = await new Promise<LoudnessMeasurement | null>((resolveMeasure) => {
+      let graphDir: string | null = null
+      const cleanup = (): void => {
+        if (graphDir) rmSync(graphDir, { recursive: true, force: true })
+      }
+      try {
+        const command = ffmpeg()
+        const built = buildGraph(command, false)
+        built.filterParts.push(
+          `${built.audioLabel}loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json[aloud]`
+        )
+        graphDir = mkdtempSync(join(tmpdir(), 've-graph-'))
+        const graphPath = join(graphDir, 'filtergraph.txt')
+        writeFileSync(graphPath, built.filterParts.join(';'), 'utf-8')
+        // loudnorm の測定結果は stderr の末尾に JSON で出る。全行貯めると長尺で
+        // 際限なく膨らむので、後ろだけ持つ
+        const stderrTail: string[] = []
+        command
+          .outputOptions('-filter_complex_script', graphPath)
+          .outputOptions(['-map [aloud]', '-f null'])
+          .output(process.platform === 'win32' ? 'NUL' : '/dev/null')
+          .on('start', () => onProgress(0, '音量を測定中'))
+          .on('progress', (progress) => {
+            const seconds = timemarkToSeconds(progress.timemark)
+            const percent = totalDuration > 0 ? Math.min(29, (seconds / totalDuration) * 30) : 0
+            onProgress(percent, '音量を測定中')
+          })
+          .on('stderr', (line: string) => {
+            stderrTail.push(line)
+            if (stderrTail.length > 200) stderrTail.shift()
+          })
+          .on('error', () => {
+            cleanup()
+            resolveMeasure(null)
+          })
+          .on('end', () => {
+            cleanup()
+            resolveMeasure(parseLoudnormMeasurement(stderrTail.join('\n')))
+          })
+          .run()
+        currentExportCommand = command
+        // グラフ組み立て中にキャンセルが来ていたら、ハンドルが出来たいま倒す
+        if (exportCancelRequested) command.kill('SIGKILL')
+      } catch {
+        cleanup()
+        resolveMeasure(null)
+      }
+    })
+    currentExportCommand = null
+    if (exportCancelRequested) {
+      exportInProgress = false
+      throw new Error('EXPORT_CANCELED')
+    }
+  }
+  // エンコードの進み表示。測定パスが走ったときは 30% から先を使う
+  const progressBase = measured ? 30 : 0
+
+  return new Promise((resolve, reject) => {
+    let command: ffmpeg.FfmpegCommand
+    let assDir: string | null = null
+    /** フィルタグラフを書いたファイルの置き場(理由は `-filter_complex_script` を渡す箇所) */
+    let graphDir: string | null = null
+    const cleanupTempDirs = (): void => {
+      if (assDir) rmSync(assDir, { recursive: true, force: true })
+      if (graphDir) rmSync(graphDir, { recursive: true, force: true })
+    }
+    try {
+      command = ffmpeg()
+      const built = buildGraph(command, true)
+      const filterParts = built.filterParts
+      const videoLabel = built.videoLabel
+      let audioLabel = built.audioLabel
+      assDir = built.assDir
+
       if (loudnessNormalization) {
         // loudnorm は内部を 192kHz で回すため、後ろを固定しないと**出力が 96kHz になる**
         // (実測: 48kHz の素材が 96kHz で書き出されていた)。既定でONなので既定のまま
         // 書き出すと必ず踏む。ここでも形式を戻す。
-        filterParts.push(`${audioLabel}loudnorm=I=-14:TP=-1.5:LRA=11,${AUDIO_FORMAT}[aloud]`)
+        // 測定パスが成功していれば measured_* を渡して linear で掛ける。dynamic と
+        // 違って -14 LUFS へ狙いどおり寄り、音の幅(LRA)も潰れない。
+        // LRA の指定は linear では「これを超えたら dynamic へ落とす」閾値でしかなく、
+        // 増幅量には効かない。素材の LRA が 11 を超えていると黙って dynamic に
+        // 戻ってしまう(実測: LRA 18.5 の素材で 2パス目も -14.57/LRA 14.4 のまま)ので、
+        // 測った LRA を下回らない値を渡して linear を守る(上限 50 は loudnorm の定義域)
+        const lraTarget = measured ? Math.min(50, Math.max(11, Math.ceil(measured.inputLRA))) : 11
+        const loudnormArgs = measured
+          ? `loudnorm=I=-14:TP=-1.5:LRA=${lraTarget}:measured_I=${measured.inputI}:` +
+            `measured_TP=${measured.inputTP}:measured_LRA=${measured.inputLRA}:` +
+            `measured_thresh=${measured.inputThresh}:offset=${measured.targetOffset}:linear=true`
+          : `loudnorm=I=-14:TP=-1.5:LRA=11`
+        filterParts.push(`${audioLabel}${loudnormArgs},${AUDIO_FORMAT}[aloud]`)
         audioLabel = '[aloud]'
       }
 
@@ -1184,7 +1298,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         .on('start', () => onProgress(0, 'エンコード開始'))
         .on('progress', (progress) => {
           const seconds = timemarkToSeconds(progress.timemark)
-          const percent = totalDuration > 0 ? Math.min(99, (seconds / totalDuration) * 100) : 0
+          const percent =
+            totalDuration > 0
+              ? Math.min(99, progressBase + (seconds / totalDuration) * (100 - progressBase))
+              : progressBase
           onProgress(percent, 'エンコード中')
         })
         .on('error', (err, _stdout, stderr) => {
@@ -1218,6 +1335,40 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       reject(e)
     }
   })
+}
+
+/** loudnorm 測定パスの結果(2パス目へ渡す measured_* 一式) */
+interface LoudnessMeasurement {
+  inputI: number
+  inputTP: number
+  inputLRA: number
+  inputThresh: number
+  targetOffset: number
+}
+
+/**
+ * loudnorm(print_format=json)が stderr に出す測定 JSON を読む。
+ *
+ * 値は `"input_i" : "-22.01"` のように**文字列**で入っており、全編無音だと
+ * `"-inf"` が来る。`Number("-inf")` は NaN なので、1つでも数値にならなければ
+ * 測定失敗として null を返す(呼び出し側は従来の1パスへ落とす)。
+ */
+export function parseLoudnormMeasurement(stderr: string): LoudnessMeasurement | null {
+  const blocks = stderr.match(/\{[^{}]*"input_i"[^{}]*\}/g)
+  if (!blocks || blocks.length === 0) return null
+  try {
+    const obj = JSON.parse(blocks[blocks.length - 1]) as Record<string, unknown>
+    const m: LoudnessMeasurement = {
+      inputI: Number(obj.input_i),
+      inputTP: Number(obj.input_tp),
+      inputLRA: Number(obj.input_lra),
+      inputThresh: Number(obj.input_thresh),
+      targetOffset: Number(obj.target_offset)
+    }
+    return Object.values(m).every(Number.isFinite) ? m : null
+  } catch {
+    return null
+  }
 }
 
 function timemarkToSeconds(timemark: string): number {
