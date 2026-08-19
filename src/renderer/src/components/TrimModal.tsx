@@ -22,8 +22,7 @@ export function TrimModal({
   onClose: () => void
 }): React.JSX.Element | null {
   const project = useProjectStore((s) => s.project)
-  const updateClipTrim = useProjectStore((s) => s.updateClipTrim)
-  const updateClipCrop = useProjectStore((s) => s.updateClipCrop)
+  const applyClipTrimAndCrop = useProjectStore((s) => s.applyClipTrimAndCrop)
 
   const clip = project.clips.find((c) => c.id === clipId)
   const asset = clip ? project.assets.find((a) => a.id === clip.assetId) : undefined
@@ -41,12 +40,9 @@ export function TrimModal({
   if (!clip || !asset) return null
 
   function handleSave(): void {
-    if (inPoint < outPoint) {
-      updateClipTrim(clipId, inPoint, outPoint)
-    }
-    if (fillCrop !== (clip?.fillCrop ?? false) || cropCenter !== clip?.cropCenter) {
-      updateClipCrop(clipId, fillCrop, cropCenter)
-    }
+    // トリムとクロップをまとめて履歴1件で適用する(何も変えていなければ
+    // skipNoOpHistory が履歴ごと落とす)
+    applyClipTrimAndCrop(clipId, inPoint, outPoint, fillCrop, cropCenter)
     onClose()
   }
 

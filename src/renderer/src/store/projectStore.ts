@@ -519,6 +519,14 @@ interface ProjectState {
   detachClipAudio: (clipId: string) => void
   reattachClipAudio: (clipId: string) => void
   updateClipCrop: (clipId: string, fillCrop: boolean, cropCenter?: { x: number; y: number }) => void
+  /** トリムモーダルの「適用」1回分。トリムとクロップをまとめて履歴1件で適用する */
+  applyClipTrimAndCrop: (
+    clipId: string,
+    inPoint: number,
+    outPoint: number,
+    fillCrop: boolean,
+    cropCenter?: { x: number; y: number }
+  ) => void
   /** 余白を黒帯ではなくぼかし背景で埋めるかどうか */
   updateClipBlurBackground: (clipId: string, blurBackground: boolean) => void
   replaceClipRange: (clipId: string, newClips: Clip[]) => void
@@ -538,6 +546,8 @@ interface ProjectState {
   setMultiSelectedClipIds: (clipIds: string[]) => void
   setPlayheadTime: (t: number) => void
   setIsPlaying: (p: boolean) => void
+  /** 再生/一時停止の切り替え。末尾で止まっているときは先頭へ戻して再生し直す */
+  togglePlayback: () => void
   seekTo: (t: number) => void
 
   copySelectedClip: () => void
@@ -1561,6 +1571,29 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     })),
 
+  applyClipTrimAndCrop: (clipId, inPoint, outPoint, fillCrop, cropCenter) =>
+    set((state) => ({
+      // 「適用」ボタン1回 = 履歴1件。updateClipTrim と updateClipCrop を続けて呼ぶと
+      // 履歴が2件積まれ、Undo 1回で利用者が一度も選んでいない中間状態に戻ってしまう
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        clips: state.project.clips.map((c) => {
+          if (c.id !== clipId) return c
+          const trimmed =
+            inPoint < outPoint
+              ? clampSourceRange(c, inPoint, outPoint, assetDurationOf(state.project, c.assetId))
+              : c
+          // クロップに触れていないときは書かない。`fillCrop: false` を書き込むと
+          // 未設定(undefined)のクリップが「変更あり」になり、空の履歴が積まれる
+          const nextCenter = cropCenter ?? trimmed.cropCenter
+          const cropChanged =
+            fillCrop !== (trimmed.fillCrop ?? false) || nextCenter !== trimmed.cropCenter
+          return cropChanged ? { ...trimmed, fillCrop, cropCenter: nextCenter } : trimmed
+        })
+      }
+    })),
+
   replaceClipRange: (clipId, newClips) =>
     set((state) => {
       const project = applyClipReplacement(state.project, clipId, newClips)
@@ -1784,6 +1817,22 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   setMultiSelectedClipIds: (clipIds) => set({ multiSelectedClipIds: clipIds }),
   setPlayheadTime: (t) => set({ playheadTime: t }),
   setIsPlaying: (p) => set({ isPlaying: p }),
+  togglePlayback: () =>
+    set((state) => {
+      if (state.isPlaying) return { isPlaying: false }
+      // 末尾で止まった状態から再生を押すと、絵の要素は最後のクリップの終端に
+      // いるので play() してもすぐ「次が無い」で止め直され、何も起きなかった。
+      // 末尾(往復の丸めぶんを見て 0.1 秒手前まで)なら先頭へ戻してから再生する
+      const total = getTotalDuration(state.project)
+      if (total > 0 && state.playheadTime >= total - 0.1) {
+        return {
+          isPlaying: true,
+          playheadTime: 0,
+          seekRequest: { time: 0, token: (state.seekRequest?.token ?? 0) + 1 }
+        }
+      }
+      return { isPlaying: true }
+    }),
   seekTo: (t) =>
     set((state) => ({
       playheadTime: t,

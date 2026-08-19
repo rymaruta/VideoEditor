@@ -38,6 +38,7 @@ import {
   findTimedClipById,
   nextTimedClip,
   totalTimelineDuration,
+  totalExportDuration,
   TimedClip
 } from '../lib/timelineMath'
 import {
@@ -821,6 +822,7 @@ export function PreviewPlayer(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const isPlaying = useProjectStore((s) => s.isPlaying)
   const setIsPlaying = useProjectStore((s) => s.setIsPlaying)
+  const togglePlayback = useProjectStore((s) => s.togglePlayback)
   const setPlayheadTime = useProjectStore((s) => s.setPlayheadTime)
   const playheadTime = useProjectStore((s) => s.playheadTime)
   const seekRequest = useProjectStore((s) => s.seekRequest)
@@ -1038,6 +1040,10 @@ export function PreviewPlayer(): React.JSX.Element {
   })()
 
   const total = totalTimelineDuration(timedClips)
+  // 書き出したファイルの尺。つなぎの重なりぶんタイムラインより短くなる。
+  // 再生位置やシークはタイムライン秒のままなので、総尺ラベルの**横に併記**する
+  // (置き換えると、末尾で止めたとき「現在 0:20 / 全体 0:19」という壊れた表示になる)
+  const exportTotal = totalExportDuration(timedClips)
 
   // Continuous drag-scrubbing on the preview's own progress bar: seekTo() already
   // preserves the isPlaying state, so this lets the user grab the bar and drag through
@@ -1439,6 +1445,14 @@ export function PreviewPlayer(): React.JSX.Element {
               />
             </div>
             <span className="time-label total">{formatTime(total)}</span>
+            {exportTotal < total - 0.005 && (
+              <span
+                className="time-label export-total"
+                title="つなぎは2本のクリップを重ねるため、書き出したファイルはタイムラインよりつなぎの秒数ぶん短くなります"
+              >
+                (書き出し {formatTime(exportTotal)})
+              </span>
+            )}
           </div>
           <div className="preview-transport-row">
             <div className="transport-side transport-side-left">
@@ -1469,11 +1483,7 @@ export function PreviewPlayer(): React.JSX.Element {
               >
                 <StepBackIcon width={14} height={14} />
               </button>
-              <button
-                className="play-button"
-                onClick={() => setIsPlaying(!isPlaying)}
-                disabled={!activeSrc}
-              >
+              <button className="play-button" onClick={togglePlayback} disabled={!activeSrc}>
                 {isPlaying ? (
                   <PauseIcon width={16} height={16} />
                 ) : (

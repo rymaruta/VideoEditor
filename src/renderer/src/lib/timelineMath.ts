@@ -1,4 +1,5 @@
 import type { Clip, MediaAsset, Project } from '@shared/types'
+import { effectiveTransitionSeconds } from '@shared/transition'
 
 export interface TimedClip {
   clip: Clip
@@ -82,6 +83,23 @@ export function rangeSelectionIds(
 
 export function totalTimelineDuration(timedClips: TimedClip[]): number {
   return timedClips.length === 0 ? 0 : timedClips[timedClips.length - 1].end
+}
+
+/**
+ * **書き出したファイル**の尺(秒)。つなぎは2本のクリップを重ねるので、
+ * タイムラインの総尺(`totalTimelineDuration`)よりつなぎの実効秒数ぶん短くなる。
+ * 実効秒数は書き出しと同じ関数(`effectiveTransitionSeconds`)から出す。
+ *
+ * **位置の計算には使わないこと。** タイムライン上の配置・シーク・サムネ抽出は
+ * タイムライン秒の総尺側が正しい。これは「尺として見せる」ためだけの値。
+ */
+export function totalExportDuration(timedClips: TimedClip[]): number {
+  const durations = timedClips.map((tc) => tc.end - tc.start)
+  const overlaps = effectiveTransitionSeconds(
+    durations,
+    timedClips.map((tc) => tc.clip.transitionIn)
+  )
+  return durations.reduce((s, d) => s + d, 0) - overlaps.reduce((s, t) => s + t, 0)
 }
 
 /**

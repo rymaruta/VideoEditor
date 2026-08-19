@@ -84,7 +84,7 @@ export function useKeyboardShortcuts(): void {
       }
       if (matchesBinding(e, keymap.playPause)) {
         e.preventDefault()
-        store.setIsPlaying(!store.isPlaying)
+        store.togglePlayback()
         return
       }
       if (matchesBinding(e, keymap.split)) {
