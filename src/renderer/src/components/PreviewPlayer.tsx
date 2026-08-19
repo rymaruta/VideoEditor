@@ -47,6 +47,7 @@ import {
   PauseIcon,
   ClapperboardIcon,
   YoutubeIcon,
+  TargetIcon,
   MaximizeIcon,
   Volume2Icon,
   VolumeXIcon,
@@ -57,6 +58,7 @@ import {
 } from './icons'
 
 import { ShortsUiMockup } from './ShortsUiMockup'
+import { shortsSafeAreaInset } from '../lib/shortsSafeArea'
 import type {
   AudioTrackClip,
   MediaAsset,
@@ -868,6 +870,10 @@ export function PreviewPlayer(): React.JSX.Element {
   const activeTimedClipRef = useRef<TimedClip | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
   const [showShortsUi, setShowShortsUi] = useState(false)
+  // **既定で出す。** 既定のテロップ位置が Shorts の下部帯に入るので、
+  // 出していないと「隠れる場所に置いている」ことに作っている最中は気付けない
+  // (理由と実測は shortsSafeArea)。画面だけの線で、書き出しには影響しない。
+  const [showSafeArea, setShowSafeArea] = useState(true)
   const [isExpanded, setIsExpanded] = useState(false)
   const [volume, setVolume] = useState(readStoredVolume)
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === 'true')
@@ -1427,6 +1433,11 @@ export function PreviewPlayer(): React.JSX.Element {
               )
             })}
             {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
+            {showSafeArea && project.aspectRatio === '9:16' && (
+              <div className="shorts-safe-area" style={shortsSafeAreaInset()}>
+                <span className="shorts-safe-area-label">セーフエリア</span>
+              </div>
+            )}
             {project.audioTracks.flatMap((track) =>
               track.clips
                 .filter(
@@ -1490,13 +1501,22 @@ export function PreviewPlayer(): React.JSX.Element {
           <div className="preview-transport-row">
             <div className="transport-side transport-side-left">
               {project.aspectRatio === '9:16' && (
-                <button
-                  className={`icon-button ${showShortsUi ? 'active' : ''}`}
-                  title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
-                  onClick={() => setShowShortsUi((v) => !v)}
-                >
-                  <YoutubeIcon width={14} height={14} />
-                </button>
+                <>
+                  <button
+                    className={`icon-button ${showShortsUi ? 'active' : ''}`}
+                    title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
+                    onClick={() => setShowShortsUi((v) => !v)}
+                  >
+                    <YoutubeIcon width={14} height={14} />
+                  </button>
+                  <button
+                    className={`icon-button ${showSafeArea ? 'active' : ''}`}
+                    title="セーフエリアの目安線を表示(この線の外はYouTubeのUIに隠れやすい範囲です。線は画面だけのもので、書き出しには写りません)"
+                    onClick={() => setShowSafeArea((v) => !v)}
+                  >
+                    <TargetIcon width={14} height={14} />
+                  </button>
+                </>
               )}
             </div>
             <div className="transport-center">

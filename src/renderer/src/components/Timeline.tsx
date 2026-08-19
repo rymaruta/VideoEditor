@@ -10,6 +10,13 @@ import {
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
 import {
+  CAPTION_MIN_DRAW_PX,
+  assignCaptionRows,
+  captionLaneHeight,
+  captionRowCount,
+  captionRowRect
+} from '../lib/captionRows'
+import {
   ASSET_DRAG_TYPE,
   SFX_DRAG_TYPE,
   SOURCE_RANGE_DRAG_TYPE,
@@ -716,6 +723,15 @@ export function Timeline(): React.JSX.Element {
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
 
   const baseTimedClips = useMemo(() => buildTimedClips(project), [project])
+
+  // 時間が重なったテロップは段に分けて縦にずらす。重なりが無ければ段は1つのまま。
+  // 重なりは**描かれた幅**で見る(短い1枚も最低 CAPTION_MIN_DRAW_PX ぶん場所を取る)。
+  const captionRows = useMemo(
+    () => assignCaptionRows(project.textOverlays, CAPTION_MIN_DRAW_PX / pixelsPerSecond),
+    [project.textOverlays, pixelsPerSecond]
+  )
+  const captionRowTotal = captionRowCount(captionRows)
+  const captionLaneH = captionLaneHeight(captionRowTotal)
 
   const snapCandidates = useMemo(() => {
     const times: number[] = [0]
@@ -2049,7 +2065,7 @@ export function Timeline(): React.JSX.Element {
             </div>
           ))}
           {project.textOverlays.length > 0 && (
-            <div className="track-label">
+            <div className="track-label" style={{ height: captionLaneH }}>
               <span className="track-label-name">
                 <TypeIcon width={12} height={12} />
                 テロップ
@@ -2710,7 +2726,10 @@ export function Timeline(): React.JSX.Element {
           ))}
 
           {project.textOverlays.length > 0 && (
-            <div className="track-lane caption-lane" style={{ width: timelineWidth }}>
+            <div
+              className="track-lane caption-lane"
+              style={{ width: timelineWidth, height: captionLaneH }}
+            >
               {project.textOverlays.map((overlay) => {
                 const isDragging = overlayDrag?.overlayId === overlay.id
                 const displayStart = isDragging ? overlayDrag.liveStartTime : overlay.startTime
@@ -2723,7 +2742,8 @@ export function Timeline(): React.JSX.Element {
                     } ${isDragging ? 'dragging' : ''}`}
                     style={{
                       left: displayStart * pixelsPerSecond,
-                      width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond)
+                      width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond),
+                      ...captionRowRect(captionRows.get(overlay.id) ?? 0, captionRowTotal)
                     }}
                     title={overlay.text}
                     onMouseDown={(e) => {

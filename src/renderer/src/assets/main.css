@@ -1667,6 +1667,28 @@ h3 {
   font-size: 10.5px;
 }
 
+.shorts-safe-area {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+  border: 1px dashed rgba(255, 255, 255, 0.55);
+  border-radius: 2px;
+}
+
+.shorts-safe-area-label {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 2px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
 .shorts-ui-progress {
   position: absolute;
   left: 0;
@@ -2165,10 +2187,11 @@ h3 {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
 }
 
+/* 縦位置(`top` / `height`)は JSX が段から出す。時間が重なった2枚を縦にずらすため、
+   ここで `top` / `bottom` を固定しないこと——固定すると重なった2枚が寸分違わず
+   同じ位置に来て、下の1枚が掴めなくなる(実測: 3点とも上の1枚しか拾えなかった)。 */
 .timeline-caption-clip {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
   background: linear-gradient(160deg, #1f6f8a, #164a5c);
   border: 1px solid rgba(34, 211, 238, 0.5);
   border-radius: var(--radius-sm);
@@ -2200,11 +2223,17 @@ h3 {
   opacity: 0.75;
 }
 
+/* つまみは帯の 1/4 まで。短いテロップは幅がそのまま時刻なので広げられず、
+   6px 固定だと**つまみだけで帯が埋まって動かせなかった**
+   (実測: 0.3秒 = 幅14px の帯で左右のつまみが 12px を占め、本体の残りは 2px。
+   帯の中央を突くとつまみが返り、掴んで動かす経路が無かった)。
+   割合にすれば、どんなに短くても真ん中の半分は本体として残る。 */
 .timeline-caption-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 6px;
+  width: 25%;
+  max-width: 6px;
   z-index: 2;
   cursor: ew-resize;
 }
