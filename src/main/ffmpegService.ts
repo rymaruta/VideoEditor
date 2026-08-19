@@ -911,6 +911,18 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // `totalDuration` はこの直前に本編の実尺で確定しているので、それを上限にする。
           const pipVisibleDuration = Math.min(dur, totalDuration - pipStart)
           if (pipVisibleDuration <= 0) return
+          /**
+           * **PiP の終わり(書き出しの秒)。絵と音の両方がここで終わる。**
+           *
+           * 繋ぎに食われたぶんを詰めた終わり(`toExportEndTime`)を、本編の尺で
+           * 頭打ちにしたもの。繋ぎをまたがない PiP では `pipStart + dur` と
+           * 完全に同じ値になるので、今までの書き出しは1バイトも変わらない。
+           */
+          const pipEndExport = Math.min(
+            toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur),
+            totalDuration
+          )
+          const pipAudibleDur = Math.max(0, Math.min(pipVisibleDuration, pipEndExport - pipStart))
           command
             .input(asset.filePath)
             .inputOptions([`-ss ${overlayClip.inPoint}`, `-t ${pipVisibleDuration}`])
@@ -933,14 +945,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               track.position === 'top-left' || track.position === 'top-right'
                 ? `${margin}`
                 : `H-h-${margin}`
-            // **終わりも同じ換算を通す。** ここだけ「始まり + 素材の尺」のままだと、
-            // 繋ぎをまたぐ PiP が繋ぎのぶん長く残り、置いた覚えのない絵の上に居座る
-            // (理由と実測は `toExportEndTime`)。
-            // 見せる区間の終わりも本編の尺で頭打ちにする(入力を切ったのと同じ上限)。
-            const endTime = Math.min(
-              toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur),
-              totalDuration
-            )
+            // 見せる区間の終わりは `pipEndExport`(繋ぎに食われたぶんを詰め、
+            // 本編の尺で頭打ちにした終わり)。音の枝も同じ値で切る。
+            const endTime = pipEndExport
             const outV = `vpip${pipCounter}`
             filterParts.push(
               `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${pipStart}\\,${endTime})'[${outV}]`
@@ -950,8 +957,28 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           if (asset.hasAudio) {
             const delayMs = Math.max(0, Math.round(pipStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
+            /**
+             * **音も絵と同じ秒で終わらせる。**
+             *
+             * 絵は `enable` の窓を `pipEndExport` で閉じているのに、音の枝には
+             * 切る処理が無かった。繋ぎをまたぐ PiP は**絵が消えたあとも繋ぎの
+             * 秒数ぶん音だけが鳴り続ける**。同じ食い違いは BGM・効果音の側で
+             * 一度直してあり(`toExportEndTime` の注記)、**PiP の音だけが
+             * 取り残されていた**。
+             * (実測: 本編5秒×2本を1.0秒の繋ぎでつなぎ、タイムライン [2.0, 6.0] に
+             *  PiP を置くと、絵は 5.033秒で消えるのに音は **6.0秒**まで鳴り、
+             *  **0.967秒**ずれていた。繋ぎ無しでは絵 6.033秒・音 6.0秒で一致)
+             *
+             * 入力は `-t pipVisibleDuration` で切ってあるが、AAC はフレーム境界
+             * (約23ms)でしか切れないので、秒ちょうどに揃えるのはここで行う。
+             */
+            const PIP_TRIM_EPSILON = 1e-6
+            const pipTrim =
+              pipAudibleDur < pipVisibleDuration - PIP_TRIM_EPSILON
+                ? `atrim=0:${pipAudibleDur},`
+                : ''
             filterParts.push(
-              `[${myIndex}:a]asetpts=PTS-STARTPTS,${adelayFilter(delayMs)},` +
+              `[${myIndex}:a]asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
                 `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })
