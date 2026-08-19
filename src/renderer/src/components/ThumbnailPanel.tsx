@@ -120,6 +120,8 @@ export function ThumbnailPanel(): React.JSX.Element {
         cropCenter?: { x: number; y: number }
         blurBackground?: boolean
       }[] = []
+      let failed = 0
+      let firstFailure: string | null = null
       for (const assetId of assetIds) {
         const asset = project.assets.find((a) => a.id === assetId)
         if (!asset || !asset.hasVideo) continue
@@ -142,14 +144,22 @@ export function ThumbnailPanel(): React.JSX.Element {
               })
             }
           }
-        } catch {
-          // Skip assets whose highlight analysis fails; continue with the rest.
+        } catch (e) {
+          // 1本の失敗で全体は止めないが、**理由は捨てない**(理由は autoEdit の
+          // collectHighlights)。捨てると壊れたファイルでも「見つかりませんでした」
+          // ＝ハイライトの無い動画と同じ表示になる。
+          failed++
+          if (firstFailure === null) firstFailure = formatIpcError(e)
         }
       }
       scored.sort((a, b) => b.score - a.score)
       const top = scored.slice(0, CANDIDATE_COUNT)
       if (top.length === 0) {
-        setError('ハイライトが見つかりませんでした。「均等間隔で生成」をお試しください。')
+        setError(
+          failed > 0 && firstFailure
+            ? `ハイライトが見つかりませんでした(${failed}件の解析に失敗しました: ${firstFailure})。「均等間隔で生成」をお試しください。`
+            : 'ハイライトが見つかりませんでした。「均等間隔で生成」をお試しください。'
+        )
         return
       }
       const frames: string[] = []

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
+import { noHighlightsMessage } from '../lib/autoEdit'
 import { TargetIcon, PlusIcon } from './icons'
 
 interface FlatCandidate {
@@ -53,6 +54,11 @@ export function RoughCutModal({ onClose }: { onClose: () => void }): React.JSX.E
       setError(null)
       setProgress(0)
       const all: FlatCandidate[] = []
+      // 1本の失敗で全体を止めないが、**理由は捨てない**。捨てると壊れたファイルを
+      // 渡しても「ハイライトを検出できませんでした」＝静かな動画と同じ表示になる
+      // (理由と直し方は autoEdit の collectHighlights)。
+      let failed = 0
+      let firstFailure: string | null = null
       for (let i = 0; i < videoAssets.length; i++) {
         const asset = videoAssets[i]
         try {
@@ -68,13 +74,17 @@ export function RoughCutModal({ onClose }: { onClose: () => void }): React.JSX.E
               hasAudioPeak: c.hasAudioPeak
             })
           }
-        } catch {
-          // Skip assets whose analysis fails; continue with the rest.
+        } catch (e) {
+          failed++
+          if (firstFailure === null) firstFailure = formatIpcError(e)
         }
         if (cancelled) return
         setProgress(i + 1)
       }
       if (cancelled) return
+      if (all.length === 0 && failed > 0) {
+        setError(noHighlightsMessage(videoAssets.length, failed, firstFailure))
+      }
       setCandidates(all)
       setSelected(autoSelect(all, targetDuration))
       setLoading(false)

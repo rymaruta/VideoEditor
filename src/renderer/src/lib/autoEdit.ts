@@ -10,6 +10,7 @@ import type {
 import { useEditPreferenceStore } from '../store/editPreferenceStore'
 import { STYLE_DESCRIPTIONS, STYLE_LABELS } from './autoEditStyles'
 import { beatGridFromAnalysis } from './beatGrid'
+import { formatIpcError } from './ipcError'
 
 interface FlatCandidate {
   assetId: string
@@ -61,10 +62,22 @@ function seededShuffle<T>(arr: T[], rand: () => number): T[] {
   return a
 }
 
-async function collectHighlights(
-  assets: MediaAsset[]
-): Promise<{ asset: MediaAsset; candidates: FlatCandidate[] }[]> {
+/**
+ * 素材ごとのハイライト検出。**1本の失敗で全体を止めないが、理由は捨てない。**
+ *
+ * 捨てていたころは、壊れたファイル・音声ストリームの無いファイルを渡しても
+ * 「候補0件」になり、**静かな動画と同じ「ハイライトを検出できませんでした」**しか
+ * 出なかった(解析側は `describeFfmpegExit` で日本語の理由を投げているのに、
+ * ここで握りつぶしていた)。全部失敗したときに理由を添えられるよう持ち帰る。
+ */
+async function collectHighlights(assets: MediaAsset[]): Promise<{
+  results: { asset: MediaAsset; candidates: FlatCandidate[] }[]
+  failed: number
+  firstFailure: string | null
+}> {
   const results: { asset: MediaAsset; candidates: FlatCandidate[] }[] = []
+  let failed = 0
+  let firstFailure: string | null = null
   for (let i = 0; i < assets.length; i++) {
     const asset = assets[i]
     try {
@@ -81,11 +94,30 @@ async function collectHighlights(
           hasAudioPeak: c.hasAudioPeak
         }))
       })
-    } catch {
+    } catch (e) {
+      failed++
+      if (firstFailure === null) firstFailure = formatIpcError(e)
       results.push({ asset, candidates: [] })
     }
   }
-  return results
+  return { results, failed, firstFailure }
+}
+
+/**
+ * 候補が1件も無いときの文言。**失敗があったならその理由を必ず添える。**
+ * 「静かな動画だから0件」と「解析が失敗して0件」は利用者から見て同じに見えるので、
+ * 分けて伝えないと、直せる原因(壊れたファイル)を素材のせいだと思って探し回ることになる。
+ */
+export function noHighlightsMessage(
+  assetCount: number,
+  failed: number,
+  firstFailure: string | null
+): string {
+  if (failed <= 0 || !firstFailure) return 'ハイライトを検出できませんでした'
+  if (failed >= assetCount) {
+    return `ハイライトを検出できませんでした(${assetCount}件すべての解析に失敗しました: ${firstFailure})`
+  }
+  return `ハイライトを検出できませんでした(${assetCount}件中${failed}件の解析に失敗しました: ${firstFailure})`
 }
 
 function trimToMax(c: FlatCandidate, maxSeconds: number): FlatCandidate {
@@ -671,9 +703,14 @@ export async function generateAutoEditPatterns(
   const videoAssets = assets.filter((a) => a.hasVideo)
   if (videoAssets.length === 0) throw new Error('動画素材がありません')
 
-  const withCandidates = await collectHighlights(videoAssets)
+  const collected = await collectHighlights(videoAssets)
+  const withCandidates = collected.results
   const flat = withCandidates.flatMap((w) => w.candidates)
-  if (flat.length === 0) throw new Error('ハイライトを検出できませんでした')
+  if (flat.length === 0) {
+    throw new Error(
+      noHighlightsMessage(videoAssets.length, collected.failed, collected.firstFailure)
+    )
+  }
 
   normalizeScoresInPlace(flat)
 
