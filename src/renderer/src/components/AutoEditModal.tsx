@@ -292,9 +292,23 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                         字幕を{finishResult.captionCount}件追加しました
                         {finishResult.metadata
                           ? '。メタデータも生成しました。「投稿準備」タブでご確認ください。'
-                          : geminiApiKey
-                            ? '。メタデータの生成に失敗しました。'
-                            : '。メタデータも生成するにはGemini APIキーを設定してください。'}
+                          : finishResult.metadataError
+                            ? '。'
+                            : geminiApiKey
+                              ? '。メタデータの生成に失敗しました。'
+                              : '。メタデータも生成するにはGemini APIキーを設定してください。'}
+                      </p>
+                    )}
+                    {appliedId === p.id && finishResult && finishResult.transcribeFailed > 0 && (
+                      <p className="error-text">
+                        文字起こしは{finishResult.transcribeAttempted}クリップ中
+                        {finishResult.transcribeFailed}クリップで失敗しました:{' '}
+                        {finishResult.transcribeFailureReason}
+                      </p>
+                    )}
+                    {appliedId === p.id && finishResult?.metadataError && (
+                      <p className="error-text">
+                        メタデータの生成に失敗しました: {finishResult.metadataError}
                       </p>
                     )}
                     {appliedId === p.id && finishError && (

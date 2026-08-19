@@ -3,11 +3,20 @@ import { buildTimedClips, totalTimelineDuration } from './timelineMath'
 import { captureAiFrames } from './aiFrames'
 import { defaultTextStyle } from '@shared/textStyle'
 import { generateVideoMetadata, type VideoMetadata } from './metadataGeneration'
+import { formatIpcError } from './ipcError'
 import type { TextOverlay } from '@shared/types'
 
 export interface AutoFinishResult {
   captionCount: number
+  /** 文字起こしを試したクリップ数(音声のある本編クリップだけ) */
+  transcribeAttempted: number
+  /** 文字起こしに失敗したクリップ数。0件追加が「喋っていない」のか「全部失敗」なのかを分ける */
+  transcribeFailed: number
+  /** 最初の失敗の理由(日本語化済み)。failed が 0 のときは null */
+  transcribeFailureReason: string | null
   metadata: VideoMetadata | null
+  /** メタデータ生成の失敗理由。鍵が無くて試していないとき・成功したときは null */
+  metadataError: string | null
 }
 
 export async function autoFinishTimeline(
@@ -18,8 +27,14 @@ export async function autoFinishTimeline(
   const timedClips = buildTimedClips(store.project)
 
   const overlays: Omit<TextOverlay, 'id'>[] = []
+  // 失敗は握りつぶさずに数える。全クリップが失敗しても、以前は「字幕を0件追加しました」
+  // という成功と同じ表示になり、喋っていない動画と区別が付かなかった
+  let attempted = 0
+  let failed = 0
+  let firstFailure: string | null = null
   for (const tc of timedClips) {
     if (!tc.asset.hasAudio) continue
+    attempted++
     try {
       const segments = await window.api.transcribe(
         tc.asset.filePath,
@@ -41,14 +56,17 @@ export async function autoFinishTimeline(
           source: 'auto'
         })
       }
-    } catch {
-      // Skip clips whose transcription fails; continue with the rest.
+    } catch (e) {
+      // 1クリップの失敗で全体は止めない(残りのクリップの字幕は付けられる)
+      failed++
+      if (firstFailure === null) firstFailure = formatIpcError(e)
     }
   }
   store.addTextOverlays(overlays)
   const captionCount = overlays.length
 
   let metadata: VideoMetadata | null = null
+  let metadataError: string | null = null
   if (geminiApiKey) {
     try {
       const latestProject = useProjectStore.getState().project
@@ -60,10 +78,18 @@ export async function autoFinishTimeline(
       const total = totalTimelineDuration(timedClips)
       const frames = await captureAiFrames(timedClips, total, latestProject.aspectRatio)
       metadata = await generateVideoMetadata(geminiApiKey, transcript, '', language, frames)
-    } catch {
-      // Metadata generation is best-effort; the captions added above are still kept.
+    } catch (e) {
+      // メタデータは無くても字幕は残せるので中断しないが、理由は画面へ持ち帰る
+      metadataError = formatIpcError(e)
     }
   }
 
-  return { captionCount, metadata }
+  return {
+    captionCount,
+    transcribeAttempted: attempted,
+    transcribeFailed: failed,
+    transcribeFailureReason: firstFailure,
+    metadata,
+    metadataError
+  }
 }
