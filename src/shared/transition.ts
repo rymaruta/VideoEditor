@@ -64,6 +64,42 @@ export function effectiveTransitionSeconds(
 }
 
 /**
+ * 並びの中の1本について、**指定した秒数と実際に掛かる秒数**を返す。
+ *
+ * `xfade`/`acrossfade` は隣のどちらよりも短くないと書き出しごと失敗するので、
+ * 入らないぶんは**黙って詰めて**いる。ところが入力欄は指定した値のまま
+ * (上限も 2 の固定値)なので、**指定の半分以下しか掛かっていないことに気付けない**
+ * (実測: 1.0秒に詰めたクリップの次に 2.0秒のクロスフェードを指定すると、
+ *  実効は **0.95秒**で、書き出しは 11秒のタイムラインに対し **10.05秒**。
+ *  それでも欄は 2.0 のままで警告も出ない)。
+ *
+ * 画面に「実際は何秒か」を出すための共通の入り口。**書き出しと同じ関数**
+ * (`effectiveTransitionSeconds`)から出すので、表示と出来上がりがズレない。
+ * 見つからないクリップ・繋ぎ無しは `null`。
+ */
+export function transitionSecondsForClip(
+  clips: readonly {
+    id: string
+    inPoint: number
+    outPoint: number
+    speed?: number
+    transitionIn?: TransitionSpec | null
+  }[],
+  clipId: string
+): { specified: number; effective: number } | null {
+  const index = clips.findIndex((c) => c.id === clipId)
+  if (index < 0) return null
+  const spec = clips[index].transitionIn
+  if (!spec || spec.type === 'none') return null
+  const durations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
+  const effective = effectiveTransitionSeconds(
+    durations,
+    clips.map((c) => c.transitionIn)
+  )[index]
+  return { specified: spec.duration, effective }
+}
+
+/**
  * 繋ぎの最中の「これから出てくる側」の不透明度(0〜1)。
  *
  * `xfade=transition=fade` は時間に対して線形に混ぜるので、そのまま線形で返す。

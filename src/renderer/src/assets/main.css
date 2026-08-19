@@ -1875,6 +1875,13 @@ h3 {
   box-shadow: none;
 }
 
+/* 指定した繋ぎの長さが隣に入らず詰められているときだけ出す実効値。
+   入力欄の隣に小さく添えるので、桁が増えても行が折り返さない幅に留める。 */
+.transition-trimmed {
+  white-space: nowrap;
+  color: var(--warn, #e0a33e);
+}
+
 .transition-duration {
   width: 52px;
 }

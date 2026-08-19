@@ -35,6 +35,7 @@ import {
   scaleBpm
 } from '../lib/beatGrid'
 import { normalizeFades } from '@shared/audioFade'
+import { transitionSecondsForClip } from '@shared/transition'
 import {
   SHORTCUT_ACTIONS,
   getActionLabel,
@@ -98,8 +99,44 @@ const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'bottom-right': '右下'
 }
 
+/**
+ * 繋ぎの長さの入力欄に出す説明。**指定した秒数がそのまま掛かるとは限らない**
+ * ——隣に入らないぶんは書き出しが黙って詰めるので、実効値を添える
+ * (理由と実測は `transitionSecondsForClip`)。
+ */
+function transitionDurationTitle(clips: Clip[], clipId: string): string {
+  const seconds = transitionSecondsForClip(clips, clipId)
+  if (!seconds) return 'トランジション秒数'
+  if (seconds.effective >= seconds.specified - 0.005) return 'トランジション秒数'
+  return `トランジション秒数(指定 ${seconds.specified}秒。隣のクリップに入らないため実際は ${seconds.effective.toFixed(2)}秒)`
+}
+
+/** 詰められているときだけ実効秒数を返す。詰められていなければ null(何も出さない) */
+function trimmedTransitionOf(clips: Clip[], clipId: string): number | null {
+  const seconds = transitionSecondsForClip(clips, clipId)
+  if (!seconds || seconds.effective >= seconds.specified - 0.005) return null
+  return seconds.effective
+}
+
 const BASE_PIXELS_PER_SECOND = 40
+/**
+ * 手で縮められる下限。ここより細くするとクリップの掴み代とスナップのしきい値
+ * (`SNAP_PIXELS`)が実質きつくなるので、通常の操作ではここで止める。
+ */
 const MIN_ZOOM = 0.25
+/**
+ * 「タイムライン全体を表示」のためだけに許す、さらに下の下限。
+ *
+ * `MIN_ZOOM` で頭打ちにしていたため、**ボタンの名前どおりの結果にならなかった**
+ * (実測・レーンの表示幅 542px: 総尺60秒で中身 608px = **66px はみ出し**、
+ *  200秒で 2008px = **1466px**、600秒で 6008px = **5466px** が画面の外に残る。
+ *  しかも下限で止まったことは画面のどこにも出ない)。
+ * 全体を見るのが目的の操作なので、**入るところまで縮められる**ようにする。
+ * 0.01 = 0.4px/秒 で、1時間の素材(3600秒)でも 1440px に収まる。
+ */
+const MIN_FIT_ZOOM = 0.01
+/** 全体表示のときレーンの右端に残す余白(px)。下限の計算と同じ数字を使う */
+const LANE_FIT_MARGIN_PX = 16
 const MAX_ZOOM = 4
 const MIN_CLIP_SOURCE_DURATION = 0.2
 const SNAP_PIXELS = 8
@@ -1430,18 +1467,33 @@ export function Timeline(): React.JSX.Element {
     }
   }, [])
 
+  /**
+   * いま縮められる下限。**「全体が入る倍率」までは必ず下げられる**ようにする
+   * (`MIN_ZOOM` で頭打ちにすると、全体表示のボタンが名前どおりに働かない)。
+   * 全体が `MIN_ZOOM` で収まる短いタイムラインでは、従来どおり `MIN_ZOOM` が下限。
+   */
+  function currentMinZoom(): number {
+    const container = trackLanesColRef.current
+    const availableWidth = (container?.clientWidth ?? 0) - LANE_FIT_MARGIN_PX
+    if (total <= 0 || availableWidth <= 0) return MIN_ZOOM
+    const fitZoom = availableWidth / (total * BASE_PIXELS_PER_SECOND)
+    if (!Number.isFinite(fitZoom) || fitZoom <= 0) return MIN_ZOOM
+    return Math.max(MIN_FIT_ZOOM, Math.min(MIN_ZOOM, fitZoom))
+  }
+
   function handleWheelZoom(e: React.WheelEvent<HTMLDivElement>): void {
     if (!e.ctrlKey && !e.metaKey) return
     e.preventDefault()
-    setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (e.deltaY < 0 ? 1.1 : 0.9))))
+    const floor = currentMinZoom()
+    setZoom((z) => Math.min(MAX_ZOOM, Math.max(floor, z * (e.deltaY < 0 ? 1.1 : 0.9))))
   }
 
   function handleZoomToFit(): void {
     const container = trackLanesColRef.current
     if (!container || total <= 0) return
-    const availableWidth = container.clientWidth - 16
+    const availableWidth = container.clientWidth - LANE_FIT_MARGIN_PX
     const fitZoom = availableWidth / (total * BASE_PIXELS_PER_SECOND)
-    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, fitZoom)))
+    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_FIT_ZOOM, fitZoom)))
   }
 
   async function handleAnalyzeBpm(track: AudioTrack): Promise<void> {
@@ -1516,7 +1568,7 @@ export function Timeline(): React.JSX.Element {
           <button
             className="icon-button"
             title="縮小"
-            onClick={() => setZoom((z) => Math.max(MIN_ZOOM, z / 1.4))}
+            onClick={() => setZoom((z) => Math.max(currentMinZoom(), z / 1.4))}
           >
             <ZoomOutIcon width={13} height={13} />
           </button>
@@ -1781,7 +1833,7 @@ export function Timeline(): React.JSX.Element {
                         duration: Number(e.target.value)
                       })
                     }
-                    title="トランジション秒数"
+                    title={transitionDurationTitle(project.clips, selectedClip.id)}
                   />
                 )}
               </>
@@ -2229,21 +2281,29 @@ export function Timeline(): React.JSX.Element {
                             <option value="wipe">ワイプ</option>
                           </select>
                           {tc.clip.transitionIn && (
-                            <input
-                              className="transition-duration"
-                              type="number"
-                              min={0.1}
-                              max={2}
-                              step={0.1}
-                              value={tc.clip.transitionIn.duration}
-                              onChange={(e) =>
-                                updateClipTransition(tc.clip.id, {
-                                  type: tc.clip.transitionIn?.type ?? 'crossfade',
-                                  duration: Number(e.target.value)
-                                })
-                              }
-                              title="トランジション秒数"
-                            />
+                            <>
+                              <input
+                                className="transition-duration"
+                                type="number"
+                                min={0.1}
+                                max={2}
+                                step={0.1}
+                                value={tc.clip.transitionIn.duration}
+                                onChange={(e) =>
+                                  updateClipTransition(tc.clip.id, {
+                                    type: tc.clip.transitionIn?.type ?? 'crossfade',
+                                    duration: Number(e.target.value)
+                                  })
+                                }
+                                title={transitionDurationTitle(project.clips, tc.clip.id)}
+                              />
+                              {trimmedTransitionOf(project.clips, tc.clip.id) && (
+                                <span className="hint-text transition-trimmed">
+                                  実際 {trimmedTransitionOf(project.clips, tc.clip.id)!.toFixed(2)}
+                                  秒
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
                       )}

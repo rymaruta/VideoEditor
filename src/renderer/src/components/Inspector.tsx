@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
 import { buildTimedClips } from '../lib/timelineMath'
 import { CLIP_COLORS } from '../lib/clipColors'
+import { transitionSecondsForClip } from '@shared/transition'
 import type { ClipColorLabel, TransitionType } from '@shared/types'
 import { GaugeIcon, LayersIcon, MusicIcon, ScissorsIcon, TagIcon, TargetIcon } from './icons'
 
@@ -88,6 +89,12 @@ export function Inspector(): React.JSX.Element {
   const timedClips = buildTimedClips(project)
   const index = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const timed = index >= 0 ? timedClips[index] : null
+  // 指定した繋ぎの長さと、実際に掛かる長さ。詰められているときだけ画面に出す
+  const transitionSeconds = clip ? transitionSecondsForClip(project.clips, clip.id) : null
+  const trimmedTransition =
+    transitionSeconds && transitionSeconds.effective < transitionSeconds.specified - 0.005
+      ? transitionSeconds
+      : null
 
   // 選択中の色がばらばらのときは undefined にして、どの色も選択中に見せない
   const multiSelectedClips = project.clips.filter((c) => multiSelectedClipIds.includes(c.id))
@@ -420,6 +427,15 @@ export function Inspector(): React.JSX.Element {
                 }
               />
             </div>
+          )}
+          {/* 隣に入らないぶんは書き出しが黙って詰めている。指定した数字だけを見せると、
+              半分以下しか掛かっていないことに気付けない(理由と実測は transitionSecondsForClip)。 */}
+          {trimmedTransition && (
+            <p className="hint-text">
+              隣のクリップに入らないため、実際は{' '}
+              <strong>{trimmedTransition.effective.toFixed(2)}秒</strong>
+              だけ掛かります(指定 {trimmedTransition.specified}秒)。
+            </p>
           )}
         </div>
       )}
