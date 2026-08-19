@@ -234,6 +234,16 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
 
   function handleApply(): void {
     if (!plan || !asset || cuts.length === 0) return
+    // 既にクリップが並んでいるときは黙って継ぎ足さない。ショートは単体で完成品なので、
+    // 無関係なクリップの後ろへ足されるのはほぼ意図されない(AIおまかせ編集の確認と同じ扱い)
+    if (
+      clips.length > 0 &&
+      !confirm(
+        'タイムラインには既にクリップが並んでいます。ショートはその後ろに追加されます。続行しますか?'
+      )
+    ) {
+      return
+    }
     const picks = cuts.map((c, i) => ({
       assetId: asset.id,
       start: c.start,
