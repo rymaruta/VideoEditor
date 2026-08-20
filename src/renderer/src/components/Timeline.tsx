@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
-import { useProjectStore } from '../store/projectStore'
+import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import {
   audioClipDuration,
@@ -15,6 +15,7 @@ import { snapClamped, snapTime } from '../lib/snapping'
 // 逆に開始が 0.1秒ぶん飛んで尺が伸びた(実測: 4.000〜4.100 の左端を右へ動かすと
 // 3.900〜4.100 になった)。規則は `textOverlayPlacement` の1箇所だけに置く。
 import { MIN_OVERLAY_DURATION } from '../lib/textOverlayPlacement'
+// クリップの下限も**書き込み先と同じ数字**を使う(理由は projectStore の定義)。
 import {
   CAPTION_MIN_DRAW_PX,
   assignCaptionRows,
@@ -151,7 +152,6 @@ const MIN_FIT_ZOOM = 0.01
 /** 全体表示のときレーンの右端に残す余白(px)。下限の計算と同じ数字を使う */
 const LANE_FIT_MARGIN_PX = 16
 const MAX_ZOOM = 4
-const MIN_CLIP_SOURCE_DURATION = 0.2
 const SNAP_PIXELS = 8
 
 /**

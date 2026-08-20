@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useProjectStore } from '../store/projectStore'
+import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
 import { buildTimedClips } from '../lib/timelineMath'
 import { CLIP_COLORS } from '../lib/clipColors'
@@ -8,7 +8,6 @@ import type { ClipColorLabel, TransitionType } from '@shared/types'
 import { GaugeIcon, LayersIcon, MusicIcon, ScissorsIcon, TagIcon, TargetIcon } from './icons'
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
-const MIN_CLIP_SOURCE_DURATION = 0.1
 
 /**
  * 色ラベルの選択欄。単一選択でも複数選択でも同じものを使う。

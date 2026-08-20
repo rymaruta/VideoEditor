@@ -2416,11 +2416,19 @@ h3 {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+/* つまみは帯の 1/4 まで。幅がそのまま時刻なので帯は広げられず(すぐ上の注記のとおり)、
+   8px 固定だと**短いクリップがつまみだけで埋まって動かせなかった**
+   (実測: 素材0.1秒のクリップは幅18px——padding 8px×2 と枠線が下限——で、
+   左右のつまみが 16px を占め、本体の残りは 2px。帯の中央を突くとつまみが返り、
+   掴んで動かす経路が無かった。4倍速で画面0.1秒にしたときも同じ 18px / 残り2px)。
+   割合にすれば、どんなに短くても真ん中の半分は本体として残る。
+   テロップのつまみ(`.timeline-caption-handle`)と同じ直し方。 */
 .timeline-clip-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: 25%;
+  max-width: 8px;
   z-index: 2;
   cursor: ew-resize;
 }

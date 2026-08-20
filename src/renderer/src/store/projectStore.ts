@@ -36,9 +36,17 @@ import type {
 } from '@shared/types'
 
 const MAX_HISTORY = 50
-// Shortest a clip may become in source seconds; below this it would vanish visually
-// while still occupying an entry in the timeline.
-const MIN_CLIP_SOURCE_DURATION = 0.1
+/**
+ * クリップを縮められる下限(**素材の秒**)。これ未満だと画面から消えるのに、
+ * タイムラインの1本としては残ってしまう。
+ *
+ * **この数字はここ(書き込み先)にしか置かない。** `applyTrim` が最後に挟み直すので、
+ * どの入口から来てもここで守られる。入口側(インスペクタの数値欄・タイムラインのつまみ)は
+ * **必ずこれを import する**こと——同じ名前のローカル定数を書き直していたころ、
+ * 数値欄は 0.1秒まで縮められるのにつまみは 0.2秒で止まり、さらに 0.1秒のクリップの
+ * 左端を掴むと**掴んだ向きと逆へ 0.1秒飛んで伸びていた**(実測: in 2.000 → 1.900)。
+ */
+export const MIN_CLIP_SOURCE_DURATION = 0.1
 
 function assetDurationOf(project: Project, assetId: string): number | undefined {
   return project.assets.find((a) => a.id === assetId)?.duration
