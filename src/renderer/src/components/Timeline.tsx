@@ -9,6 +9,12 @@ import {
   totalTimelineDuration
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
+// テロップの最短の長さは**追加のときと同じ数字**を使う。ここに別の数字を書いていたころ、
+// 数値欄では 0.1秒まで縮められるのにドラッグは 0.2秒で止まり、**同じ「縮める」操作が
+// 入口によって別の結果**になっていた。しかも 0.1秒のテロップの端を掴むと、掴んだ向きと
+// 逆に開始が 0.1秒ぶん飛んで尺が伸びた(実測: 4.000〜4.100 の左端を右へ動かすと
+// 3.900〜4.100 になった)。規則は `textOverlayPlacement` の1箇所だけに置く。
+import { MIN_OVERLAY_DURATION } from '../lib/textOverlayPlacement'
 import {
   CAPTION_MIN_DRAW_PX,
   assignCaptionRows,
@@ -248,8 +254,6 @@ interface OverlayDragState {
   liveEndTime: number
   snapGuideTime: number | null
 }
-
-const MIN_OVERLAY_DURATION = 0.2
 
 // 入力された合計がクリップ尺を超えているかを、書き出しと同じ規則で判定する。
 // 画面に出す注意書きと実際の丸め方をズラさないため、判定にも normalizeFades を使う。
