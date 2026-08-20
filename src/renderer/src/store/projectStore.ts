@@ -904,6 +904,64 @@ function applyInsertedClips(project: Project, built: InsertedClips): Project {
   return next
 }
 
+/**
+ * **企画を切り替えるときに捨てる state の一覧。**
+ *
+ * 「開く」「新規作成」「自動保存から復元」の3経路は、どれも**前の企画の残りかす**を
+ * 捨てなければならない。ところが3箇所に手で並べていたので、**経路ごとに一覧が
+ * 食い違っていた**——`saveError` は開く/復元だけが捨てていて新規作成は残し、
+ * ソースビューア(`sourceAssetId` / `sourceIn` / `sourceOut`)は**3経路とも捨てていなかった**。
+ *
+ * (実測: 企画Aで素材をソースビューアに出して選択範囲 1.5〜4.25 を打つ →
+ *  企画Bを開く(ビューアは消えるが `sourceAssetId` は `asset-A` のまま) →
+ *  **企画Aを開き直すと、開いた覚えのないビューアが勝手に開き、打った覚えのない
+ *  選択範囲 1.5〜4.25 が入っている**。
+ *  保存エラーのほうは、出ている状態で「新規作成」を押すと**新しい空の企画の画面に
+ *  前の企画のエラー文がそのまま残っていた**——開く経路では消えるので、
+ *  同じ操作なのに入口によって違う)
+ *
+ * **新しい state を `project` の外に足したら、捨てるべきかどうかをここで決めること。**
+ * ここに書けば3経路すべてに同時に効く。
+ *
+ * `project` / `currentFilePath` / `isDirty` は経路ごとに値が違うので**ここには入れない**
+ * (呼び出し側が必ず自分で決める)。`draggingAssetId` はドラッグの終わりに必ず下ろされる
+ * 一時的な印なので、ここでは触らない。
+ */
+function projectSwitchReset(): Pick<
+  ProjectState,
+  | 'past'
+  | 'future'
+  | 'selectedClipId'
+  | 'multiSelectedClipIds'
+  | 'clipboardClips'
+  | 'playheadTime'
+  | 'isPlaying'
+  | 'seekRequest'
+  | 'missingAssetPaths'
+  | 'missingAssetIds'
+  | 'saveError'
+  | 'sourceAssetId'
+  | 'sourceIn'
+  | 'sourceOut'
+> {
+  return {
+    past: [],
+    future: [],
+    selectedClipId: null,
+    multiSelectedClipIds: [],
+    clipboardClips: [],
+    playheadTime: 0,
+    isPlaying: false,
+    seekRequest: null,
+    missingAssetPaths: [],
+    missingAssetIds: [],
+    saveError: null,
+    sourceAssetId: null,
+    sourceIn: null,
+    sourceOut: null
+  }
+}
+
 function pushHistory(
   state: ProjectState,
   coalesceKey?: string
@@ -1097,19 +1155,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   newProject: () => {
     resetHistoryCoalescing()
     set({
+      ...projectSwitchReset(),
       project: createBlankProject(),
-      past: [],
-      future: [],
       currentFilePath: null,
-      isDirty: false,
-      selectedClipId: null,
-      multiSelectedClipIds: [],
-      clipboardClips: [],
-      playheadTime: 0,
-      isPlaying: false,
-      seekRequest: null,
-      missingAssetPaths: [],
-      missingAssetIds: []
+      isDirty: false
     })
   },
 
@@ -1124,20 +1173,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
+      ...projectSwitchReset(),
       project: reattachClipsWithoutLinkedAudio(cleaned.project, cleaned.unlinkedClipIds),
-      past: [],
-      future: [],
       currentFilePath: filePath,
       isDirty: cleaned.droppedCount > 0,
-      saveError: cleaned.droppedCount > 0 ? orphanCleanupMessage(cleaned.droppedCount) : null,
-      selectedClipId: null,
-      multiSelectedClipIds: [],
-      clipboardClips: [],
-      playheadTime: 0,
-      isPlaying: false,
-      seekRequest: null,
-      missingAssetPaths: [],
-      missingAssetIds: []
+      // 落としたぶんの案内は、上の一覧が入れた `null` のあとに上書きする
+      saveError: cleaned.droppedCount > 0 ? orphanCleanupMessage(cleaned.droppedCount) : null
     })
   },
 
@@ -1149,22 +1190,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
+      ...projectSwitchReset(),
       project: reattachClipsWithoutLinkedAudio(cleaned.project, cleaned.unlinkedClipIds),
-      past: [],
-      future: [],
       currentFilePath: null,
-      saveError: cleaned.droppedCount > 0 ? orphanCleanupMessage(cleaned.droppedCount) : null,
       // The recovered draft doesn't exist on disk under a real save yet, so keep
       // it flagged dirty until the user explicitly saves it.
       isDirty: true,
-      selectedClipId: null,
-      multiSelectedClipIds: [],
-      clipboardClips: [],
-      playheadTime: 0,
-      missingAssetPaths: [],
-      missingAssetIds: [],
-      isPlaying: false,
-      seekRequest: null
+      // 落としたぶんの案内は、上の一覧が入れた `null` のあとに上書きする
+      saveError: cleaned.droppedCount > 0 ? orphanCleanupMessage(cleaned.droppedCount) : null
     })
   },
 
