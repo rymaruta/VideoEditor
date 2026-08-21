@@ -11,7 +11,7 @@ import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
 import { dropOrphanClips, orphanCleanupMessage } from '../lib/orphanClips'
 import { clampBpm } from '../lib/beatGrid'
 import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
-import { defaultTextStyle } from '@shared/textStyle'
+import { normalizeTextStyle } from '@shared/textStyle'
 import type {
   AspectRatio,
   AudioTrack,
@@ -21,13 +21,10 @@ import type {
   Clip,
   ClipColorLabel,
   EditTemplate,
-  FontFamily,
   MediaAsset,
   PipPosition,
   Project,
-  TextAnimation,
   TextOverlay,
-  TextPosition,
   TextStyle,
   TranscriptWord,
   Transition,
@@ -137,23 +134,6 @@ function asOneOf<T extends string>(value: unknown, allowed: readonly T[], fallba
     : fallback
 }
 
-const FONT_FAMILIES: readonly FontFamily[] = [
-  'sans-serif',
-  'serif',
-  'M PLUS Rounded 1c',
-  'Noto Sans JP',
-  'Noto Serif JP'
-]
-const TEXT_POSITIONS: readonly TextPosition[] = ['top', 'center', 'bottom']
-const TEXT_ANIMATIONS: readonly TextAnimation[] = [
-  'none',
-  'fadeIn',
-  'popIn',
-  'slideInUp',
-  'slideInDown',
-  'bounce',
-  'typewriter'
-]
 const PIP_POSITIONS: readonly PipPosition[] = [
   'top-left',
   'top-right',
@@ -248,39 +228,6 @@ function normalizeVideoOverlayClip(
     assetId: raw.assetId,
     startTime: asNonNegative(raw.startTime, 0),
     ...normalizeRange(raw, durationOf(raw.assetId))
-  }
-}
-
-function normalizeTextStyle(raw: unknown): TextStyle {
-  const base = defaultTextStyle()
-  if (!isRecord(raw)) return base
-  const custom = raw.customPosition
-  return {
-    ...base,
-    // 知らない項目も残す(将来増えた項目を読み込みで落とさない)
-    ...(raw as Partial<TextStyle>),
-    fontFamily: asOneOf(raw.fontFamily, FONT_FAMILIES, base.fontFamily),
-    fontSize: asFinite(raw.fontSize, base.fontSize),
-    color: asNonEmptyString(raw.color, base.color),
-    position: asOneOf(raw.position, TEXT_POSITIONS, base.position),
-    customPosition:
-      isRecord(custom) && typeof custom.x === 'number' && typeof custom.y === 'number'
-        ? { x: asFinite(custom.x, 0.5), y: asFinite(custom.y, 0.5) }
-        : undefined,
-    rotation: asFinite(raw.rotation, base.rotation),
-    bold: asBoolean(raw.bold, base.bold),
-    italic: asBoolean(raw.italic, base.italic),
-    outline: asBoolean(raw.outline, base.outline),
-    outlineColor: asNonEmptyString(raw.outlineColor, base.outlineColor),
-    outlineWidth: asNonNegative(raw.outlineWidth, base.outlineWidth),
-    shadow: asBoolean(raw.shadow, base.shadow),
-    background: asBoolean(raw.background, base.background),
-    backgroundColor: asNonEmptyString(raw.backgroundColor, base.backgroundColor),
-    backgroundOpacity: asFinite(raw.backgroundOpacity, base.backgroundOpacity),
-    letterSpacing: asFinite(raw.letterSpacing, base.letterSpacing),
-    animation: asOneOf(raw.animation, TEXT_ANIMATIONS, base.animation),
-    wordHighlight: asBoolean(raw.wordHighlight, base.wordHighlight),
-    highlightColor: asNonEmptyString(raw.highlightColor, base.highlightColor)
   }
 }
 

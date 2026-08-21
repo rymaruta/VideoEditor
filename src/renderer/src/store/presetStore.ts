@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
+import { normalizeTextStyle } from '@shared/textStyle'
 import type { QualityPreset, ResolutionHeight, TextStyle } from '@shared/types'
 
 const CAPTION_PRESETS_KEY = 've-caption-presets'
@@ -36,13 +37,17 @@ const QUALITY_PRESETS: QualityPreset[] = ['high', 'standard', 'small']
 // null だったりしたときに、それを .map() する画面ごと落ちる(実測: 値が "null" や
 // "5" のとき「v.map is not a function」で パネル全体が表示できなくなる)。
 // 配列でなければ空にし、使えない要素は捨てて残りを返す。
-function loadArray<T>(key: string, isValid: (value: unknown) => value is T): T[] {
+function loadArray<T>(
+  key: string,
+  isValid: (value: unknown) => value is T,
+  repair: (value: T) => T = (v) => v
+): T[] {
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isValid)
+    return parsed.filter(isValid).map(repair)
   } catch {
     return []
   }
@@ -58,6 +63,22 @@ function hasIdAndName(value: unknown): value is Record<string, unknown> {
 
 function isCaptionPreset(value: unknown): value is CaptionPreset {
   return hasIdAndName(value) && isRecord(value.style)
+}
+
+/**
+ * `style` が**オブジェクトであること**しか確かめていないので、中身は歯抜けのまま通る。
+ * 通ったお気に入りは `PresetPanel` がそのまま `addTextOverlay` へ渡すため、
+ * 項目の欠けたテロップがプロジェクトに入り、**書き出しで初めて落ちる**
+ * (実測: `style: {}` のお気に入りから作ったテロップがあると、書き出しが
+ * 「Cannot read properties of undefined (reading 'replace')」で失敗する。
+ * `color` だけ、`outlineColor` だけ落としても同じ)。
+ *
+ * 捨てずに**直して残す**のは、プロジェクトファイルの読み込みと同じ方針
+ * (`normalizeTextStyle`)。名前は利用者が付けたもので、色が欠けていることは
+ * 消してよい理由にならない。
+ */
+function repairCaptionPreset(preset: CaptionPreset): CaptionPreset {
+  return { ...preset, style: normalizeTextStyle(preset.style) }
 }
 
 function isSePreset(value: unknown): value is SePreset {
@@ -89,12 +110,14 @@ interface PresetState {
 }
 
 export const usePresetStore = create<PresetState>((set, get) => ({
-  captionPresets: loadArray(CAPTION_PRESETS_KEY, isCaptionPreset),
+  captionPresets: loadArray(CAPTION_PRESETS_KEY, isCaptionPreset, repairCaptionPreset),
   sePresets: loadArray(SE_PRESETS_KEY, isSePreset),
   exportPresets: loadArray(EXPORT_PRESETS_KEY, isExportPreset),
 
   addCaptionPreset: (name, style) => {
-    const next = [...get().captionPresets, { id: uuid(), name, style: { ...style } }]
+    // 書き込むときも同じ規則を通す。歯抜けの style がここから入ると、
+    // 次に開いたときに直る(＝症状が消える)ぶん、原因が追えなくなる。
+    const next = [...get().captionPresets, { id: uuid(), name, style: normalizeTextStyle(style) }]
     localStorage.setItem(CAPTION_PRESETS_KEY, JSON.stringify(next))
     set({ captionPresets: next })
   },

@@ -209,3 +209,90 @@ export const FONT_FAMILY_OPTIONS: { value: FontFamily; label: string }[] = [
   { value: 'Noto Sans JP', label: 'Noto Sans JP' },
   { value: 'Noto Serif JP', label: 'Noto Serif JP' }
 ]
+
+const FONT_FAMILIES: readonly FontFamily[] = [
+  'sans-serif',
+  'serif',
+  'M PLUS Rounded 1c',
+  'Noto Sans JP',
+  'Noto Serif JP'
+]
+const TEXT_POSITIONS: readonly TextPosition[] = ['top', 'center', 'bottom']
+const TEXT_ANIMATIONS: readonly TextAnimation[] = [
+  'none',
+  'fadeIn',
+  'popIn',
+  'slideInUp',
+  'slideInDown',
+  'bounce',
+  'typewriter'
+]
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+function asNonEmptyString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length > 0 ? value : fallback
+}
+function asFinite(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+function asNonNegative(value: unknown, fallback: number): number {
+  return Math.max(0, asFinite(value, fallback))
+}
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+function asOneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fallback
+}
+
+/**
+ * 外から来た「テロップの見た目」を、**必ず全項目が揃った形**に直す。
+ *
+ * `TextStyle` は書き出しで ASS のタグに焼かれる。`color` が無いだけで
+ * `toAssColor(undefined)` が `undefined.replace(...)` を踏み、
+ * **書き出しが生の英語で落ちる**(実測: 「Cannot read properties of undefined
+ * (reading 'replace')」)。だから欠けは受け取った時点で埋める。
+ *
+ * **置き場がここなのは、外から来る道が1本ではないから。** プロジェクトファイル
+ * (`projectStore` の読み込み)と、localStorage のお気に入り(`presetStore`)の
+ * 両方が同じ規則を通る必要がある。片方だけが直す形にすると、直していない側の
+ * 入口から入った値が同じ書き出しの式に届く。
+ *
+ * 知らない項目は落とさずに残す(将来増えた項目を読み込みで捨てないため)。
+ */
+export function normalizeTextStyle(raw: unknown): TextStyle {
+  const base = defaultTextStyle()
+  if (!isRecord(raw)) return base
+  const custom = raw.customPosition
+  return {
+    ...base,
+    // 知らない項目も残す(将来増えた項目を読み込みで落とさない)
+    ...(raw as Partial<TextStyle>),
+    fontFamily: asOneOf(raw.fontFamily, FONT_FAMILIES, base.fontFamily),
+    fontSize: asFinite(raw.fontSize, base.fontSize),
+    color: asNonEmptyString(raw.color, base.color),
+    position: asOneOf(raw.position, TEXT_POSITIONS, base.position),
+    customPosition:
+      isRecord(custom) && typeof custom.x === 'number' && typeof custom.y === 'number'
+        ? { x: asFinite(custom.x, 0.5), y: asFinite(custom.y, 0.5) }
+        : undefined,
+    rotation: asFinite(raw.rotation, base.rotation),
+    bold: asBoolean(raw.bold, base.bold),
+    italic: asBoolean(raw.italic, base.italic),
+    outline: asBoolean(raw.outline, base.outline),
+    outlineColor: asNonEmptyString(raw.outlineColor, base.outlineColor),
+    outlineWidth: asNonNegative(raw.outlineWidth, base.outlineWidth),
+    shadow: asBoolean(raw.shadow, base.shadow),
+    background: asBoolean(raw.background, base.background),
+    backgroundColor: asNonEmptyString(raw.backgroundColor, base.backgroundColor),
+    backgroundOpacity: asFinite(raw.backgroundOpacity, base.backgroundOpacity),
+    letterSpacing: asFinite(raw.letterSpacing, base.letterSpacing),
+    animation: asOneOf(raw.animation, TEXT_ANIMATIONS, base.animation),
+    wordHighlight: asBoolean(raw.wordHighlight, base.wordHighlight),
+    highlightColor: asNonEmptyString(raw.highlightColor, base.highlightColor)
+  }
+}
