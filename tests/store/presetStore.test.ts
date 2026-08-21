@@ -9,7 +9,10 @@ import { NASTY_VALUES, seeded } from '../helpers/boundary'
  */
 const store = new Map<string, string>()
 
-async function loadWith(key: string, raw: string): Promise<typeof import('@renderer/store/presetStore')> {
+async function loadWith(
+  key: string,
+  raw: string
+): Promise<typeof import('@renderer/store/presetStore')> {
   store.clear()
   store.set(key, raw)
   vi.resetModules()
@@ -60,7 +63,9 @@ describe('【レグレッション】お気に入りのテロップは、項目�
   it('一部だけ欠けているときは、**書いてある値のほうを残す**', async () => {
     const m = await loadWith(
       KEY,
-      JSON.stringify([{ id: 'b', name: '色だけ欠け', style: { fontSize: 80, bold: true, position: 'top' } }])
+      JSON.stringify([
+        { id: 'b', name: '色だけ欠け', style: { fontSize: 80, bold: true, position: 'top' } }
+      ])
     )
     const s = m.usePresetStore.getState().captionPresets[0].style
     expect(s.fontSize).toBe(80) // 利用者が決めた値
@@ -84,7 +89,9 @@ describe('【レグレッション】お気に入りのテロップは、項目�
     expect(presets).toHaveLength(200)
     for (const p of presets) {
       for (const k of KEYS) {
-        expect((p.style as unknown as Record<string, unknown>)[k], `${p.name}.${k}`).not.toBe(undefined)
+        expect((p.style as unknown as Record<string, unknown>)[k], `${p.name}.${k}`).not.toBe(
+          undefined
+        )
       }
     }
   })
@@ -122,12 +129,27 @@ describe('【レグレッション】お気に入りのテロップは、項目�
 
   it('対照: 効果音と書き出し設定のお気に入りは今までどおり', async () => {
     store.clear()
-    store.set('ve-se-presets', JSON.stringify([{ id: 's', name: 'ドン', filePath: '/a.wav', fileName: 'a.wav' }]))
+    store.set(
+      've-se-presets',
+      JSON.stringify([{ id: 's', name: 'ドン', filePath: '/a.wav', fileName: 'a.wav' }])
+    )
     store.set(
       've-export-presets',
       JSON.stringify([
-        { id: 'e', name: '配信用', resolutionHeight: 1080, quality: 'high', loudnessNormalization: true },
-        { id: 'x', name: '知らない画質', resolutionHeight: 1080, quality: 'ultra', loudnessNormalization: true }
+        {
+          id: 'e',
+          name: '配信用',
+          resolutionHeight: 1080,
+          quality: 'high',
+          loudnessNormalization: true
+        },
+        {
+          id: 'x',
+          name: '知らない画質',
+          resolutionHeight: 1080,
+          quality: 'ultra',
+          loudnessNormalization: true
+        }
       ])
     )
     vi.resetModules()

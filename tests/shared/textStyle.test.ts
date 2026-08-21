@@ -106,13 +106,23 @@ describe('normalizeTextStyle — 外から来た見た目を「全項目が揃�
       const raw: Record<string, unknown> = {}
       for (const k of KEYS) raw[k] = pool[Math.floor(rnd() * pool.length)]
       const s = normalizeTextStyle(raw)
-      for (const k of ['fontSize', 'rotation', 'outlineWidth', 'backgroundOpacity', 'letterSpacing'] as const) {
+      for (const k of [
+        'fontSize',
+        'rotation',
+        'outlineWidth',
+        'backgroundOpacity',
+        'letterSpacing'
+      ] as const) {
         expect(Number.isFinite(s[k]), `${k}=${String(raw[k])}`).toBe(true)
       }
       expect(s.outlineWidth).toBeGreaterThanOrEqual(0)
-      expect(['sans-serif', 'serif', 'M PLUS Rounded 1c', 'Noto Sans JP', 'Noto Serif JP']).toContain(
-        s.fontFamily
-      )
+      expect([
+        'sans-serif',
+        'serif',
+        'M PLUS Rounded 1c',
+        'Noto Sans JP',
+        'Noto Serif JP'
+      ]).toContain(s.fontFamily)
       expect(['top', 'center', 'bottom']).toContain(s.position)
       for (const k of ['color', 'outlineColor', 'backgroundColor', 'highlightColor'] as const) {
         expect(typeof s[k], k).toBe('string')
@@ -154,9 +164,9 @@ describe('【レグレッション】項目の欠けた見た目で書き出し�
     expect(ass).toContain('\\fnundefined')
     expect(ass).toContain('\\fsundefined')
     // 入口で通せば消える(対照)
-    expect(buildAssContent([overlay(normalizeTextStyle({ color: '#ffffff' }))], 640, 360)).not.toMatch(
-      /undefined/
-    )
+    expect(
+      buildAssContent([overlay(normalizeTextStyle({ color: '#ffffff' }))], 640, 360)
+    ).not.toMatch(/undefined/)
   })
 
   it('入口で通してから渡せば落ちない(対照)', () => {

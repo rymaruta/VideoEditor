@@ -10,7 +10,6 @@ import {
   needsWebAudioGain,
   toElementVolume
 } from '@shared/audioGain'
-import { pipMarginPx } from '@shared/pipLayout'
 import {
   TEXT_ANIMATION_MS,
   TEXT_MARGIN_H_RATIO,
@@ -32,6 +31,7 @@ import {
 import { crossfadeOpacity, effectiveTransitionSeconds } from '@shared/transition'
 import { cropPreviewStyle } from '../lib/cropPreview'
 import { overlayBoxStyle } from '../lib/overlayBox'
+import { pipPreviewStyle } from '../lib/pipPreviewStyle'
 import {
   audioClipDuration,
   buildTimedClips,
@@ -236,30 +236,6 @@ const horizontalInsetStyle: CSSProperties = {
   right: `${TEXT_MARGIN_H_RATIO * 100}%`
 }
 
-/**
- * 隅からの余白は**枠の幅**基準(書き出しと同じ規則)。CSS の `top`/`bottom` に `%` を書くと
- * **親の高さ**基準になり、同じ設定でも縦横比によって書き出しとズレる。
- * 枠の実寸が要るので `frameWidth` を受け取る(0 のときは 0px = 隅に付く。初回描画の
- * 1フレームだけで、ResizeObserver が測ったらすぐ追従する)。
- */
-function pipStyle(position: PipPosition, scale: number, frameWidth: number): CSSProperties {
-  const margin = pipMarginPx(frameWidth)
-  const style: CSSProperties = {
-    position: 'absolute',
-    width: `${scale * 100}%`,
-    height: 'auto',
-    borderRadius: 8,
-    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.5)',
-    border: '2px solid rgba(255, 255, 255, 0.8)',
-    zIndex: 2
-  }
-  if (position === 'top-left' || position === 'top-right') style.top = margin
-  else style.bottom = margin
-  if (position === 'top-left' || position === 'bottom-left') style.left = margin
-  else style.right = margin
-  return style
-}
-
 function VideoOverlayLayer({
   clip,
   asset,
@@ -318,7 +294,11 @@ function VideoOverlayLayer({
   }, [volume, muted])
 
   return (
-    <video ref={ref} src={previewSourceUrl(asset)} style={pipStyle(position, scale, frameWidth)} />
+    <video
+      ref={ref}
+      src={previewSourceUrl(asset)}
+      style={pipPreviewStyle(position, scale, frameWidth)}
+    />
   )
 }
 
