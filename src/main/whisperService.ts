@@ -1,6 +1,7 @@
+import { app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
@@ -26,9 +27,29 @@ interface AsrResult {
 
 type Transcriber = (audio: Float32Array, options: Record<string, unknown>) => Promise<AsrResult>
 
+/**
+ * ダウンロードした音声認識モデルの置き場。
+ *
+ * transformers.js の既定は**モジュールからの相対**
+ * (`node_modules/@huggingface/transformers/.cache/`)。開発中は書けるが、**配布版では
+ * それが `app.asar` の中**——アーカイブ1ファイルなので、そこへ作ろうとすると
+ * `ENOTDIR` で失敗する(実測: `mkdir .../app.asar/node_modules/@huggingface/transformers/.cache`
+ * → `Not a directory`)。つまり**インストールして使う人だけ、初回の自動テロップで必ず落ちる**。
+ * アプリが書いていい場所(userData)へ移す。BGM・ナレーションの保存先と同じ考え方。
+ *
+ * ここに置くと、アプリを入れ直してもモデルは残る(消したいときは userData ごと消せる)。
+ */
+function modelCacheDir(): string {
+  const dir = join(app.getPath('userData'), 'models')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
 // 失敗を覚えないキャッシュ。接続を直して押し直せばやり直せる(進行中は1本に束ねる)
 const getTranscriber = retryableSingleton<Transcriber>(async () => {
-  const { pipeline } = await import('@huggingface/transformers')
+  const { env, pipeline } = await import('@huggingface/transformers')
+  // 読み込みの前に置き場を差し替える(pipeline はここを見てダウンロード先を決める)
+  env.cacheDir = modelCacheDir()
   return (await pipeline('automatic-speech-recognition', MODEL_ID, {
     dtype: 'fp32'
   })) as unknown as Transcriber

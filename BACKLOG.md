@@ -4081,6 +4081,30 @@
   **同種を洗った結果**: 同じ「呼び捨てで失敗が消える」形は `openExternal` に
   **4箇所**(BGM/効果音のライセンス・ゲームトレンド・YouTubeトレンド)残っている。
   書き出し結果のボタンではないので今回の1件に含めず記録に留めた。
+- [x] **配布版(パッケージ)を初めて実機で検証し、配布版だけで壊れていた2件を直した** — 2026-08-29(利用者の依頼)
+  `dist/` は一度も作られたことがなく、BACKLOG にも配布の記述が0件だった。4ロールは `npm run build`
+  (バンドル)までしか走らせないので、**asar に固めて初めて壊れる類は誰も踏めない**。
+  AppImage / deb / snap を実際に作り、AppImage を xvfb で起動して通した。
+  **見つけて直した2件(どちらも配布版だけで起きる)**:
+  1. **自動テロップのモデル置き場が `app.asar` の中だった。** transformers.js の `cacheDir` の既定は
+     モジュール相対(`node_modules/@huggingface/transformers/.cache/`)。開発中は書けるが、配布版では
+     それが asar アーカイブの内側になる。実測: `mkdir .../app.asar/node_modules/@huggingface/transformers/.cache`
+     → **`ENOTDIR (20) Not a directory`**。`@huggingface/transformers` は `asarUnpack` にも入っていない
+     (asar 内に1,351エントリ、unpacked 側には0)。つまり**インストールして使う人は、初回の自動テロップで必ず失敗する**。
+     `env.cacheDir` をユーザーデータ配下(`<userData>/models`)へ変えた。実測: 修正前は起動しても
+     `models` が作られず、修正後はテロップを1回叩くと `/root/.config/video-editor/models` が**作られる**。
+  2. **`.env` を「アプリと同じフォルダ」に置く案内が、AppImage では効かなかった。** AppImage は起動のたびに
+     `/tmp` へ展開されて動くので、`app.getPath('exe')` の隣は展開先。実測: `.AppImage` の隣に
+     `GEMINI_API_KEY=...` を置いて(カレントを別の場所にして)起動すると、読み込まれたキーは**4つとも空**。
+     `$APPIMAGE`(実測で `/home/user/VideoEditor/dist/video-editor-1.0.0.AppImage` を指す)の
+     ディレクトリを候補に足し、macOS 用に `.app` の隣も足した。修正後は `dummy-next-to-appimage` が読める。
+  **通ったことの実測(AppImage 版)**: 起動 → ファイルのドロップで取り込み(`0:06`/`0:05`・サムネ生成あり)
+  → タイムラインへ2本 → 9:16・720p で書き出し。出力は **720x1280 / 210フレーム(=30fps × 7.000秒)**、
+  音声 330フレーム、`format=duration 7.000`(4秒+3秒と一致)。日本語のテロップも焼き込まれており、
+  字幕帯の明るい画素は表示中 **543個 / 非表示時 0個**。コンソールエラー 0 件。
+  **この環境では確かめられなかったもの**: Whisper のモデル取得(huggingface.co がネットワークポリシーで
+  遮断され、curl でも HTTP 000 / プロキシが CONNECT に 403)。Windows・macOS 版のパッケージ。
+  VOICEVOX 連携(エンジン未導入)。
 
 - [x] **素材一覧のサムネイルを、非正方画素(SAR≠1)でも表示どおりの形にする** — 2026-08-15
   (未着手が空だったので候補の一番上を1件だけ繰り上げた。繰り上げる前に完了欄とコードを
