@@ -118,7 +118,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
   async function handleRun(): Promise<void> {
     if (!asset) return
     if (!geminiApiKey) {
-      setError('Gemini API キーを入力してください(ゲームトレンドタブで設定できます)')
+      setError('Gemini API キーを入力してください(ゲームリサーチタブで設定できます)')
       return
     }
     setError(null)

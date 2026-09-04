@@ -5,8 +5,13 @@ import {
   analyzeGamingTrends,
   askAboutTrends,
   GameTrendAnalysis,
-  TrendChatTurn
+  ResearchProgress,
+  TrendChatTurn,
+  VERIFY_TOP_N,
+  VERIFY_WINDOW_DAYS
 } from '../lib/gameTrendAnalysis'
+import type { AnalyzedGame } from '../lib/gameTrendAnalysis'
+import { SCORE_WEIGHTS } from '../lib/gameResearch'
 import { compareTrend, saveTrendSnapshot, TrendComparison } from '../lib/trendHistory'
 import { formatIpcError } from '../lib/ipcError'
 import { openExternalLink } from '../lib/openExternalLink'
@@ -17,7 +22,9 @@ import {
   TargetIcon,
   ImageIcon,
   WandIcon,
-  MegaphoneIcon
+  MegaphoneIcon,
+  ActivityIcon,
+  SearchIcon
 } from './icons'
 
 // Before any data is fetched the questions can't refer to "this list", so the
@@ -30,13 +37,28 @@ const SUGGESTED_QUESTIONS_BEFORE_FETCH = [
 
 const SUGGESTED_QUESTIONS_AFTER_FETCH = [
   'この中で初心者でも撮りやすいのはどれ？',
-  '再生数が伸びているタイトルの共通点は？',
+  '1位と2位の差はどこ？',
   '明日1本作るなら何をどう撮ればいい？'
 ]
 
 function formatViews(views: number): string {
+  if (!Number.isFinite(views)) return '不明'
   if (views >= 10000) return `${(views / 10000).toFixed(1)}万回`
   return `${views}回`
+}
+
+/** 速度は桁が大きく振れるので、万を超えたら「万回/時」に落として読めるようにする */
+function formatPerHour(value: number): string {
+  if (!Number.isFinite(value)) return '不明'
+  if (value >= 10000) return `${(value / 10000).toFixed(1)}万回/時`
+  return `${Math.round(value).toLocaleString('ja-JP')}回/時`
+}
+
+function formatHoursAgo(hours: number | null): string {
+  if (hours === null || !Number.isFinite(hours)) return '不明'
+  if (hours < 1) return '1時間以内'
+  if (hours < 24) return `${Math.round(hours)}時間前`
+  return `${Math.round(hours / 24)}日前`
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -47,17 +69,141 @@ function formatRelativeTime(timestamp: number): string {
   return `${Math.round(hours / 24)}日前`
 }
 
+function progressLabel(progress: ResearchProgress | null): string {
+  if (!progress) return '急上昇データを取得中...'
+  switch (progress.phase) {
+    case 'attribute':
+      return 'タイトルからゲーム名を判定中...'
+    case 'verify':
+      return `候補をYouTube検索で裏取り中... (${progress.done ?? 0}/${progress.total ?? 0})`
+    case 'compose':
+      return '順位の解説を作成中...'
+  }
+}
+
+/** 内訳を「満点のうち何点か」で描く。どの項目で稼いだ順位なのかが一目で分かる */
+function ScoreBar({
+  label,
+  value,
+  max
+}: {
+  label: string
+  value: number
+  max: number
+}): React.JSX.Element {
+  const ratio = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0
+  return (
+    <div className="game-score-bar">
+      <span className="game-score-bar-label">{label}</span>
+      <span className="game-score-bar-track">
+        <span className="game-score-bar-fill" style={{ width: `${ratio * 100}%` }} />
+      </span>
+      <span className="game-score-bar-value">
+        {value}/{max}
+      </span>
+    </div>
+  )
+}
+
+function RankedGameCard({
+  game,
+  rank,
+  onError
+}: {
+  game: AnalyzedGame
+  rank: number
+  onError: (message: string) => void
+}): React.JSX.Element {
+  const [open, setOpen] = useState(rank === 1)
+  const s = game.stats
+  return (
+    <div className={`game-rank-card${rank === 1 ? ' top' : ''}`}>
+      <div className="game-rank-head">
+        <span className="game-rank-badge">{rank}位</span>
+        <span className="game-rank-name">
+          <TargetIcon width={13} height={13} />
+          {s.displayName}
+        </span>
+        <span className="game-rank-score">{game.score.total}点</span>
+      </div>
+      <div className="game-rank-facts">
+        <span>急上昇 {s.videoCount}本</span>
+        <span>{s.channelCount}チャンネル</span>
+        <span>速度中央値 {formatPerHour(s.medianViewsPerHour)}</span>
+        <span>最新 {formatHoursAgo(s.newestHoursAgo)}</span>
+        {game.verification ? (
+          <span className={game.verification.shortsFound > 0 ? 'verified' : 'verified none'}>
+            <SearchIcon width={10} height={10} />
+            直近{game.verification.windowDays}日のショート {game.verification.shortsFound}本
+            {game.verification.shortsFound > 0
+              ? ` / ${formatPerHour(game.verification.medianViewsPerHour)}`
+              : ''}
+          </span>
+        ) : (
+          <span className="unverified">裏取り未実施</span>
+        )}
+      </div>
+      {game.whyNow && <p className="game-rank-why">{game.whyNow}</p>}
+      {game.sceneSuggestion && <p className="game-rank-scene">{game.sceneSuggestion}</p>}
+      <button className="small-button game-rank-toggle" onClick={() => setOpen(!open)}>
+        {open ? '根拠を隠す' : `根拠を見る(${s.videoCount}本 / 採点の内訳)`}
+      </button>
+      {open && (
+        <div className="game-rank-detail">
+          <div className="game-score-bars">
+            <ScoreBar label="勢い" value={game.score.momentum} max={SCORE_WEIGHTS.momentum} />
+            <ScoreBar label="新しさ" value={game.score.freshness} max={SCORE_WEIGHTS.freshness} />
+            <ScoreBar label="広がり" value={game.score.spread} max={SCORE_WEIGHTS.spread} />
+            <ScoreBar
+              label="ショート適性"
+              value={game.score.shortsFit}
+              max={SCORE_WEIGHTS.shortsFit}
+            />
+          </div>
+          <ul className="game-trend-evidence">
+            {s.videos.map((v) => (
+              <li key={v.id} title={v.title}>
+                <button
+                  className="game-evidence-link"
+                  onClick={() =>
+                    void openExternalLink(`https://www.youtube.com/watch?v=${v.id}`, onError)
+                  }
+                >
+                  {v.title}
+                </button>
+                <span className="game-evidence-meta">
+                  {v.channelTitle} ・ {formatViews(v.viewCount)} ・ {formatHoursAgo(v.hoursAgo)}
+                  {v.isShort ? ' ・ ショート' : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {game.verification?.topVideo && (
+            <p className="hint-text">
+              裏取りで最も伸びていたショート: 「{game.verification.topVideo.title}」(
+              {formatViews(game.verification.topVideo.viewCount)})
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function GameTrendPanel(): React.JSX.Element {
   const youtubeApiKey = useSettingsStore((s) => s.youtubeApiKey)
   const setYoutubeApiKey = useSettingsStore((s) => s.setYoutubeApiKey)
   const geminiApiKey = useSettingsStore((s) => s.geminiApiKey)
   const setGeminiApiKey = useSettingsStore((s) => s.setGeminiApiKey)
   const envKeySources = useSettingsStore((s) => s.envKeySources)
+  const verifyEnabled = useSettingsStore((s) => s.trendVerifyEnabled)
+  const setVerifyEnabled = useSettingsStore((s) => s.setTrendVerifyEnabled)
 
   const [videos, setVideos] = useState<YouTubeVideoInfo[]>([])
   const [analysis, setAnalysis] = useState<GameTrendAnalysis | null>(null)
   const [comparison, setComparison] = useState<TrendComparison | null>(null)
   const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState<ResearchProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [instruction, setInstruction] = useState('')
   const [chat, setChat] = useState<TrendChatTurn[]>([])
@@ -75,6 +221,7 @@ export function GameTrendPanel(): React.JSX.Element {
     videos: YouTubeVideoInfo[]
     analysis: GameTrendAnalysis
   }> {
+    setProgress(null)
     const trending = await fetchTrendingGamingVideos(youtubeApiKey)
     if (trending.length === 0) {
       throw new Error(
@@ -82,9 +229,14 @@ export function GameTrendPanel(): React.JSX.Element {
       )
     }
     setVideos(trending)
-    const result = await analyzeGamingTrends(geminiApiKey, trending, instruction)
+    const result = await analyzeGamingTrends(geminiApiKey, trending, {
+      userInstruction: instruction,
+      youtubeApiKey,
+      verify: verifyEnabled,
+      onProgress: setProgress
+    })
     setAnalysis(result)
-    const gameNames = result.insights.map((i) => i.gameName)
+    const gameNames = result.rankedGames.map((g) => g.stats.displayName)
     setComparison(compareTrend(gameNames))
     saveTrendSnapshot(gameNames)
     return { videos: trending, analysis: result }
@@ -114,6 +266,7 @@ export function GameTrendPanel(): React.JSX.Element {
       setError(formatIpcError(e))
     } finally {
       setLoading(false)
+      setProgress(null)
     }
   }
 
@@ -170,16 +323,20 @@ export function GameTrendPanel(): React.JSX.Element {
     } finally {
       setAsking(false)
       setFetchingForQuestion(false)
+      setProgress(null)
     }
   }
+
+  const busy = loading || asking
 
   return (
     <div className="panel game-trend-panel">
       <div className="panel-header">
-        <h2>ゲームトレンド分析</h2>
+        <h2>ゲームリサーチ</h2>
       </div>
       <p className="hint-text">
-        YouTube公式APIで「ゲームカテゴリの急上昇動画(日本)」を取得し、そのタイトルとサムネイル画像だけを根拠にGemini(AI)がゲーム名・バズる要素・視覚傾向を分析します。実行するたびに最新の急上昇データを取得します。
+        YouTube公式APIで「ゲームカテゴリの急上昇動画(日本)」を取得し、タイトルからゲーム名をAIが判定します。
+        件数・再生速度(再生数÷公開からの経過時間)・チャンネル数・新しさの集計と順位付けはAIではなくアプリ側の計算で行い、AIには順位の解説だけを書かせます。
       </p>
       <div className="youtube-field">
         <label>
@@ -218,12 +375,29 @@ export function GameTrendPanel(): React.JSX.Element {
           placeholder="例: ホラーゲーム中心で見たい / 顔出しなしで作れるものを重視して"
         />
         <p className="hint-text">
-          書いておくと、分析の切り口をここに寄せます。空欄でも通常どおり分析します。
+          書いておくと、解説の切り口をここに寄せます(順位と数値は変わりません)。
         </p>
       </div>
-      <button className="primary-button" onClick={handleRefresh} disabled={loading || asking}>
+      <label className="game-trend-verify-toggle">
+        <input
+          type="checkbox"
+          checked={verifyEnabled}
+          onChange={(e) => setVerifyEnabled(e.target.checked)}
+          disabled={busy}
+        />
+        <span>
+          上位{VERIFY_TOP_N}件をYouTube検索で裏取りする(精度優先)
+          <span className="hint-text">
+            候補ごとに直近{VERIFY_WINDOW_DAYS}
+            日のショートを検索し、実際に回っているかを確かめてから順位を付け直します。
+            精度は上がりますが、YouTube APIの消費が1回の分析あたり最大{VERIFY_TOP_N}
+            回分の検索(既定の無料枠のおよそ5%)増えます。
+          </span>
+        </span>
+      </label>
+      <button className="primary-button" onClick={handleRefresh} disabled={busy}>
         <SparklesIcon width={13} height={13} />
-        {loading ? '分析中...' : '最新トレンドを分析'}
+        {loading ? progressLabel(progress) : '最新トレンドを分析'}
       </button>
       {error && <p className="error-text">{error}</p>}
 
@@ -238,6 +412,33 @@ export function GameTrendPanel(): React.JSX.Element {
         </div>
       )}
 
+      {analysis && analysis.rankedGames.length === 0 && (
+        <p className="hint-text">
+          取得した{analysis.analyzedVideoCount}
+          本のタイトルからは、ゲーム名を確実に読み取れる動画がありませんでした(雑談・切り抜きなどが並んでいる時間帯に起きます)。時間をおいて再実行してください。
+        </p>
+      )}
+
+      {analysis && analysis.rankedGames.length > 0 && (
+        <div className="game-trend-ranking">
+          <h3>
+            <ActivityIcon width={13} height={13} />
+            いま撮るべきゲーム(スコア順)
+          </h3>
+          <p className="hint-text">
+            急上昇{analysis.analyzedVideoCount}本を集計。
+            {analysis.unattributedCount > 0 &&
+              `うち${analysis.unattributedCount}本はゲーム名を特定できず除外。`}
+            {analysis.verifiedCount > 0
+              ? `上位${analysis.verifiedCount}件は直近${VERIFY_WINDOW_DAYS}日のショート検索で裏取り済み。`
+              : '裏取りは未実施(ショート適性は控えめに見積もった値です)。'}
+          </p>
+          {analysis.rankedGames.map((game, i) => (
+            <RankedGameCard key={game.stats.key} game={game} rank={i + 1} onError={setError} />
+          ))}
+        </div>
+      )}
+
       <div className="game-trend-chat">
         <h3>
           <MegaphoneIcon width={13} height={13} />
@@ -245,7 +446,7 @@ export function GameTrendPanel(): React.JSX.Element {
         </h3>
         <p className="hint-text">
           {hasData
-            ? '上で取得した急上昇動画リストと分析結果だけを根拠に答えます。データから分からないことは「分からない」と答えます。'
+            ? '上で取得した急上昇動画リストと集計結果だけを根拠に答えます。データから分からないことは「分からない」と答えます。'
             : 'そのまま質問できます。まだ取得していない場合は、急上昇データを自動で取得してから答えます(分析ボタンを先に押す必要はありません)。'}
         </p>
         {chat.length > 0 && (
@@ -257,7 +458,7 @@ export function GameTrendPanel(): React.JSX.Element {
             ))}
             {asking && (
               <div className="game-trend-chat-turn model pending">
-                {fetchingForQuestion ? '急上昇データを取得中...' : '回答を作成中...'}
+                {fetchingForQuestion ? progressLabel(progress) : '回答を作成中...'}
               </div>
             )}
           </div>
@@ -295,7 +496,7 @@ export function GameTrendPanel(): React.JSX.Element {
           <button
             className="primary-button"
             onClick={() => handleAsk(question)}
-            disabled={asking || loading || question.trim() === ''}
+            disabled={busy || question.trim() === ''}
           >
             {asking
               ? fetchingForQuestion
@@ -336,30 +537,6 @@ export function GameTrendPanel(): React.JSX.Element {
               {comparison.sustainedGames.join(' / ')}
             </p>
           )}
-        </div>
-      )}
-
-      {analysis && analysis.insights.length > 0 && (
-        <div className="game-trend-insights">
-          <h3>今バズっていそうなゲーム</h3>
-          {analysis.insights.map((insight, i) => (
-            <div key={i} className="game-trend-insight-card">
-              <h4>
-                <TargetIcon width={13} height={13} />
-                {insight.gameName}
-              </h4>
-              <p>{insight.sceneSuggestion}</p>
-              {insight.evidenceTitles.length > 0 && (
-                <ul className="game-trend-evidence">
-                  {insight.evidenceTitles.map((t, j) => (
-                    <li key={j} title={t}>
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
         </div>
       )}
 

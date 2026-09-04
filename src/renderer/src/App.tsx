@@ -96,9 +96,9 @@ const EDIT_TABS: TabDef[] = [
 const PUBLISH_TABS: TabDef[] = [
   {
     id: 'gametrend',
-    label: 'ゲームトレンド',
+    label: 'ゲームリサーチ',
     icon: TargetIcon,
-    description: 'ゲームトレンド分析(YouTube+Gemini)'
+    description: '今撮るべきゲームの調査(YouTube実データの集計+Gemini)'
   },
   {
     id: 'youtube',

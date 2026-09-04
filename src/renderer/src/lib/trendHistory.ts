@@ -1,3 +1,5 @@
+import { normalizeGameKey } from './gameResearch'
+
 export interface TrendSnapshot {
   timestamp: number
   gameNames: string[]
@@ -39,14 +41,32 @@ export interface TrendComparison {
   sustainedGames: string[]
 }
 
+/**
+ * 前回と比べる。
+ *
+ * 突き合わせは**正規化した鍵**で行う。生の文字列で比べると、AIが前回「Apex Legends」・
+ * 今回「APEX」と書いただけで**同じゲームが毎回「新規」**として出続け、
+ * 「新規」という表示そのものが当てにならなくなる(画面に出す名前は今回の表記のまま)。
+ */
 export function compareTrend(currentGameNames: string[]): TrendComparison | null {
   const history = loadTrendHistory()
   if (history.length === 0) return null
   const previous = history[history.length - 1]
-  const previousSet = new Set(previous.gameNames)
-  return {
-    previousTimestamp: previous.timestamp,
-    newGames: currentGameNames.filter((g) => !previousSet.has(g)),
-    sustainedGames: currentGameNames.filter((g) => previousSet.has(g))
+  const previousSet = new Set(
+    previous.gameNames
+      .filter((g): g is string => typeof g === 'string')
+      .map((g) => normalizeGameKey(g))
+  )
+  const seen = new Set<string>()
+  const newGames: string[] = []
+  const sustainedGames: string[] = []
+  for (const name of Array.isArray(currentGameNames) ? currentGameNames : []) {
+    if (typeof name !== 'string') continue
+    const key = normalizeGameKey(name)
+    if (key === '' || seen.has(key)) continue
+    seen.add(key)
+    if (previousSet.has(key)) sustainedGames.push(name)
+    else newGames.push(name)
   }
+  return { previousTimestamp: previous.timestamp, newGames, sustainedGames }
 }

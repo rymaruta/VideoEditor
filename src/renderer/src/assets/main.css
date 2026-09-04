@@ -2981,21 +2981,45 @@ h3 {
   margin-bottom: 10px;
 }
 
-.game-trend-insights,
+.game-trend-ranking,
 .game-trend-tips,
 .game-trend-source {
   margin-top: 14px;
 }
 
-.game-trend-insights h3,
+.game-trend-ranking h3,
 .game-trend-tips h3,
 .game-trend-source h3 {
   font-size: 12px;
   color: var(--text-2);
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.game-trend-insight-card {
+/* 裏取りの ON/OFF。消費が増える設定なので、説明を畳まずそのまま添える */
+.game-trend-verify-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 10px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.game-trend-verify-toggle input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.game-trend-verify-toggle .hint-text {
+  display: block;
+  margin-top: 3px;
+}
+
+.game-rank-card {
   background: var(--bg-elevated-2);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
@@ -3003,25 +3027,153 @@ h3 {
   margin-bottom: 8px;
 }
 
-.game-trend-insight-card h4 {
+.game-rank-card.top {
+  border-color: var(--accent-1);
+  background: var(--accent-soft);
+}
+
+.game-rank-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+.game-rank-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--bg-elevated-3);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.game-rank-card.top .game-rank-badge {
+  background: var(--accent-1);
+  color: var(--bg);
+  font-weight: 700;
+}
+
+.game-rank-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-rank-score {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-1);
+  flex-shrink: 0;
+}
+
+.game-rank-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-bottom: 6px;
+}
+
+.game-rank-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--bg-elevated-3);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.game-rank-facts .verified {
+  color: var(--success);
+}
+
+/* 裏取りして「0本だった」は、裏取りしていないのとは別の情報。色を分ける */
+.game-rank-facts .verified.none {
+  color: var(--danger);
+}
+
+.game-rank-facts .unverified {
+  color: var(--text-3);
+}
+
+.game-rank-why {
+  font-size: 11.5px;
+  color: var(--text-1);
+  line-height: 1.6;
   margin-bottom: 4px;
 }
 
-.game-trend-insight-card p {
+.game-rank-scene {
   font-size: 11.5px;
   color: var(--text-2);
+  line-height: 1.6;
   margin-bottom: 6px;
+}
+
+.game-rank-toggle {
+  font-size: 10.5px;
+}
+
+.game-rank-detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.game-score-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.game-score-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-2);
+}
+
+.game-score-bar-label {
+  width: 66px;
+  flex-shrink: 0;
+}
+
+.game-score-bar-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-elevated-3);
+  overflow: hidden;
+}
+
+.game-score-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent-gradient);
+}
+
+.game-score-bar-value {
+  width: 48px;
+  text-align: right;
+  flex-shrink: 0;
+  color: var(--text-3);
 }
 
 .game-trend-evidence {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -3030,17 +3182,43 @@ h3 {
 .game-trend-evidence li {
   font-size: 10.5px;
   color: var(--text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   padding-left: 10px;
   position: relative;
+  overflow: hidden;
 }
 
 .game-trend-evidence li::before {
   content: '—';
   position: absolute;
   left: 0;
+}
+
+.game-evidence-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 10.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.game-evidence-link:hover {
+  color: var(--accent-1);
+  text-decoration: underline;
+}
+
+.game-evidence-meta {
+  display: block;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .game-trend-tips ul {

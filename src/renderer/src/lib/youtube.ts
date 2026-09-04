@@ -114,8 +114,16 @@ export async function fetchTrendingVideos(apiKey: string): Promise<YouTubeVideoI
 
 const GAMING_CATEGORY_ID = '20'
 
+/**
+ * 候補を探す元になる一覧。**上限いっぱいの50件**を取る。
+ *
+ * `chart=mostPopular` の1回は25件でも50件でも**消費は同じ1ユニット**なのに、
+ * 25件だと1ゲームあたり2〜3本しか集まらず、「何チャンネルが出しているか」で
+ * 見分けようとしても差が付かない(件数が少ないほど、たまたま並んだ1本で
+ * 順位が入れ替わる)。母数を広げるのがいちばん安い精度の上げ方。
+ */
 export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTubeVideoInfo[]> {
-  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=JP&videoCategoryId=${GAMING_CATEGORY_ID}&maxResults=25&key=${encodeURIComponent(apiKey)}`
+  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=JP&videoCategoryId=${GAMING_CATEGORY_ID}&maxResults=50&key=${encodeURIComponent(apiKey)}`
   const data = await fetchJson<ApiError & { items?: VideosListItem[] }>(
     url,
     undefined,
@@ -126,8 +134,52 @@ export async function fetchTrendingGamingVideos(apiKey: string): Promise<YouTube
     .filter(isPresent)
 }
 
-export async function searchVideos(apiKey: string, query: string): Promise<YouTubeVideoInfo[]> {
-  const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=viewCount&maxResults=15&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`
+/**
+ * `search.list` に載せられる絞り込み。
+ *
+ * **`publishedAfter` が要点。** 「いま伸びているか」を測るのに、期間を切らない検索は
+ * 使えない——`order=viewCount` は**何年前の動画でも**再生数が多ければ上に出すので、
+ * 5年前の名作がそのまま「今のトレンド」として返ってくる。
+ */
+export interface VideoSearchOptions {
+  /** この時刻より後に公開された動画だけ(RFC3339)。`Date` を渡してもよい */
+  publishedAfter?: Date | string
+  /** YouTube 側の粗い尺の区分。`short` は「4分未満」なので、正確な尺は呼び出し側で見直す */
+  videoDuration?: 'any' | 'short' | 'medium' | 'long'
+  order?: 'relevance' | 'viewCount' | 'date' | 'rating'
+  maxResults?: number
+  regionCode?: string
+  relevanceLanguage?: string
+}
+
+function toRfc3339(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : value
+}
+
+function buildSearchParams(query: string, apiKey: string, options: VideoSearchOptions): string {
+  const params = new URLSearchParams({
+    part: 'snippet',
+    type: 'video',
+    order: options.order ?? 'viewCount',
+    maxResults: String(options.maxResults ?? 15),
+    q: query,
+    key: apiKey
+  })
+  if (options.publishedAfter) params.set('publishedAfter', toRfc3339(options.publishedAfter))
+  if (options.videoDuration && options.videoDuration !== 'any') {
+    params.set('videoDuration', options.videoDuration)
+  }
+  if (options.regionCode) params.set('regionCode', options.regionCode)
+  if (options.relevanceLanguage) params.set('relevanceLanguage', options.relevanceLanguage)
+  return params.toString()
+}
+
+export async function searchVideos(
+  apiKey: string,
+  query: string,
+  options: VideoSearchOptions = {}
+): Promise<YouTubeVideoInfo[]> {
+  const searchUrl = `https://www.googleapis.com/youtube/v3/search?${buildSearchParams(query, apiKey, options)}`
   const data = await fetchJson<ApiError & { items?: SearchListItem[] }>(
     searchUrl,
     undefined,
@@ -146,4 +198,33 @@ export async function searchVideos(apiKey: string, query: string): Promise<YouTu
       )
     })
     .filter(isPresent)
+}
+
+/**
+ * 1つのゲームについて、**直近に公開されたショート**を取りに行く(裏取り用)。
+ *
+ * 急上昇のゲームカテゴリはほぼ長尺で、そこに名前が出たからといって
+ * **ショートでも回っている**とは限らない。「今日ショートを1本撮るなら」の答えを
+ * 出すには、そのゲームのショートが実際に何本あって、どれくらいの速さで回っているかを
+ * 別途数える必要がある。
+ *
+ * `search.list` は再生数を返さないので、`videos.list` で実数を取り直す
+ * (この2段構えは `searchVideos` と同じ)。尺の絞り込みは YouTube 側が「4分未満」と
+ * 粗いため、本当にショートかどうかは戻り値の `durationSeconds` で判断すること。
+ */
+export async function searchRecentShorts(
+  apiKey: string,
+  gameName: string,
+  windowDays: number,
+  maxResults = 10
+): Promise<YouTubeVideoInfo[]> {
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
+  return searchVideos(apiKey, gameName, {
+    publishedAfter: since,
+    videoDuration: 'short',
+    order: 'viewCount',
+    maxResults,
+    regionCode: 'JP',
+    relevanceLanguage: 'ja'
+  })
 }

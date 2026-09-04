@@ -11,6 +11,7 @@ const SNAP_ENABLED_KEY = 've-snap-enabled'
 const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible'
 const SHORT_NOTE_KEY = 've-short-note'
 const EXPORT_RESOLUTION_KEY = 've-export-resolution'
+const TREND_VERIFY_KEY = 've-trend-verify-enabled'
 
 const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
 
@@ -49,6 +50,13 @@ interface SettingsState {
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
+  /**
+   * ゲームリサーチで候補をYouTube検索まで裏取りするか。
+   * 精度が上がる代わりにYouTube APIの消費が増えるので、選んだ設定を次回まで残す
+   * (毎回チェックし直させると、上限を気にする人が結局使わなくなる)。
+   */
+  trendVerifyEnabled: boolean
+  setTrendVerifyEnabled: (enabled: boolean) => void
   envKeySources: EnvKeySources
   loadEnvApiKeys: () => Promise<void>
 }
@@ -107,6 +115,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShortNote: (note) => {
     localStorage.setItem(SHORT_NOTE_KEY, note)
     set({ shortNote: note })
+  },
+  // 既定は ON。既定を OFF にすると、一番効く裏取りが**使われないまま**
+  // 「精度が低い」と見られる
+  trendVerifyEnabled: localStorage.getItem(TREND_VERIFY_KEY) !== 'false',
+  setTrendVerifyEnabled: (enabled) => {
+    localStorage.setItem(TREND_VERIFY_KEY, String(enabled))
+    set({ trendVerifyEnabled: enabled })
   },
   envKeySources: {
     youtubeApiKey: false,
