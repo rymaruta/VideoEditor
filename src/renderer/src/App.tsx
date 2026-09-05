@@ -11,6 +11,7 @@ import { NarrationPanel } from './components/NarrationPanel'
 import { ThumbnailPanel } from './components/ThumbnailPanel'
 import { AudioLibraryPanel } from './components/AudioLibraryPanel'
 import { GameTrendPanel } from './components/GameTrendPanel'
+import { ChannelAnalysisPanel } from './components/ChannelAnalysisPanel'
 import { MetadataPanel } from './components/MetadataPanel'
 import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
@@ -33,6 +34,7 @@ import {
   ImageIcon,
   MusicIcon,
   TargetIcon,
+  ActivityIcon,
   MegaphoneIcon,
   StarIcon
 } from './components/icons'
@@ -47,6 +49,7 @@ type RightTab =
   | 'audio'
   | 'preset'
   | 'gametrend'
+  | 'channel'
   | 'youtube'
   | 'metadata'
   | 'export'
@@ -99,6 +102,12 @@ const PUBLISH_TABS: TabDef[] = [
     label: 'ゲームリサーチ',
     icon: TargetIcon,
     description: '今撮るべきゲームの調査(YouTube実データの集計+Gemini)'
+  },
+  {
+    id: 'channel',
+    label: 'チャンネル分析',
+    icon: ActivityIcon,
+    description: 'チャンネルの実測+外部ニュースから次の企画を出す'
   },
   {
     id: 'youtube',
@@ -495,6 +504,9 @@ function App(): React.JSX.Element {
             </div>
             <div className={`tab-pane ${tab === 'gametrend' ? 'active' : ''}`}>
               <GameTrendPanel />
+            </div>
+            <div className={`tab-pane ${tab === 'channel' ? 'active' : ''}`}>
+              <ChannelAnalysisPanel />
             </div>
             <div className={`tab-pane ${tab === 'youtube' ? 'active' : ''}`}>
               <YouTubeTrendPanel />

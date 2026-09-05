@@ -1,4 +1,5 @@
-import { fetchJson, parseModelJsonObject } from './httpJson'
+import { parseModelJsonObject } from './httpJson'
+import { generateContent, generateFromParts, type GeminiPart } from './gemini'
 import { searchRecentShorts, type YouTubeVideoInfo } from './youtube'
 import {
   aggregateGames,
@@ -67,7 +68,6 @@ export interface GameTrendAnalysis {
   recommendedGame: RecommendedGame | null
 }
 
-const GEMINI_MODEL = 'gemini-flash-latest'
 /** サムネイルを取りに行く上限。**実際に添付できた枚数とは別物**(下の buildComposePrompt 参照) */
 const THUMBNAIL_SAMPLE_COUNT = 5
 /** 裏取りをかける候補の数。YouTube の検索は1回100ユニット消費するのでむやみに増やさない */
@@ -77,34 +77,8 @@ export const VERIFY_WINDOW_DAYS = 14
 /** 文章を付けて画面に出す上限 */
 const MAX_RANKED_GAMES = 8
 
-interface GeminiResponse {
-  candidates?: { content?: { parts?: { text?: string }[] } }[]
-  error?: { message?: string }
-}
-
-type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } }
-
-async function callGemini(
-  apiKey: string,
-  parts: GeminiPart[],
-  expectJson: boolean
-): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
-  const data = await fetchJson<GeminiResponse>(
-    url,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        ...(expectJson ? { generationConfig: { responseMimeType: 'application/json' } } : {})
-      })
-    },
-    'Gemini API'
-  )
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!text || !text.trim()) throw new Error('Geminiからの応答が空でした')
-  return text
+async function askForJson(apiKey: string, parts: GeminiPart[]): Promise<string> {
+  return (await generateFromParts(apiKey, parts, { json: true })).text
 }
 
 /** 依頼文に載せる番号付きの一覧。**番号がそのまま突き合わせの鍵**になる */
@@ -428,7 +402,7 @@ export async function analyzeGamingTrends(
   const now = Number.isFinite(options.now) ? (options.now as number) : Date.now()
 
   onProgress?.({ phase: 'attribute' })
-  const attributionText = await callGemini(apiKey, [{ text: buildAttributionPrompt(videos) }], true)
+  const attributionText = await askForJson(apiKey, [{ text: buildAttributionPrompt(videos) }])
   const attributions = parseAttributions(attributionText)
   const stats = aggregateGames(videos, attributions, now)
 
@@ -462,7 +436,7 @@ export async function analyzeGamingTrends(
     { text: buildComposePrompt(videos, top, images.length, userInstruction) },
     ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.data } }))
   ]
-  const composed = parseModelJsonObject(await callGemini(apiKey, parts, true), 'Gemini API')
+  const composed = parseModelJsonObject(await askForJson(apiKey, parts), 'Gemini API')
   const texts = parseGameTexts(composed)
 
   const rankedGames: AnalyzedGame[] = top.map((g, i) => {
@@ -547,23 +521,13 @@ export async function askAboutTrends(
   // separate system instruction) so it stays attached to the conversation on every
   // follow-up question without being re-sent each time.
   const contents = [
-    { role: 'user', parts: [{ text: buildChatSystemPrompt(videos, analysis) }] },
-    { role: 'model', parts: [{ text: '承知しました。取得したデータの範囲で回答します。' }] },
-    ...history.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
-    { role: 'user', parts: [{ text: question }] }
-  ]
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
-  const data = await fetchJson<GeminiResponse>(
-    url,
+    { role: 'user' as const, parts: [{ text: buildChatSystemPrompt(videos, analysis) }] },
     {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents })
+      role: 'model' as const,
+      parts: [{ text: '承知しました。取得したデータの範囲で回答します。' }]
     },
-    'Gemini API'
-  )
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!text || !text.trim()) throw new Error('Geminiからの応答が空でした')
-  return text.trim()
+    ...history.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
+    { role: 'user' as const, parts: [{ text: question }] }
+  ]
+  return (await generateContent(apiKey, contents)).text
 }

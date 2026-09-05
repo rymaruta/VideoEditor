@@ -12,6 +12,9 @@ const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible'
 const SHORT_NOTE_KEY = 've-short-note'
 const EXPORT_RESOLUTION_KEY = 've-export-resolution'
 const TREND_VERIFY_KEY = 've-trend-verify-enabled'
+const CHANNEL_INPUT_KEY = 've-channel-input'
+const CHANNEL_RIVALS_KEY = 've-channel-rivals'
+const CHANNEL_RESEARCH_KEY = 've-channel-research-enabled'
 
 const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
 
@@ -57,6 +60,15 @@ interface SettingsState {
    */
   trendVerifyEnabled: boolean
   setTrendVerifyEnabled: (enabled: boolean) => void
+  /** チャンネル分析で調べる自分のチャンネル。毎回貼り直さずに済むよう残す */
+  channelInput: string
+  setChannelInput: (value: string) => void
+  /** 比較したいチャンネル(1行に1つ) */
+  channelRivals: string
+  setChannelRivals: (value: string) => void
+  /** チャンネル分析で外部ニュースまで調べるか */
+  channelResearchEnabled: boolean
+  setChannelResearchEnabled: (enabled: boolean) => void
   envKeySources: EnvKeySources
   loadEnvApiKeys: () => Promise<void>
 }
@@ -122,6 +134,21 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setTrendVerifyEnabled: (enabled) => {
     localStorage.setItem(TREND_VERIFY_KEY, String(enabled))
     set({ trendVerifyEnabled: enabled })
+  },
+  channelInput: localStorage.getItem(CHANNEL_INPUT_KEY) ?? '',
+  setChannelInput: (value) => {
+    localStorage.setItem(CHANNEL_INPUT_KEY, value)
+    set({ channelInput: value })
+  },
+  channelRivals: localStorage.getItem(CHANNEL_RIVALS_KEY) ?? '',
+  setChannelRivals: (value) => {
+    localStorage.setItem(CHANNEL_RIVALS_KEY, value)
+    set({ channelRivals: value })
+  },
+  channelResearchEnabled: localStorage.getItem(CHANNEL_RESEARCH_KEY) !== 'false',
+  setChannelResearchEnabled: (enabled) => {
+    localStorage.setItem(CHANNEL_RESEARCH_KEY, String(enabled))
+    set({ channelResearchEnabled: enabled })
   },
   envKeySources: {
     youtubeApiKey: false,

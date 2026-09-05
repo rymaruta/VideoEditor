@@ -3452,6 +3452,504 @@ h3 {
   padding: 6px 9px;
 }
 
+/* Channel analysis */
+.channel-panel {
+  overflow-y: auto;
+}
+
+.channel-panel .primary-button {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.channel-rivals-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 40px;
+}
+
+.channel-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 10px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.channel-toggle input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.channel-toggle .hint-text {
+  display: block;
+  margin-top: 3px;
+}
+
+.channel-toggle.compact {
+  margin: 6px 0;
+}
+
+.channel-identity {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 10px;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.channel-identity img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.channel-identity-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin-bottom: 3px;
+}
+
+.channel-identity-handle {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.channel-identity-meta {
+  font-size: 10.5px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.channel-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.channel-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 8px 9px;
+}
+
+.channel-stat-label {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.channel-stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.channel-stat-note {
+  font-size: 10px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* 取れない指標を隠さず先に出す。無い数字を推測で埋めないことの表明でもある */
+.channel-limitation {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.channel-limitation svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--danger);
+}
+
+.channel-block {
+  margin-top: 16px;
+}
+
+.channel-block > h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.channel-block h4 {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 8px 0 4px;
+}
+
+.channel-diagnosis > p {
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.7;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 9px 10px;
+}
+
+.channel-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.channel-bullets li {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.6;
+  padding: 5px 9px 5px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated-2);
+  position: relative;
+}
+
+.channel-bullets li::before {
+  position: absolute;
+  left: 8px;
+}
+
+.channel-bullets.good li::before {
+  content: '+';
+  color: var(--success);
+}
+
+.channel-bullets.bad li::before {
+  content: '−';
+  color: var(--danger);
+}
+
+.channel-idea-card {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 9px 10px;
+  margin-bottom: 8px;
+}
+
+.channel-idea-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.channel-idea-number {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-1);
+}
+
+.channel-format-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--bg-elevated-3);
+  color: var(--text-2);
+}
+
+.channel-format-badge.shorts {
+  color: #f5b942;
+}
+
+.channel-idea-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.channel-idea-outline,
+.channel-idea-why {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+
+.channel-idea-evidence {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 6px;
+}
+
+.channel-idea-news {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.channel-idea-news-chip {
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--bg-elevated-3);
+  border-radius: 4px;
+  padding: 2px 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-news-card {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.channel-news-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.channel-news-date {
+  font-size: 10px;
+  color: var(--accent-1);
+  flex-shrink: 0;
+}
+
+.channel-news-headline {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+
+.channel-news-why {
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin-top: 3px;
+}
+
+.channel-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.channel-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--bg-elevated-3);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-source-chip:hover {
+  color: var(--accent-1);
+  border-color: var(--accent-1);
+}
+
+.channel-research-raw {
+  margin-top: 6px;
+  padding: 8px 9px;
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  color: var(--text-2);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.channel-video-list {
+  margin-bottom: 10px;
+}
+
+.channel-video-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.channel-video-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.channel-video-title {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.channel-video-title:hover {
+  color: var(--accent-1);
+  text-decoration: underline;
+}
+
+.channel-video-meta {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.channel-table-scroll {
+  overflow-x: auto;
+}
+
+.channel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+
+.channel-table th,
+.channel-table td {
+  text-align: left;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.channel-table th {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.channel-table td {
+  color: var(--text-2);
+}
+
+.channel-table tr.primary td {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.channel-table td:first-child {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.channel-pattern-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.channel-pattern-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  background: var(--bg-elevated-2);
+  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+}
+
+.channel-pattern-label {
+  color: var(--text-1);
+}
+
+.channel-pattern-values {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.channel-weekdays {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.channel-weekday {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--text-3);
+  background: var(--bg-elevated-2);
+  border-radius: var(--radius-sm);
+  padding: 5px 2px;
+}
+
+.channel-weekday b {
+  font-size: 10.5px;
+  color: var(--text-1);
+}
+
+.channel-weekday.thin b {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.channel-chat .game-trend-chat-log {
+  margin-top: 8px;
+}
+
 /* Metadata / publish prep */
 .metadata-panel {
   overflow-y: auto;

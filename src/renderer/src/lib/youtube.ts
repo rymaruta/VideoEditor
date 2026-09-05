@@ -1,4 +1,5 @@
 import { asArray, fetchJson } from './httpJson'
+import type { ChannelRef } from './channelUrl'
 export interface YouTubeVideoInfo {
   id: string
   title: string
@@ -227,4 +228,254 @@ export async function searchRecentShorts(
     regionCode: 'JP',
     relevanceLanguage: 'ja'
   })
+}
+
+// ── チャンネル ─────────────────────────────────────────────────────────────
+
+export interface YouTubeChannelInfo {
+  id: string
+  title: string
+  /** `@handle`。設定していないチャンネルでは空 */
+  handle: string
+  description: string
+  thumbnailUrl: string
+  publishedAt: string
+  /** 非公開にしているチャンネルがある。0 と「非公開」は別物なので旗を分ける */
+  subscriberCount: number
+  subscriberCountHidden: boolean
+  viewCount: number
+  videoCount: number
+  country: string
+  /** 投稿動画がすべて入る再生リスト。ここから過去作を辿る */
+  uploadsPlaylistId: string
+  /** チャンネルの題材(Wikipedia のカテゴリURL)。外部調査の手がかりに使う */
+  topicCategories: string[]
+  keywords: string
+}
+
+interface ChannelListItem {
+  id?: string
+  snippet?: {
+    title?: string
+    description?: string
+    customUrl?: string
+    publishedAt?: string
+    country?: string
+    thumbnails?: ApiThumbnails
+  }
+  statistics?: {
+    viewCount?: string
+    subscriberCount?: string
+    hiddenSubscriberCount?: boolean
+    videoCount?: string
+  }
+  contentDetails?: { relatedPlaylists?: { uploads?: string } }
+  topicDetails?: { topicCategories?: string[] }
+  brandingSettings?: { channel?: { keywords?: string } }
+}
+
+const CHANNEL_PARTS = 'snippet,statistics,contentDetails,topicDetails,brandingSettings'
+
+function toChannelInfo(item: ChannelListItem | null | undefined): YouTubeChannelInfo | null {
+  if (!item?.id || !item.snippet) return null
+  const customUrl = typeof item.snippet.customUrl === 'string' ? item.snippet.customUrl : ''
+  return {
+    id: item.id,
+    title: item.snippet.title ?? '',
+    handle: customUrl.startsWith('@') ? customUrl : customUrl ? `@${customUrl}` : '',
+    description: item.snippet.description ?? '',
+    thumbnailUrl: pickThumbnail(item.snippet.thumbnails),
+    publishedAt: item.snippet.publishedAt ?? '',
+    subscriberCount: Number(item.statistics?.subscriberCount ?? 0),
+    subscriberCountHidden: item.statistics?.hiddenSubscriberCount === true,
+    viewCount: Number(item.statistics?.viewCount ?? 0),
+    videoCount: Number(item.statistics?.videoCount ?? 0),
+    country: item.snippet.country ?? '',
+    uploadsPlaylistId: item.contentDetails?.relatedPlaylists?.uploads ?? '',
+    topicCategories: Array.isArray(item.topicDetails?.topicCategories)
+      ? item.topicDetails.topicCategories.filter((c): c is string => typeof c === 'string')
+      : [],
+    keywords: item.brandingSettings?.channel?.keywords ?? ''
+  }
+}
+
+async function fetchChannelsBy(
+  apiKey: string,
+  param: string,
+  value: string
+): Promise<YouTubeChannelInfo[]> {
+  const params = new URLSearchParams({ part: CHANNEL_PARTS, key: apiKey })
+  params.set(param, value)
+  const data = await fetchJson<ApiError & { items?: ChannelListItem[] }>(
+    `https://www.googleapis.com/youtube/v3/channels?${params.toString()}`,
+    undefined,
+    'YouTube API'
+  )
+  return (asArray(data.items) as ChannelListItem[]).map(toChannelInfo).filter(isPresent)
+}
+
+/** 複数のチャンネルをまとめて引く(比較用。IDは50件までを1回で) */
+export async function fetchChannelsByIds(
+  apiKey: string,
+  ids: readonly string[]
+): Promise<YouTubeChannelInfo[]> {
+  const unique = [...new Set(ids.filter((id) => typeof id === 'string' && id !== ''))]
+  if (unique.length === 0) return []
+  const found: YouTubeChannelInfo[] = []
+  for (let i = 0; i < unique.length; i += 50) {
+    found.push(...(await fetchChannelsBy(apiKey, 'id', unique.slice(i, i + 50).join(','))))
+  }
+  return found
+}
+
+/** 動画IDからその投稿チャンネルのIDを引く */
+async function fetchChannelIdOfVideo(apiKey: string, videoId: string): Promise<string> {
+  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(apiKey)}`
+  const data = await fetchJson<ApiError & { items?: { snippet?: { channelId?: string } }[] }>(
+    url,
+    undefined,
+    'YouTube API'
+  )
+  const items = asArray(data.items) as { snippet?: { channelId?: string } }[]
+  return items[0]?.snippet?.channelId ?? ''
+}
+
+async function searchChannelId(apiKey: string, query: string): Promise<string> {
+  const params = new URLSearchParams({
+    part: 'snippet',
+    type: 'channel',
+    maxResults: '1',
+    q: query,
+    key: apiKey
+  })
+  const data = await fetchJson<
+    ApiError & { items?: { id?: { channelId?: string }; snippet?: { channelId?: string } }[] }
+  >(`https://www.googleapis.com/youtube/v3/search?${params.toString()}`, undefined, 'YouTube API')
+  const items = asArray(data.items) as {
+    id?: { channelId?: string }
+    snippet?: { channelId?: string }
+  }[]
+  return items[0]?.id?.channelId ?? items[0]?.snippet?.channelId ?? ''
+}
+
+/**
+ * 貼られた手がかりから実際のチャンネルへ辿り着く。
+ *
+ * **ハンドルは `forHandle` で1ユニットで引ける**が、旧 `/c/` 形式とただの語には
+ * 専用の引き方が無いので検索(100ユニット)に落ちる。落ちる経路をこの1箇所に
+ * まとめてあるので、消費が増える条件が読める。
+ * 見つからなければ、**何として解釈したかを添えて**日本語で投げる(「見つかりません」
+ * だけだと、URLの写し間違いなのか非公開なのか区別が付かない)。
+ */
+export async function resolveChannel(apiKey: string, ref: ChannelRef): Promise<YouTubeChannelInfo> {
+  let channels: YouTubeChannelInfo[] = []
+  switch (ref.kind) {
+    case 'channelId':
+      channels = await fetchChannelsBy(apiKey, 'id', ref.value)
+      break
+    case 'handle':
+      channels = await fetchChannelsBy(apiKey, 'forHandle', ref.value)
+      break
+    case 'legacyUser':
+      channels = await fetchChannelsBy(apiKey, 'forUsername', ref.value)
+      break
+    case 'videoId': {
+      const channelId = await fetchChannelIdOfVideo(apiKey, ref.value)
+      if (channelId) channels = await fetchChannelsBy(apiKey, 'id', channelId)
+      break
+    }
+    case 'customName':
+    case 'query': {
+      const channelId = await searchChannelId(apiKey, ref.value)
+      if (channelId) channels = await fetchChannelsBy(apiKey, 'id', channelId)
+      break
+    }
+  }
+  // ハンドルは表記が変わっていることがある。最後の手段として検索に回す
+  if (channels.length === 0 && (ref.kind === 'handle' || ref.kind === 'legacyUser')) {
+    const channelId = await searchChannelId(apiKey, ref.value.replace(/^@/, ''))
+    if (channelId) channels = await fetchChannelsBy(apiKey, 'id', channelId)
+  }
+  if (channels.length === 0) {
+    throw new Error(
+      `チャンネルが見つかりませんでした(${ref.kind === 'query' ? `検索語「${ref.value}」` : ref.value})。URLを貼り直すか、チャンネル名で検索してみてください。`
+    )
+  }
+  return channels[0]
+}
+
+interface PlaylistItemsResponse {
+  items?: { contentDetails?: { videoId?: string } }[]
+  nextPageToken?: string
+}
+
+/** 投稿動画のIDを新しい順に集める(1ページ50件・1ユニット) */
+async function fetchUploadVideoIds(
+  apiKey: string,
+  uploadsPlaylistId: string,
+  max: number
+): Promise<string[]> {
+  const ids: string[] = []
+  let pageToken = ''
+  while (ids.length < max) {
+    const params = new URLSearchParams({
+      part: 'contentDetails',
+      playlistId: uploadsPlaylistId,
+      maxResults: String(Math.min(50, max - ids.length)),
+      key: apiKey
+    })
+    if (pageToken) params.set('pageToken', pageToken)
+    const data = await fetchJson<ApiError & PlaylistItemsResponse>(
+      `https://www.googleapis.com/youtube/v3/playlistItems?${params.toString()}`,
+      undefined,
+      'YouTube API'
+    )
+    const page = (asArray(data.items) as { contentDetails?: { videoId?: string } }[])
+      .map((i) => i?.contentDetails?.videoId)
+      .filter((id): id is string => typeof id === 'string' && id !== '')
+    ids.push(...page)
+    pageToken = typeof data.nextPageToken === 'string' ? data.nextPageToken : ''
+    if (!pageToken || page.length === 0) break
+  }
+  return ids.slice(0, max)
+}
+
+/** IDの一覧から実数(再生数・尺・公開日時)を取り直す。50件ずつ・1回1ユニット */
+export async function fetchVideosByIds(
+  apiKey: string,
+  ids: readonly string[]
+): Promise<YouTubeVideoInfo[]> {
+  const videos: YouTubeVideoInfo[] = []
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50)
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${chunk.join(',')}&maxResults=50&key=${encodeURIComponent(apiKey)}`
+    const data = await fetchJson<ApiError & { items?: VideosListItem[] }>(
+      url,
+      undefined,
+      'YouTube API'
+    )
+    videos.push(
+      ...(asArray(data.items) as VideosListItem[])
+        .map((item) => toVideoInfo(item))
+        .filter(isPresent)
+    )
+  }
+  return videos
+}
+
+/**
+ * チャンネルの投稿動画を、実数付きで新しい順に取る。
+ *
+ * 消費は**動画100本でも4ユニット**(再生リスト2回 + 実数2回)。検索(1回100)と
+ * 違って桁違いに安いので、母数はけちらず取る——本数が少ないと「当たり動画」の
+ * 基準になる中央値そのものが揺れて、分析が回ごとに違うことを言い出す。
+ */
+export async function fetchChannelVideos(
+  apiKey: string,
+  channel: YouTubeChannelInfo,
+  max = 100
+): Promise<YouTubeVideoInfo[]> {
+  if (!channel.uploadsPlaylistId) return []
+  const ids = await fetchUploadVideoIds(apiKey, channel.uploadsPlaylistId, max)
+  return fetchVideosByIds(apiKey, ids)
 }
