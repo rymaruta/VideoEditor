@@ -21,6 +21,16 @@ export function sameProjectContent(a: Project, b: Project): boolean {
   return deepEqual(a, b)
 }
 
+/**
+ * 2つのクリップが **`id` を除いて**同じ中身か。
+ *
+ * 「何も切らなかった置き換え」を見分けるのに使う(理由は `applyClipReplacement`)。
+ * `id` は毎回 `uuid()` で振り直されるので、素朴に比べると**必ず「変わった」**になる。
+ */
+export function sameClipContentIgnoringId<T extends { id: string }>(a: T, b: T): boolean {
+  return deepEqual({ ...a, id: '' }, { ...b, id: '' })
+}
+
 function deepEqual(a: unknown, b: unknown): boolean {
   // 参照が同じなら中身も同じ。編集していない配列・クリップはここで打ち切れる
   // (NaN 同士も `Object.is` なら同じと数える。NaN は「値が変わった」ではない)。

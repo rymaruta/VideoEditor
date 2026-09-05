@@ -64,6 +64,11 @@ export function FillerWordCutModal({
   function handleApply(): void {
     if (!clip) return
     const cutRanges = ranges.filter((_, i) => checked.has(i))
+    // 1件も選ばれていないなら触らない(無音カットと同じ関門)。
+    if (cutRanges.length === 0) {
+      onClose()
+      return
+    }
     replaceClipRange(clipId, buildCutSegments(clip, cutRanges))
     onClose()
   }
@@ -104,7 +109,7 @@ export function FillerWordCutModal({
           <button
             className="primary-button"
             onClick={handleApply}
-            disabled={loading || ranges.length === 0}
+            disabled={loading || checked.size === 0}
           >
             選択した区間を削除
           </button>

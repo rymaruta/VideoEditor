@@ -716,3 +716,63 @@ describe('連続操作 — ランダムな手順でも壊れない', () => {
     }
   })
 })
+
+/**
+ * 【レグレッション】何も切らない置き換えで、参照が総取り替えになっていた (2026-09-15)
+ *
+ * フィラーカットは検出が1件でもあれば「選択した区間を削除」を押せてしまい、
+ * チェックを全部外して押すと**削る区間0件**のまま `replaceClipRange` まで届いた
+ * (文字起こしがクリップの尺の外まで返したときも同じ形になる)。
+ * `buildCutSegments` が返すのは「同じ範囲の断片1本」——中身は同じで `id` だけが新しい。
+ * 張り替えは分離音声の `id` を**必ず `uuid()` で作り直す**ので、中身が1バイトも
+ * 変わらないのに参照だけが入れ替わっていた。
+ *
+ * 修正前の実測(4秒のクリップ c1・分離音声 a2・追従テロップ o1・c1 を選択中):
+ * | | 修正前 | 修正後 |
+ * |---|---|---|
+ * | 本編クリップの id | `988ae3e2-…`(新規) | `c1` |
+ * | 分離音声の id | `6ad7a9bb-…`(新規) | `a2` |
+ * | `selectedClipId` が指す先 | **どのクリップでもない** | `c1` |
+ * | `past` | **1件** | 0件 |
+ * | `isDirty` | **true** | false |
+ */
+describe('【レグレッション】何も切らない置き換えは何もしない (2026-09-15)', () => {
+  beforeEach(() => {
+    reset()
+    // `reset()` は `isDirty` を触らないので、ここで明示的に落としてから測る
+    // (前のテストが立てた印を「この操作が立てた」と誤読しないため)。
+    S.setState({ selectedClipId: 'c1', multiSelectedClipIds: ['c1'], isDirty: false })
+  })
+
+  it('同じ内容のクリップ1本を渡しても、id も選択も履歴も動かない', () => {
+    const before = snap()
+    const c1 = st().project.clips.find((c) => c.id === 'c1')!
+    // `buildCutSegments(clip, [])` が返すのと同じ形(id だけ新しい同内容の1本)
+    st().replaceClipRange('c1', [{ ...c1, id: 'brand-new' }])
+
+    const s = st()
+    expect(s.project.clips.map((c) => c.id)).toEqual(['c1', 'c2', 'c3'])
+    expect(s.project.audioTracks[1].clips.map((c) => c.id)).toEqual(['a2'])
+    expect(s.project.textOverlays.find((o) => o.id === 'o1')?.linkedClipId).toBe('c1')
+    // 選択が「消えたID」を指していない = 選択が外れない
+    expect(s.project.clips.some((c) => c.id === s.selectedClipId)).toBe(true)
+    expect(s.past.length).toBe(0)
+    expect(s.isDirty).toBe(false)
+    expect(snap()).toBe(before)
+  })
+
+  it('本当に切る置き換えは、今までどおり断片へ分かれて履歴も1件積む', () => {
+    const c1 = st().project.clips.find((c) => c.id === 'c1')!
+    st().replaceClipRange('c1', [
+      { ...c1, id: 's1', outPoint: 1 },
+      { ...c1, id: 's2', inPoint: 3, transitionIn: undefined }
+    ])
+
+    const s = st()
+    expect(s.project.clips.map((c) => c.id)).toEqual(['s1', 's2', 'c2', 'c3'])
+    // 分離音声も断片ぶんに割り直される(古い a2 は残らない)
+    expect(s.project.audioTracks[1].clips.map((c) => c.linkedClipId)).toEqual(['s1', 's2'])
+    expect(s.past.length).toBe(1)
+    expect(brokenInvariant(s.project)).toBeNull()
+  })
+})

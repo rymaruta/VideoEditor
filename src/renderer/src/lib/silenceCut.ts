@@ -55,6 +55,18 @@ export function buildCutSegments(clip: Clip, cutRanges: SilenceRange[]): Clip[] 
     })
   }
   if (segments.length === 0) return [{ ...clip }]
+  // **1つも削れなかったなら、クリップは作り直さない。** 区間が1つも選ばれていない・
+  // 選ばれた区間が全部クリップの外だった(文字起こしは尺の外まで返すことがある)のどちらでも
+  // ここへ来る。新しい `id` を振った「同じ範囲の断片1本」を返すと、置き換え側が
+  // 分離音声のIDまで作り直し、**中身は同じなのに参照だけが総取り替え**になる。
+  // 全部が削除対象だった上の枝が丸ごと残すのと同じ扱いにする。
+  if (
+    segments.length === 1 &&
+    segments[0].inPoint === clip.inPoint &&
+    segments[0].outPoint === clip.outPoint
+  ) {
+    return [{ ...clip }]
+  }
   segments[0] = { ...segments[0], transitionIn: clip.transitionIn }
   return segments
 }

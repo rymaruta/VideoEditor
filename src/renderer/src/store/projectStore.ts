@@ -1,6 +1,6 @@
 import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
-import { sameProjectContent } from '../lib/projectEquality'
+import { sameClipContentIgnoringId, sameProjectContent } from '../lib/projectEquality'
 import {
   audioClipDuration,
   buildTimedClips,
@@ -2978,6 +2978,16 @@ function applyClipReplacement(project: Project, clipId: string, newClips: Clip[]
   const idx = project.clips.findIndex((c) => c.id === clipId)
   if (idx === -1) return project
   const original = project.clips[idx]
+  // **何も切らなかった置き換えは、何もしない。** 区間を1つも選ばずに適用した・
+  // 選んだ区間が全部クリップの外だった場合、届く `newClips` は「同じ範囲のクリップ1本」
+  // ——中身は同じで `id` だけが新しい。そのまま流すと下の張り替えが**分離音声のIDを
+  // 必ず `uuid()` で作り直し**、追従テロップの `linkOffset` も計算し直すので、
+  // 中身は1バイトも変わらないのに**参照だけが総取り替え**になる。
+  // (実測: 4秒のクリップに区間を1つも選ばずに適用すると、本編クリップも分離音声も
+  //  新しいIDになり、`selectedClipId` は消えたIDを指したまま = **選択が外れる**。
+  //  履歴も1件積まれて `isDirty` が立つので、取り消しても画面は何も変わらないのに
+  //  未保存の印と自動保存だけが走り出す)
+  if (newClips.length === 1 && sameClipContentIgnoringId(original, newClips[0])) return project
   const clips = [...project.clips]
   clips.splice(idx, 1, ...newClips)
   return relinkForReplacedClip({ ...project, clips }, original, newClips)
