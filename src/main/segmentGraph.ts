@@ -1,6 +1,7 @@
 import type { MediaAsset } from '@shared/types'
 import type { AudioItem, MediaItem, Sequence, VideoItem } from '@shared/sequence/types'
 import type { Segment } from '@shared/sequence/segmentPlan'
+import { telopConcatList, type TelopLayerPayload } from '@shared/telop/layer'
 import { audioClipGain } from '@shared/audioGain'
 import { normalizeFades } from '@shared/audioFade'
 import { duckingFilterArgs } from '@shared/ducking'
@@ -27,11 +28,14 @@ import {
  */
 
 export interface GraphInput {
+  /** `concatList` があるときは使わない(一覧のファイルを書き出し側が作る) */
   path: string
   /** 素材の何秒目から読むか */
   seek: number
   /** 何秒ぶん読むか */
   duration: number
+  /** concat demuxer で読む一覧の中身(テロップの層)。あるときは `-ss/-t` を付けない */
+  concatList?: string
 }
 
 export interface SegmentGraph {
@@ -49,6 +53,11 @@ export interface GraphContext {
   audioChannels?: ReadonlyMap<string, number>
   /** シーケンス全体のテロップを書いた ASS(時刻はシーケンスの絶対秒) */
   assPath?: string
+  /**
+   * 画面のプロセスが共通テロップレンダラで描いた、テロップの層。
+   * **あるときは ASS より優先する**(画面と同じ絵になるのはこちら)
+   */
+  telopLayer?: { runs: TelopLayerPayload['runs']; imagePaths: readonly string[] }
 }
 
 /** ffmpeg に渡すフレームレートの表記(29.97 は `30000/1001`) */
@@ -285,13 +294,29 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
     }
   }
 
-  // --- テロップ: シーケンス全体の ASS を、区間の頭へ時刻をずらして焼く ---
+  // --- テロップ(共通レンダラの層): 区間の分だけ画像を並べた一覧を1本の入力として重ねる ---
+  const layerList = ctx.telopLayer
+    ? telopConcatList(ctx.telopLayer.runs, ctx.telopLayer.imagePaths, segStart, segEnd, seq.fps)
+    : null
+  if (layerList) {
+    inputs.push({ path: '', seek: 0, duration: 0, concatList: layerList })
+    const idx = inputs.length - 1
+    const layer = newLabel('l')
+    const out = newLabel('t')
+    parts.push(
+      `[${idx}:v]fps=${fps},format=rgba,trim=end_frame=${segFrames},settb=${tb},setpts=N[${layer}]`
+    )
+    parts.push(`[${cur}][${layer}]overlay=0:0[${out}]`)
+    cur = out
+  }
+
+  // --- テロップ(従来の ASS): シーケンス全体の ASS を、区間の頭へ時刻をずらして焼く ---
   const hasTelop = seq.videoTracks.some(
     (t) =>
       !t.hidden &&
       t.items.some((i: VideoItem) => i.kind === 'telop' && intersects(i, segStart, segEnd))
   )
-  if (hasTelop && ctx.assPath) {
+  if (!ctx.telopLayer && hasTelop && ctx.assPath) {
     const out = newLabel('t')
     parts.push(
       `[${cur}]setpts=PTS+${num(sec(segStart))}/TB,subtitles=filename='${escapeFilterPath(ctx.assPath)}',` +

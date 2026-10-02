@@ -57,6 +57,7 @@ import {
   StepForwardIcon
 } from './icons'
 
+import { TelopCanvasLayer } from './TelopCanvasLayer'
 import { ShortsUiMockup } from './ShortsUiMockup'
 import { shortsSafeAreaInset } from '../lib/shortsSafeArea'
 import type {
@@ -839,6 +840,8 @@ export function PreviewPlayer(): React.JSX.Element {
   const seekTo = useProjectStore((s) => s.seekTo)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const exportResolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
+  // 長尺向けの書き出しを選んでいるときは、テロップを書き出しと同じ共通レンダラで描く
+  const drawsTelopsOnCanvas = useSettingsStore((s) => s.exportEngine === 'segmented')
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const frameRef = useRef<HTMLDivElement>(null)
@@ -1343,6 +1346,25 @@ export function PreviewPlayer(): React.JSX.Element {
                   )
                 })
               )}
+            {drawsTelopsOnCanvas && (
+              <TelopCanvasLayer
+                overlays={activeOverlays.map((o) =>
+                  overlayDrag?.id === o.id
+                    ? {
+                        ...o,
+                        style: {
+                          ...o.style,
+                          customPosition: { x: overlayDrag.x, y: overlayDrag.y }
+                        }
+                      }
+                    : o
+                )}
+                time={playheadTime}
+                frameWidth={frameWidth}
+                frameHeight={frameHeight}
+                aspectRatio={project.aspectRatio}
+              />
+            )}
             {activeOverlays.map((o) => {
               const livePos = overlayDrag?.id === o.id ? overlayDrag : o.style.customPosition
               const positionStyle: CSSProperties = livePos
@@ -1391,7 +1413,7 @@ export function PreviewPlayer(): React.JSX.Element {
               return (
                 <div
                   key={o.id}
-                  className={`overlay-text ${livePos ? '' : `overlay-${o.style.position}`} anim-${o.style.animation}`}
+                  className={`overlay-text ${livePos ? '' : `overlay-${o.style.position}`} anim-${o.style.animation}${drawsTelopsOnCanvas ? ' overlay-hitbox-only' : ''}`}
                   style={{ ...overlayPreviewStyle(o.style, overlayScale), ...positionStyle }}
                   onMouseDown={(e) => {
                     e.preventDefault()

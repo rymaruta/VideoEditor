@@ -40,6 +40,7 @@ import { loadEnvFile, getEnvApiKeys } from './envConfig'
 import { fitWindowStateToDisplays, type WindowState } from './windowState'
 import { exportSequenceSegmented } from './segmentRenderer'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
+import type { TelopLayerPayload } from '@shared/telop/layer'
 import type {
   AspectRatio,
   ExportEngine,
@@ -303,6 +304,8 @@ function registerWindowScopedIpcHandlers(): void {
         outputPath: string
         loudnessNormalization?: boolean
         engine?: ExportEngine
+        /** 長尺向けの書き出しで使う、画面のプロセスが描いたテロップの層 */
+        telopLayer?: TelopLayerPayload | null
       }
     ) => {
       const onProgress = (percent: number, stage: string): void => {
@@ -320,6 +323,7 @@ function registerWindowScopedIpcHandlers(): void {
             outputPath: payload.outputPath,
             quality: payload.quality,
             loudnessNormalization: payload.loudnessNormalization,
+            telopLayer: payload.telopLayer,
             onProgress,
             signal
           })

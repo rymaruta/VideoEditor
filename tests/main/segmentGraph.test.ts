@@ -247,6 +247,42 @@ describe('buildSegmentVideoGraph — 区間の映像', () => {
     expect(buildSegmentVideoGraph(ctx, seg(130, 200)).filter).not.toContain('subtitles')
   })
 
+  it('共通レンダラのテロップの層があるときは、ASS ではなく画像の一覧を1本の入力として重ねる', () => {
+    const telop: TelopItem = {
+      kind: 'telop',
+      id: 't',
+      startFrame: 100,
+      durationFrames: 30,
+      origin: 'auto',
+      text: 'あ',
+      style: defaultTextStyle()
+    }
+    const s = sequence({
+      videoTracks: [
+        { id: 'v1', name: 'V1', hidden: false, items: [media('m', 0, 300)] },
+        { id: 'tl', name: 'T', hidden: false, items: [telop] }
+      ]
+    })
+    const ctx = ctxOf(s, {
+      assPath: '/tmp/x.ass',
+      telopLayer: {
+        runs: [{ startFrame: 100, endFrame: 130, image: 1 }],
+        imagePaths: ['/w/0.png', '/w/1.png']
+      }
+    })
+    const g = buildSegmentVideoGraph(ctx, seg(90, 200))
+    expect(g.filter).not.toContain('subtitles')
+    const layerInput = g.inputs.find((i) => i.concatList !== undefined)!
+    expect(layerInput.concatList).toContain("file '/w/1.png'")
+    expect(g.filter).toContain('fps=30,format=rgba,trim=end_frame=110')
+    expect(g.filter).toMatch(/overlay=0:0\[t\d+\]/)
+    expectWellFormed(g.filter)
+    // 層に区間が掛からなければ入力も足さない
+    expect(
+      buildSegmentVideoGraph(ctx, seg(0, 90)).inputs.some((i) => i.concatList !== undefined)
+    ).toBe(false)
+  })
+
   it('【不変条件】ランダムな企画をどう区切っても、グラフの形が壊れず、入力は区間に掛かる分だけ', () => {
     const rnd = seeded(5150)
     for (let n = 0; n < 150; n++) {

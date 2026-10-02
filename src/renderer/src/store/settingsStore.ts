@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
-import type { ResolutionHeight } from '@shared/types'
+import type { ExportEngine, ResolutionHeight } from '@shared/types'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
@@ -11,6 +11,7 @@ const SNAP_ENABLED_KEY = 've-snap-enabled'
 const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible'
 const SHORT_NOTE_KEY = 've-short-note'
 const EXPORT_RESOLUTION_KEY = 've-export-resolution'
+const EXPORT_ENGINE_KEY = 've-export-engine'
 
 const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
 
@@ -19,6 +20,14 @@ const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
 function readExportResolution(): ResolutionHeight {
   const n = Number(localStorage.getItem(EXPORT_RESOLUTION_KEY))
   return RESOLUTION_HEIGHTS.includes(n as ResolutionHeight) ? (n as ResolutionHeight) : 1080
+}
+
+function readExportEngine(): ExportEngine {
+  try {
+    return localStorage.getItem(EXPORT_ENGINE_KEY) === 'segmented' ? 'segmented' : 'standard'
+  } catch {
+    return 'standard'
+  }
 }
 
 export interface EnvKeySources {
@@ -46,6 +55,12 @@ interface SettingsState {
   /** 書き出しの解像度。プレビューのテロップ換算にも使うので画面をまたいで共有する */
   exportResolutionHeight: ResolutionHeight
   setExportResolutionHeight: (height: ResolutionHeight) => void
+  /**
+   * 書き出しの方式。プレビューのテロップの描き方もこれに合わせる
+   * (長尺向けは共通テロップレンダラで書き出すので、画面も同じ関数で描く)
+   */
+  exportEngine: ExportEngine
+  setExportEngine: (engine: ExportEngine) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -102,6 +117,15 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setExportResolutionHeight: (height) => {
     localStorage.setItem(EXPORT_RESOLUTION_KEY, String(height))
     set({ exportResolutionHeight: height })
+  },
+  exportEngine: readExportEngine(),
+  setExportEngine: (engine) => {
+    try {
+      localStorage.setItem(EXPORT_ENGINE_KEY, engine)
+    } catch {
+      // 保存できなくても今回の起動の間は効く
+    }
+    set({ exportEngine: engine })
   },
   shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {

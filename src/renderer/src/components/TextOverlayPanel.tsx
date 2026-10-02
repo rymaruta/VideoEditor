@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
 import { getTotalDuration } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
 import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } from '@shared/types'
@@ -33,6 +34,8 @@ export function TextOverlayPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
+  // 外側の縁・グラデーションは共通テロップレンダラ(長尺向けの書き出し)でだけ描ける
+  const drawsTelopsOnCanvas = useSettingsStore((s) => s.exportEngine === 'segmented')
   const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
   const shiftAllTextOverlays = useProjectStore((s) => s.shiftAllTextOverlays)
   const setTextOverlayLink = useProjectStore((s) => s.setTextOverlayLink)
@@ -488,6 +491,80 @@ export function TextOverlayPanel(): React.JSX.Element {
                   </>
                 )}
               </div>
+              <div className="overlay-item-row">
+                <label
+                  className="checkbox-label"
+                  title="縁取りのさらに外側にもう1本縁を付けます(バラエティの二重縁取り)"
+                >
+                  <input
+                    type="checkbox"
+                    checked={(o.style.extraStrokes?.length ?? 0) > 0}
+                    onChange={(e) =>
+                      patchStyle(o.id, o.style, {
+                        extraStrokes: e.target.checked
+                          ? [{ color: '#ffffff', width: 6 }]
+                          : undefined
+                      })
+                    }
+                  />
+                  外側の縁
+                </label>
+                {o.style.extraStrokes?.[0] && (
+                  <>
+                    <input
+                      type="color"
+                      value={o.style.extraStrokes[0].color}
+                      onChange={(e) =>
+                        patchStyle(o.id, o.style, {
+                          extraStrokes: [{ ...o.style.extraStrokes![0], color: e.target.value }]
+                        })
+                      }
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={o.style.extraStrokes[0].width}
+                      onChange={(e) =>
+                        patchStyle(o.id, o.style, {
+                          extraStrokes: [
+                            { ...o.style.extraStrokes![0], width: Number(e.target.value) }
+                          ]
+                        })
+                      }
+                    />
+                  </>
+                )}
+                <label
+                  className="checkbox-label"
+                  title="文字の色を上から下へのグラデーションにします"
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(o.style.gradientColor)}
+                    onChange={(e) =>
+                      patchStyle(o.id, o.style, {
+                        gradientColor: e.target.checked ? '#ffcc00' : undefined
+                      })
+                    }
+                  />
+                  グラデーション
+                </label>
+                {o.style.gradientColor && (
+                  <input
+                    type="color"
+                    value={o.style.gradientColor}
+                    onChange={(e) => patchStyle(o.id, o.style, { gradientColor: e.target.value })}
+                  />
+                )}
+              </div>
+              {!drawsTelopsOnCanvas &&
+                ((o.style.extraStrokes?.length ?? 0) > 0 || Boolean(o.style.gradientColor)) && (
+                  <p className="hint-text">
+                    外側の縁・グラデーションは、書き出し方式が「長尺向け」のときに表示・書き出しされます
+                    (書き出しタブで切り替えられます)。
+                  </p>
+                )}
               <div className="overlay-item-row">
                 <label className="checkbox-label">
                   <input

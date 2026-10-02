@@ -11,6 +11,7 @@ import {
   type SegmentPlanOptions
 } from '@shared/sequence/segmentPlan'
 import { textCanvasSize } from '@shared/resolution'
+import type { TelopLayerPayload } from '@shared/telop/layer'
 import { buildAssContent } from './assSubtitle'
 import { describeFfmpegExit } from './ffmpegError'
 import {
@@ -58,6 +59,11 @@ export interface SegmentedExportOptions {
   encoder?: VideoEncoder | 'auto'
   /** 同時に走らせる ffmpeg の数。既定はエンコーダと CPU 数から決める */
   maxParallel?: number
+  /**
+   * 画面のプロセスが共通テロップレンダラで描いたテロップの層。あればこちらで焼き、
+   * 無ければ従来の ASS で焼く
+   */
+  telopLayer?: TelopLayerPayload | null
   /** 区間の長さ。既定は `defaultSegmentOptions` */
   segmentOptions?: SegmentPlanOptions
   signal?: AbortSignal
@@ -128,11 +134,17 @@ const DECODER_THREADS = 1
 function graphArgs(graph: SegmentGraph, graphPath: string): string[] {
   writeFileSync(graphPath, graph.filter, 'utf-8')
   const args: string[] = []
-  for (const input of graph.inputs) {
+  graph.inputs.forEach((input, i) => {
+    if (input.concatList !== undefined) {
+      const listPath = `${graphPath}.in${i}.ffconcat`
+      writeFileSync(listPath, input.concatList, 'utf-8')
+      args.push('-f', 'concat', '-safe', '0', '-i', listPath)
+      return
+    }
     args.push('-threads', String(DECODER_THREADS))
     args.push('-ss', String(Math.max(0, input.seek)), '-t', String(Math.max(0.001, input.duration)))
     args.push('-i', input.path)
-  }
+  })
   // 理由は v1 の書き出しと同じ(コマンドラインの長さの上限・空白を含むパス)
   args.push('-filter_complex_script', graphPath, '-map', graph.outLabel)
   return args
@@ -305,9 +317,23 @@ export async function exportSequenceSegmented(
       })
     )
 
-    // テロップはシーケンス全体で1つの ASS にし、各区間は時刻をずらして使う
+    // テロップ: 画面のプロセスが描いた層があればそれを使う(画面と同じ絵になる)。
+    // 無ければシーケンス全体で1つの ASS にし、各区間は時刻をずらして使う
     let assPath: string | undefined
-    const overlays = telopsAsOverlays(seq)
+    let telopLayer: GraphContext['telopLayer']
+    if (options.telopLayer && options.telopLayer.images.length > 0) {
+      const layer = options.telopLayer
+      if (layer.width !== seq.width || layer.height !== seq.height) {
+        throw new Error('テロップの画像の大きさが書き出しの解像度と合いません')
+      }
+      const imagePaths = layer.images.map((bytes, i) => {
+        const p = join(work, `telop_${String(i).padStart(6, '0')}.png`)
+        writeFileSync(p, bytes)
+        return p
+      })
+      telopLayer = { runs: layer.runs, imagePaths }
+    }
+    const overlays = telopLayer ? [] : telopsAsOverlays(seq)
     if (overlays.length > 0) {
       const wideEmByFont = await measureWideAdvances(ffmpegPath, overlays)
       const canvas = textCanvasSize(seq.width >= seq.height ? '16:9' : '9:16')
@@ -315,7 +341,7 @@ export async function exportSequenceSegmented(
       writeFileSync(assPath, buildAssContent(overlays, canvas.w, canvas.h, wideEmByFont), 'utf-8')
     }
 
-    const ctx: GraphContext = { sequence: seq, assetsById, audioChannels, assPath }
+    const ctx: GraphContext = { sequence: seq, assetsById, audioChannels, assPath, telopLayer }
     const encodeArgs = videoEncodeArgs(encoder, quality, fps)
     const threadsPerJob =
       encoder === 'libx264' ? Math.max(1, Math.floor(cpus().length / parallel)) : 0

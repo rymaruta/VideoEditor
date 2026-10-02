@@ -16,6 +16,8 @@ import { formatIpcError } from '../lib/ipcError'
 import { safeFileBaseName } from '@shared/fileName'
 import type { AspectRatio, ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
 import type { ExportPreset } from '../store/presetStore'
+import type { TelopLayerPayload } from '@shared/telop/layer'
+import { prepareTelopLayerForExport } from '../lib/telopRaster'
 
 interface BatchJob {
   id: string
@@ -74,7 +76,9 @@ export function ExportPanel(): React.JSX.Element {
   const setResolutionHeight = useSettingsStore((s) => s.setExportResolutionHeight)
   const [quality, setQuality] = useState<QualityPreset>('standard')
   const [loudnessNormalization, setLoudnessNormalization] = useState(true)
-  const [engine, setEngine] = useState<ExportEngine>('standard')
+  // プレビューのテロップの描き方もこれに合わせるので、画面をまたいで共有する
+  const engine = useSettingsStore((s) => s.exportEngine)
+  const setEngine = useSettingsStore((s) => s.setExportEngine)
   const [progress, setProgress] = useState<{ percent: number; stage: string } | null>(null)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -125,6 +129,20 @@ export function ExportPanel(): React.JSX.Element {
     }
   }
 
+  /**
+   * 長尺向けの書き出しでは、テロップを**画面と同じ描画関数**で先に画像にしておく
+   * (共通テロップレンダラ。標準の書き出しは従来どおり ASS で焼く)。
+   */
+  async function telopLayerFor(
+    aspect: AspectRatio,
+    height: ResolutionHeight
+  ): Promise<TelopLayerPayload | null> {
+    if (engine !== 'segmented') return null
+    return prepareTelopLayerForExport(project, aspect, height, (done, total) =>
+      setProgress({ percent: 0, stage: `テロップを描画中(${done}/${total})` })
+    )
+  }
+
   async function handleExport(): Promise<void> {
     setError(null)
     setDoneMessage(null)
@@ -144,6 +162,7 @@ export function ExportPanel(): React.JSX.Element {
     setExporting(true)
     setProgress({ percent: 0, stage: '準備中' })
     try {
+      const telopLayer = await telopLayerFor(project.aspectRatio, resolutionHeight)
       await window.api.exportProject({
         project,
         aspectRatio: project.aspectRatio,
@@ -151,7 +170,8 @@ export function ExportPanel(): React.JSX.Element {
         quality,
         outputPath,
         loudnessNormalization,
-        engine
+        engine,
+        telopLayer
       })
       setDoneMessage(`書き出しが完了しました: ${outputPath}`)
       setDoneFilePath(outputPath)
@@ -246,6 +266,7 @@ export function ExportPanel(): React.JSX.Element {
       setProgress({ percent: 0, stage: '準備中' })
       try {
         const outputPath = `${folder}/${jobFileName(project.name, job)}`
+        const telopLayer = await telopLayerFor(job.aspectRatio, job.resolutionHeight)
         await window.api.exportProject({
           project,
           aspectRatio: job.aspectRatio,
@@ -253,7 +274,8 @@ export function ExportPanel(): React.JSX.Element {
           quality: job.quality,
           outputPath,
           loudnessNormalization,
-          engine
+          engine,
+          telopLayer
         })
         setBatchStatus((prev) => ({ ...prev, [job.id]: 'done' }))
       } catch (e) {
@@ -333,7 +355,8 @@ export function ExportPanel(): React.JSX.Element {
         <p className="hint-text">
           長尺向けは、動画を数十秒ずつの区間に分けて同時に書き出し、最後につなぎます。
           カットの多い長い動画でもメモリを使いすぎず、NVIDIA の GPU があれば自動で使います
-          (使っているかは進捗の表示に出ます)。
+          (使っているかは進捗の表示に出ます)。テロップは画面と同じ描き方で書き出すので、
+          二重の縁取り・グラデーションも使えます(プレビューもこの描き方に切り替わります)。
         </p>
       </div>
       <div className="export-field">

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
+import type { TelopLayerPayload } from '@shared/telop/layer'
 import type {
   AspectRatio,
   BpmAnalysisResult,
@@ -148,6 +149,7 @@ const api = {
     outputPath: string
     loudnessNormalization?: boolean
     engine?: ExportEngine
+    telopLayer?: TelopLayerPayload | null
   }): Promise<{ success: boolean }> => ipcRenderer.invoke(IPC.exportProject, payload),
   onExportProgress: (callback: (progress: ExportProgress) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, progress: ExportProgress): void =>

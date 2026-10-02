@@ -72,6 +72,19 @@ export interface TextStyle {
   animation: TextAnimation
   wordHighlight: boolean
   highlightColor: string
+  /**
+   * 縁取りのさらに外側に重ねる縁(内側から順)。バラエティの「白文字・色縁・外側に白縁」のような
+   * 二重・三重の縁取りに使う。幅はそれぞれの縁の太さ(キャンバス上の px)。
+   * 共通テロップレンダラ(`@shared/telop/render`)で描く。従来の書き出し(ASS)には出ない。
+   */
+  extraStrokes?: TelopStroke[]
+  /** 指定すると文字の塗りを上(`color`)→下(この色)の縦グラデーションにする */
+  gradientColor?: string
+}
+
+export interface TelopStroke {
+  color: string
+  width: number
 }
 
 export interface TranscriptWord {

@@ -1,4 +1,4 @@
-import type { FontFamily, TextAnimation, TextPosition, TextStyle } from './types'
+import type { FontFamily, TelopStroke, TextAnimation, TextPosition, TextStyle } from './types'
 
 /**
  * テロップの上下の余白(**枠の高さ**に対する比)。
@@ -293,6 +293,24 @@ export function normalizeTextStyle(raw: unknown): TextStyle {
     letterSpacing: asFinite(raw.letterSpacing, base.letterSpacing),
     animation: asOneOf(raw.animation, TEXT_ANIMATIONS, base.animation),
     wordHighlight: asBoolean(raw.wordHighlight, base.wordHighlight),
-    highlightColor: asNonEmptyString(raw.highlightColor, base.highlightColor)
+    highlightColor: asNonEmptyString(raw.highlightColor, base.highlightColor),
+    extraStrokes: normalizeStrokes(raw.extraStrokes),
+    gradientColor:
+      typeof raw.gradientColor === 'string' && raw.gradientColor.length > 0
+        ? raw.gradientColor
+        : undefined
   }
+}
+
+/** 外側の縁の一覧。壊れた要素は捨て、幅は 0 以上の有限値にする。空なら undefined */
+function normalizeStrokes(raw: unknown): TelopStroke[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: TelopStroke[] = []
+  for (const s of raw) {
+    if (!isRecord(s)) continue
+    const width = asNonNegative(s.width, 0)
+    if (width <= 0) continue
+    out.push({ color: asNonEmptyString(s.color, '#ffffff'), width })
+  }
+  return out.length > 0 ? out : undefined
 }
