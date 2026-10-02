@@ -5,6 +5,7 @@ import type {
   AspectRatio,
   BpmAnalysisResult,
   EnvApiKeys,
+  ExportEngine,
   ExportProgress,
   HighlightCandidate,
   HighlightSensitivity,
@@ -146,6 +147,7 @@ const api = {
     quality: QualityPreset
     outputPath: string
     loudnessNormalization?: boolean
+    engine?: ExportEngine
   }): Promise<{ success: boolean }> => ipcRenderer.invoke(IPC.exportProject, payload),
   onExportProgress: (callback: (progress: ExportProgress) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, progress: ExportProgress): void =>

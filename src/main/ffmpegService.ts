@@ -606,8 +606,38 @@ async function probeUsedAudioChannels(project: Project): Promise<Map<string, num
   return map
 }
 
+/** 別の方式の書き出し(`runExclusiveExport`)が走っているときの中断の入口 */
+let externalExportAbort: AbortController | null = null
+
+/**
+ * 従来の書き出しと**同じ排他・同じキャンセル**の下で、別の方式の書き出しを走らせる。
+ * 進捗の通知先とキャンセルのボタンは1つしかないので、方式が違っても同時には走らせない。
+ * キャンセルされたら `EXPORT_CANCELED`(画面が文字列で見分けている目印)で失敗させる。
+ */
+export async function runExclusiveExport<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (exportInProgress) {
+    throw new Error('別の書き出しが進行中です。完了またはキャンセルしてから再度お試しください')
+  }
+  exportInProgress = true
+  const controller = new AbortController()
+  externalExportAbort = controller
+  try {
+    return await run(controller.signal)
+  } catch (e) {
+    if (controller.signal.aborted) throw new Error('EXPORT_CANCELED')
+    throw e
+  } finally {
+    externalExportAbort = null
+    exportInProgress = false
+  }
+}
+
 export function cancelExport(): void {
   if (!exportInProgress) return
+  if (externalExportAbort) {
+    externalExportAbort.abort()
+    return
+  }
   // Also covers the window before .run() assigns currentExportCommand: the flag
   // makes the in-flight job abort as soon as its command handle exists.
   exportCancelRequested = true

@@ -14,7 +14,7 @@ import {
 } from './icons'
 import { formatIpcError } from '../lib/ipcError'
 import { safeFileBaseName } from '@shared/fileName'
-import type { AspectRatio, QualityPreset, ResolutionHeight } from '@shared/types'
+import type { AspectRatio, ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
 import type { ExportPreset } from '../store/presetStore'
 
 interface BatchJob {
@@ -74,6 +74,7 @@ export function ExportPanel(): React.JSX.Element {
   const setResolutionHeight = useSettingsStore((s) => s.setExportResolutionHeight)
   const [quality, setQuality] = useState<QualityPreset>('standard')
   const [loudnessNormalization, setLoudnessNormalization] = useState(true)
+  const [engine, setEngine] = useState<ExportEngine>('standard')
   const [progress, setProgress] = useState<{ percent: number; stage: string } | null>(null)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -149,7 +150,8 @@ export function ExportPanel(): React.JSX.Element {
         resolutionHeight,
         quality,
         outputPath,
-        loudnessNormalization
+        loudnessNormalization,
+        engine
       })
       setDoneMessage(`書き出しが完了しました: ${outputPath}`)
       setDoneFilePath(outputPath)
@@ -250,7 +252,8 @@ export function ExportPanel(): React.JSX.Element {
           resolutionHeight: job.resolutionHeight,
           quality: job.quality,
           outputPath,
-          loudnessNormalization
+          loudnessNormalization,
+          engine
         })
         setBatchStatus((prev) => ({ ...prev, [job.id]: 'done' }))
       } catch (e) {
@@ -316,6 +319,22 @@ export function ExportPanel(): React.JSX.Element {
           <option value="standard">標準</option>
           <option value="small">軽量(ファイルサイズ小)</option>
         </select>
+      </div>
+      <div className="export-field">
+        <label>書き出し方式</label>
+        <select
+          value={engine}
+          disabled={exporting || batchRunning}
+          onChange={(e) => setEngine(e.target.value as ExportEngine)}
+        >
+          <option value="standard">標準</option>
+          <option value="segmented">長尺向け・区間並列(試験中)</option>
+        </select>
+        <p className="hint-text">
+          長尺向けは、動画を数十秒ずつの区間に分けて同時に書き出し、最後につなぎます。
+          カットの多い長い動画でもメモリを使いすぎず、NVIDIA の GPU があれば自動で使います
+          (使っているかは進捗の表示に出ます)。
+        </p>
       </div>
       <div className="export-field">
         <label className="checkbox-label">

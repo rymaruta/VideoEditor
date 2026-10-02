@@ -10,7 +10,12 @@ import {
   frameToSample,
   type GraphContext
 } from '@main/segmentGraph'
-import { defaultParallelism, telopsAsOverlays, videoEncodeArgs } from '@main/segmentRenderer'
+import {
+  defaultParallelism,
+  encoderLabel,
+  telopsAsOverlays,
+  videoEncodeArgs
+} from '@main/segmentRenderer'
 import { seeded } from '../helpers/boundary'
 
 const asset = (id: string, extra: Partial<MediaAsset> = {}): MediaAsset => ({
@@ -430,5 +435,7 @@ describe('segmentRenderer の小物', () => {
     expect(defaultParallelism('libx264', 16)).toBe(4)
     expect(defaultParallelism('libx264', 64)).toBe(6)
     expect(defaultParallelism('libx264', 1)).toBe(1)
+    expect(encoderLabel('h264_nvenc')).toBe('GPU: NVENC')
+    expect(encoderLabel('libx264')).toBe('CPU: x264')
   })
 })

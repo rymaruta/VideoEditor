@@ -20,6 +20,7 @@ import {
   generateWaveformDataUrl,
   exportProject,
   cancelExport,
+  runExclusiveExport,
   detectSilence
 } from './ffmpegService'
 import { transcribeRange, transcribeWordsRange } from './whisperService'
@@ -37,8 +38,11 @@ import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
 import { fitWindowStateToDisplays, type WindowState } from './windowState'
+import { exportSequenceSegmented } from './segmentRenderer'
+import { projectV1ToV2 } from '@shared/sequence/fromV1'
 import type {
   AspectRatio,
+  ExportEngine,
   HighlightSensitivity,
   Project,
   QualityPreset,
@@ -298,8 +302,30 @@ function registerWindowScopedIpcHandlers(): void {
         quality: QualityPreset
         outputPath: string
         loudnessNormalization?: boolean
+        engine?: ExportEngine
       }
     ) => {
+      const onProgress = (percent: number, stage: string): void => {
+        notifySender(event, IPC.exportProgress, { percent, stage })
+      }
+      if (payload.engine === 'segmented') {
+        // 一括書き出しは企画と違う縦横比で書き出すことがあるので、縦横比は引数のほうを使う
+        const v2 = projectV1ToV2(
+          { ...payload.project, aspectRatio: payload.aspectRatio },
+          { resolution: payload.resolutionHeight }
+        )
+        await runExclusiveExport((signal) =>
+          exportSequenceSegmented({
+            project: v2,
+            outputPath: payload.outputPath,
+            quality: payload.quality,
+            loudnessNormalization: payload.loudnessNormalization,
+            onProgress,
+            signal
+          })
+        )
+        return { success: true }
+      }
       await exportProject({
         project: payload.project,
         aspectRatio: payload.aspectRatio,
@@ -307,9 +333,7 @@ function registerWindowScopedIpcHandlers(): void {
         quality: payload.quality,
         outputPath: payload.outputPath,
         loudnessNormalization: payload.loudnessNormalization,
-        onProgress: (percent, stage) => {
-          notifySender(event, IPC.exportProgress, { percent, stage })
-        }
+        onProgress
       })
       return { success: true }
     }

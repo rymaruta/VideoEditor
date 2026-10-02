@@ -151,7 +151,7 @@ type TelopKind = 'speech' | 'tsukkomi' | 'inner-voice' | 'situation' | 'location
 
 現行の「1回の ffmpeg で全部」をやめ、次の方式に置き換える。
 **実装済み(2026-10-02)**: `src/shared/sequence/segmentPlan.ts`(区切り方)・`src/main/segmentGraph.ts`(区間のグラフ)・
-`src/main/segmentRenderer.ts`(並列実行・連結)。画面からはまだ呼んでいない(既存の書き出しと並存)。
+`src/main/segmentRenderer.ts`(並列実行・連結)。書き出し画面の「書き出し方式」で選べる(既定は従来の方式。試験中)。
 
 1. シーケンスを**カット点で区切った 20〜90秒(目標45秒)のセグメント**に分割する。
    繋ぎの途中と両端では切らない。1区間で読む素材は 24本までに抑える(メモリは区間の長さではなく本数で決まるため)。

@@ -205,6 +205,11 @@ export function defaultParallelism(encoder: VideoEncoder, cpuCount = cpus().leng
   return Math.max(1, Math.min(6, Math.floor(cpuCount / 4)))
 }
 
+/** 進捗に出すエンコーダの名前。GPU で書き出せているかを利用者が確かめられるように */
+export function encoderLabel(encoder: VideoEncoder): string {
+  return encoder === 'h264_nvenc' ? 'GPU: NVENC' : 'CPU: x264'
+}
+
 // ------------------------------------------------------------------ テロップ
 
 /** v2 のテロップを、ASS の生成器(v1 の形)へ渡せる形にする。時刻はシーケンスの絶対秒 */
@@ -319,7 +324,7 @@ export async function exportSequenceSegmented(
     const report = (): void =>
       onProgress(
         Math.min(90, (doneFrames / (totalFrames * 2)) * 90),
-        `書き出し中(${segments.length}区間・${parallel}並列)`
+        `書き出し中(${segments.length}区間・${parallel}並列・${encoderLabel(encoder)})`
       )
     report()
 

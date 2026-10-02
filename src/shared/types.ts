@@ -179,6 +179,13 @@ export interface EditTemplate {
 export type QualityPreset = 'high' | 'standard' | 'small'
 export type ResolutionHeight = 480 | 720 | 1080 | 1440
 
+/**
+ * 書き出しの方式。
+ * - `standard`: 企画全体を1回の ffmpeg で書き出す(従来の方式)
+ * - `segmented`: 長尺向け。区間に分けて並列に書き出して繋ぐ(試験中。計画書 §4.3)
+ */
+export type ExportEngine = 'standard' | 'segmented'
+
 export interface ExportSettings {
   aspectRatio: AspectRatio
   resolutionHeight: ResolutionHeight
