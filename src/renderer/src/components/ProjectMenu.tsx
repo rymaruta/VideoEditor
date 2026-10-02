@@ -12,55 +12,49 @@ import {
 } from '../lib/projectFileActions'
 import { useMenuCommand } from '../lib/menuCommands'
 import { checkMissingAssets } from '../lib/projectFileActions'
-import {
-  SaveIcon,
-  FolderOpenIcon,
-  FilePlusIcon,
-  ChevronDownIcon,
-  TrashIcon,
-  UndoIcon
-} from './icons'
 
-export function ProjectMenu(): React.JSX.Element {
-  const currentFilePath = useProjectStore((s) => s.currentFilePath)
-  const isDirty = useProjectStore((s) => s.isDirty)
+/**
+ * プロジェクトのファイル操作(新規・開く・最近使った・保存・名前を付けて保存・自動保存の復元)。
+ *
+ * 操作の入口は**メニューバーの「ファイル」**(Windows の編集ソフトと同じ)。ここはその受け手で、
+ * 画面にはステータスバーに失敗の知らせだけを出す。最近使ったプロジェクトと「破棄した自動保存
+ * データを戻す」の有無は、メニューの中身として main へ渡す。
+ */
+export function ProjectMenu(): React.JSX.Element | null {
   const saveError = useProjectStore((s) => s.saveError)
   const setSaveError = useProjectStore((s) => s.setSaveError)
+  const isDirty = useProjectStore((s) => s.isDirty)
   const restoreAutosave = useProjectStore((s) => s.restoreAutosave)
   const discardedAutosave = useAutosaveStore((s) => s.discarded)
   const recentProjects = useRecentProjectsStore((s) => s.recentProjects)
-  const forgetProject = useRecentProjectsStore((s) => s.forgetProject)
   const [error, setError] = useState<string | null>(null)
-  const [recentOpen, setRecentOpen] = useState(false)
-  const [missingPaths, setMissingPaths] = useState<string[]>([])
-  const recentRef = useRef<HTMLDivElement>(null)
+  const recentRef = useRef<string[]>([])
 
-  // 一覧を開いたときだけ、実ファイルの有無を確かめる。移動・削除されたものに
-  // 印を付けるのが目的で、黙って一覧から消すことはしない(利用者が消す)。
+  // メニューの「最近使ったプロジェクト」を作り直す。移動・削除されたものには印を付ける
+  // (黙って一覧から消すことはしない)
   useEffect(() => {
-    if (!recentOpen || recentProjects.length === 0) return
     let canceled = false
-    window.api
-      .checkFilesExist(recentProjects.map((e) => e.filePath))
-      .then((missing) => {
-        if (!canceled) setMissingPaths(missing)
-      })
-      .catch(() => {
-        if (!canceled) setMissingPaths([])
-      })
+    const paths = recentProjects.map((e) => e.filePath)
+    const send = (missing: string[]): void => {
+      if (canceled) return
+      recentRef.current = paths
+      void window.api
+        .updateMenu({
+          file: {
+            recent: paths.map(
+              (p) => `${projectFileName(p)}${missing.includes(p) ? '(見つかりません)' : ''}`
+            ),
+            canRestoreDiscarded: Boolean(discardedAutosave)
+          }
+        })
+        .catch(() => {})
+    }
+    if (paths.length === 0) send([])
+    else window.api.checkFilesExist(paths).then(send, () => send([]))
     return () => {
       canceled = true
     }
-  }, [recentOpen, recentProjects])
-
-  useEffect(() => {
-    if (!recentOpen) return
-    function handleOutside(e: MouseEvent): void {
-      if (!recentRef.current?.contains(e.target as Node)) setRecentOpen(false)
-    }
-    window.addEventListener('mousedown', handleOutside)
-    return () => window.removeEventListener('mousedown', handleOutside)
-  }, [recentOpen])
+  }, [recentProjects, discardedAutosave])
 
   async function handleSave(): Promise<void> {
     setError(null)
@@ -70,17 +64,6 @@ export function ProjectMenu(): React.JSX.Element {
       setSaveError(formatIpcError(e))
     }
   }
-
-  // メニューバー(ファイル)から来る操作。失敗の出し方はボタンと同じ
-  useMenuCommand((id) => {
-    if (id === 'file.new') void startNewProject()
-    else if (id === 'file.open') void handleOpen()
-    else if (id === 'file.save') void handleSave()
-    else if (id === 'file.saveAs') {
-      setError(null)
-      saveProjectAs().catch((e) => setSaveError(formatIpcError(e)))
-    }
-  })
 
   async function handleOpen(): Promise<void> {
     setError(null)
@@ -109,79 +92,42 @@ export function ProjectMenu(): React.JSX.Element {
     setError(null)
     try {
       await openRecentProject(filePath)
-      setRecentOpen(false)
     } catch (e) {
       setError(formatIpcError(e))
     }
   }
 
+  // メニューバー(ファイル)から来る操作
+  useMenuCommand((id) => {
+    if (id === 'file.new') void startNewProject()
+    else if (id === 'file.open') void handleOpen()
+    else if (id === 'file.save') void handleSave()
+    else if (id === 'file.saveAs') {
+      setError(null)
+      saveProjectAs().catch((e) => setSaveError(formatIpcError(e)))
+    } else if (id === 'file.restoreDiscarded') void handleRestoreDiscarded()
+    else if (id.startsWith('file.recent.')) {
+      const path = recentRef.current[Number(id.slice('file.recent.'.length))]
+      if (path) void handleOpenRecent(path)
+    }
+  })
+
+  const message = error ?? saveError
+  if (!message) return null
   return (
-    <div className="project-menu">
-      <div className="project-menu-buttons">
-        <button className="icon-button" title="新規プロジェクト" onClick={startNewProject}>
-          <FilePlusIcon width={14} height={14} />
-        </button>
-        <button className="icon-button" title="プロジェクトを開く" onClick={handleOpen}>
-          <FolderOpenIcon width={14} height={14} />
-        </button>
-        <div className="recent-projects" ref={recentRef}>
-          <button
-            className="icon-button"
-            title="最近使ったプロジェクト"
-            disabled={recentProjects.length === 0}
-            onClick={() => setRecentOpen((v) => !v)}
-          >
-            <ChevronDownIcon width={14} height={14} />
-          </button>
-          {recentOpen && (
-            <div className="recent-projects-list">
-              {recentProjects.map((entry) => {
-                const missing = missingPaths.includes(entry.filePath)
-                return (
-                  <div
-                    key={entry.filePath}
-                    className={`recent-project-item ${missing ? 'missing' : ''}`}
-                  >
-                    <button
-                      className="recent-project-open"
-                      title={missing ? `見つかりません: ${entry.filePath}` : entry.filePath}
-                      onClick={() => handleOpenRecent(entry.filePath)}
-                    >
-                      <span className="recent-project-name">{projectFileName(entry.filePath)}</span>
-                      {missing && <span className="recent-project-missing">見つかりません</span>}
-                    </button>
-                    <button
-                      className="icon-button danger"
-                      title="この項目を一覧から削除"
-                      onClick={() => forgetProject(entry.filePath)}
-                    >
-                      <TrashIcon width={12} height={12} />
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-        {discardedAutosave && (
-          <button
-            className="icon-button"
-            title="破棄した自動保存データを戻す"
-            onClick={handleRestoreDiscarded}
-          >
-            <UndoIcon width={14} height={14} />
-          </button>
-        )}
-        <button
-          className="icon-button"
-          title="保存 (Ctrl+S)"
-          onClick={handleSave}
-          disabled={!isDirty && Boolean(currentFilePath)}
-        >
-          <SaveIcon width={14} height={14} />
-        </button>
-      </div>
-      {(error ?? saveError) && <span className="project-menu-error">{error ?? saveError}</span>}
-    </div>
+    <span className="status-error" role="alert">
+      {message}
+      <button
+        type="button"
+        className="status-error-close"
+        aria-label="閉じる"
+        onClick={() => {
+          setError(null)
+          setSaveError(null)
+        }}
+      >
+        ×
+      </button>
+    </span>
   )
 }

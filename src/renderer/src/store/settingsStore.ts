@@ -8,7 +8,9 @@ const FREESOUND_STORAGE_KEY = 've-freesound-api-key'
 const GEMINI_STORAGE_KEY = 've-gemini-api-key'
 const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
 const SNAP_ENABLED_KEY = 've-snap-enabled'
-const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible'
+// 初期状態は隠す(常に出ていると邪魔、という声を受けて v2 で既定を変えた)。
+// 出したいときはヘルプ > キーボードショートカット
+const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible-v2'
 const SHORT_NOTE_KEY = 've-short-note'
 const EXPORT_RESOLUTION_KEY = 've-export-resolution'
 const EXPORT_ENGINE_KEY = 've-export-engine'
@@ -108,7 +110,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     localStorage.setItem(SNAP_ENABLED_KEY, String(enabled))
     set({ snapEnabled: enabled })
   },
-  shortcutGuideVisible: localStorage.getItem(SHORTCUT_GUIDE_VISIBLE_KEY) !== 'false',
+  shortcutGuideVisible: localStorage.getItem(SHORTCUT_GUIDE_VISIBLE_KEY) === 'true',
   setShortcutGuideVisible: (visible) => {
     localStorage.setItem(SHORTCUT_GUIDE_VISIBLE_KEY, String(visible))
     set({ shortcutGuideVisible: visible })

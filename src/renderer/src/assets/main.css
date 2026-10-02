@@ -1,29 +1,31 @@
 @import './base.css';
 
 :root {
-  --bg: #0a0e14;
-  --bg-elevated: #10151d;
-  --bg-elevated-2: #161c26;
-  --bg-elevated-3: #1d242f;
-  --border: #232b38;
-  --border-soft: #1c2330;
-  --text-1: #eef2f7;
-  --text-2: #a3aebb;
-  --text-3: #6b7684;
-  --accent-1: #22d3ee;
-  --accent-2: #3b82f6;
-  --accent-gradient: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  --accent-soft: rgba(34, 211, 238, 0.14);
-  --danger: #f2495c;
-  --danger-soft: rgba(242, 73, 92, 0.14);
-  --success: #2dd4bf;
-  --radius-lg: 10px;
-  --radius-md: 7px;
-  --radius-sm: 5px;
-  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.45);
+  /* グラファイト(Windows の編集ソフトと同じ落ち着いた灰色)。色味を足さない */
+  --bg: #1b1b1b;
+  --bg-elevated: #232323;
+  --bg-elevated-2: #2b2b2b;
+  --bg-elevated-3: #343434;
+  --border: #3a3a3a;
+  --border-soft: #2c2c2c;
+  --text-1: #e4e4e4;
+  --text-2: #a8a8a8;
+  --text-3: #7c7c7c;
+  --accent-1: #4d8eff;
+  --accent-2: #3a7bf0;
+  /* 以前は青緑のグラデーションだった。目立たせる面も単色にする */
+  --accent-gradient: linear-gradient(0deg, #3a7bf0, #3a7bf0);
+  --accent-soft: rgba(77, 142, 255, 0.16);
+  --danger: #e5484d;
+  --danger-soft: rgba(229, 72, 77, 0.14);
+  --success: #4fb37a;
+  --radius-lg: 4px;
+  --radius-md: 3px;
+  --radius-sm: 3px;
+  --shadow-panel: none;
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Segoe UI', Inter,
-    Roboto, 'Helvetica Neue', Arial, sans-serif;
+    'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', 'Hiragino Kaku Gothic ProN', system-ui, sans-serif;
+  --font-mono: 'Consolas', 'Cascadia Mono', 'Menlo', monospace;
 
   --color-background: var(--bg);
   --color-text: var(--text-1);
@@ -52,7 +54,9 @@ body {
   overflow: hidden;
   user-select: none;
   font-family: var(--font-sans);
-  background: radial-gradient(circle at 15% 0%, #101c26 0%, var(--bg) 45%);
+  background: var(--bg);
+  color: var(--text-1);
+  font-size: 12px;
 }
 
 #root {
@@ -137,7 +141,7 @@ button:disabled {
 
 .linked-audio-badge {
   color: var(--accent-1);
-  border-color: rgba(34, 211, 238, 0.4);
+  border-color: rgba(77, 142, 255, 0.4);
   background-color: var(--accent-soft);
 }
 
@@ -161,12 +165,12 @@ button:disabled {
   border-color: transparent;
   color: white;
   font-weight: 600;
-  box-shadow: 0 4px 14px rgba(34, 211, 238, 0.35);
+  box-shadow: 0 4px 14px rgba(77, 142, 255, 0.35);
 }
 
 .primary-button:hover:not(:disabled) {
   filter: brightness(1.08);
-  box-shadow: 0 6px 18px rgba(34, 211, 238, 0.45);
+  box-shadow: 0 6px 18px rgba(77, 142, 255, 0.45);
 }
 
 .primary-button:disabled {
@@ -1079,7 +1083,7 @@ h3 {
 }
 
 .batch-job-running .batch-job-badge {
-  background: rgba(34, 211, 238, 0.18);
+  background: rgba(77, 142, 255, 0.18);
   color: var(--accent-1);
 }
 
@@ -2183,7 +2187,7 @@ h3 {
   top: 2px;
   bottom: 2px;
   background: linear-gradient(160deg, var(--accent-1), var(--accent-2));
-  border: 1px solid rgba(34, 211, 238, 0.5);
+  border: 1px solid rgba(77, 142, 255, 0.5);
   border-radius: var(--radius-sm);
   font-size: 10.5px;
   color: white;
@@ -2211,7 +2215,7 @@ h3 {
 .timeline-caption-clip {
   position: absolute;
   background: linear-gradient(160deg, #1f6f8a, #164a5c);
-  border: 1px solid rgba(34, 211, 238, 0.5);
+  border: 1px solid rgba(77, 142, 255, 0.5);
   border-radius: var(--radius-sm);
   font-size: 10.5px;
   color: var(--text-1);
@@ -2606,7 +2610,7 @@ h3 {
 .tab-bar button.active {
   background: var(--accent-gradient);
   color: white;
-  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
+  box-shadow: 0 4px 12px rgba(77, 142, 255, 0.3);
 }
 
 .tab-bar-divider {
@@ -3224,7 +3228,7 @@ h3 {
 }
 
 .trend-comparison-badge.new {
-  background: rgba(34, 211, 238, 0.18);
+  background: rgba(77, 142, 255, 0.18);
   color: var(--accent-1);
 }
 
@@ -3956,7 +3960,7 @@ h3 {
   border-color: var(--accent-1);
   box-shadow:
     0 0 0 1px var(--accent-1),
-    0 8px 24px rgba(34, 211, 238, 0.18);
+    0 8px 24px rgba(77, 142, 255, 0.18);
 }
 
 .autoedit-card.director .autoedit-thumb {
@@ -4082,7 +4086,7 @@ h3 {
 }
 
 .track-lane.drop-active {
-  background-image: linear-gradient(rgba(34, 211, 238, 0.22), rgba(34, 211, 238, 0.22));
+  background-image: linear-gradient(rgba(77, 142, 255, 0.22), rgba(77, 142, 255, 0.22));
 }
 
 /* 落とす位置(本編は挿入する切れ目、音声・PiPはその時刻) */
@@ -4344,4 +4348,360 @@ h3 {
 }
 .library-toolbar .small-button {
   white-space: nowrap;
+}
+
+/* =====================================================================
+   画面の配置(Premiere 型)。上段: パネル / プログラム、下段: プロジェクト / タイムライン
+   ===================================================================== */
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 4px 0;
+}
+.workspace-row {
+  display: flex;
+  min-height: 0;
+  flex-shrink: 0;
+}
+.frame {
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.frame-props,
+.frame-bin {
+  flex-shrink: 0;
+}
+.frame-monitor,
+.frame-timeline {
+  flex: 1;
+}
+.split-handle {
+  flex-shrink: 0;
+  background: transparent;
+}
+.split-handle.split-col {
+  width: 4px;
+  cursor: col-resize;
+}
+.split-handle.split-row {
+  height: 4px;
+  cursor: row-resize;
+}
+.split-handle:hover,
+.split-handle.active {
+  background: var(--accent-1);
+}
+
+/* パネルの見出しのタブ(Premiere の「ソース: …」「エフェクトコントロール」と同じ作り) */
+.panel-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-bottom: 1px solid #161616;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.panel-tabs::-webkit-scrollbar {
+  display: none;
+}
+.panel-tab {
+  height: 27px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.panel-tab:hover:not(:disabled):not(.active) {
+  background: transparent;
+  color: var(--text-1);
+}
+.panel-tab.active {
+  color: var(--text-1);
+  font-weight: 600;
+  border-bottom-color: var(--accent-1);
+}
+.panel-tab:active:not(:disabled) {
+  transform: none;
+}
+
+/* 枠の中に入るパネルは、自分の枠線・角丸・影を持たない(枠は .frame が持つ) */
+.frame .panel,
+.frame .tab-pane > .panel {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 8px 10px;
+}
+.frame-monitor .preview-player {
+  padding: 0;
+}
+.frame .tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.frame .tab-pane {
+  overflow-y: auto;
+}
+
+/* ステータスバー(画面の一番下) */
+.status-bar {
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 10px;
+  margin-top: 4px;
+  background: #202020;
+  border-top: 1px solid #111;
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.status-bar .project-name,
+.status-bar .project-name-input {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-1);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+.status-bar .project-name:hover {
+  border-color: var(--border);
+}
+.status-bar .project-name-input {
+  border-color: var(--accent-1);
+  background: var(--bg);
+  width: 260px;
+}
+.status-save.dirty {
+  color: #e6a23c;
+}
+.status-spacer {
+  flex: 1;
+}
+.status-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #ff8f9a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
+}
+.status-error-close {
+  padding: 0 4px;
+  height: 16px;
+  line-height: 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+}
+
+/* 目立たせていた面(グラデーション・光彩)を、落ち着いた単色にそろえる */
+.primary-button {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  box-shadow: none;
+  color: #fff;
+}
+.primary-button:hover:not(:disabled) {
+  background: #4a88f5;
+  border-color: #4a88f5;
+}
+
+/* 上段左のパネルでは、タブに名前が出ているので中の見出しの名前は出さない(ボタンは残す) */
+.frame-props .tab-pane > .panel > .panel-header > h2 {
+  display: none;
+}
+.frame-props .tab-pane > .panel > .panel-header {
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+.frame-props .tab-pane > .panel > .panel-header:empty {
+  display: none;
+}
+
+.status-busy {
+  color: var(--accent-1);
+}
+
+/* =====================================================================
+   タイムライン(Premiere と同じ見え方: 目盛り・今の位置・トラックの名札・種類ごとの色)
+   ===================================================================== */
+.timeline-timecode-cell {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+.timeline-timecode {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  color: var(--accent-1);
+  letter-spacing: 0.02em;
+}
+.timeline-ruler {
+  position: relative;
+  height: 30px;
+  flex-shrink: 0;
+  background: #262626;
+  border-bottom: 1px solid #161616;
+  cursor: text;
+}
+.timeline-ruler-tick {
+  position: absolute;
+  top: 0;
+  height: 30px;
+  padding: 3px 0 0 4px;
+  border-left: 1px solid #5a5a5a;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: #b0b0b0;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.track-lanes-col {
+  background: #1e1e1e;
+  border-radius: 0;
+  gap: 1px;
+}
+.track-labels-col {
+  gap: 1px;
+  padding-right: 0;
+  background: #262626;
+  border-right: 1px solid #161616;
+}
+.track-label {
+  padding: 2px 6px;
+  border-bottom: 1px solid #1b1b1b;
+  color: #cfcfcf;
+}
+.track-label-video {
+  font-weight: 500;
+}
+.track-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 18px;
+  padding: 0 4px;
+  margin-right: 6px;
+  border-radius: 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+.tag-video {
+  background: #3d5a8a;
+}
+.tag-audio {
+  background: #3d7a52;
+}
+.tag-telop {
+  background: #8a3d62;
+}
+.track-lane {
+  border-bottom: 1px solid #1b1b1b;
+}
+.audio-lane {
+  background: transparent;
+  border-radius: 0;
+}
+/* 再生位置の線は目盛りから全トラックを貫く */
+.timeline-playhead {
+  top: -31px;
+  bottom: auto;
+  height: 4000px;
+  background: var(--accent-1);
+}
+
+/* クリップの色は種類で固定(映像=青・ワイプ=水色・音声=緑・テロップ=桃) */
+.timeline-clip {
+  background: #8f9be0;
+  border: 1px solid #b7bff0;
+  border-radius: 2px;
+  color: #141414;
+}
+.timeline-clip.selected {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 1px #ffffff inset;
+}
+.timeline-clip * {
+  color: inherit;
+}
+.timeline-audio-clip {
+  background: #6fbf86;
+  border: 1px solid #a3dcb3;
+  border-radius: 2px;
+  color: #141414;
+}
+.timeline-caption-clip {
+  background: #e59bbd;
+  border: 1px solid #f3c3d8;
+  border-radius: 2px;
+  color: #141414;
+}
+.timeline-caption-clip.selected {
+  border-color: #ffffff;
+}
+.timeline-video-overlay-clip {
+  background: #7fb5d8;
+  border: 1px solid #a9d0ea;
+  border-radius: 2px;
+  color: #141414;
+}
+
+/* ショートカット一覧は既定で隠す。隠している間は帯ごと出さない(ヘルプ > キーボードショートカットで出す) */
+.timeline-shortcut-bar:not(:has(.timeline-shortcut-hints)) {
+  display: none;
+}
+.preview-player .time-label {
+  font-family: var(--font-mono);
+}
+.preview-player .time-label.current {
+  color: var(--accent-1);
+  font-size: 14px;
+}
+
+/* 素材の読み込みボタンは控えめに(読み込みはメニューの ファイル > 読み込む からも出来る) */
+.media-import-buttons .primary-button {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  font-weight: 500;
+  padding: 3px 10px;
+  height: 26px;
+}
+.media-import-buttons .primary-button:hover:not(:disabled) {
+  background: var(--bg-elevated-3);
+  border-color: #4a4a4a;
+}
+.frame-bin .panel-header {
+  margin-bottom: 6px;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MediaBin } from './components/MediaBin'
 import { PreviewPlayer } from './components/PreviewPlayer'
 import { SourceViewer } from './components/SourceViewer'
@@ -15,22 +15,18 @@ import { MetadataPanel } from './components/MetadataPanel'
 import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
-import { ProjectMenu } from './components/ProjectMenu'
-import { ProjectNameField } from './components/ProjectNameField'
+import { StatusBar } from './components/StatusBar'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { useProjectStore } from './store/projectStore'
 import { useAutosaveStore } from './store/autosaveStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
 import {
-  ClapperboardIcon,
   SparklesIcon,
   TypeIcon,
   YoutubeIcon,
   DownloadIcon,
   MicIcon,
-  UndoIcon,
-  RedoIcon,
   ImageIcon,
   MusicIcon,
   TargetIcon,
@@ -119,57 +115,100 @@ const PUBLISH_TABS: TabDef[] = [
 /** メニューバーの「ウィンドウ」に並べる右側のパネル */
 const MENU_WINDOWS = [...EDIT_TABS, ...PUBLISH_TABS].map(({ id, label }) => ({ id, label }))
 
-const LEFT_WIDTH_KEY = 've-layout-left-width'
-const RIGHT_WIDTH_KEY = 've-layout-right-width'
-const TIMELINE_HEIGHT_KEY = 've-layout-timeline-height'
-const LEFT_COLLAPSED_KEY = 've-layout-left-collapsed'
-const RIGHT_COLLAPSED_KEY = 've-layout-right-collapsed'
+/**
+ * 画面の配置(Windows の編集ソフト・Premiere と同じ並び)。
+ *
+ *   ┌──────────────┬─────────────────────┐
+ *   │ パネル(タブ)  │ プログラムモニター   │  上段
+ *   ├──────────────┼─────────────────────┤
+ *   │ プロジェクト  │ タイムライン          │  下段
+ *   └──────────────┴─────────────────────┘
+ *   ステータスバー
+ *
+ * 上段の左は「ソース・インスペクタ・テロップ・BGM/SE・書き出し…」をタブで切り替える。
+ * 下段の左は素材(プロジェクト / ライブラリ)。境目はどれもドラッグで動かせ、大きさは次回も残る。
+ */
+const PROPS_WIDTH_KEY = 've-layout2-props-width'
+const BIN_WIDTH_KEY = 've-layout2-bin-width'
+const BOTTOM_HEIGHT_KEY = 've-layout2-bottom-height'
 
-const DEFAULT_LEFT_WIDTH = 260
-const DEFAULT_RIGHT_WIDTH = 320
-const DEFAULT_TIMELINE_HEIGHT = 440
-const MIN_LEFT_WIDTH = 200
-const MIN_RIGHT_WIDTH = 280
-const MIN_TIMELINE_HEIGHT = 160
-const MAX_TIMELINE_HEIGHT = 560
-// DaVinci Resolve-style panels: no fixed pixel cap. The only limit is leaving
-// enough room for the preview/timeline in the center to stay usable.
-const MIN_CENTER_WIDTH = 360
-const RESIZE_CHROME_WIDTH = 80
+const DEFAULT_PROPS_WIDTH = 520
+const DEFAULT_BIN_WIDTH = 320
+const DEFAULT_BOTTOM_HEIGHT = 420
+const MIN_PROPS_WIDTH = 300
+const MIN_BIN_WIDTH = 220
+const MIN_MONITOR_WIDTH = 360
+const MIN_TIMELINE_WIDTH = 420
+const MIN_BOTTOM_HEIGHT = 180
+const MIN_TOP_HEIGHT = 220
+/** 枠・境目・ステータスバーなど、パネル以外が使う高さ */
+const CHROME_HEIGHT = 60
 
 function readStoredSize(key: string, fallback: number): number {
-  const raw = localStorage.getItem(key)
-  const n = raw ? Number(raw) : NaN
-  return Number.isFinite(n) ? n : fallback
+  try {
+    const raw = localStorage.getItem(key)
+    const n = raw ? Number(raw) : NaN
+    return Number.isFinite(n) && n > 0 ? n : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function storeSize(key: string, value: number): void {
+  try {
+    localStorage.setItem(key, String(Math.round(value)))
+  } catch {
+    // 残せなくても今回の配置は効く
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
+/** 窓の大きさに収まるよう、3つの寸法を詰める(縮めた窓でモニターやタイムラインが消えないように) */
+function fitLayout(size: { props: number; bin: number; bottom: number }): {
+  props: number
+  bin: number
+  bottom: number
+} {
+  const w = window.innerWidth
+  const h = window.innerHeight
+  return {
+    props: clamp(size.props, MIN_PROPS_WIDTH, Math.max(MIN_PROPS_WIDTH, w - MIN_MONITOR_WIDTH)),
+    bin: clamp(size.bin, MIN_BIN_WIDTH, Math.max(MIN_BIN_WIDTH, w - MIN_TIMELINE_WIDTH)),
+    bottom: clamp(
+      size.bottom,
+      MIN_BOTTOM_HEIGHT,
+      Math.max(MIN_BOTTOM_HEIGHT, h - MIN_TOP_HEIGHT - CHROME_HEIGHT)
+    )
+  }
+}
+
+type PanelTab = RightTab | 'source'
+
 interface ResizeDragState {
-  kind: 'left' | 'right' | 'timeline'
+  kind: 'props' | 'bin' | 'rows'
   startX: number
   startY: number
-  startLeftWidth: number
-  startRightWidth: number
-  startTimelineHeight: number
+  start: { props: number; bin: number; bottom: number }
 }
 
 function App(): React.JSX.Element {
-  const [tab, setTab] = useState<RightTab>('template')
-  const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
-  const canUndo = useProjectStore((s) => s.past.length > 0)
-  const canRedo = useProjectStore((s) => s.future.length > 0)
-  const undo = useProjectStore((s) => s.undo)
-  const redo = useProjectStore((s) => s.redo)
+  const [tab, setTab] = useState<PanelTab>('inspector')
+  const projectName = useProjectStore((s) => s.project.name)
   const isDirty = useProjectStore((s) => s.isDirty)
   const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
   const refreshAutosave = useAutosaveStore((s) => s.refresh)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
 
-  // メニューバー(ファイル / 編集 / … / ウィンドウ)。ウィンドウの欄には右側のパネルを並べる
+  // メニューバー(ファイル / 編集 / … / ウィンドウ)。ウィンドウの欄には上段左のパネルを並べる
   useAppMenu(MENU_WINDOWS)
+
+  // ウィンドウのタイトルにプロジェクト名と未保存の印を出す(Windows のソフトの決まり)
+  useEffect(() => {
+    document.title = `${projectName}${isDirty ? ' *' : ''} — VideoEditor`
+  }, [projectName, isDirty])
 
   useEffect(() => {
     loadEnvApiKeys()
@@ -193,8 +232,8 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const interval = setInterval(() => {
       const { project, isDirty } = useProjectStore.getState()
-      // 見送った前回の自動保存を上書きする前に退避したときは、上部バーの復元ボタンを
-      // すぐ出す。退避したのにボタンが出ないと、再起動するまで戻せない。
+      // 見送った前回の自動保存を上書きする前に退避したときは、メニューの「破棄した自動保存
+      // データを戻す」をすぐ使えるようにする。
       if (isDirty) {
         window.api.autosaveProject(project).then((setAside) => {
           if (setAside) useAutosaveStore.getState().refresh()
@@ -204,40 +243,15 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval)
   }, [])
 
-  const [leftWidth, setLeftWidth] = useState(() =>
-    readStoredSize(LEFT_WIDTH_KEY, DEFAULT_LEFT_WIDTH)
-  )
-  const [rightWidth, setRightWidth] = useState(() =>
-    readStoredSize(RIGHT_WIDTH_KEY, DEFAULT_RIGHT_WIDTH)
-  )
-  const [timelineHeight, setTimelineHeight] = useState(() =>
-    readStoredSize(TIMELINE_HEIGHT_KEY, DEFAULT_TIMELINE_HEIGHT)
-  )
-  const previousTimelineHeightRef = useRef(timelineHeight)
-
-  // Double-clicking the preview/timeline divider snaps the timeline down to its
-  // minimum height (maximizing the preview) and back, so getting a much bigger
-  // preview doesn't require manually dragging the divider every time.
-  function handleDividerDoubleClick(): void {
-    setTimelineHeight((current) => {
-      if (current > MIN_TIMELINE_HEIGHT) {
-        previousTimelineHeightRef.current = current
-        return MIN_TIMELINE_HEIGHT
-      }
-      return previousTimelineHeightRef.current > MIN_TIMELINE_HEIGHT
-        ? previousTimelineHeightRef.current
-        : DEFAULT_TIMELINE_HEIGHT
-    })
+  // 素材をソースで開いたら、上段左を「ソース」にする。閉じたら元のタブへ戻す
+  const [prevSource, setPrevSource] = useState(sourceAssetId)
+  if (prevSource !== sourceAssetId) {
+    setPrevSource(sourceAssetId)
+    if (sourceAssetId) setTab('source')
+    else if (tab === 'source') setTab('inspector')
   }
-  const [leftCollapsed, setLeftCollapsed] = useState(
-    () => localStorage.getItem(LEFT_COLLAPSED_KEY) === 'true'
-  )
-  const [rightCollapsed, setRightCollapsed] = useState(
-    () => localStorage.getItem(RIGHT_COLLAPSED_KEY) === 'true'
-  )
 
-  // メニューバーの「ウィンドウ」「書き出し…」「テロップの一覧」で右側のパネルを開く
-  // (畳んでいれば広げる)。ライブラリ・読み込みは左のメディアパネルが受ける
+  // メニューバーの「ウィンドウ」「書き出し…」「テロップの一覧」で上段左のパネルを切り替える
   useMenuCommand((id) => {
     const target = id.startsWith('window.')
       ? (id.slice('window.'.length) as RightTab)
@@ -246,74 +260,46 @@ function App(): React.JSX.Element {
         : id === 'telop.list'
           ? 'text'
           : null
-    if (target && MENU_WINDOWS.some((w) => w.id === target)) {
-      setTab(target)
-      setRightCollapsed(false)
-    }
-    if (id === 'view.library' || id === 'file.importVideo' || id === 'file.importAudio') {
-      setLeftCollapsed(false)
-    }
+    if (target && MENU_WINDOWS.some((w) => w.id === target)) setTab(target)
   })
+
+  const [size, setSize] = useState(() =>
+    fitLayout({
+      props: readStoredSize(PROPS_WIDTH_KEY, DEFAULT_PROPS_WIDTH),
+      bin: readStoredSize(BIN_WIDTH_KEY, DEFAULT_BIN_WIDTH),
+      bottom: readStoredSize(BOTTOM_HEIGHT_KEY, DEFAULT_BOTTOM_HEIGHT)
+    })
+  )
   const [resizeDrag, setResizeDrag] = useState<ResizeDragState | null>(null)
 
   function beginResize(kind: ResizeDragState['kind'], e: React.MouseEvent): void {
     e.preventDefault()
-    setResizeDrag({
-      kind,
-      startX: e.clientX,
-      startY: e.clientY,
-      startLeftWidth: leftWidth,
-      startRightWidth: rightWidth,
-      startTimelineHeight: timelineHeight
-    })
+    setResizeDrag({ kind, startX: e.clientX, startY: e.clientY, start: size })
   }
 
   useEffect(() => {
     if (!resizeDrag) return
     function handleMouseMove(e: MouseEvent): void {
       if (!resizeDrag) return
-      if (resizeDrag.kind === 'left') {
-        const rightSpace = rightCollapsed ? 0 : resizeDrag.startRightWidth
-        const maxLeftWidth = Math.max(
-          MIN_LEFT_WIDTH,
-          window.innerWidth - rightSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
+      const dx = e.clientX - resizeDrag.startX
+      const dy = e.clientY - resizeDrag.startY
+      const s = resizeDrag.start
+      setSize(
+        fitLayout(
+          resizeDrag.kind === 'props'
+            ? { ...s, props: s.props + dx }
+            : resizeDrag.kind === 'bin'
+              ? { ...s, bin: s.bin + dx }
+              : { ...s, bottom: s.bottom - dy }
         )
-        setLeftWidth(
-          clamp(
-            resizeDrag.startLeftWidth + (e.clientX - resizeDrag.startX),
-            MIN_LEFT_WIDTH,
-            maxLeftWidth
-          )
-        )
-      } else if (resizeDrag.kind === 'right') {
-        const leftSpace = leftCollapsed ? 0 : resizeDrag.startLeftWidth
-        const maxRightWidth = Math.max(
-          MIN_RIGHT_WIDTH,
-          window.innerWidth - leftSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
-        )
-        setRightWidth(
-          clamp(
-            resizeDrag.startRightWidth - (e.clientX - resizeDrag.startX),
-            MIN_RIGHT_WIDTH,
-            maxRightWidth
-          )
-        )
-      } else {
-        setTimelineHeight(
-          clamp(
-            resizeDrag.startTimelineHeight - (e.clientY - resizeDrag.startY),
-            MIN_TIMELINE_HEIGHT,
-            MAX_TIMELINE_HEIGHT
-          )
-        )
-      }
+      )
     }
     function handleMouseUp(): void {
       setResizeDrag(null)
     }
     const previousCursor = document.body.style.cursor
     const previousUserSelect = document.body.style.userSelect
-    document.body.style.cursor = resizeDrag.kind === 'timeline' ? 'row-resize' : 'col-resize'
+    document.body.style.cursor = resizeDrag.kind === 'rows' ? 'row-resize' : 'col-resize'
     document.body.style.userSelect = 'none'
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
@@ -323,217 +309,140 @@ function App(): React.JSX.Element {
       document.body.style.cursor = previousCursor
       document.body.style.userSelect = previousUserSelect
     }
-  }, [resizeDrag, leftCollapsed, rightCollapsed])
+  }, [resizeDrag])
 
   useEffect(() => {
-    localStorage.setItem(LEFT_WIDTH_KEY, String(leftWidth))
-  }, [leftWidth])
-  useEffect(() => {
-    localStorage.setItem(RIGHT_WIDTH_KEY, String(rightWidth))
-  }, [rightWidth])
-  useEffect(() => {
-    localStorage.setItem(TIMELINE_HEIGHT_KEY, String(timelineHeight))
-  }, [timelineHeight])
-  useEffect(() => {
-    localStorage.setItem(LEFT_COLLAPSED_KEY, String(leftCollapsed))
-  }, [leftCollapsed])
-  useEffect(() => {
-    localStorage.setItem(RIGHT_COLLAPSED_KEY, String(rightCollapsed))
-  }, [rightCollapsed])
+    storeSize(PROPS_WIDTH_KEY, size.props)
+    storeSize(BIN_WIDTH_KEY, size.bin)
+    storeSize(BOTTOM_HEIGHT_KEY, size.bottom)
+  }, [size])
 
-  // Re-clamp panel widths when the OS window itself is resized (not just via drag),
-  // so shrinking the window can't squeeze the center preview/timeline out entirely.
-  const layoutRef = useRef({ leftWidth, rightWidth, leftCollapsed, rightCollapsed })
+  // 窓そのものの大きさが変わったら詰め直す(前回の大きさのまま狭い窓で開いたときも)
   useEffect(() => {
-    layoutRef.current = { leftWidth, rightWidth, leftCollapsed, rightCollapsed }
-  }, [leftWidth, rightWidth, leftCollapsed, rightCollapsed])
-  useEffect(() => {
-    function handleWindowResize(): void {
-      const {
-        leftWidth: lw,
-        rightWidth: rw,
-        leftCollapsed: lc,
-        rightCollapsed: rc
-      } = layoutRef.current
-      const rightSpace = rc ? 0 : rw
-      const leftSpace = lc ? 0 : lw
-      const maxLeftWidth = Math.max(
-        MIN_LEFT_WIDTH,
-        window.innerWidth - rightSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
-      )
-      const maxRightWidth = Math.max(
-        MIN_RIGHT_WIDTH,
-        window.innerWidth - leftSpace - MIN_CENTER_WIDTH - RESIZE_CHROME_WIDTH
-      )
-      setLeftWidth((w) => clamp(w, MIN_LEFT_WIDTH, maxLeftWidth))
-      setRightWidth((w) => clamp(w, MIN_RIGHT_WIDTH, maxRightWidth))
-    }
-    // **復元した直後にも1回掛ける。** 幅は前回のウィンドウの幅で決めた値なので、
-    // 次に狭い画面で開くと今の幅に収まっている保証がどこにも無い。`resize` を待つと
-    // 「利用者がウィンドウを動かすまで中央が無い」状態が続く
-    // (実測: 1360px のウィンドウに前回の左1200pxを復元すると、
-    //  中央の列が **0px**・プレビューも **0px** で、編集する場所そのものが無かった)。
-    handleWindowResize()
+    const handleWindowResize = (): void => setSize((s) => fitLayout(s))
     window.addEventListener('resize', handleWindowResize)
     return () => window.removeEventListener('resize', handleWindowResize)
   }, [])
 
   useKeyboardShortcuts()
 
+  const tabButton = ({
+    id,
+    label,
+    description
+  }: {
+    id: PanelTab
+    label: string
+    description: string
+  }): React.JSX.Element => (
+    <button
+      key={id}
+      type="button"
+      role="tab"
+      aria-selected={tab === id}
+      className={`panel-tab ${tab === id ? 'active' : ''}`}
+      onClick={() => setTab(id)}
+      title={description}
+    >
+      {label}
+    </button>
+  )
+
   return (
     <div className="app-shell">
-      <header className="top-bar">
-        <div className="top-bar-left">
-          <div className="top-bar-brand">
-            <span className="brand-icon">
-              <ClapperboardIcon width={18} height={18} />
-            </span>
-            <span className="brand-name">VideoEditor</span>
-          </div>
-          <ProjectMenu />
-          <div className="top-bar-history">
-            <button
-              className="icon-button"
-              title="元に戻す (Ctrl+Z)"
-              onClick={undo}
-              disabled={!canUndo}
-            >
-              <UndoIcon width={14} height={14} />
-            </button>
-            <button
-              className="icon-button"
-              title="やり直す (Ctrl+Shift+Z)"
-              onClick={redo}
-              disabled={!canRedo}
-            >
-              <RedoIcon width={14} height={14} />
-            </button>
-          </div>
-        </div>
-        <div className="top-bar-project">
-          <ProjectNameField />
-          <span className="project-badge">{aspectRatio}</span>
-        </div>
-      </header>
-      <div className="app-layout">
-        <div
-          className={`left-column ${leftCollapsed ? 'panel-collapsed' : ''}`}
-          style={{ width: leftCollapsed ? 0 : leftWidth }}
-        >
-          <MediaBin />
-        </div>
-        <div
-          className={`col-resize-handle ${leftCollapsed ? 'collapsed' : ''} ${
-            resizeDrag?.kind === 'left' ? 'active' : ''
-          }`}
-          onMouseDown={leftCollapsed ? undefined : (e) => beginResize('left', e)}
-          onDoubleClick={() => setLeftCollapsed((v) => !v)}
-          title={
-            leftCollapsed
-              ? 'ダブルクリックでメディアパネルを表示'
-              : 'ドラッグして幅を調整(ダブルクリックで折りたたむ)'
-          }
-        />
-        <div className="center-column">
-          <div className="viewer-row">
-            {/* Keyed by asset so switching clips remounts the viewer: transport position,
-                play state and shuttle speed all belong to the clip being auditioned and
-                must not carry over to the next one. */}
-            {sourceAssetId && <SourceViewer key={sourceAssetId} />}
-            <PreviewPlayer />
-          </div>
+      <div className="workspace">
+        {/* ===== 上段: パネル(タブ) / プログラムモニター ===== */}
+        <div className="workspace-row" style={{ flex: 1 }}>
+          <section className="frame frame-props" style={{ width: size.props }}>
+            <div className="panel-tabs" role="tablist" aria-label="パネル">
+              {sourceAssetId &&
+                tabButton({ id: 'source', label: 'ソース', description: '素材をソースで確認する' })}
+              {EDIT_TABS.map(tabButton)}
+              {PUBLISH_TABS.map(tabButton)}
+            </div>
+            {/* All tab panels stay mounted (hidden via CSS) rather than being unmounted on
+                switch, so an in-progress AI/API request (Gemini, VOICEVOX, YouTube, etc.) in
+                one tab keeps running and its result is still there when the user comes back,
+                instead of being silently discarded by switching tabs to do something else. */}
+            <div className="tab-content">
+              {/* Keyed by asset so switching clips remounts the viewer: transport position,
+                  play state and shuttle speed all belong to the clip being auditioned and
+                  must not carry over to the next one. */}
+              <div className={`tab-pane ${tab === 'source' ? 'active' : ''}`}>
+                {sourceAssetId && <SourceViewer key={sourceAssetId} />}
+              </div>
+              <div className={`tab-pane ${tab === 'inspector' ? 'active' : ''}`}>
+                <Inspector />
+              </div>
+              <div className={`tab-pane ${tab === 'template' ? 'active' : ''}`}>
+                <TemplatePanel />
+              </div>
+              <div className={`tab-pane ${tab === 'text' ? 'active' : ''}`}>
+                <TextOverlayPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'narration' ? 'active' : ''}`}>
+                <NarrationPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'thumbnail' ? 'active' : ''}`}>
+                <ThumbnailPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'audio' ? 'active' : ''}`}>
+                <AudioLibraryPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'preset' ? 'active' : ''}`}>
+                <PresetPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'gametrend' ? 'active' : ''}`}>
+                <GameTrendPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'youtube' ? 'active' : ''}`}>
+                <YouTubeTrendPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'metadata' ? 'active' : ''}`}>
+                <MetadataPanel />
+              </div>
+              <div className={`tab-pane ${tab === 'export' ? 'active' : ''}`}>
+                <ExportPanel />
+              </div>
+            </div>
+          </section>
           <div
-            className={`row-resize-handle ${resizeDrag?.kind === 'timeline' ? 'active' : ''}`}
-            onMouseDown={(e) => beginResize('timeline', e)}
-            onDoubleClick={handleDividerDoubleClick}
-            title="ドラッグして高さを調整(ダブルクリックでプレビューを最大化/元に戻す)"
+            className={`split-handle split-col ${resizeDrag?.kind === 'props' ? 'active' : ''}`}
+            onMouseDown={(e) => beginResize('props', e)}
+            title="ドラッグして幅を調整"
           />
-          <div className="timeline-wrapper" style={{ height: timelineHeight }}>
-            <Timeline />
-          </div>
+          <section className="frame frame-monitor">
+            <div className="panel-tabs" role="tablist" aria-label="モニター">
+              <button type="button" role="tab" aria-selected className="panel-tab active">
+                プログラム
+              </button>
+            </div>
+            <PreviewPlayer />
+          </section>
         </div>
+
         <div
-          className={`col-resize-handle ${rightCollapsed ? 'collapsed' : ''} ${
-            resizeDrag?.kind === 'right' ? 'active' : ''
-          }`}
-          onMouseDown={rightCollapsed ? undefined : (e) => beginResize('right', e)}
-          onDoubleClick={() => setRightCollapsed((v) => !v)}
-          title={
-            rightCollapsed
-              ? 'ダブルクリックで右パネルを表示'
-              : 'ドラッグして幅を調整(ダブルクリックで折りたたむ)'
-          }
+          className={`split-handle split-row ${resizeDrag?.kind === 'rows' ? 'active' : ''}`}
+          onMouseDown={(e) => beginResize('rows', e)}
+          title="ドラッグして高さを調整"
         />
-        <div
-          className={`right-column ${rightCollapsed ? 'panel-collapsed' : ''}`}
-          style={{ width: rightCollapsed ? 0 : rightWidth }}
-        >
-          <div className="tab-bar">
-            {EDIT_TABS.map(({ id, label, icon: Icon, description }) => (
-              <button
-                key={id}
-                className={tab === id ? 'active' : ''}
-                onClick={() => setTab(id)}
-                title={description}
-              >
-                <Icon width={14} height={14} />
-                <span>{label}</span>
-              </button>
-            ))}
-            <div className="tab-bar-divider" />
-            {PUBLISH_TABS.map(({ id, label, icon: Icon, description }) => (
-              <button
-                key={id}
-                className={tab === id ? 'active' : ''}
-                onClick={() => setTab(id)}
-                title={description}
-              >
-                <Icon width={14} height={14} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-          {/* All tab panels stay mounted (hidden via CSS) rather than being unmounted on
-              switch, so an in-progress AI/API request (Gemini, VOICEVOX, YouTube, etc.) in
-              one tab keeps running and its result is still there when the user comes back,
-              instead of being silently discarded by switching tabs to do something else. */}
-          <div className="tab-content">
-            <div className={`tab-pane ${tab === 'inspector' ? 'active' : ''}`}>
-              <Inspector />
-            </div>
-            <div className={`tab-pane ${tab === 'template' ? 'active' : ''}`}>
-              <TemplatePanel />
-            </div>
-            <div className={`tab-pane ${tab === 'text' ? 'active' : ''}`}>
-              <TextOverlayPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'narration' ? 'active' : ''}`}>
-              <NarrationPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'thumbnail' ? 'active' : ''}`}>
-              <ThumbnailPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'audio' ? 'active' : ''}`}>
-              <AudioLibraryPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'preset' ? 'active' : ''}`}>
-              <PresetPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'gametrend' ? 'active' : ''}`}>
-              <GameTrendPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'youtube' ? 'active' : ''}`}>
-              <YouTubeTrendPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'metadata' ? 'active' : ''}`}>
-              <MetadataPanel />
-            </div>
-            <div className={`tab-pane ${tab === 'export' ? 'active' : ''}`}>
-              <ExportPanel />
-            </div>
-          </div>
+
+        {/* ===== 下段: プロジェクト / タイムライン ===== */}
+        <div className="workspace-row" style={{ height: size.bottom }}>
+          <section className="frame frame-bin" style={{ width: size.bin }}>
+            <MediaBin />
+          </section>
+          <div
+            className={`split-handle split-col ${resizeDrag?.kind === 'bin' ? 'active' : ''}`}
+            onMouseDown={(e) => beginResize('bin', e)}
+            title="ドラッグして幅を調整"
+          />
+          <section className="frame frame-timeline">
+            <Timeline />
+          </section>
         </div>
       </div>
+      <StatusBar />
       <AutosaveRestoreModal />
     </div>
   )

@@ -3,7 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
 import type { TelopLayerPayload } from '@shared/telop/layer'
 import type { LibraryFile, LibraryState } from '@shared/library'
-import type { MenuShortcuts } from '@shared/appMenu'
+import type { MenuFileState, MenuShortcuts } from '@shared/appMenu'
 import type {
   AspectRatio,
   BpmAnalysisResult,
@@ -220,6 +220,7 @@ const api = {
   updateMenu: (next: {
     shortcuts?: MenuShortcuts
     windows?: { id: string; label: string }[]
+    file?: MenuFileState
   }): Promise<void> => ipcRenderer.invoke(IPC.menuUpdate, next),
   onLibraryChanged: (callback: () => void): (() => void) => {
     const listener = (): void => callback()

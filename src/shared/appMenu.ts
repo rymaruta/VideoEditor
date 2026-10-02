@@ -13,6 +13,8 @@ export type MenuCommand =
   | 'file.new'
   | 'file.newEpisode'
   | 'file.open'
+  | 'file.restoreDiscarded'
+  | `file.recent.${number}`
   | 'file.save'
   | 'file.saveAs'
   | 'file.importVideo'
@@ -64,6 +66,7 @@ export interface MenuItemSpec {
     | 'toggleDevTools'
     | 'reload'
   type?: 'separator'
+  enabled?: boolean
   submenu?: MenuItemSpec[]
 }
 
@@ -95,10 +98,19 @@ export function displayToAccelerator(display: string | undefined): string | unde
   return mapped.every((m) => m !== null) ? mapped.join('+') : undefined
 }
 
+/** ファイルの欄の、その時々で変わる中身 */
+export interface MenuFileState {
+  /** 最近使ったプロジェクト(新しい順。表示名) */
+  recent: readonly string[]
+  /** 起動時に破棄した自動保存データを戻せるか */
+  canRestoreDiscarded: boolean
+}
+
 export function buildMenuTemplate(
   shortcuts: MenuShortcuts,
   windows: readonly { id: string; label: string }[],
-  options: { isDev: boolean; isMac: boolean }
+  options: { isDev: boolean; isMac: boolean },
+  fileState: MenuFileState = { recent: [], canRestoreDiscarded: false }
 ): MenuItemSpec[] {
   const key = (k: keyof MenuShortcuts): string | undefined => displayToAccelerator(shortcuts[k])
   const menu: MenuItemSpec[] = [
@@ -107,6 +119,21 @@ export function buildMenuTemplate(
       submenu: [
         { label: '新規プロジェクト', id: 'file.new', accelerator: 'CmdOrCtrl+N' },
         { label: '開く…', id: 'file.open', accelerator: 'CmdOrCtrl+O' },
+        {
+          label: '最近使ったプロジェクト',
+          submenu:
+            fileState.recent.length > 0
+              ? fileState.recent.map((label, i) => ({
+                  label,
+                  id: `file.recent.${i}` as MenuCommand
+                }))
+              : [{ label: '(なし)', enabled: false }]
+        },
+        {
+          label: '破棄した自動保存データを戻す',
+          id: 'file.restoreDiscarded',
+          enabled: fileState.canRestoreDiscarded
+        },
         SEP,
         { label: '保存', id: 'file.save', accelerator: key('save') },
         { label: '名前を付けて保存…', id: 'file.saveAs', accelerator: 'CmdOrCtrl+Shift+S' },

@@ -1,5 +1,10 @@
 import { app, BrowserWindow, dialog, Menu, type MenuItemConstructorOptions } from 'electron'
-import { buildMenuTemplate, type MenuItemSpec, type MenuShortcuts } from '@shared/appMenu'
+import {
+  buildMenuTemplate,
+  type MenuFileState,
+  type MenuItemSpec,
+  type MenuShortcuts
+} from '@shared/appMenu'
 import { IPC } from '@shared/ipc'
 
 /**
@@ -12,6 +17,7 @@ import { IPC } from '@shared/ipc'
 
 let shortcuts: MenuShortcuts = {}
 let windows: { id: string; label: string }[] = []
+let fileState: MenuFileState = { recent: [], canRestoreDiscarded: false }
 
 function sendCommand(id: string): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
@@ -31,6 +37,7 @@ function sendCommand(id: string): void {
 function toElectron(spec: MenuItemSpec): MenuItemConstructorOptions {
   if (spec.type === 'separator') return { type: 'separator' }
   const item: MenuItemConstructorOptions = { label: spec.label }
+  if (spec.enabled === false) item.enabled = false
   if (spec.role) item.role = spec.role
   if (spec.accelerator) {
     item.accelerator = spec.accelerator
@@ -45,19 +52,31 @@ function toElectron(spec: MenuItemSpec): MenuItemConstructorOptions {
 }
 
 export function installAppMenu(isDev: boolean): void {
-  const template = buildMenuTemplate(shortcuts, windows, {
-    isDev,
-    isMac: process.platform === 'darwin'
-  })
+  const template = buildMenuTemplate(
+    shortcuts,
+    windows,
+    { isDev, isMac: process.platform === 'darwin' },
+    fileState
+  )
   Menu.setApplicationMenu(Menu.buildFromTemplate(template.map(toElectron)))
 }
 
 /** 画面からキー配置・パネルの一覧を受け取って、メニューを作り直す */
 export function updateAppMenu(
-  next: { shortcuts?: MenuShortcuts; windows?: { id: string; label: string }[] },
+  next: {
+    shortcuts?: MenuShortcuts
+    windows?: { id: string; label: string }[]
+    file?: MenuFileState
+  },
   isDev: boolean
 ): void {
   if (next.shortcuts) shortcuts = next.shortcuts
   if (Array.isArray(next.windows)) windows = next.windows
+  if (next.file && Array.isArray(next.file.recent)) {
+    fileState = {
+      recent: next.file.recent.filter((r) => typeof r === 'string').slice(0, 15),
+      canRestoreDiscarded: Boolean(next.file.canRestoreDiscarded)
+    }
+  }
   installAppMenu(isDev)
 }

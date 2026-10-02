@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { frameSeconds } from '@shared/frameRate'
+import { formatTimecode } from '../lib/timelineRuler'
 import { fadeGainAt } from '@shared/audioFade'
 import {
   audioClipGain,
@@ -79,12 +80,6 @@ import {
   seekPreviewTime
 } from '../lib/previewSync'
 import { applyPendingPreviewLoad, type PendingPreviewLoad } from '../lib/pendingPreviewLoad'
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
 
 const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
   'sans-serif': 'sans-serif',
@@ -1267,6 +1262,8 @@ export function PreviewPlayer(): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isExpanded])
 
+  // 時間の表示はタイムラインと同じ `時:分:秒:フレーム`(Premiere と同じ)
+  const timecodeFps = Math.round(1 / frameSeconds(project.clips, project.assets))
   const activeOverlays = project.textOverlays.filter(
     (o) => playheadTime >= o.startTime && playheadTime < o.endTime
   )
@@ -1471,7 +1468,7 @@ export function PreviewPlayer(): React.JSX.Element {
         </div>
         <div className="preview-controls">
           <div className="preview-scrub-row">
-            <span className="time-label current">{formatTime(playheadTime)}</span>
+            <span className="time-label current">{formatTimecode(playheadTime, timecodeFps)}</span>
             <div
               ref={scrubTrackRef}
               className={`scrub-track ${scrubbingPreview ? 'scrubbing' : ''}`}
@@ -1490,13 +1487,13 @@ export function PreviewPlayer(): React.JSX.Element {
                 }}
               />
             </div>
-            <span className="time-label total">{formatTime(total)}</span>
+            <span className="time-label total">{formatTimecode(total, timecodeFps)}</span>
             {exportTotal < total - 0.005 && (
               <span
                 className="time-label export-total"
                 title="つなぎは2本のクリップを重ねるため、書き出したファイルはタイムラインよりつなぎの秒数ぶん短くなります"
               >
-                (書き出し {formatTime(exportTotal)})
+                (書き出し {formatTimecode(exportTotal, timecodeFps)})
               </span>
             )}
           </div>

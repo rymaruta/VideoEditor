@@ -4,7 +4,6 @@ import { useMenuCommand } from '../lib/menuCommands'
 import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
-import { useAutoEditRunStore } from '../store/autoEditRunStore'
 import { formatIpcError } from '../lib/ipcError'
 import { assetsNeedingPreviewProxy, canPreviewFile } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
@@ -22,7 +21,6 @@ import {
   MusicIcon,
   AlertTriangleIcon,
   TargetIcon,
-  WandIcon,
   RefreshIcon,
   TrashIcon
 } from './icons'
@@ -76,10 +74,6 @@ export function MediaBin(): React.JSX.Element {
   const [proxyProgress, setProxyProgress] = useState<Record<string, number>>({})
   const [fileDragActive, setFileDragActive] = useState(false)
   const hasVideoAssets = assets.some((a) => a.hasVideo)
-  // 全自動編集はモーダルを閉じても走り続けるので、走っていることがここから分かるようにする
-  const autoEditRunning = useAutoEditRunStore(
-    (s) => s.status === 'running' || s.finishingId !== null
-  )
 
   // Progress arrives on a main-process channel keyed by asset id, so several files
   // being transcoded at once each drive their own row.
@@ -468,40 +462,7 @@ export function MediaBin(): React.JSX.Element {
         </>
       ) : (
         <>
-          {hasVideoAssets && (
-            <div className="media-bin-auto-buttons">
-              <button
-                className="small-button longform-trigger"
-                onClick={() => setShowLongForm(true)}
-                title="2時間などの長い動画から、音声の盛り上がりを手がかりに30秒前後のショートをAIが組み立てます"
-              >
-                <WandIcon width={13} height={13} />
-                長尺からショートを自動生成
-              </button>
-              <button
-                className={`small-button autoedit-trigger ${autoEditRunning ? 'running' : ''}`}
-                onClick={() => setShowAutoEdit(true)}
-                title={
-                  autoEditRunning
-                    ? '生成中です。押すと進み具合と結果を開けます(閉じても生成は続きます)'
-                    : '配置した動画素材から5種類の編集パターンをAIが自動生成します。良し悪しを評価すると次回以降の生成に反映されます'
-                }
-              >
-                <WandIcon width={13} height={13} />
-                {autoEditRunning
-                  ? 'AIおまかせ全自動編集(生成中...)'
-                  : 'AIおまかせ全自動編集(5パターン)'}
-              </button>
-              <button
-                className="small-button roughcut-trigger"
-                onClick={() => setShowRoughCut(true)}
-                title="すべての動画素材からハイライトを検出し、タイムラインへ自動でラフカットを組み立てます"
-              >
-                <WandIcon width={13} height={13} />
-                複数素材から自動ラフカット
-              </button>
-            </div>
-          )}
+          {/* 自動編集(AIおまかせ・ラフカット・長尺からショート)はメニューバーの「自動編集」から開く */}
           {importing && <p className="hint-text">読み込み中...</p>}
           {error && <p className="error-text">{error}</p>}
           <div className="media-list">

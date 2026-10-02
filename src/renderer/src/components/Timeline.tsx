@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
 import { useMenuCommand } from '../lib/menuCommands'
+import { formatTimecode, rulerStep, rulerTicks } from '../lib/timelineRuler'
+import { frameSeconds } from '@shared/frameRate'
 import { v4 as uuid } from 'uuid'
 import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -266,6 +268,12 @@ function fadeExceedsClip(clip: AudioTrackClip): boolean {
   if (raw <= 0) return false
   const n = normalizeFades(clip.fadeIn, clip.fadeOut, dur)
   return n.fadeIn + n.fadeOut < raw - 1e-9
+}
+
+/** タイムライン左上の今の位置(時:分:秒:フレーム)。再生位置だけを購読する小さな部品 */
+function TimelineTimecode({ fps }: { fps: number }): React.JSX.Element {
+  const playheadTime = useProjectStore((s) => s.playheadTime)
+  return <span className="timeline-timecode">{formatTimecode(playheadTime, fps)}</span>
 }
 
 // The playhead is the only part of the timeline that has to follow `playheadTime`
@@ -1344,6 +1352,9 @@ export function Timeline(): React.JSX.Element {
   const timedClips = buildTimedClips(previewProject)
   const total = totalTimelineDuration(timedClips)
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
+  // 時間目盛りの刻み(フレームレートはプロジェクトの素材から。書き出しと同じ数え方)
+  const rulerFps = Math.round(1 / frameSeconds(project.clips, project.assets))
+  const rulerStepSeconds = rulerStep(pixelsPerSecond, rulerFps)
   const pinned = pinnedIds([
     selectedClipId,
     multiSelectedClipIds,
@@ -1995,10 +2006,16 @@ export function Timeline(): React.JSX.Element {
 
       <div className="timeline-tracks">
         <div className="track-labels-col">
-          <div className="track-label track-label-video">動画</div>
-          {project.videoOverlayTracks.map((track) => (
+          <div className="timeline-timecode-cell">
+            <TimelineTimecode fps={rulerFps} />
+          </div>
+          <div className="track-label track-label-video">
+            <span className="track-tag tag-video">V1</span>本編
+          </div>
+          {project.videoOverlayTracks.map((track, trackIndex) => (
             <div key={track.id} className="track-label">
               <span className="track-label-name" title={track.name}>
+                <span className="track-tag tag-video">V{trackIndex + 2}</span>
                 {track.name}
               </span>
               <div className="track-label-controls">
@@ -2049,9 +2066,10 @@ export function Timeline(): React.JSX.Element {
               </div>
             </div>
           ))}
-          {project.audioTracks.map((track) => (
+          {project.audioTracks.map((track, trackIndex) => (
             <div key={track.id} className="track-label">
               <span className="track-label-name" title={track.name}>
+                <span className="track-tag tag-audio">A{trackIndex + 1}</span>
                 {track.name}
               </span>
               <div className="track-label-controls">
@@ -2108,7 +2126,7 @@ export function Timeline(): React.JSX.Element {
           {project.textOverlays.length > 0 && (
             <div className="track-label" style={{ height: captionLaneH }}>
               <span className="track-label-name">
-                <TypeIcon width={12} height={12} />
+                <span className="track-tag tag-telop">T1</span>
                 テロップ
               </span>
             </div>
@@ -2116,6 +2134,26 @@ export function Timeline(): React.JSX.Element {
         </div>
 
         <div className="track-lanes-col" ref={trackLanesColRef} onWheel={handleWheelZoom}>
+          {/* 時間目盛り。押した位置へ再生位置を移す(見えている範囲の目盛りだけ描く) */}
+          <div
+            className="timeline-ruler"
+            style={{ width: timelineWidth }}
+            onMouseDown={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect()
+              const t = Math.max(0, Math.min(total, (e.clientX - rect.left) / pixelsPerSecond))
+              seekTo(t)
+            }}
+          >
+            {rulerTicks(
+              Math.max(0, visibleWindow.from),
+              Math.min(total + rulerStepSeconds, visibleWindow.to),
+              rulerStepSeconds
+            ).map((t) => (
+              <span key={t} className="timeline-ruler-tick" style={{ left: t * pixelsPerSecond }}>
+                {formatTimecode(t, rulerFps)}
+              </span>
+            ))}
+          </div>
           {project.beatGrid?.enabled &&
             beatTimes.map((t, i) => (
               <div key={i} className="timeline-beat-line" style={{ left: t * pixelsPerSecond }} />
