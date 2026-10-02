@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
 import { v4 as uuid } from 'uuid'
 import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -725,6 +726,9 @@ export function Timeline(): React.JSX.Element {
   const lastClickedClipIdRef = useRef<string | null>(null)
 
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom
+  // 見えている範囲だけ描く(長尺の企画で、クリップ数に比例して重くならないように)。
+  // 操作中・選択中のものは見えていなくても描く(理由は pinnedIds)
+  const visibleWindow = useVisibleWindow(trackLanesColRef, pixelsPerSecond)
 
   const baseTimedClips = useMemo(() => buildTimedClips(project), [project])
 
@@ -1338,6 +1342,22 @@ export function Timeline(): React.JSX.Element {
   const timedClips = buildTimedClips(previewProject)
   const total = totalTimelineDuration(timedClips)
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
+  const pinned = pinnedIds([
+    selectedClipId,
+    multiSelectedClipIds,
+    draggedClipId,
+    trimDrag,
+    rollDrag,
+    audioDrag,
+    mediaTrimDrag,
+    overlayDrag,
+    videoOverlayDrag,
+    selectedOverlayId,
+    selectedAudioClip,
+    selectedVideoOverlayClip,
+    transitionPopoverClipId,
+    contextMenu
+  ])
   const selectedIndex = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const selectedClip = selectedIndex >= 0 ? timedClips[selectedIndex].clip : null
   // 案内線を出す元は**`snapGuideTime` を持つドラッグ状態の全部**。1つでも書き漏らすと、
@@ -2161,6 +2181,9 @@ export function Timeline(): React.JSX.Element {
               />
             )}
             {timedClips.map((tc, i) => {
+              if (!inWindow(visibleWindow, tc.start, tc.end) && !pinned.has(tc.clip.id)) {
+                return null
+              }
               const clipWidth = (tc.end - tc.start) * pixelsPerSecond
               // **置く位置は時刻から出す。** 音声・PiP・テロップの3レーンは前から
               // `left = 秒 × 1秒あたりの画素` で置いており、本編だけが**並べた順に流し込む**
@@ -2437,6 +2460,16 @@ export function Timeline(): React.JSX.Element {
                 />
               )}
               {track.clips.map((clip) => {
+                if (
+                  !inWindow(
+                    visibleWindow,
+                    clip.startTime,
+                    clip.startTime + (clip.outPoint - clip.inPoint)
+                  ) &&
+                  !pinned.has(clip.id)
+                ) {
+                  return null
+                }
                 const asset = project.assets.find((a) => a.id === clip.assetId)
                 if (!asset) return null
                 const isTrimmingThis =
@@ -2608,6 +2641,16 @@ export function Timeline(): React.JSX.Element {
                 />
               )}
               {track.clips.map((clip) => {
+                if (
+                  !inWindow(
+                    visibleWindow,
+                    clip.startTime,
+                    clip.startTime + audioClipDuration(clip)
+                  ) &&
+                  !pinned.has(clip.id)
+                ) {
+                  return null
+                }
                 const asset = project.assets.find((a) => a.id === clip.assetId)
                 if (!asset) return null
                 const isTrimmingThis =
@@ -2735,6 +2778,12 @@ export function Timeline(): React.JSX.Element {
               style={{ width: timelineWidth, height: captionLaneH }}
             >
               {project.textOverlays.map((overlay) => {
+                if (
+                  !inWindow(visibleWindow, overlay.startTime, overlay.endTime) &&
+                  !pinned.has(overlay.id)
+                ) {
+                  return null
+                }
                 const isDragging = overlayDrag?.overlayId === overlay.id
                 const displayStart = isDragging ? overlayDrag.liveStartTime : overlay.startTime
                 const displayEnd = isDragging ? overlayDrag.liveEndTime : overlay.endTime

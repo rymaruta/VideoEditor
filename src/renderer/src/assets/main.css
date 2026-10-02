@@ -4158,3 +4158,12 @@ h3 {
   gap: 10px;
   margin: 0 0 6px;
 }
+
+/* テロップ一覧のページ送り(件数が多い企画で、1ページぶんだけ描く) */
+.overlay-paging {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+}

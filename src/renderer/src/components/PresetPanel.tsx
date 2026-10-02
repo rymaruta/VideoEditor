@@ -48,7 +48,9 @@ export function PresetPanel(): React.JSX.Element {
   const removeDictionaryEntry = useSfxDictionaryStore((s) => s.removeEntry)
 
   const project = useProjectStore((s) => s.project)
-  const playheadTime = useProjectStore((s) => s.playheadTime)
+  // 再生位置は**押した瞬間に読む**(購読しない)。購読すると再生中は毎フレームこのパネル全体が
+  // 描き直され、テロップが多い企画ほど重くなる(実測: テロップ1,000本・60分の企画で、
+  // 再生中のフレーム間隔が 167ms=約6fps まで落ちていた。原因の大半がこの描き直し)。
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
   const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
 
@@ -76,7 +78,7 @@ export function PresetPanel(): React.JSX.Element {
     addTextOverlay({
       text: preset.name,
       // 置く位置の規則は「テキスト」タブの追加と共通(片方だけ尺を超えて置けていた)
-      ...newOverlayRange(playheadTime, getTotalDuration(project)),
+      ...newOverlayRange(useProjectStore.getState().playheadTime, getTotalDuration(project)),
       style: { ...preset.style },
       source: 'manual'
     })
@@ -147,7 +149,7 @@ export function PresetPanel(): React.JSX.Element {
           hasVideo: false
         },
         // テロップのプリセットと同じく再生位置へ置く。そこが埋まっていれば直後へずれる。
-        { trackName: 'SE', startTime: playheadTime }
+        { trackName: 'SE', startTime: useProjectStore.getState().playheadTime }
       )
     } catch (e) {
       setError(formatIpcError(e))

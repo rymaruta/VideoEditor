@@ -7,6 +7,7 @@ import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } 
 import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
 import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
 import { parseBulkFontSize } from '../lib/textOverlayInput'
+import { OVERLAY_PAGE_SIZE, clampPage, pageCount, pageForTime, pageSlice } from '../lib/listPaging'
 import { MIN_OVERLAY_DURATION, newOverlayRange } from '../lib/textOverlayPlacement'
 import { PlusIcon, TrashIcon, TypeIcon, CopyIcon, StarIcon } from './icons'
 
@@ -41,7 +42,9 @@ export function TextOverlayPanel(): React.JSX.Element {
   const setTextOverlayLink = useProjectStore((s) => s.setTextOverlayLink)
   const updateTextOverlaysStyle = useProjectStore((s) => s.updateTextOverlaysStyle)
   const addCaptionPreset = usePresetStore((s) => s.addCaptionPreset)
-  const playheadTime = useProjectStore((s) => s.playheadTime)
+  // 再生位置は**押した瞬間に読む**(購読しない)。購読すると再生中は毎フレームこのパネル全体が
+  // 描き直され、テロップが多い企画ほど重くなる(実測: テロップ1,000本・60分の企画で、
+  // 再生中のフレーム間隔が 167ms=約6fps まで落ちていた。原因の大半がこの描き直し)。
 
   const total = getTotalDuration(project)
   const timedClips = buildTimedClips(project)
@@ -55,6 +58,8 @@ export function TextOverlayPanel(): React.JSX.Element {
   const [presetNameDrafts, setPresetNameDrafts] = useState<Record<string, string>>({})
   const [shiftAmount, setShiftAmount] = useState(0.5)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // 一覧は1ページぶんだけ描く(理由は listPaging)
+  const [page, setPage] = useState(0)
 
   // 選択は「いま存在するテロップ」に絞って使う。削除された分のIDが残っていても、
   // ここで落ちるので件数表示も一括適用も実物とズレない。
@@ -104,6 +109,9 @@ export function TextOverlayPanel(): React.JSX.Element {
     })
   }
 
+  const currentPage = clampPage(page, project.textOverlays.length)
+  const visibleRange = pageSlice(currentPage, project.textOverlays.length)
+
   return (
     <div className="panel text-overlay-panel">
       <div className="panel-header">
@@ -115,7 +123,7 @@ export function TextOverlayPanel(): React.JSX.Element {
               text: '新しいテキスト',
               // 置く位置は**再生位置**。0 秒固定だと、見ている場所と関係ないところに入り、
               // 続けて押すたびに同じ区間へ積み上がる(規則は newOverlayRange)。
-              ...newOverlayRange(playheadTime, total),
+              ...newOverlayRange(useProjectStore.getState().playheadTime, total),
               style: defaultTextStyle(),
               source: 'manual'
             })
@@ -234,7 +242,37 @@ export function TextOverlayPanel(): React.JSX.Element {
             <p className="hint-text">テキストはありません</p>
           </div>
         )}
-        {project.textOverlays.map((o) => (
+        {project.textOverlays.length > OVERLAY_PAGE_SIZE && (
+          <div className="overlay-paging">
+            <button
+              className="small-button"
+              disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              前へ
+            </button>
+            <span className="hint-text">
+              {visibleRange.start + 1}〜{visibleRange.end} / {project.textOverlays.length}件
+            </span>
+            <button
+              className="small-button"
+              disabled={currentPage >= pageCount(project.textOverlays.length) - 1}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              次へ
+            </button>
+            <button
+              className="small-button"
+              title="再生位置に出ているテロップが載っているページへ移ります"
+              onClick={() =>
+                setPage(pageForTime(project.textOverlays, useProjectStore.getState().playheadTime))
+              }
+            >
+              再生位置へ
+            </button>
+          </div>
+        )}
+        {project.textOverlays.slice(visibleRange.start, visibleRange.end).map((o) => (
           <div key={o.id} className={`overlay-item ${selectedIds.has(o.id) ? 'selected' : ''}`}>
             <label className="checkbox-label overlay-select-label">
               <input
