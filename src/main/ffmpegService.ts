@@ -440,7 +440,7 @@ export async function detectSilence(
   })
 }
 
-function crfForQuality(quality: QualityPreset): number {
+export function crfForQuality(quality: QualityPreset): number {
   switch (quality) {
     case 'high':
       return 18
@@ -451,11 +451,11 @@ function crfForQuality(quality: QualityPreset): number {
   }
 }
 
-function escapeFilterPath(p: string): string {
+export function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")
 }
 
-function xfadeName(type: TransitionType): string {
+export function xfadeName(type: TransitionType): string {
   switch (type) {
     case 'fade':
       return 'fadeblack'
@@ -510,11 +510,11 @@ export function atempoChain(speed: number): string {
 // サンプルレートも道連れで落ちる**(実測: 48kHz ステレオの本編にモノラルのナレーションを
 // 1本足すと出力が 44.1kHz・1ch になり、左だけに入れた音が中央に潰れた)。
 // エラーも警告も出ないので、書き出しの尺だけ見ていると気付けない。
-const OUTPUT_SAMPLE_RATE = 48000
+export const OUTPUT_SAMPLE_RATE = 48000
 const OUTPUT_CHANNEL_LAYOUT = 'stereo'
 // 合流の手前で形式を固定して、交渉の余地を無くす。**音声の枝を足したら必ずこれを通す**
 // (通し忘れた枝が1本あれば、そこからグラフ全体が引きずられる)。
-const AUDIO_FORMAT = `aformat=sample_fmts=fltp:sample_rates=${OUTPUT_SAMPLE_RATE}:channel_layouts=${OUTPUT_CHANNEL_LAYOUT}`
+export const AUDIO_FORMAT = `aformat=sample_fmts=fltp:sample_rates=${OUTPUT_SAMPLE_RATE}:channel_layouts=${OUTPUT_CHANNEL_LAYOUT}`
 
 // 映像も同じ理由で固定する。**形式の交渉は音声だけの話ではない。**
 // `xfade` は yuv444p を好むため、4:2:0 の素材しか無いタイムラインでも、
@@ -528,14 +528,14 @@ const AUDIO_FORMAT = `aformat=sample_fmts=fltp:sample_rates=${OUTPUT_SAMPLE_RATE
 // 4:4:4 はハードウェアデコーダや一般的な再生環境が扱えない profile で、
 // 元素材に無い色差情報が増えるわけでもないので、ここで 4:2:0 に固定する。
 // (`previewProxyService` は最初から `-pix_fmt yuv420p` を付けている。書き出しだけが素通しだった)
-const VIDEO_FORMAT = 'format=yuv420p'
+export const VIDEO_FORMAT = 'format=yuv420p'
 
 /**
  * 音声の枝の終端に置く形式固定。モノラルの素材だけ、`@shared/audioUpmix` の理由で
  * 等倍に直してから固定する。チャンネル数が分からない素材(ffprobe が答えなかった)は
  * 今までどおりの経路にする。
  */
-function audioFormatFor(channels: number | undefined): string {
+export function audioFormatFor(channels: number | undefined): string {
   if (isMonoChannelCount(channels)) {
     return `${monoUpmixFilter(OUTPUT_SAMPLE_RATE)},${AUDIO_FORMAT}`
   }
@@ -567,7 +567,7 @@ function audioFormatFor(channels: number | undefined): string {
  * 調べなくてよいので、**数が分からなかった素材でも取りこぼさない**。
  * 1ch・2ch では今までと同じ結果になる(余った `|` は元々無視されていた)。
  */
-function adelayFilter(delayMs: number): string {
+export function adelayFilter(delayMs: number): string {
   return `adelay=${delayMs}:all=1`
 }
 
@@ -575,7 +575,7 @@ function adelayFilter(delayMs: number): string {
  * 素材の音声チャンネル数を調べる。**書き出しを止める理由にはしない**ので、
  * 失敗しても `undefined` を返す(呼び出し側が今までどおりの経路に倒す)。
  */
-function probeAudioChannels(filePath: string): Promise<number | undefined> {
+export function probeAudioChannels(filePath: string): Promise<number | undefined> {
   return new Promise((resolve) => {
     ffmpeg.ffprobe(filePath, (err, data) => {
       if (err || !data) return resolve(undefined)
@@ -1350,7 +1350,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
 }
 
 /** loudnorm 測定パスの結果(2パス目へ渡す measured_* 一式) */
-interface LoudnessMeasurement {
+export interface LoudnessMeasurement {
   inputI: number
   inputTP: number
   inputLRA: number

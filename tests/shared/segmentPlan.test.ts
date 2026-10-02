@@ -81,21 +81,31 @@ describe('planSegments — 書き出しを区間に分ける', () => {
     for (const x of s) expect(x.itemIds).toEqual(['long'])
   })
 
-  it('繋ぎの途中では切らない: 最大の位置が繋ぎの途中なら、繋ぎの始まりへ戻す', () => {
-    // c0 [0,230) と c1 [180,1000) の繋ぎ [180,230) が、最大 200 をまたぐ。カット点 180 は範囲内
+  it('繋ぎに掛かる位置では切らない: 最大の位置が繋ぎの中なら、繋ぎの始まりの1つ手前へ戻す', () => {
+    // c0 [0,230) と c1 [180,1000) の繋ぎ [180,230] が、最大 200 をまたぐ。両端 180・230 も使えない
     const s = planSegments(seq([media('c0', 0, 230), media('c1', 180, 820, 50)]), OPT)
-    for (const x of s.slice(1)) expect(x.startFrame <= 180 || x.startFrame >= 230).toBe(true)
-    expect(s[0].endFrame).toBe(180)
+    for (const x of s.slice(1)) expect(x.startFrame < 180 || x.startFrame > 230).toBe(true)
+    expect(s[0].endFrame).toBe(179)
   })
 
   it('最大より長い繋ぎは割らない: 手前(最小より短くても)で切り、繋ぎは終わりまで1区間に入れる', () => {
-    // 繋ぎ [10,400) は最大(200)より長い。最大の位置 200 から繋ぎの始まり 10 へ戻して切り、
-    // 次の区間は繋ぎを割れないので繋ぎの終わり 400 まで伸びる(最大を超えるのはこの場合だけ)
+    // 繋ぎ [10,400] は最大(200)より長い。最大の位置 200 から繋ぎの始まりの手前 9 へ戻して切り、
+    // 次の区間は繋ぎを割れず、終わりちょうども避けるので 401 まで伸びる(最大を超えるのはこの場合だけ)
     const s = planSegments(seq([media('c0', 0, 400), media('c1', 10, 990, 390)]), OPT)
     expect(s.slice(0, 2).map((x) => [x.startFrame, x.endFrame])).toEqual([
-      [0, 10],
-      [10, 400]
+      [0, 9],
+      [9, 401]
     ])
+  })
+
+  it('【レグレッション】繋ぎの両端ちょうどでは切らない(片側が区間に繋ぎの長さしか残らず、繋ぎが消える)', () => {
+    // 70フレーム + 21フレームの繋ぎ [49,70]。カット点 49(始まり)・70(終わり)はどちらも使えない
+    const s = planSegments(seq([media('c1', 0, 70), media('c2', 49, 93, 21)]), {
+      targetFrames: 60,
+      minFrames: 30,
+      maxFrames: 90
+    })
+    for (const x of s) expect(x.startFrame >= 49 && x.startFrame <= 70).toBe(false)
   })
 
   it('上のトラックのカット点(テロップの出入り等)も切る位置の候補になる', () => {
@@ -103,17 +113,32 @@ describe('planSegments — 書き出しを区間に分ける', () => {
     expect(s[0].endFrame).toBe(95)
   })
 
+  it('細かく刻んだ企画は、1区間の素材の本数が上限に収まるよう短く切る(最小より短くても)', () => {
+    // 10フレームずつ100本。長さだけなら 200フレーム(20本)ずつだが、上限8本なので 80フレームずつ
+    const s = planSegments(seq(back2back(Array(100).fill(10))), { ...OPT, maxItems: 8 })
+    for (const g of s) expect(g.itemIds.length).toBeLessThanOrEqual(8)
+    expect(s[0]).toMatchObject({ startFrame: 0, endFrame: 80 })
+  })
+
+  it('1つの瞬間に上限を超える本数が重なっていても、1フレームずつには刻まない', () => {
+    const stacked = Array.from({ length: 30 }, (_, i) => [media(`s${i}`, 0, 600)])
+    const s = planSegments(seq(back2back(Array(60).fill(10)), stacked), { ...OPT, maxItems: 8 })
+    expect(s.length).toBeLessThan(20)
+    expect(s.at(-1)!.endFrame).toBe(600)
+  })
+
   it('既定の長さは 45秒前後・20〜90秒', () => {
     expect(defaultSegmentOptions(30)).toEqual({
       targetFrames: 1350,
       minFrames: 600,
-      maxFrames: 2700
+      maxFrames: 2700,
+      maxItems: 24
     })
     expect(defaultSegmentOptions(NaN)).toEqual(defaultSegmentOptions(30))
     expect(defaultSegmentOptions(-1)).toEqual(defaultSegmentOptions(30))
   })
 
-  it('【不変条件】区間は隙間なく [0, 尺) を覆い、繋ぎの途中で切らず、itemIds は掛かるアイテムと一致', () => {
+  it('【不変条件】区間は隙間なく [0, 尺) を覆い、繋ぎの途中と両端で切らず、itemIds は掛かるアイテムと一致', () => {
     const rnd = seeded(9001)
     for (let n = 0; n < 400; n++) {
       const items: MediaItem[] = []
@@ -134,7 +159,8 @@ describe('planSegments — 書き出しを区間に分ける', () => {
       const opt = {
         targetFrames: 50 + rnd() * 300,
         minFrames: 1 + rnd() * 100,
-        maxFrames: 100 + rnd() * 400
+        maxFrames: 100 + rnd() * 400,
+        maxItems: rnd() < 0.5 ? 1 + Math.floor(rnd() * 12) : undefined
       }
       const segs = planSegments(s, opt)
       expect(segs[0].startFrame).toBe(0)
@@ -146,8 +172,8 @@ describe('planSegments — 書き出しを区間に分ける', () => {
         for (const it of items) {
           if (it.transitionIn) {
             expect(
-              g.startFrame > it.startFrame &&
-                g.startFrame < it.startFrame + it.transitionIn.durationFrames
+              g.startFrame >= it.startFrame &&
+                g.startFrame <= it.startFrame + it.transitionIn.durationFrames
             ).toBe(false)
           }
         }

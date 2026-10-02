@@ -141,8 +141,9 @@ export function scaleToFrameFilter(
      * 5.967秒(179フレーム)に対して音声 6.000秒。合成の前に両系統を揃え、
      * `overlay` の後ろには置かない形にすると 6.000秒(180フレーム)で一致する。
      * 静止画1枚の生成では不要なので省略してよい。
+     * 29.97 のような値は `'30000/1001'` の形(ffmpeg の有理数表記)で渡せる。
      */
-    fps?: number
+    fps?: number | string
   } = {}
 ): string {
   const labelSuffix = options.labelSuffix ?? ''

@@ -150,6 +150,41 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
     expect([pip2.items[0].startFrame, pip2.items[0].durationFrames]).toEqual([180, 90])
   })
 
+  it('ワイプの音は専用の音声トラックに同じ位置で入る。非表示のワイプはミュート、音の無い素材は入らない', () => {
+    const pipTrack = (
+      id: string,
+      hidden: boolean,
+      assetId: string
+    ): Project['videoOverlayTracks'][number] => ({
+      id,
+      name: id,
+      hidden,
+      position: 'top-left',
+      scale: 0.3,
+      clips: [{ id: `${id}-c`, assetId, startTime: 1, inPoint: 2, outPoint: 4 }]
+    })
+    const p = projectV1ToV2(
+      emptyProject({
+        clips: crossfadeClips(),
+        videoOverlayTracks: [
+          pipTrack('shown', false, 'a'),
+          pipTrack('hidden', true, 'b'),
+          pipTrack('silent', false, 'mute')
+        ]
+      })
+    )
+    const byId = new Map(p.sequence.audioTracks.map((t) => [t.id, t]))
+    expect(byId.get('shown:audio')).toMatchObject({ muted: false, duckingEnabled: false })
+    expect(byId.get('shown:audio')!.items[0]).toMatchObject({
+      linkedItemId: 'shown-c',
+      startFrame: 30,
+      durationFrames: 60,
+      sourceIn: 2
+    })
+    expect(byId.get('hidden:audio')?.muted).toBe(true)
+    expect(byId.has('silent:audio')).toBe(false)
+  })
+
   it('テロップは書き出しの秒へ換算し、単語の時刻はアイテムの頭からの秒にする', () => {
     const p = projectV1ToV2(
       emptyProject({

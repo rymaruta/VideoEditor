@@ -118,6 +118,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
   ]
 
   // --- PiP: 1本の v1 トラックの中で重なっていれば、v2 では段を分ける ---
+  const pipAudioTracks: SequenceAudioTrack[] = []
   for (const track of project.videoOverlayTracks) {
     const items: MediaItem[] = []
     for (const oc of track.clips) {
@@ -149,6 +150,31 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         hidden: track.hidden,
         items: lane
       })
+      // v1 の書き出しはワイプの素材の音も混ぜる(本編の音ではないのでダッキングの基準にはしない)。
+      // 非表示のワイプは音も出さないので、ミュートしたトラックとして写す。
+      const audioItems: AudioItem[] = lane
+        .filter((it) => assetById.get(it.assetId)?.hasAudio)
+        .map((it) => ({
+          kind: 'audio',
+          id: `${it.id}:audio`,
+          assetId: it.assetId,
+          startFrame: it.startFrame,
+          durationFrames: it.durationFrames,
+          sourceIn: it.sourceIn,
+          speed: 1,
+          origin: 'manual',
+          linkedItemId: it.id
+        }))
+      if (audioItems.length > 0) {
+        pipAudioTracks.push({
+          id: `${li === 0 ? track.id : `${track.id}:${li + 1}`}:audio`,
+          name: `${li === 0 ? track.name : `${track.name} (${li + 1})`} の音`,
+          muted: track.hidden,
+          volume: 1,
+          duckingEnabled: false,
+          items: audioItems
+        })
+      }
     })
   }
 
@@ -231,6 +257,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
       })
     })
   }
+
+  audioTracks.push(...pipAudioTracks)
 
   return {
     version: 2,
