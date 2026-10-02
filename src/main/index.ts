@@ -39,6 +39,17 @@ import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
 import { fitWindowStateToDisplays, type WindowState } from './windowState'
 import { exportSequenceSegmented } from './segmentRenderer'
+import { installAppMenu, updateAppMenu } from './appMenu'
+import {
+  forgetLibraryFolder,
+  libraryOverview,
+  listLibraryFiles,
+  rememberFolder,
+  rememberImportedFiles,
+  startLibraryWatchers,
+  stopLibraryWatchers,
+  toggleLibraryFavorite
+} from './libraryService'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
 import type { TelopLayerPayload } from '@shared/telop/layer'
 import type {
@@ -95,7 +106,8 @@ function createWindow(): void {
     x: savedState?.x,
     y: savedState?.y,
     show: false,
-    autoHideMenuBar: true,
+    // メニューバー(ファイル / 編集 / …)を常に出す。Windows の編集ソフトと同じ作り
+    autoHideMenuBar: false,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -369,6 +381,11 @@ function hasLinuxOpener(): boolean {
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.videoeditor.app')
+  startLibraryWatchers()
+  installAppMenu(is.dev)
+  ipcMain.handle(IPC.menuUpdate, (_e, next: Parameters<typeof updateAppMenu>[0]) =>
+    updateAppMenu(next ?? {}, is.dev)
+  )
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -568,6 +585,25 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.loadDiscardedAutosave, () => loadProjectFile(discardedPathFor(autosavePath)))
   ipcMain.handle(IPC.cancelExport, () => cancelExport())
 
+  // --- 共通ライブラリ(一度読み込んだフォルダを覚えて、次の回からも使う) ---
+  ipcMain.handle(IPC.libraryOverview, () => libraryOverview())
+  ipcMain.handle(IPC.libraryRemember, (_e, filePaths: string[]) =>
+    rememberImportedFiles(Array.isArray(filePaths) ? filePaths : [])
+  )
+  ipcMain.handle(IPC.libraryForget, (_e, folderPath: string) => forgetLibraryFolder(folderPath))
+  ipcMain.handle(IPC.libraryToggleFavorite, (_e, filePath: string) =>
+    toggleLibraryFavorite(filePath)
+  )
+  ipcMain.handle(IPC.libraryFiles, (_e, folderPath: string) => listLibraryFiles(folderPath))
+  ipcMain.handle(IPC.libraryAddFolder, async (event) => {
+    const result = await showOpenDialogForSender(event, {
+      title: 'ライブラリに加えるフォルダ',
+      properties: ['openDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return rememberFolder(result.filePaths[0])
+  })
+
   registerWindowScopedIpcHandlers()
 
   createWindow()
@@ -576,6 +612,8 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+app.on('will-quit', () => stopLibraryWatchers())
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

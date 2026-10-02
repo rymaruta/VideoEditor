@@ -4167,3 +4167,181 @@ h3 {
   flex-wrap: wrap;
   margin: 4px 0 8px;
 }
+
+/* ===== メディアパネルのタブ(プロジェクト / ライブラリ) ===== */
+.media-bin-tabs {
+  display: flex;
+  gap: 2px;
+}
+.media-bin-tab {
+  height: 26px;
+  padding: 0 8px;
+  white-space: nowrap;
+  border-radius: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.media-bin-tab.active {
+  color: var(--text-1);
+  border-bottom-color: var(--accent-2);
+}
+
+/* ===== 共通ライブラリ ===== */
+.library-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  flex: 1;
+  padding: 0 8px 8px;
+}
+.library-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.library-toolbar select {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+}
+.library-folder-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.library-folder-path span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-search {
+  height: 28px;
+}
+.library-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.library-chip {
+  height: 24px;
+  padding: 0 10px;
+  white-space: nowrap;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.library-chip.active {
+  border-color: var(--accent-2);
+  color: var(--text-1);
+  background: rgba(59, 130, 246, 0.16);
+}
+.library-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.library-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--border-soft);
+}
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: default;
+}
+.library-row:hover {
+  background: var(--bg-elevated-3);
+}
+.library-row.used .library-name {
+  color: var(--text-3);
+}
+.library-star,
+.library-play {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.library-star.on {
+  color: #e6a23c;
+}
+.library-star.on svg {
+  fill: currentColor;
+}
+.library-play {
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.library-kind {
+  width: 22px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-3);
+  text-align: center;
+}
+.library-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.library-sub {
+  font-size: 10px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.library-size {
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.library-use {
+  flex-shrink: 0;
+}
+.library-more {
+  padding: 8px;
+  text-align: center;
+}
+
+.library-use {
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.library-toolbar .small-button {
+  white-space: nowrap;
+}

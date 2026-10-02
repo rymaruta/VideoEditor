@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
+import { useMenuCommand } from '../lib/menuCommands'
 import { v4 as uuid } from 'uuid'
 import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -7,7 +8,8 @@ import {
   audioClipDuration,
   buildTimedClips,
   rangeSelectionIds,
-  totalTimelineDuration
+  totalTimelineDuration,
+  findTimedClipAt
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
 // テロップの最短の長さは**追加のときと同じ数字**を使う。ここに別の数字を書いていたころ、
@@ -1535,6 +1537,21 @@ export function Timeline(): React.JSX.Element {
     const fitZoom = availableWidth / (total * BASE_PIXELS_PER_SECOND)
     setZoom(Math.min(MAX_ZOOM, Math.max(MIN_FIT_ZOOM, fitZoom)))
   }
+
+  // メニューバー(表示・テロップ・ヘルプ)から来る操作
+  useMenuCommand((id) => {
+    if (id === 'view.zoomIn') setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))
+    else if (id === 'view.zoomOut') setZoom((z) => Math.max(currentMinZoom(), z / 1.4))
+    else if (id === 'view.zoomFit') handleZoomToFit()
+    else if (id === 'help.shortcuts') setShortcutGuideVisible(true)
+    else if (id === 'telop.auto') {
+      // 選んでいるクリップ、無ければ再生位置のクリップの音声からテロップを作る
+      const state = useProjectStore.getState()
+      const target =
+        state.selectedClipId ?? findTimedClipAt(timedClips, state.playheadTime)?.clip.id ?? null
+      if (target) setAutoCaptionClipId(target)
+    }
+  })
 
   async function handleAnalyzeBpm(track: AudioTrack): Promise<void> {
     const clip = track.clips[0]

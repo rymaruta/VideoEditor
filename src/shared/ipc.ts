@@ -38,6 +38,15 @@ export const IPC = {
   discardAutosave: 'project:discardAutosave',
   loadDiscardedAutosave: 'project:loadDiscardedAutosave',
   cancelExport: 'export:cancel',
+  libraryOverview: 'library:overview',
+  libraryRemember: 'library:remember',
+  libraryAddFolder: 'library:addFolder',
+  libraryForget: 'library:forget',
+  libraryFiles: 'library:files',
+  libraryToggleFavorite: 'library:toggleFavorite',
+  libraryChanged: 'library:changed',
+  menuCommand: 'menu:command',
+  menuUpdate: 'menu:update',
   checkFilesExist: 'media:checkFilesExist',
   selectRelinkFile: 'media:selectRelinkFile'
 } as const

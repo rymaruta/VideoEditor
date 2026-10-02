@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
 import type { TelopLayerPayload } from '@shared/telop/layer'
+import type { LibraryFile, LibraryState } from '@shared/library'
+import type { MenuShortcuts } from '@shared/appMenu'
 import type {
   AspectRatio,
   BpmAnalysisResult,
@@ -198,7 +200,32 @@ const api = {
   /** 消さずに退避する。戻り値は退避したかどうか */
   discardAutosave: (): Promise<boolean> => ipcRenderer.invoke(IPC.discardAutosave),
   loadDiscardedAutosave: (): Promise<Project> => ipcRenderer.invoke(IPC.loadDiscardedAutosave),
-  cancelExport: (): Promise<void> => ipcRenderer.invoke(IPC.cancelExport)
+  cancelExport: (): Promise<void> => ipcRenderer.invoke(IPC.cancelExport),
+  libraryOverview: (): Promise<{ state: LibraryState; missing: string[] }> =>
+    ipcRenderer.invoke(IPC.libraryOverview),
+  libraryRemember: (filePaths: string[]): Promise<LibraryState> =>
+    ipcRenderer.invoke(IPC.libraryRemember, filePaths),
+  libraryAddFolder: (): Promise<LibraryState | null> => ipcRenderer.invoke(IPC.libraryAddFolder),
+  libraryForget: (folderPath: string): Promise<LibraryState> =>
+    ipcRenderer.invoke(IPC.libraryForget, folderPath),
+  libraryFiles: (folderPath: string): Promise<LibraryFile[]> =>
+    ipcRenderer.invoke(IPC.libraryFiles, folderPath),
+  libraryToggleFavorite: (filePath: string): Promise<LibraryState> =>
+    ipcRenderer.invoke(IPC.libraryToggleFavorite, filePath),
+  onMenuCommand: (callback: (id: string) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, id: string): void => callback(id)
+    ipcRenderer.on(IPC.menuCommand, listener)
+    return () => ipcRenderer.removeListener(IPC.menuCommand, listener)
+  },
+  updateMenu: (next: {
+    shortcuts?: MenuShortcuts
+    windows?: { id: string; label: string }[]
+  }): Promise<void> => ipcRenderer.invoke(IPC.menuUpdate, next),
+  onLibraryChanged: (callback: () => void): (() => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(IPC.libraryChanged, listener)
+    return () => ipcRenderer.removeListener(IPC.libraryChanged, listener)
+  }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

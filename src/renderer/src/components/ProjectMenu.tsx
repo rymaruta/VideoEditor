@@ -7,8 +7,10 @@ import {
   saveProject,
   openProject,
   openRecentProject,
+  saveProjectAs,
   startNewProject
 } from '../lib/projectFileActions'
+import { useMenuCommand } from '../lib/menuCommands'
 import { checkMissingAssets } from '../lib/projectFileActions'
 import {
   SaveIcon,
@@ -68,6 +70,17 @@ export function ProjectMenu(): React.JSX.Element {
       setSaveError(formatIpcError(e))
     }
   }
+
+  // メニューバー(ファイル)から来る操作。失敗の出し方はボタンと同じ
+  useMenuCommand((id) => {
+    if (id === 'file.new') void startNewProject()
+    else if (id === 'file.open') void handleOpen()
+    else if (id === 'file.save') void handleSave()
+    else if (id === 'file.saveAs') {
+      setError(null)
+      saveProjectAs().catch((e) => setSaveError(formatIpcError(e)))
+    }
+  })
 
   async function handleOpen(): Promise<void> {
     setError(null)

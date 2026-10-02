@@ -14,6 +14,7 @@ import { GameTrendPanel } from './components/GameTrendPanel'
 import { MetadataPanel } from './components/MetadataPanel'
 import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
+import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { ProjectMenu } from './components/ProjectMenu'
 import { ProjectNameField } from './components/ProjectNameField'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
@@ -115,6 +116,9 @@ const PUBLISH_TABS: TabDef[] = [
   { id: 'export', label: '書き出し', icon: DownloadIcon, description: '動画の書き出し設定' }
 ]
 
+/** メニューバーの「ウィンドウ」に並べる右側のパネル */
+const MENU_WINDOWS = [...EDIT_TABS, ...PUBLISH_TABS].map(({ id, label }) => ({ id, label }))
+
 const LEFT_WIDTH_KEY = 've-layout-left-width'
 const RIGHT_WIDTH_KEY = 've-layout-right-width'
 const TIMELINE_HEIGHT_KEY = 've-layout-timeline-height'
@@ -163,6 +167,9 @@ function App(): React.JSX.Element {
   const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
   const refreshAutosave = useAutosaveStore((s) => s.refresh)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
+
+  // メニューバー(ファイル / 編集 / … / ウィンドウ)。ウィンドウの欄には右側のパネルを並べる
+  useAppMenu(MENU_WINDOWS)
 
   useEffect(() => {
     loadEnvApiKeys()
@@ -228,6 +235,25 @@ function App(): React.JSX.Element {
   const [rightCollapsed, setRightCollapsed] = useState(
     () => localStorage.getItem(RIGHT_COLLAPSED_KEY) === 'true'
   )
+
+  // メニューバーの「ウィンドウ」「書き出し…」「テロップの一覧」で右側のパネルを開く
+  // (畳んでいれば広げる)。ライブラリ・読み込みは左のメディアパネルが受ける
+  useMenuCommand((id) => {
+    const target = id.startsWith('window.')
+      ? (id.slice('window.'.length) as RightTab)
+      : id === 'file.export'
+        ? 'export'
+        : id === 'telop.list'
+          ? 'text'
+          : null
+    if (target && MENU_WINDOWS.some((w) => w.id === target)) {
+      setTab(target)
+      setRightCollapsed(false)
+    }
+    if (id === 'view.library' || id === 'file.importVideo' || id === 'file.importAudio') {
+      setLeftCollapsed(false)
+    }
+  })
   const [resizeDrag, setResizeDrag] = useState<ResizeDragState | null>(null)
 
   function beginResize(kind: ResizeDragState['kind'], e: React.MouseEvent): void {
