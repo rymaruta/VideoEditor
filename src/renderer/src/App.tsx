@@ -6,7 +6,7 @@ import { Timeline } from './components/Timeline'
 import { TemplatePanel } from './components/TemplatePanel'
 import { TextOverlayPanel } from './components/TextOverlayPanel'
 import { YouTubeTrendPanel } from './components/YouTubeTrendPanel'
-import { ExportPanel } from './components/ExportPanel'
+import { ExportDialog } from './components/ExportDialog'
 import { NarrationPanel } from './components/NarrationPanel'
 import { ThumbnailPanel } from './components/ThumbnailPanel'
 import { AudioLibraryPanel } from './components/AudioLibraryPanel'
@@ -25,7 +25,6 @@ import {
   SparklesIcon,
   TypeIcon,
   YoutubeIcon,
-  DownloadIcon,
   MicIcon,
   ImageIcon,
   MusicIcon,
@@ -46,7 +45,6 @@ type RightTab =
   | 'gametrend'
   | 'youtube'
   | 'metadata'
-  | 'export'
 
 interface TabDef {
   id: RightTab
@@ -108,8 +106,7 @@ const PUBLISH_TABS: TabDef[] = [
     label: '投稿準備',
     icon: MegaphoneIcon,
     description: '投稿用タイトル・概要欄・ハッシュタグの自動生成'
-  },
-  { id: 'export', label: '書き出し', icon: DownloadIcon, description: '動画の書き出し設定' }
+  }
 ]
 
 /** メニューバーの「ウィンドウ」に並べる右側のパネル */
@@ -251,15 +248,13 @@ function App(): React.JSX.Element {
     else if (tab === 'source') setTab('inspector')
   }
 
-  // メニューバーの「ウィンドウ」「書き出し…」「テロップの一覧」で上段左のパネルを切り替える
+  // メニューバーの「ウィンドウ」「テロップの一覧」で上段左のパネルを切り替える
   useMenuCommand((id) => {
     const target = id.startsWith('window.')
       ? (id.slice('window.'.length) as RightTab)
-      : id === 'file.export'
-        ? 'export'
-        : id === 'telop.list'
-          ? 'text'
-          : null
+      : id === 'telop.list'
+        ? 'text'
+        : null
     if (target && MENU_WINDOWS.some((w) => w.id === target)) setTab(target)
   })
 
@@ -401,9 +396,6 @@ function App(): React.JSX.Element {
               <div className={`tab-pane ${tab === 'metadata' ? 'active' : ''}`}>
                 <MetadataPanel />
               </div>
-              <div className={`tab-pane ${tab === 'export' ? 'active' : ''}`}>
-                <ExportPanel />
-              </div>
             </div>
           </section>
           <div
@@ -443,6 +435,7 @@ function App(): React.JSX.Element {
         </div>
       </div>
       <StatusBar />
+      <ExportDialog />
       <AutosaveRestoreModal />
     </div>
   )

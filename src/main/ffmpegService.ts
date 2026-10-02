@@ -1,3 +1,4 @@
+import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
@@ -473,6 +474,8 @@ export interface ExportOptions {
   quality: QualityPreset
   outputPath: string
   loudnessNormalization?: boolean
+  /** 音量の基準。既定は配信(-14 LUFS) */
+  loudnessTarget?: LoudnessTarget
   onProgress: (percent: number, stage: string) => void
 }
 
@@ -1215,7 +1218,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         const command = ffmpeg()
         const built = buildGraph(command, false)
         built.filterParts.push(
-          `${built.audioLabel}loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json[aloud]`
+          `${built.audioLabel}${loudnormMeasureFilter(options.loudnessTarget)}[aloud]`
         )
         graphDir = mkdtempSync(join(tmpdir(), 've-graph-'))
         const graphPath = join(graphDir, 'filtergraph.txt')
@@ -1290,12 +1293,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 増幅量には効かない。素材の LRA が 11 を超えていると黙って dynamic に
         // 戻ってしまう(実測: LRA 18.5 の素材で 2パス目も -14.57/LRA 14.4 のまま)ので、
         // 測った LRA を下回らない値を渡して linear を守る(上限 50 は loudnorm の定義域)
-        const lraTarget = measured ? Math.min(50, Math.max(11, Math.ceil(measured.inputLRA))) : 11
-        const loudnormArgs = measured
-          ? `loudnorm=I=-14:TP=-1.5:LRA=${lraTarget}:measured_I=${measured.inputI}:` +
-            `measured_TP=${measured.inputTP}:measured_LRA=${measured.inputLRA}:` +
-            `measured_thresh=${measured.inputThresh}:offset=${measured.targetOffset}:linear=true`
-          : `loudnorm=I=-14:TP=-1.5:LRA=11`
+        const loudnormArgs = loudnormApplyFilter(options.loudnessTarget, measured)
         filterParts.push(`${audioLabel}${loudnormArgs},${AUDIO_FORMAT}[aloud]`)
         audioLabel = '[aloud]'
       }

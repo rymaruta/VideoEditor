@@ -1,3 +1,4 @@
+import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
@@ -38,7 +39,7 @@ import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
 import { fitWindowStateToDisplays, type WindowState } from './windowState'
-import { exportSequenceSegmented } from './segmentRenderer'
+import { detectVideoEncoder, exportSequenceSegmented } from './segmentRenderer'
 import { installAppMenu, updateAppMenu } from './appMenu'
 import {
   forgetLibraryFolder,
@@ -315,6 +316,7 @@ function registerWindowScopedIpcHandlers(): void {
         quality: QualityPreset
         outputPath: string
         loudnessNormalization?: boolean
+        loudnessTarget?: LoudnessTarget
         engine?: ExportEngine
         /** 長尺向けの書き出しで使う、画面のプロセスが描いたテロップの層 */
         telopLayer?: TelopLayerPayload | null
@@ -335,6 +337,7 @@ function registerWindowScopedIpcHandlers(): void {
             outputPath: payload.outputPath,
             quality: payload.quality,
             loudnessNormalization: payload.loudnessNormalization,
+            loudnessTarget: normalizeLoudnessTarget(payload.loudnessTarget),
             telopLayer: payload.telopLayer,
             onProgress,
             signal
@@ -349,6 +352,7 @@ function registerWindowScopedIpcHandlers(): void {
         quality: payload.quality,
         outputPath: payload.outputPath,
         loudnessNormalization: payload.loudnessNormalization,
+        loudnessTarget: normalizeLoudnessTarget(payload.loudnessTarget),
         onProgress
       })
       return { success: true }
@@ -584,6 +588,8 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.discardAutosave, () => releaseAutosave())
   ipcMain.handle(IPC.loadDiscardedAutosave, () => loadProjectFile(discardedPathFor(autosavePath)))
   ipcMain.handle(IPC.cancelExport, () => cancelExport())
+  // 長尺向けの書き出しで使う映像エンコーダ(GPU が使えるか)。1回試し書きして結果を覚える
+  ipcMain.handle(IPC.detectExportEncoder, () => detectVideoEncoder())
 
   // --- 共通ライブラリ(一度読み込んだフォルダを覚えて、次の回からも使う) ---
   ipcMain.handle(IPC.libraryOverview, () => libraryOverview())

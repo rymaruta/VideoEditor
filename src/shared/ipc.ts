@@ -38,6 +38,7 @@ export const IPC = {
   discardAutosave: 'project:discardAutosave',
   loadDiscardedAutosave: 'project:loadDiscardedAutosave',
   cancelExport: 'export:cancel',
+  detectExportEncoder: 'export:detect-encoder',
   libraryOverview: 'library:overview',
   libraryRemember: 'library:remember',
   libraryAddFolder: 'library:addFolder',

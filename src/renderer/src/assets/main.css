@@ -4992,3 +4992,237 @@ h3 {
 .inspector-panel .telop-inspector {
   padding: 4px 0 0;
 }
+
+/* ------------------------------------------------------------------ 書き出し設定ダイアログ */
+.export-dialog {
+  width: 980px;
+  max-width: calc(100vw - 32px);
+  height: 640px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.dialog-titlebar {
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0 14px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #161616;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.dialog-close {
+  width: 46px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 16px;
+}
+.dialog-close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+.export-dialog-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+}
+.export-dialog-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-right: 1px solid #161616;
+  overflow-y: auto;
+}
+.export-dialog-section {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.export-dialog-summary dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.export-dialog-summary dl > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 12px;
+}
+.export-dialog-summary dt {
+  color: var(--text-2);
+}
+.export-dialog-summary dd {
+  margin: 0;
+  color: var(--text-1);
+  word-break: break-word;
+}
+.export-dialog-settings {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.export-dialog-fields {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 220px) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: 12px;
+}
+.form-row-top {
+  align-items: start;
+}
+.form-row > label {
+  color: var(--text-2);
+}
+.form-row select {
+  height: 26px;
+}
+.form-row-top .choice-list,
+.form-row-top > .form-value {
+  grid-column: 2 / 4;
+}
+.form-value {
+  color: var(--text-1);
+}
+.form-note {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.form-hint {
+  margin: 0 0 0 120px;
+}
+.form-check {
+  margin-left: 120px;
+  font-size: 12px;
+}
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.choice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.choice:has(input:checked) {
+  border-color: var(--accent-1);
+  background: var(--accent-soft);
+}
+.choice input {
+  margin-top: 2px;
+}
+.choice > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.choice-label {
+  font-size: 12px;
+  color: var(--text-1);
+}
+.choice-note {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.export-queue {
+  margin-top: 6px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+}
+.export-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.export-queue ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.export-queue-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px 26px;
+  align-items: center;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.export-queue-status {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.export-queue-item.running .export-queue-status {
+  color: var(--accent-1);
+}
+.export-queue-item.done .export-queue-status {
+  color: var(--success);
+}
+.export-queue-item.error .export-queue-status {
+  color: var(--danger);
+}
+.dialog-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid #161616;
+  background: #1e1e1e;
+  font-size: 12px;
+}
+.dialog-footer select {
+  height: 26px;
+  min-width: 200px;
+}
+.dialog-footer input[type='text'] {
+  height: 26px;
+  width: 220px;
+}
+.dialog-footer-label {
+  color: var(--text-2);
+}
+.dialog-footer-spacer {
+  flex: 1;
+}
+/* 高さを決めた選択欄は、上下の余白で文字が欠けるので左右だけ空ける */
+.export-dialog select,
+.export-dialog input[type='text'] {
+  padding: 0 8px;
+  line-height: normal;
+}

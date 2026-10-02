@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
-import type { ExportEngine, ResolutionHeight } from '@shared/types'
+import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
+import type { LoudnessTarget } from '@shared/loudness'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
@@ -14,6 +15,29 @@ const SHORTCUT_GUIDE_VISIBLE_KEY = 've-shortcut-guide-visible-v2'
 const SHORT_NOTE_KEY = 've-short-note'
 const EXPORT_RESOLUTION_KEY = 've-export-resolution'
 const EXPORT_ENGINE_KEY = 've-export-engine'
+const EXPORT_QUALITY_KEY = 've-export-quality'
+const EXPORT_LOUDNESS_KEY = 've-export-loudness'
+const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
+
+/** 書き出しの音量の扱い。`off` は正規化しない */
+export type ExportLoudness = 'off' | LoudnessTarget
+
+function readChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const v = localStorage.getItem(key)
+    return allowed.includes(v as T) ? (v as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeSetting(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 保存できなくても今回の起動の間は効く
+  }
+}
 
 const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
 
@@ -63,6 +87,13 @@ interface SettingsState {
    */
   exportEngine: ExportEngine
   setExportEngine: (engine: ExportEngine) => void
+  /** 書き出しの画質・音量・終わったらフォルダを開くか。書き出し設定を次回も覚えておく */
+  exportQuality: QualityPreset
+  setExportQuality: (quality: QualityPreset) => void
+  exportLoudness: ExportLoudness
+  setExportLoudness: (loudness: ExportLoudness) => void
+  exportOpenFolderAfter: boolean
+  setExportOpenFolderAfter: (open: boolean) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -128,6 +159,29 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       // 保存できなくても今回の起動の間は効く
     }
     set({ exportEngine: engine })
+  },
+  exportQuality: readChoice<QualityPreset>(
+    EXPORT_QUALITY_KEY,
+    ['high', 'standard', 'small'],
+    'high'
+  ),
+  setExportQuality: (quality) => {
+    writeSetting(EXPORT_QUALITY_KEY, quality)
+    set({ exportQuality: quality })
+  },
+  exportLoudness: readChoice<ExportLoudness>(
+    EXPORT_LOUDNESS_KEY,
+    ['off', 'web', 'broadcast'],
+    'web'
+  ),
+  setExportLoudness: (loudness) => {
+    writeSetting(EXPORT_LOUDNESS_KEY, loudness)
+    set({ exportLoudness: loudness })
+  },
+  exportOpenFolderAfter: readChoice(EXPORT_OPEN_FOLDER_KEY, ['true', 'false'], 'false') === 'true',
+  setExportOpenFolderAfter: (open) => {
+    writeSetting(EXPORT_OPEN_FOLDER_KEY, String(open))
+    set({ exportOpenFolderAfter: open })
   },
   shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {

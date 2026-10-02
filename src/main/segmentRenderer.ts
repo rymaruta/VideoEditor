@@ -1,3 +1,4 @@
+import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
 import { spawn } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { cpus, tmpdir } from 'os'
@@ -54,6 +55,8 @@ export interface SegmentedExportOptions {
   outputPath: string
   quality: QualityPreset
   loudnessNormalization?: boolean
+  /** 音量の基準。既定は配信(-14 LUFS) */
+  loudnessTarget?: LoudnessTarget
   onProgress?: (percent: number, stage: string) => void
   /** 既定は自動(NVENC が使えれば NVENC) */
   encoder?: VideoEncoder | 'auto'
@@ -424,7 +427,7 @@ export async function exportSequenceSegmented(
           '-i',
           fullWav,
           '-af',
-          'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json',
+          loudnormMeasureFilter(options.loudnessTarget),
           '-f',
           'null',
           '-'
@@ -436,12 +439,7 @@ export async function exportSequenceSegmented(
     const audioFilter: string[] = []
     if (options.loudnessNormalization) {
       // 2パス目の掛け方は v1 の書き出しと同じ(理由もそちらのコメント)
-      const lraTarget = measured ? Math.min(50, Math.max(11, Math.ceil(measured.inputLRA))) : 11
-      const loudnorm = measured
-        ? `loudnorm=I=-14:TP=-1.5:LRA=${lraTarget}:measured_I=${measured.inputI}:` +
-          `measured_TP=${measured.inputTP}:measured_LRA=${measured.inputLRA}:` +
-          `measured_thresh=${measured.inputThresh}:offset=${measured.targetOffset}:linear=true`
-        : 'loudnorm=I=-14:TP=-1.5:LRA=11'
+      const loudnorm = loudnormApplyFilter(options.loudnessTarget, measured)
       audioFilter.push('-af', `${loudnorm},${AUDIO_FORMAT}`)
     }
 

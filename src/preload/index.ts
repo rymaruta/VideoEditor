@@ -1,3 +1,4 @@
+import type { LoudnessTarget } from '@shared/loudness'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
@@ -150,6 +151,7 @@ const api = {
     quality: QualityPreset
     outputPath: string
     loudnessNormalization?: boolean
+    loudnessTarget?: LoudnessTarget
     engine?: ExportEngine
     telopLayer?: TelopLayerPayload | null
   }): Promise<{ success: boolean }> => ipcRenderer.invoke(IPC.exportProject, payload),
@@ -201,6 +203,8 @@ const api = {
   discardAutosave: (): Promise<boolean> => ipcRenderer.invoke(IPC.discardAutosave),
   loadDiscardedAutosave: (): Promise<Project> => ipcRenderer.invoke(IPC.loadDiscardedAutosave),
   cancelExport: (): Promise<void> => ipcRenderer.invoke(IPC.cancelExport),
+  detectExportEncoder: (): Promise<'libx264' | 'h264_nvenc'> =>
+    ipcRenderer.invoke(IPC.detectExportEncoder),
   libraryOverview: (): Promise<{ state: LibraryState; missing: string[] }> =>
     ipcRenderer.invoke(IPC.libraryOverview),
   libraryRemember: (filePaths: string[]): Promise<LibraryState> =>
