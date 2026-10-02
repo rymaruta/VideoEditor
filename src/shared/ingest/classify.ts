@@ -151,3 +151,13 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
 export function sourceDuration(source: Pick<FootageSource, 'files'>): number {
   return source.files.reduce((s, f) => s + (Number.isFinite(f.duration) ? f.duration : 0), 0)
 }
+
+/** 収録フォルダを読んだ結果 */
+export interface FootageScan {
+  root: string
+  sources: FootageSource[]
+  /** 読めなかったファイル(壊れている・対応していない) */
+  skipped: { path: string; reason: string }[]
+  /** 解析結果の使い回しの判定に使う(パス → 大きさ・更新時刻) */
+  stats: Record<string, { size: number; mtimeMs: number }>
+}

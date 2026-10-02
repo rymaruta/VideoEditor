@@ -1,3 +1,5 @@
+import { cancelSync, runSync, scanFootage } from './footageService'
+import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
@@ -609,6 +611,23 @@ app.whenReady().then(() => {
     if (result.canceled || result.filePaths.length === 0) return null
     return rememberFolder(result.filePaths[0])
   })
+
+  ipcMain.handle(IPC.footageSelectFolder, async (event) => {
+    const result = await showOpenDialogForSender(event, {
+      title: '収録フォルダ',
+      properties: ['openDirectory']
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+  ipcMain.handle(IPC.footageScan, (event, root: string) =>
+    scanFootage(root, (done, total) =>
+      notifySender(event, IPC.footageScanProgress, { done, total })
+    )
+  )
+  ipcMain.handle(IPC.syncRun, (event, files: SyncInputFile[]) =>
+    runSync(files, (percent, stage) => notifySender(event, IPC.syncProgress, { percent, stage }))
+  )
+  ipcMain.handle(IPC.syncCancel, () => cancelSync())
 
   registerWindowScopedIpcHandlers()
 

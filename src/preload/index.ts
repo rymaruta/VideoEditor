@@ -1,3 +1,5 @@
+import type { FootageScan } from '@shared/ingest/classify'
+import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import type { LoudnessTarget } from '@shared/loudness'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
@@ -230,6 +232,22 @@ const api = {
     const listener = (): void => callback()
     ipcRenderer.on(IPC.libraryChanged, listener)
     return () => ipcRenderer.removeListener(IPC.libraryChanged, listener)
+  },
+  footageSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.footageSelectFolder),
+  footageScan: (root: string): Promise<FootageScan> => ipcRenderer.invoke(IPC.footageScan, root),
+  onFootageScanProgress: (callback: (p: { done: number; total: number }) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: { done: number; total: number }): void =>
+      callback(p)
+    ipcRenderer.on(IPC.footageScanProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.footageScanProgress, listener)
+  },
+  syncRun: (files: SyncInputFile[]): Promise<SyncReport> => ipcRenderer.invoke(IPC.syncRun, files),
+  syncCancel: (): Promise<void> => ipcRenderer.invoke(IPC.syncCancel),
+  onSyncProgress: (callback: (p: { percent: number; stage: string }) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: { percent: number; stage: string }): void =>
+      callback(p)
+    ipcRenderer.on(IPC.syncProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.syncProgress, listener)
   }
 }
 

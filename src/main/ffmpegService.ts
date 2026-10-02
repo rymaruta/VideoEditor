@@ -40,7 +40,7 @@ export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
   'app.asar',
   'app.asar.unpacked'
 )
-const ffprobePath = ffprobeStatic.path.replace('app.asar', 'app.asar.unpacked')
+export const ffprobePath = ffprobeStatic.path.replace('app.asar', 'app.asar.unpacked')
 
 ffmpeg.setFfmpegPath(ffmpegPath)
 ffmpeg.setFfprobePath(ffprobePath)
