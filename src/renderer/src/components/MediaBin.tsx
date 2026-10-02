@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { LibraryPanel } from './LibraryPanel'
+import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
+import { formatTimecode } from '../lib/timelineRuler'
 import { useMenuCommand } from '../lib/menuCommands'
 import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
@@ -14,16 +16,7 @@ import { HighlightModal } from './HighlightModal'
 import { RoughCutModal } from './RoughCutModal'
 import { AutoEditModal } from './AutoEditModal'
 import { LongFormShortModal } from './LongFormShortModal'
-import {
-  UploadIcon,
-  PlusIcon,
-  ClapperboardIcon,
-  MusicIcon,
-  AlertTriangleIcon,
-  TargetIcon,
-  RefreshIcon,
-  TrashIcon
-} from './icons'
+import { UploadIcon, ClapperboardIcon, MusicIcon, AlertTriangleIcon } from './icons'
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -31,15 +24,6 @@ function fileNameFromPath(path: string): string {
 
 function unsupportedMessage(names: string[]): string {
   return `対応していない形式のため${names.length}件を取り込みませんでした(${MEDIA_EXTENSIONS.join(' / ')}) — ${names.join(' / ')}`
-}
-
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`
 }
 
 export function MediaBin(): React.JSX.Element {
@@ -63,9 +47,11 @@ export function MediaBin(): React.JSX.Element {
   const [importing, setImporting] = useState(false)
   // 「プロジェクト」(この企画の素材)と「ライブラリ」(全プロジェクト共通)の切り替え
   const [view, setView] = useState<'project' | 'library'>('project')
+  // 素材の右クリックメニュー(操作のボタンを行に並べないため)
+  const [assetMenu, setAssetMenu] = useState<{ asset: MediaAsset; x: number; y: number } | null>(
+    null
+  )
   const [error, setError] = useState<string | null>(null)
-  const [trackChoice, setTrackChoice] = useState<Record<string, string>>({})
-  const [videoTrackChoice, setVideoTrackChoice] = useState<Record<string, string>>({})
   const [highlightAssetId, setHighlightAssetId] = useState<string | null>(null)
   const [showRoughCut, setShowRoughCut] = useState(false)
   const [showAutoEdit, setShowAutoEdit] = useState(false)
@@ -313,6 +299,47 @@ export function MediaBin(): React.JSX.Element {
     setImporting(false)
   }
 
+  /** 素材の右クリックメニューの中身。行に常に並べていたボタンと同じ操作 */
+  function assetMenuItems(asset: MediaAsset): ContextMenuItem[] {
+    const isMissing = missingAssetIds.includes(asset.id)
+    const items: ContextMenuItem[] = []
+    if (isMissing) {
+      items.push({
+        label: '再リンク…(ファイルの場所を選び直す)',
+        onSelect: () => void handleRelink(asset.id),
+        disabled: relinkingId === asset.id
+      })
+    } else {
+      items.push({ label: 'ソースで開く', onSelect: () => openInSourceViewer(asset.id) })
+      if (asset.hasVideo) {
+        items.push({ label: '本編(V1)の末尾に追加', onSelect: () => addClipToTimeline(asset.id) })
+        for (const t of videoOverlayTracks) {
+          items.push({
+            label: `${t.name}(ワイプ)に追加`,
+            onSelect: () => addClipToVideoOverlayTrack(t.id, asset.id)
+          })
+        }
+      }
+      if (asset.hasAudio) {
+        for (const t of audioTracks) {
+          items.push({
+            label: `${t.name} に追加`,
+            onSelect: () => addClipToAudioTrack(t.id, asset.id)
+          })
+        }
+      }
+      if (asset.hasVideo) {
+        items.push({ label: 'ハイライトを検出…', onSelect: () => setHighlightAssetId(asset.id) })
+      }
+    }
+    items.push({
+      label: 'プロジェクトから削除',
+      danger: true,
+      onSelect: () => handleRemoveAsset(asset)
+    })
+    return items
+  }
+
   async function handleImportVideo(): Promise<void> {
     setError(null)
     await importFiles(await window.api.selectMediaFiles())
@@ -473,16 +500,32 @@ export function MediaBin(): React.JSX.Element {
                 <p className="hint-text">ファイルをこのウィンドウにドロップしても追加できます</p>
               </div>
             )}
+            {assets.length > 0 && (
+              <div className="media-list-head" aria-hidden>
+                <span className="media-col-name">名前</span>
+                <span className="media-col-dur">デュレーション</span>
+                <span className="media-col-res">解像度</span>
+              </div>
+            )}
             {assets.map((asset) => {
               const isMissing = missingAssetIds.includes(asset.id)
+              const mismatch = asset.hasVideo && !isMissing && isAspectMismatch(asset, aspectRatio)
               return (
                 <div
                   key={asset.id}
-                  className={`media-item ${isMissing ? 'media-item-missing' : ''} ${
-                    sourceAssetId === asset.id ? 'media-item-in-source' : ''
-                  }`}
+                  className={`media-row ${isMissing ? 'missing' : ''} ${
+                    sourceAssetId === asset.id ? 'in-source' : ''
+                  } ${assetMenu?.asset.id === asset.id ? 'menu-open' : ''}`}
                   onDoubleClick={() => !isMissing && openInSourceViewer(asset.id)}
-                  title="タイムラインへドラッグして配置。ダブルクリックでソースビューアで開く"
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setAssetMenu({ asset, x: e.clientX, y: e.clientY })
+                  }}
+                  title={
+                    isMissing
+                      ? `ファイルが見つかりません: ${asset.filePath}(右クリックで再リンク)`
+                      : `${asset.filePath}\nタイムラインへドラッグして配置・ダブルクリックでソースを開く・右クリックで操作`
+                  }
                   // 見つからない素材は掴めない(置いた先で「素材がありません」になるだけなので)
                   draggable={!isMissing}
                   onDragStart={(e) => {
@@ -493,168 +536,51 @@ export function MediaBin(): React.JSX.Element {
                   }}
                   onDragEnd={() => setDraggingAssetId(null)}
                 >
-                  <div className="media-thumb">
-                    {asset.thumbnailDataUrl ? (
-                      <img src={asset.thumbnailDataUrl} alt={asset.fileName} />
-                    ) : (
-                      <div className="media-thumb-placeholder">
-                        {asset.hasVideo ? (
-                          <ClapperboardIcon width={16} height={16} />
-                        ) : (
-                          <MusicIcon width={16} height={16} />
-                        )}
-                      </div>
+                  <span
+                    className={`media-kind ${asset.hasVideo ? 'video' : 'audio'}`}
+                    aria-hidden
+                  />
+                  <span className="media-col-name">
+                    {(isMissing || mismatch) && (
+                      <AlertTriangleIcon
+                        width={11}
+                        height={11}
+                        className="media-warn"
+                        aria-label={
+                          isMissing
+                            ? 'ファイルが見つかりません'
+                            : 'プロジェクトと縦横比が違うため、書き出しで黒帯が入ります'
+                        }
+                      />
                     )}
-                  </div>
-                  <div className="media-info">
-                    <div className="media-name" title={asset.fileName}>
-                      {asset.fileName}
-                    </div>
-                    <div className="media-meta">
-                      {formatDuration(asset.duration)}
-                      {asset.hasVideo && ` ・ ${asset.width}x${asset.height}`}
-                      {asset.hasVideo && !isMissing && isAspectMismatch(asset, aspectRatio) && (
-                        <span
-                          className="mismatch-badge"
-                          title="プロジェクトのアスペクト比と異なるため、書き出し時に上下または左右に黒帯が入ります"
-                        >
-                          <AlertTriangleIcon width={11} height={11} />
-                          比率が異なる
-                        </span>
-                      )}
-                      {isMissing && (
-                        <span
-                          className="mismatch-badge missing-badge"
-                          title={`ファイルが見つかりません: ${asset.filePath}`}
-                        >
-                          <AlertTriangleIcon width={11} height={11} />
-                          ファイルが見つかりません
-                        </span>
-                      )}
-                    </div>
-                    {proxyProgress[asset.id] !== undefined && (
-                      <div
-                        className="media-proxy-progress"
-                        title="プレビューで再生できない形式のため、プレビュー専用の変換をしています。書き出しは元のファイルを使うので画質は落ちません。"
-                      >
-                        <div className="media-proxy-bar">
-                          <div
-                            className="media-proxy-bar-fill"
-                            style={{ width: `${proxyProgress[asset.id]}%` }}
-                          />
-                        </div>
-                        <span>プレビュー用に変換中 {proxyProgress[asset.id]}%</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="media-item-actions">
-                    <button
-                      className="icon-button danger media-item-remove"
-                      onClick={() => handleRemoveAsset(asset)}
-                      title="この素材をプロジェクトから削除(使用中のクリップも一緒に消えます)"
-                    >
-                      <TrashIcon width={12} height={12} />
-                    </button>
-                    {!isMissing && (
-                      <button
-                        className="small-button"
-                        onClick={() => openInSourceViewer(asset.id)}
-                        title="ソースビューアで開いて、使う範囲を決めてから配置する"
-                      >
-                        ソースで開く
-                      </button>
-                    )}
-                    {isMissing && (
-                      <button
-                        className="small-button"
-                        onClick={() => handleRelink(asset.id)}
-                        disabled={relinkingId === asset.id}
-                        title="移動・改名されたファイルの場所を選び直します"
-                      >
-                        <RefreshIcon width={13} height={13} />
-                        再リンク
-                      </button>
-                    )}
-                    {!isMissing && asset.hasVideo && (
-                      <button
-                        className="icon-button"
-                        onClick={() => setHighlightAssetId(asset.id)}
-                        title="ハイライトを検出"
-                      >
-                        <TargetIcon width={14} height={14} />
-                      </button>
-                    )}
-                    {!isMissing && asset.hasVideo && (
-                      <button
-                        className="icon-button"
-                        onClick={() => addClipToTimeline(asset.id)}
-                        title="動画トラックに追加"
-                      >
-                        <PlusIcon width={14} height={14} />
-                      </button>
-                    )}
-                    {!isMissing && asset.hasAudio && audioTracks.length > 0 && (
-                      <div className="media-track-add">
-                        <select
-                          value={trackChoice[asset.id] ?? audioTracks[0].id}
-                          onChange={(e) =>
-                            setTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
-                          }
-                        >
-                          {audioTracks.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          className="icon-button"
-                          title="音声トラックに追加"
-                          onClick={() =>
-                            addClipToAudioTrack(
-                              trackChoice[asset.id] ?? audioTracks[0].id,
-                              asset.id
-                            )
-                          }
-                        >
-                          <PlusIcon width={14} height={14} />
-                        </button>
-                      </div>
-                    )}
-                    {!isMissing && asset.hasVideo && videoOverlayTracks.length > 0 && (
-                      <div className="media-track-add">
-                        <select
-                          value={videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id}
-                          onChange={(e) =>
-                            setVideoTrackChoice((prev) => ({ ...prev, [asset.id]: e.target.value }))
-                          }
-                        >
-                          {videoOverlayTracks.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          className="icon-button"
-                          title="動画トラック(PiP)に追加"
-                          onClick={() =>
-                            addClipToVideoOverlayTrack(
-                              videoTrackChoice[asset.id] ?? videoOverlayTracks[0].id,
-                              asset.id
-                            )
-                          }
-                        >
-                          <PlusIcon width={14} height={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                    {asset.fileName}
+                  </span>
+                  <span className="media-col-dur">
+                    {formatTimecode(asset.duration, asset.fps || 30)}
+                  </span>
+                  <span className="media-col-res">
+                    {asset.hasVideo ? `${asset.width}×${asset.height}` : '音声'}
+                  </span>
+                  {proxyProgress[asset.id] !== undefined && (
+                    <span
+                      className="media-row-progress"
+                      title={`プレビュー用に変換中 ${proxyProgress[asset.id]}%(書き出しは元のファイルを使います)`}
+                      style={{ width: `${proxyProgress[asset.id]}%` }}
+                    />
+                  )}
                 </div>
               )
             })}
           </div>
         </>
+      )}
+      {assetMenu && (
+        <ClipContextMenu
+          x={assetMenu.x}
+          y={assetMenu.y}
+          items={assetMenuItems(assetMenu.asset)}
+          onClose={() => setAssetMenu(null)}
+        />
       )}
       {highlightAssetId && (
         <HighlightModal assetId={highlightAssetId} onClose={() => setHighlightAssetId(null)} />

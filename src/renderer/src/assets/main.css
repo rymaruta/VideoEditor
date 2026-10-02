@@ -4705,3 +4705,85 @@ h3 {
 .frame-bin .panel-header {
   margin-bottom: 6px;
 }
+
+/* ===== 素材の一覧(Premiere のリスト表示: 名前・デュレーション・解像度) ===== */
+.media-list {
+  gap: 0;
+}
+.media-list-head,
+.media-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 92px 84px;
+  align-items: center;
+  column-gap: 8px;
+  padding: 0 8px;
+}
+.media-list-head {
+  grid-template-columns: minmax(0, 1fr) 92px 84px;
+  padding-left: 28px;
+  height: 24px;
+  font-size: 11px;
+  color: var(--text-3);
+  border-bottom: 1px solid #1c1c1c;
+}
+.media-row {
+  position: relative;
+  height: 26px;
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: default;
+  border-bottom: 1px solid transparent;
+}
+.media-row:hover {
+  background: #2c2c2c;
+}
+.media-row.in-source,
+.media-row.menu-open {
+  background: #34414f;
+}
+.media-row.missing .media-col-name {
+  color: #ff9f6b;
+}
+.media-kind {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.media-kind.video {
+  background: #8f9be0;
+}
+.media-kind.audio {
+  background: #6fbf86;
+}
+.media-col-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.media-col-dur,
+.media-col-res {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.media-list-head .media-col-dur,
+.media-list-head .media-col-res {
+  font-family: inherit;
+}
+.media-warn {
+  flex-shrink: 0;
+  color: #e6a23c;
+}
+.media-row-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent-1);
+}
