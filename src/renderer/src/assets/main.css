@@ -4787,3 +4787,208 @@ h3 {
   height: 2px;
   background: var(--accent-1);
 }
+
+/* ------------------------------------------------------------------ テロップ(一覧 + 設定) */
+.telop-panel {
+  container-type: inline-size;
+  height: 100%;
+  min-height: 0;
+}
+.telop-panel-body {
+  display: grid;
+  grid-template-columns: minmax(200px, 40%) minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+.telop-list-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid #161616;
+}
+.telop-list-head {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 10px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.telop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.telop-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px 0 7px;
+  border-left: 3px solid transparent;
+  font-size: 12px;
+  color: #dcdcdc;
+  cursor: default;
+  user-select: none;
+}
+.telop-row:hover {
+  background: #2c2c2c;
+}
+.telop-row.selected {
+  background: #34414f;
+}
+.telop-row-tc {
+  flex-shrink: 0;
+  width: 74px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.telop-row-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.telop-list-paging,
+.telop-list-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-top: 1px solid #161616;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.telop-list-foot input {
+  width: 54px;
+}
+.telop-list-paging > *,
+.telop-list-foot > * {
+  white-space: nowrap;
+}
+.telop-detail-pane {
+  min-height: 0;
+  overflow-y: auto;
+}
+@container (max-width: 680px) {
+  .telop-panel-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 40%) minmax(0, 1fr);
+  }
+  .telop-list-pane {
+    border-right: 0;
+    border-bottom: 1px solid #161616;
+  }
+}
+
+/* 設定欄: ラベル列 + 値。デザイン案の「話者 / スタイル / 塗り / 縁 …」の並び */
+.telop-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 14px;
+}
+.prop-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.prop-text textarea {
+  resize: vertical;
+  min-height: 48px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: #1a1a1a;
+  color: #f0f0f0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.prop-heading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.prop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.prop-label {
+  flex-shrink: 0;
+  width: 76px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.prop-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.prop-control select,
+.prop-control input[type='text'] {
+  height: 26px;
+  max-width: 180px;
+  padding: 0 6px;
+  line-height: normal;
+  font-size: 12px;
+}
+.prop-control input[type='color'] {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #444;
+  border-radius: 2px;
+  background: transparent;
+}
+.prop-control input[type='range'] {
+  width: 90px;
+}
+.prop-num {
+  width: 52px;
+  height: 24px;
+}
+.prop-num.wide {
+  width: 70px;
+}
+.prop-unit {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.prop-swatch {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  border: 1px solid #444;
+}
+.prop-note {
+  margin: 0 0 4px 86px;
+}
+.prop-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.prop-actions .small-button.danger {
+  color: var(--danger);
+}
+.inspector-panel .telop-inspector {
+  padding: 4px 0 0;
+}

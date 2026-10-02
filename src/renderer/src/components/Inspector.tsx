@@ -1,3 +1,4 @@
+import { TelopInspector } from './TelopInspector'
 import { useState } from 'react'
 import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
@@ -83,6 +84,8 @@ export function Inspector(): React.JSX.Element {
   const [detecting, setDetecting] = useState(false)
   const [detectError, setDetectError] = useState<string | null>(null)
 
+  const selectedOverlayId = useProjectStore((s) => s.selectedOverlayId)
+  const selectedOverlay = project.textOverlays.find((o) => o.id === selectedOverlayId) ?? null
   const clip = project.clips.find((c) => c.id === selectedClipId) ?? null
   const asset = clip ? project.assets.find((a) => a.id === clip.assetId) : undefined
   const timedClips = buildTimedClips(project)
@@ -145,6 +148,18 @@ export function Inspector(): React.JSX.Element {
     )
   }
 
+  // 本編クリップではなくテロップが選ばれていれば、そのテロップの設定を出す
+  if (!clip && selectedOverlay) {
+    return (
+      <div className="panel inspector-panel">
+        <div className="panel-header">
+          <h2>インスペクタ — テロップ</h2>
+        </div>
+        <TelopInspector key={selectedOverlay.id} overlay={selectedOverlay} />
+      </div>
+    )
+  }
+
   if (!clip || !asset) {
     return (
       <div className="panel inspector-panel">
@@ -153,7 +168,7 @@ export function Inspector(): React.JSX.Element {
         </div>
         <div className="inspector-empty">
           <TargetIcon width={26} height={26} />
-          <p>タイムラインのクリップを選択すると、そのクリップの設定がここに表示されます。</p>
+          <p>タイムラインのクリップやテロップを選択すると、その設定がここに表示されます。</p>
         </div>
       </div>
     )

@@ -254,7 +254,8 @@ function normalizeTextOverlay(raw: Record<string, unknown>): TextOverlay {
     style: normalizeTextStyle(raw.style),
     words: normalizeWords(raw.words),
     linkedClipId: typeof raw.linkedClipId === 'string' ? raw.linkedClipId : undefined,
-    linkOffset: raw.linkOffset === undefined ? undefined : asFinite(raw.linkOffset, 0)
+    linkOffset: raw.linkOffset === undefined ? undefined : asFinite(raw.linkOffset, 0),
+    speaker: typeof raw.speaker === 'string' && raw.speaker.trim() ? raw.speaker : undefined
   }
 }
 
@@ -383,6 +384,11 @@ interface ProjectState {
   isDirty: boolean
   selectedClipId: string | null
   multiSelectedClipIds: string[]
+  /**
+   * 選んでいるテロップ。タイムライン・テロップ一覧・インスペクタが同じものを見る。
+   * 履歴には積まない(取り消しで消えたテロップを指していたら、読む側が「選択なし」と扱う)。
+   */
+  selectedOverlayId: string | null
   clipboardClips: Clip[]
   playheadTime: number
   isPlaying: boolean
@@ -511,7 +517,8 @@ interface ProjectState {
   undo: () => void
   redo: () => void
 
-  addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => void
+  /** 足したテロップの ID を返す(足した直後に選ぶため) */
+  addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => string
   addTextOverlays: (overlays: Omit<TextOverlay, 'id'>[]) => void
   updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void
   /** 選んだテロップのスタイルをまとめて更新する。何件でも履歴は1件 */
@@ -519,6 +526,7 @@ interface ProjectState {
   /** クリップへの追従を設定/解除する。`clipId` が null なら解除 */
   setTextOverlayLink: (id: string, clipId: string | null) => void
   removeTextOverlay: (id: string) => void
+  selectOverlay: (id: string | null) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
 
   addAudioTrack: (name: string) => void
@@ -880,6 +888,7 @@ function projectSwitchReset(): Pick<
   | 'future'
   | 'selectedClipId'
   | 'multiSelectedClipIds'
+  | 'selectedOverlayId'
   | 'clipboardClips'
   | 'playheadTime'
   | 'isPlaying'
@@ -896,6 +905,7 @@ function projectSwitchReset(): Pick<
     future: [],
     selectedClipId: null,
     multiSelectedClipIds: [],
+    selectedOverlayId: null,
     clipboardClips: [],
     playheadTime: 0,
     isPlaying: false,
@@ -996,6 +1006,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   isDirty: false,
   selectedClipId: null,
   multiSelectedClipIds: [],
+  selectedOverlayId: null,
   clipboardClips: [],
   playheadTime: 0,
   isPlaying: false,
@@ -1801,8 +1812,19 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })),
 
   selectClip: (clipId) =>
-    set({ selectedClipId: clipId, multiSelectedClipIds: clipId ? [clipId] : [] }),
+    set(
+      clipId
+        ? { selectedClipId: clipId, multiSelectedClipIds: [clipId], selectedOverlayId: null }
+        : { selectedClipId: null, multiSelectedClipIds: [] }
+    ),
   setMultiSelectedClipIds: (clipIds) => set({ multiSelectedClipIds: clipIds }),
+  // テロップを選んだら本編クリップの選択は外す(選択は常に1種類だけ。理由は Timeline の selectOnly)
+  selectOverlay: (id) =>
+    set(
+      id
+        ? { selectedOverlayId: id, selectedClipId: null, multiSelectedClipIds: [] }
+        : { selectedOverlayId: null }
+    ),
   setPlayheadTime: (t) => set({ playheadTime: t }),
   setIsPlaying: (p) => set({ isPlaying: p }),
   togglePlayback: () =>
@@ -1916,14 +1938,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })
   },
 
-  addTextOverlay: (overlay) =>
+  addTextOverlay: (overlay) => {
+    const id = uuid()
     set((state) => ({
       ...pushHistory(state),
       project: {
         ...state.project,
-        textOverlays: [...state.project.textOverlays, { ...overlay, id: uuid() }]
+        textOverlays: [...state.project.textOverlays, { ...overlay, id }]
       }
-    })),
+    }))
+    return id
+  },
 
   addTextOverlays: (overlays) =>
     set((state) => {
@@ -2014,6 +2039,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   removeTextOverlay: (id) =>
     set((state) => ({
       ...pushHistory(state),
+      selectedOverlayId: state.selectedOverlayId === id ? null : state.selectedOverlayId,
       project: {
         ...state.project,
         textOverlays: state.project.textOverlays.filter((o) => o.id !== id)

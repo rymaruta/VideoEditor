@@ -25,7 +25,7 @@ function dragRight(start: number, end: number, deltaSec: number): { s: number; e
     e: round(snapClamped(rawEnd, [], 0, minEnd, Number.POSITIVE_INFINITY).time)
   }
 }
-/** 「テキスト」タブの数値欄の規則(`TextOverlayPanel.tsx` と同じ式) */
+/** 「テキスト」タブの数値欄の規則(`TelopInspector.tsx` と同じ式) */
 function fieldStart(value: number, end: number): number {
   if (!Number.isFinite(value)) return 0
   return round(Math.min(Math.max(0, value), Math.max(0, end - MIN_OVERLAY_DURATION)))

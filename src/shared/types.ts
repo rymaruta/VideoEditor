@@ -105,6 +105,8 @@ export interface TextOverlay {
   linkedClipId?: string
   /** 追従先クリップの開始からの相対秒。追従中はこちらが位置の基準になる */
   linkOffset?: number
+  /** 話者(出演者名)。話者ごとのテロップスタイルの割り当てと、一覧の色分けに使う */
+  speaker?: string
 }
 
 export interface AudioTrackClip {

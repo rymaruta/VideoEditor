@@ -1,713 +1,319 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import { useSettingsStore } from '../store/settingsStore'
 import { getTotalDuration } from '../store/projectStore'
-import { usePresetStore } from '../store/presetStore'
-import type { FontFamily, TextAnimation, TextOverlay, TextPosition, TextStyle } from '@shared/types'
+import type { FontFamily, TextOverlay, TextPosition, TextStyle } from '@shared/types'
 import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
-import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
+import { speakerColor } from '@shared/speaker'
 import { parseBulkFontSize } from '../lib/textOverlayInput'
-import { OVERLAY_PAGE_SIZE, clampPage, pageCount, pageForTime, pageSlice } from '../lib/listPaging'
-import { MIN_OVERLAY_DURATION, newOverlayRange } from '../lib/textOverlayPlacement'
-import { PlusIcon, TrashIcon, TypeIcon, CopyIcon, StarIcon } from './icons'
+import { clampPage, pageCount, pageForTime, pageSlice } from '../lib/listPaging'
+import { newOverlayRange } from '../lib/textOverlayPlacement'
+import { formatTimecode } from '../lib/timelineRuler'
+import { frameSeconds } from '@shared/frameRate'
+import { TelopInspector } from './TelopInspector'
+import { PlusIcon, TypeIcon } from './icons'
 
-function defaultPositionFraction(position: TextPosition): { x: number; y: number } {
-  if (position === 'top') return { x: 0.5, y: 0.08 }
-  if (position === 'bottom') return { x: 0.5, y: 0.9 }
-  return { x: 0.5, y: 0.5 }
-}
+/**
+ * テロップ(デザイン案の「テロップ」タブ)。左に一覧、右に選んだテロップの設定。
+ *
+ * - 一覧は1行 = 1本(時刻・話者の色・本文)。クリックで選んでその位置へ移る
+ * - Ctrl+クリック / Shift+クリックで複数を選ぶと、右側がまとめて変更する欄になる
+ * - 選択はタイムラインと共有(どちらで選んでも同じものが選ばれる)
+ *
+ * 再生位置は**押した瞬間に読む**(購読しない)。購読すると再生中は毎フレームこのパネル全体が
+ * 描き直され、テロップが多い企画ほど重くなる(実測: テロップ1,000本・60分の企画で、
+ * 再生中のフレーム間隔が 167ms=約6fps まで落ちていた)。
+ */
 
-// The min/max attributes only constrain the spinner — a typed value still reaches
-// onChange. Unclamped, a negative start produced a malformed ASS timestamp and an
-// end before the start made the caption silently vanish from both preview and
-// export, with nothing on screen to explain why.
-function clampOverlayStart(value: number, endTime: number): number {
-  if (!Number.isFinite(value)) return 0
-  return Math.min(Math.max(0, value), Math.max(0, endTime - MIN_OVERLAY_DURATION))
-}
-
-function clampOverlayEnd(value: number, startTime: number): number {
-  if (!Number.isFinite(value)) return startTime + MIN_OVERLAY_DURATION
-  return Math.max(value, startTime + MIN_OVERLAY_DURATION)
-}
+/** 一覧の1ページの件数。1行が軽いので、設定欄を並べていた頃(50件)より多く出せる */
+const LIST_PAGE = 200
 
 export function TextOverlayPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
-  const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
-  // 外側の縁・グラデーションは共通テロップレンダラ(長尺向けの書き出し)でだけ描ける
-  const drawsTelopsOnCanvas = useSettingsStore((s) => s.exportEngine === 'segmented')
-  const removeTextOverlay = useProjectStore((s) => s.removeTextOverlay)
   const shiftAllTextOverlays = useProjectStore((s) => s.shiftAllTextOverlays)
-  const setTextOverlayLink = useProjectStore((s) => s.setTextOverlayLink)
   const updateTextOverlaysStyle = useProjectStore((s) => s.updateTextOverlaysStyle)
-  const addCaptionPreset = usePresetStore((s) => s.addCaptionPreset)
-  // 再生位置は**押した瞬間に読む**(購読しない)。購読すると再生中は毎フレームこのパネル全体が
-  // 描き直され、テロップが多い企画ほど重くなる(実測: テロップ1,000本・60分の企画で、
-  // 再生中のフレーム間隔が 167ms=約6fps まで落ちていた。原因の大半がこの描き直し)。
+  const selectedOverlayId = useProjectStore((s) => s.selectedOverlayId)
+  const selectOverlay = useProjectStore((s) => s.selectOverlay)
+  const seekTo = useProjectStore((s) => s.seekTo)
 
-  const total = getTotalDuration(project)
-  const timedClips = buildTimedClips(project)
-
-  /** そのテロップが乗っているクリップ(何番目か)。どのクリップにも重ならなければ null */
-  function clipUnder(o: TextOverlay): { id: string; index: number } | null {
-    const tc = findTimedClipAt(timedClips, o.startTime)
-    if (!tc || o.startTime < tc.start || o.startTime >= tc.end) return null
-    return { id: tc.clip.id, index: timedClips.indexOf(tc) + 1 }
-  }
-  const [presetNameDrafts, setPresetNameDrafts] = useState<Record<string, string>>({})
   const [shiftAmount, setShiftAmount] = useState(0.5)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  // 一覧は1ページぶんだけ描く(理由は listPaging)
+  // 複数選択(一覧の中だけで持つ)。ストアの選択を含んでいるときだけ有効
+  const [multiIds, setMultiIds] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(0)
+  const listRef = useRef<HTMLUListElement>(null)
 
-  // 選択は「いま存在するテロップ」に絞って使う。削除された分のIDが残っていても、
-  // ここで落ちるので件数表示も一括適用も実物とズレない。
-  const selectedOverlays = project.textOverlays.filter((o) => selectedIds.has(o.id))
+  /** 一覧は時刻順(足した順のままだと、後から足したテロップが末尾に紛れる) */
+  const sorted = useMemo(
+    () =>
+      [...project.textOverlays].sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime),
+    [project.textOverlays]
+  )
+  const fps = Math.round(1 / frameSeconds(project.clips, project.assets))
+  const selected = sorted.find((o) => o.id === selectedOverlayId) ?? null
+  const effectiveMulti =
+    selected && multiIds.has(selected.id) && multiIds.size > 1 ? multiIds : null
+  const multiOverlays = effectiveMulti ? sorted.filter((o) => effectiveMulti.has(o.id)) : []
 
-  function toggleSelected(id: string): void {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
+  // タイムラインで選ばれたら、そのテロップの載っているページを開いて見える位置まで送る
+  useEffect(
+    () =>
+      useProjectStore.subscribe((state, prev) => {
+        if (!state.selectedOverlayId || state.selectedOverlayId === prev.selectedOverlayId) return
+        const list = [...state.project.textOverlays].sort(
+          (a, b) => a.startTime - b.startTime || a.endTime - b.endTime
+        )
+        const index = list.findIndex((o) => o.id === state.selectedOverlayId)
+        if (index >= 0) setPage(Math.floor(index / LIST_PAGE))
+      }),
+    []
+  )
+  useEffect(() => {
+    listRef.current?.querySelector('.telop-row.selected')?.scrollIntoView({ block: 'nearest' })
+  }, [selectedOverlayId, page])
+
+  function handleRowClick(e: React.MouseEvent, o: TextOverlay): void {
+    if (e.ctrlKey || e.metaKey) {
+      const base = effectiveMulti ?? new Set(selected ? [selected.id] : [])
+      const next = new Set(base)
+      if (next.has(o.id) && next.size > 1) next.delete(o.id)
+      else next.add(o.id)
+      setMultiIds(next)
+      // 主の選択は「最後に触ったもの」。外した場合は残りのどれかへ
+      selectOverlay(next.has(o.id) ? o.id : [...next][0])
+      return
+    }
+    if (e.shiftKey && selected) {
+      const a = sorted.indexOf(selected)
+      const b = sorted.indexOf(o)
+      const [lo, hi] = a < b ? [a, b] : [b, a]
+      setMultiIds(new Set(sorted.slice(lo, hi + 1).map((x) => x.id)))
+      selectOverlay(o.id)
+      return
+    }
+    setMultiIds(new Set([o.id]))
+    selectOverlay(o.id)
+    seekTo(o.startTime)
+  }
+
+  function handleAdd(): void {
+    const store = useProjectStore.getState()
+    // 置く位置は**再生位置**(規則は newOverlayRange)
+    const id = addTextOverlay({
+      text: '新しいテキスト',
+      ...newOverlayRange(store.playheadTime, getTotalDuration(project)),
+      style: defaultTextStyle(),
+      source: 'manual'
     })
+    setMultiIds(new Set([id]))
+    selectOverlay(id)
   }
 
-  /** 選択中で値が揃っていればその値、混在していれば undefined */
-  function commonStyleValue<K extends keyof TextStyle>(key: K): TextStyle[K] | undefined {
-    if (selectedOverlays.length === 0) return undefined
-    const first = selectedOverlays[0].style[key]
-    return selectedOverlays.every((o) => o.style[key] === first) ? first : undefined
-  }
-
-  function applyToSelected(patch: Partial<TextStyle>): void {
-    updateTextOverlaysStyle(
-      selectedOverlays.map((o) => o.id),
-      patch
-    )
-  }
-
-  function patchStyle(id: string, current: TextStyle, patch: Partial<TextStyle>): void {
-    updateTextOverlay(id, { style: { ...current, ...patch } })
-  }
-
-  function handleSavePreset(o: TextOverlay): void {
-    const name = (presetNameDrafts[o.id] ?? '').trim() || 'マイプリセット'
-    addCaptionPreset(name, o.style)
-    setPresetNameDrafts((prev) => ({ ...prev, [o.id]: '' }))
-  }
-
-  function handleDuplicate(o: TextOverlay): void {
-    addTextOverlay({
-      text: o.text,
-      startTime: o.startTime,
-      endTime: o.endTime,
-      style: { ...o.style },
-      source: o.source,
-      words: o.words ? o.words.map((w) => ({ ...w })) : undefined
-    })
-  }
-
-  const currentPage = clampPage(page, project.textOverlays.length)
-  const visibleRange = pageSlice(currentPage, project.textOverlays.length)
+  const currentPage = clampPage(page, sorted.length, LIST_PAGE)
+  const range = pageSlice(currentPage, sorted.length, LIST_PAGE)
+  const pages = pageCount(sorted.length, LIST_PAGE)
 
   return (
-    <div className="panel text-overlay-panel">
-      <div className="panel-header">
-        <h2>テキスト / 字幕</h2>
-        <button
-          className="primary-button"
-          onClick={() =>
-            addTextOverlay({
-              text: '新しいテキスト',
-              // 置く位置は**再生位置**。0 秒固定だと、見ている場所と関係ないところに入り、
-              // 続けて押すたびに同じ区間へ積み上がる(規則は newOverlayRange)。
-              ...newOverlayRange(useProjectStore.getState().playheadTime, total),
-              style: defaultTextStyle(),
-              source: 'manual'
-            })
-          }
-        >
-          <PlusIcon width={14} height={14} />
-          追加
-        </button>
-      </div>
-      <p className="hint-text">
-        プレビュー画面でテキストを直接ドラッグすると、自由な位置に配置できます。タイムライン上のテロップブロックをドラッグすると開始位置の移動、左右の端をドラッグすると個別のトリムができます。
-      </p>
-      {project.textOverlays.length > 0 && (
-        <div className="overlay-shift-row">
-          <span className="hint-text">全テロップを一括シフト</span>
-          <input
-            type="number"
-            step={0.1}
-            value={shiftAmount}
-            onChange={(e) => setShiftAmount(Number(e.target.value))}
-          />
-          <span className="hint-text">秒</span>
-          <button
-            className="small-button"
-            onClick={() => shiftAllTextOverlays(shiftAmount)}
-            title="すべてのテロップの開始/終了時刻を指定した秒数だけ一括でずらします"
-          >
-            適用
-          </button>
-          <button className="small-button" onClick={() => shiftAllTextOverlays(-shiftAmount)}>
-            逆方向に適用
-          </button>
-        </div>
-      )}
-      {project.textOverlays.length > 0 && (
-        <div className="overlay-bulk-style">
-          <div className="overlay-bulk-row">
-            <span className="hint-text">まとめてスタイル変更</span>
+    <div className="telop-panel">
+      <div className="telop-panel-body">
+        <div className="telop-list-pane">
+          <div className="telop-list-head">
+            <span>テロップ {sorted.length.toLocaleString()}件</span>
             <button
               className="small-button"
-              onClick={() => setSelectedIds(new Set(project.textOverlays.map((o) => o.id)))}
+              onClick={handleAdd}
+              title="再生位置にテロップを足します"
             >
-              全選択
+              <PlusIcon width={12} height={12} />
+              追加
             </button>
-            <button className="small-button" onClick={() => setSelectedIds(new Set())}>
-              全解除
-            </button>
-            <span className="hint-text">{selectedOverlays.length}件選択中</span>
           </div>
-          {selectedOverlays.length > 0 && (
-            <div className="overlay-bulk-row">
-              <label>
-                フォント
-                <select
-                  value={commonStyleValue('fontFamily') ?? ''}
-                  onChange={(e) => applyToSelected({ fontFamily: e.target.value as FontFamily })}
-                >
-                  {commonStyleValue('fontFamily') === undefined && <option value="">(混在)</option>}
-                  {FONT_FAMILY_OPTIONS.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                サイズ
-                <input
-                  type="number"
-                  min={16}
-                  max={96}
-                  step={2}
-                  placeholder="混在"
-                  value={commonStyleValue('fontSize') ?? ''}
-                  onChange={(e) => {
-                    const size = parseBulkFontSize(e.target.value)
-                    if (size !== null) applyToSelected({ fontSize: size })
-                  }}
-                />
-              </label>
-              <label>
-                色
-                <input
-                  type="color"
-                  value={commonStyleValue('color') ?? '#ffffff'}
-                  onChange={(e) => applyToSelected({ color: e.target.value })}
-                />
-              </label>
-              <label>
-                位置
-                <select
-                  value={commonStyleValue('position') ?? ''}
-                  onChange={(e) =>
-                    // 1件用と同じ規則。自由配置が残っているとそちらが優先されて、
-                    // 位置を変えたのに画面が動かない。
-                    applyToSelected({
-                      position: e.target.value as TextPosition,
-                      customPosition: undefined
-                    })
-                  }
-                >
-                  {commonStyleValue('position') === undefined && <option value="">(混在)</option>}
-                  <option value="top">上</option>
-                  <option value="center">中央</option>
-                  <option value="bottom">下</option>
-                </select>
-              </label>
+          {sorted.length === 0 ? (
+            <div className="empty-state">
+              <TypeIcon width={22} height={22} />
+              <p className="hint-text">
+                テロップはありません。「追加」か、テロップメニューの「音声から自動でテロップを作る」で作れます。
+              </p>
+            </div>
+          ) : (
+            <ul className="telop-list" ref={listRef} role="listbox" aria-multiselectable="true">
+              {sorted.slice(range.start, range.end).map((o) => {
+                const isSel = o.id === selectedOverlayId || Boolean(effectiveMulti?.has(o.id))
+                return (
+                  <li
+                    key={o.id}
+                    role="option"
+                    aria-selected={isSel}
+                    className={`telop-row ${isSel ? 'selected' : ''}`}
+                    style={{ borderLeftColor: speakerColor(o.speaker) }}
+                    title={o.speaker ? `${o.speaker}: ${o.text}` : o.text}
+                    onClick={(e) => handleRowClick(e, o)}
+                  >
+                    <span className="telop-row-tc">{formatTimecode(o.startTime, fps)}</span>
+                    <span className="telop-row-text">{o.text.replace(/\n/g, ' ') || '(空)'}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {pages > 1 && (
+            <div className="telop-list-paging">
+              <button
+                className="small-button"
+                disabled={currentPage === 0}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                前へ
+              </button>
+              <span>
+                {range.start + 1}〜{range.end}
+              </span>
+              <button
+                className="small-button"
+                disabled={currentPage >= pages - 1}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                次へ
+              </button>
+              <button
+                className="small-button"
+                title="再生位置のテロップが載っているページへ移ります"
+                onClick={() =>
+                  setPage(pageForTime(sorted, useProjectStore.getState().playheadTime, LIST_PAGE))
+                }
+              >
+                再生位置へ
+              </button>
+            </div>
+          )}
+          {sorted.length > 0 && (
+            <div
+              className="telop-list-foot"
+              title="すべてのテロップの開始・終了をまとめてずらします"
+            >
+              <span>全体をずらす</span>
+              <input
+                type="number"
+                aria-label="ずらす秒数"
+                step={0.1}
+                value={shiftAmount}
+                onChange={(e) => setShiftAmount(Number(e.target.value))}
+              />
+              <span>秒</span>
+              <button className="small-button" onClick={() => shiftAllTextOverlays(-shiftAmount)}>
+                早める
+              </button>
+              <button className="small-button" onClick={() => shiftAllTextOverlays(shiftAmount)}>
+                遅らせる
+              </button>
             </div>
           )}
         </div>
-      )}
-      <div className="overlay-list">
-        {project.textOverlays.length === 0 && (
-          <div className="empty-state">
-            <TypeIcon width={26} height={26} />
-            <p className="hint-text">テキストはありません</p>
-          </div>
-        )}
-        {project.textOverlays.length > OVERLAY_PAGE_SIZE && (
-          <div className="overlay-paging">
-            <button
-              className="small-button"
-              disabled={currentPage === 0}
-              onClick={() => setPage(currentPage - 1)}
-            >
-              前へ
-            </button>
-            <span className="hint-text">
-              {visibleRange.start + 1}〜{visibleRange.end} / {project.textOverlays.length}件
-            </span>
-            <button
-              className="small-button"
-              disabled={currentPage >= pageCount(project.textOverlays.length) - 1}
-              onClick={() => setPage(currentPage + 1)}
-            >
-              次へ
-            </button>
-            <button
-              className="small-button"
-              title="再生位置に出ているテロップが載っているページへ移ります"
-              onClick={() =>
-                setPage(pageForTime(project.textOverlays, useProjectStore.getState().playheadTime))
-              }
-            >
-              再生位置へ
-            </button>
-          </div>
-        )}
-        {project.textOverlays.slice(visibleRange.start, visibleRange.end).map((o) => (
-          <div key={o.id} className={`overlay-item ${selectedIds.has(o.id) ? 'selected' : ''}`}>
-            <label className="checkbox-label overlay-select-label">
-              <input
-                type="checkbox"
-                checked={selectedIds.has(o.id)}
-                onChange={() => toggleSelected(o.id)}
-              />
-              まとめて変更の対象
-            </label>
-            <textarea
-              className="overlay-text-input"
-              rows={2}
-              value={o.text}
-              onChange={(e) => updateTextOverlay(o.id, { text: e.target.value })}
-            />
-            <div className="overlay-item-row">
-              <label>
-                開始
-                <input
-                  type="number"
-                  step={0.1}
-                  min={0}
-                  max={Math.max(0, o.endTime - MIN_OVERLAY_DURATION)}
-                  value={o.startTime}
-                  onChange={(e) =>
-                    updateTextOverlay(o.id, {
-                      startTime: clampOverlayStart(Number(e.target.value), o.endTime)
-                    })
-                  }
-                />
-              </label>
-              <label>
-                終了
-                <input
-                  type="number"
-                  step={0.1}
-                  min={o.startTime + MIN_OVERLAY_DURATION}
-                  value={o.endTime}
-                  onChange={(e) =>
-                    updateTextOverlay(o.id, {
-                      endTime: clampOverlayEnd(Number(e.target.value), o.startTime)
-                    })
-                  }
-                />
-              </label>
-              {o.source === 'auto' && <span className="project-badge">自動</span>}
-            </div>
 
-            <div className="overlay-item-row">
-              <label
-                className="checkbox-label"
-                title="手前のクリップを詰めても、このテロップが紐づいたクリップと一緒に動きます"
-              >
-                <input
-                  type="checkbox"
-                  checked={Boolean(o.linkedClipId)}
-                  disabled={!o.linkedClipId && !clipUnder(o)}
-                  onChange={(e) =>
-                    setTextOverlayLink(o.id, e.target.checked ? (clipUnder(o)?.id ?? null) : null)
-                  }
-                />
-                クリップに追従
-              </label>
-              <span className="hint-text">
-                {o.linkedClipId
-                  ? `クリップ${timedClips.findIndex((t) => t.clip.id === o.linkedClipId) + 1 || '?'}の先頭から ${(o.linkOffset ?? 0).toFixed(1)}秒`
-                  : clipUnder(o)
-                    ? `クリップ${clipUnder(o)!.index}に紐づけます`
-                    : 'クリップの無い位置なので紐づけできません'}
-              </span>
-            </div>
-
-            {o.words && o.words.length > 0 && (
-              <div className="overlay-item-row">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={o.style.wordHighlight}
-                    onChange={(e) => patchStyle(o.id, o.style, { wordHighlight: e.target.checked })}
-                  />
-                  単語ハイライト(カラオケ字幕)
-                </label>
-                {o.style.wordHighlight && (
-                  <input
-                    type="color"
-                    value={o.style.highlightColor}
-                    onChange={(e) => patchStyle(o.id, o.style, { highlightColor: e.target.value })}
-                  />
-                )}
-              </div>
-            )}
-
-            <div className="overlay-item-row">
-              <label>
-                位置
-                <select
-                  value={o.style.position}
-                  onChange={(e) =>
-                    patchStyle(o.id, o.style, {
-                      position: e.target.value as TextPosition,
-                      customPosition: undefined
-                    })
-                  }
-                >
-                  <option value="top">上</option>
-                  <option value="center">中央</option>
-                  <option value="bottom">下</option>
-                </select>
-              </label>
-              {o.style.customPosition && (
-                <button
-                  className="small-button"
-                  title="プレビュー画面でドラッグした自由配置を解除し、プリセット位置に戻します"
-                  onClick={() => patchStyle(o.id, o.style, { customPosition: undefined })}
-                >
-                  自由配置を解除
-                </button>
-              )}
-              <label>
-                サイズ
-                <input
-                  type="number"
-                  min={16}
-                  max={96}
-                  step={2}
-                  value={o.style.fontSize}
-                  onChange={(e) => patchStyle(o.id, o.style, { fontSize: Number(e.target.value) })}
-                />
-              </label>
-              <label>
-                色
-                <input
-                  type="color"
-                  value={o.style.color}
-                  onChange={(e) => patchStyle(o.id, o.style, { color: e.target.value })}
-                />
-              </label>
-            </div>
-
-            <div className="overlay-item-row">
-              {(() => {
-                const pos = o.style.customPosition ?? defaultPositionFraction(o.style.position)
-                return (
-                  <>
-                    <label>
-                      X(%)
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={Math.round(pos.x * 100)}
-                        onChange={(e) =>
-                          patchStyle(o.id, o.style, {
-                            customPosition: {
-                              x: Math.min(100, Math.max(0, Number(e.target.value))) / 100,
-                              y: pos.y
-                            }
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Y(%)
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={Math.round(pos.y * 100)}
-                        onChange={(e) =>
-                          patchStyle(o.id, o.style, {
-                            customPosition: {
-                              x: pos.x,
-                              y: Math.min(100, Math.max(0, Number(e.target.value))) / 100
-                            }
-                          })
-                        }
-                      />
-                    </label>
-                  </>
+        <div className="telop-detail-pane">
+          {effectiveMulti ? (
+            <BulkStyleEditor
+              overlays={multiOverlays}
+              onApply={(patch) =>
+                updateTextOverlaysStyle(
+                  multiOverlays.map((o) => o.id),
+                  patch
                 )
-              })()}
-              <label>
-                回転(度)
-                <input
-                  type="number"
-                  min={-180}
-                  max={180}
-                  step={1}
-                  value={o.style.rotation}
-                  onChange={(e) => patchStyle(o.id, o.style, { rotation: Number(e.target.value) })}
-                />
-              </label>
+              }
+            />
+          ) : selected ? (
+            <TelopInspector key={selected.id} overlay={selected} />
+          ) : (
+            <div className="empty-state">
+              <p className="hint-text">
+                一覧かタイムラインでテロップを選ぶと、ここで本文・話者・見た目を変えられます。
+                Ctrl+クリックで複数を選ぶと、まとめて変更できます。
+              </p>
             </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
-            <div className="overlay-item-row">
-              <label>
-                フォント
-                <select
-                  value={o.style.fontFamily}
-                  onChange={(e) =>
-                    patchStyle(o.id, o.style, { fontFamily: e.target.value as FontFamily })
-                  }
-                >
-                  {FONT_FAMILY_OPTIONS.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className={`toggle-chip ${o.style.bold ? 'active' : ''}`}
-                onClick={() => patchStyle(o.id, o.style, { bold: !o.style.bold })}
-              >
-                B
-              </button>
-              <button
-                className={`toggle-chip italic ${o.style.italic ? 'active' : ''}`}
-                onClick={() => patchStyle(o.id, o.style, { italic: !o.style.italic })}
-              >
-                I
-              </button>
-            </div>
-
-            <details className="overlay-advanced">
-              <summary>詳細な装飾設定</summary>
-              <div className="overlay-item-row">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={o.style.outline}
-                    onChange={(e) => patchStyle(o.id, o.style, { outline: e.target.checked })}
-                  />
-                  縁取り
-                </label>
-                {o.style.outline && (
-                  <>
-                    <input
-                      type="color"
-                      value={o.style.outlineColor}
-                      onChange={(e) => patchStyle(o.id, o.style, { outlineColor: e.target.value })}
-                    />
-                    <input
-                      type="number"
-                      min={1}
-                      max={8}
-                      value={o.style.outlineWidth}
-                      onChange={(e) =>
-                        patchStyle(o.id, o.style, { outlineWidth: Number(e.target.value) })
-                      }
-                    />
-                  </>
-                )}
-              </div>
-              <div className="overlay-item-row">
-                <label
-                  className="checkbox-label"
-                  title="縁取りのさらに外側にもう1本縁を付けます(バラエティの二重縁取り)"
-                >
-                  <input
-                    type="checkbox"
-                    checked={(o.style.extraStrokes?.length ?? 0) > 0}
-                    onChange={(e) =>
-                      patchStyle(o.id, o.style, {
-                        extraStrokes: e.target.checked
-                          ? [{ color: '#ffffff', width: 6 }]
-                          : undefined
-                      })
-                    }
-                  />
-                  外側の縁
-                </label>
-                {o.style.extraStrokes?.[0] && (
-                  <>
-                    <input
-                      type="color"
-                      value={o.style.extraStrokes[0].color}
-                      onChange={(e) =>
-                        patchStyle(o.id, o.style, {
-                          extraStrokes: [{ ...o.style.extraStrokes![0], color: e.target.value }]
-                        })
-                      }
-                    />
-                    <input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={o.style.extraStrokes[0].width}
-                      onChange={(e) =>
-                        patchStyle(o.id, o.style, {
-                          extraStrokes: [
-                            { ...o.style.extraStrokes![0], width: Number(e.target.value) }
-                          ]
-                        })
-                      }
-                    />
-                  </>
-                )}
-                <label
-                  className="checkbox-label"
-                  title="文字の色を上から下へのグラデーションにします"
-                >
-                  <input
-                    type="checkbox"
-                    checked={Boolean(o.style.gradientColor)}
-                    onChange={(e) =>
-                      patchStyle(o.id, o.style, {
-                        gradientColor: e.target.checked ? '#ffcc00' : undefined
-                      })
-                    }
-                  />
-                  グラデーション
-                </label>
-                {o.style.gradientColor && (
-                  <input
-                    type="color"
-                    value={o.style.gradientColor}
-                    onChange={(e) => patchStyle(o.id, o.style, { gradientColor: e.target.value })}
-                  />
-                )}
-              </div>
-              {!drawsTelopsOnCanvas &&
-                ((o.style.extraStrokes?.length ?? 0) > 0 || Boolean(o.style.gradientColor)) && (
-                  <p className="hint-text">
-                    外側の縁・グラデーションは、書き出し方式が「長尺向け」のときに表示・書き出しされます
-                    (書き出しタブで切り替えられます)。
-                  </p>
-                )}
-              <div className="overlay-item-row">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={o.style.shadow}
-                    onChange={(e) => patchStyle(o.id, o.style, { shadow: e.target.checked })}
-                  />
-                  影
-                </label>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={o.style.background}
-                    onChange={(e) => patchStyle(o.id, o.style, { background: e.target.checked })}
-                  />
-                  背景ボックス
-                </label>
-                {o.style.background && (
-                  <>
-                    <input
-                      type="color"
-                      value={o.style.backgroundColor}
-                      onChange={(e) =>
-                        patchStyle(o.id, o.style, { backgroundColor: e.target.value })
-                      }
-                    />
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={o.style.backgroundOpacity}
-                      onChange={(e) =>
-                        patchStyle(o.id, o.style, { backgroundOpacity: Number(e.target.value) })
-                      }
-                    />
-                  </>
-                )}
-              </div>
-              <div className="overlay-item-row">
-                <label>
-                  文字間隔
-                  <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={o.style.letterSpacing}
-                    onChange={(e) =>
-                      patchStyle(o.id, o.style, { letterSpacing: Number(e.target.value) })
-                    }
-                  />
-                </label>
-                <label>
-                  アニメーション
-                  <select
-                    value={o.style.animation}
-                    onChange={(e) =>
-                      patchStyle(o.id, o.style, { animation: e.target.value as TextAnimation })
-                    }
-                  >
-                    <option value="none">なし</option>
-                    <option value="fadeIn">フェードイン</option>
-                    <option value="popIn">ポップイン</option>
-                    <option value="slideInUp">スライドイン(下から)</option>
-                    <option value="slideInDown">スライドイン(上から)</option>
-                    <option value="bounce">バウンス</option>
-                    <option value="typewriter">タイプライター</option>
-                  </select>
-                </label>
-              </div>
-            </details>
-
-            <div className="overlay-item-row overlay-preset-save-row">
-              <input
-                type="text"
-                className="overlay-preset-name-input"
-                placeholder="プリセット名"
-                value={presetNameDrafts[o.id] ?? ''}
-                onChange={(e) =>
-                  setPresetNameDrafts((prev) => ({ ...prev, [o.id]: e.target.value }))
-                }
-              />
-              <button
-                className="icon-button"
-                title="このスタイルをプリセットとして保存"
-                onClick={() => handleSavePreset(o)}
-              >
-                <StarIcon width={13} height={13} />
-              </button>
-            </div>
-
-            <div className="overlay-item-row">
-              <button className="icon-button" title="複製" onClick={() => handleDuplicate(o)}>
-                <CopyIcon width={13} height={13} />
-              </button>
-              <button
-                className="icon-button danger"
-                title="削除"
-                onClick={() => removeTextOverlay(o.id)}
-              >
-                <TrashIcon width={13} height={13} />
-              </button>
-            </div>
-          </div>
-        ))}
+/** 複数のテロップの見た目をまとめて変える。値が揃っていない項目は「(混在)」と出す */
+function BulkStyleEditor({
+  overlays,
+  onApply
+}: {
+  overlays: readonly TextOverlay[]
+  onApply: (patch: Partial<TextStyle>) => void
+}): React.JSX.Element {
+  function common<K extends keyof TextStyle>(key: K): TextStyle[K] | undefined {
+    const first = overlays[0]?.style[key]
+    return overlays.every((o) => o.style[key] === first) ? first : undefined
+  }
+  return (
+    <div className="telop-inspector">
+      <p className="prop-heading">{overlays.length}件をまとめて変更</p>
+      <div className="prop-row">
+        <span className="prop-label">フォント</span>
+        <div className="prop-control">
+          <select
+            value={common('fontFamily') ?? ''}
+            onChange={(e) => onApply({ fontFamily: e.target.value as FontFamily })}
+          >
+            {common('fontFamily') === undefined && <option value="">(混在)</option>}
+            {FONT_FAMILY_OPTIONS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">サイズ</span>
+        <div className="prop-control">
+          <input
+            type="number"
+            className="prop-num"
+            min={16}
+            max={96}
+            step={2}
+            placeholder="混在"
+            value={common('fontSize') ?? ''}
+            onChange={(e) => {
+              const size = parseBulkFontSize(e.target.value)
+              if (size !== null) onApply({ fontSize: size })
+            }}
+          />
+          <span className="prop-unit">px</span>
+        </div>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">塗り</span>
+        <div className="prop-control">
+          <input
+            type="color"
+            aria-label="文字の色"
+            value={common('color') ?? '#ffffff'}
+            onChange={(e) => onApply({ color: e.target.value })}
+          />
+          {common('color') === undefined && <span className="prop-unit">(混在)</span>}
+        </div>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">配置</span>
+        <div className="prop-control">
+          <select
+            value={common('position') ?? ''}
+            onChange={(e) =>
+              // 自由配置が残っているとそちらが優先されて、位置を変えたのに画面が動かない
+              onApply({ position: e.target.value as TextPosition, customPosition: undefined })
+            }
+          >
+            {common('position') === undefined && <option value="">(混在)</option>}
+            <option value="top">上</option>
+            <option value="center">中央</option>
+            <option value="bottom">下</option>
+          </select>
+        </div>
       </div>
     </div>
   )

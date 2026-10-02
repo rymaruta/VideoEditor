@@ -90,12 +90,14 @@ export function useAppMenu(windows: readonly { id: string; label: string }[]): v
         const action = KEY_ACTIONS[id]
         if (action) return pressShortcut(action)
         if (id === 'telop.add') {
-          store.addTextOverlay({
-            text: '新しいテキスト',
-            ...newOverlayRange(store.playheadTime, getTotalDuration(store.project)),
-            style: defaultTextStyle(),
-            source: 'manual'
-          })
+          store.selectOverlay(
+            store.addTextOverlay({
+              text: '新しいテキスト',
+              ...newOverlayRange(store.playheadTime, getTotalDuration(store.project)),
+              style: defaultTextStyle(),
+              source: 'manual'
+            })
+          )
           emitMenuCommand('window.text')
           return
         }

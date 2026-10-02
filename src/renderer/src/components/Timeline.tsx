@@ -587,7 +587,9 @@ export function Timeline(): React.JSX.Element {
   const videoOverlayHoverTrackRef = useRef<string | null>(null)
   const [mediaTrimDrag, setMediaTrimDrag] = useState<MediaTrimDragState | null>(null)
   const [overlayDrag, setOverlayDrag] = useState<OverlayDragState | null>(null)
-  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
+  // テロップの選択はストアに置く(テロップ一覧・インスペクタと同じものを見るため)
+  const selectedOverlayId = useProjectStore((s) => s.selectedOverlayId)
+  const setSelectedOverlayId = useProjectStore((s) => s.selectOverlay)
   const [transitionPopoverClipId, setTransitionPopoverClipId] = useState<string | null>(null)
   const [scrubbing, setScrubbing] = useState(false)
 
@@ -618,6 +620,15 @@ export function Timeline(): React.JSX.Element {
   useEffect(
     () =>
       useProjectStore.subscribe((state, prev) => {
+        // テロップが外から(テロップ一覧で)選ばれたときも、こちらのローカル選択を落とす
+        if (
+          state.selectedOverlayId !== null &&
+          state.selectedOverlayId !== prev.selectedOverlayId
+        ) {
+          setSelectedAudioClip(null)
+          setSelectedVideoOverlayClip(null)
+          return
+        }
         const active = state.selectedClipId !== null || state.multiSelectedClipIds.length > 0
         const wasActive = prev.selectedClipId !== null || prev.multiSelectedClipIds.length > 0
         if (!active || wasActive) return
@@ -625,7 +636,7 @@ export function Timeline(): React.JSX.Element {
         setSelectedVideoOverlayClip(null)
         setSelectedOverlayId(null)
       }),
-    []
+    [setSelectedOverlayId]
   )
 
   // 右クリックで出す操作の一覧。ショートカットと同じ動きをそのまま呼ぶだけで、
@@ -862,6 +873,7 @@ export function Timeline(): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleDeleteKey)
   }, [
     selectedOverlayId,
+    setSelectedOverlayId,
     selectedAudioClip,
     selectedVideoOverlayClip,
     removeTextOverlay,
