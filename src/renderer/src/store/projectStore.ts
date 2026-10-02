@@ -1,3 +1,4 @@
+import { restyleOverlays, type TelopStyleDef } from '@shared/telop/styles'
 import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { sameProjectContent } from '../lib/projectEquality'
@@ -255,7 +256,8 @@ function normalizeTextOverlay(raw: Record<string, unknown>): TextOverlay {
     words: normalizeWords(raw.words),
     linkedClipId: typeof raw.linkedClipId === 'string' ? raw.linkedClipId : undefined,
     linkOffset: raw.linkOffset === undefined ? undefined : asFinite(raw.linkOffset, 0),
-    speaker: typeof raw.speaker === 'string' && raw.speaker.trim() ? raw.speaker : undefined
+    speaker: typeof raw.speaker === 'string' && raw.speaker.trim() ? raw.speaker : undefined,
+    styleId: typeof raw.styleId === 'string' && raw.styleId ? raw.styleId : undefined
   }
 }
 
@@ -527,6 +529,8 @@ interface ProjectState {
   setTextOverlayLink: (id: string, clipId: string | null) => void
   removeTextOverlay: (id: string) => void
   selectOverlay: (id: string | null) => void
+  /** テロップスタイルの一覧を新しくしたとき、使っているテロップへ反映する(取り消しは1回で戻る) */
+  restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
 
   addAudioTrack: (name: string) => void
@@ -2000,6 +2004,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const idSet = new Set(ids)
       if (idSet.size === 0) return state
       if (!state.project.textOverlays.some((o) => idSet.has(o.id))) return state
+      const placementOnly = Object.keys(patch).every(
+        (k) => k === 'position' || k === 'customPosition'
+      )
       return {
         // 何件掛けても履歴は1件。合体キーを付けているのは、色や数値を連続で
         // 動かしたときに1回の調整で履歴が埋まらないようにするため(1件用と同じ考え方)。
@@ -2007,7 +2014,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         project: {
           ...state.project,
           textOverlays: state.project.textOverlays.map((o) =>
-            idSet.has(o.id) ? { ...o, style: { ...o.style, ...patch } } : o
+            idSet.has(o.id)
+              ? {
+                  ...o,
+                  style: { ...o.style, ...patch },
+                  // 見た目を変えたらスタイルとのつながりを外す(置き場所だけなら保つ)
+                  styleId: placementOnly ? o.styleId : undefined
+                }
+              : o
           )
         }
       }
@@ -2033,6 +2047,16 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               : o
           )
         }
+      }
+    }),
+
+  restyleTextOverlays: (styles) =>
+    set((state) => {
+      const next = restyleOverlays(state.project.textOverlays, styles)
+      if (next.every((o, i) => o === state.project.textOverlays[i])) return state
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, textOverlays: next }
       }
     }),
 

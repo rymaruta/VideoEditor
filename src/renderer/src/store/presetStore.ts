@@ -11,6 +11,8 @@ export interface CaptionPreset {
   id: string
   name: string
   style: TextStyle
+  /** この話者の発言テロップに自動で使う(テロップスタイルの管理で選ぶ) */
+  speakers?: string[]
 }
 
 export interface SePreset {
@@ -78,7 +80,14 @@ function isCaptionPreset(value: unknown): value is CaptionPreset {
  * 消してよい理由にならない。
  */
 function repairCaptionPreset(preset: CaptionPreset): CaptionPreset {
-  return { ...preset, style: normalizeTextStyle(preset.style) }
+  const speakers = Array.isArray(preset.speakers)
+    ? preset.speakers.filter((sp): sp is string => typeof sp === 'string' && sp.trim() !== '')
+    : []
+  return {
+    ...preset,
+    style: normalizeTextStyle(preset.style),
+    speakers: speakers.length > 0 ? speakers : undefined
+  }
 }
 
 function isSePreset(value: unknown): value is SePreset {
@@ -102,6 +111,8 @@ interface PresetState {
   exportPresets: ExportPreset[]
   addCaptionPreset: (name: string, style: TextStyle) => void
   removeCaptionPreset: (id: string) => void
+  /** テロップスタイルの管理で OK を押したとき、一覧をまるごと置き換える */
+  replaceCaptionPresets: (presets: CaptionPreset[]) => void
   addSePreset: (name: string, filePath: string, fileName: string) => void
   removeSePreset: (id: string) => void
   /** 同じ名前が既にあるときは追加せず false を返す(どちらを押したか区別できなくなるため) */
@@ -118,6 +129,12 @@ export const usePresetStore = create<PresetState>((set, get) => ({
     // 書き込むときも同じ規則を通す。歯抜けの style がここから入ると、
     // 次に開いたときに直る(＝症状が消える)ぶん、原因が追えなくなる。
     const next = [...get().captionPresets, { id: uuid(), name, style: normalizeTextStyle(style) }]
+    localStorage.setItem(CAPTION_PRESETS_KEY, JSON.stringify(next))
+    set({ captionPresets: next })
+  },
+
+  replaceCaptionPresets: (presets) => {
+    const next = presets.map(repairCaptionPreset)
     localStorage.setItem(CAPTION_PRESETS_KEY, JSON.stringify(next))
     set({ captionPresets: next })
   },

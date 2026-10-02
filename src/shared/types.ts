@@ -107,6 +107,8 @@ export interface TextOverlay {
   linkOffset?: number
   /** 話者(出演者名)。話者ごとのテロップスタイルの割り当てと、一覧の色分けに使う */
   speaker?: string
+  /** 使っているテロップスタイルの ID。スタイルを直すとこのテロップにも反映される */
+  styleId?: string
 }
 
 export interface AudioTrackClip {

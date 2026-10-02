@@ -32,6 +32,7 @@ export type MenuCommand =
   | 'telop.add'
   | 'telop.list'
   | 'telop.auto'
+  | 'telop.styles'
   | 'auto.allInOne'
   | 'auto.roughCut'
   | 'auto.longFormShort'
@@ -184,7 +185,8 @@ export function buildMenuTemplate(
         { label: 'テロップを追加', id: 'telop.add' },
         { label: '音声から自動でテロップを作る…', id: 'telop.auto' },
         SEP,
-        { label: 'テロップの一覧', id: 'telop.list' }
+        { label: 'テロップの一覧', id: 'telop.list' },
+        { label: 'テロップスタイルの管理…', id: 'telop.styles' }
       ]
     },
     {

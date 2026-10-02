@@ -7,6 +7,7 @@ import { TemplatePanel } from './components/TemplatePanel'
 import { TextOverlayPanel } from './components/TextOverlayPanel'
 import { YouTubeTrendPanel } from './components/YouTubeTrendPanel'
 import { ExportDialog } from './components/ExportDialog'
+import { TelopStyleDialog } from './components/TelopStyleDialog'
 import { NarrationPanel } from './components/NarrationPanel'
 import { ThumbnailPanel } from './components/ThumbnailPanel'
 import { AudioLibraryPanel } from './components/AudioLibraryPanel'
@@ -436,6 +437,7 @@ function App(): React.JSX.Element {
       </div>
       <StatusBar />
       <ExportDialog />
+      <TelopStyleDialog />
       <AutosaveRestoreModal />
     </div>
   )
