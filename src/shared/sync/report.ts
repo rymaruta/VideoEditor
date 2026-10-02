@@ -30,6 +30,10 @@ export interface SyncPairResult {
   refined: boolean
   /** 時計の進み方の差(百万分率)。重なりが長いときだけ測る。+ なら b の時計が速い */
   driftPpm?: number
+  /** a の時計で1秒進む間に、b の時計が何秒進むか(1 + ドリフト)。測れたときだけ */
+  rate?: number
+  /** offset を測った位置(a の時刻、秒)。時計のずれの補正に使う */
+  center?: number
 }
 
 export interface SyncReport {

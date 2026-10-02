@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { atempoChain, parseLoudnormMeasurement } from '@main/ffmpegService'
+import { atempoChain, audioSpeedChain, parseLoudnormMeasurement } from '@main/ffmpegService'
 import { NASTY_NUMBERS, seeded } from '../helpers/boundary'
 
 /** `atempo=a,atempo=b,...` を掛け合わせて実効の速度を出す */
@@ -125,5 +125,23 @@ describe('parseLoudnormMeasurement — 測定パスの JSON を読む', () => {
     expect(lraTarget(5)).toBe(11)
     expect(lraTarget(60)).toBe(50)
     expect(lraTarget(11)).toBe(11)
+  })
+})
+
+describe('audioSpeedChain — 時計のずれの補正は atempo を使わない', () => {
+  it('等倍は何も掛けない(atempo=1 でも音が遅れて揺れるため)', () => {
+    expect(audioSpeedChain(1)).toBe('anull')
+  })
+
+  it('大きな速度変更は atempo のまま', () => {
+    expect(audioSpeedChain(1.5)).toBe('atempo=1.5')
+    expect(audioSpeedChain(0.9)).toBe('atempo=0.9')
+  })
+
+  it('ごく小さな違いは周波数の読み替えで掛ける(誤差 0.5ppm 以下)', () => {
+    const chain = audioSpeedChain(1.0000625)
+    expect(chain).toBe('aresample=960000,asetrate=960060,aresample=48000')
+    const m = /asetrate=(\d+)/.exec(audioSpeedChain(0.99997))!
+    expect(Math.abs(Number(m[1]) / 960000 - 0.99997)).toBeLessThan(0.6e-6)
   })
 })

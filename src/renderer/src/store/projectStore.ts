@@ -1,3 +1,4 @@
+import type { MulticamLayout } from '@shared/sync/multicamLayout'
 import { restyleOverlays, type TelopStyleDef } from '@shared/telop/styles'
 import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
@@ -457,6 +458,17 @@ interface ProjectState {
 
   addAsset: (asset: MediaAsset) => void
   addAssets: (assets: MediaAsset[]) => void
+  /**
+   * 同期した収録素材をまとめて入れる(素材の追加 + 本編・PiP・音声トラック)。取り消し1回で全部戻る。
+   * 並べ方は `@shared/sync/multicamLayout`。`assetIdOf` は素材のファイル(同期の ID)→ 素材 ID。
+   */
+  addMulticamTimeline: (
+    assets: MediaAsset[],
+    layout: MulticamLayout,
+    assetIdOf: Record<string, string>,
+    /** 基準カメラに合わせた縦横比(指定すればプロジェクトの縦横比も同じ1回の操作で変える) */
+    aspectRatio?: AspectRatio
+  ) => void
   setAssetProxyPath: (assetId: string, proxyPath: string) => void
   removeAsset: (assetId: string) => void
   addAudioClipWithAsset: (
@@ -1200,6 +1212,69 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return {
         ...pushHistory(state),
         project: { ...state.project, assets: [...state.project.assets, ...assets] }
+      }
+    }),
+
+  addMulticamTimeline: (assets, layout, assetIdOf, aspectRatio) =>
+    set((state) => {
+      const idOf = (fileId: string): string | undefined => assetIdOf[fileId]
+      const main: Clip[] = layout.main
+        .filter((m) => idOf(m.fileId))
+        .map((m) => ({
+          id: uuid(),
+          assetId: idOf(m.fileId)!,
+          inPoint: m.inPoint,
+          outPoint: m.outPoint,
+          speed: m.speed
+        }))
+      // ほかのカメラは隠しておく(どのアングルを使うかはアングルの切替で決める。出したままだと
+      // 全部が小窓で重なって見える)。隠したトラックの音は書き出しでも鳴らさない
+      const cameras: VideoOverlayTrack[] = layout.cameras.map((c) => ({
+        id: uuid(),
+        name: c.name,
+        hidden: true,
+        position: 'top-right',
+        scale: 0.32,
+        clips: c.pieces
+          .filter((p) => idOf(p.fileId))
+          .map((p) => ({
+            id: uuid(),
+            assetId: idOf(p.fileId)!,
+            startTime: p.startTime,
+            inPoint: p.inPoint,
+            outPoint: p.outPoint
+          }))
+      }))
+      // 録音機の時計のずれは速度で補正する(4時間で1秒近くずれることがある)。
+      // PiP のクリップは速度を持てないので、区間ごとの頭で合わせ直すだけにする
+      // (ずれは区間の中でしか積もらない。20ppm・30分の区間で最大 36ms)
+      const mics: AudioTrack[] = layout.mics.map((m) => ({
+        id: uuid(),
+        name: m.name,
+        muted: false,
+        volume: 1,
+        duckingEnabled: false,
+        clips: m.pieces
+          .filter((p) => idOf(p.fileId))
+          .map((p) => ({
+            id: uuid(),
+            assetId: idOf(p.fileId)!,
+            startTime: p.startTime,
+            inPoint: p.inPoint,
+            outPoint: p.outPoint,
+            ...(Math.abs(p.speed - 1) > 1e-9 ? { speed: p.speed } : {})
+          }))
+      }))
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          aspectRatio: aspectRatio ?? state.project.aspectRatio,
+          assets: [...state.project.assets, ...assets],
+          clips: [...state.project.clips, ...main],
+          videoOverlayTracks: [...state.project.videoOverlayTracks, ...cameras],
+          audioTracks: [...state.project.audioTracks, ...mics]
+        }
       }
     }),
 

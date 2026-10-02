@@ -506,6 +506,34 @@ export function atempoChain(speed: number): string {
   return steps.map((s) => `atempo=${Number(s.toFixed(6))}`).join(',')
 }
 
+/**
+ * 音声の速度を変えるフィルタ。**ごく小さな速度の違い(録音機の時計のずれの補正)は atempo を使わない。**
+ *
+ * atempo は音程を保つために波形を細かく切ってつなぎ直す(WSOLA)ので、つなぎ目で数十ms
+ * タイミングが揺れる。速度 1.0000625(時計のずれ 62.5ppm)を掛けると、本来の位置から
+ * **18〜24ms** ずれ、ほかのマイクと重ねると声が二重(やまびこ)に聞こえた。
+ * ずれの補正は「サンプル周波数を読み替える」だけで済む(音程は 0.2% 以下の違いなので聞き分けられない)。
+ * 同じ素材で測ると、読み替えなら位置の誤差は 0.13ms 以下だった。
+ *
+ * 読み替えの周波数は整数しか指定できないので、960kHz に上げてから読み替える(誤差 0.5ppm 以下)。
+ */
+export const RESAMPLE_SPEED_LIMIT = 0.002
+const RESAMPLE_GRID_RATE = 960000
+
+export function audioSpeedChain(speed: number): string {
+  // 等倍なら何も掛けない。atempo=1 でも素通しにはならず、同じく切ってつなぎ直すので
+  // 音が 19〜26ms 遅れて揺れていた(実測: 30fps の映像に対して口の動きより音が遅れる)
+  // 壊れた値(NaN・0 以下)も等倍として扱う
+  if (speed === 1 || !Number.isFinite(speed) || speed <= 0) return 'anull'
+  if (Math.abs(speed - 1) > RESAMPLE_SPEED_LIMIT) {
+    return atempoChain(speed)
+  }
+  return (
+    `aresample=${RESAMPLE_GRID_RATE},asetrate=${Math.round(RESAMPLE_GRID_RATE * speed)},` +
+    `aresample=${OUTPUT_SAMPLE_RATE}`
+  )
+}
+
 // 書き出す音声の形式。合流フィルタ(concat / acrossfade / amix / sidechaincompress)は
 // libavfilter がグラフ全体で1つの形式に揃うよう交渉するので、枝の中に `aresample` の
 // ような変換フィルタがあると「変換の少ない側」が採られる。その結果、**モノラルや
@@ -828,7 +856,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // 最初から `anullsrc` に `duration` を渡して尺ちょうどにしており、
           // ここでも**片方にだけ揃える処理が育っていた**。
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+            `[${myIndex}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
               `apad,atrim=0:${outputDuration},asetpts=PTS-STARTPTS,` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )
@@ -1116,7 +1144,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           }
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
-            `[${myIndex}:a]${atempoChain(clipSpeed)},asetpts=PTS-STARTPTS,${trimChain}${fadeChain}` +
+            `[${myIndex}:a]${audioSpeedChain(clipSpeed)},asetpts=PTS-STARTPTS,${trimChain}${fadeChain}` +
               `volume=${clipVolume},${adelayFilter(delayMs)},` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
           )

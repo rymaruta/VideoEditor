@@ -206,6 +206,8 @@ async function run(): Promise<void> {
       // 重なっている区間(a の時刻)の中ほどで詰める
       const ovStart = Math.max(0, m.offset)
       const ovEnd = Math.min(a.duration, m.offset + b.duration)
+      // offset を測った位置。時計がずれていると、測る位置で offset が変わる(sync/solve で補正する)
+      result.center = (ovStart + ovEnd) / 2
       try {
         const mid = await refineAt(a, b, m.offset, (ovStart + ovEnd) / 2)
         // GCC-PHAT の山が鋭くなければ(音が少ない区間など)、粗い値のままにする
@@ -222,7 +224,9 @@ async function run(): Promise<void> {
           ])
           if (e.sharpness >= 5 && l.sharpness >= 5) {
             // b の時計が速いと、a の後ろほど b の位置は手前(offset が小さく)に見える
-            result.driftPpm = (-(l.offset - e.offset) / (late - early)) * 1e6
+            const drift = -(l.offset - e.offset) / (late - early)
+            result.driftPpm = drift * 1e6
+            result.rate = 1 + drift
           }
         }
       } catch {
@@ -241,7 +245,14 @@ async function run(): Promise<void> {
     })),
     results
       .filter((r) => r.reliable)
-      .map((r) => ({ a: r.a, b: r.b, offset: r.offset, confidence: r.confidence }))
+      .map((r) => ({
+        a: r.a,
+        b: r.b,
+        offset: r.offset,
+        confidence: r.confidence,
+        rate: r.rate,
+        center: r.center
+      }))
   )
   post({ type: 'progress', percent: 100, stage: '完了' })
   post({ type: 'done', report: { ...solution, pairs: results, elapsedMs: Date.now() - t0 } })

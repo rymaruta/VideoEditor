@@ -33,6 +33,7 @@ export type MenuCommand =
   | 'telop.list'
   | 'telop.auto'
   | 'telop.styles'
+  | 'auto.screen'
   | 'auto.allInOne'
   | 'auto.roughCut'
   | 'auto.longFormShort'
@@ -119,6 +120,7 @@ export function buildMenuTemplate(
       label: 'ファイル(&F)',
       submenu: [
         { label: '新規プロジェクト', id: 'file.new', accelerator: 'CmdOrCtrl+N' },
+        { label: '新しい回を作る…', id: 'file.newEpisode', accelerator: 'CmdOrCtrl+Shift+N' },
         { label: '開く…', id: 'file.open', accelerator: 'CmdOrCtrl+O' },
         {
           label: '最近使ったプロジェクト',
@@ -192,6 +194,8 @@ export function buildMenuTemplate(
     {
       label: '自動編集(&A)',
       submenu: [
+        { label: '自動編集の画面', id: 'auto.screen' },
+        SEP,
         { label: 'AIおまかせ全自動編集…', id: 'auto.allInOne' },
         { label: '複数素材から自動ラフカット…', id: 'auto.roughCut' },
         { label: '長尺からショートを自動生成…', id: 'auto.longFormShort' }

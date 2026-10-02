@@ -347,7 +347,10 @@ export function MediaBin(): React.JSX.Element {
 
   // メニューバー(ファイル・表示・自動編集)から来る操作
   useMenuCommand((id) => {
-    if (id === 'file.importVideo') void handleImportVideo()
+    // 自動編集で収録素材をまとめて入れたあと(再生できない形式ならプレビュー用に変換する)
+    if (id === 'assets.checkPreview')
+      void ensureLoadedAssetsPreviewable(useProjectStore.getState().project.assets, () => true)
+    else if (id === 'file.importVideo') void handleImportVideo()
     else if (id === 'file.importAudio') void handleImportAudio()
     else if (id === 'view.library') setView('library')
     else if (id === 'file.addLibraryFolder') {

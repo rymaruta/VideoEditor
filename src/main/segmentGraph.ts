@@ -10,7 +10,7 @@ import {
   AUDIO_FORMAT,
   OUTPUT_SAMPLE_RATE,
   VIDEO_FORMAT,
-  atempoChain,
+  audioSpeedChain,
   audioFormatFor,
   escapeFilterPath,
   xfadeName
@@ -449,7 +449,7 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       const label = newLabel('a')
       const delay = frameToSample(seq, visStart) - frameToSample(seq, renderStart)
       parts.push(
-        `[${idx}:a]${atempoChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+        `[${idx}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
           `apad,atrim=0:${num(dur)},asetpts=PTS-STARTPTS,` +
           `${audioFormatFor(ctx.audioChannels?.get(asset.filePath))},` +
           `${envelope(item, track.items, audioClipGain(track.volume, item.volume), skipSec)},` +
