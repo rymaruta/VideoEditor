@@ -16,7 +16,7 @@ import type {
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
 import { measureWideAdvances } from './fontMetrics'
-import { effectiveTransitionSeconds } from '@shared/transition'
+import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import { createExportTimeMap } from '@shared/exportTimeline'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
@@ -640,7 +640,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
     clips.map((c) => assetById.get(c.assetId)?.fps).filter((f): f is number => f !== undefined)
   )
   /** タイムライン(画面)の上での1本の長さ。テロップ・BGM の位置はこの秒で来る。 */
-  const clipOutputDurations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
+  // 位置と尺の数え方は `computeMainTrackLayout` に1つだけ置く(v2 への移行も同じ関数を使う)。
+  const mainLayout = computeMainTrackLayout(clips, outputFps)
+  const clipOutputDurations = mainLayout.timelineDurations
   /**
    * **書き出しの中での1本の長さ。フレーム数から作り直す。**
    *
@@ -663,24 +665,15 @@ export async function exportProject(options: ExportOptions): Promise<void> {
    * 揃える先を**映像側**にするのは、出力が CFR で映像の枚数が動かせないから。
    * 1本あたりの調整は最大でも半フレームで、**積み上がらない**のがここの要点。
    */
-  const clipExportDurations = clipOutputDurations.map(
-    (d) => frameCountForDuration(d, outputFps) / outputFps
-  )
+  const clipExportDurations = mainLayout.exportDurations
   let totalDuration = clipExportDurations.reduce((sum, d) => sum + d, 0)
   // Where each clip begins on the app's timeline (clips laid back-to-back). A
   // crossfade overlaps two clips, so the exported video is shorter than this by the
   // transition duration — exportStarts below tracks the real output positions.
   // **こちらは画面の秒のまま**。`toExportTime` の入口は画面から来た秒なので、
   // ここをフレームに丸めると入口の目盛りが画面とずれる。
-  const timelineStarts: number[] = []
-  {
-    let acc = 0
-    for (const d of clipOutputDurations) {
-      timelineStarts.push(acc)
-      acc += d
-    }
-  }
-  const exportStarts: number[] = new Array(clips.length).fill(0)
+  const timelineStarts = mainLayout.timelineStarts
+  const exportStarts = mainLayout.exportStarts
   exportCancelRequested = false
   // `exportInProgress` はここまでに同期で立っているので、同じ tick の2回目は上で弾かれる
   // (この await より前に立てておくのが条件)。調べるのは使う素材だけで、失敗しても
@@ -828,18 +821,14 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       //  1本目の実長は 0.1333秒しかなく、出来上がった mp4 は**映像だけ**。書き出し側の
       //  尺を渡すと繋ぎ 0.0833秒 < 0.1333秒 に収まり、音声が付く)
       // 尺が整数秒なら両者は完全に同じ値なので、今までの出力は動かない。
-      const transitionSeconds = effectiveTransitionSeconds(
-        clipExportDurations,
-        clips.map((c) => c.transitionIn)
-      )
+      const transitionSeconds = mainLayout.transitionSeconds
       let curV = 'v0'
       let curA = 'a0'
-      // 畳み込みの累積も**書き出し側の長さ**で数える。`exportStarts` はこの累積から
-      // 作られ、テロップ・BGM・PiP の位置(`toExportTime`)がここに乗る。
-      let curDuration = clipExportDurations[0]
+      // 畳み込みの位置(`exportStarts`)と累積の尺は `computeMainTrackLayout` が
+      // **書き出し側の長さ**で数え済み。テロップ・BGM・PiP の位置(`toExportTime`)も
+      // 同じ値に乗る。ここではその位置どおりにフィルタを並べるだけにする。
       for (let i = 1; i < clips.length; i++) {
         const clip = clips[i]
-        const incomingDuration = clipExportDurations[i]
         const transition = clip.transitionIn
         const t = transitionSeconds[i]
         if (t <= 0 || !transition) {
@@ -851,10 +840,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(`[${curA}][a${i}]concat=n=2:v=0:a=1[${outA}]`)
           curV = outV
           curA = outA
-          exportStarts[i] = curDuration
-          curDuration = curDuration + incomingDuration
         } else {
-          const offset = Math.max(0, curDuration - t)
+          const offset = exportStarts[i]
           const outV = `vxf${i}`
           const outA = `axf${i}`
           if (includeVideo) {
@@ -865,8 +852,6 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(`[${curA}][a${i}]acrossfade=d=${t}[${outA}]`)
           curV = outV
           curA = outA
-          exportStarts[i] = offset
-          curDuration = curDuration + incomingDuration - t
         }
       }
 
@@ -883,7 +868,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         exportStarts
       )
       // The encoded video's real length; the raw timeline sum would stall progress short of 100%.
-      totalDuration = curDuration
+      totalDuration = mainLayout.totalExportDuration
 
       // --- Video overlay tracks (PiP): scale + timestamp-shift + overlay onto the base video ---
       const pipAudioEntries: { label: string; duck: boolean }[] = []
