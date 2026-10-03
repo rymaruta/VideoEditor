@@ -1,5 +1,6 @@
 import { childMain } from './childMain'
 import { readWindow } from './audioPcm'
+import { groupAsrJobs, splitGroupWords, type GroupedJob } from '@shared/diarize/groupJobs'
 import type { AsrDevice, AsrJob, AsrWorkerMessage } from '@shared/transcript'
 
 /**
@@ -109,25 +110,32 @@ async function run(): Promise<void> {
         ? 'GPU を使えなかったため CPU で認識します(時間がかかります)'
         : undefined
   })
+  // 同じマイクで続く発話はまとめて読む(窓の数が減って速い)。次の窓の音は、今の窓の認識中に読んでおく
+  const groups = groupAsrJobs(input.jobs)
+  const read = (g: GroupedJob): Promise<Float32Array> =>
+    readWindow(input.ffmpegPath, g.path, g.start, g.end - g.start, SAMPLE_RATE)
   let done = 0
-  for (const job of input.jobs) {
-    const audio = await readWindow(
-      input.ffmpegPath,
-      job.path,
-      job.start,
-      job.end - job.start,
-      SAMPLE_RATE
-    )
+  let next = groups.length > 0 ? read(groups[0]) : null
+  for (let gi = 0; gi < groups.length; gi++) {
+    const group = groups[gi]
+    const audio = await next!
+    next = gi + 1 < groups.length ? read(groups[gi + 1]) : null
     const r = await asr(audio, OPTIONS)
     const words = (r.chunks ?? [])
       .map((c) => ({
         text: c.text.trim(),
-        start: job.start + c.timestamp[0],
-        end: job.start + (c.timestamp[1] ?? c.timestamp[0])
+        start: group.start + c.timestamp[0],
+        end: group.start + (c.timestamp[1] ?? c.timestamp[0])
       }))
       .filter((w) => w.text.length > 0)
-    post({ type: 'result', result: { id: job.id, text: (r.text ?? '').trim(), words } })
-    post({ type: 'progress', done: ++done, total: input.jobs.length })
+    if (group.parts.length === 1)
+      post({
+        type: 'result',
+        result: { id: group.parts[0].id, text: (r.text ?? '').trim(), words }
+      })
+    else for (const part of splitGroupWords(group, words)) post({ type: 'result', result: part })
+    done += group.parts.length
+    post({ type: 'progress', done, total: input.jobs.length })
   }
   post({ type: 'done' })
 }
