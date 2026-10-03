@@ -135,12 +135,15 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         sourceIn: oc.inPoint,
         speed: 1,
         origin: 'manual',
-        placement: {
-          kind: 'box',
-          anchor: track.position,
-          margin: PIP_MARGIN_RATIO,
-          width: track.scale
-        }
+        placement:
+          track.position === 'full'
+            ? { kind: 'frame', fit: 'contain' }
+            : {
+                kind: 'box',
+                anchor: track.position,
+                margin: PIP_MARGIN_RATIO,
+                width: track.scale
+              }
       })
     }
     assignLanes(items).forEach((lane, li) => {

@@ -52,6 +52,16 @@ export function pipPreviewStyle(
   scale: number,
   frameWidth: number
 ): CSSProperties {
+  // 全面(版面CG): 縦横比を保って枠に収める。縁取り・影は付けない(透過の外側が見えてしまう)
+  if (position === 'full')
+    return {
+      position: 'absolute',
+      inset: 0,
+      width: '100%',
+      height: '100%',
+      objectFit: 'contain',
+      zIndex: 2
+    }
   const margin = pipMarginPx(frameWidth)
   const style: CSSProperties = {
     position: 'absolute',

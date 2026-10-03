@@ -10,7 +10,8 @@ import { normalizeCategory, type KitFile, type ShowKit } from '@shared/finish/so
  * 分類のフォルダ名は言い換えも受け付ける(`normalizeCategory`)。読めないファイルは飛ばす。
  */
 const AUDIO = new Set<string>(AUDIO_EXTENSIONS)
-const VIDEO = new Set<string>([...VIDEO_EXTENSIONS, 'png'])
+// 版面CG は動画(透過付きの .mov / .webm など)。静止画は素材として読み込めないので対象外
+const VIDEO = new Set<string>(VIDEO_EXTENSIONS)
 
 async function listDirs(dir: string): Promise<string[]> {
   try {
@@ -49,14 +50,9 @@ async function readGroup(
   for (const dir of await listDirs(top)) {
     const files: KitFile[] = []
     for (const path of await listFiles(join(top, dir), exts)) {
-      const isStill = extname(path).toLowerCase() === '.png'
-      const info = isStill ? null : await probeMedia(path).catch(() => null)
-      if (!isStill && !(info && info.duration > 0)) continue
-      files.push({
-        path,
-        name: path.split(/[/\\]/).pop() ?? path,
-        duration: isStill ? 0 : info!.duration
-      })
+      const info = await probeMedia(path).catch(() => null)
+      if (!(info && info.duration > 0)) continue
+      files.push({ path, name: path.split(/[/\\]/).pop() ?? path, duration: info.duration })
     }
     if (files.length > 0) {
       const key = normalizeCategory(dir)

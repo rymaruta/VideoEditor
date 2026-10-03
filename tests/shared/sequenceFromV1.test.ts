@@ -119,6 +119,26 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
     ])
   })
 
+  it('全面(版面CG)のワイプは、画面に収める置き方(縁なし・縦横比を保つ)になる', () => {
+    const p = projectV1ToV2(
+      emptyProject({
+        clips: crossfadeClips(),
+        videoOverlayTracks: [
+          {
+            id: 'cg',
+            name: 'CG',
+            hidden: false,
+            position: 'full',
+            scale: 1,
+            clips: [{ id: 'c1', assetId: 'a', startTime: 1, inPoint: 0, outPoint: 2 }]
+          }
+        ]
+      })
+    )
+    const cg = p.sequence.videoTracks.find((t) => t.id === 'cg')!
+    expect((cg.items[0] as MediaItem).placement).toEqual({ kind: 'frame', fit: 'contain' })
+  })
+
   it('PiP は本編の尺で頭打ち。v1 の同じトラックで重なっていれば段を分ける', () => {
     const p = projectV1ToV2(
       emptyProject({

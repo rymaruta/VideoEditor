@@ -1,3 +1,4 @@
+import { planCg } from '@shared/finish/cg'
 import {
   fallbackMood,
   planBgm,
@@ -98,7 +99,7 @@ export const STEPS: { id: StepId; label: string }[] = [
   { id: 'angles', label: 'アングルの切り替え' },
   { id: 'placement', label: '発言テロップの配置(顔を避ける)' },
   { id: 'effects', label: '演出テロップの提案' },
-  { id: 'sound', label: 'SE・BGM' }
+  { id: 'sound', label: 'SE・BGM・CG' }
 ]
 
 interface PipelineState {
@@ -420,7 +421,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
   async function placeSounds(
     keptIds: string[],
     spans: { timeline: number; start: number; end: number }[],
-    effectTelops: Omit<TextOverlay, 'id'>[]
+    effectTelops: Omit<TextOverlay, 'id'>[],
+    allTelops: Omit<TextOverlay, 'id'>[]
   ): Promise<void> {
     const folder = useSettingsStore.getState().showKitFolder
     if (!folder) {
@@ -449,9 +451,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         kit
       )
       const bgm = planBgm(scenes, kit)
+      const cg = planCg(allTelops, kit.cg)
       // 置く素材を読み込む(すでにあるものは使い回す)
       const have = new Set(useProjectStore.getState().project.assets.map((a) => a.filePath))
-      const paths = [...new Set([...se, ...bgm].map((x) => x.path))].filter((p) => !have.has(p))
+      const paths = [...new Set([...se, ...bgm, ...cg].map((x) => x.path))].filter(
+        (p) => !have.has(p)
+      )
       const assets: MediaAsset[] = []
       for (const path of paths) {
         const meta = await window.api.probeMedia(path).catch(() => null)
@@ -475,16 +480,21 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         ],
         assets
       )
+      useProjectStore.getState().setAutoCg(cg, assets)
+      // 足した素材(ProRes の CG など)が画面で再生できない形式なら、素材一覧の側でプレビュー用に変換する
+      if (assets.length > 0) emitMenuCommand('assets.checkPreview')
       const seCats = Object.keys(kit.se).length
       const bgmMoods = Object.keys(kit.bgm).length
       setStep('sound', {
         state: 'done',
         percent: 100,
-        note: `SE ${se.length} · BGM ${bgm.length} 曲ぶん`
+        note: `SE ${se.length} · BGM ${bgm.length} 本 · CG ${cg.length}`
       })
       log(
-        `SE・BGM: SE ${se.length} 個(分類 ${seCats})、BGM ${bgm.length} 本(雰囲気 ${bgmMoods})を置きました${
-          seCats + bgmMoods === 0 ? '。番組素材フォルダに SE / BGM のフォルダが見つかりません' : ''
+        `SE・BGM・CG: SE ${se.length} 個(分類 ${seCats})、BGM ${bgm.length} 本(雰囲気 ${bgmMoods})、CG ${cg.length} 個(きっかけの言葉 ${Object.keys(kit.cg).length})を置きました${
+          seCats + bgmMoods + Object.keys(kit.cg).length === 0
+            ? '。番組素材フォルダに SE / BGM / CG のフォルダが見つかりません'
+            : ''
         }`
       )
     } catch (e) {
@@ -654,7 +664,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         telops: telops.length
       }
     })
-    await placeSounds(plan.selection.kept, plan.cut.spans, effectTelops)
+    await placeSounds(plan.selection.kept, plan.cut.spans, effectTelops, [
+      ...telops,
+      ...effectTelops
+    ])
     log(
       `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${telops.length}`
     )

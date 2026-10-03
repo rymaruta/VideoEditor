@@ -979,19 +979,26 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           if (includeVideo) {
             const pipLabel = `pip${pipCounter}`
             const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
+            const full = track.position === 'full'
             filterParts.push(
               // PiP も**画素を正方形に直してから**幅を決める。`scale=幅:-2` は
               // `iw/ih` から高さを出すので、SAR≠1 の素材はここでも縦長に潰れる。
-              `[${myIndex}:v]${SQUARE_PIXEL_FILTER},scale=${scaledWidth}:-2,` +
+              // 全面(版面CG)は縦横比を保って画面に収める。透過(アルファ)はそのまま overlay へ渡る
+              `[${myIndex}:v]${SQUARE_PIXEL_FILTER},` +
+                (full
+                  ? `scale=${w}:${h}:force_original_aspect_ratio=decrease,`
+                  : `scale=${scaledWidth}:-2,`) +
                 `setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
             )
             const margin = Math.round(pipMarginPx(w))
-            const xExpr =
-              track.position === 'top-left' || track.position === 'bottom-left'
+            const xExpr = full
+              ? '(W-w)/2'
+              : track.position === 'top-left' || track.position === 'bottom-left'
                 ? `${margin}`
                 : `W-w-${margin}`
-            const yExpr =
-              track.position === 'top-left' || track.position === 'top-right'
+            const yExpr = full
+              ? '(H-h)/2'
+              : track.position === 'top-left' || track.position === 'top-right'
                 ? `${margin}`
                 : `H-h-${margin}`
             // 見せる区間の終わりは `pipEndExport`(繋ぎに食われたぶんを詰め、

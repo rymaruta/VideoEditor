@@ -808,3 +808,35 @@ describe('自動の SE・BGM', () => {
     expect(tracks.find((t) => !t.autoRole)?.clips[0].startTime).toBe(3)
   })
 })
+
+describe('自動の版面CG', () => {
+  beforeEach(reset)
+  it('全面のトラックに置き、手で直したものは作り直しでも残す', () => {
+    const cgAsset: Project['assets'][number] = {
+      id: 'cg1',
+      filePath: '/cg/a.mov',
+      fileName: 'a.mov',
+      duration: 3,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      hasAudio: false,
+      hasVideo: true
+    }
+    st().setAutoCg(
+      [{ path: '/cg/a.mov', startTime: 4, inPoint: 0, outPoint: 3, keyword: 'うまい' }],
+      [cgAsset]
+    )
+    const track = st().project.videoOverlayTracks.find((t) => t.autoRole === 'cg')!
+    expect([track.position, track.clips[0].startTime]).toEqual(['full', 4])
+    // 作り直し(中身を変えていない)は入れ替わる
+    st().setAutoCg(
+      [{ path: '/cg/a.mov', startTime: 6, inPoint: 0, outPoint: 3, keyword: 'うまい' }],
+      []
+    )
+    expect(st().project.videoOverlayTracks.filter((t) => t.name === 'CG(自動)')).toHaveLength(1)
+    // 何も置かないなら、自動のトラックは消える
+    st().setAutoCg([], [])
+    expect(st().project.videoOverlayTracks.filter((t) => t.autoRole)).toHaveLength(0)
+  })
+})

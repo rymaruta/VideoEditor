@@ -115,7 +115,8 @@ const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
   'top-right': '右上',
   'bottom-left': '左下',
-  'bottom-right': '右下'
+  'bottom-right': '右下',
+  full: '全面(CG)'
 }
 
 /**

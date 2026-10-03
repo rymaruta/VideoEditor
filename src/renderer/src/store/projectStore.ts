@@ -1,3 +1,4 @@
+import type { PlacedCg } from '@shared/finish/cg'
 import type { PlacedSound } from '@shared/finish/sound'
 import type { ColorMatch } from '@shared/color/match'
 import type { RoughCut } from '@shared/roughCut/build'
@@ -145,7 +146,8 @@ const PIP_POSITIONS: readonly PipPosition[] = [
   'top-left',
   'top-right',
   'bottom-left',
-  'bottom-right'
+  'bottom-right',
+  'full'
 ]
 
 /**
@@ -180,13 +182,21 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
 }
 
 /** 自動の SE・BGM のトラックの中身の要約(手で直したかを見分ける) */
-function autoSignatureOf(track: Pick<AudioTrack, 'clips'>): string {
+function autoSignatureOf(track: {
+  clips: {
+    assetId: string
+    startTime: number
+    inPoint: number
+    outPoint: number
+    volume?: number
+  }[]
+}): string {
   return track.clips
     .map((c) => [c.assetId, c.startTime, c.inPoint, c.outPoint, c.volume ?? 1].join(','))
     .join(';')
 }
 
-function withAutoSignature(track: AudioTrack): AudioTrack {
+function withAutoSignature<T extends AudioTrack | VideoOverlayTrack>(track: T): T {
   return { ...track, autoSignature: autoSignatureOf(track) }
 }
 
@@ -329,6 +339,8 @@ function normalizeVideoOverlayTrack(
     position: asOneOf(raw.position, PIP_POSITIONS, 'top-right'),
     // 0以下だと `scale=0:-2` で書き出しが失敗する。1超は枠からはみ出す。
     scale: scale > 0 && scale <= 1 ? scale : 0.3,
+    autoRole: raw.autoRole === 'cg' ? 'cg' : undefined,
+    autoSignature: typeof raw.autoSignature === 'string' ? raw.autoSignature : undefined,
     clips: asRecordArray<Record<string, unknown>>(raw.clips)
       .map((c) => normalizeVideoOverlayClip(c, durationOf))
       .filter((c): c is VideoOverlayClip => c !== null)
@@ -666,6 +678,8 @@ interface ProjectState {
     sounds: { role: 'se' | 'bgm'; clips: PlacedSound[] }[],
     assets: MediaAsset[]
   ) => void
+  /** 自動の版面CG のトラックを入れ替える(`setAutoSounds` と同じく履歴は積まない) */
+  setAutoCg: (clips: PlacedCg[], assets: MediaAsset[]) => void
   /** 文字起こしの結果を入れ替える(取り消し1回で戻る) */
   setTranscript: (transcript: TranscriptUtterance[]) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
@@ -2347,6 +2361,42 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           assets: state.project.assets.map((a) =>
             a.id in matches ? { ...a, colorMatch: matches[a.id] } : a
           )
+        }
+      }
+    }),
+
+  setAutoCg: (clips, newAssets) =>
+    set((state) => {
+      const assets = [...state.project.assets]
+      for (const a of newAssets) if (!assets.some((x) => x.filePath === a.filePath)) assets.push(a)
+      const idOf = new Map(assets.map((a) => [a.filePath, a.id]))
+      const placed = clips.filter((c) => idOf.has(c.path))
+      const kept = state.project.videoOverlayTracks
+        .filter((t) => !t.autoRole || t.autoSignature !== autoSignatureOf(t))
+        .map((t) => (t.autoRole ? { ...t, autoRole: undefined, autoSignature: undefined } : t))
+      const track: VideoOverlayTrack | null =
+        placed.length > 0
+          ? withAutoSignature({
+              id: uuid(),
+              name: 'CG(自動)',
+              hidden: false,
+              position: 'full',
+              scale: 1,
+              autoRole: 'cg',
+              clips: placed.map((c) => ({
+                id: uuid(),
+                assetId: idOf.get(c.path)!,
+                startTime: c.startTime,
+                inPoint: c.inPoint,
+                outPoint: c.outPoint
+              }))
+            })
+          : null
+      return {
+        project: {
+          ...state.project,
+          assets,
+          videoOverlayTracks: track ? [...kept, track] : kept
         }
       }
     }),

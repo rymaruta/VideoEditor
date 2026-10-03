@@ -171,7 +171,10 @@ export interface BeatGrid {
   sourceLabel: string
 }
 
-export type PipPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+/**
+ * ワイプの置き場所。`full` は画面全体に重ねる(版面CG など透過付きの素材。余白・縁取り無し、縦横比を保って収める)
+ */
+export type PipPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'full'
 
 export interface VideoOverlayClip {
   id: string
@@ -189,6 +192,10 @@ export interface VideoOverlayTrack {
   hidden: boolean
   position: PipPosition
   scale: number
+  /** 自動で置いた版面CG のトラック(仮編集を作り直すと入れ替わる。手で直したら印を外す) */
+  autoRole?: 'cg'
+  /** 自動で置いたときの中身の要約。今の中身と違えば手で直したとみなす */
+  autoSignature?: string
   clips: VideoOverlayClip[]
 }
 

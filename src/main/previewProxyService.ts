@@ -37,6 +37,8 @@ export function needsPreviewProxy(
 interface ProxyStreamInfo {
   audioCodec: string
   hasAudio: boolean
+  /** 映像が透過(アルファ)を持つ(版面CG の ProRes 4444・QuickTime Animation など) */
+  hasAlpha: boolean
   /** 0 は「分からなかった」。等倍のモノラル展開を掛けてよいのは 1 のときだけ。 */
   audioChannels: number
 }
@@ -44,9 +46,12 @@ interface ProxyStreamInfo {
 function probeStreams(filePath: string): Promise<ProxyStreamInfo> {
   return new Promise((resolve) => {
     ffmpeg.ffprobe(filePath, (err, data) => {
-      if (err || !data) return resolve({ audioCodec: '', hasAudio: false, audioChannels: 0 })
+      if (err || !data)
+        return resolve({ audioCodec: '', hasAudio: false, hasAlpha: false, audioChannels: 0 })
       const audio = data.streams.find((s) => s.codec_type === 'audio')
+      const video = data.streams.find((s) => s.codec_type === 'video')
       resolve({
+        hasAlpha: hasAlphaPixelFormat(String(video?.pix_fmt ?? '')),
         audioCodec: audio?.codec_name ?? '',
         hasAudio: Boolean(audio),
         audioChannels: audio?.channels ?? 0
@@ -66,7 +71,7 @@ function proxyDir(): string {
  * (or opening a saved project) reuses the existing proxy instead of transcoding again,
  * while a file that was edited in place still gets a fresh one.
  */
-function proxyPathFor(filePath: string): string {
+function proxyPathFor(filePath: string, ext: 'mp4' | 'webm' = 'mp4'): string {
   let stamp = ''
   try {
     const st = statSync(filePath)
@@ -75,7 +80,12 @@ function proxyPathFor(filePath: string): string {
     stamp = ''
   }
   const key = createHash('sha1').update(`${filePath}|${stamp}`).digest('hex').slice(0, 16)
-  return join(proxyDir(), `${key}.mp4`)
+  return join(proxyDir(), `${key}.${ext}`)
+}
+
+/** 透過(アルファ)を持つ画素の形式か(yuva420p・rgba・argb・gbrap・ya8 など) */
+export function hasAlphaPixelFormat(pixFmt: string): boolean {
+  return /^(yuva|gbra|ya\d)|^(rgba|bgra|argb|abgr)|^rgba64|^bgra64/.test(pixFmt)
 }
 
 // Concurrent imports of the same file would otherwise race on the same output path and
@@ -98,6 +108,9 @@ export function ensurePreviewProxy(
 ): Promise<string> {
   const outPath = proxyPathFor(filePath)
   if (existsSync(outPath)) return Promise.resolve(outPath)
+  // 透過を持つ素材(版面CG)は、透過を保てる VP9(WebM)で作る。H.264 にすると背景が黒く塗られる
+  const alphaPath = proxyPathFor(filePath, 'webm')
+  if (existsSync(alphaPath)) return Promise.resolve(alphaPath)
   const running = inFlight.get(outPath)
   if (running) {
     if (onProgress) running.listeners.add(onProgress)
@@ -118,11 +131,49 @@ export function ensurePreviewProxy(
 
   // Written to a temporary name and renamed only on success, so an interrupted run
   // can never leave a half-written file that would later be treated as a valid cache.
-  const tmpPath = `${outPath}.partial.mp4`
   const task = probeStreams(filePath)
     .then(
-      ({ audioCodec, hasAudio, audioChannels }) =>
+      ({ audioCodec, hasAudio, hasAlpha, audioChannels }) =>
         new Promise<string>((resolve, reject) => {
+          const finalPath = hasAlpha ? alphaPath : outPath
+          const tmpPath = hasAlpha ? `${alphaPath}.partial.webm` : `${outPath}.partial.mp4`
+          if (hasAlpha) {
+            // VP9 のアルファ付き。WebM には AAC を入れられないので音は Opus にする
+            const command = ffmpeg(filePath)
+              .videoCodec('libvpx-vp9')
+              .outputOptions([
+                '-vf scale=-2:min(540\\,ih)',
+                '-pix_fmt yuva420p',
+                '-b:v 0',
+                '-crf 34',
+                '-deadline realtime',
+                '-cpu-used 8',
+                '-row-mt 1',
+                '-auto-alt-ref 0'
+              ])
+            if (hasAudio) command.audioCodec('libopus').outputOptions(['-ac 2'])
+            else command.noAudio()
+            command
+              .on('progress', (p) => {
+                if (typeof p.percent === 'number')
+                  notifyProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
+              })
+              .on('error', (err, _stdout, stderr) => {
+                rmSync(tmpPath, { force: true })
+                reject(describeFfmpegError(err, stderr))
+              })
+              .on('end', () => {
+                try {
+                  renameSync(tmpPath, finalPath)
+                  resolve(finalPath)
+                } catch (e) {
+                  rmSync(tmpPath, { force: true })
+                  reject(e)
+                }
+              })
+              .save(tmpPath)
+            return
+          }
           const command = ffmpeg(filePath).videoCodec('libx264').outputOptions([
             '-preset veryfast',
             '-crf 28',
