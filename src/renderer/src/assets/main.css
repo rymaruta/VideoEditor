@@ -5436,7 +5436,7 @@ h3 {
 }
 .new-episode-source {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) 200px 96px 150px;
+  grid-template-columns: 10px minmax(0, 1fr) 170px 90px 130px 130px;
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
@@ -5795,4 +5795,110 @@ h3 {
   border: 1px solid #6b5221;
   border-radius: 2px;
   padding: 0 4px;
+}
+
+/* 自動編集の画面: 構成 */
+.auto-edit-structure {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+.structure-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.structure-controls label {
+  font-size: 12px;
+  gap: 6px;
+}
+.structure-controls input[type='number'] {
+  width: 64px;
+  height: 26px;
+  padding: 0 6px;
+}
+.structure-note {
+  flex: 1;
+  max-width: 380px;
+}
+.structure-note input {
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+}
+.structure-summary {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.structure-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.structure-row {
+  display: grid;
+  grid-template-columns: 18px 64px 58px 70px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid #262626;
+}
+.structure-row.dropped .structure-body,
+.structure-row.dropped .structure-kind {
+  opacity: 0.45;
+}
+.structure-kind {
+  font-size: 11px;
+  text-align: center;
+  border-radius: 2px;
+  padding: 1px 0;
+  background: #333;
+  color: var(--text-2);
+}
+.structure-kind.highlight {
+  background: #5a3a12;
+  color: #ffcf7a;
+}
+.structure-kind.unneeded {
+  background: #2a2a2a;
+  color: var(--text-3);
+}
+.structure-score {
+  height: 6px;
+  background: #1c1c1c;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.structure-score span {
+  display: block;
+  height: 100%;
+  background: var(--accent-1);
+}
+.structure-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.structure-title {
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.new-episode-target {
+  font-size: 12px;
+  gap: 6px;
+}
+.new-episode-target input {
+  width: 70px;
 }

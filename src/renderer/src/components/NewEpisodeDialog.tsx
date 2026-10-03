@@ -42,6 +42,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
   const running = usePipelineStore((s) => s.running)
   const scanFolder = usePipelineStore((s) => s.scanFolder)
   const updateSource = usePipelineStore((s) => s.updateSource)
+  const targetMinutes = usePipelineStore((s) => s.targetMinutes)
 
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -72,6 +73,10 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
 
   const scanning = ingest.state === 'run'
   const usable = sources.filter((s) => s.kind !== 'skip')
+  // カメラが「誰を映すか」の候補は、マイクに付けた出演者の名前
+  const performers = sources
+    .filter((s) => s.kind === 'mic' && s.name.trim())
+    .map((s) => s.name.trim())
   const canCreate =
     name.trim() !== '' && scan !== null && !scanning && usable.some((s) => s.kind === 'camera')
 
@@ -210,6 +215,23 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                     disabled={s.kind === 'skip'}
                     onChange={(e) => updateSource(s.id, { name: e.target.value })}
                   />
+                  {s.kind === 'camera' ? (
+                    <select
+                      aria-label="主に映す人"
+                      title="このカメラが主に誰を映しているか。その人が話すとき、このカメラに切り替えます"
+                      value={s.subject ?? ''}
+                      onChange={(e) => updateSource(s.id, { subject: e.target.value || undefined })}
+                    >
+                      <option value="">全体</option>
+                      {performers.map((p) => (
+                        <option key={p} value={p}>
+                          {p} を映す
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span />
+                  )}
                 </li>
               ))}
             </ul>
@@ -225,13 +247,28 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
             )}
           </div>
 
+          <label className="new-episode-target">
+            仕上がりの長さ
+            <input
+              type="number"
+              min={0}
+              step={1}
+              placeholder="決めない"
+              value={targetMinutes || ''}
+              onChange={(e) =>
+                usePipelineStore.getState().setTargetMinutes(Number(e.target.value) || 0)
+              }
+            />
+            分<span className="form-note">(空なら長さは決めず、不要な場面だけ落とします)</span>
+          </label>
+
           <label className="checkbox-label">
             <input
               type="checkbox"
               checked={startNow}
               onChange={(e) => setStartNow(e.target.checked)}
             />
-            作ったあと、そのまま自動編集を始める(同期 → タイムラインに並べる)
+            作ったあと、そのまま自動編集を始める(同期 → 文字起こし → 構成 → カット → アングル)
           </label>
         </div>
 

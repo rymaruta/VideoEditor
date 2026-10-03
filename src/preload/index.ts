@@ -245,9 +245,8 @@ const api = {
   },
   syncRun: (files: SyncInputFile[]): Promise<SyncReport> => ipcRenderer.invoke(IPC.syncRun, files),
   syncCancel: (): Promise<void> => ipcRenderer.invoke(IPC.syncCancel),
-  footageEnvelopes: (
-    files: { path: string; size: number; mtimeMs: number }[]
-  ): Promise<Float32Array[]> => ipcRenderer.invoke(IPC.footageEnvelopes, files),
+  footageEnvelopes: (paths: string[]): Promise<Float32Array[]> =>
+    ipcRenderer.invoke(IPC.footageEnvelopes, paths),
   asrRun: (jobs: AsrJob[]): Promise<AsrJobResult[]> => ipcRenderer.invoke(IPC.asrRun, jobs),
   asrCancel: (): Promise<void> => ipcRenderer.invoke(IPC.asrCancel),
   onAsrProgress: (callback: (m: AsrProgressMessage) => void): (() => void) => {

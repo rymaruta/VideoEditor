@@ -111,6 +111,8 @@ export interface TextOverlay {
   speaker?: string
   /** 使っているテロップスタイルの ID。スタイルを直すとこのテロップにも反映される */
   styleId?: string
+  /** 文字起こしから作った発言テロップなら、その発話の ID(仮編集を作り直すときに入れ替える) */
+  utteranceId?: string
 }
 
 export interface AudioTrackClip {
@@ -136,6 +138,8 @@ export interface AudioTrackClip {
 export interface AudioTrack {
   id: string
   name: string
+  /** 収録素材の同期で作ったトラックなら、その機材の ID(仮編集を作り直すときに入れ替える) */
+  multicamSourceId?: string
   muted: boolean
   volume: number
   duckingEnabled: boolean
@@ -162,6 +166,8 @@ export interface VideoOverlayClip {
 export interface VideoOverlayTrack {
   id: string
   name: string
+  /** 収録素材の同期で作ったトラックなら、その機材の ID */
+  multicamSourceId?: string
   hidden: boolean
   position: PipPosition
   scale: number

@@ -5,6 +5,18 @@ import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import { buildMulticamLayout } from '@shared/sync/multicamLayout'
 import type { MediaAsset } from '@shared/types'
 import { useProjectStore } from './projectStore'
+import { useSettingsStore } from './settingsStore'
+import { usePresetStore } from './presetStore'
+import type { Project } from '@shared/types'
+import type { MulticamInfo } from '@shared/sync/multicam'
+import type { Scene, SceneJudgement } from '@shared/structure/scenes'
+import {
+  cameraRange,
+  judgeScenes,
+  loadActivity,
+  planRoughCut,
+  scenesFor
+} from '../lib/roughCutPlan'
 import { formatIpcError } from '../lib/ipcError'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { detectTurns, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
@@ -24,7 +36,8 @@ import {
  * 構成・カット・アングルの切り替えなどは、できたものから順にここへ足していく。
  */
 
-export type StepId = 'ingest' | 'sync' | 'timeline' | 'speakers' | 'transcribe'
+export type StepId =
+  'ingest' | 'sync' | 'timeline' | 'speakers' | 'transcribe' | 'structure' | 'cut' | 'angles'
 export type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
 
 export interface StepStatus {
@@ -49,7 +62,10 @@ export const STEPS: { id: StepId; label: string }[] = [
   { id: 'sync', label: 'カメラ・マイクの同期' },
   { id: 'timeline', label: 'タイムラインに並べる' },
   { id: 'speakers', label: '話者の判定' },
-  { id: 'transcribe', label: '文字起こし' }
+  { id: 'transcribe', label: '文字起こし' },
+  { id: 'structure', label: '構成(見どころ・不要な場面)' },
+  { id: 'cut', label: 'カット(間を詰める)' },
+  { id: 'angles', label: 'アングルの切り替え' }
 ]
 
 interface PipelineState {
@@ -67,6 +83,30 @@ interface PipelineState {
   screenOpen: boolean
   /** 音声認識に使った計算装置(GPU / CPU) */
   asrDevice: AsrDevice | null
+  /** 仕上がりの長さ(分)。0 なら決めない(不要な場面だけ落とす) */
+  targetMinutes: number
+  /** 構成の編集方針(AI に伝える) */
+  editNote: string
+  scenes: Scene[]
+  judgements: SceneJudgement[]
+  /** 場面の判定を AI でしたか、簡易の点数か */
+  judgeSource: 'ai' | 'heuristic' | null
+  /** 画面で手で決めた「残す / 落とす」 */
+  keep: Record<string, boolean>
+  /** 今の仮編集の要約 */
+  roughCut: {
+    keptIds: string[]
+    kept: number
+    dropped: number
+    duration: number
+    shots: number
+    telops: number
+  } | null
+  setTargetMinutes: (minutes: number) => void
+  setEditNote: (note: string) => void
+  setKeep: (sceneId: string, keep: boolean | undefined) => void
+  /** 構成の判定はそのままに、カット・アングル・仮編集を作り直す(残す/落とす・長さを変えたとき) */
+  rebuildRoughCut: () => Promise<void>
 
   setScreenOpen: (open: boolean) => void
   scanFolder: (root: string) => Promise<void>
@@ -85,7 +125,10 @@ const initialSteps = (): Record<StepId, StepStatus> => ({
   sync: { state: 'wait', percent: 0 },
   timeline: { state: 'wait', percent: 0 },
   speakers: { state: 'wait', percent: 0 },
-  transcribe: { state: 'wait', percent: 0 }
+  transcribe: { state: 'wait', percent: 0 },
+  structure: { state: 'wait', percent: 0 },
+  cut: { state: 'wait', percent: 0 },
+  angles: { state: 'wait', percent: 0 }
 })
 
 /** 出演者の名前(マイク1 → 出演者A など)は、同じ収録フォルダの構成なら次の回にも引き継ぐ */
@@ -104,6 +147,12 @@ function rememberSourceName(id: string, name: string): void {
   } catch {
     // 覚えられなくても今回の名前は使える
   }
+}
+
+function formatMinutes(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}分${String(s).padStart(2, '0')}秒`
 }
 
 function fileName(path: string): string {
@@ -134,9 +183,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const targetFiles = files.filter(
       (f) => speakerSources.some((s) => s.id === f.sourceId) && placeOf.get(f.id)?.method !== 'none'
     )
-    const envelopes = await window.api.footageEnvelopes(
-      targetFiles.map((f) => ({ path: f.path, size: f.size, mtimeMs: f.mtimeMs }))
-    )
+    const envelopes = await window.api.footageEnvelopes(targetFiles.map((f) => f.path))
     const length = Math.ceil(
       Math.max(
         0,
@@ -238,7 +285,132 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     log(`文字起こしが終わりました(${utterances.length} 件)`)
   }
 
+  let activityCache: { projectId: string; mask: Uint8Array } | null = null
+  async function activityOf(project: Project, info: MulticamInfo): Promise<Uint8Array> {
+    if (activityCache?.projectId !== project.id) {
+      activityCache = { projectId: project.id, mask: await loadActivity(project, info) }
+    }
+    return activityCache.mask
+  }
+
+  /** 構成(場面の判定)→ カット → アングル → 仮編集を入れる */
+  async function structureAndCut(): Promise<void> {
+    const project = useProjectStore.getState().project
+    const info = project.multicam
+    if (!info || !(project.transcript?.length ?? 0)) {
+      for (const id of ['structure', 'cut', 'angles'] as StepId[])
+        setStep(id, { state: 'skipped', note: '文字起こしがありません' })
+      return
+    }
+    setStep('structure', { state: 'run', percent: 0, note: '場面に分けています' })
+    const scenes = scenesFor(project, info)
+    const range = cameraRange(info)
+    const apiKey = useSettingsStore.getState().geminiApiKey
+    const { judgements, source, failure } = await judgeScenes(
+      scenes,
+      range.end - range.start,
+      {
+        apiKey,
+        episodeName: project.name,
+        targetSec: get().targetMinutes * 60 || range.end - range.start,
+        note: get().editNote || undefined
+      },
+      (done, total) =>
+        setStep('structure', {
+          percent: (done / total) * 100,
+          note: `AI が判定中(${done + 1}/${total})`
+        })
+    )
+    set({ scenes, judgements, judgeSource: source, keep: {} })
+    const highlights = judgements.filter((j) => j.kind === 'highlight').length
+    const unneeded = judgements.filter((j) => j.kind === 'unneeded').length
+    setStep('structure', {
+      state: 'done',
+      percent: 100,
+      note: `場面 ${scenes.length} · 見どころ ${highlights} · 不要 ${unneeded}${source === 'ai' ? ' · AI' : ' · 簡易'}`
+    })
+    log(
+      source === 'ai'
+        ? `構成: AI(Gemini)で ${scenes.length} 場面を判定しました`
+        : failure
+          ? `構成: AI に頼めなかったため簡易の点数で判定しました(${failure})`
+          : '構成: Gemini の鍵が無いため、簡易の点数(発話の密度・掛け合い・盛り上がり)で判定しました'
+    )
+    await buildAndApply()
+  }
+
+  async function buildAndApply(): Promise<void> {
+    const project = useProjectStore.getState().project
+    const info = project.multicam
+    if (!info) return
+    setStep('cut', { state: 'run', percent: 0, note: '音の大きさを読み込み中' })
+    const activity = await activityOf(project, info)
+    const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
+      targetSec: get().targetMinutes * 60,
+      keep: get().keep,
+      styles: usePresetStore.getState().captionPresets
+    })
+    const raw = plan.selection.kept.reduce((t, id) => {
+      const sc = get().scenes.find((x) => x.id === id)
+      return t + (sc ? sc.end - sc.start : 0)
+    }, 0)
+    setStep('cut', {
+      state: 'done',
+      percent: 100,
+      note: `${plan.pieces.length} 区間 · 間を詰めて ${formatMinutes(raw)} → ${formatMinutes(plan.cut.duration)}`
+    })
+    setStep('angles', { state: 'run', percent: 50, note: 'タイムラインに並べています' })
+    useProjectStore.getState().applyRoughCut(plan.cut, plan.telops)
+    const switches = plan.shots.length
+    setStep('angles', {
+      state: 'done',
+      percent: 100,
+      note: `ショット ${switches} · 発言テロップ ${plan.telops.length}`
+    })
+    set({
+      roughCut: {
+        keptIds: plan.selection.kept,
+        kept: plan.selection.kept.length,
+        dropped: plan.selection.dropped.length,
+        duration: plan.cut.duration,
+        shots: switches,
+        telops: plan.telops.length
+      }
+    })
+    log(
+      `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${plan.telops.length}`
+    )
+  }
+
   return {
+    targetMinutes: 0,
+    editNote: '',
+    scenes: [],
+    judgements: [],
+    judgeSource: null,
+    keep: {},
+    roughCut: null,
+    setTargetMinutes: (minutes) => set({ targetMinutes: Math.max(0, minutes) }),
+    setEditNote: (note) => set({ editNote: note }),
+    setKeep: (sceneId, keep) =>
+      set((s) => {
+        const next = { ...s.keep }
+        if (keep === undefined) delete next[sceneId]
+        else next[sceneId] = keep
+        return { keep: next }
+      }),
+    rebuildRoughCut: async () => {
+      if (get().running || get().scenes.length === 0) return
+      set({ running: true })
+      try {
+        await buildAndApply()
+      } catch (e) {
+        setStep('angles', { state: 'error', note: formatIpcError(e) })
+        log(`仮編集を作り直せませんでした: ${formatIpcError(e)}`)
+      } finally {
+        set({ running: false })
+      }
+    },
     asrDevice: null,
     root: null,
     scan: null,
@@ -262,7 +434,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         report: null,
         syncedFiles: [],
         log: [],
-        reviewed: []
+        reviewed: [],
+        scenes: [],
+        judgements: [],
+        judgeSource: null,
+        keep: {},
+        roughCut: null
       }),
 
     scanFolder: async (root) => {
@@ -435,11 +612,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           `タイムラインに並べました(基準カメラ: ${used.find((s) => s.id === layout.anchorSourceId)?.name ?? ''})`
         )
         await transcribeEpisode(used, files, report, assetIdOf, layout.anchorSourceId)
+        await structureAndCut()
       } catch (e) {
         const msg = formatIpcError(e)
-        const current = (['timeline', 'speakers', 'transcribe'] as StepId[]).find(
-          (id) => get().steps[id].state === 'run'
-        )
+        const current = (
+          ['timeline', 'speakers', 'transcribe', 'structure', 'cut', 'angles'] as StepId[]
+        ).find((id) => get().steps[id].state === 'run')
         const canceled = msg.includes('ASR_CANCELED')
         if (current)
           setStep(current, {

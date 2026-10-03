@@ -82,7 +82,8 @@ export function telopsFromTranscript(
         style: def ? applyLook(base, def.style) : { ...base },
         styleId: def?.id,
         speaker: u.speaker,
-        source: 'auto'
+        source: 'auto',
+        utteranceId: u.id
       })
     }
   }

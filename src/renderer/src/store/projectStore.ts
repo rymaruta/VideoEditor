@@ -1,3 +1,4 @@
+import type { RoughCut } from '@shared/roughCut/build'
 import type { MulticamInfo, MulticamSource } from '@shared/sync/multicam'
 import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
@@ -606,6 +607,11 @@ interface ProjectState {
   selectOverlay: (id: string | null) => void
   /** テロップスタイルの一覧を新しくしたとき、使っているテロップへ反映する(取り消しは1回で戻る) */
   restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
+  /**
+   * 仮編集(構成・カット・アングル)を入れる。本編・同期で作ったトラック・発言テロップを入れ替え、
+   * 手で足したトラック・テロップには触れない。取り消し1回で戻る
+   */
+  applyRoughCut: (cut: RoughCut, telops: Omit<TextOverlay, 'id'>[]) => void
   /** 文字起こしの結果を入れ替える(取り消し1回で戻る) */
   setTranscript: (transcript: TranscriptUtterance[]) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
@@ -1297,6 +1303,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const cameras: VideoOverlayTrack[] = layout.cameras.map((c) => ({
         id: uuid(),
         name: c.name,
+        multicamSourceId: c.sourceId,
         hidden: true,
         position: 'top-right',
         scale: 0.32,
@@ -1316,6 +1323,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const mics: AudioTrack[] = layout.mics.map((m) => ({
         id: uuid(),
         name: m.name,
+        multicamSourceId: m.sourceId,
         muted: false,
         volume: 1,
         duckingEnabled: false,
@@ -2201,6 +2209,55 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                 : { ...o, linkedClipId: undefined, linkOffset: undefined }
               : o
           )
+        }
+      }
+    }),
+
+  applyRoughCut: (cut, telops) =>
+    set((state) => {
+      const clips: Clip[] = cut.main.map((m) => ({
+        id: uuid(),
+        assetId: m.assetId,
+        inPoint: m.inPoint,
+        outPoint: m.outPoint,
+        speed: m.speed,
+        // 本編のカメラの音は使わない(声はピンマイク、周りの音は別トラック)
+        audioDetached: true
+      }))
+      const audioTracks: AudioTrack[] = [
+        ...state.project.audioTracks.filter((t) => !t.multicamSourceId),
+        ...cut.audio.map((a) => ({
+          id: uuid(),
+          name: a.name,
+          multicamSourceId: a.sourceId,
+          muted: false,
+          volume: a.volume,
+          duckingEnabled: false,
+          clips: a.clips.map((c) => ({
+            id: uuid(),
+            assetId: c.assetId,
+            startTime: c.startTime,
+            inPoint: c.inPoint,
+            outPoint: c.outPoint,
+            ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {})
+          }))
+        }))
+      ]
+      return {
+        ...pushHistory(state),
+        selectedClipId: null,
+        multiSelectedClipIds: [],
+        selectedOverlayId: null,
+        project: {
+          ...state.project,
+          clips,
+          audioTracks,
+          // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す
+          videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
+          textOverlays: [
+            ...state.project.textOverlays.filter((o) => !o.utteranceId),
+            ...telops.map((o) => ({ ...o, id: uuid() }))
+          ]
         }
       }
     }),

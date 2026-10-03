@@ -1,4 +1,5 @@
-import { cachedEnvelope, type AudioFileRef } from './audioPcm'
+import { cachedEnvelope } from './audioPcm'
+import { stat } from 'fs/promises'
 import { cancelAsr, runAsr } from './asrService'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
@@ -632,11 +633,17 @@ app.whenReady().then(() => {
     runSync(files, (percent, stage) => notifySender(event, IPC.syncProgress, { percent, stage }))
   )
   ipcMain.handle(IPC.syncCancel, () => cancelSync())
-  ipcMain.handle(IPC.footageEnvelopes, (_e, files: AudioFileRef[]) =>
+  // 素材の音の大きさ(10ms ごと)。同期のときに作ったものがキャッシュにあれば、それを返す
+  ipcMain.handle(IPC.footageEnvelopes, (_e, paths: string[]) =>
     Promise.all(
-      files.map((f) =>
-        cachedEnvelope(ffmpegPath, join(app.getPath('userData'), 'analysis-cache'), f)
-      )
+      paths.map(async (path) => {
+        const st = await stat(path)
+        return cachedEnvelope(ffmpegPath, join(app.getPath('userData'), 'analysis-cache'), {
+          path,
+          size: st.size,
+          mtimeMs: st.mtimeMs
+        })
+      })
     )
   )
   ipcMain.handle(IPC.asrRun, (event, jobs: AsrJob[]) =>

@@ -16,7 +16,7 @@ import { speakerColor } from '@shared/speaker'
  * 工程は裏で進むので、この画面を閉じて編集画面に戻っても止まらない。
  */
 
-type CenterTab = 'sources' | 'sync' | 'transcript' | 'log'
+type CenterTab = 'sources' | 'sync' | 'transcript' | 'structure' | 'log'
 
 const SOURCE_COLORS = ['#9ea7e0', '#7fb5d8', '#d8a77f', '#c49ee0', '#7fcf96', '#e0d27f', '#e08ab0']
 
@@ -67,6 +67,13 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const projectName = project.name
   const asrDevice = usePipelineStore((s) => s.asrDevice)
   const [telopsMade, setTelopsMade] = useState<number | null>(null)
+  const scenes = usePipelineStore((s) => s.scenes)
+  const judgements = usePipelineStore((s) => s.judgements)
+  const judgeSource = usePipelineStore((s) => s.judgeSource)
+  const keep = usePipelineStore((s) => s.keep)
+  const roughCut = usePipelineStore((s) => s.roughCut)
+  const targetMinutes = usePipelineStore((s) => s.targetMinutes)
+  const editNote = usePipelineStore((s) => s.editNote)
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
@@ -237,6 +244,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 ['sources', '素材の整理'],
                 ['sync', '同期の結果'],
                 ['transcript', '文字起こし'],
+                ['structure', '構成'],
                 ['log', 'ログ']
               ] as [CenterTab, string][]
             ).map(([id, label]) => (
@@ -443,6 +451,106 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     ))}
                   </ul>
                 </>
+              )}
+            </div>
+          )}
+
+          {tab === 'structure' && (
+            <div className="auto-edit-pane auto-edit-structure">
+              <div className="structure-controls">
+                <label>
+                  仕上がりの長さ
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={targetMinutes || ''}
+                    placeholder="決めない"
+                    onChange={(e) =>
+                      usePipelineStore.getState().setTargetMinutes(Number(e.target.value) || 0)
+                    }
+                  />
+                  分
+                </label>
+                <label className="structure-note">
+                  方針
+                  <input
+                    type="text"
+                    placeholder="例: 笑いを優先、食レポは短く(AI に伝えます)"
+                    value={editNote}
+                    onChange={(e) => usePipelineStore.getState().setEditNote(e.target.value)}
+                  />
+                </label>
+                <div className="dialog-footer-spacer" />
+                <button
+                  className="small-button"
+                  disabled={running || scenes.length === 0}
+                  onClick={() => void usePipelineStore.getState().rebuildRoughCut()}
+                  title="残す/落とすと長さに合わせて、カット・アングル・発言テロップを作り直します(取り消しは Ctrl+Z)"
+                >
+                  仮編集を作り直す
+                </button>
+              </div>
+              {roughCut && (
+                <p className="form-note structure-summary">
+                  {roughCut.kept} 場面を残す · {roughCut.dropped} 場面を落とす · 仕上がり{' '}
+                  {formatTimecode(roughCut.duration, 30)} · ショット {roughCut.shots} · 発言テロップ{' '}
+                  {roughCut.telops}
+                  {judgeSource === 'heuristic' &&
+                    ' · 判定は簡易の点数(Gemini の鍵を設定すると AI で判定します)'}
+                </p>
+              )}
+              {scenes.length === 0 ? (
+                <p className="hint-text">
+                  {steps.structure.state === 'run'
+                    ? `判定中… ${steps.structure.note ?? ''}`
+                    : '文字起こしが終わると、話のまとまり(場面)ごとに見どころ・不要を判定してここに並べます。'}
+                </p>
+              ) : (
+                <ul className="structure-list">
+                  {scenes.map((sc) => {
+                    const j = judgements.find((x) => x.sceneId === sc.id)
+                    const kept = keep[sc.id] ?? roughCut?.keptIds.includes(sc.id) ?? false
+                    const manual = keep[sc.id] !== undefined
+                    return (
+                      <li key={sc.id} className={`structure-row ${kept ? 'kept' : 'dropped'}`}>
+                        <input
+                          type="checkbox"
+                          aria-label="残す"
+                          checked={kept}
+                          onChange={(e) =>
+                            usePipelineStore.getState().setKeep(sc.id, e.target.checked)
+                          }
+                        />
+                        <span className="mono form-note">
+                          {formatTimecode(sc.start, 30).slice(0, 8)}
+                          <br />
+                          {Math.round(sc.end - sc.start)}秒
+                        </span>
+                        <span className={`structure-kind ${j?.kind ?? 'normal'}`}>
+                          {j?.kind === 'highlight'
+                            ? '見どころ'
+                            : j?.kind === 'unneeded'
+                              ? '不要'
+                              : '普通'}
+                        </span>
+                        <span className="structure-score" title={`点数 ${j?.score ?? '-'}`}>
+                          <span style={{ width: `${j?.score ?? 0}%` }} />
+                        </span>
+                        <span className="structure-body">
+                          <span className="structure-title">
+                            {j?.title ??
+                              (sc.lines[0]
+                                ? `${sc.lines[0].speaker ?? ''}「${sc.lines[0].text.slice(0, 30)}」`
+                                : '(会話なし)')}
+                            {manual && <span className="transcript-tag">手で変更</span>}
+                          </span>
+                          <span className="form-note">{j?.reason}</span>
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
               )}
             </div>
           )}
