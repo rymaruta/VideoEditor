@@ -4,6 +4,7 @@ import { usePipelineStore, STEPS, type StepStatus } from '../store/pipelineStore
 import { useProjectStore } from '../store/projectStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
+import { buildRunReport, formatElapsed } from '../lib/runReport'
 import { loadEditXml } from '../lib/editXml'
 import { compareEdits, type EditComparison } from '@shared/eval/compare'
 import type { ReviewItem } from '../lib/reviewItems'
@@ -42,7 +43,7 @@ function stepMark(state: StepStatus['state']): string {
 function stepStateLabel(step: StepStatus): string {
   switch (step.state) {
     case 'done':
-      return '完了'
+      return step.elapsedMs !== undefined ? `完了 · ${formatElapsed(step.elapsedMs)}` : '完了'
     case 'run':
       return `実行中 ${Math.round(step.percent)}%`
     case 'error':
@@ -87,6 +88,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
+  const [reportSaved, setReportSaved] = useState<string | null>(null)
   const [comparison, setComparison] = useState<
     { name: string; result: EditComparison } | { error: string } | null
   >(null)
@@ -115,6 +117,27 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const utterances = placedUtterances(project)
   const placementOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
   const durationOf = new Map(syncedFiles.map((f) => [f.id, f.duration]))
+
+  /** 処理の記録(工程ごとの時間・PC の構成・ログ)をテキストに保存する */
+  async function saveRunReport(): Promise<void> {
+    const system = await window.api.systemInfo().catch(() => null)
+    const used = sources.filter((x) => x.kind !== 'skip')
+    const lengths = used.map((x) => sourceDuration(x))
+    const text = buildRunReport({
+      episode: project.name,
+      steps: STEPS.map((st) => ({ id: st.id, label: st.label, status: steps[st.id] })),
+      footage: {
+        cameras: used.filter((x) => x.kind === 'camera').length,
+        mics: used.filter((x) => x.kind === 'mic').length,
+        totalSec: lengths.reduce((a, b) => a + b, 0),
+        longestSec: lengths.reduce((a, b) => Math.max(a, b), 0)
+      },
+      system,
+      log
+    })
+    const saved = await window.api.saveRunReport(`処理の記録_${project.name}.txt`, text)
+    if (saved) setReportSaved(saved.split(/[/\\]/).pop() ?? saved)
+  }
 
   /** 人が仕上げた完成版(Premiere の XML)と、今の仮編集を比べる */
   async function compareWithHuman(): Promise<void> {
@@ -706,6 +729,16 @@ export function AutoEditScreen(): React.JSX.Element | null {
 
           {tab === 'log' && (
             <div className="auto-edit-pane auto-edit-log">
+              <div className="auto-edit-log-actions">
+                <button
+                  className="small-button"
+                  title="工程ごとの時間・使った装置・素材の量・PC の構成・ログを1つのテキストに保存します(速くするための材料)"
+                  onClick={() => void saveRunReport()}
+                >
+                  処理の記録を保存…
+                </button>
+                {reportSaved && <span className="form-note">保存しました: {reportSaved}</span>}
+              </div>
               {log.length === 0 ? (
                 <p className="hint-text">まだ記録はありません。</p>
               ) : (

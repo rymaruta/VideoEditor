@@ -69,6 +69,8 @@ export const IPC = {
   selectProjectFiles: 'project:selectFiles',
   selectEditXml: 'project:selectEditXml',
   readEditXml: 'project:readEditXml',
+  systemInfo: 'app:systemInfo',
+  saveRunReport: 'app:saveRunReport',
   showKitSelectFolder: 'showKit:selectFolder',
   denoiseProgress: 'denoise:progress',
   denoiseCancel: 'denoise:cancel',

@@ -6068,3 +6068,10 @@ h3 {
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+
+.auto-edit-log-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}

@@ -1,3 +1,4 @@
+import type { SystemInfo } from '@shared/systemInfo'
 import type { ShowKit } from '@shared/finish/sound'
 import type { DenoiseResult } from '@shared/denoise'
 import type { QcMeasurement } from '@shared/qc/media'
@@ -268,6 +269,9 @@ const api = {
   selectProjectFiles: (): Promise<string[]> => ipcRenderer.invoke(IPC.selectProjectFiles),
   selectEditXml: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectEditXml),
   readEditXml: (filePath: string): Promise<string> => ipcRenderer.invoke(IPC.readEditXml, filePath),
+  systemInfo: (): Promise<SystemInfo> => ipcRenderer.invoke(IPC.systemInfo),
+  saveRunReport: (defaultName: string, text: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.saveRunReport, defaultName, text),
   showKitSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.showKitSelectFolder),
   onDenoiseProgress: (
     callback: (p: { done: number; total: number; percent: number }) => void

@@ -1,5 +1,6 @@
 import { cachedEnvelope } from './audioPcm'
-import { readFile, stat } from 'fs/promises'
+import { readFile, stat, writeFile } from 'fs/promises'
+import os from 'os'
 import { cancelAsr, runAsr } from './asrService'
 import { detectFaces } from './faceService'
 import { cancelLlm, runLlm } from './llmService'
@@ -701,6 +702,51 @@ app.whenReady().then(() => {
       filters: [{ name: 'Premiere の XML(FCP7)', extensions: ['xml'] }]
     })
     return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+  // 処理の記録に載せる PC の構成
+  ipcMain.handle(IPC.systemInfo, async () => {
+    const cpus = os.cpus()
+    let gpu: string[] = []
+    try {
+      const info = (await app.getGPUInfo('complete')) as {
+        gpuDevice?: {
+          vendorId?: number
+          deviceId?: number
+          active?: boolean
+          driverVersion?: string
+        }[]
+        auxAttributes?: { glRenderer?: string }
+      }
+      gpu = [
+        ...(info.auxAttributes?.glRenderer ? [info.auxAttributes.glRenderer] : []),
+        ...(info.gpuDevice ?? []).map(
+          (d) =>
+            `vendor 0x${(d.vendorId ?? 0).toString(16)} device 0x${(d.deviceId ?? 0).toString(16)}${d.driverVersion ? ` driver ${d.driverVersion}` : ''}${d.active ? '(使用中)' : ''}`
+        )
+      ]
+    } catch {
+      gpu = []
+    }
+    return {
+      os: `${os.type()} ${os.release()} (${os.arch()})`,
+      cpu: cpus[0]?.model?.trim() ?? '不明',
+      cores: cpus.length,
+      memoryGb: Math.round(os.totalmem() / 1024 ** 3),
+      gpu,
+      app: `${app.getName()} ${app.getVersion()} / Electron ${process.versions.electron}`
+    }
+  })
+  ipcMain.handle(IPC.saveRunReport, async (event, defaultName: string, text: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.SaveDialogOptions = {
+      title: '処理の記録を保存',
+      defaultPath: defaultName,
+      filters: [{ name: 'テキスト', extensions: ['txt'] }]
+    }
+    const r = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (r.canceled || !r.filePath) return null
+    await writeFile(r.filePath, text, 'utf-8')
+    return r.filePath
   })
   // XML だけを読む(任意のファイルを読めないよう、拡張子と大きさを確かめる)
   ipcMain.handle(IPC.readEditXml, async (_e, filePath: string) => {

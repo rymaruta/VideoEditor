@@ -76,6 +76,9 @@ export interface StepStatus {
   state: StepState
   percent: number
   note?: string
+  /** 始めた時刻(ms)と、かかった時間(ms)。処理時間の記録に使う */
+  startedAt?: number
+  elapsedMs?: number
 }
 
 /** 画面で直せる振り分け。kind が skip なら使わない */
@@ -219,7 +222,23 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
   const log = (text: string): void =>
     set((s) => ({ log: [...s.log, { time: Date.now(), text }].slice(-500) }))
   const setStep = (id: StepId, status: Partial<StepStatus>): void =>
-    set((s) => ({ steps: { ...s.steps, [id]: { ...s.steps[id], ...status } } }))
+    set((s) => {
+      const cur = s.steps[id]
+      const next: StepStatus = { ...cur, ...status }
+      // 走り始めた時刻を覚え、終わったら(完了・エラー・省略)かかった時間を残す
+      if (status.state === 'run' && cur.state !== 'run') {
+        next.startedAt = Date.now()
+        next.elapsedMs = undefined
+      } else if (
+        status.state &&
+        status.state !== 'run' &&
+        cur.state === 'run' &&
+        cur.startedAt !== undefined
+      ) {
+        next.elapsedMs = Date.now() - cur.startedAt
+      }
+      return { steps: { ...s.steps, [id]: next } }
+    })
 
   /**
    * 話者の判定(ピンマイクの音量)→ 文字起こし。結果は素材の時刻で企画に保存する。
