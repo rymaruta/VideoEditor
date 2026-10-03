@@ -1,5 +1,5 @@
 import { cachedEnvelope } from './audioPcm'
-import { stat } from 'fs/promises'
+import { readFile, stat } from 'fs/promises'
 import { cancelAsr, runAsr } from './asrService'
 import { detectFaces } from './faceService'
 import { cancelLlm, runLlm } from './llmService'
@@ -674,11 +674,31 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.showKitScan, (_e, root: string) => scanShowKit(root))
   ipcMain.handle(IPC.selectProjectFiles, async (event) => {
     const result = await showOpenDialogForSender(event, {
-      title: '学ばせる過去回のプロジェクトを選ぶ(人が仕上げたもの・複数可)',
+      title:
+        '学ばせる過去回を選ぶ(人が仕上げたもの・複数可。このアプリのプロジェクトか Premiere の XML)',
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+      filters: [
+        { name: 'プロジェクト・XML', extensions: ['veproj', 'xml'] },
+        { name: 'VideoEditorプロジェクト', extensions: ['veproj'] },
+        { name: 'Premiere の XML(FCP7)', extensions: ['xml'] }
+      ]
     })
     return result.canceled ? [] : result.filePaths
+  })
+  ipcMain.handle(IPC.selectEditXml, async (event) => {
+    const result = await showOpenDialogForSender(event, {
+      title: '人が仕上げた完成版の XML を選ぶ(Premiere: ファイル > 書き出し > Final Cut Pro XML)',
+      properties: ['openFile'],
+      filters: [{ name: 'Premiere の XML(FCP7)', extensions: ['xml'] }]
+    })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+  // XML だけを読む(任意のファイルを読めないよう、拡張子と大きさを確かめる)
+  ipcMain.handle(IPC.readEditXml, async (_e, filePath: string) => {
+    if (!/\.xml$/i.test(filePath)) throw new Error('XML ファイルではありません')
+    const st = await stat(filePath)
+    if (st.size > 200 * 1024 * 1024) throw new Error('XML が大きすぎます(200MB まで)')
+    return readFile(filePath, 'utf-8')
   })
   ipcMain.handle(IPC.showKitSelectFolder, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

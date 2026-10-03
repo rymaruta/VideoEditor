@@ -151,6 +151,8 @@ interface PipelineState {
   } | null
   setTargetMinutes: (minutes: number) => void
   setEditNote: (note: string) => void
+  /** ログに1行足す(画面の操作の結果を残す) */
+  addLog: (text: string) => void
   setKeep: (sceneId: string, keep: boolean | undefined) => void
   /** 構成の判定はそのままに、カット・アングル・仮編集を作り直す(残す/落とす・長さを変えたとき) */
   rebuildRoughCut: () => Promise<void>
@@ -780,6 +782,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     running: false,
     screenOpen: false,
 
+    addLog: (text) => log(text),
     setScreenOpen: (open) => set({ screenOpen: open }),
 
     reset: () =>

@@ -115,7 +115,9 @@ export function measureProject(project: Project): Partial<ShowStyle> {
           t.clips.every((c) => (c.outPoint - c.inPoint) / (c.speed || 1) < 3))
     )
     .reduce((n, t) => n + t.clips.length, 0)
-  if (total > 30) out.sePerMinute = seClips / (total / 60)
+  // SE が1つも無い回からは学ばない(使わなかったのか、書き出しに入っていないのか区別できない。
+  // 0 を学ぶと、次の回から SE が一切置かれなくなる)
+  if (total > 30 && seClips > 0) out.sePerMinute = seClips / (total / 60)
 
   // BGM: 自動の BGM のトラック、または長い音(20秒以上)のあるトラック。音量はトラック × クリップ
   const bgm = loose

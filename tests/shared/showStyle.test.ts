@@ -96,11 +96,12 @@ describe('measureProject', () => {
     expect(m.ambienceVolume).toBeCloseTo(0.4)
   })
 
-  it('測れない項目は返さない(本編1本・発言が少ない)', () => {
+  it('測れない項目は返さない(本編1本・発言が少ない・SE が1つも無い)', () => {
     const p = { ...episode(4, 0.5, 0, 0.3), clips: [], textOverlays: [] }
     const m = measureProject(p)
     expect(m.minShotSec).toBeUndefined()
     expect(m.keepPauseSec).toBeUndefined()
+    expect(measureProject(episode(4, 0.5, 0, 0.3)).sePerMinute).toBeUndefined()
   })
 })
 

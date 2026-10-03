@@ -4,6 +4,8 @@ import { usePipelineStore, type EditableSource } from '../store/pipelineStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { useSettingsStore } from '../store/settingsStore'
 import type { Project } from '@shared/types'
+import { fcp7ToProject } from '@shared/import/fcp7'
+import { loadEditXml } from '../lib/editXml'
 import { DEFAULT_SHOW_STYLE, describeShowStyle, learnShowStyle } from '@shared/style/showStyle'
 import { formatTimecode } from '../lib/timelineRuler'
 import { sourceDuration } from '@shared/ingest/classify'
@@ -100,7 +102,12 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
       const names: string[] = []
       for (const p of paths) {
         try {
-          projects.push(await window.api.loadProject(p))
+          // Premiere の XML(FCP7)も読める(人が他のソフトで仕上げた過去回から学ぶ)
+          projects.push(
+            /\.xml$/i.test(p)
+              ? fcp7ToProject(await loadEditXml(p))
+              : await window.api.loadProject(p)
+          )
           names.push(p.split(/[/\\]/).pop() ?? p)
         } catch {
           // 読めない回は飛ばす(全部読めなければ下で知らせる)
@@ -333,7 +340,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
               <button
                 className="small-button"
                 aria-label="過去回から番組スタイルを学ぶ"
-                title="人が仕上げた過去回のプロジェクト(.veproj)を選ぶと、その回の間・ショットの長さ・SE の数・音量を集計して、次の自動編集に使います"
+                title="人が仕上げた過去回のプロジェクト(.veproj)か Premiere の XML を選ぶと、その回の間・ショットの長さ・SE の数・音量を集計して、次の自動編集に使います"
                 disabled={learning}
                 onClick={() => void learnStyle()}
               >

@@ -4,6 +4,8 @@ import { usePipelineStore, STEPS, type StepStatus } from '../store/pipelineStore
 import { useProjectStore } from '../store/projectStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
+import { loadEditXml } from '../lib/editXml'
+import { compareEdits, type EditComparison } from '@shared/eval/compare'
 import type { ReviewItem } from '../lib/reviewItems'
 import { formatTimecode } from '../lib/timelineRuler'
 import { placedUtterances, telopsFromTranscript } from '../lib/transcriptTimeline'
@@ -27,6 +29,10 @@ const SOURCE_COLORS = ['#9ea7e0', '#7fb5d8', '#d8a77f', '#c49ee0', '#7fcf96', '#
 
 function fileName(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
+}
+
+function pct(v: number): string {
+  return Number.isFinite(v) ? `${Math.round(v * 100)}%` : '—'
 }
 
 function stepMark(state: StepStatus['state']): string {
@@ -81,6 +87,9 @@ export function AutoEditScreen(): React.JSX.Element | null {
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
+  const [comparison, setComparison] = useState<
+    { name: string; result: EditComparison } | { error: string } | null
+  >(null)
 
   useMenuCommand((id) => {
     if (id === 'auto.screen') setOpen(true)
@@ -106,6 +115,29 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const utterances = placedUtterances(project)
   const placementOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
   const durationOf = new Map(syncedFiles.map((f) => [f.id, f.duration]))
+
+  /** 人が仕上げた完成版(Premiere の XML)と、今の仮編集を比べる */
+  async function compareWithHuman(): Promise<void> {
+    const path = await window.api.selectEditXml()
+    if (!path) return
+    const name = path.split(/[/\\]/).pop() ?? path
+    try {
+      const seq = await loadEditXml(path)
+      const p = useProjectStore.getState().project
+      if (!p.multicam) return
+      const result = compareEdits(seq, p, p.multicam)
+      setComparison({ name, result })
+      usePipelineStore
+        .getState()
+        .addLog(
+          `人の完成版「${name}」と比べました: 採用区間の一致度 ${pct(result.iou)} · カット点 ${pct(result.cutRecall)} · アングル ${pct(result.angleAgreement)}`
+        )
+    } catch (e) {
+      setComparison({
+        error: `比べられませんでした: ${e instanceof Error ? e.message : String(e)}`
+      })
+    }
+  }
 
   /** 編集画面に戻って、その位置(とテロップ)へ移る */
   function jumpTo(item: ReviewItem): void {
@@ -505,7 +537,53 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 >
                   仮編集を作り直す
                 </button>
+                <button
+                  className="small-button"
+                  disabled={!project.multicam || project.clips.length === 0}
+                  onClick={() => void compareWithHuman()}
+                  title="人が仕上げた完成版(Premiere の XML)と、残した区間・カット点・アングルがどれだけ一致するかを測ります"
+                >
+                  人の完成版と比べる…
+                </button>
               </div>
+              {comparison && (
+                <div className="structure-compare" aria-label="人の完成版との比較">
+                  {'error' in comparison ? (
+                    <p className="error-text">{comparison.error}</p>
+                  ) : (
+                    <>
+                      <p className="form-note">
+                        「{comparison.name}」と比べた結果(共通の時間軸で比較)
+                      </p>
+                      <dl>
+                        <dt>採用区間の一致度(IoU)</dt>
+                        <dd>{pct(comparison.result.iou)}</dd>
+                        <dt>カット点の一致(±0.5秒)</dt>
+                        <dd>
+                          人のカット点の {pct(comparison.result.cutRecall)} を自動も切っている ·
+                          自動のカット点の {pct(comparison.result.cutPrecision)} が人と同じ
+                        </dd>
+                        <dt>アングルの一致</dt>
+                        <dd>{pct(comparison.result.angleAgreement)}(両方が残した時間のうち)</dd>
+                        <dt>長さ</dt>
+                        <dd>
+                          人 {formatTimecode(comparison.result.humanSec, 30)} · 自動{' '}
+                          {formatTimecode(comparison.result.autoSec, 30)} · 重なり{' '}
+                          {formatTimecode(comparison.result.overlapSec, 30)}
+                        </dd>
+                      </dl>
+                      {comparison.result.unmatchedFiles.length > 0 && (
+                        <p className="form-note">
+                          この回の素材に見つからないため比べなかったクリップ:{' '}
+                          {comparison.result.totalClips - comparison.result.matchedClips} 本(
+                          {comparison.result.unmatchedFiles.slice(0, 3).join('、')}
+                          {comparison.result.unmatchedFiles.length > 3 ? ' ほか' : ''})
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {roughCut && (
                 <p className="form-note structure-summary">
                   {roughCut.kept} 場面を残す · {roughCut.dropped} 場面を落とす · 仕上がり{' '}

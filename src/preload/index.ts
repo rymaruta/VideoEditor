@@ -266,6 +266,8 @@ const api = {
   denoiseCancel: (): Promise<void> => ipcRenderer.invoke(IPC.denoiseCancel),
   showKitScan: (root: string): Promise<ShowKit> => ipcRenderer.invoke(IPC.showKitScan, root),
   selectProjectFiles: (): Promise<string[]> => ipcRenderer.invoke(IPC.selectProjectFiles),
+  selectEditXml: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectEditXml),
+  readEditXml: (filePath: string): Promise<string> => ipcRenderer.invoke(IPC.readEditXml, filePath),
   showKitSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.showKitSelectFolder),
   onDenoiseProgress: (
     callback: (p: { done: number; total: number; percent: number }) => void

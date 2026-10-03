@@ -6044,3 +6044,27 @@ h3 {
 .status-review:hover {
   filter: brightness(1.08);
 }
+
+/* 構成: 人の完成版との比較 */
+.structure-compare {
+  margin: 6px 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.structure-compare dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 6px 0 0;
+}
+
+.structure-compare dt {
+  opacity: 0.8;
+}
+
+.structure-compare dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
