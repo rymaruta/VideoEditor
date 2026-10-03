@@ -1,5 +1,12 @@
+import {
+  fallbackMood,
+  planBgm,
+  planSoundEffects,
+  timelineRangeOf,
+  type BgmMood
+} from '@shared/finish/sound'
 import { planCameraColors } from '../lib/colorMatchPlan'
-import { describeColorMatch } from '@shared/color/match'
+import { COLOR_VERDICT_TEXT, describeColorMatch } from '@shared/color/match'
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import type { FootageScan, FootageSource, ProbedFile, SourceKind } from '@shared/ingest/classify'
@@ -10,7 +17,7 @@ import { useProjectStore } from './projectStore'
 import { useSettingsStore } from './settingsStore'
 import { parseDictionary } from '@shared/telop/polish'
 import { usePresetStore } from './presetStore'
-import type { Project } from '@shared/types'
+import type { Project, TextOverlay } from '@shared/types'
 import type { MulticamInfo } from '@shared/sync/multicam'
 import type { Scene, SceneJudgement } from '@shared/structure/scenes'
 import {
@@ -58,6 +65,7 @@ export type StepId =
   | 'angles'
   | 'placement'
   | 'effects'
+  | 'sound'
 export type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
 
 export interface StepStatus {
@@ -89,7 +97,8 @@ export const STEPS: { id: StepId; label: string }[] = [
   { id: 'cut', label: 'カット(間を詰める)' },
   { id: 'angles', label: 'アングルの切り替え' },
   { id: 'placement', label: '発言テロップの配置(顔を避ける)' },
-  { id: 'effects', label: '演出テロップの提案' }
+  { id: 'effects', label: '演出テロップの提案' },
+  { id: 'sound', label: 'SE・BGM' }
 ]
 
 interface PipelineState {
@@ -165,7 +174,8 @@ const initialSteps = (): Record<StepId, StepStatus> => ({
   cut: { state: 'wait', percent: 0 },
   angles: { state: 'wait', percent: 0 },
   placement: { state: 'wait', percent: 0 },
-  effects: { state: 'wait', percent: 0 }
+  effects: { state: 'wait', percent: 0 },
+  sound: { state: 'wait', percent: 0 }
 })
 
 /** 出演者の名前(マイク1 → 出演者A など)は、同じ収録フォルダの構成なら次の回にも引き継ぐ */
@@ -220,7 +230,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const targetFiles = files.filter(
       (f) => speakerSources.some((s) => s.id === f.sourceId) && placeOf.get(f.id)?.method !== 'none'
     )
-    const envelopes = await window.api.footageEnvelopes(targetFiles.map((f) => f.path))
+    // ノイズを除いた音声があればそれを読む(時刻は元の録音と同じ。雑音で発話の区切りを誤らない)
+    const assetsNow = useProjectStore.getState().project.assets
+    const pathOf = (f: SyncInputFile): string =>
+      assetsNow.find((a) => a.id === assetIdOf[f.id])?.filePath ?? f.path
+    const envelopes = await window.api.footageEnvelopes(targetFiles.map(pathOf))
     const length = Math.ceil(
       Math.max(
         0,
@@ -262,7 +276,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       turns,
       targetFiles.map((f) => ({
         id: f.id,
-        path: f.path,
+        path: pathOf(f),
         sourceId: f.sourceId,
         duration: f.duration
       })),
@@ -344,15 +358,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         note:
           fixed.length > 0
             ? `${fixed.length} 台を基準カメラに合わせました`
-            : '色の差はありませんでした'
+            : '合わせる必要のあるカメラはありませんでした'
       })
       for (const c of plan.cameras)
         log(
           c.match
             ? `色合わせ: ${c.name} を基準カメラに合わせました(${describeColorMatch(c.match)})`
-            : c.pairs === 0
-              ? `色合わせ: ${c.name} は基準カメラと同じ時刻の画が読めず、合わせていません`
-              : `色合わせ: ${c.name} は基準カメラとの差がほとんど無いため、そのままにしました`
+            : `色合わせ: ${c.name} は${COLOR_VERDICT_TEXT[c.verdict === 'matched' ? 'same' : c.verdict]}`
         )
     } catch (e) {
       setStep('color', { state: 'error', note: formatIpcError(e) })
@@ -404,6 +416,83 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     }
   }
 
+  /** 番組素材フォルダから SE・BGM を選んで置く(仮編集を入れた後) */
+  async function placeSounds(
+    keptIds: string[],
+    spans: { timeline: number; start: number; end: number }[],
+    effectTelops: Omit<TextOverlay, 'id'>[]
+  ): Promise<void> {
+    const folder = useSettingsStore.getState().showKitFolder
+    if (!folder) {
+      setStep('sound', { state: 'skipped', note: '番組素材フォルダが未設定です' })
+      return
+    }
+    setStep('sound', { state: 'run', percent: 0, note: '番組素材フォルダを読み込み中' })
+    try {
+      const kit = await window.api.showKitScan(folder)
+      const judged = new Map(get().judgements.map((j) => [j.sceneId, j]))
+      const scenes = get()
+        .scenes.filter((sc) => keptIds.includes(sc.id))
+        .map((sc) => {
+          const range = timelineRangeOf(spans, sc.start, sc.end)
+          const j = judged.get(sc.id)
+          return range ? { ...range, mood: j?.mood ?? fallbackMood(j?.kind ?? 'normal') } : null
+        })
+        .filter((x): x is { start: number; end: number; mood: BgmMood } => x !== null)
+      const kindOf = new Map(get().effects.map((e) => [e.id, e.kind]))
+      const effects = effectTelops
+        .filter((t) => t.effectId && kindOf.has(t.effectId))
+        .map((t) => ({ time: t.startTime, kind: kindOf.get(t.effectId!)!, text: t.text }))
+      const se = planSoundEffects(
+        effects,
+        scenes.map((x) => x.start),
+        kit
+      )
+      const bgm = planBgm(scenes, kit)
+      // 置く素材を読み込む(すでにあるものは使い回す)
+      const have = new Set(useProjectStore.getState().project.assets.map((a) => a.filePath))
+      const paths = [...new Set([...se, ...bgm].map((x) => x.path))].filter((p) => !have.has(p))
+      const assets: MediaAsset[] = []
+      for (const path of paths) {
+        const meta = await window.api.probeMedia(path).catch(() => null)
+        if (!meta) continue
+        assets.push({
+          id: uuid(),
+          filePath: path,
+          fileName: path.split(/[/\\]/).pop() ?? path,
+          duration: meta.duration,
+          width: meta.width,
+          height: meta.height,
+          fps: meta.fps,
+          hasAudio: meta.hasAudio,
+          hasVideo: meta.hasVideo
+        })
+      }
+      useProjectStore.getState().setAutoSounds(
+        [
+          { role: 'se', clips: se },
+          { role: 'bgm', clips: bgm }
+        ],
+        assets
+      )
+      const seCats = Object.keys(kit.se).length
+      const bgmMoods = Object.keys(kit.bgm).length
+      setStep('sound', {
+        state: 'done',
+        percent: 100,
+        note: `SE ${se.length} · BGM ${bgm.length} 曲ぶん`
+      })
+      log(
+        `SE・BGM: SE ${se.length} 個(分類 ${seCats})、BGM ${bgm.length} 本(雰囲気 ${bgmMoods})を置きました${
+          seCats + bgmMoods === 0 ? '。番組素材フォルダに SE / BGM のフォルダが見つかりません' : ''
+        }`
+      )
+    } catch (e) {
+      setStep('sound', { state: 'error', note: formatIpcError(e) })
+      log(`SE・BGM を置けませんでした: ${formatIpcError(e)}`)
+    }
+  }
+
   let activityCache: { projectId: string; mask: Uint8Array } | null = null
   async function activityOf(project: Project, info: MulticamInfo): Promise<Uint8Array> {
     if (activityCache?.projectId !== project.id) {
@@ -417,7 +506,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const project = useProjectStore.getState().project
     const info = project.multicam
     if (!info || !(project.transcript?.length ?? 0)) {
-      for (const id of ['structure', 'cut', 'angles', 'placement', 'effects'] as StepId[])
+      for (const id of ['structure', 'cut', 'angles', 'placement', 'effects', 'sound'] as StepId[])
         setStep(id, { state: 'skipped', note: '文字起こしがありません' })
       return
     }
@@ -565,6 +654,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         telops: telops.length
       }
     })
+    await placeSounds(plan.selection.kept, plan.cut.spans, effectTelops)
     log(
       `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${telops.length}`
     )
@@ -836,6 +926,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         const current = (
           [
             'effects',
+            'sound',
             'timeline',
             'color',
             'denoise',

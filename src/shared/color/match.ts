@@ -22,6 +22,16 @@ export const MATCH_PERCENTILES = [0.05, 0.25, 0.5, 0.75, 0.95] as const
 /** 補正の上限。これを超える差は合わせきらない(別の場所を映している・露出の失敗などは人が見る) */
 export const GAIN_LIMIT: [number, number] = [0.7, 1.4]
 export const OFFSET_LIMIT = 0.12
+/**
+ * 比べられる画かどうか。暗部〜明部の幅(5〜95 百分位)が狭い画(ほぼ単色・真っ暗)は、
+ * 分布の形から色の違いを読めないので合わせない。
+ */
+const MIN_SPREAD = 0.15
+/**
+ * 合わせたあとも分布の形が大きく違う(5点のどこかが 0.1 以上ずれる)なら、カメラの違いではなく
+ * 映っている物の違いなので合わせない(空だけを映すカメラなど)。
+ */
+const MAX_RESIDUAL = 0.1
 /** これより小さい補正は掛けない(差が無いのと同じ) */
 const NEGLIGIBLE_GAIN = 0.015
 const NEGLIGIBLE_OFFSET = 0.008
@@ -84,13 +94,35 @@ function fitLine(xs: readonly number[], ys: readonly number[]): { g: number; o: 
  * 画素が少なすぎる(読めたフレームが無い)ときも null。
  */
 export function fitColorMatch(source: RgbHistogram, reference: RgbHistogram): ColorMatch | null {
-  if (source.count < 1000 || reference.count < 1000) return null
+  return judgeColorMatch(source, reference).match
+}
+
+/** 合わせなかった理由(画面のログ用) */
+export type ColorMatchVerdict = 'matched' | 'same' | 'flat' | 'shape' | 'few'
+
+export const COLOR_VERDICT_TEXT: Record<Exclude<ColorMatchVerdict, 'matched'>, string> = {
+  same: '基準カメラとの差がほとんど無いため、そのままにしました',
+  flat: '画の明暗の幅が狭く(ほぼ単色・真っ暗)色の違いを読めないため、合わせていません',
+  shape: '基準カメラと映っている物が違いすぎて比べられないため、合わせていません',
+  few: '基準カメラと同じ時刻の画が読めず、合わせていません'
+}
+
+export function judgeColorMatch(
+  source: RgbHistogram,
+  reference: RgbHistogram
+): { match: ColorMatch | null; verdict: ColorMatchVerdict } {
+  if (source.count < 1000 || reference.count < 1000) return { match: null, verdict: 'few' }
   const gain: number[] = []
   const offset: number[] = []
   for (const c of [0, 1, 2] as const) {
     const xs = MATCH_PERCENTILES.map((p) => source.percentile(c, p))
     const ys = MATCH_PERCENTILES.map((p) => reference.percentile(c, p))
+    if (xs[4] - xs[0] < MIN_SPREAD || ys[4] - ys[0] < MIN_SPREAD)
+      return { match: null, verdict: 'flat' }
     const fit = fitLine(xs, ys)
+    // 形の違いは、上限で抑える前の当てはまりで見る(上限に当たるだけの大きな差は、上限まで合わせる)
+    if (xs.some((x, i) => Math.abs(fit.g * x + fit.o - ys[i]) > MAX_RESIDUAL))
+      return { match: null, verdict: 'shape' }
     const g = clamp(fit.g, GAIN_LIMIT[0], GAIN_LIMIT[1])
     // 倍率を抑えたら、中間(50%)が合うよう足し込みを取り直す
     const o = clamp(g === fit.g ? fit.o : ys[2] - g * xs[2], -OFFSET_LIMIT, OFFSET_LIMIT)
@@ -100,10 +132,10 @@ export function fitColorMatch(source: RgbHistogram, reference: RgbHistogram): Co
   const negligible = gain.every(
     (g, i) => Math.abs(g - 1) < NEGLIGIBLE_GAIN && Math.abs(offset[i]) < NEGLIGIBLE_OFFSET
   )
-  if (negligible) return null
+  if (negligible) return { match: null, verdict: 'same' }
   return {
-    gain: gain as [number, number, number],
-    offset: offset as [number, number, number]
+    match: { gain: gain as [number, number, number], offset: offset as [number, number, number] },
+    verdict: 'matched'
   }
 }
 

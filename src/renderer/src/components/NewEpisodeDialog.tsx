@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { usePipelineStore, type EditableSource } from '../store/pipelineStore'
 import { useMenuCommand } from '../lib/menuCommands'
+import { useSettingsStore } from '../store/settingsStore'
 import { formatTimecode } from '../lib/timelineRuler'
 import { sourceDuration } from '@shared/ingest/classify'
 
@@ -43,6 +44,8 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
   const scanFolder = usePipelineStore((s) => s.scanFolder)
   const updateSource = usePipelineStore((s) => s.updateSource)
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
+  const showKitFolder = useSettingsStore((s) => s.showKitFolder)
+  const setShowKitFolder = useSettingsStore((s) => s.setShowKitFolder)
 
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -247,6 +250,35 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
             )}
           </div>
 
+          <div className="form-stack">
+            <span>
+              番組素材フォルダ(SE・BGM。中に「SE/ツッコミ」「BGM/楽しい」のような分類のフォルダ)
+            </span>
+            <div className="new-episode-folder">
+              <input
+                type="text"
+                readOnly
+                value={showKitFolder}
+                placeholder="(未設定: SE・BGM は置きません)"
+                aria-label="番組素材フォルダ"
+              />
+              <button
+                className="small-button"
+                onClick={async () => {
+                  const folder = await window.api.showKitSelectFolder()
+                  if (folder) setShowKitFolder(folder)
+                }}
+              >
+                参照…
+              </button>
+              {showKitFolder && (
+                <button className="small-button" onClick={() => setShowKitFolder('')}>
+                  外す
+                </button>
+              )}
+            </div>
+          </div>
+
           <label className="new-episode-target">
             仕上がりの長さ
             <input
@@ -268,7 +300,8 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
               checked={startNow}
               onChange={(e) => setStartNow(e.target.checked)}
             />
-            作ったあと、そのまま自動編集を始める(同期 → 文字起こし → 構成 → カット → アングル)
+            作ったあと、そのまま自動編集を始める(同期 → 色合わせ・ノイズ除去 → 文字起こし → 構成 →
+            カット → アングル → テロップ → SE・BGM)
           </label>
         </div>
 

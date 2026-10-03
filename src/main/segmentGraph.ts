@@ -463,7 +463,12 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
           `adelay=${delay}S:all=1,${AUDIO_FORMAT}[${label}]`
       )
       // 本編(一番下の映像トラック)に紐づく音は「本編の声」。ダッキングの基準にもする
-      if (duckingInUse && item.linkedItemId && mainIds.has(item.linkedItemId)) {
+      // 出演者の声のトラック(ピンマイク)も同じく基準にする
+      if (
+        duckingInUse &&
+        !track.duckingEnabled &&
+        ((item.linkedItemId && mainIds.has(item.linkedItemId)) || track.voice)
+      ) {
         parts.push(`[${label}]asplit=2[${label}m][${label}v]`)
         labels.push(`${label}m`)
         voiceLabels.push(`${label}v`)

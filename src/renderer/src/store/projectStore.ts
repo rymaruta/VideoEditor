@@ -1,3 +1,4 @@
+import type { PlacedSound } from '@shared/finish/sound'
 import type { ColorMatch } from '@shared/color/match'
 import type { RoughCut } from '@shared/roughCut/build'
 import type { MulticamInfo, MulticamSource } from '@shared/sync/multicam'
@@ -178,6 +179,17 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
   }
 }
 
+/** 自動の SE・BGM のトラックの中身の要約(手で直したかを見分ける) */
+function autoSignatureOf(track: Pick<AudioTrack, 'clips'>): string {
+  return track.clips
+    .map((c) => [c.assetId, c.startTime, c.inPoint, c.outPoint, c.volume ?? 1].join(','))
+    .join(';')
+}
+
+function withAutoSignature(track: AudioTrack): AudioTrack {
+  return { ...track, autoSignature: autoSignatureOf(track) }
+}
+
 /** 色合わせの値。壊れていれば補正なし(元の色)にする */
 function normalizeColorMatch(raw: unknown): ColorMatch | undefined {
   if (!raw || typeof raw !== 'object') return undefined
@@ -294,6 +306,9 @@ function normalizeAudioTrack(
     name: asNonEmptyString(raw.name, '音声トラック'),
     muted: asBoolean(raw.muted, false),
     duckingEnabled: asBoolean(raw.duckingEnabled, false),
+    voice: raw.voice === true ? true : undefined,
+    autoRole: raw.autoRole === 'se' || raw.autoRole === 'bgm' ? raw.autoRole : undefined,
+    autoSignature: typeof raw.autoSignature === 'string' ? raw.autoSignature : undefined,
     volume: asNonNegative(raw.volume, 1),
     clips: asRecordArray<Record<string, unknown>>(raw.clips)
       .map((c) => normalizeAudioClip(c, durationOf))
@@ -643,6 +658,14 @@ interface ProjectState {
   applyRoughCut: (cut: RoughCut, telops: Omit<TextOverlay, 'id'>[]) => void
   /** 演出テロップ(提案から置いたもの)を入れ替える(取り消し1回で戻る) */
   setEffectTelops: (telops: Omit<TextOverlay, 'id'>[]) => void
+  /**
+   * 自動の SE・BGM のトラックを入れ替える(前に自動で置いたものは消える)。素材が無ければ足す。
+   * 仮編集を入れた直後に続けて呼ぶので履歴は積まない(取り消し1回で仮編集の前に戻る)。
+   */
+  setAutoSounds: (
+    sounds: { role: 'se' | 'bgm'; clips: PlacedSound[] }[],
+    assets: MediaAsset[]
+  ) => void
   /** 文字起こしの結果を入れ替える(取り消し1回で戻る) */
   setTranscript: (transcript: TranscriptUtterance[]) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
@@ -1358,6 +1381,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         muted: false,
         volume: 1,
         duckingEnabled: false,
+        voice: true,
         clips: m.pieces
           .filter((p) => idOf(p.fileId))
           .map((p) => ({
@@ -2264,6 +2288,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           muted: false,
           volume: a.volume,
           duckingEnabled: false,
+          voice: state.project.multicam?.sources.find((x) => x.id === a.sourceId)?.kind === 'mic',
           clips: a.clips.map((c) => ({
             id: uuid(),
             assetId: c.assetId,
@@ -2322,6 +2347,50 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           assets: state.project.assets.map((a) =>
             a.id in matches ? { ...a, colorMatch: matches[a.id] } : a
           )
+        }
+      }
+    }),
+
+  setAutoSounds: (sounds, newAssets) =>
+    set((state) => {
+      const assets = [...state.project.assets]
+      for (const a of newAssets) if (!assets.some((x) => x.filePath === a.filePath)) assets.push(a)
+      const idOf = new Map(assets.map((a) => [a.filePath, a.id]))
+      const NAMES = { se: 'SE(自動)', bgm: 'BGM(自動)' } as const
+      const tracks: AudioTrack[] = sounds
+        .filter((x) => x.clips.length > 0)
+        .map((x) =>
+          withAutoSignature({
+            id: uuid(),
+            name: NAMES[x.role],
+            muted: false,
+            volume: 1,
+            // BGM は声の間だけ下げる
+            duckingEnabled: x.role === 'bgm',
+            autoRole: x.role,
+            clips: x.clips
+              .filter((c) => idOf.has(c.path))
+              .map((c) => ({
+                id: uuid(),
+                assetId: idOf.get(c.path)!,
+                startTime: c.startTime,
+                inPoint: c.inPoint,
+                outPoint: c.outPoint,
+                volume: c.volume,
+                ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
+                ...(c.fadeOut ? { fadeOut: c.fadeOut } : {})
+              }))
+          })
+        )
+      // 手で直した自動のトラックは消さずに残し、自動の印だけ外す
+      const kept = state.project.audioTracks
+        .filter((t) => !t.autoRole || t.autoSignature !== autoSignatureOf(t))
+        .map((t) => (t.autoRole ? { ...t, autoRole: undefined, autoSignature: undefined } : t))
+      return {
+        project: {
+          ...state.project,
+          assets,
+          audioTracks: [...kept, ...tracks]
         }
       }
     }),

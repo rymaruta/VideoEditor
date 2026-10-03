@@ -1151,7 +1151,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               `volume=${clipVolume},${adelayFilter(delayMs)},` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
           )
-          if (duckingInUse && isMainVoiceClip(trackClip)) {
+          if (
+            duckingInUse &&
+            !track.duckingEnabled &&
+            (isMainVoiceClip(trackClip) || track.voice)
+          ) {
             // 分離された本編の音。**出力へ混ぜる枝とサイドチェインへ渡す枝の2本**に割る
             // (同じラベルを2箇所へ繋ぐことはできない)。測るのは音量・フェードを
             // 通したあと——利用者が声を小さくしたら、下がり方もそのぶん弱くなるのが正しい。

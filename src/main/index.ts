@@ -6,6 +6,7 @@ import { cancelLlm, runLlm } from './llmService'
 import { cancelMeasureExport, measureExport } from './qcService'
 import { readFramesRgb } from './frameService'
 import { cancelDenoise, denoiseFiles } from './audioCleanService'
+import { scanShowKit } from './showKitService'
 import type { LlmRequest } from '@shared/llm'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
@@ -670,6 +671,16 @@ app.whenReady().then(() => {
     )
   )
   ipcMain.handle(IPC.denoiseCancel, () => cancelDenoise())
+  ipcMain.handle(IPC.showKitScan, (_e, root: string) => scanShowKit(root))
+  ipcMain.handle(IPC.showKitSelectFolder, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: '番組素材フォルダを選ぶ(中に SE / BGM / CG のフォルダ)',
+      properties: ['openDirectory']
+    }
+    const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    return r.canceled ? null : (r.filePaths[0] ?? null)
+  })
   ipcMain.handle(
     IPC.framesRgb,
     (event, requests: { path: string; time: number }[], size: { w: number; h: number }) =>

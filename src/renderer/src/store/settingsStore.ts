@@ -21,6 +21,7 @@ const EXPORT_LOUDNESS_KEY = 've-export-loudness'
 const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
 const TELOP_DICTIONARY_KEY = 've-telop-dictionary'
 const QC_WORDS_KEY = 've-qc-words'
+const SHOW_KIT_KEY = 've-show-kit-folder'
 const AI_PROVIDER_KEY = 've-ai-provider'
 
 /** 書き出しの音量の扱い。`off` は正規化しない */
@@ -107,6 +108,9 @@ interface SettingsState {
   /** 書き出し後の確認で、テロップに入っていたら知らせる言葉(1行に1つ) */
   qcWords: string
   setQcWords: (text: string) => void
+  /** 番組素材フォルダ(中に SE / BGM / CG)。自動編集が SE・BGM を選ぶ。空なら置かない */
+  showKitFolder: string
+  setShowKitFolder: (folder: string) => void
   /** 構成の判定・演出テロップの提案に使う AI(既定はこのPC。無料・素材が外に出ない) */
   aiProvider: AiProvider
   setAiProvider: (provider: AiProvider) => void
@@ -220,6 +224,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setQcWords: (text) => {
     writeSetting(QC_WORDS_KEY, text)
     set({ qcWords: text })
+  },
+  showKitFolder: (() => {
+    try {
+      return localStorage.getItem(SHOW_KIT_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })(),
+  setShowKitFolder: (folder) => {
+    writeSetting(SHOW_KIT_KEY, folder)
+    set({ showKitFolder: folder })
   },
   aiProvider: readChoice<AiProvider>(AI_PROVIDER_KEY, ['local', 'gemini', 'off'], 'local'),
   setAiProvider: (provider) => {

@@ -153,6 +153,14 @@ export interface AudioTrack {
   muted: boolean
   volume: number
   duckingEnabled: boolean
+  /**
+   * 出演者の声のトラック(ピンマイク)。ダッキングは、本編から分離した音に加えて、ここで鳴っている声にも反応して下げる。
+   */
+  voice?: boolean
+  /** 自動で置いた SE・BGM のトラック(仮編集を作り直すと入れ替わる。手で直したら印を外す) */
+  autoRole?: 'se' | 'bgm'
+  /** 自動で置いたときの中身の要約。今の中身と違えば手で直したとみなし、作り直しで消さない */
+  autoSignature?: string
   clips: AudioTrackClip[]
 }
 

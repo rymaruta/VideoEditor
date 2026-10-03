@@ -1,4 +1,9 @@
-import { RgbHistogram, fitColorMatch, type ColorMatch } from '@shared/color/match'
+import {
+  RgbHistogram,
+  judgeColorMatch,
+  type ColorMatch,
+  type ColorMatchVerdict
+} from '@shared/color/match'
 import { pairedSamples } from '@shared/color/samples'
 import type { MulticamInfo } from '@shared/sync/multicam'
 import type { MediaAsset } from '@shared/types'
@@ -15,6 +20,7 @@ export interface CameraColorResult {
   match: ColorMatch | null
   /** 比べられた画の組の数 */
   pairs: number
+  verdict: ColorMatchVerdict
 }
 
 /**
@@ -62,8 +68,8 @@ export async function planCameraColors(
       ref.add(b)
       pairs++
     }
-    const match = pairs > 0 ? fitColorMatch(src, ref) : null
-    results.push({ sourceId: p.camera.id, name: p.camera.name, match, pairs })
+    const { match, verdict } = judgeColorMatch(src, ref)
+    results.push({ sourceId: p.camera.id, name: p.camera.name, match, pairs, verdict })
     for (const f of info.files)
       if (f.sourceId === p.camera.id) matches[f.assetId] = match ?? undefined
   }

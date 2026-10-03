@@ -1,3 +1,4 @@
+import type { ShowKit } from '@shared/finish/sound'
 import type { DenoiseResult } from '@shared/denoise'
 import type { QcMeasurement } from '@shared/qc/media'
 import type { LlmRequest, LlmWorkerMessage } from '@shared/llm'
@@ -263,6 +264,8 @@ const api = {
   denoiseRun: (sources: string[]): Promise<DenoiseResult[]> =>
     ipcRenderer.invoke(IPC.denoiseRun, sources),
   denoiseCancel: (): Promise<void> => ipcRenderer.invoke(IPC.denoiseCancel),
+  showKitScan: (root: string): Promise<ShowKit> => ipcRenderer.invoke(IPC.showKitScan, root),
+  showKitSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.showKitSelectFolder),
   onDenoiseProgress: (
     callback: (p: { done: number; total: number; percent: number }) => void
   ): (() => void) => {

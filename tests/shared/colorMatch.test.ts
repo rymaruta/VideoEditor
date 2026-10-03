@@ -59,6 +59,19 @@ describe('fitColorMatch', () => {
     for (const g of m.gain) expect(g).toBeLessThanOrEqual(GAIN_LIMIT[1])
   })
 
+  it('ほぼ単色の画どうしは比べない(色の違いが読めない)', () => {
+    const flatA = frame(() => 0.5)
+    const flatB = frame(() => 0.3)
+    expect(fitColorMatch(hist(flatB), hist(flatA))).toBeNull()
+  })
+
+  it('合わせても分布の形が違うもの(映っている物の違い)は合わせない', () => {
+    const ref = frame((v) => v)
+    // 暗部だけが極端に持ち上がった、形の違う分布
+    const other = frame((v) => (v < 0.5 ? 0.45 + v * 0.1 : v))
+    expect(fitColorMatch(hist(other), hist(ref))).toBeNull()
+  })
+
   it('画素が少なすぎれば比べない', () => {
     expect(fitColorMatch(hist(frame((v) => v, 10)), hist(frame((v) => v)))).toBeNull()
   })

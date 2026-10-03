@@ -1465,7 +1465,11 @@ export function PreviewPlayer(): React.JSX.Element {
                       trackVolume={track.volume}
                       trackMuted={track.muted}
                       trackDucking={track.duckingEnabled}
-                      isMainVoice={isMainVoiceClip(clip) && duckingInUse}
+                      isMainVoice={
+                        (isMainVoiceClip(clip) || Boolean(track.voice)) &&
+                        !track.duckingEnabled &&
+                        duckingInUse
+                      }
                       playheadTime={playheadTime}
                       isPlaying={isPlaying}
                       masterVolume={volume}

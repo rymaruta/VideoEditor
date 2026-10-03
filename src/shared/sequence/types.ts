@@ -44,6 +44,8 @@ export interface SequenceAudioTrack {
   /** トラック全体の音量(倍率) */
   volume: number
   duckingEnabled: boolean
+  /** 出演者の声のトラック(ダッキングの基準に数える) */
+  voice?: boolean
   items: AudioItem[]
 }
 

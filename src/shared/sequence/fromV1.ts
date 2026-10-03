@@ -253,6 +253,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         muted: track.muted,
         volume: track.volume,
         duckingEnabled: track.duckingEnabled,
+        ...(track.voice ? { voice: true } : {}),
         items: lane
       })
     })

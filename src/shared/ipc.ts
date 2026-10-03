@@ -65,6 +65,8 @@ export const IPC = {
   qcCancel: 'qc:cancel',
   framesRgb: 'frames:rgb',
   denoiseRun: 'denoise:run',
+  showKitScan: 'showKit:scan',
+  showKitSelectFolder: 'showKit:selectFolder',
   denoiseProgress: 'denoise:progress',
   denoiseCancel: 'denoise:cancel',
   framesProgress: 'frames:progress',

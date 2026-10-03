@@ -752,3 +752,58 @@ describe('ノイズ除去・色合わせの差し替え', () => {
     expect(asset('B').colorMatch).toBeUndefined()
   })
 })
+
+describe('自動の SE・BGM', () => {
+  beforeEach(reset)
+  const placed = (path: string, startTime: number) => ({
+    path,
+    startTime,
+    inPoint: 0,
+    outPoint: 1,
+    volume: 0.8,
+    reason: ''
+  })
+  const kitAsset = (id: string, filePath: string): Project['assets'][number] => ({
+    id,
+    filePath,
+    fileName: filePath,
+    duration: 60,
+    width: 0,
+    height: 0,
+    fps: 30,
+    hasAudio: true,
+    hasVideo: false
+  })
+
+  it('SE と BGM(ダッキング入り)のトラックを置き、作り直すと入れ替わる', () => {
+    st().setAutoSounds(
+      [
+        { role: 'se', clips: [placed('/se/a.wav', 2)] },
+        { role: 'bgm', clips: [placed('/bgm/x.mp3', 0)] }
+      ],
+      [kitAsset('se1', '/se/a.wav'), kitAsset('bgm1', '/bgm/x.mp3')]
+    )
+    const auto = st().project.audioTracks.filter((t) => t.autoRole)
+    expect(auto.map((t) => [t.autoRole, t.duckingEnabled, t.clips.length])).toEqual([
+      ['se', false, 1],
+      ['bgm', true, 1]
+    ])
+    st().setAutoSounds([{ role: 'se', clips: [placed('/se/a.wav', 5)] }], [])
+    const again = st().project.audioTracks.filter((t) => t.autoRole)
+    expect(again).toHaveLength(1)
+    expect(again[0].clips[0].startTime).toBe(5)
+  })
+
+  it('手で直した自動のトラックは、作り直しても消さずに残す(自動の印は外す)', () => {
+    st().setAutoSounds(
+      [{ role: 'se', clips: [placed('/se/a.wav', 2)] }],
+      [kitAsset('se1', '/se/a.wav')]
+    )
+    const track = st().project.audioTracks.find((t) => t.autoRole === 'se')!
+    st().updateAudioClipStart(track.id, track.clips[0].id, 3)
+    st().setAutoSounds([{ role: 'se', clips: [placed('/se/a.wav', 9)] }], [])
+    const tracks = st().project.audioTracks.filter((t) => t.name === 'SE(自動)')
+    expect(tracks).toHaveLength(2)
+    expect(tracks.find((t) => !t.autoRole)?.clips[0].startTime).toBe(3)
+  })
+})

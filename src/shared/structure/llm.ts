@@ -1,3 +1,4 @@
+import { BGM_MOODS } from '../finish/sound'
 import type { Scene, SceneJudgement, SceneKind } from './scenes'
 
 /**
@@ -70,6 +71,7 @@ ${options.note ? `編集方針: ${options.note}\n` : ''}
 - kind: "highlight"(見どころ) / "normal"(つなぎとして使える) / "unneeded"(不要: 移動だけ・待機・段取りの相談・言い直しなど)
 - title: 場面の短い見出し(日本語15字以内)
 - reason: そう判定した理由(日本語1文。発言を引用してよい)
+- mood: 場面の雰囲気(BGM を選ぶのに使う)。"楽しい" / "穏やか" / "緊張" / "感動" / "移動"
 発言の内容を作り変えたり、無い発言を書いたりしないでください。
 
 場面:
@@ -77,8 +79,8 @@ ${list}
 
 ${
   options.answerFormat === 'keyed'
-    ? '場面の ID ごとに、title・reason(先に理由)・kind・score を JSON で返してください。'
-    : '次の JSON だけを返してください:\n{"scenes":[{"id":"場面のID","score":0,"kind":"normal","title":"","reason":""}]}'
+    ? '場面の ID ごとに、title・reason(先に理由)・kind・score・mood を JSON で返してください。'
+    : '次の JSON だけを返してください:\n{"scenes":[{"id":"場面のID","score":0,"kind":"normal","title":"","reason":"","mood":"楽しい"}]}'
 }`
 }
 
@@ -117,7 +119,8 @@ export function parseStructureAnswer(answer: unknown, scenes: readonly Scene[]):
       reason:
         typeof o.reason === 'string' && o.reason.trim()
           ? o.reason.trim().slice(0, 200)
-          : 'AI の判定'
+          : 'AI の判定',
+      mood: BGM_MOODS.find((m) => m === o.mood)
     })
   }
   return [...out.values()]
@@ -134,9 +137,10 @@ export function structureSchema(scenes: readonly Scene[]): Record<string, unknow
       title: { type: 'string' },
       reason: { type: 'string' },
       kind: { enum: KINDS },
-      score: { type: 'integer' }
+      score: { type: 'integer' },
+      mood: { enum: BGM_MOODS }
     },
-    required: ['title', 'reason', 'kind', 'score']
+    required: ['title', 'reason', 'kind', 'score', 'mood']
   }
   return {
     type: 'object',

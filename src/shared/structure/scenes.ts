@@ -1,3 +1,4 @@
+import type { BgmMood } from '../finish/sound'
 /**
  * 構成(計画書 §5.5)の土台: 文字起こしを「場面」(話のまとまり)に分け、場面ごとに点数を付け、
  * 仕上がりの長さに収まるよう残す場面を選ぶ。
@@ -36,6 +37,8 @@ export interface SceneJudgement {
   title?: string
   /** なぜその点数か(人が読んで直せるように) */
   reason: string
+  /** 場面の雰囲気(BGM を選ぶのに使う。AI のときだけ) */
+  mood?: BgmMood
 }
 
 export interface SceneOptions {
