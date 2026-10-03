@@ -34,9 +34,9 @@ export function runLlm(
         onMessage(m)
         return false
       },
-      () => {
+      (code, stderr) => {
         running = null
-        reject(new Error('LLM_CANCELED'))
+        reject(new Error(code === 0 || !stderr ? 'LLM_CANCELED' : `AI が止まりました: ${stderr}`))
       }
     )
   })

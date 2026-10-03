@@ -24,7 +24,7 @@ export function detectFaces(
         }
         return false
       },
-      (code) => reject(new Error(`顔の検出が止まりました(${code})`))
+      (code, stderr) => reject(new Error(`顔の検出が止まりました(${code}) ${stderr}`))
     )
   })
 }

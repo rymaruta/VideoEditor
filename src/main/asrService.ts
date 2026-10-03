@@ -39,9 +39,11 @@ export function runAsr(
         } else onMessage(m)
         return false
       },
-      () => {
+      (code, stderr) => {
         running = null
-        reject(new Error('ASR_CANCELED'))
+        reject(
+          new Error(code === 0 || !stderr ? 'ASR_CANCELED' : `音声認識が止まりました: ${stderr}`)
+        )
       }
     )
   })
