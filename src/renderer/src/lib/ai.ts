@@ -41,6 +41,10 @@ export async function askAiJson(
     })
     try {
       return { results: await window.api.llmRun(requests), device, model }
+    } catch (e) {
+      // Electron が付ける前置き(Error invoking remote method 'llm:run': Error: …)を外して、理由だけにする
+      const message = e instanceof Error ? e.message : String(e)
+      throw new Error(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
     } finally {
       off()
     }

@@ -33,15 +33,16 @@ childMain<WorkerInput>(async (input, send) => {
         note: `AI のモデルをダウンロード中(初回のみ・${(totalSize / 1e9).toFixed(1)}GB)`
       })
   })
-  post({ type: 'status', stage: 'load', percent: 50, note: 'AI のモデルを読み込み中' })
-  const model = await llama.loadModel({ modelPath })
-  const context = await model.createContext({
-    contextSize: Math.min(16384, model.trainContextSize)
-  })
+  // 読み込みの前に知らせる(読み込み中に落ちたとき、どの装置だったかで理由を示せるように)
   post({
     type: 'device',
     device: (llama.gpu || 'cpu') as 'cuda' | 'vulkan' | 'metal' | 'cpu',
     model: input.modelUri ? uri.replace(/^hf:/, '') : choice.label
+  })
+  post({ type: 'status', stage: 'load', percent: 50, note: 'AI のモデルを読み込み中' })
+  const model = await llama.loadModel({ modelPath })
+  const context = await model.createContext({
+    contextSize: Math.min(16384, model.trainContextSize)
   })
   const results: (unknown | null)[] = []
   for (let i = 0; i < input.requests.length; i++) {
