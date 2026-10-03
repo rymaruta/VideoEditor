@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useProjectStore } from '@renderer/store/projectStore'
 import type { Project } from '@shared/types'
+import type { PlacedSound } from '@shared/finish/sound'
 import { audioClipDuration } from '@renderer/lib/timelineMath'
 import { seeded } from '../helpers/boundary'
 
@@ -755,7 +756,7 @@ describe('ノイズ除去・色合わせの差し替え', () => {
 
 describe('自動の SE・BGM', () => {
   beforeEach(reset)
-  const placed = (path: string, startTime: number) => ({
+  const placed = (path: string, startTime: number): PlacedSound => ({
     path,
     startTime,
     inPoint: 0,
