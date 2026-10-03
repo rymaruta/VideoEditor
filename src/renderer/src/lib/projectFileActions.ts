@@ -41,7 +41,22 @@ export async function checkMissingAssets(): Promise<void> {
   }
   // 見つからなかった**パス**をそのまま渡す。ID への変換はストア側でそのつど行う
   // (IDで覚えると、取り消しでパスが戻っても印が戻らない)。
-  setMissingAssetPaths(await window.api.checkFilesExist(project.assets.map((a) => a.filePath)))
+  const missing = await window.api.checkFilesExist(project.assets.map((a) => a.filePath))
+  // ノイズを除いた音声(このPCのキャッシュ)が無ければ、元の録音へ戻す(別のPCで開いた・キャッシュを消した)
+  const fallback = project.assets.filter((a) => a.denoisedFrom && missing.includes(a.filePath))
+  if (fallback.length > 0) {
+    const originalsMissing = await window.api.checkFilesExist(fallback.map((a) => a.denoisedFrom!))
+    const revert = fallback.filter((a) => !originalsMissing.includes(a.denoisedFrom!))
+    if (revert.length > 0) {
+      useProjectStore
+        .getState()
+        .setAssetsDenoised(Object.fromEntries(revert.map((a) => [a.id, null])), { history: false })
+      const reverted = new Set(revert.map((a) => a.filePath))
+      setMissingAssetPaths(missing.filter((p) => !reverted.has(p)))
+      return
+    }
+  }
+  setMissingAssetPaths(missing)
 }
 
 export async function saveProjectAs(): Promise<void> {

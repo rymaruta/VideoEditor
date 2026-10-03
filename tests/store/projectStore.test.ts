@@ -716,3 +716,39 @@ describe('連続操作 — ランダムな手順でも壊れない', () => {
     }
   })
 })
+
+describe('ノイズ除去・色合わせの差し替え', () => {
+  beforeEach(reset)
+  const asset = (id: string): Project['assets'][number] =>
+    st().project.assets.find((a) => a.id === id)!
+
+  it('ノイズを除いた音声に差し替え、外すと元の録音に戻る。どちらも1操作で元に戻せる', () => {
+    st().setAssetsDenoised({ M: '/cache/m-clean.flac' })
+    expect(asset('M').filePath).toBe('/cache/m-clean.flac')
+    expect(asset('M').denoisedFrom).toBe('/x/m.m4a')
+    // 掛け直しても、元の録音は最初のまま覚えている
+    st().setAssetsDenoised({ M: '/cache/m-clean2.flac' })
+    expect(asset('M').denoisedFrom).toBe('/x/m.m4a')
+    st().setAssetsDenoised({ M: null })
+    expect(asset('M').filePath).toBe('/x/m.m4a')
+    expect(asset('M').denoisedFrom).toBeUndefined()
+    st().undo()
+    expect(asset('M').filePath).toBe('/cache/m-clean2.flac')
+  })
+
+  it('開いたときの自動の戻しは、元に戻すの履歴に積まない', () => {
+    st().setAssetsDenoised({ M: '/cache/m-clean.flac' })
+    const past = st().past.length
+    st().setAssetsDenoised({ M: null }, { history: false })
+    expect(st().past.length).toBe(past)
+    expect(asset('M').filePath).toBe('/x/m.m4a')
+  })
+
+  it('色合わせを付け外しでき、関係のない素材は変えない', () => {
+    st().setColorMatches({ B: { gain: [1.1, 1, 0.9], offset: [0, 0, 0.02] } })
+    expect(asset('B').colorMatch?.gain).toEqual([1.1, 1, 0.9])
+    expect(asset('A').colorMatch).toBeUndefined()
+    st().setColorMatches({ B: undefined })
+    expect(asset('B').colorMatch).toBeUndefined()
+  })
+})

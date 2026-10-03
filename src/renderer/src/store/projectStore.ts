@@ -172,7 +172,9 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
     hasVideo: asBoolean(raw.hasVideo, true),
     hasAudio: asBoolean(raw.hasAudio, false),
     proxyPath: typeof raw.proxyPath === 'string' ? raw.proxyPath : undefined,
-    colorMatch: normalizeColorMatch(raw.colorMatch)
+    colorMatch: normalizeColorMatch(raw.colorMatch),
+    denoisedFrom:
+      typeof raw.denoisedFrom === 'string' && raw.denoisedFrom ? raw.denoisedFrom : undefined
   }
 }
 
@@ -626,6 +628,14 @@ interface ProjectState {
   restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
   /** カメラ間の色合わせを素材に付ける(undefined で外す)。まとめて1操作=履歴1件 */
   setColorMatches: (matches: Record<string, ColorMatch | undefined>) => void
+  /**
+   * 音声の素材を、ノイズを除いた音声に差し替える(パス)/ 元の録音へ戻す(null)。
+   * `history: false` は開いたときの自動の戻し(利用者の操作ではない)。
+   */
+  setAssetsDenoised: (
+    changes: Record<string, string | null>,
+    options?: { history?: boolean }
+  ) => void
   /**
    * 仮編集(構成・カット・アングル)を入れる。本編・同期で作ったトラック・発言テロップを入れ替え、
    * 手で足したトラック・テロップには触れない。取り消し1回で戻る
@@ -2313,6 +2323,28 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             a.id in matches ? { ...a, colorMatch: matches[a.id] } : a
           )
         }
+      }
+    }),
+
+  setAssetsDenoised: (changes, options) =>
+    set((state) => {
+      let changed = false
+      const assets = state.project.assets.map((a) => {
+        if (!(a.id in changes)) return a
+        const cleaned = changes[a.id]
+        if (cleaned) {
+          if (a.filePath === cleaned) return a
+          changed = true
+          return { ...a, filePath: cleaned, denoisedFrom: a.denoisedFrom ?? a.filePath }
+        }
+        if (!a.denoisedFrom) return a
+        changed = true
+        return { ...a, filePath: a.denoisedFrom, denoisedFrom: undefined }
+      })
+      if (!changed) return state
+      return {
+        ...(options?.history === false ? {} : pushHistory(state)),
+        project: { ...state.project, assets }
       }
     }),
 

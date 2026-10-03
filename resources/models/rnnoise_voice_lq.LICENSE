@@ -1,0 +1,11 @@
+rnnoise_voice_lq.rnnn
+
+Source: https://github.com/GregorR/rnnoise-models
+        leavened-quisling-2018-08-31/lq.rnnn
+        (expected signal: voice, including non-speech human sounds such as laughter;
+         expected noise: general)
+
+The repository states: "With the exception of the tools/ directory and this file,
+none of this work is creative and thus none of it is subject to copyright."
+
+The model is used with FFmpeg's arnndn filter (RNNoise, BSD-3-Clause, by Jean-Marc Valin).

@@ -50,6 +50,7 @@ export type StepId =
   | 'sync'
   | 'timeline'
   | 'color'
+  | 'denoise'
   | 'speakers'
   | 'transcribe'
   | 'structure'
@@ -81,6 +82,7 @@ export const STEPS: { id: StepId; label: string }[] = [
   { id: 'sync', label: 'カメラ・マイクの同期' },
   { id: 'timeline', label: 'タイムラインに並べる' },
   { id: 'color', label: 'カメラの色合わせ' },
+  { id: 'denoise', label: 'ピンマイクのノイズ除去' },
   { id: 'speakers', label: '話者の判定' },
   { id: 'transcribe', label: '文字起こし' },
   { id: 'structure', label: '構成(見どころ・不要な場面)' },
@@ -156,6 +158,7 @@ const initialSteps = (): Record<StepId, StepStatus> => ({
   sync: { state: 'wait', percent: 0 },
   timeline: { state: 'wait', percent: 0 },
   color: { state: 'wait', percent: 0 },
+  denoise: { state: 'wait', percent: 0 },
   speakers: { state: 'wait', percent: 0 },
   transcribe: { state: 'wait', percent: 0 },
   structure: { state: 'wait', percent: 0 },
@@ -354,6 +357,50 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     } catch (e) {
       setStep('color', { state: 'error', note: formatIpcError(e) })
       log(`カメラの色合わせができませんでした(色は元のまま): ${formatIpcError(e)}`)
+    }
+  }
+
+  /** ピンマイクの音声からノイズを除く。失敗しても編集は続ける(元の録音のまま) */
+  async function denoiseMics(): Promise<void> {
+    const project = useProjectStore.getState().project
+    const info = project.multicam
+    const micIds = new Set(info?.sources.filter((x) => x.kind === 'mic').map((x) => x.id))
+    const assets = project.assets.filter((a) =>
+      info?.files.some((f) => f.assetId === a.id && micIds.has(f.sourceId))
+    )
+    if (assets.length === 0) {
+      setStep('denoise', { state: 'skipped', note: 'ピンマイクがありません' })
+      return
+    }
+    setStep('denoise', { state: 'run', percent: 0, note: '準備中' })
+    const off = window.api.onDenoiseProgress((p) =>
+      setStep('denoise', { percent: p.percent, note: `${p.done}/${p.total} 本` })
+    )
+    try {
+      const sources = assets.map((a) => a.denoisedFrom ?? a.filePath)
+      const results = await window.api.denoiseRun(sources)
+      const changes: Record<string, string | null> = {}
+      results.forEach((r, i) => {
+        if (r.cleaned) changes[assets[i].id] = r.cleaned
+        else
+          log(
+            `ノイズ除去: ${assets[i].fileName} はできませんでした(元の録音のまま): ${r.error ?? ''}`
+          )
+      })
+      useProjectStore.getState().setAssetsDenoised(changes)
+      const done = Object.keys(changes).length
+      setStep('denoise', {
+        state: done > 0 ? 'done' : 'error',
+        percent: 100,
+        note: `${done}/${assets.length} 本`
+      })
+      log(`ピンマイクのノイズ除去: ${done} 本(素材一覧の右クリックで外せます)`)
+    } catch (e) {
+      const msg = formatIpcError(e)
+      setStep('denoise', { state: 'error', note: msg })
+      log(`ピンマイクのノイズ除去ができませんでした(元の録音のまま): ${msg}`)
+    } finally {
+      off()
     }
   }
 
@@ -781,6 +828,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           `タイムラインに並べました(基準カメラ: ${used.find((s) => s.id === layout.anchorSourceId)?.name ?? ''})`
         )
         await matchColors()
+        await denoiseMics()
         await transcribeEpisode(used, files, report, assetIdOf, layout.anchorSourceId)
         await structureAndCut()
       } catch (e) {
@@ -790,6 +838,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             'effects',
             'timeline',
             'color',
+            'denoise',
             'speakers',
             'transcribe',
             'structure',

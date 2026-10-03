@@ -1,3 +1,4 @@
+import type { DenoiseResult } from '@shared/denoise'
 import type { QcMeasurement } from '@shared/qc/media'
 import type { LlmRequest, LlmWorkerMessage } from '@shared/llm'
 type LlmProgressMessage = Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>
@@ -259,6 +260,19 @@ const api = {
   qcMeasure: (filePath: string): Promise<QcMeasurement> =>
     ipcRenderer.invoke(IPC.qcMeasure, filePath),
   qcCancel: (): Promise<void> => ipcRenderer.invoke(IPC.qcCancel),
+  denoiseRun: (sources: string[]): Promise<DenoiseResult[]> =>
+    ipcRenderer.invoke(IPC.denoiseRun, sources),
+  denoiseCancel: (): Promise<void> => ipcRenderer.invoke(IPC.denoiseCancel),
+  onDenoiseProgress: (
+    callback: (p: { done: number; total: number; percent: number }) => void
+  ): (() => void) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      p: { done: number; total: number; percent: number }
+    ): void => callback(p)
+    ipcRenderer.on(IPC.denoiseProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.denoiseProgress, listener)
+  },
   framesRgb: (
     requests: { path: string; time: number }[],
     size: { w: number; h: number }

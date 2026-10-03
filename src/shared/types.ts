@@ -20,6 +20,11 @@ export interface MediaAsset {
   proxyPath?: string
   /** カメラ間の色合わせ(基準カメラに合わせる補正)。書き出しとプレビューの両方に効く */
   colorMatch?: ColorMatch
+  /**
+   * ノイズを除いた音声に差し替えているとき、元の録音のパス(`filePath` はノイズを除いた音声を指す)。
+   * 外せば `filePath` をこれに戻す。差し替えた音声(キャッシュ)が無ければ、開いたときに自動で元へ戻す。
+   */
+  denoisedFrom?: string
 }
 
 export type TransitionType = 'none' | 'crossfade' | 'fade' | 'wipe'

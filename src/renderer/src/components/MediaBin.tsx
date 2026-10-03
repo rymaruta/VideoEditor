@@ -300,6 +300,17 @@ export function MediaBin(): React.JSX.Element {
     setImporting(false)
   }
 
+  async function denoiseAsset(asset: MediaAsset): Promise<void> {
+    setError(null)
+    try {
+      const [r] = await window.api.denoiseRun([asset.filePath])
+      if (r?.cleaned) useProjectStore.getState().setAssetsDenoised({ [asset.id]: r.cleaned })
+      else setError(r?.error ?? 'ノイズ除去ができませんでした')
+    } catch (e) {
+      setError(formatIpcError(e))
+    }
+  }
+
   /** 素材の右クリックメニューの中身。行に常に並べていたボタンと同じ操作 */
   function assetMenuItems(asset: MediaAsset): ContextMenuItem[] {
     const isMissing = missingAssetIds.includes(asset.id)
@@ -331,6 +342,18 @@ export function MediaBin(): React.JSX.Element {
       }
       if (asset.hasVideo) {
         items.push({ label: 'ハイライトを検出…', onSelect: () => setHighlightAssetId(asset.id) })
+      }
+      // ピンマイクのノイズ除去(声だけの素材)。外すと元の録音に戻る(元に戻すで再び掛かる)
+      if (asset.denoisedFrom) {
+        items.push({
+          label: 'ノイズ除去を外す(元の録音に戻す)',
+          onSelect: () => useProjectStore.getState().setAssetsDenoised({ [asset.id]: null })
+        })
+      } else if (asset.hasAudio && !asset.hasVideo) {
+        items.push({
+          label: 'ノイズ除去をかける(声を残して雑音を減らす)',
+          onSelect: () => void denoiseAsset(asset)
+        })
       }
       // 自動編集のカメラの色合わせ。合っていなければ外して元の色に戻せる(元に戻すで再び掛かる)
       if (asset.colorMatch) {

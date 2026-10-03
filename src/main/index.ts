@@ -5,6 +5,7 @@ import { detectFaces } from './faceService'
 import { cancelLlm, runLlm } from './llmService'
 import { cancelMeasureExport, measureExport } from './qcService'
 import { readFramesRgb } from './frameService'
+import { cancelDenoise, denoiseFiles } from './audioCleanService'
 import type { LlmRequest } from '@shared/llm'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
@@ -663,6 +664,12 @@ app.whenReady().then(() => {
     measureExport(filePath, (percent) => notifySender(event, IPC.qcProgress, percent))
   )
   ipcMain.handle(IPC.qcCancel, () => cancelMeasureExport())
+  ipcMain.handle(IPC.denoiseRun, (event, sources: string[]) =>
+    denoiseFiles(sources, (done, total, percent) =>
+      notifySender(event, IPC.denoiseProgress, { done, total, percent })
+    )
+  )
+  ipcMain.handle(IPC.denoiseCancel, () => cancelDenoise())
   ipcMain.handle(
     IPC.framesRgb,
     (event, requests: { path: string; time: number }[], size: { w: number; h: number }) =>
