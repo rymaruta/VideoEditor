@@ -18,6 +18,7 @@ const EXPORT_ENGINE_KEY = 've-export-engine'
 const EXPORT_QUALITY_KEY = 've-export-quality'
 const EXPORT_LOUDNESS_KEY = 've-export-loudness'
 const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
+const TELOP_DICTIONARY_KEY = 've-telop-dictionary'
 
 /** 書き出しの音量の扱い。`off` は正規化しない */
 export type ExportLoudness = 'off' | LoudnessTarget
@@ -94,6 +95,12 @@ interface SettingsState {
   setExportLoudness: (loudness: ExportLoudness) => void
   exportOpenFolderAfter: boolean
   setExportOpenFolderAfter: (open: boolean) => void
+  /**
+   * 用語の辞書(「誤 → 正」を1行ずつ)。発言テロップを作るときに当てる。
+   * 番組をまたいで使う(出演者名・地名・番組用語)
+   */
+  telopDictionary: string
+  setTelopDictionary: (text: string) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -182,6 +189,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setExportOpenFolderAfter: (open) => {
     writeSetting(EXPORT_OPEN_FOLDER_KEY, String(open))
     set({ exportOpenFolderAfter: open })
+  },
+  telopDictionary: (() => {
+    try {
+      return localStorage.getItem(TELOP_DICTIONARY_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })(),
+  setTelopDictionary: (text) => {
+    writeSetting(TELOP_DICTIONARY_KEY, text)
+    set({ telopDictionary: text })
   },
   shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {

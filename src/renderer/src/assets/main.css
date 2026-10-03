@@ -5902,3 +5902,19 @@ h3 {
 .new-episode-target input {
   width: 70px;
 }
+
+.dictionary-editor {
+  padding: 8px 16px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dictionary-editor p {
+  margin: 0;
+}
+.dictionary-editor textarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+}

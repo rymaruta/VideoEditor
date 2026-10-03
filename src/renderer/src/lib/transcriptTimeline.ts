@@ -7,6 +7,7 @@ import {
 import { utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
+import type { DictionaryEntry } from '@shared/telop/polish'
 import { buildTimedClips } from './timelineMath'
 
 /** 企画の全クリップ(本編・PiP・音声)を、タイムラインでの位置つきで並べる */
@@ -62,14 +63,15 @@ export function placedUtterances(project: Project): PlacedUtterance[] {
  */
 export function telopsFromTranscript(
   project: Project,
-  styles: readonly TelopStyleDef[]
+  styles: readonly TelopStyleDef[],
+  dictionary: readonly DictionaryEntry[] = []
 ): Omit<TextOverlay, 'id'>[] {
   const clips = placedClips(project)
   const base = defaultTextStyle()
   const out: Omit<TextOverlay, 'id'>[] = []
   for (const u of project.transcript ?? []) {
     const def = styleForSpeaker(styles, u.speaker)
-    for (const chunk of utteranceToTelopChunks(u)) {
+    for (const chunk of utteranceToTelopChunks(u, { dictionary })) {
       const r = utteranceTimelineRange(
         { assetId: u.assetId, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd },
         clips

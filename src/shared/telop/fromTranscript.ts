@@ -1,4 +1,5 @@
 import type { AsrWord, TranscriptUtterance } from '../transcript'
+import { applyDictionary, findBreak, removeFillers, type DictionaryEntry } from './polish'
 
 /**
  * 発話を発言テロップの単位に区切る(計画書 §5.8 の手前の、仮の整形)。
@@ -20,6 +21,10 @@ export interface ChunkOptions {
   maxLineChars?: number
   maxLines?: number
   minDurationSec?: number
+  /** 言いよどみを除く(既定は除く) */
+  removeFillers?: boolean
+  /** 用語の辞書 */
+  dictionary?: readonly DictionaryEntry[]
 }
 
 /** 表示用に整える(句点を落とし、読点を空白に) */
@@ -45,27 +50,13 @@ function charTimes(words: readonly AsrWord[]): { ch: string; start: number; end:
   return out
 }
 
-const BREAK_AFTER = /[、。！？!?,.\s]/u
-
-/** 1行に収まるよう改行を入れる(句読点の後を優先、無ければ文字数で) */
+/** 1行に収まるよう改行を入れる(禁則を守り、句読点・助詞の後を優先) */
 export function wrapTelopLines(text: string, maxLineChars: number): string[] {
   const chars = [...text]
   const lines: string[] = []
   let i = 0
   while (i < chars.length) {
-    if (chars.length - i <= maxLineChars) {
-      lines.push(chars.slice(i).join('').trim())
-      break
-    }
-    let cut = -1
-    // 行の後ろ半分にある区切りを探す
-    for (let k = i + maxLineChars; k > i + Math.floor(maxLineChars / 2); k--) {
-      if (BREAK_AFTER.test(chars[k - 1])) {
-        cut = k
-        break
-      }
-    }
-    if (cut < 0) cut = i + maxLineChars
+    const cut = findBreak(chars, i, maxLineChars)
     lines.push(chars.slice(i, cut).join('').trim())
     i = cut
   }
@@ -88,22 +79,17 @@ export function utteranceToTelopChunks(
   const chars = [...raw]
   let i = 0
   while (i < chars.length) {
-    let to = Math.min(chars.length, i + perChunk)
-    if (to < chars.length) {
-      for (let k = to; k > i + Math.floor(perChunk / 2); k--) {
-        if (BREAK_AFTER.test(chars[k - 1])) {
-          to = k
-          break
-        }
-      }
-    }
+    const to = findBreak(chars, i, perChunk)
     pieces.push({ from: i, to })
     i = to
   }
 
   const chunks: TelopChunk[] = []
   for (const p of pieces) {
-    const text = tidyTelopText(chars.slice(p.from, p.to).join(''))
+    let body = chars.slice(p.from, p.to).join('')
+    if (options.removeFillers !== false) body = removeFillers(body)
+    if (options.dictionary?.length) body = applyDictionary(body, options.dictionary)
+    const text = tidyTelopText(body)
     if (!text) continue
     const start = timed.length > 0 ? timed[p.from].start : u.sourceStart
     const end = timed.length > 0 ? timed[p.to - 1].end : u.sourceEnd

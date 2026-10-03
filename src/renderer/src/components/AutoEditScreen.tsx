@@ -7,6 +7,8 @@ import { useMenuCommand } from '../lib/menuCommands'
 import { formatTimecode } from '../lib/timelineRuler'
 import { placedUtterances, telopsFromTranscript } from '../lib/transcriptTimeline'
 import { usePresetStore } from '../store/presetStore'
+import { useSettingsStore } from '../store/settingsStore'
+import { parseDictionary } from '@shared/telop/polish'
 import { speakerColor } from '@shared/speaker'
 
 /**
@@ -67,6 +69,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const projectName = project.name
   const asrDevice = usePipelineStore((s) => s.asrDevice)
   const [telopsMade, setTelopsMade] = useState<number | null>(null)
+  const [dictOpen, setDictOpen] = useState(false)
+  const dictionary = useSettingsStore((s) => s.telopDictionary)
   const scenes = usePipelineStore((s) => s.scenes)
   const judgements = usePipelineStore((s) => s.judgements)
   const judgeSource = usePipelineStore((s) => s.judgeSource)
@@ -146,7 +150,11 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const doneIssues = reviewItems.filter((i) => reviewed.includes(i.key))
 
   function makeTelops(): void {
-    const overlays = telopsFromTranscript(project, usePresetStore.getState().captionPresets)
+    const overlays = telopsFromTranscript(
+      project,
+      usePresetStore.getState().captionPresets,
+      parseDictionary(useSettingsStore.getState().telopDictionary)
+    )
     if (overlays.length === 0) return
     const store = useProjectStore.getState()
     store.addTextOverlays(overlays)
@@ -420,6 +428,13 @@ export function AutoEditScreen(): React.JSX.Element | null {
                       )}
                     </span>
                     <div className="dialog-footer-spacer" />
+                    <button
+                      className="small-button"
+                      onClick={() => setDictOpen(!dictOpen)}
+                      title="聞き違い・出演者名・地名の表記を登録すると、テロップを作るときに直します"
+                    >
+                      用語の辞書…
+                    </button>
                     {telopsMade !== null ? (
                       <span className="form-note">
                         発言テロップを {telopsMade} 枚並べました(取り消しは Ctrl+Z)
@@ -434,6 +449,22 @@ export function AutoEditScreen(): React.JSX.Element | null {
                       </button>
                     )}
                   </div>
+                  {dictOpen && (
+                    <div className="dictionary-editor">
+                      <p className="form-note">
+                        1行に「誤 → 正」(例: 定選 →
+                        停戦)。発言テロップを作るとき・仮編集を作り直すときに当てます。番組をまたいで使います。
+                      </p>
+                      <textarea
+                        rows={5}
+                        value={dictionary}
+                        placeholder={'定選 → 停戦\n基礎川 → 木曽川'}
+                        onChange={(e) =>
+                          useSettingsStore.getState().setTelopDictionary(e.target.value)
+                        }
+                      />
+                    </div>
+                  )}
                   <ul className="transcript-list">
                     {utterances.map(({ utterance: u, start }) => (
                       <li

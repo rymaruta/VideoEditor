@@ -17,6 +17,7 @@ import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/d
 import { utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
+import type { DictionaryEntry } from '@shared/telop/polish'
 import { fetchJson, parseModelJsonObject } from './httpJson'
 
 /**
@@ -148,7 +149,12 @@ export function planRoughCut(
   scenes: Scene[],
   judgements: SceneJudgement[],
   activity: Uint8Array,
-  options: { targetSec: number; keep?: Record<string, boolean>; styles: readonly TelopStyleDef[] }
+  options: {
+    targetSec: number
+    keep?: Record<string, boolean>
+    styles: readonly TelopStyleDef[]
+    dictionary?: readonly DictionaryEntry[]
+  }
 ): RoughCutPlan {
   const lines = timedLines(project, info)
   const speech = lines.map((l) => ({ start: l.start, end: l.end }))
@@ -205,7 +211,7 @@ export function planRoughCut(
     const f = fileOfAsset.get(u.assetId)
     if (!f) continue
     const def = styleForSpeaker(options.styles, u.speaker)
-    for (const chunk of utteranceToTelopChunks(u)) {
+    for (const chunk of utteranceToTelopChunks(u, { dictionary: options.dictionary })) {
       const start = roughTimelineAt(cut.spans, toCommon(f, chunk.sourceStart))
       if (start === null) continue
       // 終わりがカットで落ちた所に掛かるなら、その区間の終わりまで

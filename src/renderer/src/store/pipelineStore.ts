@@ -6,6 +6,7 @@ import { buildMulticamLayout } from '@shared/sync/multicamLayout'
 import type { MediaAsset } from '@shared/types'
 import { useProjectStore } from './projectStore'
 import { useSettingsStore } from './settingsStore'
+import { parseDictionary } from '@shared/telop/polish'
 import { usePresetStore } from './presetStore'
 import type { Project } from '@shared/types'
 import type { MulticamInfo } from '@shared/sync/multicam'
@@ -348,7 +349,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       targetSec: get().targetMinutes * 60,
       keep: get().keep,
-      styles: usePresetStore.getState().captionPresets
+      styles: usePresetStore.getState().captionPresets,
+      dictionary: parseDictionary(useSettingsStore.getState().telopDictionary)
     })
     const raw = plan.selection.kept.reduce((t, id) => {
       const sc = get().scenes.find((x) => x.id === id)
