@@ -1,3 +1,4 @@
+import type { MulticamInfo, MulticamSource } from '@shared/sync/multicam'
 import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
 import { restyleOverlays, type TelopStyleDef } from '@shared/telop/styles'
@@ -371,8 +372,33 @@ function normalizeLoadedProject(project: Project): Project {
       normalizeTextOverlay
     ),
     beatGrid: normalizeBeatGrid(raw.beatGrid),
-    transcript: normalizeTranscript(raw.transcript)
+    transcript: normalizeTranscript(raw.transcript),
+    multicam: normalizeMulticam(raw.multicam)
   }
+}
+
+function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.anchorSourceId !== 'string') return undefined
+  const sources = asRecordArray<Record<string, unknown>>(r.sources)
+    .filter((s) => typeof s.id === 'string' && (s.kind === 'camera' || s.kind === 'mic'))
+    .map((s) => ({
+      id: s.id as string,
+      name: typeof s.name === 'string' ? s.name : '',
+      kind: s.kind as 'camera' | 'mic',
+      subject: typeof s.subject === 'string' && s.subject ? s.subject : undefined
+    }))
+  const files = asRecordArray<Record<string, unknown>>(r.files)
+    .filter((f) => typeof f.assetId === 'string' && typeof f.sourceId === 'string')
+    .map((f) => ({
+      assetId: f.assetId as string,
+      sourceId: f.sourceId as string,
+      start: asFinite(f.start, 0),
+      rate: asFinite(f.rate, 1) > 0 ? asFinite(f.rate, 1) : 1,
+      duration: asNonNegative(f.duration, 0)
+    }))
+  return { anchorSourceId: r.anchorSourceId, sources, files }
 }
 
 /** 文字起こしは作り直せる結果なので、形の崩れたものは黙って捨てる(企画を開けなくするより良い) */
@@ -502,7 +528,9 @@ interface ProjectState {
     layout: MulticamLayout,
     assetIdOf: Record<string, string>,
     /** 基準カメラに合わせた縦横比(指定すればプロジェクトの縦横比も同じ1回の操作で変える) */
-    aspectRatio?: AspectRatio
+    aspectRatio?: AspectRatio,
+    /** 機材の名前・役割(企画に残す。仮編集の作り直しに使う) */
+    sources?: MulticamSource[]
   ) => void
   setAssetProxyPath: (assetId: string, proxyPath: string) => void
   removeAsset: (assetId: string) => void
@@ -1252,7 +1280,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  addMulticamTimeline: (assets, layout, assetIdOf, aspectRatio) =>
+  addMulticamTimeline: (assets, layout, assetIdOf, aspectRatio, sources) =>
     set((state) => {
       const idOf = (fileId: string): string | undefined => assetIdOf[fileId]
       const main: Clip[] = layout.main
@@ -1307,6 +1335,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         project: {
           ...state.project,
           aspectRatio: aspectRatio ?? state.project.aspectRatio,
+          multicam: sources
+            ? {
+                anchorSourceId: layout.anchorSourceId,
+                sources,
+                files: layout.placed
+                  .filter((p) => assetIdOf[p.fileId])
+                  .map((p) => ({
+                    assetId: assetIdOf[p.fileId],
+                    sourceId: p.sourceId,
+                    start: p.start,
+                    rate: p.rate,
+                    duration: p.duration
+                  }))
+              }
+            : state.project.multicam,
           assets: [...state.project.assets, ...assets],
           clips: [...state.project.clips, ...main],
           videoOverlayTracks: [...state.project.videoOverlayTracks, ...cameras],

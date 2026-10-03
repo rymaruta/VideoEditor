@@ -46,6 +46,11 @@ export interface MulticamLayout {
   mics: { sourceId: string; name: string; pieces: LayoutPiece[] }[]
   /** 同期できず、並べなかった素材 */
   leftOut: string[]
+  /**
+   * 同期できた素材の位置(基準カメラの時計の共通の時間軸)。仮編集(構成・カット・アングル)を
+   * 後から作り直すために企画に残す
+   */
+  placed: { fileId: string; sourceId: string; start: number; rate: number; duration: number }[]
   /** タイムラインの長さ(秒) */
   duration: number
 }
@@ -164,6 +169,13 @@ export function buildMulticamLayout(
     cameras: group('camera'),
     mics: group('mic'),
     leftOut,
+    placed: synced.map((f) => ({
+      fileId: f.id,
+      sourceId: f.sourceId,
+      start: place.get(f.id)!.start,
+      rate: place.get(f.id)!.rate,
+      duration: f.duration
+    })),
     duration: timeline
   }
 }

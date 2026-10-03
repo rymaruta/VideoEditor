@@ -38,6 +38,8 @@ export interface EditableSource {
   id: string
   name: string
   kind: SourceKind | 'skip'
+  /** カメラが主に映している出演者(マイクの名前)。全体なら undefined */
+  subject?: string
   basis: string
   files: ProbedFile[]
 }
@@ -68,7 +70,10 @@ interface PipelineState {
 
   setScreenOpen: (open: boolean) => void
   scanFolder: (root: string) => Promise<void>
-  updateSource: (id: string, patch: Partial<Pick<EditableSource, 'name' | 'kind'>>) => void
+  updateSource: (
+    id: string,
+    patch: Partial<Pick<EditableSource, 'name' | 'kind' | 'subject'>>
+  ) => void
   runPipeline: () => Promise<void>
   cancel: () => void
   markReviewed: (key: string, reviewed: boolean) => void
@@ -406,7 +411,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               ? '16:9'
               : '9:16'
             : undefined
-        useProjectStore.getState().addMulticamTimeline(assets, layout, assetIdOf, aspect)
+        useProjectStore.getState().addMulticamTimeline(
+          assets,
+          layout,
+          assetIdOf,
+          aspect,
+          used.map((u) => ({
+            id: u.id,
+            name: u.name,
+            kind: u.kind as SourceKind,
+            subject: u.subject
+          }))
+        )
         // 再生できない形式(HEVC など)は、素材一覧の側でプレビュー用の変換を始める
         emitMenuCommand('assets.checkPreview')
         void window.api.libraryRemember(assets.map((a) => a.filePath)).catch(() => {})

@@ -1,3 +1,4 @@
+import type { MulticamInfo } from './sync/multicam'
 import type { TranscriptUtterance } from './transcript'
 export interface MediaAsset {
   id: string
@@ -179,6 +180,8 @@ export interface Project {
   beatGrid?: BeatGrid | null
   /** 文字起こしと話者(自動編集の工程で作る)。時刻は素材の時刻 */
   transcript?: TranscriptUtterance[]
+  /** 同期した収録素材の情報(新しい回を作ったとき)。仮編集を作り直すのに使う */
+  multicam?: MulticamInfo
 }
 
 export interface TemplateSegment {

@@ -103,6 +103,23 @@ function statsOf(track: MicTrack): MicStats | null {
   return { id: track.id, db, floor, speech, threshold }
 }
 
+/**
+ * どれかのマイクで音が鳴っている所(声・笑い・リアクション)を 1、静かな所を 0 にする(100Hz)。
+ * カットで間を詰めるときに使う。話者は問わない
+ */
+export function activityMask(tracks: readonly MicTrack[]): Uint8Array {
+  const stats = tracks.map(statsOf).filter((s): s is MicStats => s !== null)
+  const n = Math.max(0, ...stats.map((s) => s.db.length))
+  const out = new Uint8Array(n)
+  for (const st of stats) {
+    for (let t = 0; t < st.db.length; t++) {
+      const v = st.db[t]
+      if (!Number.isNaN(v) && v >= st.threshold) out[t] = 1
+    }
+  }
+  return out
+}
+
 /** 各時刻の持ち主(複数なら重なり)を決め、マイクごとの発話区間にする */
 export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = {}): SpeechTurn[] {
   const margin = options.marginDb ?? 6
