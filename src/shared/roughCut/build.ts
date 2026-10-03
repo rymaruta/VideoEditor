@@ -41,7 +41,11 @@ export interface RoughCut {
 /** 周りの音(基準カメラの音)の音量 */
 export const AMBIENCE_VOLUME = 0.35
 
-export function buildRoughCut(shots: readonly Shot[], info: MulticamInfo): RoughCut {
+export function buildRoughCut(
+  shots: readonly Shot[],
+  info: MulticamInfo,
+  options: { ambienceVolume?: number } = {}
+): RoughCut {
   const main: RoughMainClip[] = []
   // 本編: ショットを素材の切れ目で分けて並べる
   const placed: { start: number; end: number }[] = []
@@ -113,7 +117,7 @@ export function buildRoughCut(shots: readonly Shot[], info: MulticamInfo): Rough
       // ピンマイクが無ければ、基準カメラの音が声も兼ねるので小さくしない
       name: mics.length > 0 ? `周りの音(${anchor.name})` : `${anchor.name} の音`,
       sourceId: anchor.id,
-      volume: mics.length > 0 ? AMBIENCE_VOLUME : 1,
+      volume: mics.length > 0 ? (options.ambienceVolume ?? AMBIENCE_VOLUME) : 1,
       clips: audioFor(anchor.id)
     })
   }

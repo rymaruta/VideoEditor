@@ -104,7 +104,9 @@ const SE_MIN_GAP = 0.6
 export function planSoundEffects(
   effects: readonly { time: number; kind: EffectKind; text: string }[],
   sceneStarts: readonly number[],
-  kit: ShowKit
+  kit: ShowKit,
+  /** 1分あたりの上限(番組スタイル)。演出テロップの SE を先に、場面転換を後に残す */
+  limit?: { perMinute: number; durationSec: number }
 ): PlacedSound[] {
   const rot = new Rotation()
   const out: PlacedSound[] = []
@@ -119,6 +121,8 @@ export function planSoundEffects(
       .filter((t) => t > 0.5)
       .map((t) => ({ time: t, category: '場面転換', reason: '場面転換' }))
   ].sort((a, b) => a.time - b.time)
+  // 演出テロップの SE は 0、場面転換は 1(上限に掛かったら、数の大きい方から落とす)
+  const priority: number[] = []
   for (const w of wants) {
     const last = out[out.length - 1]
     if (last && w.time - last.startTime < SE_MIN_GAP) continue
@@ -132,8 +136,19 @@ export function planSoundEffects(
       volume: SE_VOLUME,
       reason: w.reason
     })
+    priority.push(w.category === '場面転換' ? 1 : 0)
   }
-  return out
+  if (!limit || !Number.isFinite(limit.perMinute)) return out
+  const max = Math.max(0, Math.floor((limit.perMinute * limit.durationSec) / 60))
+  if (out.length <= max) return out
+  // 演出テロップの SE を先に残す(同じ重みなら時刻の早い順)。並びは時刻の順のまま
+  const keep = new Set(
+    out
+      .map((_, i) => i)
+      .sort((a, b) => priority[a] - priority[b] || a - b)
+      .slice(0, max)
+  )
+  return out.filter((_, i) => keep.has(i))
 }
 
 export const BGM_VOLUME = 0.3
@@ -150,7 +165,8 @@ export function fallbackMood(kind: 'highlight' | 'normal' | 'unneeded'): BgmMood
  */
 export function planBgm(
   scenes: readonly { start: number; end: number; mood: BgmMood }[],
-  kit: ShowKit
+  kit: ShowKit,
+  volume = BGM_VOLUME
 ): PlacedSound[] {
   const rot = new Rotation()
   const out: PlacedSound[] = []
@@ -176,7 +192,7 @@ export function planBgm(
         startTime: t,
         inPoint: 0,
         outPoint: len,
-        volume: BGM_VOLUME,
+        volume,
         fadeIn: Math.min(first ? BGM_FADE : cross, len / 3),
         fadeOut: Math.min(last ? BGM_FADE : cross, len / 3),
         reason: `${r.mood}(${file.name})`

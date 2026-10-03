@@ -1,3 +1,4 @@
+import type { ShowStyle } from '@shared/style/showStyle'
 import type { Project, TextOverlay } from '@shared/types'
 import { toCommon, type MulticamInfo } from '@shared/sync/multicam'
 import {
@@ -182,13 +183,18 @@ export function planRoughCut(
     keep?: Record<string, boolean>
     styles: readonly TelopStyleDef[]
     dictionary?: readonly DictionaryEntry[]
+    /** 番組スタイル(過去回から学んだ間・ショットの長さ・周りの音の音量)。無ければ既定値 */
+    style?: ShowStyle
   }
 ): RoughCutPlan {
+  const tighten = options.style
+    ? { maxPauseSec: options.style.maxPauseSec, keepPauseSec: options.style.keepPauseSec }
+    : {}
   const lines = timedLines(project, info)
   const speech = lines.map((l) => ({ start: l.start, end: l.end }))
   // 長さの見込みは、場面ごとに詰めた後の長さで測る
   const tightenedLength = new Map(
-    scenes.map((s) => [s.id, totalLength(tightenRanges([s], activity, speech))])
+    scenes.map((s) => [s.id, totalLength(tightenRanges([s], activity, speech, tighten))])
   )
   const auto = selectScenes(
     scenes,
@@ -217,7 +223,8 @@ export function planRoughCut(
   const pieces = tightenRanges(
     kept.map((s) => ({ start: s.start, end: s.end, sceneId: s.id })),
     activity,
-    speech
+    speech,
+    tighten
   )
   const cameras = info.sources
     .filter((s) => s.kind === 'camera')
@@ -228,8 +235,16 @@ export function planRoughCut(
         .filter((f) => f.sourceId === s.id)
         .map((f) => ({ start: f.start, end: f.start + f.duration / f.rate }))
     }))
-  const shots = chooseAngles(pieces, cameras, info.anchorSourceId, lines)
-  const cut = buildRoughCut(shots, info)
+  const shots = chooseAngles(
+    pieces,
+    cameras,
+    info.anchorSourceId,
+    lines,
+    options.style
+      ? { minShotSec: options.style.minShotSec, maxShotSec: options.style.maxShotSec }
+      : {}
+  )
+  const cut = buildRoughCut(shots, info, { ambienceVolume: options.style?.ambienceVolume })
 
   // 発言テロップ: 話者に割り当てたテロップスタイルで、仮編集の時刻に置く
   const base = defaultTextStyle()

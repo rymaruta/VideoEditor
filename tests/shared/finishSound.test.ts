@@ -64,6 +64,25 @@ describe('planSoundEffects', () => {
   })
 })
 
+describe('planSoundEffects の上限(番組スタイル)', () => {
+  it('1分あたりの上限を超えたら、場面転換から落とす', () => {
+    const r = planSoundEffects(
+      [
+        { time: 3, kind: 'tsukkomi', text: 'a' },
+        { time: 30, kind: 'tsukkomi', text: 'b' }
+      ],
+      [10, 20, 40],
+      kit,
+      { perMinute: 3, durationSec: 60 }
+    )
+    expect(r.map((x) => [x.startTime, x.path])).toEqual([
+      [3, '/se/t1.wav'],
+      [10, '/se/w.wav'],
+      [30, '/se/t2.wav']
+    ])
+  })
+})
+
 describe('planBgm', () => {
   it('同じ雰囲気の場面は1曲で通し、曲が短ければ重ねながら繰り返す。雰囲気が変われば曲を替える', () => {
     const r = planBgm(

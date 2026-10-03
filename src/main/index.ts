@@ -672,6 +672,14 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.denoiseCancel, () => cancelDenoise())
   ipcMain.handle(IPC.showKitScan, (_e, root: string) => scanShowKit(root))
+  ipcMain.handle(IPC.selectProjectFiles, async (event) => {
+    const result = await showOpenDialogForSender(event, {
+      title: '学ばせる過去回のプロジェクトを選ぶ(人が仕上げたもの・複数可)',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+    })
+    return result.canceled ? [] : result.filePaths
+  })
   ipcMain.handle(IPC.showKitSelectFolder, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {

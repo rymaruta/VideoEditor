@@ -265,6 +265,7 @@ const api = {
     ipcRenderer.invoke(IPC.denoiseRun, sources),
   denoiseCancel: (): Promise<void> => ipcRenderer.invoke(IPC.denoiseCancel),
   showKitScan: (root: string): Promise<ShowKit> => ipcRenderer.invoke(IPC.showKitScan, root),
+  selectProjectFiles: (): Promise<string[]> => ipcRenderer.invoke(IPC.selectProjectFiles),
   showKitSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.showKitSelectFolder),
   onDenoiseProgress: (
     callback: (p: { done: number; total: number; percent: number }) => void

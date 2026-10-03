@@ -3,6 +3,8 @@ import { useProjectStore } from '../store/projectStore'
 import { usePipelineStore, type EditableSource } from '../store/pipelineStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { useSettingsStore } from '../store/settingsStore'
+import type { Project } from '@shared/types'
+import { DEFAULT_SHOW_STYLE, describeShowStyle, learnShowStyle } from '@shared/style/showStyle'
 import { formatTimecode } from '../lib/timelineRuler'
 import { sourceDuration } from '@shared/ingest/classify'
 
@@ -45,6 +47,10 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
   const updateSource = usePipelineStore((s) => s.updateSource)
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const showKitFolder = useSettingsStore((s) => s.showKitFolder)
+  const showStyle = useSettingsStore((s) => s.showStyle)
+  const setShowStyle = useSettingsStore((s) => s.setShowStyle)
+  const [learning, setLearning] = useState(false)
+  const [styleError, setStyleError] = useState<string | null>(null)
   const setShowKitFolder = useSettingsStore((s) => s.setShowKitFolder)
 
   const [open, setOpen] = useState(false)
@@ -82,6 +88,38 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
     .map((s) => s.name.trim())
   const canCreate =
     name.trim() !== '' && scan !== null && !scanning && usable.some((s) => s.kind === 'camera')
+
+  /** 過去回のプロジェクトを読み、番組スタイルを集計する */
+  async function learnStyle(): Promise<void> {
+    setStyleError(null)
+    const paths = await window.api.selectProjectFiles()
+    if (paths.length === 0) return
+    setLearning(true)
+    try {
+      const projects: Project[] = []
+      const names: string[] = []
+      for (const p of paths) {
+        try {
+          projects.push(await window.api.loadProject(p))
+          names.push(p.split(/[/\\]/).pop() ?? p)
+        } catch {
+          // 読めない回は飛ばす(全部読めなければ下で知らせる)
+        }
+      }
+      if (projects.length === 0) {
+        setStyleError('選んだプロジェクトを読めませんでした')
+        return
+      }
+      const learned = learnShowStyle(projects)
+      if (Object.keys(learned.learned).length === 0) {
+        setStyleError('集計できる編集(本編のクリップ・テロップ・SE・BGM)が見つかりませんでした')
+        return
+      }
+      setShowStyle({ style: learned.style, sources: names })
+    } finally {
+      setLearning(false)
+    }
+  }
 
   async function pickFolder(): Promise<void> {
     const folder = await window.api.footageSelectFolder()
@@ -282,6 +320,36 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                 </button>
               )}
             </div>
+          </div>
+
+          <div className="form-stack">
+            <span>番組スタイル(間・ショットの長さ・SE の数・BGM と周りの音の音量)</span>
+            <div className="new-episode-style">
+              <span className="form-note" title={showStyle?.sources.join('\n')}>
+                {showStyle
+                  ? `過去回 ${showStyle.sources.length} 本から学んだ値: ${describeShowStyle(showStyle.style)}`
+                  : `既定値: ${describeShowStyle(DEFAULT_SHOW_STYLE)}`}
+              </span>
+              <button
+                className="small-button"
+                aria-label="過去回から番組スタイルを学ぶ"
+                title="人が仕上げた過去回のプロジェクト(.veproj)を選ぶと、その回の間・ショットの長さ・SE の数・音量を集計して、次の自動編集に使います"
+                disabled={learning}
+                onClick={() => void learnStyle()}
+              >
+                {learning ? '集計中…' : '過去回から学ぶ…'}
+              </button>
+              {showStyle && (
+                <button
+                  className="small-button"
+                  aria-label="番組スタイルを既定に戻す"
+                  onClick={() => setShowStyle(null)}
+                >
+                  既定に戻す
+                </button>
+              )}
+            </div>
+            {styleError && <p className="error-text">{styleError}</p>}
           </div>
 
           <label className="new-episode-target">

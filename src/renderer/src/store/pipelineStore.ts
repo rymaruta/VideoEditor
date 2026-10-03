@@ -445,12 +445,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const effects = effectTelops
         .filter((t) => t.effectId && kindOf.has(t.effectId))
         .map((t) => ({ time: t.startTime, kind: kindOf.get(t.effectId!)!, text: t.text }))
+      const style = useSettingsStore.getState().showStyle?.style
+      const duration = spans.reduce((t, x) => Math.max(t, x.timeline + (x.end - x.start)), 0)
       const se = planSoundEffects(
         effects,
         scenes.map((x) => x.start),
-        kit
+        kit,
+        style ? { perMinute: style.sePerMinute, durationSec: duration } : undefined
       )
-      const bgm = planBgm(scenes, kit)
+      const bgm = planBgm(scenes, kit, style?.bgmVolume)
       const cg = planCg(allTelops, kit.cg)
       // 置く素材を読み込む(すでにあるものは使い回す)
       const have = new Set(useProjectStore.getState().project.assets.map((a) => a.filePath))
@@ -564,7 +567,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       targetSec: get().targetMinutes * 60,
       keep: get().keep,
       styles: usePresetStore.getState().captionPresets,
-      dictionary: parseDictionary(useSettingsStore.getState().telopDictionary)
+      dictionary: parseDictionary(useSettingsStore.getState().telopDictionary),
+      style: useSettingsStore.getState().showStyle?.style
     })
     const raw = plan.selection.kept.reduce((t, id) => {
       const sc = get().scenes.find((x) => x.id === id)

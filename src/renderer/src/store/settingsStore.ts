@@ -1,3 +1,4 @@
+import { normalizeShowStyle, type ShowStyle } from '@shared/style/showStyle'
 import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
 import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
@@ -22,6 +23,7 @@ const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
 const TELOP_DICTIONARY_KEY = 've-telop-dictionary'
 const QC_WORDS_KEY = 've-qc-words'
 const SHOW_KIT_KEY = 've-show-kit-folder'
+const SHOW_STYLE_KEY = 've-show-style'
 const AI_PROVIDER_KEY = 've-ai-provider'
 
 /** 書き出しの音量の扱い。`off` は正規化しない */
@@ -111,6 +113,9 @@ interface SettingsState {
   /** 番組素材フォルダ(中に SE / BGM / CG)。自動編集が SE・BGM を選ぶ。空なら置かない */
   showKitFolder: string
   setShowKitFolder: (folder: string) => void
+  /** 過去回から学んだ番組スタイル(無ければ既定値で編集する)と、学んだ回の名前 */
+  showStyle: { style: ShowStyle; sources: string[] } | null
+  setShowStyle: (value: { style: ShowStyle; sources: string[] } | null) => void
   /** 構成の判定・演出テロップの提案に使う AI(既定はこのPC。無料・素材が外に出ない) */
   aiProvider: AiProvider
   setAiProvider: (provider: AiProvider) => void
@@ -235,6 +240,27 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setShowKitFolder: (folder) => {
     writeSetting(SHOW_KIT_KEY, folder)
     set({ showKitFolder: folder })
+  },
+  showStyle: (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SHOW_STYLE_KEY) ?? 'null') as {
+        style?: unknown
+        sources?: unknown
+      } | null
+      if (!raw || typeof raw !== 'object') return null
+      return {
+        style: normalizeShowStyle(raw.style),
+        sources: Array.isArray(raw.sources)
+          ? raw.sources.filter((x): x is string => typeof x === 'string')
+          : []
+      }
+    } catch {
+      return null
+    }
+  })(),
+  setShowStyle: (value) => {
+    writeSetting(SHOW_STYLE_KEY, JSON.stringify(value))
+    set({ showStyle: value })
   },
   aiProvider: readChoice<AiProvider>(AI_PROVIDER_KEY, ['local', 'gemini', 'off'], 'local'),
   setAiProvider: (provider) => {
