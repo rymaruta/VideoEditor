@@ -1,4 +1,4 @@
-import { parentPort, workerData } from 'worker_threads'
+import { childMain } from './childMain'
 import { spawn } from 'child_process'
 import { decodeYunet, YUNET_SIZE } from './yunet'
 import type { FaceBox } from '@shared/telop/avoidFaces'
@@ -21,7 +21,8 @@ interface WorkerInput {
   modelPath: string
 }
 
-const input = workerData as WorkerInput
+let input: WorkerInput
+let post: (m: unknown) => void
 
 function frameBgr(req: FaceRequest, w: number, h: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -92,11 +93,13 @@ async function run(): Promise<void> {
     } catch {
       results.push(null)
     }
-    parentPort!.postMessage({ type: 'progress', done: k + 1, total: input.requests.length })
+    post({ type: 'progress', done: k + 1, total: input.requests.length })
   }
-  parentPort!.postMessage({ type: 'done', results })
+  post({ type: 'done', results })
 }
 
-run().catch((e: unknown) =>
-  parentPort!.postMessage({ type: 'error', message: e instanceof Error ? e.message : String(e) })
-)
+childMain<WorkerInput>(async (data, send) => {
+  input = data
+  post = send
+  await run()
+})

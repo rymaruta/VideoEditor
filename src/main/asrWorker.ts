@@ -1,4 +1,4 @@
-import { parentPort, workerData } from 'worker_threads'
+import { childMain } from './childMain'
 import { readWindow } from './audioPcm'
 import type { AsrDevice, AsrJob, AsrWorkerMessage } from '@shared/transcript'
 
@@ -21,8 +21,8 @@ interface WorkerInput {
   devices?: AsrDevice[]
 }
 
-const input = workerData as WorkerInput
-const post = (m: AsrWorkerMessage): void => parentPort!.postMessage(m)
+let input: WorkerInput
+let post: (m: AsrWorkerMessage) => void
 
 export const ASR_MODEL_ID = 'onnx-community/whisper-large-v3-turbo_timestamped'
 const SAMPLE_RATE = 16000
@@ -132,6 +132,8 @@ async function run(): Promise<void> {
   post({ type: 'done' })
 }
 
-run().catch((e: unknown) =>
-  post({ type: 'error', message: e instanceof Error ? e.message : String(e) })
-)
+childMain<WorkerInput>(async (data, send) => {
+  input = data
+  post = send
+  await run()
+})
