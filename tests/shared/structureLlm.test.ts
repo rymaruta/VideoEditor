@@ -82,4 +82,15 @@ describe('parseStructureAnswer', () => {
     ).toEqual([])
     expect(parseStructureAnswer('nonsense', scenes)).toEqual([])
   })
+
+  it('場面 ID ごとの形(このPCの AI)も受け付ける', () => {
+    const r = parseStructureAnswer(
+      {
+        s1: { score: 80, kind: 'highlight', title: 't', reason: 'r' },
+        s9: { score: 1, kind: 'normal' }
+      },
+      scenes
+    )
+    expect(r.map((x) => [x.sceneId, x.score, x.kind])).toEqual([['s1', 80, 'highlight']])
+  })
 })

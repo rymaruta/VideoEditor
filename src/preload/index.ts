@@ -1,3 +1,5 @@
+import type { LlmRequest, LlmWorkerMessage } from '@shared/llm'
+type LlmProgressMessage = Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>
 import type { FaceBox } from '@shared/telop/avoidFaces'
 import type { AsrJob, AsrJobResult, AsrWorkerMessage } from '@shared/transcript'
 type AsrProgressMessage = Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 'error' }>
@@ -250,6 +252,14 @@ const api = {
     ipcRenderer.invoke(IPC.footageEnvelopes, paths),
   asrRun: (jobs: AsrJob[]): Promise<AsrJobResult[]> => ipcRenderer.invoke(IPC.asrRun, jobs),
   asrCancel: (): Promise<void> => ipcRenderer.invoke(IPC.asrCancel),
+  llmRun: (requests: LlmRequest[]): Promise<(unknown | null)[]> =>
+    ipcRenderer.invoke(IPC.llmRun, requests),
+  llmCancel: (): Promise<void> => ipcRenderer.invoke(IPC.llmCancel),
+  onLlmProgress: (callback: (m: LlmProgressMessage) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, m: LlmProgressMessage): void => callback(m)
+    ipcRenderer.on(IPC.llmProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.llmProgress, listener)
+  },
   faceDetect: (
     requests: { path: string; time: number; width: number; height: number }[]
   ): Promise<(FaceBox[] | null)[]> => ipcRenderer.invoke(IPC.faceDetect, requests),

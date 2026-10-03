@@ -12,6 +12,8 @@ export interface StructureRequestOptions {
   targetSec: number
   /** 編集方針などの自由記入 */
   note?: string
+  /** 答えの形: list = {"scenes":[...]}(Gemini)、keyed = {"s1":{...}}(このPCの AI。形はスキーマで縛る) */
+  answerFormat?: 'list' | 'keyed'
 }
 
 /** 1回に送る場面の数と文字数の上限 */
@@ -73,8 +75,11 @@ ${options.note ? `編集方針: ${options.note}\n` : ''}
 場面:
 ${list}
 
-次の JSON だけを返してください:
-{"scenes":[{"id":"場面のID","score":0,"kind":"normal","title":"","reason":""}]}`
+${
+  options.answerFormat === 'keyed'
+    ? '場面の ID ごとに、title・reason(先に理由)・kind・score を JSON で返してください。'
+    : '次の JSON だけを返してください:\n{"scenes":[{"id":"場面のID","score":0,"kind":"normal","title":"","reason":""}]}'
+}`
 }
 
 const KINDS: SceneKind[] = ['highlight', 'normal', 'unneeded']
@@ -85,10 +90,17 @@ const KINDS: SceneKind[] = ['highlight', 'normal', 'unneeded']
  */
 export function parseStructureAnswer(answer: unknown, scenes: readonly Scene[]): SceneJudgement[] {
   const ids = new Set(scenes.map((s) => s.id))
-  const list =
-    answer && typeof answer === 'object' && Array.isArray((answer as { scenes?: unknown }).scenes)
-      ? ((answer as { scenes: unknown[] }).scenes as unknown[])
-      : []
+  // 2つの形を受け付ける: {"scenes":[{id,...}]}(Gemini)と {"s1":{...},"s2":{...}}(このPCの AI。
+  // 出力の形を場面ごとの必須項目で縛るので、場面の抜けが起きない)
+  let list: unknown[] = []
+  if (answer && typeof answer === 'object') {
+    const o = answer as Record<string, unknown>
+    if (Array.isArray(o.scenes)) list = o.scenes
+    else
+      list = Object.entries(o)
+        .filter(([k, v]) => ids.has(k) && v && typeof v === 'object')
+        .map(([k, v]) => ({ ...(v as Record<string, unknown>), id: k }))
+  }
   const out = new Map<string, SceneJudgement>()
   for (const item of list) {
     if (!item || typeof item !== 'object') continue
@@ -109,4 +121,26 @@ export function parseStructureAnswer(answer: unknown, scenes: readonly Scene[]):
     })
   }
   return [...out.values()]
+}
+
+/**
+ * このPCの AI に渡す、出力の形(JSON スキーマ)。場面の ID を必須の項目にして、抜けを起こさない。
+ * 理由を点数より先に書かせる(先に根拠を書かせると判定が安定する)。
+ */
+export function structureSchema(scenes: readonly Scene[]): Record<string, unknown> {
+  const item = {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      reason: { type: 'string' },
+      kind: { enum: KINDS },
+      score: { type: 'integer' }
+    },
+    required: ['title', 'reason', 'kind', 'score']
+  }
+  return {
+    type: 'object',
+    properties: Object.fromEntries(scenes.map((s) => [s.id, item])),
+    required: scenes.map((s) => s.id)
+  }
 }

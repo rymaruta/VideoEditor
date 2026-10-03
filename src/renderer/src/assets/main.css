@@ -5925,3 +5925,8 @@ h3 {
 .structure-row:has(.effects-body) {
   grid-template-columns: 18px 70px 70px minmax(0, 1fr);
 }
+
+.structure-controls select {
+  height: 26px;
+  padding: 0 6px;
+}

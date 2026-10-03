@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
 import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
 import type { LoudnessTarget } from '@shared/loudness'
+import type { AiProvider } from '@shared/llm'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
@@ -19,6 +20,7 @@ const EXPORT_QUALITY_KEY = 've-export-quality'
 const EXPORT_LOUDNESS_KEY = 've-export-loudness'
 const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
 const TELOP_DICTIONARY_KEY = 've-telop-dictionary'
+const AI_PROVIDER_KEY = 've-ai-provider'
 
 /** 書き出しの音量の扱い。`off` は正規化しない */
 export type ExportLoudness = 'off' | LoudnessTarget
@@ -101,6 +103,9 @@ interface SettingsState {
    */
   telopDictionary: string
   setTelopDictionary: (text: string) => void
+  /** 構成の判定・演出テロップの提案に使う AI(既定はこのPC。無料・素材が外に出ない) */
+  aiProvider: AiProvider
+  setAiProvider: (provider: AiProvider) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -200,6 +205,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setTelopDictionary: (text) => {
     writeSetting(TELOP_DICTIONARY_KEY, text)
     set({ telopDictionary: text })
+  },
+  aiProvider: readChoice<AiProvider>(AI_PROVIDER_KEY, ['local', 'gemini', 'off'], 'local'),
+  setAiProvider: (provider) => {
+    writeSetting(AI_PROVIDER_KEY, provider)
+    set({ aiProvider: provider })
   },
   shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {

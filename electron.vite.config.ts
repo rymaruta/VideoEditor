@@ -8,7 +8,7 @@ export default defineConfig({
       rollupOptions: {
         // ネイティブのアドオン(.node)は取り込めないので、実行時に node_modules から読む
         // (音声認識は @huggingface/transformers 経由で読まれるので元から外にある)
-        external: ['onnxruntime-node']
+        external: ['onnxruntime-node', 'node-llama-cpp']
       }
     },
     resolve: {

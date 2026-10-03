@@ -9,7 +9,14 @@ import {
   type Selection,
   type TimedLine
 } from '@shared/structure/scenes'
-import { buildStructurePrompt, chunkScenes, parseStructureAnswer } from '@shared/structure/llm'
+import {
+  buildStructurePrompt,
+  chunkScenes,
+  parseStructureAnswer,
+  structureSchema
+} from '@shared/structure/llm'
+import type { AiProvider } from '@shared/llm'
+import { askAiJson, type AiProgress } from './ai'
 import { tightenRanges, totalLength, type CutRange } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
 import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
@@ -19,6 +26,7 @@ import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/st
 import { defaultTextStyle } from '@shared/textStyle'
 import {
   buildEffectPrompt,
+  effectSchema,
   EFFECT_DURATION_SEC,
   EFFECT_LABEL,
   effectStyle,
@@ -29,18 +37,11 @@ import {
 import { stackSimultaneousTelops } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
 import type { DictionaryEntry } from '@shared/telop/polish'
-import { fetchJson, parseModelJsonObject } from './httpJson'
 
 /**
  * 仮編集(計画書 フェーズ2: 構成 → カット → アングルの切り替え)を、企画の文字起こしと同期結果から作る。
  * 計算は `@shared/structure` `@shared/cut` `@shared/angles` `@shared/roughCut`。ここはそれをつなぐだけ。
  */
-
-const GEMINI_MODEL = 'gemini-flash-latest'
-
-interface GeminiResponse {
-  candidates?: { content?: { parts?: { text?: string }[] } }[]
-}
 
 /** 発話を共通の時間軸の行にする(声を拾った素材の位置から換算) */
 export function timedLines(project: Project, info: MulticamInfo): TimedLine[] {
@@ -100,35 +101,47 @@ export async function loadActivity(project: Project, info: MulticamInfo): Promis
 export async function judgeScenes(
   scenes: Scene[],
   totalSec: number,
-  options: { apiKey: string; episodeName: string; targetSec: number; note?: string },
-  onProgress?: (done: number, total: number) => void
-): Promise<{ judgements: SceneJudgement[]; source: 'ai' | 'heuristic'; failure?: string }> {
+  options: {
+    provider: AiProvider
+    apiKey: string
+    episodeName: string
+    targetSec: number
+    note?: string
+  },
+  onProgress?: (p: AiProgress) => void
+): Promise<{
+  judgements: SceneJudgement[]
+  source: 'ai' | 'heuristic'
+  failure?: string
+  model?: string
+  device?: string
+}> {
   const fallback = heuristicJudgements(scenes)
-  if (!options.apiKey) return { judgements: fallback, source: 'heuristic' }
+  if (options.provider === 'off' || (options.provider === 'gemini' && !options.apiKey)) {
+    return { judgements: fallback, source: 'heuristic' }
+  }
   const chunks = chunkScenes(scenes)
+  const answerFormat = options.provider === 'local' ? 'keyed' : 'list'
   const got = new Map<string, SceneJudgement>()
+  let model: string | undefined
+  let device: string | undefined
   try {
-    for (let i = 0; i < chunks.length; i++) {
-      onProgress?.(i, chunks.length)
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(options.apiKey)}`
-      const data = await fetchJson<GeminiResponse>(
-        url,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: buildStructurePrompt(chunks[i], totalSec, options) }] }],
-            generationConfig: { responseMimeType: 'application/json' }
-          })
-        },
-        'Gemini API'
-      )
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-      if (!text) continue
-      for (const j of parseStructureAnswer(parseModelJsonObject(text, 'Gemini API'), chunks[i])) {
-        got.set(j.sceneId, j)
-      }
-    }
+    const r = await askAiJson(
+      options.provider,
+      options.apiKey,
+      chunks.map((c) => ({
+        prompt: buildStructurePrompt(c, totalSec, { ...options, answerFormat }),
+        schema: structureSchema(c),
+        maxTokens: 200 * c.length + 200
+      })),
+      onProgress
+    )
+    model = r.model
+    device = r.device
+    r.results.forEach((answer, i) => {
+      if (answer === null) return
+      for (const j of parseStructureAnswer(answer, chunks[i])) got.set(j.sceneId, j)
+    })
   } catch (e) {
     return {
       judgements: fallback,
@@ -136,9 +149,13 @@ export async function judgeScenes(
       failure: e instanceof Error ? e.message : String(e)
     }
   }
+  if (got.size === 0)
+    return { judgements: fallback, source: 'heuristic', failure: 'AI が答えませんでした' }
   return {
     judgements: scenes.map((s) => got.get(s.id) ?? fallback.find((f) => f.sceneId === s.id)!),
-    source: 'ai'
+    source: 'ai',
+    model,
+    device
   }
 }
 
@@ -273,34 +290,32 @@ export function effectLines(
   return out.sort((a, b) => a.start - b.start)
 }
 
-/** Gemini に演出テロップを提案させる(発言は 300 件ずつ) */
+/** AI に演出テロップを提案させる(発言は 200 件ずつ) */
 export async function proposeEffects(
   lines: EffectLine[],
-  options: { apiKey: string; episodeName: string; note?: string }
+  options: {
+    provider: Exclude<AiProvider, 'off'>
+    apiKey: string
+    episodeName: string
+    note?: string
+  },
+  onProgress?: (p: AiProgress) => void
 ): Promise<EffectProposal[]> {
-  const out: EffectProposal[] = []
-  for (let i = 0; i < lines.length; i += 300) {
-    const chunk = lines.slice(i, i + 300)
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(options.apiKey)}`
-    const data = await fetchJson<GeminiResponse>(
-      url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            { parts: [{ text: buildEffectPrompt(chunk, options.episodeName, options.note) }] }
-          ],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      },
-      'Gemini API'
-    )
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!text) continue
-    out.push(...parseEffectAnswer(parseModelJsonObject(text, 'Gemini API'), chunk))
-  }
-  return out
+  const chunks: EffectLine[][] = []
+  for (let i = 0; i < lines.length; i += 200) chunks.push(lines.slice(i, i + 200))
+  const r = await askAiJson(
+    options.provider,
+    options.apiKey,
+    chunks.map((c) => ({
+      prompt: buildEffectPrompt(c, options.episodeName, options.note),
+      schema: effectSchema(c),
+      maxTokens: 2048
+    })),
+    onProgress
+  )
+  return r.results.flatMap((answer, i) =>
+    answer === null ? [] : parseEffectAnswer(answer, chunks[i])
+  )
 }
 
 /** 選んだ提案を、仮編集のタイムラインに置く(発言の終わりから。前の演出テロップとは重ねない) */

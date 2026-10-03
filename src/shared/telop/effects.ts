@@ -170,3 +170,27 @@ export function effectStyle(kind: EffectKind): TextStyle {
 
 /** 演出テロップを出す長さ(秒) */
 export const EFFECT_DURATION_SEC = 2.2
+
+/** このPCの AI に渡す、演出テロップの出力の形。「どの発言の後か」は実在する発言の ID からしか選べない */
+export function effectSchema(lines: readonly EffectLine[]): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      effects: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            after: { enum: lines.map((l) => l.id) },
+            kind: { enum: Object.keys(EFFECT_LABEL) },
+            reason: { type: 'string' },
+            text: { type: 'string' },
+            confidence: { type: 'number' }
+          },
+          required: ['after', 'kind', 'reason', 'text', 'confidence']
+        }
+      }
+    },
+    required: ['effects']
+  }
+}

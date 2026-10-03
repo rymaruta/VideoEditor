@@ -9,6 +9,7 @@ import { placedUtterances, telopsFromTranscript } from '../lib/transcriptTimelin
 import { usePresetStore } from '../store/presetStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { parseDictionary } from '@shared/telop/polish'
+import type { AiProvider } from '@shared/llm'
 import { speakerColor } from '@shared/speaker'
 import { AUTO_PLACE_CONFIDENCE, EFFECT_LABEL } from '@shared/telop/effects'
 
@@ -72,6 +73,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const [telopsMade, setTelopsMade] = useState<number | null>(null)
   const [dictOpen, setDictOpen] = useState(false)
   const dictionary = useSettingsStore((s) => s.telopDictionary)
+  const aiProvider = useSettingsStore((s) => s.aiProvider)
   const scenes = usePipelineStore((s) => s.scenes)
   const judgements = usePipelineStore((s) => s.judgements)
   const judgeSource = usePipelineStore((s) => s.judgeSource)
@@ -525,6 +527,19 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     onChange={(e) => usePipelineStore.getState().setEditNote(e.target.value)}
                   />
                 </label>
+                <label title="構成の判定と演出テロップの提案に使う AI">
+                  AI
+                  <select
+                    value={aiProvider}
+                    onChange={(e) =>
+                      useSettingsStore.getState().setAiProvider(e.target.value as AiProvider)
+                    }
+                  >
+                    <option value="local">このPC(無料・素材は外に出ない)</option>
+                    <option value="gemini">Gemini(鍵が必要)</option>
+                    <option value="off">使わない(簡易の点数)</option>
+                  </select>
+                </label>
                 <div className="dialog-footer-spacer" />
                 <button
                   className="small-button"
@@ -540,8 +555,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                   {roughCut.kept} 場面を残す · {roughCut.dropped} 場面を落とす · 仕上がり{' '}
                   {formatTimecode(roughCut.duration, 30)} · ショット {roughCut.shots} · 発言テロップ{' '}
                   {roughCut.telops}
-                  {judgeSource === 'heuristic' &&
-                    ' · 判定は簡易の点数(Gemini の鍵を設定すると AI で判定します)'}
+                  {judgeSource === 'heuristic' && ' · 判定は簡易の点数'}
                 </p>
               )}
               {scenes.length === 0 ? (

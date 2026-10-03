@@ -2,6 +2,8 @@ import { cachedEnvelope } from './audioPcm'
 import { stat } from 'fs/promises'
 import { cancelAsr, runAsr } from './asrService'
 import { detectFaces } from './faceService'
+import { cancelLlm, runLlm } from './llmService'
+import type { LlmRequest } from '@shared/llm'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
@@ -651,6 +653,10 @@ app.whenReady().then(() => {
     runAsr(jobs, (m) => notifySender(event, IPC.asrProgress, m))
   )
   ipcMain.handle(IPC.asrCancel, () => cancelAsr())
+  ipcMain.handle(IPC.llmRun, (event, requests: LlmRequest[]) =>
+    runLlm(requests, (m) => notifySender(event, IPC.llmProgress, m))
+  )
+  ipcMain.handle(IPC.llmCancel, () => cancelLlm())
   ipcMain.handle(
     IPC.faceDetect,
     (event, requests: { path: string; time: number; width: number; height: number }[]) =>

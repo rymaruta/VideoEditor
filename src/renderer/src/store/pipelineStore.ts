@@ -334,21 +334,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     setStep('structure', { state: 'run', percent: 0, note: '場面に分けています' })
     const scenes = scenesFor(project, info)
     const range = cameraRange(info)
-    const apiKey = useSettingsStore.getState().geminiApiKey
-    const { judgements, source, failure } = await judgeScenes(
+    const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
+    const { judgements, source, failure, model, device } = await judgeScenes(
       scenes,
       range.end - range.start,
       {
+        provider,
         apiKey,
         episodeName: project.name,
         targetSec: get().targetMinutes * 60 || range.end - range.start,
         note: get().editNote || undefined
       },
-      (done, total) =>
-        setStep('structure', {
-          percent: (done / total) * 100,
-          note: `AI が判定中(${done + 1}/${total})`
-        })
+      (p) => setStep('structure', { percent: p.percent, note: p.note })
     )
     set({ scenes, judgements, judgeSource: source, keep: {} })
     const highlights = judgements.filter((j) => j.kind === 'highlight').length
@@ -360,10 +357,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     })
     log(
       source === 'ai'
-        ? `構成: AI(Gemini)で ${scenes.length} 場面を判定しました`
+        ? `構成: AI(${model ?? ''}${device ? `・${device === 'cpu' ? 'CPU' : `GPU ${device.toUpperCase()}`}` : ''})で ${scenes.length} 場面を判定しました`
         : failure
           ? `構成: AI に頼めなかったため簡易の点数で判定しました(${failure})`
-          : '構成: Gemini の鍵が無いため、簡易の点数(発話の密度・掛け合い・盛り上がり)で判定しました'
+          : '構成: AI を使わない設定のため、簡易の点数(発話の密度・掛け合い・盛り上がり)で判定しました'
     )
     await buildAndApply()
   }
@@ -420,20 +417,28 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     }
     // 演出テロップ: 提案は最初の1回だけ AI に頼み、作り直しでは選んだものを置き直す
     if (get().effects.length === 0 && get().steps.effects.state !== 'done') {
-      const apiKey = useSettingsStore.getState().geminiApiKey
-      if (!apiKey) {
+      const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
+      if (provider === 'off' || (provider === 'gemini' && !apiKey)) {
         setStep('effects', {
           state: 'skipped',
-          note: 'Gemini の鍵が必要です(設定すると提案します)'
+          note:
+            provider === 'off'
+              ? 'AI を使わない設定です'
+              : 'Gemini の鍵がありません(このPCの AI に切り替えると提案します)'
         })
       } else {
         setStep('effects', { state: 'run', percent: 30, note: 'AI が提案中' })
         try {
-          const proposals = await proposeEffects(effectLines(project, info, plan.cut.spans), {
-            apiKey,
-            episodeName: project.name,
-            note: get().editNote || undefined
-          })
+          const proposals = await proposeEffects(
+            effectLines(project, info, plan.cut.spans),
+            {
+              provider,
+              apiKey,
+              episodeName: project.name,
+              note: get().editNote || undefined
+            },
+            (p) => setStep('effects', { percent: p.percent, note: p.note })
+          )
           const auto = proposals
             .filter((p) => p.confidence >= AUTO_PLACE_CONFIDENCE)
             .map((p) => p.id)
