@@ -264,6 +264,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
               />
               <button
                 className="small-button"
+                aria-label="番組素材フォルダを選ぶ"
                 onClick={async () => {
                   const folder = await window.api.showKitSelectFolder()
                   if (folder) setShowKitFolder(folder)
@@ -272,7 +273,11 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                 参照…
               </button>
               {showKitFolder && (
-                <button className="small-button" onClick={() => setShowKitFolder('')}>
+                <button
+                  className="small-button"
+                  aria-label="番組素材フォルダを外す"
+                  onClick={() => setShowKitFolder('')}
+                >
                   外す
                 </button>
               )}
