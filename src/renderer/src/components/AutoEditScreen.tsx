@@ -214,7 +214,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
             })}
           </ol>
           <p className="form-note auto-edit-next">
-            この後の工程(文字起こし・話者分離・構成・カット・アングルの切り替え・テロップ・SE/BGM)は、
+            この後の工程(テロップの整え・演出テロップ・SE/BGM・CG版面・音声の仕上げ・色合わせ・書き出し後の自動チェック)は、
             できたものから順にここへ加わります。
           </p>
           <div className="dialog-footer-spacer" />
