@@ -1,3 +1,4 @@
+import { countEvents } from '@shared/events/audioEvents'
 import { isImagePath } from '@shared/mediaExtensions'
 import { stillAssetFrom } from '../lib/stillAsset'
 import { coverageOfClips, hasOverrides, updateOverrides } from '@shared/roughCut/overrides'
@@ -64,6 +65,7 @@ export type StepId =
   | 'denoise'
   | 'speakers'
   | 'transcribe'
+  | 'events'
   | 'structure'
   | 'cut'
   | 'angles'
@@ -100,6 +102,7 @@ export const STEPS: { id: StepId; label: string }[] = [
   { id: 'denoise', label: 'ピンマイクのノイズ除去' },
   { id: 'speakers', label: '話者の判定' },
   { id: 'transcribe', label: '文字起こし' },
+  { id: 'events', label: '笑い・歓声の検出' },
   { id: 'structure', label: '構成(見どころ・不要な場面)' },
   { id: 'cut', label: 'カット(間を詰める)' },
   { id: 'angles', label: 'アングルの切り替え' },
@@ -182,6 +185,7 @@ const initialSteps = (): Record<StepId, StepStatus> => ({
   denoise: { state: 'wait', percent: 0 },
   speakers: { state: 'wait', percent: 0 },
   transcribe: { state: 'wait', percent: 0 },
+  events: { state: 'wait', percent: 0 },
   structure: { state: 'wait', percent: 0 },
   cut: { state: 'wait', percent: 0 },
   angles: { state: 'wait', percent: 0 },
@@ -552,6 +556,61 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     } catch (e) {
       setStep('sound', { state: 'error', note: formatIpcError(e) })
       log(`SE・BGM を置けませんでした: ${formatIpcError(e)}`)
+    }
+  }
+
+  /** 笑い・歓声を、基準カメラの音から探す。失敗しても編集は続ける(構成の判定に使わないだけ) */
+  async function detectEvents(): Promise<void> {
+    const project = useProjectStore.getState().project
+    const info = project.multicam
+    const files = (info?.files ?? [])
+      .filter((f) => f.sourceId === info?.anchorSourceId)
+      .map((f) => ({
+        path: project.assets.find((a) => a.id === f.assetId)?.filePath ?? '',
+        start: f.start,
+        rate: f.rate,
+        duration: f.duration
+      }))
+      .filter((f) => f.path)
+    if (files.length === 0) {
+      setStep('events', { state: 'skipped', note: '基準カメラの音がありません' })
+      return
+    }
+    setStep('events', { state: 'run', percent: 0, note: '準備中' })
+    const off = window.api.onEventsProgress((m) => {
+      if (m.type === 'status') setStep('events', { note: m.note })
+      else if (m.type === 'device')
+        log(
+          `笑い・歓声の検出: ${m.device === 'cpu' ? 'CPU' : `GPU(${m.device === 'dml' ? 'DirectML' : 'CUDA'})`}`
+        )
+      else if (m.type === 'progress' && m.total)
+        setStep('events', {
+          percent: ((m.done ?? 0) / m.total) * 100,
+          note: `${Math.round((m.done ?? 0) / 60)}/${Math.round(m.total / 60)} 分`
+        })
+    })
+    try {
+      const events = await window.api.eventsRun(files)
+      useProjectStore.getState().setAudioEvents(events)
+      const all = countEvents(events, -Infinity, Infinity)
+      setStep('events', {
+        state: 'done',
+        percent: 100,
+        note: `笑い ${all.laughs} · 歓声 ${all.cheers}`
+      })
+      log(
+        `笑い・歓声の検出: 笑い ${all.laughs} 回、歓声・拍手 ${all.cheers} 回(構成の判定に使います)`
+      )
+    } catch (e) {
+      const msg = formatIpcError(e)
+      setStep('events', {
+        state: msg.includes('EVENTS_CANCELED') ? 'wait' : 'error',
+        note: msg.includes('EVENTS_CANCELED') ? '中止しました' : msg
+      })
+      if (!msg.includes('EVENTS_CANCELED'))
+        log(`笑い・歓声の検出ができませんでした(構成は発言だけで判定します): ${msg}`)
+    } finally {
+      off()
     }
   }
 
@@ -1004,6 +1063,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         await matchColors()
         await denoiseMics()
         await transcribeEpisode(used, files, report, assetIdOf, layout.anchorSourceId)
+        await detectEvents()
         await structureAndCut()
       } catch (e) {
         const msg = formatIpcError(e)
@@ -1016,6 +1076,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             'denoise',
             'speakers',
             'transcribe',
+            'events',
             'structure',
             'cut',
             'angles',
@@ -1037,6 +1098,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     cancel: () => {
       void window.api.syncCancel()
       void window.api.asrCancel()
+      void window.api.eventsCancel()
     },
 
     // 確認済みはプロジェクトに保存する(開き直しても残る)

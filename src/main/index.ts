@@ -8,6 +8,7 @@ import { cancelMeasureExport, measureExport } from './qcService'
 import { readFramesRgb } from './frameService'
 import { cancelDenoise, denoiseFiles } from './audioCleanService'
 import { scanShowKit } from './showKitService'
+import { cancelAudioEvents, detectAudioEvents } from './eventService'
 import type { LlmRequest } from '@shared/llm'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
@@ -682,6 +683,12 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.denoiseCancel, () => cancelDenoise())
   ipcMain.handle(IPC.showKitScan, (_e, root: string) => scanShowKit(root))
+  ipcMain.handle(
+    IPC.eventsRun,
+    (event, files: { path: string; start: number; rate: number; duration: number }[]) =>
+      detectAudioEvents(files, (m) => notifySender(event, IPC.eventsProgress, m))
+  )
+  ipcMain.handle(IPC.eventsCancel, () => cancelAudioEvents())
   ipcMain.handle(IPC.selectProjectFiles, async (event) => {
     const result = await showOpenDialogForSender(event, {
       title:

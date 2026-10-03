@@ -26,6 +26,9 @@ export interface Scene {
   lines: TimedLine[]
   /** 誰かが話している時間の合計(秒) */
   speech: number
+  /** 笑い・歓声の回数(音声イベントを検出したときだけ) */
+  laughs?: number
+  cheers?: number
 }
 
 export interface SceneJudgement {
@@ -141,15 +144,29 @@ export function heuristicJudgements(scenes: readonly Scene[]): SceneJudgement[] 
     const turnsPerMin = (turns / dur) * 60
     const overlaps = s.lines.filter((l) => l.overlap).length
     const exclaims = s.lines.reduce((n, l) => n + (l.text.match(/[!！?？]/g)?.length ?? 0), 0)
-    const score = Math.round(
-      30 +
-        30 * Math.min(1, density / 0.7) +
-        15 * Math.min(1, turnsPerMin / 8) +
-        10 * Math.min(1, overlaps / 2) +
-        15 * Math.min(1, exclaims / 4)
+    // 笑い・歓声は、その場が沸いた確かな印なので重く見る(1分あたり2回で満点)
+    const laughs = (s.laughs ?? 0) + (s.cheers ?? 0)
+    const laughPerMin = (laughs / dur) * 60
+    const score = Math.min(
+      100,
+      Math.round(
+        30 +
+          30 * Math.min(1, density / 0.7) +
+          15 * Math.min(1, turnsPerMin / 8) +
+          10 * Math.min(1, overlaps / 2) +
+          15 * Math.min(1, exclaims / 4) +
+          25 * Math.min(1, laughPerMin / 2)
+      )
     )
-    const kind: SceneKind = density < 0.15 ? 'unneeded' : score >= 70 ? 'highlight' : 'normal'
+    const kind: SceneKind =
+      density < 0.15 && laughs === 0
+        ? 'unneeded'
+        : score >= 70 || laughs >= 2
+          ? 'highlight'
+          : 'normal'
     const parts = [`発話 ${Math.round(density * 100)}%`, `掛け合い ${turnsPerMin.toFixed(0)}回/分`]
+    if (s.laughs) parts.push(`笑い ${s.laughs}`)
+    if (s.cheers) parts.push(`歓声 ${s.cheers}`)
     if (overlaps) parts.push(`声の重なり ${overlaps}`)
     if (exclaims) parts.push(`感嘆・疑問 ${exclaims}`)
     return {

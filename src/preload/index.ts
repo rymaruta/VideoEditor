@@ -1,3 +1,4 @@
+import type { AudioEventWindow } from '@shared/events/audioEvents'
 import type { SystemInfo } from '@shared/systemInfo'
 import type { ShowKit } from '@shared/finish/sound'
 import type { DenoiseResult } from '@shared/denoise'
@@ -270,6 +271,26 @@ const api = {
   selectEditXml: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectEditXml),
   readEditXml: (filePath: string): Promise<string> => ipcRenderer.invoke(IPC.readEditXml, filePath),
   systemInfo: (): Promise<SystemInfo> => ipcRenderer.invoke(IPC.systemInfo),
+  eventsRun: (
+    files: { path: string; start: number; rate: number; duration: number }[]
+  ): Promise<AudioEventWindow[]> => ipcRenderer.invoke(IPC.eventsRun, files),
+  eventsCancel: (): Promise<void> => ipcRenderer.invoke(IPC.eventsCancel),
+  onEventsProgress: (
+    callback: (m: {
+      type: string
+      note?: string
+      done?: number
+      total?: number
+      device?: string
+    }) => void
+  ): (() => void) => {
+    const listener = (
+      _e: Electron.IpcRendererEvent,
+      m: { type: string; note?: string; done?: number; total?: number; device?: string }
+    ): void => callback(m)
+    ipcRenderer.on(IPC.eventsProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.eventsProgress, listener)
+  },
   saveRunReport: (defaultName: string, text: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.saveRunReport, defaultName, text),
   showKitSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.showKitSelectFolder),

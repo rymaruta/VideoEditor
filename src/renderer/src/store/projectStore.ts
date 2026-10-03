@@ -1,3 +1,4 @@
+import type { AudioEventWindow } from '@shared/events/audioEvents'
 import {
   angleAlternatives,
   coverageOfClips,
@@ -434,7 +435,17 @@ function normalizeLoadedProject(project: Project): Project {
     reviewed: asStringArray(raw.reviewed),
     dismissedTelops: asStringArray(raw.dismissedTelops),
     roughCutAuto: normalizeSegs(raw.roughCutAuto, true) as CameraSeg[] | undefined,
-    cutOverrides: normalizeOverrides(raw.cutOverrides)
+    cutOverrides: normalizeOverrides(raw.cutOverrides),
+    audioEvents: Array.isArray(raw.audioEvents)
+      ? (raw.audioEvents as unknown[]).filter(
+          (e): e is AudioEventWindow =>
+            Boolean(e) &&
+            typeof e === 'object' &&
+            ['start', 'end', 'laugh', 'cheer'].every((k) =>
+              Number.isFinite((e as Record<string, unknown>)[k])
+            )
+        )
+      : undefined
   }
 }
 
@@ -753,6 +764,8 @@ interface ProjectState {
   setAutoCg: (clips: PlacedCg[], assets: MediaAsset[]) => void
   /** 文字起こしの結果を入れ替える(取り消し1回で戻る) */
   setTranscript: (transcript: TranscriptUtterance[]) => void
+  /** 笑い・歓声の検出結果を入れ替える(解析の結果なので履歴は積まない) */
+  setAudioEvents: (events: AudioEventWindow[]) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
 
   addAudioTrack: (name: string) => void
@@ -2535,6 +2548,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         }
       }
     }),
+
+  setAudioEvents: (events) =>
+    set((state) => ({ project: { ...state.project, audioEvents: events } })),
 
   setAssetsDenoised: (changes, options) =>
     set((state) => {

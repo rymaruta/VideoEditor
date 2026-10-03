@@ -28,8 +28,13 @@ function clock(sec: number): string {
 }
 
 function sceneText(s: Scene): string {
-  if (s.lines.length === 0) return '(会話なし)'
-  const body = s.lines.map((l) => `${l.speaker ?? '?'}「${l.text}」`).join(' ')
+  // 笑い・歓声の回数は、文字起こしからは分からない盛り上がりの手掛かり
+  const events = [s.laughs ? `笑い${s.laughs}回` : '', s.cheers ? `歓声${s.cheers}回` : '']
+    .filter(Boolean)
+    .join('・')
+  const head = events ? `(${events})` : ''
+  if (s.lines.length === 0) return `${head}(会話なし)`
+  const body = head + s.lines.map((l) => `${l.speaker ?? '?'}「${l.text}」`).join(' ')
   return body.length > MAX_CHARS_PER_SCENE ? body.slice(0, MAX_CHARS_PER_SCENE) + '…' : body
 }
 
@@ -67,7 +72,7 @@ export function buildStructurePrompt(
 以下は収録の一部を、話のまとまり(場面)ごとに並べた文字起こしです(「話者「発言」」の形)。
 ${options.note ? `編集方針: ${options.note}\n` : ''}
 各場面について、番組として残す価値を判定してください。
-- score: 0〜100。笑い・驚き・掛け合いの盛り上がり・企画の要点・感情の動きがある場面ほど高く
+- score: 0〜100。笑い・驚き・掛け合いの盛り上がり・企画の要点・感情の動きがある場面ほど高く(「笑い○回」はその場で実際に起きた笑いの数)
 - kind: "highlight"(見どころ) / "normal"(つなぎとして使える) / "unneeded"(不要: 移動だけ・待機・段取りの相談・言い直しなど)
 - title: 場面の短い見出し(日本語15字以内)
 - reason: そう判定した理由(日本語1文。発言を引用してよい)

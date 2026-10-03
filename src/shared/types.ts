@@ -1,3 +1,4 @@
+import type { AudioEventWindow } from './events/audioEvents'
 import type { CameraSeg, CutOverrides } from './roughCut/overrides'
 import type { ColorMatch } from './color/match'
 import type { MulticamInfo } from './sync/multicam'
@@ -228,6 +229,8 @@ export interface Project {
   roughCutAuto?: CameraSeg[]
   /** 本編の人の修正(削った・足した区間、替えたカメラ)。作り直しても当て直す */
   cutOverrides?: CutOverrides
+  /** 笑い・歓声の検出結果(共通の時間軸)。構成の判定に使う */
+  audioEvents?: AudioEventWindow[]
 }
 
 export interface TemplateSegment {

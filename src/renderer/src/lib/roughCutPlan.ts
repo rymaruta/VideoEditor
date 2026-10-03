@@ -1,3 +1,4 @@
+import { countEvents } from '@shared/events/audioEvents'
 import {
   applyAngleOverrides,
   applyCutOverrides,
@@ -298,7 +299,11 @@ export function planRoughCut(
 
 /** 場面を作る(カメラが録っている範囲で) */
 export function scenesFor(project: Project, info: MulticamInfo): Scene[] {
-  return buildScenes(timedLines(project, info), cameraRange(info))
+  const scenes = buildScenes(timedLines(project, info), cameraRange(info))
+  // 笑い・歓声を検出していれば、場面ごとの回数を付ける(判定と AI への文に使う)
+  const events = project.audioEvents
+  if (!events || events.length === 0) return scenes
+  return scenes.map((s) => ({ ...s, ...countEvents(events, s.start, s.end) }))
 }
 
 /** 演出テロップの提案に渡す発言(仮編集に残っているものだけ、時刻は仮編集のタイムライン) */
