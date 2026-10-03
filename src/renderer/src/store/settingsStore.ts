@@ -20,6 +20,7 @@ const EXPORT_QUALITY_KEY = 've-export-quality'
 const EXPORT_LOUDNESS_KEY = 've-export-loudness'
 const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
 const TELOP_DICTIONARY_KEY = 've-telop-dictionary'
+const QC_WORDS_KEY = 've-qc-words'
 const AI_PROVIDER_KEY = 've-ai-provider'
 
 /** 書き出しの音量の扱い。`off` は正規化しない */
@@ -103,6 +104,9 @@ interface SettingsState {
    */
   telopDictionary: string
   setTelopDictionary: (text: string) => void
+  /** 書き出し後の確認で、テロップに入っていたら知らせる言葉(1行に1つ) */
+  qcWords: string
+  setQcWords: (text: string) => void
   /** 構成の判定・演出テロップの提案に使う AI(既定はこのPC。無料・素材が外に出ない) */
   aiProvider: AiProvider
   setAiProvider: (provider: AiProvider) => void
@@ -205,6 +209,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setTelopDictionary: (text) => {
     writeSetting(TELOP_DICTIONARY_KEY, text)
     set({ telopDictionary: text })
+  },
+  qcWords: (() => {
+    try {
+      return localStorage.getItem(QC_WORDS_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })(),
+  setQcWords: (text) => {
+    writeSetting(QC_WORDS_KEY, text)
+    set({ qcWords: text })
   },
   aiProvider: readChoice<AiProvider>(AI_PROVIDER_KEY, ['local', 'gemini', 'off'], 'local'),
   setAiProvider: (provider) => {

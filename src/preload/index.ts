@@ -1,3 +1,4 @@
+import type { QcMeasurement } from '@shared/qc/media'
 import type { LlmRequest, LlmWorkerMessage } from '@shared/llm'
 type LlmProgressMessage = Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>
 import type { FaceBox } from '@shared/telop/avoidFaces'
@@ -255,6 +256,14 @@ const api = {
   llmRun: (requests: LlmRequest[]): Promise<(unknown | null)[]> =>
     ipcRenderer.invoke(IPC.llmRun, requests),
   llmCancel: (): Promise<void> => ipcRenderer.invoke(IPC.llmCancel),
+  qcMeasure: (filePath: string): Promise<QcMeasurement> =>
+    ipcRenderer.invoke(IPC.qcMeasure, filePath),
+  qcCancel: (): Promise<void> => ipcRenderer.invoke(IPC.qcCancel),
+  onQcProgress: (callback: (percent: number) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: number): void => callback(p)
+    ipcRenderer.on(IPC.qcProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.qcProgress, listener)
+  },
   onLlmProgress: (callback: (m: LlmProgressMessage) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, m: LlmProgressMessage): void => callback(m)
     ipcRenderer.on(IPC.llmProgress, listener)

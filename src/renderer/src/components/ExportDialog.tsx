@@ -15,6 +15,8 @@ import { LOUDNESS_TARGETS } from '@shared/loudness'
 import type { TelopLayerPayload } from '@shared/telop/layer'
 import type { AspectRatio, ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
 import { FolderIcon, PlayCircleIcon, TrashIcon } from './icons'
+import { ExportQcPanel } from './ExportQcPanel'
+import { useQcStore } from '../store/qcStore'
 
 /**
  * 書き出し設定(ファイル > 書き出し… / Ctrl+M)。デザイン案の「書き出し設定」ダイアログ。
@@ -212,6 +214,8 @@ export function ExportDialog(): React.JSX.Element | null {
     try {
       await runOne(project.aspectRatio, resolutionHeight, quality, outputPath)
       setDonePath(outputPath)
+      // 書き出した動画をそのまま確認する(黒味・フリーズ・無音・ラウドネス・テロップ)
+      void useQcStore.getState().run(outputPath, loudness)
       if (openFolderAfter) await window.api.showItemInFolder(outputPath).catch(() => {})
     } catch (e) {
       const message = formatIpcError(e)
@@ -646,6 +650,7 @@ export function ExportDialog(): React.JSX.Element | null {
           </div>
         </div>
 
+        <ExportQcPanel onJump={() => setOpen(false)} />
         <div className="dialog-footer">
           <span className="dialog-footer-label">プリセット:</span>
           {presetName === null ? (

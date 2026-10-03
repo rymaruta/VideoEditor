@@ -5930,3 +5930,82 @@ h3 {
   height: 26px;
   padding: 0 6px;
 }
+
+/* 書き出し後の自動確認 */
+.export-qc {
+  flex: none;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.export-qc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.export-qc-title {
+  font-weight: 600;
+}
+
+.export-qc-summary.ok {
+  color: #7fcf96;
+}
+
+.export-qc-summary.warn {
+  color: #e8c46a;
+}
+
+.export-qc-summary.error {
+  color: #ef7a7a;
+}
+
+.export-qc-words textarea {
+  width: 100%;
+  font-family: inherit;
+}
+
+.export-qc-loudness {
+  margin: 6px 0 0;
+}
+
+.export-qc-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.export-qc-item {
+  display: grid;
+  grid-template-columns: 96px 88px minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-left: 3px solid #e8c46a;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.export-qc-item.error {
+  border-left-color: #ef7a7a;
+}
+
+.export-qc-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.export-qc-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.export-qc-kind {
+  opacity: 0.85;
+}

@@ -3,6 +3,7 @@ import { stat } from 'fs/promises'
 import { cancelAsr, runAsr } from './asrService'
 import { detectFaces } from './faceService'
 import { cancelLlm, runLlm } from './llmService'
+import { cancelMeasureExport, measureExport } from './qcService'
 import type { LlmRequest } from '@shared/llm'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
@@ -657,6 +658,10 @@ app.whenReady().then(() => {
     runLlm(requests, (m) => notifySender(event, IPC.llmProgress, m))
   )
   ipcMain.handle(IPC.llmCancel, () => cancelLlm())
+  ipcMain.handle(IPC.qcMeasure, (event, filePath: string) =>
+    measureExport(filePath, (percent) => notifySender(event, IPC.qcProgress, percent))
+  )
+  ipcMain.handle(IPC.qcCancel, () => cancelMeasureExport())
   ipcMain.handle(
     IPC.faceDetect,
     (event, requests: { path: string; time: number; width: number; height: number }[]) =>
