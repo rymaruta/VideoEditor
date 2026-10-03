@@ -1,3 +1,4 @@
+import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
 import { restyleOverlays, type TelopStyleDef } from '@shared/telop/styles'
 import { create, type StateCreator } from 'zustand'
@@ -369,8 +370,42 @@ function normalizeLoadedProject(project: Project): Project {
     textOverlays: asRecordArray<Record<string, unknown>>(raw.textOverlays).map(
       normalizeTextOverlay
     ),
-    beatGrid: normalizeBeatGrid(raw.beatGrid)
+    beatGrid: normalizeBeatGrid(raw.beatGrid),
+    transcript: normalizeTranscript(raw.transcript)
   }
+}
+
+/** 文字起こしは作り直せる結果なので、形の崩れたものは黙って捨てる(企画を開けなくするより良い) */
+function normalizeTranscript(raw: unknown): TranscriptUtterance[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: TranscriptUtterance[] = []
+  for (const r of raw as Record<string, unknown>[]) {
+    if (typeof r !== 'object' || r === null) continue
+    if (typeof r.assetId !== 'string' || typeof r.text !== 'string') continue
+    const start = asFinite(r.sourceStart, NaN)
+    const end = asFinite(r.sourceEnd, NaN)
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue
+    const words = Array.isArray(r.words)
+      ? (r.words as Record<string, unknown>[])
+          .filter((w) => w && typeof w.text === 'string')
+          .map((w) => ({
+            text: w.text as string,
+            start: asFinite(w.start, start),
+            end: asFinite(w.end, end)
+          }))
+      : []
+    out.push({
+      id: asNonEmptyString(r.id, uuid()),
+      assetId: r.assetId,
+      speaker: typeof r.speaker === 'string' && r.speaker ? r.speaker : undefined,
+      sourceStart: start,
+      sourceEnd: end,
+      text: r.text,
+      words,
+      overlap: r.overlap === true
+    })
+  }
+  return out
 }
 
 interface ProjectState {
@@ -543,6 +578,8 @@ interface ProjectState {
   selectOverlay: (id: string | null) => void
   /** テロップスタイルの一覧を新しくしたとき、使っているテロップへ反映する(取り消しは1回で戻る) */
   restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
+  /** 文字起こしの結果を入れ替える(取り消し1回で戻る) */
+  setTranscript: (transcript: TranscriptUtterance[]) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
 
   addAudioTrack: (name: string) => void
@@ -2124,6 +2161,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         }
       }
     }),
+
+  setTranscript: (transcript) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: { ...state.project, transcript }
+    })),
 
   restyleTextOverlays: (styles) =>
     set((state) => {

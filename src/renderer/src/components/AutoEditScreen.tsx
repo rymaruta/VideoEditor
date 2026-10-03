@@ -5,6 +5,9 @@ import { usePipelineStore, STEPS, type StepStatus } from '../store/pipelineStore
 import { useProjectStore } from '../store/projectStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { formatTimecode } from '../lib/timelineRuler'
+import { placedUtterances, telopsFromTranscript } from '../lib/transcriptTimeline'
+import { usePresetStore } from '../store/presetStore'
+import { speakerColor } from '@shared/speaker'
 
 /**
  * 自動編集の画面(自動編集 > 自動編集の画面)。デザイン案の「AutoEdit」。
@@ -13,7 +16,7 @@ import { formatTimecode } from '../lib/timelineRuler'
  * 工程は裏で進むので、この画面を閉じて編集画面に戻っても止まらない。
  */
 
-type CenterTab = 'sources' | 'sync' | 'log'
+type CenterTab = 'sources' | 'sync' | 'transcript' | 'log'
 
 const SOURCE_COLORS = ['#9ea7e0', '#7fb5d8', '#d8a77f', '#c49ee0', '#7fcf96', '#e0d27f', '#e08ab0']
 
@@ -60,7 +63,10 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const runPipeline = usePipelineStore((s) => s.runPipeline)
   const cancel = usePipelineStore((s) => s.cancel)
   const markReviewed = usePipelineStore((s) => s.markReviewed)
-  const projectName = useProjectStore((s) => s.project.name)
+  const project = useProjectStore((s) => s.project)
+  const projectName = project.name
+  const asrDevice = usePipelineStore((s) => s.asrDevice)
+  const [telopsMade, setTelopsMade] = useState<number | null>(null)
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
@@ -91,9 +97,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
     STEPS.length
   const current = STEPS.find((s) => steps[s.id].state === 'run')
 
-  const issues = report?.issues ?? []
-  const openIssues = issues.filter((i) => !reviewed.includes(issueKey(i)))
-  const doneIssues = issues.filter((i) => reviewed.includes(issueKey(i)))
+  const utterances = placedUtterances(project)
   const placementOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
   const durationOf = new Map(syncedFiles.map((f) => [f.id, f.duration]))
 
@@ -117,6 +121,29 @@ export function AutoEditScreen(): React.JSX.Element | null {
           at: placementOf.get(issue.b)?.start
         }
     }
+  }
+
+  // 要確認: 同期の問題 + 声の重なり(テロップの話者を確かめる)
+  const reviewItems: { key: string; kind: string; text: string; at?: number }[] = [
+    ...(report?.issues ?? []).map((i) => ({ key: issueKey(i), ...describe(i) })),
+    ...utterances
+      .filter((p) => p.utterance.overlap)
+      .map((p) => ({
+        key: `overlap-voice:${p.utterance.id}`,
+        kind: '声の重なり',
+        text: `${p.utterance.speaker ?? '話者不明'}「${p.utterance.text.slice(0, 40)}」— ほかの人と同時に話しています。話者と文字を確かめてください`,
+        at: p.start
+      }))
+  ]
+  const openIssues = reviewItems.filter((i) => !reviewed.includes(i.key))
+  const doneIssues = reviewItems.filter((i) => reviewed.includes(i.key))
+
+  function makeTelops(): void {
+    const overlays = telopsFromTranscript(project, usePresetStore.getState().captionPresets)
+    if (overlays.length === 0) return
+    const store = useProjectStore.getState()
+    store.addTextOverlays(overlays)
+    setTelopsMade(overlays.length)
   }
 
   // 同期の結果: 共通の時間軸
@@ -164,7 +191,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
             {STEPS.map((s) => {
               const st = steps[s.id]
               return (
-                <li key={s.id} className={`auto-edit-step ${st.state}`}>
+                <li key={s.id} className={`auto-edit-step ${s.id} ${st.state}`}>
                   <span className="auto-edit-step-mark">{stepMark(st.state)}</span>
                   <span className="auto-edit-step-body">
                     <span className="auto-edit-step-name">{s.label}</span>
@@ -209,6 +236,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
               [
                 ['sources', '素材の整理'],
                 ['sync', '同期の結果'],
+                ['transcript', '文字起こし'],
                 ['log', 'ログ']
               ] as [CenterTab, string][]
             ).map(([id, label]) => (
@@ -361,6 +389,64 @@ export function AutoEditScreen(): React.JSX.Element | null {
             </div>
           )}
 
+          {tab === 'transcript' && (
+            <div className="auto-edit-pane auto-edit-transcript">
+              {utterances.length === 0 ? (
+                <p className="hint-text">
+                  {steps.transcribe.state === 'run'
+                    ? `文字起こし中… ${steps.transcribe.note ?? ''}`
+                    : steps.transcribe.state === 'error'
+                      ? steps.transcribe.note
+                      : '文字起こしが終わると、話者と発言がここに時刻順に並びます。'}
+                </p>
+              ) : (
+                <>
+                  <div className="transcript-head">
+                    <span>
+                      発言 {utterances.length.toLocaleString()} 件
+                      {asrDevice && (
+                        <span className="form-note">
+                          {' '}
+                          · 認識: {asrDevice === 'cpu' ? 'CPU' : 'GPU'}
+                        </span>
+                      )}
+                    </span>
+                    <div className="dialog-footer-spacer" />
+                    {telopsMade !== null ? (
+                      <span className="form-note">
+                        発言テロップを {telopsMade} 枚並べました(取り消しは Ctrl+Z)
+                      </span>
+                    ) : (
+                      <button
+                        className="small-button"
+                        onClick={makeTelops}
+                        title="話者に割り当てたテロップスタイルで、発言テロップをタイムラインに並べます"
+                      >
+                        発言テロップとして並べる
+                      </button>
+                    )}
+                  </div>
+                  <ul className="transcript-list">
+                    {utterances.map(({ utterance: u, start }) => (
+                      <li
+                        key={u.id}
+                        className="transcript-row"
+                        style={{ borderLeftColor: speakerColor(u.speaker) }}
+                        onClick={() => useProjectStore.getState().seekTo(start)}
+                        title="クリックでこの位置へ移ります"
+                      >
+                        <span className="mono form-note">{formatTimecode(start, 30)}</span>
+                        <span className="transcript-speaker">{u.speaker ?? '—'}</span>
+                        <span className="transcript-text">{u.text}</span>
+                        {u.overlap && <span className="transcript-tag">重なり</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+
           {tab === 'log' && (
             <div className="auto-edit-pane auto-edit-log">
               {log.length === 0 ? (
@@ -398,9 +484,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
             </button>
           </div>
           <ul className="auto-edit-review-list">
-            {(reviewTab === 'open' ? openIssues : doneIssues).map((issue) => {
-              const d = describe(issue)
-              const key = issueKey(issue)
+            {(reviewTab === 'open' ? openIssues : doneIssues).map((d) => {
+              const key = d.key
               return (
                 <li key={key} className="auto-edit-review-item">
                   <div className="auto-edit-review-meta">

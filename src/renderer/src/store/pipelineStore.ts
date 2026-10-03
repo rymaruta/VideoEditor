@@ -7,16 +7,24 @@ import type { MediaAsset } from '@shared/types'
 import { useProjectStore } from './projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { emitMenuCommand } from '../lib/menuCommands'
+import { detectTurns, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
+import { turnsToJobs } from '@shared/diarize/turnJobs'
+import {
+  isLikelyHallucination,
+  type AsrDevice,
+  type AsrJobResult,
+  type TranscriptUtterance
+} from '@shared/transcript'
 
 /**
  * 自動編集の工程(計画書 §5)の状態。「新しい回を作る」と「自動編集」の画面が同じものを見る。
  * 画面を閉じても工程は止まらない(状態はここにある)。
  *
- * 今ある工程: 取り込み・整理 → カメラの同期 → タイムラインに並べる。
- * 文字起こし・話者分離などは、できたものから順にここへ足していく。
+ * 今ある工程: 取り込み・整理 → カメラの同期 → タイムラインに並べる → 話者の判定 → 文字起こし。
+ * 構成・カット・アングルの切り替えなどは、できたものから順にここへ足していく。
  */
 
-export type StepId = 'ingest' | 'sync' | 'timeline'
+export type StepId = 'ingest' | 'sync' | 'timeline' | 'speakers' | 'transcribe'
 export type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
 
 export interface StepStatus {
@@ -37,7 +45,9 @@ export interface EditableSource {
 export const STEPS: { id: StepId; label: string }[] = [
   { id: 'ingest', label: '取り込み・整理' },
   { id: 'sync', label: 'カメラ・マイクの同期' },
-  { id: 'timeline', label: 'タイムラインに並べる' }
+  { id: 'timeline', label: 'タイムラインに並べる' },
+  { id: 'speakers', label: '話者の判定' },
+  { id: 'transcribe', label: '文字起こし' }
 ]
 
 interface PipelineState {
@@ -53,6 +63,8 @@ interface PipelineState {
   reviewed: string[]
   running: boolean
   screenOpen: boolean
+  /** 音声認識に使った計算装置(GPU / CPU) */
+  asrDevice: AsrDevice | null
 
   setScreenOpen: (open: boolean) => void
   scanFolder: (root: string) => Promise<void>
@@ -66,8 +78,28 @@ interface PipelineState {
 const initialSteps = (): Record<StepId, StepStatus> => ({
   ingest: { state: 'wait', percent: 0 },
   sync: { state: 'wait', percent: 0 },
-  timeline: { state: 'wait', percent: 0 }
+  timeline: { state: 'wait', percent: 0 },
+  speakers: { state: 'wait', percent: 0 },
+  transcribe: { state: 'wait', percent: 0 }
 })
+
+/** 出演者の名前(マイク1 → 出演者A など)は、同じ収録フォルダの構成なら次の回にも引き継ぐ */
+const SOURCE_NAMES_KEY = 've-source-names'
+function readSourceNames(): Record<string, string> {
+  try {
+    const v = JSON.parse(localStorage.getItem(SOURCE_NAMES_KEY) ?? '{}')
+    return v && typeof v === 'object' ? (v as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+function rememberSourceName(id: string, name: string): void {
+  try {
+    localStorage.setItem(SOURCE_NAMES_KEY, JSON.stringify({ ...readSourceNames(), [id]: name }))
+  } catch {
+    // 覚えられなくても今回の名前は使える
+  }
+}
 
 function fileName(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -79,7 +111,130 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
   const setStep = (id: StepId, status: Partial<StepStatus>): void =>
     set((s) => ({ steps: { ...s.steps, [id]: { ...s.steps[id], ...status } } }))
 
+  /**
+   * 話者の判定(ピンマイクの音量)→ 文字起こし。結果は素材の時刻で企画に保存する。
+   * ピンマイクが無ければ、基準カメラの音で発話を探し、話者は空のままにする。
+   */
+  async function transcribeEpisode(
+    used: EditableSource[],
+    files: SyncInputFile[],
+    report: SyncReport,
+    assetIdOf: Record<string, string>,
+    anchorSourceId: string
+  ): Promise<void> {
+    setStep('speakers', { state: 'run', percent: 0, note: '音量を読み込み中' })
+    const mics = used.filter((s) => s.kind === 'mic')
+    const speakerSources = mics.length > 0 ? mics : used.filter((s) => s.id === anchorSourceId)
+    const placeOf = new Map(report.placements.map((p) => [p.id, p]))
+    const targetFiles = files.filter(
+      (f) => speakerSources.some((s) => s.id === f.sourceId) && placeOf.get(f.id)?.method !== 'none'
+    )
+    const envelopes = await window.api.footageEnvelopes(
+      targetFiles.map((f) => ({ path: f.path, size: f.size, mtimeMs: f.mtimeMs }))
+    )
+    const length = Math.ceil(
+      Math.max(
+        0,
+        ...targetFiles.map((f) => {
+          const p = placeOf.get(f.id)!
+          return p.start + f.duration / (p.rate || 1)
+        })
+      ) * TURN_RATE
+    )
+    const tracks: MicTrack[] = speakerSources.map((s) => {
+      const env = new Float32Array(length).fill(NaN)
+      targetFiles.forEach((f, i) => {
+        if (f.sourceId !== s.id) return
+        const p = placeOf.get(f.id)!
+        placeEnvelope(envelopes[i], p.start, p.rate || 1, length, env)
+      })
+      return { id: s.id, envelope: env }
+    })
+    const turns = detectTurns(tracks)
+    const overlapCount = turns.filter((t) => t.overlap).length
+    setStep('speakers', {
+      state: 'done',
+      percent: 100,
+      note:
+        mics.length > 0
+          ? `発話 ${turns.length} · 重なり ${overlapCount}`
+          : `発話 ${turns.length} · ピンマイクが無いため話者は未判定`
+    })
+    log(
+      mics.length > 0
+        ? `話者を判定しました: ${mics
+            .map((m) => `${m.name} ${turns.filter((t) => t.micId === m.id).length}`)
+            .join('、')}(声の重なり ${overlapCount})`
+        : '話者の判定: ピンマイクが無いため、基準カメラの音で発話だけを探しました'
+    )
+
+    // --- 文字起こし
+    const jobs = turnsToJobs(
+      turns,
+      targetFiles.map((f) => ({
+        id: f.id,
+        path: f.path,
+        sourceId: f.sourceId,
+        duration: f.duration
+      })),
+      report.placements
+    )
+    setStep('transcribe', { state: 'run', percent: 0, note: `${jobs.length} 件の発話` })
+    log(`文字起こしを始めます(${jobs.length} 件)`)
+    const t0 = Date.now()
+    const off = window.api.onAsrProgress((m) => {
+      if (m.type === 'status') setStep('transcribe', { percent: m.percent, note: m.note })
+      else if (m.type === 'device') {
+        set({ asrDevice: m.device })
+        log(
+          `音声認識: ${m.device === 'cpu' ? 'CPU' : `GPU(${m.device === 'dml' ? 'DirectML' : 'CUDA'})`}`
+        )
+        if (m.note) log(m.note)
+      } else if (m.type === 'progress') {
+        const left =
+          m.done > 0 ? (((Date.now() - t0) / m.done) * (m.total - m.done)) / 1000 : undefined
+        setStep('transcribe', {
+          percent: (m.done / Math.max(1, m.total)) * 100,
+          note: `${m.done}/${m.total}${left !== undefined ? ` · 残り約 ${Math.ceil(left / 60)} 分` : ''}`
+        })
+      }
+    })
+    let results: AsrJobResult[]
+    try {
+      results = await window.api.asrRun(jobs.map((j) => j.job))
+    } finally {
+      off()
+    }
+    const byId = new Map(results.map((r) => [r.id, r]))
+    const nameOf = new Map(used.map((s) => [s.id, s.name]))
+    const utterances: TranscriptUtterance[] = []
+    for (const j of jobs) {
+      const r = byId.get(j.job.id)
+      if (!r || isLikelyHallucination(r.text)) continue
+      const assetId = assetIdOf[j.fileId]
+      if (!assetId) continue
+      utterances.push({
+        id: uuid(),
+        assetId,
+        speaker: mics.length > 0 ? nameOf.get(j.turn.micId) : undefined,
+        sourceStart: j.job.start,
+        sourceEnd: j.job.end,
+        text: r.text,
+        words: r.words,
+        overlap: j.turn.overlap
+      })
+    }
+    useProjectStore.getState().setTranscript(utterances)
+    setStep('transcribe', {
+      state: 'done',
+      percent: 100,
+      note: `${utterances.length} 件 · ${Math.round((Date.now() - t0) / 1000)} 秒`
+    })
+    log(`文字起こしが終わりました(${utterances.length} 件)`)
+  }
+
   return {
+    asrDevice: null,
     root: null,
     scan: null,
     sources: [],
@@ -114,9 +269,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
       try {
         const scan = await window.api.footageScan(root)
+        const remembered = readSourceNames()
         const sources: EditableSource[] = scan.sources.map((s: FootageSource) => ({
           id: s.id,
-          name: s.name,
+          name: remembered[s.id] ?? s.name,
           kind: s.kind,
           basis: s.basis,
           files: s.files
@@ -140,8 +296,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       }
     },
 
-    updateSource: (id, patch) =>
-      set((s) => ({ sources: s.sources.map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
+    updateSource: (id, patch) => {
+      if (patch.name !== undefined && patch.name.trim()) rememberSourceName(id, patch.name.trim())
+      set((s) => ({ sources: s.sources.map((x) => (x.id === id ? { ...x, ...patch } : x)) }))
+    },
 
     runPipeline: async () => {
       const { scan, sources, running } = get()
@@ -260,9 +418,19 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         log(
           `タイムラインに並べました(基準カメラ: ${used.find((s) => s.id === layout.anchorSourceId)?.name ?? ''})`
         )
+        await transcribeEpisode(used, files, report, assetIdOf, layout.anchorSourceId)
       } catch (e) {
-        setStep('timeline', { state: 'error', note: formatIpcError(e) })
-        log(`タイムラインに並べられませんでした: ${formatIpcError(e)}`)
+        const msg = formatIpcError(e)
+        const current = (['timeline', 'speakers', 'transcribe'] as StepId[]).find(
+          (id) => get().steps[id].state === 'run'
+        )
+        const canceled = msg.includes('ASR_CANCELED')
+        if (current)
+          setStep(current, {
+            state: canceled ? 'wait' : 'error',
+            note: canceled ? '中止しました' : msg
+          })
+        log(canceled ? '文字起こしを中止しました' : `止まりました: ${msg}`)
       } finally {
         set({ running: false })
       }
@@ -270,6 +438,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 
     cancel: () => {
       void window.api.syncCancel()
+      void window.api.asrCancel()
     },
 
     markReviewed: (key, reviewed) =>

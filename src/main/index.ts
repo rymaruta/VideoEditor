@@ -1,3 +1,6 @@
+import { cachedEnvelope, type AudioFileRef } from './audioPcm'
+import { cancelAsr, runAsr } from './asrService'
+import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
@@ -24,7 +27,8 @@ import {
   exportProject,
   cancelExport,
   runExclusiveExport,
-  detectSilence
+  detectSilence,
+  ffmpegPath
 } from './ffmpegService'
 import { transcribeRange, transcribeWordsRange } from './whisperService'
 import { analyzeSmartCropCenter } from './smartCropService'
@@ -628,6 +632,17 @@ app.whenReady().then(() => {
     runSync(files, (percent, stage) => notifySender(event, IPC.syncProgress, { percent, stage }))
   )
   ipcMain.handle(IPC.syncCancel, () => cancelSync())
+  ipcMain.handle(IPC.footageEnvelopes, (_e, files: AudioFileRef[]) =>
+    Promise.all(
+      files.map((f) =>
+        cachedEnvelope(ffmpegPath, join(app.getPath('userData'), 'analysis-cache'), f)
+      )
+    )
+  )
+  ipcMain.handle(IPC.asrRun, (event, jobs: AsrJob[]) =>
+    runAsr(jobs, (m) => notifySender(event, IPC.asrProgress, m))
+  )
+  ipcMain.handle(IPC.asrCancel, () => cancelAsr())
 
   registerWindowScopedIpcHandlers()
 

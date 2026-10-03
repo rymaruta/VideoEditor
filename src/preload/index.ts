@@ -1,3 +1,5 @@
+import type { AsrJob, AsrJobResult, AsrWorkerMessage } from '@shared/transcript'
+type AsrProgressMessage = Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 'error' }>
 import type { FootageScan } from '@shared/ingest/classify'
 import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import type { LoudnessTarget } from '@shared/loudness'
@@ -243,6 +245,16 @@ const api = {
   },
   syncRun: (files: SyncInputFile[]): Promise<SyncReport> => ipcRenderer.invoke(IPC.syncRun, files),
   syncCancel: (): Promise<void> => ipcRenderer.invoke(IPC.syncCancel),
+  footageEnvelopes: (
+    files: { path: string; size: number; mtimeMs: number }[]
+  ): Promise<Float32Array[]> => ipcRenderer.invoke(IPC.footageEnvelopes, files),
+  asrRun: (jobs: AsrJob[]): Promise<AsrJobResult[]> => ipcRenderer.invoke(IPC.asrRun, jobs),
+  asrCancel: (): Promise<void> => ipcRenderer.invoke(IPC.asrCancel),
+  onAsrProgress: (callback: (m: AsrProgressMessage) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, m: AsrProgressMessage): void => callback(m)
+    ipcRenderer.on(IPC.asrProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.asrProgress, listener)
+  },
   onSyncProgress: (callback: (p: { percent: number; stage: string }) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, p: { percent: number; stage: string }): void =>
       callback(p)

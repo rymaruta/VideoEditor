@@ -154,7 +154,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                 {scanning
                   ? `読み込み中… ${ingest.note ?? ''}`
                   : sources.length > 0
-                    ? '違っていれば右の欄で直せます'
+                    ? '違っていれば右の欄で直せます(マイクは付けていた出演者の名前に)'
                     : ''}
               </span>
             </div>
@@ -200,6 +200,12 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                   <input
                     type="text"
                     aria-label="名前"
+                    placeholder={s.kind === 'mic' ? '付けていた出演者' : 'カメラの名前'}
+                    title={
+                      s.kind === 'mic'
+                        ? 'ピンマイクは付けていた出演者の名前にすると、文字起こしとテロップの話者になります'
+                        : undefined
+                    }
                     value={s.name}
                     disabled={s.kind === 'skip'}
                     onChange={(e) => updateSource(s.id, { name: e.target.value })}

@@ -5744,3 +5744,55 @@ h3 {
 .auto-edit-review-empty {
   padding: 14px;
 }
+
+/* 自動編集の画面: 文字起こし */
+.auto-edit-transcript {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+.transcript-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.transcript-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.transcript-row {
+  display: grid;
+  grid-template-columns: 84px 90px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 14px 6px 11px;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid #262626;
+  cursor: default;
+}
+.transcript-row:hover {
+  background: #2c2c2c;
+}
+.transcript-speaker {
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.transcript-text {
+  color: var(--text-1);
+  line-height: 1.5;
+  user-select: text;
+}
+.transcript-tag {
+  font-size: 10px;
+  color: #e6a23c;
+  border: 1px solid #6b5221;
+  border-radius: 2px;
+  padding: 0 4px;
+}

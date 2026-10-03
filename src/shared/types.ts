@@ -1,3 +1,4 @@
+import type { TranscriptUtterance } from './transcript'
 export interface MediaAsset {
   id: string
   filePath: string
@@ -176,6 +177,8 @@ export interface Project {
   videoOverlayTracks: VideoOverlayTrack[]
   textOverlays: TextOverlay[]
   beatGrid?: BeatGrid | null
+  /** 文字起こしと話者(自動編集の工程で作る)。時刻は素材の時刻 */
+  transcript?: TranscriptUtterance[]
 }
 
 export interface TemplateSegment {

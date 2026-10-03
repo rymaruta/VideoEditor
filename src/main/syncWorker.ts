@@ -1,16 +1,6 @@
 import { parentPort, workerData } from 'worker_threads'
-import { spawn } from 'child_process'
-import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
-import {
-  ENVELOPE_RATE,
-  EnvelopeBuilder,
-  isReliableMatch,
-  matchFeatures,
-  onsetFeature,
-  refineOffset
-} from '@shared/sync/correlate'
+import { cachedEnvelope, readWindow } from './audioPcm'
+import { isReliableMatch, matchFeatures, onsetFeature, refineOffset } from '@shared/sync/correlate'
 import { solvePlacements } from '@shared/sync/solve'
 import type { SyncInputFile, SyncPairResult, SyncWorkerMessage } from '@shared/sync/report'
 
@@ -34,100 +24,17 @@ interface WorkerInput {
 const input = workerData as WorkerInput
 const post = (m: SyncWorkerMessage): void => parentPort!.postMessage(m)
 
-const ENVELOPE_SAMPLE_RATE = 8000
 const REFINE_SAMPLE_RATE = 16000
 const REFINE_WINDOW_SEC = 20
 const DRIFT_MIN_OVERLAP_SEC = 600
 /** 並べて読む本数(ffmpeg の数) */
 const DECODE_PARALLEL = 3
 
-function readPcm(args: string[], onChunk: (samples: Float32Array) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(input.ffmpegPath, ['-hide_banner', '-nostdin', '-v', 'error', ...args], {
-      windowsHide: true
-    })
-    let rest: Buffer = Buffer.alloc(0)
-    let err = ''
-    child.stdout.on('data', (chunk: Buffer) => {
-      const buf = rest.length > 0 ? Buffer.concat([rest, chunk]) : chunk
-      const usable = buf.length - (buf.length % 4)
-      if (usable > 0) {
-        // Buffer の位置が4の倍数とは限らないので、写してから float として読む
-        const copy = new Float32Array(usable / 4)
-        Buffer.from(copy.buffer).set(buf.subarray(0, usable))
-        onChunk(copy)
-      }
-      rest = buf.subarray(usable)
-    })
-    child.stderr.on('data', (c: Buffer) => {
-      if (err.length < 4000) err += c.toString()
-    })
-    child.on('error', reject)
-    child.on('close', (code) =>
-      code === 0 ? resolve() : reject(new Error(err.trim().split('\n').pop() || `ffmpeg ${code}`))
-    )
-  })
-}
+const envelopeOf = (f: SyncInputFile): Promise<Float32Array> =>
+  cachedEnvelope(input.ffmpegPath, input.cacheDir, f)
 
-function cachePath(f: SyncInputFile): string {
-  const key = createHash('sha1')
-    .update(`${f.path}|${f.size}|${f.mtimeMs}|${ENVELOPE_SAMPLE_RATE}|${ENVELOPE_RATE}`)
-    .digest('hex')
-  return join(input.cacheDir, `${key}.env`)
-}
-
-async function envelopeOf(f: SyncInputFile): Promise<Float32Array> {
-  const cached = cachePath(f)
-  if (existsSync(cached)) {
-    const buf = readFileSync(cached)
-    return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))
-  }
-  const builder = new EnvelopeBuilder(ENVELOPE_SAMPLE_RATE)
-  await readPcm(
-    ['-i', f.path, '-vn', '-ac', '1', '-ar', String(ENVELOPE_SAMPLE_RATE), '-f', 'f32le', 'pipe:1'],
-    (s) => builder.push(s)
-  )
-  const env = builder.finish()
-  try {
-    mkdirSync(input.cacheDir, { recursive: true })
-    writeFileSync(cached, Buffer.from(env.buffer, env.byteOffset, env.byteLength))
-  } catch {
-    // キャッシュに書けなくても同期はできる
-  }
-  return env
-}
-
-/** start 秒から length 秒の波形(16kHz)。素材の外にはみ出した分は無音で埋める */
-async function windowOf(f: SyncInputFile, start: number, length: number): Promise<Float32Array> {
-  const total = Math.round(length * REFINE_SAMPLE_RATE)
-  const out = new Float32Array(total)
-  const lead = Math.max(0, Math.round(-start * REFINE_SAMPLE_RATE))
-  let pos = lead
-  await readPcm(
-    [
-      '-ss',
-      Math.max(0, start).toFixed(4),
-      '-t',
-      (length - lead / REFINE_SAMPLE_RATE).toFixed(4),
-      '-i',
-      f.path,
-      '-vn',
-      '-ac',
-      '1',
-      '-ar',
-      String(REFINE_SAMPLE_RATE),
-      '-f',
-      'f32le',
-      'pipe:1'
-    ],
-    (s) => {
-      const n = Math.min(s.length, total - pos)
-      if (n > 0) out.set(s.subarray(0, n), pos)
-      pos += Math.max(0, n)
-    }
-  )
-  return out
-}
+const windowOf = (f: SyncInputFile, start: number, length: number): Promise<Float32Array> =>
+  readWindow(input.ffmpegPath, f.path, start, length, REFINE_SAMPLE_RATE)
 
 /** a の時刻 center の周りで、b のずれを細かく詰める */
 async function refineAt(
