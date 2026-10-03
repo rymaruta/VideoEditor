@@ -1,3 +1,4 @@
+import type { ColorMatch } from './color/match'
 import type { MulticamInfo } from './sync/multicam'
 import type { TranscriptUtterance } from './transcript'
 export interface MediaAsset {
@@ -17,6 +18,8 @@ export interface MediaAsset {
    * `filePath`, so this never affects output quality. Absent when not needed.
    */
   proxyPath?: string
+  /** カメラ間の色合わせ(基準カメラに合わせる補正)。書き出しとプレビューの両方に効く */
+  colorMatch?: ColorMatch
 }
 
 export type TransitionType = 'none' | 'crossfade' | 'fade' | 'wipe'

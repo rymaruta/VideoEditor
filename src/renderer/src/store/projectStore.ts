@@ -1,3 +1,4 @@
+import type { ColorMatch } from '@shared/color/match'
 import type { RoughCut } from '@shared/roughCut/build'
 import type { MulticamInfo, MulticamSource } from '@shared/sync/multicam'
 import type { TranscriptUtterance } from '@shared/transcript'
@@ -170,8 +171,24 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
     fps: asFinite(raw.fps, 30) > 0 ? asFinite(raw.fps, 30) : 30,
     hasVideo: asBoolean(raw.hasVideo, true),
     hasAudio: asBoolean(raw.hasAudio, false),
-    proxyPath: typeof raw.proxyPath === 'string' ? raw.proxyPath : undefined
+    proxyPath: typeof raw.proxyPath === 'string' ? raw.proxyPath : undefined,
+    colorMatch: normalizeColorMatch(raw.colorMatch)
   }
+}
+
+/** 色合わせの値。壊れていれば補正なし(元の色)にする */
+function normalizeColorMatch(raw: unknown): ColorMatch | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const triple = (v: unknown): [number, number, number] | null =>
+    Array.isArray(v) &&
+    v.length === 3 &&
+    v.every((x) => typeof x === 'number' && Number.isFinite(x))
+      ? (v as [number, number, number])
+      : null
+  const gain = triple(r.gain)
+  const offset = triple(r.offset)
+  return gain && offset ? { gain, offset } : undefined
 }
 
 /** 素材の秒で持つ区間(本編・音声・PiP に共通)。壊れた尺は素材の尺で埋める */
@@ -607,6 +624,8 @@ interface ProjectState {
   selectOverlay: (id: string | null) => void
   /** テロップスタイルの一覧を新しくしたとき、使っているテロップへ反映する(取り消しは1回で戻る) */
   restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
+  /** カメラ間の色合わせを素材に付ける(undefined で外す)。まとめて1操作=履歴1件 */
+  setColorMatches: (matches: Record<string, ColorMatch | undefined>) => void
   /**
    * 仮編集(構成・カット・アングル)を入れる。本編・同期で作ったトラック・発言テロップを入れ替え、
    * 手で足したトラック・テロップには触れない。取り消し1回で戻る
@@ -2281,6 +2300,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       ...pushHistory(state),
       project: { ...state.project, transcript }
     })),
+
+  setColorMatches: (matches) =>
+    set((state) => {
+      const ids = Object.keys(matches)
+      if (!state.project.assets.some((a) => ids.includes(a.id))) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          assets: state.project.assets.map((a) =>
+            a.id in matches ? { ...a, colorMatch: matches[a.id] } : a
+          )
+        }
+      }
+    }),
 
   restyleTextOverlays: (styles) =>
     set((state) => {

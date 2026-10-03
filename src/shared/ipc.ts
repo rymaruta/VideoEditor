@@ -63,6 +63,8 @@ export const IPC = {
   qcMeasure: 'qc:measure',
   qcProgress: 'qc:progress',
   qcCancel: 'qc:cancel',
+  framesRgb: 'frames:rgb',
+  framesProgress: 'frames:progress',
   faceProgress: 'face:progress',
   menuCommand: 'menu:command',
   menuUpdate: 'menu:update',

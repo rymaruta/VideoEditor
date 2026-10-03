@@ -1,3 +1,5 @@
+import { planCameraColors } from '../lib/colorMatchPlan'
+import { describeColorMatch } from '@shared/color/match'
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import type { FootageScan, FootageSource, ProbedFile, SourceKind } from '@shared/ingest/classify'
@@ -47,6 +49,7 @@ export type StepId =
   | 'ingest'
   | 'sync'
   | 'timeline'
+  | 'color'
   | 'speakers'
   | 'transcribe'
   | 'structure'
@@ -77,6 +80,7 @@ export const STEPS: { id: StepId; label: string }[] = [
   { id: 'ingest', label: '取り込み・整理' },
   { id: 'sync', label: 'カメラ・マイクの同期' },
   { id: 'timeline', label: 'タイムラインに並べる' },
+  { id: 'color', label: 'カメラの色合わせ' },
   { id: 'speakers', label: '話者の判定' },
   { id: 'transcribe', label: '文字起こし' },
   { id: 'structure', label: '構成(見どころ・不要な場面)' },
@@ -151,6 +155,7 @@ const initialSteps = (): Record<StepId, StepStatus> => ({
   ingest: { state: 'wait', percent: 0 },
   sync: { state: 'wait', percent: 0 },
   timeline: { state: 'wait', percent: 0 },
+  color: { state: 'wait', percent: 0 },
   speakers: { state: 'wait', percent: 0 },
   transcribe: { state: 'wait', percent: 0 },
   structure: { state: 'wait', percent: 0 },
@@ -312,6 +317,44 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       note: `${utterances.length} 件 · ${Math.round((Date.now() - t0) / 1000)} 秒`
     })
     log(`文字起こしが終わりました(${utterances.length} 件)`)
+  }
+
+  /** カメラの色を基準カメラに合わせる。失敗しても編集は続ける(色が揃わないだけ) */
+  async function matchColors(): Promise<void> {
+    const project = useProjectStore.getState().project
+    const info = project.multicam
+    const cameras = info?.sources.filter((x) => x.kind === 'camera') ?? []
+    if (!info || cameras.length < 2) {
+      setStep('color', { state: 'skipped', note: 'カメラが1台です' })
+      return
+    }
+    setStep('color', { state: 'run', percent: 0, note: '同じ時刻の画を読み込み中' })
+    try {
+      const plan = await planCameraColors(info, project.assets, (done, total) =>
+        setStep('color', { percent: (done / total) * 100, note: `${done}/${total} 枚の画` })
+      )
+      useProjectStore.getState().setColorMatches(plan.matches)
+      const fixed = plan.cameras.filter((c) => c.match)
+      setStep('color', {
+        state: 'done',
+        percent: 100,
+        note:
+          fixed.length > 0
+            ? `${fixed.length} 台を基準カメラに合わせました`
+            : '色の差はありませんでした'
+      })
+      for (const c of plan.cameras)
+        log(
+          c.match
+            ? `色合わせ: ${c.name} を基準カメラに合わせました(${describeColorMatch(c.match)})`
+            : c.pairs === 0
+              ? `色合わせ: ${c.name} は基準カメラと同じ時刻の画が読めず、合わせていません`
+              : `色合わせ: ${c.name} は基準カメラとの差がほとんど無いため、そのままにしました`
+        )
+    } catch (e) {
+      setStep('color', { state: 'error', note: formatIpcError(e) })
+      log(`カメラの色合わせができませんでした(色は元のまま): ${formatIpcError(e)}`)
+    }
   }
 
   let activityCache: { projectId: string; mask: Uint8Array } | null = null
@@ -737,6 +780,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         log(
           `タイムラインに並べました(基準カメラ: ${used.find((s) => s.id === layout.anchorSourceId)?.name ?? ''})`
         )
+        await matchColors()
         await transcribeEpisode(used, files, report, assetIdOf, layout.anchorSourceId)
         await structureAndCut()
       } catch (e) {
@@ -745,6 +789,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           [
             'effects',
             'timeline',
+            'color',
             'speakers',
             'transcribe',
             'structure',

@@ -4,6 +4,7 @@ import { cancelAsr, runAsr } from './asrService'
 import { detectFaces } from './faceService'
 import { cancelLlm, runLlm } from './llmService'
 import { cancelMeasureExport, measureExport } from './qcService'
+import { readFramesRgb } from './frameService'
 import type { LlmRequest } from '@shared/llm'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
@@ -662,6 +663,13 @@ app.whenReady().then(() => {
     measureExport(filePath, (percent) => notifySender(event, IPC.qcProgress, percent))
   )
   ipcMain.handle(IPC.qcCancel, () => cancelMeasureExport())
+  ipcMain.handle(
+    IPC.framesRgb,
+    (event, requests: { path: string; time: number }[], size: { w: number; h: number }) =>
+      readFramesRgb(requests, size, (done, total) =>
+        notifySender(event, IPC.framesProgress, { done, total })
+      )
+  )
   ipcMain.handle(
     IPC.faceDetect,
     (event, requests: { path: string; time: number; width: number; height: number }[]) =>

@@ -1,3 +1,4 @@
+import { describeColorMatch } from '@shared/color/match'
 import { useEffect, useRef, useState } from 'react'
 import { LibraryPanel } from './LibraryPanel'
 import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
@@ -330,6 +331,13 @@ export function MediaBin(): React.JSX.Element {
       }
       if (asset.hasVideo) {
         items.push({ label: 'ハイライトを検出…', onSelect: () => setHighlightAssetId(asset.id) })
+      }
+      // 自動編集のカメラの色合わせ。合っていなければ外して元の色に戻せる(元に戻すで再び掛かる)
+      if (asset.colorMatch) {
+        items.push({
+          label: `色合わせを外す(${describeColorMatch(asset.colorMatch)})`,
+          onSelect: () => useProjectStore.getState().setColorMatches({ [asset.id]: undefined })
+        })
       }
     }
     items.push({

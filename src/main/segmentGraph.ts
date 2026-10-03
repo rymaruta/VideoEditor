@@ -1,3 +1,4 @@
+import { colorMatchFilter } from '@shared/color/match'
 import type { MediaAsset } from '@shared/types'
 import type { AudioItem, MediaItem, Sequence, VideoItem } from '@shared/sequence/types'
 import type { Segment } from '@shared/sequence/segmentPlan'
@@ -129,6 +130,12 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
     return inputs.length - 1
   }
 
+  /** カメラ間の色合わせ(素材に付いていれば、縮める前の画に掛ける) */
+  const colorOf = (item: MediaItem): string => {
+    const m = assetOf(item).colorMatch
+    return m ? `${colorMatchFilter(m)},` : ''
+  }
+
   /**
    * 1本の枝を「ちょうど `frames` 枚・時刻は n 枚目 × 1フレーム」に揃える後半。
    * tpad(足りない分を最後の絵で延ばす)→ trim(フレーム数で切る)→ 時刻の作り直し → fps。
@@ -153,7 +160,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
       { labelSuffix: `_${label}`, fps }
     )
     parts.push(
-      `[${idx}:v]setpts=PTS/${num(speed)},${scale},setsar=1,${exactFrames(visEnd - visStart)},${VIDEO_FORMAT}[${label}]`
+      `[${idx}:v]setpts=PTS/${num(speed)},${colorOf(item)}${scale},setsar=1,${exactFrames(visEnd - visStart)},${VIDEO_FORMAT}[${label}]`
     )
     return label
   }
@@ -279,7 +286,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
         y = '0'
       }
       parts.push(
-        `[${idx}:v]setpts=PTS/${num(speed)},${shape},setsar=1,` +
+        `[${idx}:v]setpts=PTS/${num(speed)},${colorOf(item)}${shape},setsar=1,` +
           `tpad=stop_duration=${num(sec(frames))}:stop_mode=clone,trim=end_frame=${frames},` +
           `settb=${tb},setpts=N+${offset}[${label}]`
       )

@@ -1,3 +1,5 @@
+import { ColorMatchFilters } from './ColorMatchFilters'
+import { colorMatchCss } from '../lib/colorMatchCss'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -293,7 +295,7 @@ function VideoOverlayLayer({
     <video
       ref={ref}
       src={previewSourceUrl(asset)}
-      style={pipPreviewStyle(position, scale, frameWidth)}
+      style={{ ...pipPreviewStyle(position, scale, frameWidth), filter: colorMatchCss(asset) }}
     />
   )
 }
@@ -312,7 +314,8 @@ function PreviewBlurBackdrop({
   isPlaying,
   blurPx,
   speed,
-  seekToken
+  seekToken,
+  colorFilter
 }: {
   src: string
   localTime: number
@@ -321,6 +324,8 @@ function PreviewBlurBackdrop({
   speed: number
   /** 明示的なシークの合図(`seekRequest.token`)。変わったら位置をぴったり入れ直す */
   seekToken: number
+  /** カメラ間の色合わせ(`colorMatchCss`) */
+  colorFilter?: string
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
 
@@ -355,7 +360,7 @@ function PreviewBlurBackdrop({
       className="preview-blur-backdrop"
       src={src}
       muted
-      style={{ filter: `blur(${blurPx}px)` }}
+      style={{ filter: `${colorFilter ?? ''} blur(${blurPx}px)`.trim() }}
     />
   )
 }
@@ -997,6 +1002,7 @@ export function PreviewPlayer(): React.JSX.Element {
     opacity: number
     speed: number
     fit: CSSProperties
+    colorFilter?: string
   } | null => {
     const tc = findTimedClipAt(timedClips, playheadTime)
     if (!tc) return null
@@ -1017,6 +1023,7 @@ export function PreviewPlayer(): React.JSX.Element {
     const prevSpeed = prev.clip.speed || 1
     return {
       src: previewSourceUrl(prev.asset),
+      colorFilter: colorMatchCss(prev.asset),
       // 前のクリップの**最後の t 秒**を流す(書き出しが混ぜているのと同じ範囲)
       localTime: prev.clip.outPoint - (t - elapsed) * prevSpeed,
       // 出てくる側の不透明度が `crossfadeOpacity`。重ねているのは消える側なので裏返す
@@ -1269,6 +1276,8 @@ export function PreviewPlayer(): React.JSX.Element {
   )
 
   const aspectClass = project.aspectRatio === '9:16' ? 'aspect-9-16' : 'aspect-16-9'
+  // カメラ間の色合わせ(本編・ぼかし背景・クロスフェードに同じ補正を掛ける)
+  const activeAsset = findTimedClipAt(timedClips, playheadTime)?.asset
 
   return (
     <>
@@ -1278,9 +1287,11 @@ export function PreviewPlayer(): React.JSX.Element {
       <div className={`panel preview-player ${isExpanded ? 'expanded' : ''}`}>
         <div className="preview-frame-wrapper">
           <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
+            <ColorMatchFilters assets={project.assets} />
             {activeSrc && blurBackdrop && (
               <PreviewBlurBackdrop
                 src={activeSrc}
+                colorFilter={colorMatchCss(activeAsset)}
                 localTime={blurBackdrop.localTime}
                 isPlaying={isPlaying}
                 blurPx={blurBackdrop.blurPx}
@@ -1292,7 +1303,7 @@ export function PreviewPlayer(): React.JSX.Element {
               <video
                 ref={videoRef}
                 src={activeSrc}
-                style={cropFit}
+                style={{ ...cropFit, filter: colorMatchCss(activeAsset) }}
                 onEnded={() => setIsPlaying(false)}
                 onError={handleVideoError}
                 onLoadedMetadata={handleLoadedMetadata}
@@ -1313,7 +1324,7 @@ export function PreviewPlayer(): React.JSX.Element {
                 isPlaying={isPlaying}
                 opacity={crossfade.opacity}
                 speed={crossfade.speed}
-                fit={crossfade.fit}
+                fit={{ ...crossfade.fit, filter: crossfade.colorFilter }}
                 seekToken={seekToken}
               />
             )}

@@ -259,6 +259,16 @@ const api = {
   qcMeasure: (filePath: string): Promise<QcMeasurement> =>
     ipcRenderer.invoke(IPC.qcMeasure, filePath),
   qcCancel: (): Promise<void> => ipcRenderer.invoke(IPC.qcCancel),
+  framesRgb: (
+    requests: { path: string; time: number }[],
+    size: { w: number; h: number }
+  ): Promise<(Uint8Array | null)[]> => ipcRenderer.invoke(IPC.framesRgb, requests, size),
+  onFramesProgress: (callback: (p: { done: number; total: number }) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: { done: number; total: number }): void =>
+      callback(p)
+    ipcRenderer.on(IPC.framesProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.framesProgress, listener)
+  },
   onQcProgress: (callback: (percent: number) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, p: number): void => callback(p)
     ipcRenderer.on(IPC.qcProgress, listener)

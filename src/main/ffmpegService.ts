@@ -1,3 +1,4 @@
+import { colorMatchFilter } from '@shared/color/match'
 import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
@@ -776,6 +777,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         command.input(asset.filePath).inputOptions([`-ss ${clip.inPoint}`, `-t ${sourceDuration}`])
         const myIndex = inputIndex++
 
+        // カメラ間の色合わせ(縮める前の画に掛ける)
+        const colorPart = asset.colorMatch ? `${colorMatchFilter(asset.colorMatch)},` : ''
         const scalePadFilter = scaleToFrameFilter(
           w,
           h,
@@ -832,7 +835,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 乗っているので、この `fps` は素通しで、枚数を増やしも減らしもしない。
         if (includeVideo) {
           filterParts.push(
-            `[${myIndex}:v]setpts=PTS/${speed},${scalePadFilter},setsar=1,` +
+            `[${myIndex}:v]setpts=PTS/${speed},${colorPart}${scalePadFilter},setsar=1,` +
               `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
               `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)},` +
               `settb=1/${outputFps},setpts=N,fps=${outputFps}[v${i}]`
