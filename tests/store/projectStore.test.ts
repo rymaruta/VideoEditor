@@ -875,3 +875,34 @@ describe('人の修正を作り直しで上書きしない', () => {
     expect(st().project.reviewed).toBeUndefined()
   })
 })
+
+describe('静止画の素材', () => {
+  beforeEach(reset)
+  it('静止画は本編に置けない(ワイプ・全面(CG)のトラック用)', () => {
+    S.setState({
+      project: {
+        ...st().project,
+        assets: [
+          ...st().project.assets,
+          {
+            id: 'png',
+            filePath: '/cg/a.png',
+            fileName: 'a.png',
+            duration: 3600,
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            hasAudio: false,
+            hasVideo: true,
+            still: true
+          }
+        ]
+      }
+    })
+    const before = st().project.clips.length
+    st().addClipToTimeline('png')
+    st().insertClipAtTime('png', 0, 3, 0)
+    st().addTrimmedClipToTimeline('png', 0, 3)
+    expect(st().project.clips.length).toBe(before)
+  })
+})

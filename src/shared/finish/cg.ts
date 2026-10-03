@@ -10,6 +10,8 @@ import type { KitFile } from './sound'
  * - 長い素材は最長 8 秒で切る
  */
 export const CG_MAX_SECONDS = 8
+/** 静止画の CG を出しておく秒数 */
+export const CG_STILL_SECONDS = 3
 const MIN_KEYWORD_CHARS = 2
 
 export interface PlacedCg {
@@ -40,8 +42,8 @@ export function planCg(
     const n = used.get(keyword) ?? 0
     used.set(keyword, n + 1)
     const file = files[n % files.length]
-    if (!(file.duration > 0)) continue
-    const len = Math.min(CG_MAX_SECONDS, file.duration)
+    if (!file.still && !(file.duration > 0)) continue
+    const len = file.still ? CG_STILL_SECONDS : Math.min(CG_MAX_SECONDS, file.duration)
     out.push({ path: file.path, startTime: t.startTime, inPoint: 0, outPoint: len, keyword })
     busyUntil = t.startTime + len
   }

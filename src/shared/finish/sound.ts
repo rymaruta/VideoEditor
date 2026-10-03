@@ -57,8 +57,10 @@ export function normalizeCategory(folder: string): string {
 export interface KitFile {
   path: string
   name: string
-  /** 秒 */
+  /** 秒(静止画は 0) */
   duration: number
+  /** 静止画(版面CG の PNG など) */
+  still?: boolean
 }
 
 /** 番組素材フォルダの中身(分類 → ファイル) */

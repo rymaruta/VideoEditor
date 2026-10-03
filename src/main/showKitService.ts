@@ -1,7 +1,12 @@
 import { readdir } from 'fs/promises'
 import { extname, join } from 'path'
 import { probeMedia } from './ffmpegService'
-import { AUDIO_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/mediaExtensions'
+import {
+  AUDIO_EXTENSIONS,
+  IMAGE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+  isImagePath
+} from '@shared/mediaExtensions'
 import { normalizeCategory, type KitFile, type ShowKit } from '@shared/finish/sound'
 
 /**
@@ -10,8 +15,8 @@ import { normalizeCategory, type KitFile, type ShowKit } from '@shared/finish/so
  * 分類のフォルダ名は言い換えも受け付ける(`normalizeCategory`)。読めないファイルは飛ばす。
  */
 const AUDIO = new Set<string>(AUDIO_EXTENSIONS)
-// 版面CG は動画(透過付きの .mov / .webm など)。静止画は素材として読み込めないので対象外
-const VIDEO = new Set<string>(VIDEO_EXTENSIONS)
+// 版面CG は動画(透過付きの .mov / .webm など)と静止画(透過 PNG など)
+const VIDEO = new Set<string>([...VIDEO_EXTENSIONS, ...IMAGE_EXTENSIONS])
 
 async function listDirs(dir: string): Promise<string[]> {
   try {
@@ -50,9 +55,14 @@ async function readGroup(
   for (const dir of await listDirs(top)) {
     const files: KitFile[] = []
     for (const path of await listFiles(join(top, dir), exts)) {
+      const name = path.split(/[/\\]/).pop() ?? path
+      if (isImagePath(path)) {
+        files.push({ path, name, duration: 0, still: true })
+        continue
+      }
       const info = await probeMedia(path).catch(() => null)
       if (!(info && info.duration > 0)) continue
-      files.push({ path, name: path.split(/[/\\]/).pop() ?? path, duration: info.duration })
+      files.push({ path, name, duration: info.duration })
     }
     if (files.length > 0) {
       const key = normalizeCategory(dir)

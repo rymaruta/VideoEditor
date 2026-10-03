@@ -1,3 +1,5 @@
+import { isImagePath } from '@shared/mediaExtensions'
+import { stillAssetFrom } from '../lib/stillAsset'
 import { coverageOfClips, hasOverrides, updateOverrides } from '@shared/roughCut/overrides'
 import { planCg } from '@shared/finish/cg'
 import {
@@ -486,6 +488,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
       const assets: MediaAsset[] = []
       for (const path of paths) {
+        if (isImagePath(path)) {
+          assets.push(await stillAssetFrom(path))
+          continue
+        }
         const meta = await window.api.probeMedia(path).catch(() => null)
         if (!meta) continue
         assets.push({

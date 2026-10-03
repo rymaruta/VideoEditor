@@ -24,7 +24,12 @@ import {
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
-import { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/mediaExtensions'
+import {
+  AUDIO_EXTENSIONS,
+  IMAGE_EXTENSIONS,
+  MEDIA_EXTENSIONS,
+  VIDEO_EXTENSIONS
+} from '@shared/mediaExtensions'
 import { ensurePreviewProxy } from './previewProxyService'
 import { scanLongFormWindows } from './longFormService'
 import {
@@ -260,7 +265,11 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectMediaFiles, async (event) => {
     const result = await showOpenDialogForSender(event, {
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: '動画ファイル', extensions: [...VIDEO_EXTENSIONS] }]
+      filters: [
+        { name: '動画・静止画', extensions: [...VIDEO_EXTENSIONS, ...IMAGE_EXTENSIONS] },
+        { name: '動画ファイル', extensions: [...VIDEO_EXTENSIONS] },
+        { name: '静止画(ワイプ・CG 用)', extensions: [...IMAGE_EXTENSIONS] }
+      ]
     })
     if (result.canceled) return []
     return result.filePaths

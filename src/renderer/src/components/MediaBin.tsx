@@ -10,7 +10,8 @@ import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { assetsNeedingPreviewProxy, canPreviewFile } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
-import { isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
+import { isImagePath, isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
+import { stillAssetFrom } from '../lib/stillAsset'
 import { ASSET_DRAG_TYPE } from '../lib/assetDrag'
 import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
@@ -131,7 +132,9 @@ export function MediaBin(): React.JSX.Element {
   ): Promise<void> {
     // 前のプロジェクトのメッセージを残したままにしない(取り込みの入り口と同じ扱い)。
     setError(null)
-    for (const asset of await assetsNeedingPreviewProxy(loaded, canPreviewFile)) {
+    // 静止画は <img> でそのまま見せるので、プレビュー用の変換は要らない
+    const playable = loaded.filter((a) => !a.still)
+    for (const asset of await assetsNeedingPreviewProxy(playable, canPreviewFile)) {
       // 調べている間に別のプロジェクトを開かれたら、そこで止める。**遅れて返ってきた
       // 結果を今の画面に書かない**(実測: 消えた素材を調べている最中に別のプロジェクトを
       // 開くと、開いたあとの画面に前のプロジェクトのメッセージが出た)。
@@ -247,6 +250,11 @@ export function MediaBin(): React.JSX.Element {
     const proxyCandidates: { asset: MediaAsset; codecSaysUnplayable: boolean }[] = []
     for (const filePath of paths) {
       try {
+        // 静止画はワイプ・全面(CG)のトラック用の素材にする(プレビュー用の変換は要らない)
+        if (isImagePath(filePath)) {
+          imported.push(await stillAssetFrom(filePath))
+          continue
+        }
         const meta = await window.api.probeMedia(filePath)
         let thumbnailDataUrl: string | undefined
         if (meta.hasVideo) {
@@ -323,7 +331,7 @@ export function MediaBin(): React.JSX.Element {
       })
     } else {
       items.push({ label: 'ソースで開く', onSelect: () => openInSourceViewer(asset.id) })
-      if (asset.hasVideo) {
+      if (asset.hasVideo && !asset.still) {
         items.push({ label: '本編(V1)の末尾に追加', onSelect: () => addClipToTimeline(asset.id) })
         for (const t of videoOverlayTracks) {
           items.push({
@@ -415,7 +423,7 @@ export function MediaBin(): React.JSX.Element {
       // 実ファイルに紐づかないドラッグ(ブラウザからの画像など)は空文字が返る。
       // フォルダはパスが取れても拡張子が無いのでここで落ちる。
       const filePath = window.api.getPathForFile(file)
-      if (!filePath || !isSupportedMediaPath(filePath)) {
+      if (!filePath || !(isSupportedMediaPath(filePath) || isImagePath(filePath))) {
         unsupported.push(file.name)
         continue
       }

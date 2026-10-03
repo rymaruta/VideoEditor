@@ -972,9 +972,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             totalDuration
           )
           const pipAudibleDur = Math.max(0, Math.min(pipVisibleDuration, pipEndExport - pipStart))
-          command
-            .input(asset.filePath)
-            .inputOptions([`-ss ${overlayClip.inPoint}`, `-t ${pipVisibleDuration}`])
+          command.input(asset.filePath).inputOptions(
+            // 静止画は同じ画を、書き出しのフレームレートで必要な秒数ぶん流す
+            asset.still
+              ? ['-loop 1', `-framerate ${outputFps}`, `-t ${pipVisibleDuration}`]
+              : [`-ss ${overlayClip.inPoint}`, `-t ${pipVisibleDuration}`]
+          )
           const myIndex = inputIndex++
           if (includeVideo) {
             const pipLabel = `pip${pipCounter}`

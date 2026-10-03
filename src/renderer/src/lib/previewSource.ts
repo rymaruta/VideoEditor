@@ -34,5 +34,7 @@ export function previewSourceUrl(asset: MediaAsset): string {
  * `proxyPath ?? filePath` の規則をそれぞれの場所に書き写さずここから取る。
  */
 export function previewSourcePath(asset: MediaAsset): string {
+  // 静止画は元の画像をそのまま見せる(プレビュー用の変換は動画のためのもの)
+  if (asset.still) return asset.filePath
   return asset.proxyPath ?? asset.filePath
 }

@@ -145,6 +145,19 @@ function graphArgs(graph: SegmentGraph, graphPath: string): string[] {
       return
     }
     args.push('-threads', String(DECODER_THREADS))
+    if (input.still) {
+      // 静止画は同じ画を必要な秒数ぶん流す(シークは意味が無い)
+      args.push(
+        '-loop',
+        '1',
+        ...(input.framerate ? ['-framerate', input.framerate] : []),
+        '-t',
+        String(Math.max(0.001, input.duration)),
+        '-i',
+        input.path
+      )
+      return
+    }
     args.push('-ss', String(Math.max(0, input.seek)), '-t', String(Math.max(0.001, input.duration)))
     args.push('-i', input.path)
   })

@@ -37,6 +37,9 @@ export interface GraphInput {
   duration: number
   /** concat demuxer で読む一覧の中身(テロップの層)。あるときは `-ss/-t` を付けない */
   concatList?: string
+  /** 静止画。同じ画を `duration` 秒ぶん、シーケンスのフレームレート(`framerate`)で流す(`-loop 1`) */
+  still?: boolean
+  framerate?: string
 }
 
 export interface SegmentGraph {
@@ -125,7 +128,8 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
     inputs.push({
       path: asset.filePath,
       seek: item.sourceIn + skip * speed,
-      duration: sec(visEnd - visStart) * speed
+      duration: sec(visEnd - visStart) * speed,
+      ...(asset.still ? { still: true, framerate: `${seq.fps.num}/${seq.fps.den}` } : {})
     })
     return inputs.length - 1
   }

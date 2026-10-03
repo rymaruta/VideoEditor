@@ -26,6 +26,8 @@ export interface MediaAsset {
    * 外せば `filePath` をこれに戻す。差し替えた音声(キャッシュ)が無ければ、開いたときに自動で元へ戻す。
    */
   denoisedFrom?: string
+  /** 静止画(PNG など)。ワイプ・全面(CG)のトラックにだけ置ける。書き出しは同じ画を流し続ける */
+  still?: boolean
 }
 
 export type TransitionType = 'none' | 'crossfade' | 'fade' | 'wipe'

@@ -291,6 +291,15 @@ function VideoOverlayLayer({
     }
   }, [volume, muted])
 
+  // 静止画(版面CG など)は画像のまま重ねる(書き出しは同じ画を流し続ける)
+  if (asset.still)
+    return (
+      <img
+        src={previewSourceUrl(asset)}
+        alt=""
+        style={{ ...pipPreviewStyle(position, scale, frameWidth), filter: colorMatchCss(asset) }}
+      />
+    )
   return (
     <video
       ref={ref}

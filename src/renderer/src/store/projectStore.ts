@@ -184,6 +184,7 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
     hasVideo: asBoolean(raw.hasVideo, true),
     hasAudio: asBoolean(raw.hasAudio, false),
     proxyPath: typeof raw.proxyPath === 'string' ? raw.proxyPath : undefined,
+    still: raw.still === true ? true : undefined,
     colorMatch: normalizeColorMatch(raw.colorMatch),
     denoisedFrom:
       typeof raw.denoisedFrom === 'string' && raw.denoisedFrom ? raw.denoisedFrom : undefined
@@ -1648,7 +1649,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   addClipToTimeline: (assetId, index) =>
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
-      if (!asset) return state
+      // 静止画は本編に置かない(ワイプ・全面(CG)のトラック用)
+      if (!asset || asset.still) return state
       const newClip: Clip = {
         id: uuid(),
         assetId,
@@ -1669,7 +1671,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   addTrimmedClipToTimeline: (assetId, inPoint, outPoint, index) =>
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
-      if (!asset) return state
+      if (!asset || asset.still) return state
       const newClip: Clip = {
         id: uuid(),
         assetId,
@@ -1691,6 +1693,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // consumes the same amount of existing material instead.
   insertClipAtTime: (assetId, inPoint, outPoint, atTime) =>
     set((state) => {
+      if (state.project.assets.find((x) => x.id === assetId)?.still) return state
       const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, false)
       if (!built) return state
       return { ...pushHistory(state), project: applyInsertedClips(state.project, built) }
@@ -1698,6 +1701,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   overwriteClipAtTime: (assetId, inPoint, outPoint, atTime) =>
     set((state) => {
+      if (state.project.assets.find((x) => x.id === assetId)?.still) return state
       const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, true)
       if (!built) return state
       return { ...pushHistory(state), project: applyInsertedClips(state.project, built) }

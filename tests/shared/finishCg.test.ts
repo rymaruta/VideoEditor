@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CG_MAX_SECONDS, planCg } from '../../src/shared/finish/cg'
+import { CG_MAX_SECONDS, CG_STILL_SECONDS, planCg } from '../../src/shared/finish/cg'
 
 const cg = {
   うまい: [
@@ -38,5 +38,16 @@ describe('planCg', () => {
       cg
     )
     expect(r.map((x) => x.startTime)).toEqual([0])
+  })
+})
+
+describe('planCg(静止画)', () => {
+  it('静止画の CG は決まった秒数だけ出す', () => {
+    const r = planCg([{ text: '許可書が要る', startTime: 7 }], {
+      許可書: [{ path: '/cg/kyoka.png', name: 'kyoka.png', duration: 0, still: true }]
+    })
+    expect(r.map((x) => [x.startTime, x.path, x.outPoint])).toEqual([
+      [7, '/cg/kyoka.png', CG_STILL_SECONDS]
+    ])
   })
 })
