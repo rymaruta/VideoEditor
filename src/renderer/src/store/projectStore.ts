@@ -1,3 +1,11 @@
+import {
+  angleAlternatives,
+  coverageOfClips,
+  hasOverrides,
+  type CameraSeg,
+  type CutOverrides,
+  type Range
+} from '@shared/roughCut/overrides'
 import { autoTelopKey, isManualEdit, mergeManualTelops } from '@shared/telop/manual'
 import type { PlacedCg } from '@shared/finish/cg'
 import type { PlacedSound } from '@shared/finish/sound'
@@ -423,8 +431,41 @@ function normalizeLoadedProject(project: Project): Project {
     transcript: normalizeTranscript(raw.transcript),
     multicam: normalizeMulticam(raw.multicam),
     reviewed: asStringArray(raw.reviewed),
-    dismissedTelops: asStringArray(raw.dismissedTelops)
+    dismissedTelops: asStringArray(raw.dismissedTelops),
+    roughCutAuto: normalizeSegs(raw.roughCutAuto, true) as CameraSeg[] | undefined,
+    cutOverrides: normalizeOverrides(raw.cutOverrides)
   }
+}
+
+/** 区間の並び(壊れた要素は捨てる)。`camera` なら cameraId も要る */
+function normalizeSegs(raw: unknown, camera: boolean): (Range | CameraSeg)[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out = raw
+    .filter(
+      (r): r is Record<string, unknown> =>
+        Boolean(r) &&
+        typeof r === 'object' &&
+        Number.isFinite((r as Record<string, unknown>).start) &&
+        Number.isFinite((r as Record<string, unknown>).end) &&
+        (!camera || typeof (r as Record<string, unknown>).cameraId === 'string')
+    )
+    .map((r) => ({
+      start: r.start as number,
+      end: r.end as number,
+      ...(camera ? { cameraId: r.cameraId as string } : {})
+    }))
+  return out
+}
+
+function normalizeOverrides(raw: unknown): CutOverrides | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const o: CutOverrides = {
+    removed: (normalizeSegs(r.removed, false) as Range[] | undefined) ?? [],
+    added: (normalizeSegs(r.added, false) as Range[] | undefined) ?? [],
+    angles: (normalizeSegs(r.angles, true) as CameraSeg[] | undefined) ?? []
+  }
+  return hasOverrides(o) ? o : undefined
 }
 
 function asStringArray(raw: unknown): string[] | undefined {
@@ -674,6 +715,8 @@ interface ProjectState {
   restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
   /** 要確認の項目を「このままでよい」にする/戻す(プロジェクトに保存する) */
   setReviewed: (key: string, reviewed: boolean) => void
+  /** 本編のクリップを、同じ時間の別のカメラに替える(同期した収録素材のクリップだけ) */
+  switchClipAngle: (clipId: string, sourceId: string) => void
   /** 消した自動テロップを、また置けるようにする(演出テロップを選び直したとき) */
   undismissTelops: (keys: string[]) => void
   /** カメラ間の色合わせを素材に付ける(undefined で外す)。まとめて1操作=履歴1件 */
@@ -690,7 +733,11 @@ interface ProjectState {
    * 仮編集(構成・カット・アングル)を入れる。本編・同期で作ったトラック・発言テロップを入れ替え、
    * 手で足したトラック・テロップには触れない。取り消し1回で戻る
    */
-  applyRoughCut: (cut: RoughCut, telops: Omit<TextOverlay, 'id'>[]) => void
+  applyRoughCut: (
+    cut: RoughCut,
+    telops: Omit<TextOverlay, 'id'>[],
+    overrides?: CutOverrides
+  ) => void
   /** 演出テロップ(提案から置いたもの)を入れ替える(取り消し1回で戻る) */
   setEffectTelops: (telops: Omit<TextOverlay, 'id'>[]) => void
   /**
@@ -2308,7 +2355,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  applyRoughCut: (cut, telops) =>
+  applyRoughCut: (cut, telops, overrides) =>
     set((state) => {
       const clips: Clip[] = cut.main.map((m) => ({
         id: uuid(),
@@ -2350,6 +2397,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           audioTracks,
           // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す
           videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
+          // 作り直すときに今の本編と比べられるよう、組んだ本編を共通の時刻で覚える
+          roughCutAuto: state.project.multicam
+            ? coverageOfClips(cut.main, state.project.multicam)
+            : undefined,
+          cutOverrides: hasOverrides(overrides) ? overrides : undefined,
           // 人が直したテロップは文字と見た目を残し、人が消したものは足し直さない
           textOverlays: [
             ...state.project.textOverlays.filter((o) => !o.utteranceId && !o.effectId),
@@ -2499,6 +2551,22 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return {
         ...(options?.history === false ? {} : pushHistory(state)),
         project: { ...state.project, assets }
+      }
+    }),
+
+  switchClipAngle: (clipId, sourceId) =>
+    set((state) => {
+      const info = state.project.multicam
+      const clip = state.project.clips.find((c) => c.id === clipId)
+      if (!info || !clip) return state
+      const alt = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clip
+      if (!alt) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, ...alt } : c))
+        }
       }
     }),
 

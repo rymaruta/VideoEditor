@@ -1,3 +1,4 @@
+import { coverageOfClips, hasOverrides, updateOverrides } from '@shared/roughCut/overrides'
 import { planCg } from '@shared/finish/cg'
 import {
   fallbackMood,
@@ -584,7 +585,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     if (!info) return
     setStep('cut', { state: 'run', percent: 0, note: '音の大きさを読み込み中' })
     const activity = await activityOf(project, info)
+    // 前に組んだ本編と今の本編を比べ、人が削った・足した区間、替えたカメラを読み取る
+    const overrides = project.roughCutAuto
+      ? updateOverrides(
+          project.cutOverrides,
+          project.roughCutAuto,
+          coverageOfClips(project.clips, info)
+        )
+      : project.cutOverrides
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
+      overrides,
       targetSec: get().targetMinutes * 60,
       keep: get().keep,
       styles: usePresetStore.getState().captionPresets,
@@ -678,7 +688,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       usePresetStore.getState().captionPresets
     )
     set({ lastSpans: plan.cut.spans })
-    useProjectStore.getState().applyRoughCut(plan.cut, [...telops, ...effectTelops])
+    useProjectStore.getState().applyRoughCut(plan.cut, [...telops, ...effectTelops], overrides)
+    if (hasOverrides(overrides))
+      log(
+        `本編の手直しを当て直しました(削った区間 ${overrides!.removed.length}・足した区間 ${overrides!.added.length}・替えたカメラ ${overrides!.angles.length})`
+      )
     set({
       roughCut: {
         keptIds: plan.selection.kept,

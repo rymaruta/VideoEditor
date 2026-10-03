@@ -30,7 +30,7 @@ export interface Shot {
   end: number
   cameraId: string
   /** なぜこのカメラか(画面の説明用) */
-  reason: 'speaker' | 'jump' | 'long' | 'coverage' | 'default'
+  reason: 'speaker' | 'jump' | 'long' | 'coverage' | 'default' | 'manual'
 }
 
 export interface AngleOptions {

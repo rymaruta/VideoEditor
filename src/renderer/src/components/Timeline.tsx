@@ -1,3 +1,4 @@
+import { angleAlternatives } from '@shared/roughCut/overrides'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
 import { useMenuCommand } from '../lib/menuCommands'
@@ -671,6 +672,17 @@ export function Timeline(): React.JSX.Element {
       },
       { label: 'トリム画面を開く', onSelect: () => setTrimClipId(clipId) }
     ]
+    // 同期した収録素材のクリップは、同じ時間の別のカメラに替えられる
+    if (project.multicam) {
+      for (const alt of angleAlternatives(clip, project.multicam)) {
+        if (alt.current) continue
+        items.push({
+          label: `アングルを ${alt.name} に替える${alt.clip ? '' : '(この時間は録っていません)'}`,
+          disabled: !alt.clip,
+          onSelect: () => useProjectStore.getState().switchClipAngle(clipId, alt.sourceId)
+        })
+      }
+    }
     if (asset?.hasAudio) {
       items.push(
         clip.audioDetached

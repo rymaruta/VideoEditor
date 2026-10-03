@@ -1,3 +1,4 @@
+import type { CameraSeg, CutOverrides } from './roughCut/overrides'
 import type { ColorMatch } from './color/match'
 import type { MulticamInfo } from './sync/multicam'
 import type { TranscriptUtterance } from './transcript'
@@ -221,6 +222,10 @@ export interface Project {
   reviewed?: string[]
   /** 人が消した自動テロップの鍵(`autoTelopKey`)。作り直しても足し直さない */
   dismissedTelops?: string[]
+  /** 前に自動で組んだ本編(共通の時刻とカメラ)。作り直すときに今の本編と比べて、人の修正を読み取る */
+  roughCutAuto?: CameraSeg[]
+  /** 本編の人の修正(削った・足した区間、替えたカメラ)。作り直しても当て直す */
+  cutOverrides?: CutOverrides
 }
 
 export interface TemplateSegment {

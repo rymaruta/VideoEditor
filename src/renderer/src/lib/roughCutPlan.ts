@@ -1,3 +1,8 @@
+import {
+  applyAngleOverrides,
+  applyCutOverrides,
+  type CutOverrides
+} from '@shared/roughCut/overrides'
 import type { ShowStyle } from '@shared/style/showStyle'
 import type { Project, TextOverlay } from '@shared/types'
 import { toCommon, type MulticamInfo } from '@shared/sync/multicam'
@@ -185,6 +190,8 @@ export function planRoughCut(
     dictionary?: readonly DictionaryEntry[]
     /** 番組スタイル(過去回から学んだ間・ショットの長さ・周りの音の音量)。無ければ既定値 */
     style?: ShowStyle
+    /** 本編の人の修正(削った・足した区間、替えたカメラ)。作り直しても当て直す */
+    overrides?: CutOverrides
   }
 ): RoughCutPlan {
   const tighten = options.style
@@ -220,12 +227,13 @@ export function planRoughCut(
     estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0)
   }
 
-  const pieces = tightenRanges(
+  const tightened = tightenRanges(
     kept.map((s) => ({ start: s.start, end: s.end, sceneId: s.id })),
     activity,
     speech,
     tighten
   )
+  const pieces = options.overrides ? applyCutOverrides(tightened, options.overrides) : tightened
   const cameras = info.sources
     .filter((s) => s.kind === 'camera')
     .map((s) => ({
@@ -235,7 +243,7 @@ export function planRoughCut(
         .filter((f) => f.sourceId === s.id)
         .map((f) => ({ start: f.start, end: f.start + f.duration / f.rate }))
     }))
-  const shots = chooseAngles(
+  const chosen = chooseAngles(
     pieces,
     cameras,
     info.anchorSourceId,
@@ -244,6 +252,9 @@ export function planRoughCut(
       ? { minShotSec: options.style.minShotSec, maxShotSec: options.style.maxShotSec }
       : {}
   )
+  const shots = options.overrides
+    ? applyAngleOverrides(chosen, options.overrides.angles, info)
+    : chosen
   const cut = buildRoughCut(shots, info, { ambienceVolume: options.style?.ambienceVolume })
 
   // 発言テロップ: 話者に割り当てたテロップスタイルで、仮編集の時刻に置く
