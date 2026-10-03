@@ -175,10 +175,12 @@ export function AutoEditScreen(): React.JSX.Element | null {
   }
 
   function makeTelops(): void {
+    const learned = useSettingsStore.getState().showStyle?.style
     const overlays = telopsFromTranscript(
       project,
       usePresetStore.getState().captionPresets,
-      parseDictionary(useSettingsStore.getState().telopDictionary)
+      parseDictionary(useSettingsStore.getState().telopDictionary),
+      learned ? { lineChars: learned.telopLineChars, minSec: learned.telopMinSec } : undefined
     )
     if (overlays.length === 0) return
     const store = useProjectStore.getState()

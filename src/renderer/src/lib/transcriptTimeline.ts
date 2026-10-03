@@ -66,14 +66,21 @@ export function placedUtterances(project: Project): PlacedUtterance[] {
 export function telopsFromTranscript(
   project: Project,
   styles: readonly TelopStyleDef[],
-  dictionary: readonly DictionaryEntry[] = []
+  dictionary: readonly DictionaryEntry[] = [],
+  /** 番組スタイルで学んだ、1行の文字数・最短の表示時間 */
+  telop?: { lineChars: number; minSec: number }
 ): Omit<TextOverlay, 'id'>[] {
   const clips = placedClips(project)
   const base = defaultTextStyle()
   const out: Omit<TextOverlay, 'id'>[] = []
   for (const u of project.transcript ?? []) {
     const def = styleForSpeaker(styles, u.speaker)
-    for (const chunk of utteranceToTelopChunks(u, { dictionary })) {
+    const chunks = utteranceToTelopChunks(u, {
+      dictionary,
+      maxLineChars: telop?.lineChars,
+      minDurationSec: telop?.minSec
+    })
+    for (const chunk of chunks) {
       const r = utteranceTimelineRange(
         { assetId: u.assetId, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd },
         clips

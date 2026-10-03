@@ -96,11 +96,35 @@ describe('measureProject', () => {
     expect(m.ambienceVolume).toBeCloseTo(0.4)
   })
 
+  it('発言テロップの1行の文字数(改行で分けた行・空白は数えない)と最短の表示時間を測る', () => {
+    const p = episode(4, 0.5, 8, 0.25)
+    p.textOverlays = Array.from({ length: 20 }, (_, i) => ({
+      id: `t${i}`,
+      // 1行 18 字の2行(Premiere の改行は \r)。演出テロップは数えない
+      text:
+        i % 2
+          ? 'あいうえおかきくけこさしすせそたちつ\rなに ぬ'
+          : 'あいうえお かきくけこさしすせそたちつ',
+      startTime: i * 3,
+      endTime: i * 3 + (i === 0 ? 0.6 : 1.5),
+      style
+    }))
+    p.textOverlays.push({ ...p.textOverlays[0], id: 'fx', text: 'あ'.repeat(40), effectId: 'e' })
+    const m = measureProject(p)
+    expect(m.telopLineChars).toBeCloseTo(18)
+    expect(m.telopMinSec).toBeGreaterThan(1.3)
+    const r = learnShowStyle([p, p])
+    expect(r.style.telopLineChars).toBe(18)
+    expect(Number.isInteger(r.style.telopLineChars)).toBe(true)
+    expect(describeShowStyle(r.style)).toContain('1行 18 字')
+  })
+
   it('測れない項目は返さない(本編1本・発言が少ない・SE が1つも無い)', () => {
     const p = { ...episode(4, 0.5, 0, 0.3), clips: [], textOverlays: [] }
     const m = measureProject(p)
     expect(m.minShotSec).toBeUndefined()
     expect(m.keepPauseSec).toBeUndefined()
+    expect(m.telopLineChars).toBeUndefined()
     expect(measureProject(episode(4, 0.5, 0, 0.3)).sePerMinute).toBeUndefined()
   })
 })
@@ -137,6 +161,8 @@ describe('normalizeShowStyle', () => {
     expect(s.minShotSec).toBe(DEFAULT_SHOW_STYLE.minShotSec)
     expect(s.maxShotSec).toBe(20)
     expect(s.bgmVolume).toBe(0.5)
+    expect(normalizeShowStyle({ telopLineChars: 16.6 }).telopLineChars).toBe(17)
+    expect(normalizeShowStyle({}).telopMinSec).toBe(DEFAULT_SHOW_STYLE.telopMinSec)
     expect(describeShowStyle(s)).toContain('BGM 50%')
   })
 })

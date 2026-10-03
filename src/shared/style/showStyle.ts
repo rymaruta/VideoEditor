@@ -8,6 +8,7 @@ import type { Project } from '../types'
  * - 1ショットの長さ: 本編のクリップの長さ(アングルを替える最短・最長)
  * - SE の数: 1分あたり
  * - BGM・環境音(カメラの音)の音量
+ * - 発言テロップの1行の文字数と、最短の表示時間
  *
  * 1本ずつ集計し、本どうしは中央値でまとめる(1本だけ特殊な回に引っぱられない)。
  * 値は自動編集が壊れない範囲に収める。
@@ -24,6 +25,10 @@ export interface ShowStyle {
   sePerMinute: number
   bgmVolume: number
   ambienceVolume: number
+  /** 発言テロップの1行の文字数(これを超えたら改行・次の1枚へ) */
+  telopLineChars: number
+  /** 発言テロップの最短の表示時間(秒) */
+  telopMinSec: number
 }
 
 /** 既定値(学ぶ前)。自動編集の各工程の既定値と同じ */
@@ -34,7 +39,9 @@ export const DEFAULT_SHOW_STYLE: ShowStyle = {
   maxShotSec: 8,
   sePerMinute: 6,
   bgmVolume: 0.3,
-  ambienceVolume: 0.35
+  ambienceVolume: 0.35,
+  telopLineChars: 14,
+  telopMinSec: 1
 }
 
 const LIMITS: Record<keyof ShowStyle, [number, number]> = {
@@ -44,8 +51,13 @@ const LIMITS: Record<keyof ShowStyle, [number, number]> = {
   maxShotSec: [3, 20],
   sePerMinute: [0, 30],
   bgmVolume: [0.05, 1],
-  ambienceVolume: [0, 1]
+  ambienceVolume: [0, 1],
+  telopLineChars: [8, 24],
+  telopMinSec: [0.5, 3]
 }
+
+/** 整数で持つ項目 */
+const INTEGER_KEYS: readonly (keyof ShowStyle)[] = ['telopLineChars']
 
 export interface LearnedStyle {
   style: ShowStyle
@@ -101,6 +113,22 @@ export function measureProject(project: Project): Partial<ShowStyle> {
     out.maxPauseSec = quantile(gaps, 0.9)
   }
 
+  // テロップの1行の文字数: 改行で分けた行の長さの上の方(9割)。空白は数えない。
+  // 最短の表示時間: 表示時間の下の方(1割)。10枚以上あるときだけ
+  if (speech.length >= 10) {
+    const lines = speech.flatMap((o) =>
+      o.text
+        .split(/\r\n|\r|\n/)
+        .map((l) => [...l.replace(/\s+/g, '')].length)
+        .filter((n) => n > 0)
+    )
+    if (lines.length >= 10) out.telopLineChars = quantile(lines, 0.9)
+    out.telopMinSec = quantile(
+      speech.map((o) => o.endTime - o.startTime).filter((d) => d > 0),
+      0.1
+    )
+  }
+
   const tracks = project.audioTracks ?? []
   const isAmbience = (t: (typeof tracks)[number]): boolean =>
     Boolean(t.multicamSourceId) && !t.voice
@@ -144,7 +172,8 @@ export function learnShowStyle(projects: readonly Project[]): LearnedStyle {
     const values = measured.map((m) => m[key]).filter((v): v is number => Number.isFinite(v))
     if (values.length === 0) continue
     const [lo, hi] = LIMITS[key]
-    style[key] = round2(Math.min(hi, Math.max(lo, median(values))))
+    const v = Math.min(hi, Math.max(lo, median(values)))
+    style[key] = INTEGER_KEYS.includes(key) ? Math.round(v) : round2(v)
     learned[key] = values.length
   }
   // 最短 < 最長、残す間 < 詰める間 を保つ
@@ -161,7 +190,10 @@ export function normalizeShowStyle(raw: unknown): ShowStyle {
   for (const key of Object.keys(DEFAULT_SHOW_STYLE) as (keyof ShowStyle)[]) {
     const v = r[key]
     const [lo, hi] = LIMITS[key]
-    if (typeof v === 'number' && Number.isFinite(v)) style[key] = Math.min(hi, Math.max(lo, v))
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      const c = Math.min(hi, Math.max(lo, v))
+      style[key] = INTEGER_KEYS.includes(key) ? Math.round(c) : c
+    }
   }
   return style
 }
@@ -173,6 +205,7 @@ export function describeShowStyle(s: ShowStyle): string {
     `1ショット ${s.minShotSec}〜${s.maxShotSec}秒`,
     `SE 1分に ${s.sePerMinute} 個まで`,
     `BGM ${Math.round(s.bgmVolume * 100)}%`,
-    `周りの音 ${Math.round(s.ambienceVolume * 100)}%`
+    `周りの音 ${Math.round(s.ambienceVolume * 100)}%`,
+    `テロップ 1行 ${s.telopLineChars} 字・最短 ${s.telopMinSec}秒`
   ].join(' · ')
 }

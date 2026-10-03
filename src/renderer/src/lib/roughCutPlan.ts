@@ -266,7 +266,11 @@ export function planRoughCut(
     const f = fileOfAsset.get(u.assetId)
     if (!f) continue
     const def = styleForSpeaker(options.styles, u.speaker)
-    const chunks = utteranceToTelopChunks(u, { dictionary: options.dictionary })
+    const chunks = utteranceToTelopChunks(u, {
+      dictionary: options.dictionary,
+      maxLineChars: options.style?.telopLineChars,
+      minDurationSec: options.style?.telopMinSec
+    })
     for (let ci = 0; ci < chunks.length; ci++) {
       const chunk = chunks[ci]
       const start = roughTimelineAt(cut.spans, toCommon(f, chunk.sourceStart))
