@@ -121,6 +121,10 @@ export interface TextOverlay {
   styleId?: string
   /** 文字起こしから作った発言テロップなら、その発話の ID(仮編集を作り直すときに入れ替える) */
   utteranceId?: string
+  /** 1つの発言を何枚かに分けたときの何枚目か(0 から)。人の修正を作り直しで保つ鍵に使う */
+  utteranceChunk?: number
+  /** 人が直した(文字・見た目・時刻)。自動編集を作り直しても、文字と見た目を残す */
+  edited?: boolean
   /** 演出テロップの提案から置いたものなら、その提案の ID(仮編集を作り直すときに入れ替える) */
   effectId?: string
 }
@@ -213,6 +217,10 @@ export interface Project {
   transcript?: TranscriptUtterance[]
   /** 同期した収録素材の情報(新しい回を作ったとき)。仮編集を作り直すのに使う */
   multicam?: MulticamInfo
+  /** 要確認の一覧で「このままでよい」にした項目 */
+  reviewed?: string[]
+  /** 人が消した自動テロップの鍵(`autoTelopKey`)。作り直しても足し直さない */
+  dismissedTelops?: string[]
 }
 
 export interface TemplateSegment {

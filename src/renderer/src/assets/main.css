@@ -6021,3 +6021,26 @@ h3 {
 .new-episode-style .form-note {
   flex: 1 1 320px;
 }
+
+/* 要確認: 項目の操作 */
+.auto-edit-review-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 画面の下のバー: 要確認の件数 */
+.status-review {
+  border: 0;
+  border-radius: 10px;
+  padding: 1px 10px;
+  background: #e8c46a;
+  color: #1b1b1b;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-review:hover {
+  filter: brightness(1.08);
+}

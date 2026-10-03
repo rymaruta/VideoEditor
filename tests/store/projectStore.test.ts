@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useProjectStore } from '@renderer/store/projectStore'
-import type { Project } from '@shared/types'
+import type { Project, TextOverlay } from '@shared/types'
+import { defaultTextStyle } from '@shared/textStyle'
 import type { PlacedSound } from '@shared/finish/sound'
 import { audioClipDuration } from '@renderer/lib/timelineMath'
 import { seeded } from '../helpers/boundary'
@@ -838,5 +839,39 @@ describe('自動の版面CG', () => {
     // 何も置かないなら、自動のトラックは消える
     st().setAutoCg([], [])
     expect(st().project.videoOverlayTracks.filter((t) => t.autoRole)).toHaveLength(0)
+  })
+})
+
+describe('人の修正を作り直しで上書きしない', () => {
+  beforeEach(reset)
+  const cut = { main: [], audio: [], duration: 10, spans: [] }
+  const telop = (u: string, text: string, start: number): Omit<TextOverlay, 'id'> => ({
+    text,
+    startTime: start,
+    endTime: start + 1,
+    style: defaultTextStyle(),
+    utteranceId: u,
+    utteranceChunk: 0
+  })
+
+  it('直したテロップは作り直しても残り、消したものは足し直さない。確認済みは保存される', () => {
+    st().applyRoughCut(cut, [telop('u1', '一', 0), telop('u2', '二', 2), telop('u3', '三', 4)])
+    const byText = (t: string): TextOverlay => st().project.textOverlays.find((o) => o.text === t)!
+    st().updateTextOverlay(byText('一').id, { text: '一(直した)' })
+    st().removeTextOverlay(byText('三').id)
+    expect(st().project.dismissedTelops).toEqual(['u:u3#0'])
+    st().applyRoughCut(cut, [telop('u1', '一', 1), telop('u2', '二', 3), telop('u3', '三', 5)])
+    expect(
+      st()
+        .project.textOverlays.filter((o) => o.utteranceId)
+        .map((o) => [o.text, o.startTime])
+    ).toEqual([
+      ['一(直した)', 1],
+      ['二', 3]
+    ])
+    st().setReviewed('sync:x', true)
+    expect(st().project.reviewed).toEqual(['sync:x'])
+    st().setReviewed('sync:x', false)
+    expect(st().project.reviewed).toBeUndefined()
   })
 })

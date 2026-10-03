@@ -254,7 +254,9 @@ export function planRoughCut(
     const f = fileOfAsset.get(u.assetId)
     if (!f) continue
     const def = styleForSpeaker(options.styles, u.speaker)
-    for (const chunk of utteranceToTelopChunks(u, { dictionary: options.dictionary })) {
+    const chunks = utteranceToTelopChunks(u, { dictionary: options.dictionary })
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci]
       const start = roughTimelineAt(cut.spans, toCommon(f, chunk.sourceStart))
       if (start === null) continue
       // 終わりがカットで落ちた所に掛かるなら、その区間の終わりまで
@@ -272,7 +274,8 @@ export function planRoughCut(
         styleId: def?.id,
         speaker: u.speaker,
         source: 'auto',
-        utteranceId: u.id
+        utteranceId: u.id,
+        utteranceChunk: ci
       })
     }
   }

@@ -1,3 +1,4 @@
+import { autoTelopKey, isManualEdit, mergeManualTelops } from '@shared/telop/manual'
 import type { PlacedCg } from '@shared/finish/cg'
 import type { PlacedSound } from '@shared/finish/sound'
 import type { ColorMatch } from '@shared/color/match'
@@ -420,8 +421,26 @@ function normalizeLoadedProject(project: Project): Project {
     ),
     beatGrid: normalizeBeatGrid(raw.beatGrid),
     transcript: normalizeTranscript(raw.transcript),
-    multicam: normalizeMulticam(raw.multicam)
+    multicam: normalizeMulticam(raw.multicam),
+    reviewed: asStringArray(raw.reviewed),
+    dismissedTelops: asStringArray(raw.dismissedTelops)
   }
+}
+
+function asStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const v = raw.filter((x): x is string => typeof x === 'string')
+  return v.length > 0 ? v : undefined
+}
+
+/** 自動テロップを消したら、その鍵を覚える(作り直しで足し直さない) */
+function withDismissed(
+  list: string[] | undefined,
+  removed: TextOverlay | undefined
+): string[] | undefined {
+  const key = removed ? autoTelopKey(removed) : null
+  if (!key) return list
+  return [...new Set([...(list ?? []), key])]
 }
 
 function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
@@ -653,6 +672,10 @@ interface ProjectState {
   selectOverlay: (id: string | null) => void
   /** テロップスタイルの一覧を新しくしたとき、使っているテロップへ反映する(取り消しは1回で戻る) */
   restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
+  /** 要確認の項目を「このままでよい」にする/戻す(プロジェクトに保存する) */
+  setReviewed: (key: string, reviewed: boolean) => void
+  /** 消した自動テロップを、また置けるようにする(演出テロップを選び直したとき) */
+  undismissTelops: (keys: string[]) => void
   /** カメラ間の色合わせを素材に付ける(undefined で外す)。まとめて1操作=履歴1件 */
   setColorMatches: (matches: Record<string, ColorMatch | undefined>) => void
   /**
@@ -2216,6 +2239,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           textOverlays: state.project.textOverlays.map((o) => {
             if (o.id !== id) return o
             const next = { ...o, ...patch }
+            // 自動で置いたテロップを人が直したら印を付ける(作り直しで上書きしない)
+            if (autoTelopKey(o) && isManualEdit(patch)) next.edited = true
             // 位置を動かす更新なら単語も連れていく。`patch.words` を明示的に渡された
             // ときはそちらが正なので触らない(自動テロップの作り直しなど)。
             if (patch.startTime !== undefined && patch.words === undefined) {
@@ -2251,7 +2276,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                   ...o,
                   style: { ...o.style, ...patch },
                   // 見た目を変えたらスタイルとのつながりを外す(置き場所だけなら保つ)
-                  styleId: placementOnly ? o.styleId : undefined
+                  styleId: placementOnly ? o.styleId : undefined,
+                  ...(autoTelopKey(o) ? { edited: true } : {})
                 }
               : o
           )
@@ -2324,9 +2350,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           audioTracks,
           // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す
           videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
+          // 人が直したテロップは文字と見た目を残し、人が消したものは足し直さない
           textOverlays: [
             ...state.project.textOverlays.filter((o) => !o.utteranceId && !o.effectId),
-            ...telops.map((o) => ({ ...o, id: uuid() }))
+            ...mergeManualTelops(
+              state.project.textOverlays,
+              telops,
+              new Set(state.project.dismissedTelops ?? [])
+            ).map((o) => ({ ...o, id: uuid() }))
           ]
         }
       }
@@ -2339,7 +2370,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ...state.project,
         textOverlays: [
           ...state.project.textOverlays.filter((o) => !o.effectId),
-          ...telops.map((o) => ({ ...o, id: uuid() }))
+          ...mergeManualTelops(
+            state.project.textOverlays,
+            telops,
+            new Set(state.project.dismissedTelops ?? [])
+          ).map((o) => ({ ...o, id: uuid() }))
         ]
       }
     })),
@@ -2467,6 +2502,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
+  setReviewed: (key, reviewed) =>
+    set((state) => {
+      const cur = state.project.reviewed ?? []
+      const next = reviewed ? [...new Set([...cur, key])] : cur.filter((k) => k !== key)
+      if (next.length === cur.length && next.every((k, i) => k === cur[i])) return state
+      return { project: { ...state.project, reviewed: next.length > 0 ? next : undefined } }
+    }),
+
+  undismissTelops: (keys) =>
+    set((state) => {
+      const cur = state.project.dismissedTelops ?? []
+      const next = cur.filter((k) => !keys.includes(k))
+      if (next.length === cur.length) return state
+      return {
+        project: { ...state.project, dismissedTelops: next.length > 0 ? next : undefined }
+      }
+    }),
+
   restyleTextOverlays: (styles) =>
     set((state) => {
       const next = restyleOverlays(state.project.textOverlays, styles)
@@ -2483,7 +2536,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       selectedOverlayId: state.selectedOverlayId === id ? null : state.selectedOverlayId,
       project: {
         ...state.project,
-        textOverlays: state.project.textOverlays.filter((o) => o.id !== id)
+        textOverlays: state.project.textOverlays.filter((o) => o.id !== id),
+        dismissedTelops: withDismissed(
+          state.project.dismissedTelops,
+          state.project.textOverlays.find((o) => o.id === id)
+        )
       }
     })),
 

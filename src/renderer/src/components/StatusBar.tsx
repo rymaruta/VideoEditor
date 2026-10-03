@@ -4,6 +4,8 @@ import { targetResolution } from '@shared/resolution'
 import { ProjectMenu } from './ProjectMenu'
 import { useAutoEditRunStore } from '../store/autoEditRunStore'
 import { ProjectNameField } from './ProjectNameField'
+import { usePipelineStore } from '../store/pipelineStore'
+import { useReviewItems } from '../lib/useReviewItems'
 
 /**
  * 画面の一番下のステータスバー(Windows の編集ソフトと同じ位置)。
@@ -22,6 +24,8 @@ export function StatusBar(): React.JSX.Element {
     (s) => s.status === 'running' || s.finishingId !== null
   )
   const { w, h } = targetResolution(aspectRatio, resolution)
+  // 自動編集の要確認(自信の低い箇所)。押すと自動編集の画面の一覧を開く
+  const reviewCount = useReviewItems().open.length
   return (
     <footer className="status-bar">
       <ProjectNameField />
@@ -31,6 +35,15 @@ export function StatusBar(): React.JSX.Element {
       <ProjectMenu />
       {autoEditRunning && <span className="status-busy">AIおまかせ全自動編集: 生成中…</span>}
       <span className="status-spacer" />
+      {reviewCount > 0 && (
+        <button
+          className="status-review"
+          title="自動編集で自信の低かった箇所の一覧を開く"
+          onClick={() => usePipelineStore.getState().setScreenOpen(true)}
+        >
+          要確認 {reviewCount.toLocaleString()}
+        </button>
+      )}
       <span>
         クリップ {clipCount.toLocaleString()} · テロップ {telopCount.toLocaleString()}
       </span>

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { SyncIssue } from '@shared/sync/solve'
+import { useEffect, useState } from 'react'
 import { sourceDuration } from '@shared/ingest/classify'
 import { usePipelineStore, STEPS, type StepStatus } from '../store/pipelineStore'
 import { useProjectStore } from '../store/projectStore'
 import { useMenuCommand } from '../lib/menuCommands'
+import { useReviewItems } from '../lib/useReviewItems'
+import type { ReviewItem } from '../lib/reviewItems'
 import { formatTimecode } from '../lib/timelineRuler'
 import { placedUtterances, telopsFromTranscript } from '../lib/transcriptTimeline'
 import { usePresetStore } from '../store/presetStore'
@@ -26,12 +27,6 @@ const SOURCE_COLORS = ['#9ea7e0', '#7fb5d8', '#d8a77f', '#c49ee0', '#7fcf96', '#
 
 function fileName(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
-}
-
-function issueKey(issue: SyncIssue): string {
-  return issue.kind === 'unsynced'
-    ? `unsynced:${issue.fileId}`
-    : `${issue.kind}:${issue.a}:${issue.b}`
 }
 
 function stepMark(state: StepStatus['state']): string {
@@ -61,7 +56,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const report = usePipelineStore((s) => s.report)
   const syncedFiles = usePipelineStore((s) => s.syncedFiles)
   const log = usePipelineStore((s) => s.log)
-  const reviewed = usePipelineStore((s) => s.reviewed)
+  const { open: openIssues, done: doneIssues } = useReviewItems()
   const running = usePipelineStore((s) => s.running)
   const scan = usePipelineStore((s) => s.scan)
   const runPipeline = usePipelineStore((s) => s.runPipeline)
@@ -79,7 +74,6 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const judgeSource = usePipelineStore((s) => s.judgeSource)
   const keep = usePipelineStore((s) => s.keep)
   const roughCut = usePipelineStore((s) => s.roughCut)
-  const telopReviews = usePipelineStore((s) => s.telopReviews)
   const effects = usePipelineStore((s) => s.effects)
   const effectChosen = usePipelineStore((s) => s.effectChosen)
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
@@ -101,11 +95,6 @@ export function AutoEditScreen(): React.JSX.Element | null {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, setOpen])
 
-  const sourceOf = useMemo(() => new Map(syncedFiles.map((f) => [f.id, f.sourceId])), [syncedFiles])
-  const sourceName = (id: string): string => sources.find((s) => s.id === id)?.name ?? ''
-  const fileLabel = (fileId: string): string =>
-    `${sourceName(sourceOf.get(fileId) ?? '')} ${fileName(fileId)}`.trim()
-
   if (!open) return null
 
   const doneCount = STEPS.filter((s) => steps[s.id].state === 'done').length
@@ -118,50 +107,17 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const placementOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
   const durationOf = new Map(syncedFiles.map((f) => [f.id, f.duration]))
 
-  function describe(issue: SyncIssue): { kind: string; text: string; at?: number } {
-    switch (issue.kind) {
-      case 'unsynced':
-        return {
-          kind: '同期',
-          text: `${fileLabel(issue.fileId)} は、ほかの素材と音が一致しませんでした(タイムラインには並べていません)`
-        }
-      case 'conflict':
-        return {
-          kind: '食い違い',
-          text: `${fileLabel(issue.a)} と ${fileLabel(issue.b)} の位置が ${Math.abs(issue.difference * 1000).toFixed(0)}ms 食い違っています`,
-          at: placementOf.get(issue.b)?.start
-        }
-      case 'overlap':
-        return {
-          kind: '重なり',
-          text: `${fileLabel(issue.a)} と ${fileLabel(issue.b)} が同じ機材で ${issue.overlap.toFixed(1)} 秒重なっています`,
-          at: placementOf.get(issue.b)?.start
-        }
-    }
+  /** 編集画面に戻って、その位置(とテロップ)へ移る */
+  function jumpTo(item: ReviewItem): void {
+    const store = useProjectStore.getState()
+    const overlay = item.overlayId
+      ? store.project.textOverlays.find((o) => o.id === item.overlayId)
+      : undefined
+    const at = item.at ?? overlay?.startTime
+    setOpen(false)
+    if (at !== undefined) store.seekTo(at)
+    if (overlay) store.selectOverlay(overlay.id)
   }
-
-  // 要確認: 同期の問題 + 声の重なり(テロップの話者を確かめる)
-  const reviewItems: { key: string; kind: string; text: string; at?: number }[] = [
-    ...(report?.issues ?? []).map((i) => ({ key: issueKey(i), ...describe(i) })),
-    ...utterances
-      .filter((p) => p.utterance.overlap)
-      .map((p) => ({
-        key: `overlap-voice:${p.utterance.id}`,
-        kind: '声の重なり',
-        text: `${p.utterance.speaker ?? '話者不明'}「${p.utterance.text.slice(0, 40)}」— ほかの人と同時に話しています。話者と文字を確かめてください`,
-        at: p.start
-      }))
-  ]
-  for (const r of telopReviews) {
-    reviewItems.push({
-      key: `telop-face:${r.startTime.toFixed(2)}`,
-      kind: 'テロップと顔',
-      text: `「${r.text.replace(/\n/g, ' ').slice(0, 30)}」— 上下どちらに置いても顔に掛かります。位置を確かめてください`,
-      at: r.startTime
-    })
-  }
-  const openIssues = reviewItems.filter((i) => !reviewed.includes(i.key))
-  const doneIssues = reviewItems.filter((i) => reviewed.includes(i.key))
 
   function makeTelops(): void {
     const overlays = telopsFromTranscript(
@@ -236,8 +192,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
             })}
           </ol>
           <p className="form-note auto-edit-next">
-            この後の工程(テロップの整え・演出テロップ・SE/BGM・CG版面・音声の仕上げ・色合わせ・書き出し後の自動チェック)は、
-            できたものから順にここへ加わります。
+            仕上がったら書き出してください(ファイル &gt; 書き出し…)。書き出した動画は自動で確認し、
+            問題があれば右の「要確認」に加わります。手で直したテロップは、仮編集を作り直しても残ります。
           </p>
           <div className="dialog-footer-spacer" />
           <div className="auto-edit-step-actions">
@@ -718,12 +674,28 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     <span className="auto-edit-review-kind">{d.kind}</span>
                   </div>
                   <p>{d.text}</p>
-                  <button
-                    className="small-button"
-                    onClick={() => markReviewed(key, reviewTab === 'open')}
-                  >
-                    {reviewTab === 'open' ? 'このままでよい' : '要確認に戻す'}
-                  </button>
+                  <div className="auto-edit-review-actions">
+                    {(d.at !== undefined || d.overlayId) && (
+                      <button
+                        className="small-button"
+                        title="編集画面に戻り、その位置へ移る"
+                        onClick={() => jumpTo(d)}
+                      >
+                        移動
+                      </button>
+                    )}
+                    {d.tab && d.tab !== tab && (
+                      <button className="small-button" onClick={() => setTab(d.tab!)}>
+                        直す
+                      </button>
+                    )}
+                    <button
+                      className="small-button"
+                      onClick={() => markReviewed(key, reviewTab === 'open')}
+                    >
+                      {reviewTab === 'open' ? 'このままでよい' : '要確認に戻す'}
+                    </button>
+                  </div>
                 </li>
               )
             })}

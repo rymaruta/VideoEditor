@@ -7,7 +7,7 @@ import {
   type BgmMood
 } from '@shared/finish/sound'
 import { planCameraColors } from '../lib/colorMatchPlan'
-import { COLOR_VERDICT_TEXT, describeColorMatch } from '@shared/color/match'
+import { COLOR_VERDICT_TEXT, describeColorMatch, type ColorMatchVerdict } from '@shared/color/match'
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import type { FootageScan, FootageSource, ProbedFile, SourceKind } from '@shared/ingest/classify'
@@ -112,7 +112,6 @@ interface PipelineState {
   syncedFiles: SyncInputFile[]
   log: { time: number; text: string }[]
   /** 「このままでよい」とした要確認の印 */
-  reviewed: string[]
   running: boolean
   screenOpen: boolean
   /** 音声認識に使った計算装置(GPU / CPU) */
@@ -136,6 +135,10 @@ interface PipelineState {
   setEffectChosen: (id: string, chosen: boolean) => void
   /** 顔の検出で、上下どちらに置いても顔に掛かった発言テロップ(要確認) */
   telopReviews: { startTime: number; text: string }[]
+  /** 色を合わせられなかったカメラ(要確認に出す) */
+  colorIssues: { name: string; verdict: Exclude<ColorMatchVerdict, 'matched' | 'same'> }[]
+  /** ノイズ除去ができなかったピンマイク(要確認に出す) */
+  denoiseFailures: { fileName: string; error: string }[]
   /** 今の仮編集の要約 */
   roughCut: {
     keptIds: string[]
@@ -352,14 +355,26 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         setStep('color', { percent: (done / total) * 100, note: `${done}/${total} 枚の画` })
       )
       useProjectStore.getState().setColorMatches(plan.matches)
+      set({
+        colorIssues: plan.cameras
+          .filter((c) => c.verdict === 'flat' || c.verdict === 'shape' || c.verdict === 'few')
+          .map((c) => ({
+            name: c.name,
+            verdict: c.verdict as Exclude<ColorMatchVerdict, 'matched' | 'same'>
+          }))
+      })
       const fixed = plan.cameras.filter((c) => c.match)
+      const unmatched = get().colorIssues.length
       setStep('color', {
         state: 'done',
         percent: 100,
         note:
-          fixed.length > 0
-            ? `${fixed.length} 台を基準カメラに合わせました`
-            : '合わせる必要のあるカメラはありませんでした'
+          [
+            fixed.length > 0 ? `${fixed.length} 台を基準カメラに合わせました` : '',
+            unmatched > 0 ? `合わせられないカメラ ${unmatched} 台(要確認)` : ''
+          ]
+            .filter(Boolean)
+            .join(' · ') || '合わせる必要のあるカメラはありませんでした'
       })
       for (const c of plan.cameras)
         log(
@@ -393,6 +408,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const sources = assets.map((a) => a.denoisedFrom ?? a.filePath)
       const results = await window.api.denoiseRun(sources)
       const changes: Record<string, string | null> = {}
+      set({
+        denoiseFailures: results
+          .map((r, i) => ({ r, a: assets[i] }))
+          .filter((x) => !x.r.cleaned)
+          .map((x) => ({ fileName: x.a.fileName, error: x.r.error ?? '' }))
+      })
       results.forEach((r, i) => {
         if (r.cleaned) changes[assets[i].id] = r.cleaned
         else
@@ -686,6 +707,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     keep: {},
     roughCut: null,
     telopReviews: [],
+    colorIssues: [],
+    denoiseFailures: [],
     effects: [],
     effectChosen: [],
     lastSpans: [],
@@ -694,6 +717,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         ? [...new Set([...get().effectChosen, id])]
         : get().effectChosen.filter((x) => x !== id)
       set({ effectChosen: next })
+      // 選び直したら、前に手で消していても置き直す
+      if (chosen) useProjectStore.getState().undismissTelops([`e:${id}`])
       const project = useProjectStore.getState().project
       if (!project.multicam || get().lastSpans.length === 0) return
       useProjectStore
@@ -738,7 +763,6 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     report: null,
     syncedFiles: [],
     log: [],
-    reviewed: [],
     running: false,
     screenOpen: false,
 
@@ -753,20 +777,21 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         report: null,
         syncedFiles: [],
         log: [],
-        reviewed: [],
         scenes: [],
         judgements: [],
         judgeSource: null,
         keep: {},
         roughCut: null,
         telopReviews: [],
+        colorIssues: [],
+        denoiseFailures: [],
         effects: [],
         effectChosen: [],
         lastSpans: []
       }),
 
     scanFolder: async (root) => {
-      set({ root, scan: null, sources: [], steps: initialSteps(), report: null, reviewed: [] })
+      set({ root, scan: null, sources: [], steps: initialSteps(), report: null })
       setStep('ingest', { state: 'run', percent: 0, note: 'ファイルを探しています' })
       log(`収録フォルダを読み込みます: ${root}`)
       const off = window.api.onFootageScanProgress(({ done, total }) =>
@@ -826,7 +851,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         setStep('sync', { state: 'error', note: 'カメラの素材がありません' })
         return
       }
-      set({ running: true, report: null, syncedFiles: files, reviewed: [] })
+      set({ running: true, report: null, syncedFiles: files })
 
       // --- 同期
       setStep('sync', { state: 'run', percent: 0, note: '準備中' })
@@ -972,11 +997,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       void window.api.asrCancel()
     },
 
-    markReviewed: (key, reviewed) =>
-      set((s) => ({
-        reviewed: reviewed
-          ? [...new Set([...s.reviewed, key])]
-          : s.reviewed.filter((k) => k !== key)
-      }))
+    // 確認済みはプロジェクトに保存する(開き直しても残る)
+    markReviewed: (key, reviewed) => useProjectStore.getState().setReviewed(key, reviewed)
   }
 })
