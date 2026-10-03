@@ -44,7 +44,7 @@ function writeSetting(key: string, value: string): void {
   }
 }
 
-const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
+const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440, 2160]
 
 // プレビューのテロップは「出力ピクセル」を枠の大きさへ換算して描くため、
 // 書き出しの解像度をプレビュー側からも読める必要がある。

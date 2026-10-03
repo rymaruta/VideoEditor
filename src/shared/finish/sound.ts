@@ -146,7 +146,7 @@ export function fallbackMood(kind: 'highlight' | 'normal' | 'unneeded'): BgmMood
 
 /**
  * BGM を置く。続けて同じ雰囲気の場面は1曲で通し、雰囲気が変わる所で曲を替える(前後はフェード)。
- * 曲が場面より短ければ、同じ曲を繰り返す(継ぎ目もフェード)。
+ * 曲が場面より短ければ、同じ曲を繰り返す(継ぎ目は前後を重ねたクロスフェード)。
  */
 export function planBgm(
   scenes: readonly { start: number; end: number; mood: BgmMood }[],
@@ -164,20 +164,26 @@ export function planBgm(
   for (const r of runs) {
     const file = rot.pick(kit.bgm[r.mood], r.mood)
     if (!file || !(file.duration > 2)) continue
+    // 曲が場面より短ければ繰り返す。継ぎ目は前後を重ねてクロスフェードにする(途切れて聞こえない)
+    const cross = Math.min(BGM_FADE, file.duration / 3)
     let t = r.start
+    let first = true
     while (t < r.end - 0.5) {
       const len = Math.min(file.duration, r.end - t)
+      const last = t + len >= r.end - 1e-6
       out.push({
         path: file.path,
         startTime: t,
         inPoint: 0,
         outPoint: len,
         volume: BGM_VOLUME,
-        fadeIn: Math.min(BGM_FADE, len / 3),
-        fadeOut: Math.min(BGM_FADE, len / 3),
+        fadeIn: Math.min(first ? BGM_FADE : cross, len / 3),
+        fadeOut: Math.min(last ? BGM_FADE : cross, len / 3),
         reason: `${r.mood}(${file.name})`
       })
-      t += len
+      first = false
+      if (last) break
+      t += len - cross
     }
   }
   return out

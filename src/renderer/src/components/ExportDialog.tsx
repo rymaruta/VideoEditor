@@ -52,6 +52,7 @@ const QUALITY_LABEL: Record<QualityPreset, string> = {
 }
 
 const RESOLUTION_LABEL: Record<ResolutionHeight, string> = {
+  2160: '4K(2160)',
   1440: '2K(1440)',
   1080: 'フルHD(1080)',
   720: 'HD(720)',
@@ -440,7 +441,7 @@ export function ExportDialog(): React.JSX.Element | null {
                         setResolutionHeight(Number(e.target.value) as ResolutionHeight)
                       }
                     >
-                      {([1440, 1080, 720, 480] as ResolutionHeight[]).map((r) => (
+                      {([2160, 1440, 1080, 720, 480] as ResolutionHeight[]).map((r) => (
                         <option key={r} value={r}>
                           {RESOLUTION_LABEL[r]}
                         </option>

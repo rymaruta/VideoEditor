@@ -231,7 +231,7 @@ export interface EditTemplate {
 }
 
 export type QualityPreset = 'high' | 'standard' | 'small'
-export type ResolutionHeight = 480 | 720 | 1080 | 1440
+export type ResolutionHeight = 480 | 720 | 1080 | 1440 | 2160
 
 /**
  * 書き出しの方式。

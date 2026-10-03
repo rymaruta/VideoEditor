@@ -65,7 +65,7 @@ describe('planSoundEffects', () => {
 })
 
 describe('planBgm', () => {
-  it('同じ雰囲気の場面は1曲で通し、曲が短ければ繰り返す。雰囲気が変われば曲を替える', () => {
+  it('同じ雰囲気の場面は1曲で通し、曲が短ければ重ねながら繰り返す。雰囲気が変われば曲を替える', () => {
     const r = planBgm(
       [
         { start: 0, end: 50, mood: '楽しい' },
@@ -74,11 +74,13 @@ describe('planBgm', () => {
       ],
       kit
     )
+    // 繰り返しの継ぎ目は 1.5 秒重ねる(クロスフェード)。場面の終わりちょうどで止める
     expect(r.map((x) => [x.path, x.startTime, x.outPoint])).toEqual([
       ['/bgm/fun.mp3', 0, 40],
-      ['/bgm/fun.mp3', 40, 30],
+      ['/bgm/fun.mp3', 38.5, 31.5],
       ['/bgm/calm.mp3', 70, 30]
     ])
+    expect([r[0].fadeOut, r[1].fadeIn]).toEqual([1.5, 1.5])
     expect(r.every((x) => (x.fadeIn ?? 0) > 0 && (x.fadeOut ?? 0) > 0)).toBe(true)
   })
 

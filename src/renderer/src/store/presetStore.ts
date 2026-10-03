@@ -31,7 +31,7 @@ export interface ExportPreset {
   loudnessNormalization: boolean
 }
 
-const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440]
+const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440, 2160]
 const QUALITY_PRESETS: QualityPreset[] = ['high', 'standard', 'small']
 
 // localStorage は外部入力そのもの: 手で書き換えられるし、古い版が別の形で書いている
