@@ -612,6 +612,8 @@ interface ProjectState {
    * 手で足したトラック・テロップには触れない。取り消し1回で戻る
    */
   applyRoughCut: (cut: RoughCut, telops: Omit<TextOverlay, 'id'>[]) => void
+  /** 演出テロップ(提案から置いたもの)を入れ替える(取り消し1回で戻る) */
+  setEffectTelops: (telops: Omit<TextOverlay, 'id'>[]) => void
   /** 文字起こしの結果を入れ替える(取り消し1回で戻る) */
   setTranscript: (transcript: TranscriptUtterance[]) => void
   shiftAllTextOverlays: (deltaSeconds: number) => void
@@ -2255,12 +2257,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す
           videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
           textOverlays: [
-            ...state.project.textOverlays.filter((o) => !o.utteranceId),
+            ...state.project.textOverlays.filter((o) => !o.utteranceId && !o.effectId),
             ...telops.map((o) => ({ ...o, id: uuid() }))
           ]
         }
       }
     }),
+
+  setEffectTelops: (telops) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        textOverlays: [
+          ...state.project.textOverlays.filter((o) => !o.effectId),
+          ...telops.map((o) => ({ ...o, id: uuid() }))
+        ]
+      }
+    })),
 
   setTranscript: (transcript) =>
     set((state) => ({

@@ -15,9 +15,15 @@ import {
   cameraRange,
   judgeScenes,
   loadActivity,
+  effectLines,
+  effectOverlays,
   planRoughCut,
+  proposeEffects,
   scenesFor
 } from '../lib/roughCutPlan'
+import { placeTelopsAvoidingFaces } from '../lib/telopPlacement'
+import { AUTO_PLACE_CONFIDENCE, type EffectProposal } from '@shared/telop/effects'
+import type { RoughCut } from '@shared/roughCut/build'
 import { formatIpcError } from '../lib/ipcError'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { detectTurns, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
@@ -38,7 +44,16 @@ import {
  */
 
 export type StepId =
-  'ingest' | 'sync' | 'timeline' | 'speakers' | 'transcribe' | 'structure' | 'cut' | 'angles'
+  | 'ingest'
+  | 'sync'
+  | 'timeline'
+  | 'speakers'
+  | 'transcribe'
+  | 'structure'
+  | 'cut'
+  | 'angles'
+  | 'placement'
+  | 'effects'
 export type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
 
 export interface StepStatus {
@@ -66,7 +81,9 @@ export const STEPS: { id: StepId; label: string }[] = [
   { id: 'transcribe', label: '文字起こし' },
   { id: 'structure', label: '構成(見どころ・不要な場面)' },
   { id: 'cut', label: 'カット(間を詰める)' },
-  { id: 'angles', label: 'アングルの切り替え' }
+  { id: 'angles', label: 'アングルの切り替え' },
+  { id: 'placement', label: '発言テロップの配置(顔を避ける)' },
+  { id: 'effects', label: '演出テロップの提案' }
 ]
 
 interface PipelineState {
@@ -94,6 +111,15 @@ interface PipelineState {
   judgeSource: 'ai' | 'heuristic' | null
   /** 画面で手で決めた「残す / 落とす」 */
   keep: Record<string, boolean>
+  /** 演出テロップの提案(AI)と、置くと決めたもの */
+  effects: EffectProposal[]
+  effectChosen: string[]
+  /** 今の仮編集の、タイムラインと共通の時刻の対応(演出テロップを置き直すのに使う) */
+  lastSpans: RoughCut['spans']
+  /** 演出テロップを置く/外す(すぐタイムラインに反映する) */
+  setEffectChosen: (id: string, chosen: boolean) => void
+  /** 顔の検出で、上下どちらに置いても顔に掛かった発言テロップ(要確認) */
+  telopReviews: { startTime: number; text: string }[]
   /** 今の仮編集の要約 */
   roughCut: {
     keptIds: string[]
@@ -129,7 +155,9 @@ const initialSteps = (): Record<StepId, StepStatus> => ({
   transcribe: { state: 'wait', percent: 0 },
   structure: { state: 'wait', percent: 0 },
   cut: { state: 'wait', percent: 0 },
-  angles: { state: 'wait', percent: 0 }
+  angles: { state: 'wait', percent: 0 },
+  placement: { state: 'wait', percent: 0 },
+  effects: { state: 'wait', percent: 0 }
 })
 
 /** 出演者の名前(マイク1 → 出演者A など)は、同じ収録フォルダの構成なら次の回にも引き継ぐ */
@@ -299,7 +327,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const project = useProjectStore.getState().project
     const info = project.multicam
     if (!info || !(project.transcript?.length ?? 0)) {
-      for (const id of ['structure', 'cut', 'angles'] as StepId[])
+      for (const id of ['structure', 'cut', 'angles', 'placement', 'effects'] as StepId[])
         setStep(id, { state: 'skipped', note: '文字起こしがありません' })
       return
     }
@@ -361,14 +389,77 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       percent: 100,
       note: `${plan.pieces.length} 区間 · 間を詰めて ${formatMinutes(raw)} → ${formatMinutes(plan.cut.duration)}`
     })
-    setStep('angles', { state: 'run', percent: 50, note: 'タイムラインに並べています' })
-    useProjectStore.getState().applyRoughCut(plan.cut, plan.telops)
     const switches = plan.shots.length
-    setStep('angles', {
-      state: 'done',
-      percent: 100,
-      note: `ショット ${switches} · 発言テロップ ${plan.telops.length}`
-    })
+    setStep('angles', { state: 'done', percent: 100, note: `ショット ${switches}` })
+
+    // 発言テロップを、顔を隠さない位置へ
+    setStep('placement', { state: 'run', percent: 0, note: '顔を探しています' })
+    let telops = plan.telops
+    try {
+      const placed = await placeTelopsAvoidingFaces(
+        plan.telops,
+        plan.cut,
+        project.assets,
+        project.aspectRatio,
+        (done, total) =>
+          setStep('placement', { percent: (done / total) * 100, note: `${done}/${total} 枚の画` })
+      )
+      telops = placed.telops
+      set({ telopReviews: placed.review })
+      setStep('placement', {
+        state: 'done',
+        percent: 100,
+        note: `発言テロップ ${telops.length} · 上へ移した ${placed.moved} · 要確認 ${placed.review.length}${placed.unchecked ? ` · 調べられない ${placed.unchecked}` : ''}`
+      })
+      log(
+        `発言テロップの配置: 顔に掛かるため上へ移した ${placed.moved} 枚、上下とも顔に掛かる ${placed.review.length} 枚`
+      )
+    } catch (e) {
+      setStep('placement', { state: 'error', note: formatIpcError(e) })
+      log(`顔の検出ができませんでした(テロップは下のまま): ${formatIpcError(e)}`)
+    }
+    // 演出テロップ: 提案は最初の1回だけ AI に頼み、作り直しでは選んだものを置き直す
+    if (get().effects.length === 0 && get().steps.effects.state !== 'done') {
+      const apiKey = useSettingsStore.getState().geminiApiKey
+      if (!apiKey) {
+        setStep('effects', {
+          state: 'skipped',
+          note: 'Gemini の鍵が必要です(設定すると提案します)'
+        })
+      } else {
+        setStep('effects', { state: 'run', percent: 30, note: 'AI が提案中' })
+        try {
+          const proposals = await proposeEffects(effectLines(project, info, plan.cut.spans), {
+            apiKey,
+            episodeName: project.name,
+            note: get().editNote || undefined
+          })
+          const auto = proposals
+            .filter((p) => p.confidence >= AUTO_PLACE_CONFIDENCE)
+            .map((p) => p.id)
+          set({ effects: proposals, effectChosen: auto })
+          setStep('effects', {
+            state: 'done',
+            percent: 100,
+            note: `提案 ${proposals.length} · 自動で置いた ${auto.length}`
+          })
+          log(`演出テロップ: 提案 ${proposals.length} 件(自信の高い ${auto.length} 件を置きました)`)
+        } catch (e) {
+          setStep('effects', { state: 'error', note: formatIpcError(e) })
+          log(`演出テロップの提案ができませんでした: ${formatIpcError(e)}`)
+        }
+      }
+    }
+    const effectTelops = effectOverlays(
+      get().effects,
+      new Set(get().effectChosen),
+      project,
+      info,
+      plan.cut.spans,
+      usePresetStore.getState().captionPresets
+    )
+    set({ lastSpans: plan.cut.spans })
+    useProjectStore.getState().applyRoughCut(plan.cut, [...telops, ...effectTelops])
     set({
       roughCut: {
         keptIds: plan.selection.kept,
@@ -376,11 +467,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         dropped: plan.selection.dropped.length,
         duration: plan.cut.duration,
         shots: switches,
-        telops: plan.telops.length
+        telops: telops.length
       }
     })
     log(
-      `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${plan.telops.length}`
+      `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${telops.length}`
     )
   }
 
@@ -392,6 +483,30 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     judgeSource: null,
     keep: {},
     roughCut: null,
+    telopReviews: [],
+    effects: [],
+    effectChosen: [],
+    lastSpans: [],
+    setEffectChosen: (id, chosen) => {
+      const next = chosen
+        ? [...new Set([...get().effectChosen, id])]
+        : get().effectChosen.filter((x) => x !== id)
+      set({ effectChosen: next })
+      const project = useProjectStore.getState().project
+      if (!project.multicam || get().lastSpans.length === 0) return
+      useProjectStore
+        .getState()
+        .setEffectTelops(
+          effectOverlays(
+            get().effects,
+            new Set(next),
+            project,
+            project.multicam,
+            get().lastSpans,
+            usePresetStore.getState().captionPresets
+          )
+        )
+    },
     setTargetMinutes: (minutes) => set({ targetMinutes: Math.max(0, minutes) }),
     setEditNote: (note) => set({ editNote: note }),
     setKeep: (sceneId, keep) =>
@@ -441,7 +556,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgements: [],
         judgeSource: null,
         keep: {},
-        roughCut: null
+        roughCut: null,
+        telopReviews: [],
+        effects: [],
+        effectChosen: [],
+        lastSpans: []
       }),
 
     scanFolder: async (root) => {
@@ -618,7 +737,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       } catch (e) {
         const msg = formatIpcError(e)
         const current = (
-          ['timeline', 'speakers', 'transcribe', 'structure', 'cut', 'angles'] as StepId[]
+          [
+            'effects',
+            'timeline',
+            'speakers',
+            'transcribe',
+            'structure',
+            'cut',
+            'angles',
+            'placement'
+          ] as StepId[]
         ).find((id) => get().steps[id].state === 'run')
         const canceled = msg.includes('ASR_CANCELED')
         if (current)

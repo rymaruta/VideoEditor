@@ -11,13 +11,13 @@
 
 ## 置き場所
 
-| ディレクトリ | 対象 |
-|---|---|
-| `tests/shared/` | `src/shared/**` の共有ルール（画面と書き出しが両方使う数字と式） |
-| `tests/lib/` | `src/renderer/src/lib/**` の純関数 |
-| `tests/store/` | `projectStore` の不変条件・履歴・リンク追従 |
-| `tests/main/` | `src/main/**` の純関数（ffmpeg を起動しないものだけ） |
-| `tests/helpers/` | 境界値の一覧と固定種の乱数 |
+| ディレクトリ     | 対象                                                             |
+| ---------------- | ---------------------------------------------------------------- |
+| `tests/shared/`  | `src/shared/**` の共有ルール（画面と書き出しが両方使う数字と式） |
+| `tests/lib/`     | `src/renderer/src/lib/**` の純関数                               |
+| `tests/store/`   | `projectStore` の不変条件・履歴・リンク追従                      |
+| `tests/main/`    | `src/main/**` の純関数（ffmpeg を起動しないものだけ）            |
+| `tests/helpers/` | 境界値の一覧と固定種の乱数                                       |
 
 **ffmpeg も DOM も持ち込まない。** 実機での確認は xvfb と ffprobe の役目で、
 その結果は `docs/BUGHUNT.md` に数字で残す。ここは**その数字を固定する場所**。

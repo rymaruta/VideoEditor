@@ -7,6 +7,8 @@ import {
 import { utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
+import { stackSimultaneousTelops } from '@shared/telop/stack'
+import { textCanvasSize } from '@shared/resolution'
 import type { DictionaryEntry } from '@shared/telop/polish'
 import { buildTimedClips } from './timelineMath'
 
@@ -89,5 +91,7 @@ export function telopsFromTranscript(
       })
     }
   }
-  return out.sort((a, b) => a.startTime - b.startTime)
+  out.sort((a, b) => a.startTime - b.startTime)
+  // 声が重なった所は、後から出たテロップを1段上へ
+  return stackSimultaneousTelops(out, textCanvasSize(project.aspectRatio).h)
 }

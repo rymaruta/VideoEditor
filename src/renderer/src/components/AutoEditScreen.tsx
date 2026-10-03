@@ -10,6 +10,7 @@ import { usePresetStore } from '../store/presetStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { parseDictionary } from '@shared/telop/polish'
 import { speakerColor } from '@shared/speaker'
+import { AUTO_PLACE_CONFIDENCE, EFFECT_LABEL } from '@shared/telop/effects'
 
 /**
  * 自動編集の画面(自動編集 > 自動編集の画面)。デザイン案の「AutoEdit」。
@@ -18,7 +19,7 @@ import { speakerColor } from '@shared/speaker'
  * 工程は裏で進むので、この画面を閉じて編集画面に戻っても止まらない。
  */
 
-type CenterTab = 'sources' | 'sync' | 'transcript' | 'structure' | 'log'
+type CenterTab = 'sources' | 'sync' | 'transcript' | 'structure' | 'effects' | 'log'
 
 const SOURCE_COLORS = ['#9ea7e0', '#7fb5d8', '#d8a77f', '#c49ee0', '#7fcf96', '#e0d27f', '#e08ab0']
 
@@ -76,6 +77,9 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const judgeSource = usePipelineStore((s) => s.judgeSource)
   const keep = usePipelineStore((s) => s.keep)
   const roughCut = usePipelineStore((s) => s.roughCut)
+  const telopReviews = usePipelineStore((s) => s.telopReviews)
+  const effects = usePipelineStore((s) => s.effects)
+  const effectChosen = usePipelineStore((s) => s.effectChosen)
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const editNote = usePipelineStore((s) => s.editNote)
 
@@ -146,6 +150,14 @@ export function AutoEditScreen(): React.JSX.Element | null {
         at: p.start
       }))
   ]
+  for (const r of telopReviews) {
+    reviewItems.push({
+      key: `telop-face:${r.startTime.toFixed(2)}`,
+      kind: 'テロップと顔',
+      text: `「${r.text.replace(/\n/g, ' ').slice(0, 30)}」— 上下どちらに置いても顔に掛かります。位置を確かめてください`,
+      at: r.startTime
+    })
+  }
   const openIssues = reviewItems.filter((i) => !reviewed.includes(i.key))
   const doneIssues = reviewItems.filter((i) => reviewed.includes(i.key))
 
@@ -253,6 +265,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 ['sync', '同期の結果'],
                 ['transcript', '文字起こし'],
                 ['structure', '構成'],
+                ['effects', '演出テロップ'],
                 ['log', 'ログ']
               ] as [CenterTab, string][]
             ).map(([id, label]) => (
@@ -582,6 +595,63 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     )
                   })}
                 </ul>
+              )}
+            </div>
+          )}
+
+          {tab === 'effects' && (
+            <div className="auto-edit-pane auto-edit-structure">
+              {effects.length === 0 ? (
+                <p className="hint-text effects-empty">
+                  {steps.effects.state === 'run'
+                    ? 'AI が提案しています…'
+                    : steps.effects.state === 'skipped' || steps.effects.state === 'error'
+                      ? steps.effects.note
+                      : '仮編集ができると、ツッコミ・心の声・状況説明・地名などの演出テロップを AI が提案します。'}
+                </p>
+              ) : (
+                <>
+                  <p className="form-note structure-summary">
+                    提案 {effects.length} 件 · 置いている {effectChosen.length} 件(自信度{' '}
+                    {Math.round(AUTO_PLACE_CONFIDENCE * 100)}%
+                    以上は自動で置きました)。チェックで置く/外すを選べます。
+                    見た目は「テロップスタイルの管理」で「演出・ツッコミ」のような名前のスタイルを作ると、そちらを使います。
+                  </p>
+                  <ul className="structure-list">
+                    {effects.map((fx) => {
+                      const on = effectChosen.includes(fx.id)
+                      const line = project.transcript?.find((u) => u.id === fx.afterLineId)
+                      return (
+                        <li key={fx.id} className={`structure-row ${on ? 'kept' : 'dropped'}`}>
+                          <input
+                            type="checkbox"
+                            aria-label="置く"
+                            checked={on}
+                            onChange={(e) =>
+                              usePipelineStore.getState().setEffectChosen(fx.id, e.target.checked)
+                            }
+                          />
+                          <span className="structure-kind normal">{EFFECT_LABEL[fx.kind]}</span>
+                          <span
+                            className="structure-score"
+                            title={`自信度 ${Math.round(fx.confidence * 100)}%`}
+                          >
+                            <span style={{ width: `${fx.confidence * 100}%` }} />
+                          </span>
+                          <span className="structure-body effects-body">
+                            <span className="structure-title">{fx.text}</span>
+                            <span className="form-note">
+                              {line
+                                ? `${line.speaker ?? ''}「${line.text.slice(0, 30)}」の後 · `
+                                : ''}
+                              {fx.reason}
+                            </span>
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </>
               )}
             </div>
           )}

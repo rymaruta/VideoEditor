@@ -56,6 +56,8 @@ export const IPC = {
   asrRun: 'asr:run',
   asrProgress: 'asr:progress',
   asrCancel: 'asr:cancel',
+  faceDetect: 'face:detect',
+  faceProgress: 'face:progress',
   menuCommand: 'menu:command',
   menuUpdate: 'menu:update',
   checkFilesExist: 'media:checkFilesExist',

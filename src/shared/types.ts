@@ -113,6 +113,8 @@ export interface TextOverlay {
   styleId?: string
   /** 文字起こしから作った発言テロップなら、その発話の ID(仮編集を作り直すときに入れ替える) */
   utteranceId?: string
+  /** 演出テロップの提案から置いたものなら、その提案の ID(仮編集を作り直すときに入れ替える) */
+  effectId?: string
 }
 
 export interface AudioTrackClip {

@@ -1,3 +1,4 @@
+import type { FaceBox } from '@shared/telop/avoidFaces'
 import type { AsrJob, AsrJobResult, AsrWorkerMessage } from '@shared/transcript'
 type AsrProgressMessage = Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 'error' }>
 import type { FootageScan } from '@shared/ingest/classify'
@@ -249,6 +250,15 @@ const api = {
     ipcRenderer.invoke(IPC.footageEnvelopes, paths),
   asrRun: (jobs: AsrJob[]): Promise<AsrJobResult[]> => ipcRenderer.invoke(IPC.asrRun, jobs),
   asrCancel: (): Promise<void> => ipcRenderer.invoke(IPC.asrCancel),
+  faceDetect: (
+    requests: { path: string; time: number; width: number; height: number }[]
+  ): Promise<(FaceBox[] | null)[]> => ipcRenderer.invoke(IPC.faceDetect, requests),
+  onFaceProgress: (callback: (p: { done: number; total: number }) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: { done: number; total: number }): void =>
+      callback(p)
+    ipcRenderer.on(IPC.faceProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.faceProgress, listener)
+  },
   onAsrProgress: (callback: (m: AsrProgressMessage) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, m: AsrProgressMessage): void => callback(m)
     ipcRenderer.on(IPC.asrProgress, listener)

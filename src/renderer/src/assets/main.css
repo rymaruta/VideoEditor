@@ -5918,3 +5918,10 @@ h3 {
   font-size: 12px;
   resize: vertical;
 }
+
+.effects-empty {
+  padding: 14px 16px;
+}
+.structure-row:has(.effects-body) {
+  grid-template-columns: 18px 70px 70px minmax(0, 1fr);
+}

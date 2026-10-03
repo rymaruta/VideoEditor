@@ -17,6 +17,17 @@ import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/d
 import { utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
+import {
+  buildEffectPrompt,
+  EFFECT_DURATION_SEC,
+  EFFECT_LABEL,
+  effectStyle,
+  parseEffectAnswer,
+  type EffectLine,
+  type EffectProposal
+} from '@shared/telop/effects'
+import { stackSimultaneousTelops } from '@shared/telop/stack'
+import { textCanvasSize } from '@shared/resolution'
 import type { DictionaryEntry } from '@shared/telop/polish'
 import { fetchJson, parseModelJsonObject } from './httpJson'
 
@@ -234,10 +245,101 @@ export function planRoughCut(
     }
   }
   telops.sort((a, b) => a.startTime - b.startTime)
-  return { selection, pieces, shots, cut, telops }
+  // 声が重なった所は、後から出たテロップを1段上へ
+  const stacked = stackSimultaneousTelops(telops, textCanvasSize(project.aspectRatio).h)
+  return { selection, pieces, shots, cut, telops: stacked }
 }
 
 /** 場面を作る(カメラが録っている範囲で) */
 export function scenesFor(project: Project, info: MulticamInfo): Scene[] {
   return buildScenes(timedLines(project, info), cameraRange(info))
+}
+
+/** 演出テロップの提案に渡す発言(仮編集に残っているものだけ、時刻は仮編集のタイムライン) */
+export function effectLines(
+  project: Project,
+  info: MulticamInfo,
+  spans: RoughCut['spans']
+): EffectLine[] {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const out: EffectLine[] = []
+  for (const u of project.transcript ?? []) {
+    const f = fileOf.get(u.assetId)
+    if (!f) continue
+    const t = roughTimelineAt(spans, toCommon(f, u.sourceStart))
+    if (t === null) continue
+    out.push({ id: u.id, speaker: u.speaker, text: u.text, start: t })
+  }
+  return out.sort((a, b) => a.start - b.start)
+}
+
+/** Gemini に演出テロップを提案させる(発言は 300 件ずつ) */
+export async function proposeEffects(
+  lines: EffectLine[],
+  options: { apiKey: string; episodeName: string; note?: string }
+): Promise<EffectProposal[]> {
+  const out: EffectProposal[] = []
+  for (let i = 0; i < lines.length; i += 300) {
+    const chunk = lines.slice(i, i + 300)
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(options.apiKey)}`
+    const data = await fetchJson<GeminiResponse>(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            { parts: [{ text: buildEffectPrompt(chunk, options.episodeName, options.note) }] }
+          ],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      },
+      'Gemini API'
+    )
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!text) continue
+    out.push(...parseEffectAnswer(parseModelJsonObject(text, 'Gemini API'), chunk))
+  }
+  return out
+}
+
+/** 選んだ提案を、仮編集のタイムラインに置く(発言の終わりから。前の演出テロップとは重ねない) */
+export function effectOverlays(
+  proposals: readonly EffectProposal[],
+  chosen: ReadonlySet<string>,
+  project: Project,
+  info: MulticamInfo,
+  spans: RoughCut['spans'],
+  styles: readonly TelopStyleDef[]
+): Omit<TextOverlay, 'id'>[] {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const utterance = new Map((project.transcript ?? []).map((u) => [u.id, u]))
+  const out: Omit<TextOverlay, 'id'>[] = []
+  let lastEnd = -Infinity
+  const placed = proposals
+    .filter((p) => chosen.has(p.id))
+    .map((p) => {
+      const u = utterance.get(p.afterLineId)
+      const f = u ? fileOf.get(u.assetId) : undefined
+      const t = u && f ? roughTimelineAt(spans, toCommon(f, u.sourceEnd) - 0.05) : null
+      return { p, t }
+    })
+    .filter((x): x is { p: EffectProposal; t: number } => x.t !== null)
+    .sort((a, b) => a.t - b.t)
+  for (const { p, t } of placed) {
+    const start = Math.max(t, lastEnd + 0.2)
+    // 「演出・ツッコミ」のように名前の付いたテロップスタイルがあれば、そちらを使う
+    const named = styles.find((s) => s.name === `演出・${EFFECT_LABEL[p.kind]}`)
+    out.push({
+      text: p.text,
+      startTime: start,
+      endTime: start + EFFECT_DURATION_SEC,
+      style: named ? { ...named.style } : effectStyle(p.kind),
+      styleId: named?.id,
+      source: 'auto',
+      effectId: p.id
+    })
+    lastEnd = start + EFFECT_DURATION_SEC
+  }
+  return out
 }
