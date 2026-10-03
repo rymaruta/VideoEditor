@@ -310,10 +310,12 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
     const idx = inputs.length - 1
     const layer = newLabel('l')
     const out = newLabel('t')
-    parts.push(
-      `[${idx}:v]fps=${fps},format=rgba,trim=end_frame=${segFrames},settb=${tb},setpts=N[${layer}]`
-    )
-    parts.push(`[${cur}][${layer}]overlay=0:0[${out}]`)
+    // テロップ層は「替わる瞬間だけ1枚」のまばらな入力のまま重ねる。時刻はフレーム単位に丸める(settb)。
+    // overlay は次の1枚が来るまで直前の1枚を使い続けるので、毎フレームへ複製しなくてよい。
+    // 複製(fps)すると全フレームぶんの RGBA が overlay の待ち行列に溜まり、メモリを使い切る
+    // (実測: 45秒の区間で 1080p は 9.3GB、4K は 13.5GB で止まった。複製をやめると数百 MB)
+    parts.push(`[${idx}:v]format=rgba,settb=${tb}[${layer}]`)
+    parts.push(`[${cur}][${layer}]overlay=0:0:eof_action=repeat[${out}]`)
     cur = out
   }
 

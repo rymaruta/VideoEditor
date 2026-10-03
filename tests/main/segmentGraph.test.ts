@@ -274,8 +274,10 @@ describe('buildSegmentVideoGraph — 区間の映像', () => {
     expect(g.filter).not.toContain('subtitles')
     const layerInput = g.inputs.find((i) => i.concatList !== undefined)!
     expect(layerInput.concatList).toContain("file '/w/1.png'")
-    expect(g.filter).toContain('fps=30,format=rgba,trim=end_frame=110')
-    expect(g.filter).toMatch(/overlay=0:0\[t\d+\]/)
+    // 毎フレームへ複製しない(複製すると全フレームの RGBA が待ち行列に溜まってメモリを使い切る)
+    expect(g.filter).toContain('format=rgba,settb=1/30[l')
+    expect(g.filter).not.toMatch(/fps=30,format=rgba/)
+    expect(g.filter).toMatch(/overlay=0:0:eof_action=repeat\[t\d+\]/)
     expectWellFormed(g.filter)
     // 層に区間が掛からなければ入力も足さない
     expect(
