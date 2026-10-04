@@ -1091,9 +1091,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             : ''
         filterParts.push(`[${layerIndex}:v]${layerScale}format=rgba,settb=1/${outputFps}[telop]`)
         // 長さは本編で決める(`shortest`)。層の一覧は本編より長めに作ってあるので、先に切れることはない
-        filterParts.push(
-          `[${curV}][telop]overlay=0:0:format=auto:eof_action=pass:shortest=1[vout]`
-        )
+        filterParts.push(`[${curV}][telop]overlay=0:0:format=auto:eof_action=pass:shortest=1[vout]`)
         videoLabel = '[vout]'
       } else if (includeVideo && !usesTelopLayer && project.textOverlays.length > 0) {
         assDir = mkdtempSync(join(tmpdir(), 've-subs-'))

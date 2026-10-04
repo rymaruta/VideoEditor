@@ -1,10 +1,5 @@
 import type { TextOverlay } from '../types'
-import {
-  layoutTelop,
-  stripTelopMarkup,
-  telopStrokeRings,
-  type TelopContext
-} from '../telop/render'
+import { layoutTelop, stripTelopMarkup, telopStrokeRings, type TelopContext } from '../telop/render'
 import type { DictionaryEntry } from '../telop/polish'
 import type { QcIssue } from './types'
 

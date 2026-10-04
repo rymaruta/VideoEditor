@@ -362,10 +362,7 @@ export function ExportDialog(): React.JSX.Element | null {
     ['長さ', formatTimecode(duration, Math.round(fps))],
     ['映像', `${w}×${h} · ${displayFps(fps)}p · H.264 · ${QUALITY_LABEL[quality]}`],
     ['音声', `AAC 48kHz ステレオ · ${loudnessText}`],
-    [
-      'テロップ',
-      `${project.textOverlays.length.toLocaleString()} 本(画面と同じ描画)`
-    ],
+    ['テロップ', `${project.textOverlays.length.toLocaleString()} 本(画面と同じ描画)`],
     ['エンコーダ', encoderText]
   ]
 
