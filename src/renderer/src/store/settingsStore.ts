@@ -91,8 +91,7 @@ interface SettingsState {
   exportResolutionHeight: ResolutionHeight
   setExportResolutionHeight: (height: ResolutionHeight) => void
   /**
-   * 書き出しの方式。プレビューのテロップの描き方もこれに合わせる
-   * (長尺向けは共通テロップレンダラで書き出すので、画面も同じ関数で描く)
+   * 書き出しの方式。テロップはどちらでも共通テロップレンダラで描くので、プレビューは変わらない
    */
   exportEngine: ExportEngine
   setExportEngine: (engine: ExportEngine) => void

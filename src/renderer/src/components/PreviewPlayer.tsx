@@ -21,16 +21,6 @@ import {
   needsWebAudioGain,
   toElementVolume
 } from '@shared/audioGain'
-import {
-  TEXT_ANIMATION_MS,
-  TEXT_MARGIN_H_RATIO,
-  TEXT_MARGIN_V_RATIO,
-  TEXT_SHADOW_OFFSET_PX,
-  TEXT_SHADOW_OPACITY,
-  textAnchorOriginCss,
-  textSlideOffsetPx
-} from '@shared/textStyle'
-import { isKaraokeWordSung, karaokeWords } from '@shared/captionWords'
 import { blurSigmaFor } from '@shared/videoFrame'
 import {
   advanceDuckDetector,
@@ -41,7 +31,6 @@ import {
 } from '@shared/ducking'
 import { crossfadeOpacity, effectiveTransitionSeconds } from '@shared/transition'
 import { cropPreviewStyle } from '../lib/cropPreview'
-import { overlayBoxStyle } from '../lib/overlayBox'
 import { pipPreviewStyle } from '../lib/pipPreviewStyle'
 import {
   audioClipDuration,
@@ -69,7 +58,7 @@ import {
 } from './icons'
 
 import { TelopCanvasLayer } from './TelopCanvasLayer'
-import { TELOP_FONT_STACKS } from '@shared/telop/render'
+import { telopHitBounds, type TelopContext } from '@shared/telop/render'
 import { ShortsUiMockup } from './ShortsUiMockup'
 import { shortsSafeAreaInset } from '../lib/shortsSafeArea'
 import type {
@@ -77,8 +66,6 @@ import type {
   MediaAsset,
   PipPosition,
   TextOverlay,
-  TextPosition,
-  TextStyle,
   VideoOverlayClip
 } from '@shared/types'
 import { previewSourceUrl } from '../lib/previewSource'
@@ -97,127 +84,38 @@ import {
 } from '../lib/pendingPreviewLoad'
 import { canSwapToStandby, standbyTargetFor, type StandbyTarget } from '../lib/previewStandby'
 
-const FONT_STACKS = TELOP_FONT_STACKS
-
-/**
- * `text-shadow` に入れる長さを安全な数値にする。
- *
- * NaN や負値がひとつでも混ざると `NaNpx` になって **text-shadow 宣言ごと無効**になり、
- * 縁取りも影もまとめて消える(しかもエラーは出ない)。プロジェクトファイルは外から
- * 来るので、描画直前で切り落とす。
- */
-function normalizeLength(value: number): number {
-  return Number.isFinite(value) && value > 0 ? value : 0
+/** テロップの当たり判定を測るための Canvas(描かない。文字の幅を測るだけ) */
+let measureContext: CanvasRenderingContext2D | null = null
+function telopMeasureContext(): CanvasRenderingContext2D | null {
+  if (!measureContext) measureContext = document.createElement('canvas').getContext('2d')
+  return measureContext
 }
 
 /**
- * テロップの見た目を画面用に組み立てる。
+ * テロップをつかむための箱の位置と大きさ(枠の px)。
  *
- * 書き出しは ASS の PlayResX/PlayResY を**固定のキャンバス**(`textCanvasSize`)にしていて、
- * libass がそれを実フレームへ引き伸ばす。つまり `fontSize` と `letterSpacing` は
- * **キャンバス上のピクセル = 枠に対する比**。プレビュー枠はキャンバスより小さいので、
- * 「枠の高さ / キャンバスの高さ」を掛けて同じ比率で描く。ここを固定倍率にしていたときは、
- * サイズ40のテロップが画面では枠高の 6.77% を占めるのに、1080p の書き出しでは 2.08%
- * にしかならず、画面で決めたサイズが出力で使えなかった。
- *
- * 縁取り・影も同じキャンバス上の値なので、フォントと同じ `scale` を掛ける。
+ * テロップの絵は共通レンダラ(`TelopCanvasLayer`)が描くので、箱も同じ配置計算
+ * (`telopHitBounds` → `layoutTelop`)から出す。DOM の折り返しや CSS で寄せると、
+ * そろえ方・1行目の拡大・背景の余白が入ったときに絵とつかめる範囲がずれる。
  */
-function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
-  const shadows: string[] = []
-  if (style.outline) {
-    // 縁取りも出力ピクセルの値(書き出しは `\bord${outlineWidth}`)なので、フォントと
-    // 同じ `scale` を掛ける。ここだけ固定倍率のままだったため、文字は正しい比率なのに
-    // 縁取りだけが太すぎた(1080p を 320px 枠で見ると scale≈0.30、太さ6は本来1.78pxの
-    // ところ 3.6px で描かれていた)。
-    // 整数pxに丸めない・1px の下限も置かない。text-shadow は小数pxを受け付けて
-    // アンチエイリアスするので、丸めると縮小率が高いときにその丸めのほうが誤差の
-    // 主因になる(1920p を 240px 枠で見ると、下限1px が本来 0.25px の縁取りを 4倍に
-    // 太らせていた)。細く見えるのは書き出しでも実際に細いということ。
-    const w = normalizeLength(style.outlineWidth) * scale
-    const c = style.outlineColor
-    if (w > 0) {
-      shadows.push(
-        `-${w}px -${w}px 0 ${c}`,
-        `${w}px -${w}px 0 ${c}`,
-        `-${w}px ${w}px 0 ${c}`,
-        `${w}px ${w}px 0 ${c}`
-      )
-    }
-  }
-  // 外側の縁(強調テロップの白縁など)。書き出しは縁の外へ順に太い縁を重ねるので、
-  // 画面でも縁の太さを足した位置へ同じ色の影を重ねる(後ろに積むほど下に描かれる)
-  let reach = style.outline ? normalizeLength(style.outlineWidth) : 0
-  for (const ring of style.extraStrokes ?? []) {
-    const width = normalizeLength(ring.width)
-    if (!(width > 0)) continue
-    reach += width
-    const r = reach * scale
-    shadows.push(
-      `-${r}px -${r}px 0 ${ring.color}`,
-      `${r}px -${r}px 0 ${ring.color}`,
-      `-${r}px ${r}px 0 ${ring.color}`,
-      `${r}px ${r}px 0 ${ring.color}`,
-      `0 -${r}px 0 ${ring.color}`,
-      `0 ${r}px 0 ${ring.color}`,
-      `-${r}px 0 0 ${ring.color}`,
-      `${r}px 0 0 ${ring.color}`
-    )
-  }
-  if (style.shadow) {
-    // 影も同じ。**落とし幅も濃さも共通の置き場から取る**——ここに直に書いていたので、
-    // 濃さが書き出しと食い違っていた(実測: 画面 0.7 / 書き出し 0.6235。白地に置くと
-    // 芯が 77 対 95 で**画面のほうが濃い**)。理由と実測は `TEXT_SHADOW_OFFSET_PX`。
-    // **ぼかさない。** ASS の `\shad` は硬い影で、ぼかし半径を入れていたのは画面だけ。
-    const o = TEXT_SHADOW_OFFSET_PX * scale
-    if (o > 0) shadows.push(`${o}px ${o}px 0 rgba(0,0,0,${TEXT_SHADOW_OPACITY})`)
-  }
+function telopHitBoxStyle(
+  o: TextOverlay,
+  canvas: { w: number; h: number },
+  frameWidth: number
+): CSSProperties | null {
+  const ctx = telopMeasureContext()
+  if (!ctx || frameWidth <= 0) return null
+  const b = telopHitBounds(ctx as TelopContext, o, canvas)
+  const unit = frameWidth / canvas.w
   return {
-    fontFamily: FONT_STACKS[style.fontFamily],
-    fontSize: style.fontSize * scale,
-    color: style.color,
-    fontWeight: style.bold ? 700 : 400,
-    fontStyle: style.italic ? 'italic' : 'normal',
-    letterSpacing: style.letterSpacing ? `${style.letterSpacing * scale}px` : undefined,
-    textShadow: shadows.length > 0 ? shadows.join(', ') : undefined,
-    whiteSpace: 'pre-line'
+    left: (b.anchor.x + b.x) * unit,
+    top: (b.anchor.y + b.y) * unit,
+    width: b.w * unit,
+    height: b.h * unit,
+    // 回転の軸はアンカー(共通レンダラと同じ)
+    transformOrigin: `${-b.x * unit}px ${-b.y * unit}px`,
+    rotate: o.style.rotation ? `${o.style.rotation}deg` : undefined
   }
-}
-
-function renderOverlayText(o: TextOverlay, playheadTime: number): React.ReactNode {
-  // 単語ハイライトで描くのは**単語列がまだ本文を綴っているときだけ**。打ち直された本文を
-  // 無視して古い単語を出さないための判定で、書き出し側と同じ関数を通す(理由は karaokeWords)。
-  const words = karaokeWords(o)
-  if (words) {
-    return words.map((w, i) => (
-      <span
-        key={i}
-        style={{
-          // 色が変わる条件も**書き出しと同じ関数**を通す(理由は isKaraokeWordSung)。
-          // 「今の1語だけ」にすると、読み終わった語が元の色へ戻って出力と食い違う。
-          color: isKaraokeWordSung(w, playheadTime) ? o.style.highlightColor : undefined
-        }}
-      >
-        {w.text}
-      </span>
-    ))
-  }
-  if (o.style.animation !== 'typewriter') return o.text
-  const lines = o.text.split('\n')
-  let charIndex = 0
-  return lines.map((line, lineIdx) => (
-    <span key={lineIdx}>
-      {lineIdx > 0 && <br />}
-      {[...line].map((char, i) => {
-        const delay = charIndex * 40
-        charIndex += 1
-        return (
-          <span key={i} className="typewriter-char" style={{ animationDelay: `${delay}ms` }}>
-            {char}
-          </span>
-        )
-      })}
-    </span>
-  ))
 }
 
 interface OverlayDragState {
@@ -233,32 +131,6 @@ function readStoredVolume(): number {
   const raw = localStorage.getItem(VOLUME_KEY)
   const n = raw ? Number(raw) : 1
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1
-}
-
-/**
- * テロップの縦位置。**書き出しと同じ数字**(`TEXT_MARGIN_V_RATIO`)から出す。
- *
- * ここは以前 CSS の `.overlay-top { top: 8% }` / `.overlay-bottom { bottom: 10% }` に
- * 直接書かれていて、**下だけ書き出し(8%)と食い違っていた**。既定のテロップ位置が
- * `bottom` なので、既定のまま使うと必ず踏む。数字を2箇所に書く形をやめて、
- * 片方だけ動かせないようにする。
- */
-function verticalAnchorStyle(position: TextPosition): CSSProperties {
-  const margin = `${TEXT_MARGIN_V_RATIO * 100}%`
-  if (position === 'top') return { top: margin }
-  if (position === 'bottom') return { bottom: margin }
-  return { top: '50%' }
-}
-
-/**
- * テロップの左右の余白＝**折り返す幅**。書き出しの ASS `MarginL/R` と同じ比
- * (`TEXT_MARGIN_H_RATIO`)から出す。縦と同じ理由で CSS には数字を書かない——
- * ここが CSS の 5% と ASS の出力px固定に分かれていたため、**同じテロップが
- * 画面では2行・書き出しでは1行**になっていた。
- */
-const horizontalInsetStyle: CSSProperties = {
-  left: `${TEXT_MARGIN_H_RATIO * 100}%`,
-  right: `${TEXT_MARGIN_H_RATIO * 100}%`
 }
 
 function VideoOverlayLayer({
@@ -887,8 +759,6 @@ export function PreviewPlayer(): React.JSX.Element {
   const seekTo = useProjectStore((s) => s.seekTo)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const exportResolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
-  // 長尺向けの書き出しを選んでいるときは、テロップを書き出しと同じ共通レンダラで描く
-  const drawsTelopsOnCanvas = useSettingsStore((s) => s.exportEngine === 'segmented')
 
   // いま映している方の再生要素(2つのうちどちらか。理由は previewStandby)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -956,16 +826,12 @@ export function PreviewPlayer(): React.JSX.Element {
     return () => observer.disconnect()
   }, [isExpanded])
 
-  // 書き出しの ASS は PlayResY = **固定のキャンバス高**(出力解像度ではない)で、
-  // 文字サイズはそのキャンバス上のピクセル。画面では「枠の高さ / キャンバスの高さ」倍で
-  // 描くと、フレームに対する比率が出力と一致する。
-  // ここに出力解像度を使うと、**書き出し設定を変えただけで画面のテロップが伸び縮みする**
-  // (書き出し側は libass がキャンバスを引き伸ばすので変わらないのに、画面だけ動く)。
-  const textCanvasHeight = textCanvasSize(project.aspectRatio).h
-  const overlayScale = frameHeight > 0 && textCanvasHeight > 0 ? frameHeight / textCanvasHeight : 0
+  // テロップの数字(文字の大きさ・余白)は固定のキャンバス(`textCanvasSize`)上の px。
+  // 共通レンダラも当たり判定も、このキャンバスから枠へ同じ比で写す
+  const textCanvas = textCanvasSize(project.aspectRatio)
 
   // ぼかし背景の強さは**出力の高さ**基準(書き出しは `gblur=sigma=blurSigmaFor(出力高)`)。
-  // テロップとは基準の辺が違うので、`overlayScale` を使い回してはいけない。
+  // テロップとは基準の辺が違うので、テロップの倍率を使い回してはいけない。
   const outputHeight = targetResolution(project.aspectRatio, exportResolutionHeight).h
   const outputScale = frameHeight > 0 && outputHeight > 0 ? frameHeight / outputHeight : 0
 
@@ -1526,92 +1392,44 @@ export function PreviewPlayer(): React.JSX.Element {
                   )
                 })
               )}
-            {drawsTelopsOnCanvas && (
-              <TelopCanvasLayer
-                overlays={activeOverlays.map((o) =>
-                  overlayDrag?.id === o.id
-                    ? {
-                        ...o,
-                        style: {
-                          ...o.style,
-                          customPosition: { x: overlayDrag.x, y: overlayDrag.y }
-                        }
+            {/* テロップは書き出しと同じ共通レンダラで描く(どの書き出し方式でも、見えたとおりに出る) */}
+            <TelopCanvasLayer
+              overlays={activeOverlays.map((o) =>
+                overlayDrag?.id === o.id
+                  ? {
+                      ...o,
+                      style: {
+                        ...o.style,
+                        customPosition: { x: overlayDrag.x, y: overlayDrag.y }
                       }
-                    : o
-                )}
-                time={playheadTime}
-                frameWidth={frameWidth}
-                frameHeight={frameHeight}
-                aspectRatio={project.aspectRatio}
-              />
-            )}
+                    }
+                  : o
+              )}
+              time={playheadTime}
+              frameWidth={frameWidth}
+              frameHeight={frameHeight}
+              aspectRatio={project.aspectRatio}
+            />
             {activeOverlays.map((o) => {
+              // DOM の箱は、つかんで動かすための当たり判定だけ(絵は上の Canvas が描く)
               const livePos = overlayDrag?.id === o.id ? overlayDrag : o.style.customPosition
-              const positionStyle: CSSProperties = livePos
-                ? {
-                    left: `${livePos.x * 100}%`,
-                    top: `${livePos.y * 100}%`,
-                    right: 'auto'
-                  }
-                : { ...horizontalInsetStyle, ...verticalAnchorStyle(o.style.position) }
-              // **位置合わせと回転は `transform` ではなく `translate`/`rotate` に書く。**
-              // 登場アニメーション(`anim-*`)のキーフレームは `transform` を指定していて、
-              // **アニメーションの宣言はインラインの style より強い**。同じ `transform` に
-              // 書くと、走っている 0.2〜0.5 秒のあいだ**こちらの指定が丸ごと消える**。
-              // 消えるのは「中央ぞろえの -50%」「自由配置の -50%,-50%」「回転」で、
-              // どれも**位置そのもの**なので、出てくる瞬間だけ別の場所に描かれて跳ねる。
-              // (実測・枠 420x236: 中央ぞろえ+popIn は中心が縦 50% → **52.4%**、
-              //  自由配置(0.5,0.5)+popIn は **(54.26%, 52.4%)**、
-              //  自由配置(0.3,0.3)+slideInUp は **(34.26%, 39.57%)** と、
-              //  本来の (30%, 30%) から縦に **17.83%** ずれる。回転15度は
-              //  アニメ中の行列に回転成分が無く、**傾きが消えて**いた。
-              //  下ぞろえだけはインラインの指定が無いので前からズレ 0)
-              // `translate`/`rotate` は `transform` とは別のプロパティなので、
-              // キーフレームの `transform` と**掛け合わさる**(適用順は
-              // translate → rotate → transform)。CSS 側は触らない。
-              if (livePos) positionStyle.translate = '-50% -50%'
-              else if (o.style.position === 'center') positionStyle.translate = '0 -50%'
-              if (o.style.rotation) positionStyle.rotate = `${o.style.rotation}deg`
-              // **回して・拡大する軸は、書き出しと同じ「配置のアンカー」に置く。**
-              // ASS は `\frz` も登場アニメの `\fscx/\fscy` も `\an` のアンカー(下ぞろえなら
-              // 行の下端中央)を軸に掛けるが、CSS の既定は**箱の中心**。同じ設定なのに
-              // 画面と出力で別の場所に描かれていた(理由と実測は textAnchorOriginCss)。
-              positionStyle.transformOrigin = textAnchorOriginCss(
-                o.style.position,
-                Boolean(livePos)
+              const hitStyle = telopHitBoxStyle(
+                livePos ? { ...o, style: { ...o.style, customPosition: livePos } } : o,
+                textCanvas,
+                frameWidth
               )
-              // 「下から出る/上から出る」が動く距離は**枠の実寸から**出す。CSS に
-              // `translateY(40px)` と固定px で書いてあったため、枠の大きさが変わるたびに
-              // 書き出しとの比が動いていた(理由は TEXT_SLIDE_OFFSET_RATIO)。
-              // キーフレーム側はこの変数だけを読む——数字を CSS へ書き戻さないため。
-              ;(positionStyle as Record<string, string>)['--overlay-slide-offset'] =
-                `${textSlideOffsetPx(frameHeight)}px`
-              // 登場アニメーションの長さも同じ置き場から。CSS に秒を書き戻すと、
-              // 書き出し(ASS の時刻)と2箇所に分かれる(理由は TEXT_ANIMATION_MS)。
-              ;(positionStyle as Record<string, string>)['--overlay-anim-duration'] =
-                `${TEXT_ANIMATION_MS[o.style.animation]}ms`
+              if (!hitStyle) return null
               return (
                 <div
                   key={o.id}
-                  className={`overlay-text ${livePos ? '' : `overlay-${o.style.position}`} anim-${o.style.animation}${drawsTelopsOnCanvas ? ' overlay-hitbox-only' : ''}`}
-                  style={{ ...overlayPreviewStyle(o.style, overlayScale), ...positionStyle }}
+                  className="overlay-text overlay-hitbox-only"
+                  style={hitStyle}
                   onMouseDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
                     setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
                   }}
-                >
-                  {/* 背景箱は文字を包む内側に置く。外側は幅が確定した位置決めの箱なので、
-                      そこへ塗ると文字の量と無関係な帯になる(`overlayBoxStyle` 参照)。
-                      背景OFF のときは span を挟まず、今までと同じ木のまま描く。 */}
-                  {o.style.background ? (
-                    <span className="overlay-text-box" style={overlayBoxStyle(o.style)}>
-                      {renderOverlayText(o, playheadTime)}
-                    </span>
-                  ) : (
-                    renderOverlayText(o, playheadTime)
-                  )}
-                </div>
+                />
               )
             })}
             {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}

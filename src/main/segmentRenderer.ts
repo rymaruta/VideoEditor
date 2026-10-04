@@ -65,7 +65,7 @@ export interface SegmentedExportOptions {
   maxParallel?: number
   /**
    * 画面のプロセスが共通テロップレンダラで描いたテロップの層。あればこちらで焼き、
-   * 無ければ従来の ASS で焼く
+   * 省略時は従来の ASS で焼く(`null` は「出すテロップが無い」で、何も焼かない)
    */
   telopLayer?: TelopLayerPayload | null
   /** 区間の長さ。既定は `defaultSegmentOptions` */
@@ -354,7 +354,8 @@ export async function exportSequenceSegmented(
       })
       telopLayer = { runs: layer.runs, imagePaths }
     }
-    const overlays = telopLayer ? [] : telopsAsOverlays(seq)
+    // `null` は「画面のプロセスが描いた結果、出すテロップが無かった」。ASS で描き直さない
+    const overlays = telopLayer || options.telopLayer === null ? [] : telopsAsOverlays(seq)
     if (overlays.length > 0) {
       const wideEmByFont = await measureWideAdvances(ffmpegPath, overlays)
       const canvas = textCanvasSize(seq.width >= seq.height ? '16:9' : '9:16')

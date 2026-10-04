@@ -180,8 +180,8 @@ export function ExportDialog(): React.JSX.Element | null {
     aspect: AspectRatio,
     height: ResolutionHeight
   ): Promise<TelopLayerPayload | null> {
-    // 長尺向けは、テロップを画面と同じ描画関数で先に画像にしておく(標準は ASS で焼く)
-    if (engine !== 'segmented') return null
+    // テロップは書き出し方式によらず、画面と同じ描画関数で先に画像にしておく
+    // (見えているとおりに書き出すため。main は画像を時刻どおりに重ねるだけ)
     return prepareTelopLayerForExport(
       project,
       aspect,
@@ -364,7 +364,7 @@ export function ExportDialog(): React.JSX.Element | null {
     ['音声', `AAC 48kHz ステレオ · ${loudnessText}`],
     [
       'テロップ',
-      `${project.textOverlays.length.toLocaleString()} 本(${engine === 'segmented' ? '画面と同じ描画' : 'ASS で焼き込み'})`
+      `${project.textOverlays.length.toLocaleString()} 本(画面と同じ描画)`
     ],
     ['エンコーダ', encoderText]
   ]
@@ -538,7 +538,7 @@ export function ExportDialog(): React.JSX.Element | null {
                           [
                             'segmented',
                             '長尺向け(区間に分けて並列)',
-                            '長い番組向け。数十秒ずつ同時に書き出してつなぎます。テロップは画面と同じ描き方'
+                            '長い番組向け。数十秒ずつ同時に書き出してつなぎます'
                           ]
                         ] as [ExportEngine, string, string][]
                       ).map(([value, label, note]) => (
@@ -611,13 +611,11 @@ export function ExportDialog(): React.JSX.Element | null {
                   <div className="form-row form-row-top">
                     <label>描き方</label>
                     <span className="form-value">
-                      {engine === 'segmented'
-                        ? '画面と同じ描画(二重の縁・グラデーションも書き出せます)'
-                        : 'ASS で焼き込み(外側の縁・グラデーションは書き出されません)'}
+                      画面と同じ描画(縁・グラデーション・背景の飾りもそのまま書き出せます)
                     </span>
                   </div>
                   <p className="hint-text form-hint">
-                    描き方は「映像」タブの書き出し方式で決まります。プレビューも同じ描き方に切り替わります。
+                    どちらの書き出し方式でも、プレビューで見えているとおりに書き出します。
                   </p>
                 </>
               )}

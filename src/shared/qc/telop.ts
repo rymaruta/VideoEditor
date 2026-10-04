@@ -1,5 +1,10 @@
 import type { TextOverlay } from '../types'
-import { layoutTelop, telopStrokeRings, type TelopContext } from '../telop/render'
+import {
+  layoutTelop,
+  stripTelopMarkup,
+  telopStrokeRings,
+  type TelopContext
+} from '../telop/render'
 import type { DictionaryEntry } from '../telop/polish'
 import type { QcIssue } from './types'
 
@@ -58,9 +63,11 @@ export function telopIssues(
   const banned = options.bannedWords.map((w) => w.trim()).filter(Boolean)
   const wrong = options.dictionary.filter((d) => d.from && d.from !== d.to)
   for (const o of overlays) {
-    if (!o.text.trim()) continue
+    // 文字数・言葉の確認は、画面に出る文字で数える(`**強調**` などの印は描かれない)
+    const text = stripTelopMarkup(o.text)
+    if (!text.trim()) continue
     const base = { start: o.startTime, end: o.endTime, overlayId: o.id }
-    const label = o.text.replace(/\n/g, ' ').slice(0, 20)
+    const label = text.replace(/\n/g, ' ').slice(0, 20)
 
     const b = telopBounds(ctx, o, canvas)
     const lo = TITLE_SAFE_MARGIN - SAFE_TOLERANCE
@@ -74,7 +81,7 @@ export function telopIssues(
         message: `「${label}」が画面の端(タイトルセーフ)からはみ出しています`
       })
 
-    const chars = visibleChars(o.text)
+    const chars = visibleChars(text)
     const need = Math.max(MIN_DISPLAY_SEC, chars / READ_CHARS_PER_SEC)
     const shown = o.endTime - o.startTime
     if (shown < need)
@@ -86,7 +93,7 @@ export function telopIssues(
         message: `「${label}」は ${chars} 文字を ${shown.toFixed(1)} 秒しか出していません(読み切れない恐れ)`
       })
 
-    const hit = banned.filter((w) => o.text.includes(w))
+    const hit = banned.filter((w) => text.includes(w))
     if (hit.length > 0)
       issues.push({
         ...base,
@@ -97,7 +104,7 @@ export function telopIssues(
       })
 
     // 正しい表記が誤の表記を含む(誤「ジョウド」→ 正「ジョウドガハマ」など)ときは、正しく書けていれば知らせない
-    const left = wrong.filter((d) => o.text.split(d.to).join('').includes(d.from))
+    const left = wrong.filter((d) => text.split(d.to).join('').includes(d.from))
     if (left.length > 0)
       issues.push({
         ...base,

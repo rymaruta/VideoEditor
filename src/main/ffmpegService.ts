@@ -18,6 +18,7 @@ import type {
   TransitionType
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
+import { telopConcatList, type TelopLayerPayload } from '@shared/telop/layer'
 import { measureWideAdvances } from './fontMetrics'
 import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import { createExportTimeMap } from '@shared/exportTimeline'
@@ -485,6 +486,13 @@ export interface ExportOptions {
   loudnessNormalization?: boolean
   /** 音量の基準。既定は配信(-14 LUFS) */
   loudnessTarget?: LoudnessTarget
+  /**
+   * 画面のプロセスが共通レンダラ(`drawTelop`)で描いたテロップの層。
+   * あればこれを重ね、ASS は使わない(画面と同じ絵になる)。
+   * `null` は「描いた結果、出すテロップが無かった」なので何も焼かない。
+   * 渡されないとき(`undefined`)だけ、従来の ASS で焼く。
+   */
+  telopLayer?: TelopLayerPayload | null
   onProgress: (percent: number, stage: string) => void
 }
 
@@ -759,7 +767,13 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   // 全角の送り幅を測る(結果はフォントごとに使い回すので、2回目以降は測らない)。
   // 上の probe と同じで、測れなくても例外にしない——折り返しが少し広いだけの話で、
   // 書き出せなくなるほうがはるかに悪い。
-  const wideEmByFont = await measureWideAdvances(ffmpegPath, project.textOverlays)
+  // 層を受け取ったときは ASS を作らないので、測る必要も無い(測ると ffmpeg を1回余計に起こす)
+  const usesTelopLayer = options.telopLayer !== undefined
+  const telopLayer =
+    options.telopLayer && options.telopLayer.images.length > 0 ? options.telopLayer : null
+  const wideEmByFont = usesTelopLayer
+    ? new Map<string, number>()
+    : await measureWideAdvances(ffmpegPath, project.textOverlays)
 
   /**
    * フィルタグラフの組み立て。**本番の書き出しと、ラウドネス測定パスの2回呼ばれる。**
@@ -772,7 +786,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
    */
   const buildGraph = (
     command: ffmpeg.FfmpegCommand,
-    includeVideo: boolean
+    includeVideo: boolean,
+    /** テロップの層の concat 一覧(書き出し済みのファイル)。あれば ASS の代わりに重ねる */
+    telopListPath: string | null = null
   ): { filterParts: string[]; videoLabel: string; audioLabel: string; assDir: string | null } => {
     {
       const filterParts: string[] = []
@@ -1062,7 +1078,24 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       })
 
       let videoLabel = `[${curV}]`
-      if (includeVideo && project.textOverlays.length > 0) {
+      if (includeVideo && telopListPath) {
+        // 共通レンダラの層を重ねる(長尺向けの `segmentGraph` と同じ組み方)。
+        // 層は「絵が替わる瞬間だけ1枚」のまばらな入力のまま重ねる。毎フレームへ複製すると
+        // 全フレームぶんの RGBA が overlay の待ち行列に溜まり、メモリを使い切る
+        command.input(telopListPath).inputOptions(['-f concat', '-safe 0'])
+        const layerIndex = inputIndex++
+        // 層は v2 のシーケンスの大きさで描いてある。普通は出力と同じだが、違えば合わせる
+        const layerScale =
+          telopLayer && (telopLayer.width !== w || telopLayer.height !== h)
+            ? `scale=${w}:${h},`
+            : ''
+        filterParts.push(`[${layerIndex}:v]${layerScale}format=rgba,settb=1/${outputFps}[telop]`)
+        // 長さは本編で決める(`shortest`)。層の一覧は本編より長めに作ってあるので、先に切れることはない
+        filterParts.push(
+          `[${curV}][telop]overlay=0:0:format=auto:eof_action=pass:shortest=1[vout]`
+        )
+        videoLabel = '[vout]'
+      } else if (includeVideo && !usesTelopLayer && project.textOverlays.length > 0) {
         assDir = mkdtempSync(join(tmpdir(), 've-subs-'))
         const assPath = join(assDir, 'overlay.ass')
         // 端ごとに `toExportTime` を掛けると、繋ぎをまたぐ区間で**終わりが始まりより前**に
@@ -1332,13 +1365,40 @@ export async function exportProject(options: ExportOptions): Promise<void> {
     let assDir: string | null = null
     /** フィルタグラフを書いたファイルの置き場(理由は `-filter_complex_script` を渡す箇所) */
     let graphDir: string | null = null
+    /** テロップの層の画像と concat 一覧の置き場 */
+    let telopDir: string | null = null
     const cleanupTempDirs = (): void => {
       if (assDir) rmSync(assDir, { recursive: true, force: true })
       if (graphDir) rmSync(graphDir, { recursive: true, force: true })
+      if (telopDir) rmSync(telopDir, { recursive: true, force: true })
     }
     try {
       command = ffmpeg()
-      const built = buildGraph(command, true)
+      let telopListPath: string | null = null
+      if (telopLayer) {
+        telopDir = mkdtempSync(join(tmpdir(), 've-telop-'))
+        const dir = telopDir
+        const imagePaths = telopLayer.images.map((bytes, i) => {
+          const p = join(dir, `telop_${String(i).padStart(6, '0')}.png`)
+          writeFileSync(p, bytes)
+          return p
+        })
+        // 層の区間は v2 のフレーム(`projectV1ToV2`)。v2 は書き出しと同じ `createExportTimeMap` と
+        // 同じフレームレートで数えるので、頭からフレームで並べればそのまま時刻が合う。
+        // 一覧は本編より1秒長く(後ろは透明)作り、長さは overlay の `shortest` で本編に揃える。
+        // 本編ちょうどにすると、concat の決まりで最後に足す1枚のぶん**映像が1フレーム伸びる**
+        // (実測: 30フレームの本編が31フレームになった)。丸めで本編が長くても層が先に尽きない
+        const totalFrames = Math.round(mainLayout.totalExportDuration * outputFps) + outputFps
+        const list = telopConcatList(telopLayer.runs, imagePaths, 0, totalFrames, {
+          num: outputFps,
+          den: 1
+        })
+        if (list) {
+          telopListPath = join(dir, 'telop.ffconcat')
+          writeFileSync(telopListPath, list, 'utf-8')
+        }
+      }
+      const built = buildGraph(command, true, telopListPath)
       const filterParts = built.filterParts
       const videoLabel = built.videoLabel
       let audioLabel = built.audioLabel

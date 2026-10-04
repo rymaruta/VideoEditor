@@ -10,6 +10,7 @@ import {
   textSlideOffsetPx
 } from '@shared/textStyle'
 import { karaokeWords } from '@shared/captionWords'
+import { stripTelopMarkup } from '@shared/telop/render'
 
 function toAssTime(seconds: number): string {
   // A negative or non-finite time (an older project file, a hand-edited .veproj)
@@ -323,7 +324,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
   const marginVOf = (position: TextPosition): number =>
     position === 'center' ? 0 : Math.round(textMarginVPx(height))
 
-  const lines = overlays.map((o) => {
+  // ASS は部分の装飾(`**強調**`・`__小さく__`)を描けないので、印を外した本文で焼く
+  // (印が文字のまま焼き込まれるよりはまし。装飾ごと出すのは共通レンダラの層の役目)
+  const plain = overlays.map((o) => ({ ...o, text: stripTelopMarkup(o.text) }))
+  const lines = plain.map((o) => {
     const style = o.style
     const alignCode = style.customPosition ? 5 : alignmentFor(style.position)
     const target = style.customPosition

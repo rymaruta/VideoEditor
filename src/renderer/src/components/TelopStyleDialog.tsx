@@ -4,17 +4,21 @@ import type { TextPosition, TextStyle } from '@shared/types'
 import { defaultTextStyle } from '@shared/textStyle'
 import { textCanvasSize } from '@shared/resolution'
 import { drawTelop, telopStrokeRings, type TelopContext } from '@shared/telop/render'
-import { countStyleUsage } from '@shared/telop/styles'
+import { applyLook, countStyleUsage } from '@shared/telop/styles'
 import { listSpeakers, speakerColor } from '@shared/speaker'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore, type CaptionPreset } from '../store/presetStore'
 import { useMenuCommand } from '../lib/menuCommands'
+import { loadTelopFonts } from '../lib/telopFonts'
 import { PropRow, TelopStyleFields } from './TelopStyleFields'
+import { Segmented } from './AppearanceControls'
+import { TelopLookGallery, type LookItem } from './TelopLookGallery'
 
 /**
  * テロップスタイルの管理(テロップ > テロップスタイルの管理…)。デザイン案の「TelopStyles」。
  *
- * 左にスタイルの一覧(使っている本数)、中央に見本、右に見た目の設定。
+ * 左にスタイルの一覧(使っている本数)、中央に見本と見た目の一覧(プリセット)、右に見た目の設定。
+ * 見た目の一覧を押すと、選んでいるスタイルにその見た目を当てる(または新しいスタイルにする)。
  * OK を押すと、直したスタイルを使っているテロップ全部に反映する(取り消し1回で戻る)。
  * 「自動で使う場面」で話者を選ぶと、その話者の発言テロップにこのスタイルが付く。
  *
@@ -45,6 +49,9 @@ export function TelopStyleDialog(): React.JSX.Element | null {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sampleText, setSampleText] = useState('えっ？ ヤバイですよね')
   const [background, setBackground] = useState<SampleBackground>('frame')
+  // 見た目の一覧を押したとき: 選んでいるスタイルに当てる / 新しいスタイルとして足す
+  const [pickMode, setPickMode] = useState<'apply' | 'new'>('apply')
+  const [fontEpoch, setFontEpoch] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useMenuCommand((id) => {
@@ -74,7 +81,19 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     return () => window.removeEventListener('keydown', onKey)
   }, [draft])
 
-  // 見本を描く。書き出し(長尺向け)と同じ関数で描くので、ここで見える絵がそのまま出る
+  // 同梱フォントは使うまで読み込まれないので、見本の文字と書体を先に読み込んで描き直す
+  useEffect(() => {
+    if (!selected) return
+    let alive = true
+    void loadTelopFonts([{ text: sampleText, style: selected.style }]).then((changed) => {
+      if (alive && changed) setFontEpoch((e) => e + 1)
+    })
+    return () => {
+      alive = false
+    }
+  }, [selected, sampleText])
+
+  // 見本を描く。書き出しと同じ関数で描くので、ここで見える絵がそのまま出る
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !selected) return
@@ -99,7 +118,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
       { width: w, height: h },
       textCanvasSize(project.aspectRatio)
     )
-  }, [selected, sampleText, background, project.aspectRatio])
+  }, [selected, sampleText, background, project.aspectRatio, fontEpoch])
 
   if (!draft) return null
 
@@ -119,6 +138,16 @@ export function TelopStyleDialog(): React.JSX.Element | null {
       : { id: uuid(), name: '新しいスタイル', style: defaultTextStyle() }
     setDraft((prev) => [...(prev ?? []), next])
     setSelectedId(next.id)
+  }
+
+  function pickLook(item: LookItem): void {
+    if (pickMode === 'new' || !selected) {
+      const next: CaptionPreset = { id: uuid(), name: item.name, style: { ...item.style } }
+      setDraft((prev) => [...(prev ?? []), next])
+      setSelectedId(next.id)
+      return
+    }
+    patchSelected({ style: applyLook(selected.style, item.style) })
   }
 
   function removeSelected(): void {
@@ -288,6 +317,33 @@ export function TelopStyleDialog(): React.JSX.Element | null {
                 )}
               </div>
             )}
+            <div className="telop-style-gallery">
+              <div className="telop-style-gallery-head">
+                <span className="export-dialog-section">見た目の一覧</span>
+                <Segmented
+                  label="見た目の一覧を押したとき"
+                  value={selected ? pickMode : 'new'}
+                  options={[
+                    {
+                      value: 'apply',
+                      label: '選んだスタイルに当てる',
+                      title: '左で選んでいるスタイルの見た目を、押した見た目に置き換えます'
+                    },
+                    {
+                      value: 'new',
+                      label: '新しいスタイルにする',
+                      title: '押した見た目を、新しいスタイルとして一覧に足します'
+                    }
+                  ]}
+                  onChange={setPickMode}
+                />
+              </div>
+              <TelopLookGallery
+                saved={draft.filter((p) => p.id !== selectedId)}
+                savedSample={sampleText}
+                onPick={pickLook}
+              />
+            </div>
           </div>
 
           <div className="telop-style-settings">
@@ -301,22 +357,28 @@ export function TelopStyleDialog(): React.JSX.Element | null {
                     onChange={(e) => patchSelected({ name: e.target.value })}
                   />
                 </PropRow>
-                <TelopStyleFields style={selected.style} onPatch={patchStyle} />
-                <PropRow label="既定の位置">
-                  <select
-                    value={selected.style.position}
-                    onChange={(e) =>
-                      patchStyle({
-                        position: e.target.value as TextPosition,
-                        customPosition: undefined
-                      })
-                    }
-                  >
-                    <option value="top">上</option>
-                    <option value="center">中央</option>
-                    <option value="bottom">下</option>
-                  </select>
-                </PropRow>
+                <TelopStyleFields
+                  style={selected.style}
+                  onPatch={patchStyle}
+                  placement={
+                    <PropRow label="既定の位置">
+                      <select
+                        aria-label="既定の位置"
+                        value={selected.style.position}
+                        onChange={(e) =>
+                          patchStyle({
+                            position: e.target.value as TextPosition,
+                            customPosition: undefined
+                          })
+                        }
+                      >
+                        <option value="top">上</option>
+                        <option value="center">中央</option>
+                        <option value="bottom">下</option>
+                      </select>
+                    </PropRow>
+                  }
+                />
               </div>
             ) : (
               <p className="hint-text telop-style-empty">

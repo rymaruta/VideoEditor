@@ -111,6 +111,7 @@ import {
   EyeOffIcon,
   MusicIcon
 } from './icons'
+import { stripTelopMarkup } from '@shared/telop/render'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -2878,7 +2879,7 @@ export function Timeline(): React.JSX.Element {
                       width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond),
                       ...captionRowRect(captionRows.get(overlay.id) ?? 0, captionRowTotal)
                     }}
-                    title={overlay.text}
+                    title={stripTelopMarkup(overlay.text)}
                     onMouseDown={(e) => {
                       e.stopPropagation()
                       // 端のつまみと同じく、他の種類の選択を外してから選ぶ。
@@ -2918,7 +2919,8 @@ export function Timeline(): React.JSX.Element {
                         })
                       }}
                     />
-                    {overlay.text}
+                    {/* 帯には描かれる文字だけを出す(`**強調**` などの印は外す) */}
+                    {stripTelopMarkup(overlay.text)}
                     <div
                       className="timeline-caption-handle timeline-caption-handle-right"
                       onMouseDown={(e) => {

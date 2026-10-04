@@ -568,6 +568,34 @@ function backgroundRects(
   ]
 }
 
+/**
+ * テロップが占める矩形(キャンバス px)。プレビューで、つかむための当たり判定に使う。
+ * `x`/`y` はアンカーからの差で、回転はアンカーを軸に `rotation` 度(登場アニメは含めない)。
+ * 背景があれば余白ぶん、無ければ縁の太さぶん広げる(見えている絵とつかめる範囲を揃える)
+ */
+export function telopHitBounds(
+  ctx: Pick<TelopContext, 'measureText' | 'font'>,
+  source: TelopSource,
+  canvas: { w: number; h: number }
+): { anchor: { x: number; y: number }; x: number; y: number; w: number; h: number } {
+  const layout = layoutTelop(ctx, source, canvas)
+  const style = source.style
+  const pad = style.background
+    ? telopBackgroundPadding(style, layout.fontSize)
+    : (() => {
+        const reach = telopStrokeRings(style)[0]?.reach ?? 0
+        return { x: reach, y: reach }
+      })()
+  // 行の左端はそろえ方によらずブロックの左端(-幅/2)から始まる(`drawTelop` の lineX)
+  return {
+    anchor: layout.anchor,
+    x: -layout.blockWidth / 2 - pad.x,
+    y: layout.topFromAnchor - pad.y,
+    w: layout.blockWidth + pad.x * 2,
+    h: layout.blockHeight + pad.y * 2
+  }
+}
+
 /** 影の落とす向きと距離(キャンバス px)。既定は従来と同じ右下へ (o, o) */
 function shadowOffset(style: TextStyle): { dx: number; dy: number } {
   if (style.shadowAngle === undefined && style.shadowDistance === undefined)

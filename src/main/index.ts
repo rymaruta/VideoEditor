@@ -427,7 +427,10 @@ function registerWindowScopedIpcHandlers(): void {
         loudnessNormalization?: boolean
         loudnessTarget?: LoudnessTarget
         engine?: ExportEngine
-        /** 長尺向けの書き出しで使う、画面のプロセスが描いたテロップの層 */
+        /**
+         * 画面のプロセスが共通レンダラで描いたテロップの層(どちらの書き出し方式でも使う)。
+         * `null` は「出すテロップが無い」、省略は「層が無いので ASS で焼く」
+         */
         telopLayer?: TelopLayerPayload | null
       }
     ) => {
@@ -462,6 +465,7 @@ function registerWindowScopedIpcHandlers(): void {
         outputPath: payload.outputPath,
         loudnessNormalization: payload.loudnessNormalization,
         loudnessTarget: normalizeLoudnessTarget(payload.loudnessTarget),
+        telopLayer: payload.telopLayer,
         onProgress
       })
       return { success: true }

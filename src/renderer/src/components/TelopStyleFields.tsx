@@ -1,10 +1,34 @@
-import type { FontFamily, TextAnimation, TextStyle } from '@shared/types'
-import { FONT_FAMILY_OPTIONS, TEXT_ANIMATION_MS } from '@shared/textStyle'
-import { useSettingsStore } from '../store/settingsStore'
+import type {
+  FontFamily,
+  TelopBubbleTail,
+  TelopSpanStyle,
+  TelopStroke,
+  TextAnimation,
+  TextStyle
+} from '@shared/types'
+import { FONT_FAMILY_OPTIONS, TEXT_ANIMATION_MS, textBoxPaddingPx } from '@shared/textStyle'
+import { TELOP_LINE_HEIGHT_EM, telopFontWeight } from '@shared/telop/render'
+import {
+  addStroke,
+  effectiveFillGradient,
+  FONT_WEIGHT_OPTIONS,
+  MAX_STROKES,
+  moveStroke,
+  pointerToward,
+  shadowDisplay,
+  strokesFromStyle,
+  strokesToStyle
+} from '../lib/telopAppearance'
 import { ColorField } from './ColorField'
+import { FillField, NumberSlider, Segmented, StyleSection } from './AppearanceControls'
+import { AngleDial } from './GradientEditor'
 
 /**
- * テロップの見た目の欄(文字 → 字間 → 塗り → 縁 → 外側の縁 → 影 → 帯 → 登場)。
+ * テロップの見た目の欄。Premiere のエッセンシャルグラフィックス(アピアランス)と
+ * DaVinci の Text+ を手本に、項目ごとに畳める見出しに分けている。
+ *
+ *   テキスト → 塗り → 縁(何本でも) → 背景 → 影 → 光彩 → 部分の装飾 → 矢印 → 位置・動き
+ *
  * テロップ1本の設定と、テロップスタイルの管理の両方で同じ欄を使う
  * (片方にだけ項目が増えて、もう片方で直せない、ということが起きないように)。
  */
@@ -17,6 +41,35 @@ const ANIMATIONS: { value: TextAnimation; label: string }[] = [
   { value: 'slideInDown', label: '上から' },
   { value: 'bounce', label: '弾む' },
   { value: 'typewriter', label: '1文字ずつ' }
+]
+
+/** 書体を見出し(基本・バラエティ…)ごとにまとめる */
+const FONT_GROUPS = FONT_FAMILY_OPTIONS.reduce<
+  { group: string; items: typeof FONT_FAMILY_OPTIONS }[]
+>((acc, f) => {
+  const g = acc.find((x) => x.group === f.group)
+  if (g) g.items.push(f)
+  else acc.push({ group: f.group, items: [f] })
+  return acc
+}, [])
+
+const TAIL_SIDES: { value: TelopBubbleTail['side']; label: string }[] = [
+  { value: 'bottom', label: '下' },
+  { value: 'top', label: '上' },
+  { value: 'left', label: '左' },
+  { value: 'right', label: '右' }
+]
+
+/** 矢印の向きのボタン(画面の向き。y は下向き) */
+const POINTER_DIRS: { x: number; y: number; glyph: string; label: string }[] = [
+  { x: -1, y: -1, glyph: '↖', label: '左上' },
+  { x: 0, y: -1, glyph: '↑', label: '上' },
+  { x: 1, y: -1, glyph: '↗', label: '右上' },
+  { x: -1, y: 0, glyph: '←', label: '左' },
+  { x: 1, y: 0, glyph: '→', label: '右' },
+  { x: -1, y: 1, glyph: '↙', label: '左下' },
+  { x: 0, y: 1, glyph: '↓', label: '下' },
+  { x: 1, y: 1, glyph: '↘', label: '右下' }
 ]
 
 export function PropRow({
@@ -39,233 +92,848 @@ export function PropRow({
 export function TelopStyleFields({
   style,
   onPatch: patch,
-  showKaraoke = false
+  showKaraoke = false,
+  placement
 }: {
   style: TextStyle
   onPatch: (patch: Partial<TextStyle>) => void
   /** 単語の時刻を持つテロップだけ、カラオケの欄を出す */
   showKaraoke?: boolean
+  /** 「位置・動き」の見出しの中に出す、呼び出し側の置き場所の欄(配置・回転など) */
+  placement?: React.ReactNode
 }): React.JSX.Element {
-  // 外側の縁・グラデーションは共通テロップレンダラ(長尺向けの書き出し)でだけ描ける
-  const drawsTelopsOnCanvas = useSettingsStore((s) => s.exportEngine === 'segmented')
-  const outer = style.extraStrokes?.[0]
   return (
-    <>
-      <PropRow label="文字">
+    <div className="telop-style-fields">
+      <TextSection style={style} patch={patch} />
+      <FillSection style={style} patch={patch} />
+      <StrokeSection style={style} patch={patch} />
+      <BackgroundSection style={style} patch={patch} />
+      <ShadowSection style={style} patch={patch} />
+      <GlowSection style={style} patch={patch} />
+      <SpanSection style={style} patch={patch} />
+      <PointerSection style={style} patch={patch} />
+      <StyleSection id="motion" title="位置・動き" defaultOpen>
+        {placement}
+        <PropRow label="登場">
+          <select
+            aria-label="登場の動き"
+            value={style.animation}
+            onChange={(e) => patch({ animation: e.target.value as TextAnimation })}
+          >
+            {ANIMATIONS.map((a) => (
+              <option key={a.value} value={a.value}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+          {TEXT_ANIMATION_MS[style.animation] > 0 && (
+            <span className="prop-unit">
+              {(TEXT_ANIMATION_MS[style.animation] / 1000).toFixed(2)} 秒
+            </span>
+          )}
+        </PropRow>
+        {showKaraoke && (
+          <PropRow label="カラオケ">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={style.wordHighlight}
+                onChange={(e) => patch({ wordHighlight: e.target.checked })}
+              />
+              話した単語を色付け
+            </label>
+            {style.wordHighlight && (
+              <ColorField
+                label="色付けの色"
+                value={style.highlightColor}
+                onChange={(hex) => patch({ highlightColor: hex })}
+              />
+            )}
+          </PropRow>
+        )}
+      </StyleSection>
+    </div>
+  )
+}
+
+type SectionProps = { style: TextStyle; patch: (p: Partial<TextStyle>) => void }
+
+// ------------------------------------------------------------------ 1. テキスト
+
+function TextSection({ style, patch }: SectionProps): React.JSX.Element {
+  const weight = telopFontWeight(style)
+  const fontLabel = FONT_FAMILY_OPTIONS.find((f) => f.value === style.fontFamily)?.label
+  return (
+    <StyleSection
+      id="text"
+      title="テキスト"
+      defaultOpen
+      summary={`${fontLabel?.replace(/(.*)/, '') ?? ''} ${style.fontSize}px`}
+    >
+      <PropRow label="書体">
         <select
           aria-label="フォント"
+          className="prop-wide"
           value={style.fontFamily}
           onChange={(e) => patch({ fontFamily: e.target.value as FontFamily })}
         >
-          {FONT_FAMILY_OPTIONS.map((f) => (
-            <option key={f.value} value={f.value}>
-              {f.label}
+          {FONT_GROUPS.map((g) => (
+            <optgroup key={g.group} label={g.group}>
+              {g.items.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </PropRow>
+      <PropRow label="サイズ">
+        <NumberSlider
+          label="文字の大きさ"
+          value={style.fontSize}
+          onChange={(v) => patch({ fontSize: Math.round(v) })}
+          min={8}
+          max={300}
+          sliderMin={12}
+          sliderMax={200}
+          unit="px"
+        />
+      </PropRow>
+      <PropRow label="太さ">
+        <select
+          aria-label="文字の太さ"
+          value={weight}
+          onChange={(e) => {
+            const w = Number(e.target.value)
+            patch({ fontWeight: w, bold: w >= 600 })
+          }}
+        >
+          {FONT_WEIGHT_OPTIONS.map((w) => (
+            <option key={w.value} value={w.value}>
+              {w.label}
             </option>
           ))}
         </select>
-        <input
-          type="number"
-          aria-label="サイズ"
-          className="prop-num"
-          min={16}
-          max={96}
-          step={2}
-          value={style.fontSize}
-          onChange={(e) => patch({ fontSize: Number(e.target.value) })}
-        />
-        <span className="prop-unit">px</span>
         <button
-          className={`toggle-chip ${style.bold ? 'active' : ''}`}
-          aria-pressed={style.bold}
+          type="button"
+          className={`toggle-chip ${weight >= 600 ? 'active' : ''}`}
+          aria-pressed={weight >= 600}
+          aria-label="太字"
           title="太字"
-          onClick={() => patch({ bold: !style.bold })}
+          onClick={() => patch({ bold: weight < 600, fontWeight: undefined })}
         >
           B
         </button>
         <button
+          type="button"
           className={`toggle-chip italic ${style.italic ? 'active' : ''}`}
           aria-pressed={style.italic}
+          aria-label="斜体"
           title="斜体"
           onClick={() => patch({ italic: !style.italic })}
         >
           I
         </button>
       </PropRow>
-
+      <PropRow label="揃え">
+        <Segmented
+          label="行揃え"
+          value={style.align ?? 'center'}
+          options={[
+            { value: 'left', label: <AlignGlyph align="left" />, title: '左揃え' },
+            { value: 'center', label: <AlignGlyph align="center" />, title: '中央揃え' },
+            { value: 'right', label: <AlignGlyph align="right" />, title: '右揃え' }
+          ]}
+          onChange={(v) => patch({ align: v === 'center' ? undefined : v })}
+        />
+      </PropRow>
       <PropRow label="字間">
-        <input
-          type="number"
-          className="prop-num"
-          min={0}
-          max={20}
+        <NumberSlider
+          label="字間"
           value={style.letterSpacing}
-          onChange={(e) => patch({ letterSpacing: Number(e.target.value) })}
+          onChange={(v) => patch({ letterSpacing: v })}
+          min={-20}
+          max={100}
+          sliderMin={-10}
+          sliderMax={40}
+          unit="px"
         />
-        <span className="prop-unit">px</span>
       </PropRow>
-
-      <PropRow label="塗り">
-        <ColorField
-          label="文字の色"
-          value={style.color}
-          onChange={(hex) => patch({ color: hex })}
+      <PropRow label="行間">
+        <NumberSlider
+          label="行の高さ"
+          value={style.lineHeight ?? TELOP_LINE_HEIGHT_EM}
+          onChange={(v) => patch({ lineHeight: v })}
+          min={0.6}
+          max={3}
+          step={0.05}
+          unit="倍"
         />
-        <label className="checkbox-label" title="文字の色を上から下へのグラデーションにします">
-          <input
-            type="checkbox"
-            checked={Boolean(style.gradientColor)}
-            onChange={(e) => patch({ gradientColor: e.target.checked ? '#ffcc00' : undefined })}
+      </PropRow>
+      <PropRow label="不透明度">
+        <NumberSlider
+          label="文字全体の不透明度"
+          value={style.opacity ?? 1}
+          onChange={(v) => patch({ opacity: v >= 1 ? undefined : v })}
+          min={0}
+          max={100}
+          scale={100}
+          unit="%"
+        />
+      </PropRow>
+    </StyleSection>
+  )
+}
+
+function AlignGlyph({ align }: { align: 'left' | 'center' | 'right' }): React.JSX.Element {
+  const rows = [12, 8, 12, 6]
+  return (
+    <svg width={14} height={12} viewBox="0 0 14 12" aria-hidden="true">
+      {rows.map((w, i) => {
+        const x = align === 'left' ? 1 : align === 'right' ? 13 - w : (14 - w) / 2
+        return (
+          <rect key={i} x={x} y={1 + i * 3} width={w} height={1.6} rx={0.5} fill="currentColor" />
+        )
+      })}
+    </svg>
+  )
+}
+
+// ------------------------------------------------------------------ 2. 塗り
+
+function FillSection({ style, patch }: SectionProps): React.JSX.Element {
+  const gradient = effectiveFillGradient(style)
+  return (
+    <StyleSection
+      id="fill"
+      title="塗り"
+      defaultOpen
+      summary={gradient ? 'グラデーション' : undefined}
+    >
+      <FillField
+        label="文字の塗り"
+        color={style.color}
+        gradient={gradient}
+        onChange={({ color, gradient: g }) =>
+          // 旧形式の縦2色(gradientColor)は、触ったら新しい形に移す
+          patch({ color: color ?? style.color, fillGradient: g, gradientColor: undefined })
+        }
+      />
+    </StyleSection>
+  )
+}
+
+// ------------------------------------------------------------------ 3. 縁
+
+function StrokeSection({ style, patch }: SectionProps): React.JSX.Element {
+  const list = strokesFromStyle(style)
+  const set = (next: TelopStroke[]): void => patch(strokesToStyle(next))
+  const update = (i: number, p: Partial<TelopStroke>): void =>
+    set(list.map((s, j) => (j === i ? { ...s, ...p } : s)))
+  return (
+    <StyleSection
+      id="stroke"
+      title="縁(ストローク)"
+      defaultOpen
+      summary={list.length > 0 ? `${list.length} 本` : 'なし'}
+    >
+      {list.length === 0 && <p className="hint-text style-note">縁はありません。</p>}
+      {list.map((s, i) => (
+        <div key={i} className="stroke-card">
+          <div className="stroke-card-head">
+            <span className="stroke-card-title">
+              縁 {i + 1}
+              <span className="stroke-card-sub">
+                {list.length === 1
+                  ? ''
+                  : i === 0
+                    ? '(いちばん内側)'
+                    : i === list.length - 1
+                      ? '(いちばん外側)'
+                      : ''}
+              </span>
+            </span>
+            <div className="stroke-card-tools">
+              <button
+                type="button"
+                className="icon-chip"
+                aria-label={`縁 ${i + 1} を内側へ`}
+                title="内側へ"
+                disabled={i === 0}
+                onClick={() => set(moveStroke(list, i, -1))}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="icon-chip"
+                aria-label={`縁 ${i + 1} を外側へ`}
+                title="外側へ"
+                disabled={i === list.length - 1}
+                onClick={() => set(moveStroke(list, i, 1))}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className="icon-chip danger"
+                aria-label={`縁 ${i + 1} を消す`}
+                title="この縁を消す"
+                onClick={() => set(list.filter((_, j) => j !== i))}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <PropRow label="太さ">
+            <NumberSlider
+              label={`縁 ${i + 1} の太さ`}
+              value={s.width}
+              onChange={(v) => update(i, { width: v })}
+              min={0.5}
+              max={60}
+              step={0.5}
+              sliderMin={0.5}
+              sliderMax={30}
+              unit="px"
+            />
+          </PropRow>
+          <FillField
+            label={`縁 ${i + 1} の色`}
+            color={s.color}
+            gradient={s.gradient}
+            onChange={({ color, gradient }) => update(i, { color: color ?? s.color, gradient })}
           />
-          グラデーション
-        </label>
-        {style.gradientColor && (
-          <ColorField
-            label="グラデーションの下の色"
-            value={style.gradientColor}
-            onChange={(hex) => patch({ gradientColor: hex })}
-          />
-        )}
-      </PropRow>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="small-button add-row-button"
+        disabled={list.length >= MAX_STROKES}
+        title="いちばん外側に縁を1本足します(バラエティの二重縁・三重縁)"
+        onClick={() => set(addStroke(list))}
+      >
+        + 縁を追加
+      </button>
+    </StyleSection>
+  )
+}
 
-      {showKaraoke && (
-        <PropRow label="カラオケ">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={style.wordHighlight}
-              onChange={(e) => patch({ wordHighlight: e.target.checked })}
-            />
-            話した単語を色付け
-          </label>
-          {style.wordHighlight && (
-            <ColorField
-              label="色付けの色"
-              value={style.highlightColor}
-              onChange={(hex) => patch({ highlightColor: hex })}
-            />
-          )}
-        </PropRow>
-      )}
+// ------------------------------------------------------------------ 4. 背景
 
-      <PropRow label="縁">
-        <input
-          type="checkbox"
-          aria-label="縁を付ける"
-          checked={style.outline}
-          onChange={(e) => patch({ outline: e.target.checked })}
-        />
-        {style.outline && (
-          <>
-            <ColorField
-              label="縁の色"
-              value={style.outlineColor}
-              onChange={(hex) => patch({ outlineColor: hex })}
-            />
-            <input
-              type="number"
-              aria-label="縁の太さ"
-              className="prop-num"
-              min={1}
-              max={8}
-              value={style.outlineWidth}
-              onChange={(e) => patch({ outlineWidth: Number(e.target.value) })}
-            />
-            <span className="prop-unit">px</span>
-          </>
-        )}
-      </PropRow>
-
-      <PropRow label="外側の縁" title="縁のさらに外側にもう1本縁を付けます(バラエティの二重縁)">
-        <input
-          type="checkbox"
-          aria-label="外側の縁を付ける"
-          checked={Boolean(outer)}
-          onChange={(e) =>
-            patch({ extraStrokes: e.target.checked ? [{ color: '#ffffff', width: 6 }] : undefined })
+function BackgroundSection({ style, patch }: SectionProps): React.JSX.Element {
+  const shape = style.backgroundShape ?? 'lines'
+  const autoPad = textBoxPaddingPx(style.fontSize)
+  const pad = style.backgroundPadding ?? {
+    x: Math.round(autoPad.x),
+    y: Math.round(autoPad.y)
+  }
+  const tail = style.bubbleTail
+  const border = style.backgroundBorder
+  return (
+    <StyleSection
+      id="background"
+      title="背景"
+      enabled={style.background}
+      onToggle={(on) => patch({ background: on })}
+      summary={
+        style.background ? { lines: '行ごと', block: '1枚の板', bubble: '吹き出し' }[shape] : 'なし'
+      }
+    >
+      <PropRow label="形">
+        <Segmented
+          label="背景の形"
+          value={shape}
+          options={[
+            { value: 'lines', label: '行ごと', title: '行ごとの帯(座布団)' },
+            { value: 'block', label: '1枚の板', title: '全体を1枚の板で敷く' },
+            { value: 'bubble', label: '吹き出し', title: 'しっぽの付いた吹き出し' }
+          ]}
+          onChange={(v) =>
+            patch({
+              backgroundShape: v === 'lines' ? undefined : v,
+              ...(v === 'bubble' && !tail
+                ? { bubbleTail: { side: 'bottom', at: 0.3, length: 24 } }
+                : {}),
+              ...(v === 'bubble' && style.backgroundRadius === undefined
+                ? { backgroundRadius: 24 }
+                : {})
+            })
           }
         />
-        {outer && (
+      </PropRow>
+      <FillField
+        label="背景の色"
+        color={style.backgroundColor}
+        gradient={style.backgroundGradient}
+        onChange={({ color, gradient }) =>
+          patch({ backgroundColor: color ?? style.backgroundColor, backgroundGradient: gradient })
+        }
+      />
+      <PropRow label="不透明度">
+        <NumberSlider
+          label="背景の不透明度"
+          value={style.backgroundOpacity}
+          onChange={(v) => patch({ backgroundOpacity: v })}
+          min={0}
+          max={100}
+          scale={100}
+          unit="%"
+        />
+      </PropRow>
+      <PropRow label="角の丸み">
+        <NumberSlider
+          label="背景の角の丸み"
+          value={style.backgroundRadius ?? 0}
+          onChange={(v) => patch({ backgroundRadius: v > 0 ? v : undefined })}
+          min={0}
+          max={500}
+          sliderMax={100}
+          unit="px"
+        />
+      </PropRow>
+      <PropRow label="余白">
+        <span className="prop-unit">横</span>
+        <NumberSlider
+          slider={false}
+          label="背景の余白(横)"
+          value={pad.x}
+          onChange={(v) => patch({ backgroundPadding: { x: v, y: pad.y } })}
+          min={0}
+          max={500}
+        />
+        <span className="prop-unit">縦</span>
+        <NumberSlider
+          slider={false}
+          label="背景の余白(縦)"
+          value={pad.y}
+          onChange={(v) => patch({ backgroundPadding: { x: pad.x, y: v } })}
+          min={0}
+          max={500}
+          unit="px"
+        />
+        {style.backgroundPadding ? (
+          <button
+            type="button"
+            className="link-button"
+            title="文字の大きさに合わせた余白に戻します"
+            onClick={() => patch({ backgroundPadding: undefined })}
+          >
+            自動に戻す
+          </button>
+        ) : (
+          <span className="prop-unit">(自動)</span>
+        )}
+      </PropRow>
+      <PropRow label="斜め">
+        <NumberSlider
+          label="背景の傾き"
+          value={style.backgroundSkew ?? 0}
+          onChange={(v) => patch({ backgroundSkew: v === 0 ? undefined : v })}
+          min={-45}
+          max={45}
+          unit="度"
+        />
+      </PropRow>
+      <PropRow label="枠線">
+        <input
+          type="checkbox"
+          aria-label="背景に枠線を付ける"
+          checked={Boolean(border && border.width > 0)}
+          onChange={(e) =>
+            patch({
+              backgroundBorder: e.target.checked ? { color: '#ffffff', width: 3 } : undefined
+            })
+          }
+        />
+        {border && border.width > 0 && (
           <>
             <ColorField
-              label="外側の縁の色"
-              value={outer.color}
-              onChange={(hex) => patch({ extraStrokes: [{ ...outer, color: hex }] })}
+              label="枠線の色"
+              value={border.color}
+              onChange={(hex) => patch({ backgroundBorder: { ...border, color: hex } })}
             />
-            <input
-              type="number"
-              aria-label="外側の縁の太さ"
-              className="prop-num"
-              min={1}
-              max={20}
-              value={outer.width}
+            <NumberSlider
+              label="枠線の太さ"
+              value={border.width}
+              onChange={(v) => patch({ backgroundBorder: { ...border, width: v } })}
+              min={0.5}
+              max={100}
+              step={0.5}
+              sliderMax={20}
+              unit="px"
+            />
+          </>
+        )}
+      </PropRow>
+      {shape === 'bubble' && (
+        <>
+          <PropRow label="しっぽ">
+            <select
+              aria-label="しっぽの向き"
+              value={tail?.side ?? 'none'}
               onChange={(e) =>
-                patch({ extraStrokes: [{ ...outer, width: Number(e.target.value) }] })
+                patch({
+                  bubbleTail:
+                    e.target.value === 'none'
+                      ? undefined
+                      : {
+                          side: e.target.value as TelopBubbleTail['side'],
+                          at: tail?.at ?? 0.3,
+                          length: tail?.length ?? 24
+                        }
+                })
               }
-            />
-            <span className="prop-unit">px</span>
-          </>
-        )}
-      </PropRow>
-      {!drawsTelopsOnCanvas && Boolean(style.gradientColor) && (
-        <p className="hint-text prop-note">
-          グラデーションは、書き出し方式が「長尺向け」のときに表示・書き出しされます。
-        </p>
+            >
+              <option value="none">なし</option>
+              {TAIL_SIDES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}の辺から
+                </option>
+              ))}
+            </select>
+          </PropRow>
+          {tail && (
+            <>
+              <PropRow label="しっぽの位置">
+                <NumberSlider
+                  label="しっぽの位置"
+                  value={tail.at}
+                  onChange={(v) => patch({ bubbleTail: { ...tail, at: v } })}
+                  min={0}
+                  max={100}
+                  scale={100}
+                  unit="%"
+                />
+              </PropRow>
+              <PropRow label="しっぽの長さ">
+                <NumberSlider
+                  label="しっぽの長さ"
+                  value={tail.length}
+                  onChange={(v) => patch({ bubbleTail: { ...tail, length: v } })}
+                  min={0}
+                  max={400}
+                  sliderMax={120}
+                  unit="px"
+                />
+              </PropRow>
+            </>
+          )}
+        </>
       )}
+    </StyleSection>
+  )
+}
 
-      <PropRow label="影">
-        <input
-          type="checkbox"
-          aria-label="影を付ける"
-          checked={style.shadow}
-          onChange={(e) => patch({ shadow: e.target.checked })}
+// ------------------------------------------------------------------ 5. 影
+
+function ShadowSection({ style, patch }: SectionProps): React.JSX.Element {
+  const s = shadowDisplay(style)
+  const custom =
+    style.shadowColor !== undefined ||
+    style.shadowOpacity !== undefined ||
+    style.shadowAngle !== undefined ||
+    style.shadowDistance !== undefined ||
+    style.shadowBlur !== undefined
+  return (
+    <StyleSection
+      id="shadow"
+      title="影"
+      enabled={style.shadow}
+      onToggle={(on) => patch({ shadow: on })}
+      summary={style.shadow ? undefined : 'なし'}
+    >
+      <PropRow label="色">
+        <ColorField
+          label="影の色"
+          value={s.color}
+          onChange={(hex) => patch({ shadowColor: hex })}
+        />
+        {custom && (
+          <button
+            type="button"
+            className="link-button"
+            title="向き・距離・濃さを、従来の影(右下へ硬く落とす)に戻します"
+            onClick={() =>
+              patch({
+                shadowColor: undefined,
+                shadowOpacity: undefined,
+                shadowAngle: undefined,
+                shadowDistance: undefined,
+                shadowBlur: undefined
+              })
+            }
+          >
+            既定に戻す
+          </button>
+        )}
+      </PropRow>
+      <PropRow label="不透明度">
+        <NumberSlider
+          label="影の不透明度"
+          value={s.opacity}
+          onChange={(v) => patch({ shadowOpacity: v })}
+          min={0}
+          max={100}
+          scale={100}
+          unit="%"
         />
       </PropRow>
-
-      <PropRow label="帯(座布団)">
-        <input
-          type="checkbox"
-          aria-label="帯を敷く"
-          checked={style.background}
-          onChange={(e) => patch({ background: e.target.checked })}
+      <PropRow label="角度">
+        <AngleDial
+          label="影の向き"
+          kind="shadow"
+          value={s.angle}
+          onChange={(v) => patch({ shadowAngle: v, shadowDistance: s.distance })}
         />
-        {style.background && (
-          <>
+        <NumberSlider
+          label="影の角度"
+          value={s.angle}
+          onChange={(v) => patch({ shadowAngle: v, shadowDistance: s.distance })}
+          min={-180}
+          max={180}
+          unit="度"
+        />
+      </PropRow>
+      <PropRow label="距離">
+        <NumberSlider
+          label="影の距離"
+          value={s.distance}
+          onChange={(v) => patch({ shadowDistance: v, shadowAngle: s.angle })}
+          min={0}
+          max={200}
+          step={0.5}
+          sliderMax={60}
+          unit="px"
+        />
+      </PropRow>
+      <PropRow label="ぼかし">
+        <NumberSlider
+          label="影のぼかし"
+          value={s.blur}
+          onChange={(v) => patch({ shadowBlur: v > 0 ? v : undefined })}
+          min={0}
+          max={200}
+          sliderMax={60}
+          unit="px"
+        />
+      </PropRow>
+    </StyleSection>
+  )
+}
+
+// ------------------------------------------------------------------ 6. 光彩
+
+function GlowSection({ style, patch }: SectionProps): React.JSX.Element {
+  const glow = style.glow
+  return (
+    <StyleSection
+      id="glow"
+      title="光彩(グロー)"
+      enabled={Boolean(glow)}
+      onToggle={(on) =>
+        patch({ glow: on ? { color: '#ffe066', size: 18, opacity: 0.8 } : undefined })
+      }
+      summary={glow ? undefined : 'なし'}
+    >
+      {glow && (
+        <>
+          <PropRow label="色">
             <ColorField
-              label="帯の色"
-              value={style.backgroundColor}
-              onChange={(hex) => patch({ backgroundColor: hex })}
+              label="光彩の色"
+              value={glow.color}
+              onChange={(hex) => patch({ glow: { ...glow, color: hex } })}
             />
-            <input
-              type="range"
-              aria-label="帯の濃さ"
+          </PropRow>
+          <PropRow label="大きさ">
+            <NumberSlider
+              label="光彩の大きさ"
+              value={glow.size}
+              onChange={(v) => patch({ glow: { ...glow, size: v } })}
+              min={1}
+              max={200}
+              sliderMax={80}
+              unit="px"
+            />
+          </PropRow>
+          <PropRow label="不透明度">
+            <NumberSlider
+              label="光彩の不透明度"
+              value={glow.opacity}
+              onChange={(v) => patch({ glow: { ...glow, opacity: v } })}
               min={0}
-              max={1}
-              step={0.05}
-              value={style.backgroundOpacity}
-              onChange={(e) => patch({ backgroundOpacity: Number(e.target.value) })}
+              max={100}
+              scale={100}
+              unit="%"
             />
-            <span className="prop-unit">{Math.round(style.backgroundOpacity * 100)}%</span>
-          </>
-        )}
-      </PropRow>
+          </PropRow>
+        </>
+      )}
+    </StyleSection>
+  )
+}
 
-      <PropRow label="登場">
-        <select
-          value={style.animation}
-          onChange={(e) => patch({ animation: e.target.value as TextAnimation })}
-        >
-          {ANIMATIONS.map((a) => (
-            <option key={a.value} value={a.value}>
-              {a.label}
-            </option>
-          ))}
-        </select>
-        {TEXT_ANIMATION_MS[style.animation] > 0 && (
-          <span className="prop-unit">
-            {(TEXT_ANIMATION_MS[style.animation] / 1000).toFixed(2)} 秒
-          </span>
-        )}
-      </PropRow>
-    </>
+// ------------------------------------------------------------------ 7. 部分の装飾
+
+const SPAN_KINDS: {
+  key: 'firstLine' | 'accent' | 'sub'
+  label: string
+  scale: number
+  color?: string
+}[] = [
+  { key: 'firstLine', label: '1行目', scale: 0.7 },
+  { key: 'accent', label: '**強調**', scale: 1.3, color: '#ffe600' },
+  { key: 'sub', label: '__小さく__', scale: 0.7 }
+]
+
+function SpanSection({ style, patch }: SectionProps): React.JSX.Element {
+  const used = SPAN_KINDS.filter((k) => style[k.key]).length
+  return (
+    <StyleSection id="spans" title="部分の装飾" summary={used > 0 ? `${used} 種類` : undefined}>
+      <p className="hint-text style-note">
+        本文で <code>**強調**</code> と囲んだ所、<code>__小さく__</code> と囲んだ所、
+        改行の前の1行目だけを、別の大きさ・色にできます(値段・「Q.」・章の番号など)。
+      </p>
+      {SPAN_KINDS.map((k) => {
+        const span = style[k.key]
+        const set = (next: TelopSpanStyle | undefined): void => patch({ [k.key]: next })
+        return (
+          <div key={k.key} className="span-card">
+            <label className="checkbox-label span-card-head">
+              <input
+                type="checkbox"
+                checked={Boolean(span)}
+                onChange={(e) =>
+                  set(
+                    e.target.checked
+                      ? { scale: k.scale, ...(k.color ? { color: k.color } : {}) }
+                      : undefined
+                  )
+                }
+              />
+              <span className="span-card-title">{k.label}</span>
+            </label>
+            {span && (
+              <>
+                <PropRow label="大きさ">
+                  <NumberSlider
+                    label={`${k.label}の大きさ`}
+                    value={span.scale ?? 1}
+                    onChange={(v) => set({ ...span, scale: v })}
+                    min={20}
+                    max={500}
+                    sliderMax={300}
+                    step={5}
+                    scale={100}
+                    unit="%"
+                  />
+                </PropRow>
+                <FillField
+                  label={`${k.label}の色`}
+                  allowInherit
+                  fallbackColor={k.color ?? style.color}
+                  color={span.color}
+                  gradient={span.gradient}
+                  onChange={({ color, gradient }) => set({ ...span, color, gradient })}
+                />
+              </>
+            )}
+          </div>
+        )
+      })}
+    </StyleSection>
+  )
+}
+
+// ------------------------------------------------------------------ 8. 矢印
+
+function PointerSection({ style, patch }: SectionProps): React.JSX.Element {
+  const p = style.pointer
+  return (
+    <StyleSection
+      id="pointer"
+      title="矢印"
+      enabled={Boolean(p)}
+      onToggle={(on) =>
+        patch({
+          pointer: on ? { dx: 0.12, dy: 0.12, color: '#ff3b30', width: 6, hand: true } : undefined
+        })
+      }
+      summary={p ? undefined : 'なし'}
+    >
+      {p && (
+        <>
+          <PropRow label="向き">
+            <div className="dir-pad" role="group" aria-label="矢印の向き">
+              {POINTER_DIRS.map((d) => (
+                <button
+                  key={d.label}
+                  type="button"
+                  className="icon-chip"
+                  aria-label={`矢印を${d.label}へ`}
+                  title={d.label}
+                  onClick={() => patch({ pointer: { ...p, ...pointerToward(p, d.x, d.y) } })}
+                >
+                  {d.glyph}
+                </button>
+              ))}
+            </div>
+          </PropRow>
+          <PropRow label="横" title="矢印の先の位置(テロップの中心から、画面の幅に対する %)">
+            <NumberSlider
+              label="矢印の先(横)"
+              value={p.dx}
+              onChange={(v) => patch({ pointer: { ...p, dx: v } })}
+              min={-200}
+              max={200}
+              sliderMin={-60}
+              sliderMax={60}
+              scale={100}
+              unit="%"
+            />
+          </PropRow>
+          <PropRow label="縦" title="矢印の先の位置(テロップの中心から、画面の高さに対する %)">
+            <NumberSlider
+              label="矢印の先(縦)"
+              value={p.dy}
+              onChange={(v) => patch({ pointer: { ...p, dy: v } })}
+              min={-200}
+              max={200}
+              sliderMin={-60}
+              sliderMax={60}
+              scale={100}
+              unit="%"
+            />
+          </PropRow>
+          <PropRow label="色・太さ">
+            <ColorField
+              label="矢印の色"
+              value={p.color}
+              onChange={(hex) => patch({ pointer: { ...p, color: hex } })}
+            />
+            <NumberSlider
+              label="矢印の太さ"
+              value={p.width}
+              onChange={(v) => patch({ pointer: { ...p, width: v } })}
+              min={1}
+              max={60}
+              sliderMax={30}
+              unit="px"
+            />
+          </PropRow>
+          <PropRow label="">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={Boolean(p.hand)}
+                onChange={(e) => patch({ pointer: { ...p, hand: e.target.checked || undefined } })}
+              />
+              手書き風に曲げる
+            </label>
+          </PropRow>
+        </>
+      )}
+    </StyleSection>
   )
 }

@@ -5,6 +5,7 @@ import type { Project } from '@shared/types'
 import type { QcReport } from '../store/qcStore'
 import { placedUtterances } from './transcriptTimeline'
 import { autoTelopKey } from '@shared/telop/manual'
+import { stripTelopMarkup } from '@shared/telop/render'
 
 /**
  * 要確認の一覧(計画書 §5.13)。自動編集の各工程が「自信の低い箇所」をここへ出し、人はここから直す。
@@ -106,7 +107,8 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       : s.project.textOverlays.find(
           (o) => Math.abs(o.startTime - r.startTime) < 1e-3 && o.text === r.text
         )
-    const text = overlay?.text ?? r.text
+    // 一覧は1行の文で見せるので、`**強調**` などの印は外す
+    const text = stripTelopMarkup(overlay?.text ?? r.text)
     items.push({
       key: `telop-face:${r.key ?? r.startTime.toFixed(2)}`,
       area: 'telop',

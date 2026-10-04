@@ -157,37 +157,6 @@ export function textBoxPaddingPx(fontSize: number): { x: number; y: number } {
   return { x: size * TEXT_BOX_PADDING_H_EM, y: size * TEXT_BOX_PADDING_V_EM }
 }
 
-/**
- * 回転・拡大の**軸**(CSS の `transform-origin` に入れる値)。
- *
- * 書き出し(ASS)は `\frz`(回転)も `\fscx/\fscy`(登場アニメの拡大)も、
- * **`\an` で決まる配置のアンカー**を軸に掛ける。画面の CSS は既定で**箱の中心**を軸に
- * するので、同じ設定でも**画面と出力で別の場所に描かれる**。
- * 余白・箱の余白・飛び込む距離と同じく「書く場所が違うだけで同じ規則」なので、
- * 対応はここ1箇所に置く(`assSubtitle` の `alignmentFor` と対になる: 下=an2 / 上=an8 /
- * 中央・自由配置=an5)。
- *
- * 実測(1280x720・文字サイズ80・下ぞろえ):
- * - 回転: 書き出しは ink の中心が 0°→45° で **(+1.64%, +1.67%)** 動くのに、
- *   画面は **(0.00%, 0.00%)** と動かない(軸が違うため)。逆算した書き出しの軸は
- *   (634.5, 655.3) で、**行の下端中央**(ink 下端 654)と一致した
- * - 拡大: 登場アニメ `popIn` の途中(0.02秒)で、書き出しの ink は
- *   **下端 654→656 とほぼ動かず**上端だけ 594→619 へ下がる = 下端を軸に縮んでいる。
- *   画面は箱の中心を軸に縮むので、出だしの位置が食い違う
- *
- * 自由配置(`customPosition`)は書き出しが `\an5\pos` なので中心。
- * 知らない値は `alignmentFor` と同じく中央に倒す(手書きの `.veproj` 対策)。
- */
-export function textAnchorOriginCss(
-  position: TextPosition,
-  hasCustomPosition: boolean = false
-): string {
-  if (hasCustomPosition) return '50% 50%'
-  if (position === 'bottom') return '50% 100%'
-  if (position === 'top') return '50% 0%'
-  return '50% 50%'
-}
-
 export function defaultTextStyle(overrides: Partial<TextStyle> = {}): TextStyle {
   return {
     fontFamily: 'sans-serif',
