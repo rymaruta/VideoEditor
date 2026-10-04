@@ -119,14 +119,10 @@ export function compareEdits(
   // アングル: 両方が残した時間を 0.1 秒ごとに見る
   let same = 0
   let seen = 0
-  let unknown = 0
   for (const r of both)
     for (let t = r.start + 0.05; t < r.end; t += 0.1) {
       const h = cameraAt(human.segs, t)
-      if (h?.startsWith(UNKNOWN_ANGLE)) {
-        unknown++
-        continue
-      }
+      if (h?.startsWith(UNKNOWN_ANGLE)) continue
       seen++
       if (h === cameraAt(auto, t)) same++
     }
@@ -143,6 +139,9 @@ export function compareEdits(
     matchedClips: human.matched,
     totalClips: human.total,
     unmatchedFiles: human.unmatched,
-    angleUnknownSec: unknown * 0.1
+    // 完成版のうちカメラの分からない時間(自動が残したかどうかに関わらず)
+    angleUnknownSec: total(
+      unionRanges(human.segs.filter((sg) => sg.cameraId.startsWith(UNKNOWN_ANGLE)))
+    )
   }
 }

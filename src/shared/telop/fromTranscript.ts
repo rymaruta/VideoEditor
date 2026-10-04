@@ -41,6 +41,10 @@ export function tidyTelopText(text: string): string {
 function charTimes(words: readonly AsrWord[]): { ch: string; start: number; end: number }[] {
   const out: { ch: string; start: number; end: number }[] = []
   for (const w of words) {
+    // 英数字どうしの言葉の間は空ける(発話の文と同じ規則。詰めると「Helloworld」になり、言葉の途中で改行される)
+    const prev = out[out.length - 1]
+    if (prev && /[A-Za-z0-9]/.test(prev.ch) && /^[A-Za-z0-9]/.test(w.text))
+      out.push({ ch: ' ', start: prev.end, end: prev.end })
     const chars = [...w.text]
     const step = chars.length > 0 ? (w.end - w.start) / chars.length : 0
     chars.forEach((ch, i) =>
@@ -87,13 +91,26 @@ export function utteranceToTelopChunks(
     if (options.dictionary?.length) body = applyDictionary(body, options.dictionary)
     return tidyTelopText(body)
   }
+  // 言葉の時刻が無いときは、発話の時間を文字数で割り振る(全部の枚を発話の頭からにすると、
+  // 重ならないように詰めた結果、最後の1枚以外が長さ 0 になる)
+  const timeAt = (i: number): number =>
+    u.sourceStart + ((u.sourceEnd - u.sourceStart) * i) / Math.max(1, chars.length)
   const chunks: TelopChunk[] = []
   for (const p of pieces) {
     // 言いよどみを除く・辞書で直すと長さが変わるので、整えた文で改行し直す
-    const text = wrapTelopLines(polish(chars.slice(p.from, p.to).join('')), maxLine).join('\n')
+    const polished = polish(chars.slice(p.from, p.to).join(''))
+    const text = wrapTelopLines(polished, maxLine).join('\n')
     if (!text) continue
-    const start = timed.length > 0 ? timed[p.from].start : u.sourceStart
-    const end = timed.length > 0 ? timed[p.to - 1].end : u.sourceEnd
+    // 頭の、整えると消える文字(言いよどみ・句読点・空白)は時刻に入れない
+    // (「えーと、」と言っているあいだから次の言葉を出さない)
+    // 1文字ずつ削ると「ーと、」のように言いよどみの途中で別の文字列になるので、
+    // 整えた結果が変わらない一番後ろの頭を探す
+    let from = p.from
+    const to = p.to
+    for (let k = p.from + 1; k < to; k++)
+      if (polish(chars.slice(k, to).join('')) === polished) from = k
+    const start = timed.length > 0 ? timed[from].start : timeAt(from)
+    const end = timed.length > 0 ? timed[to - 1].end : timeAt(to)
     chunks.push({
       text,
       sourceStart: start,

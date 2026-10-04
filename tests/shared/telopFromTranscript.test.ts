@@ -67,6 +67,40 @@ describe('utteranceToTelopChunks', () => {
     expect(strip(chunks.map((c) => c.text).join(''))).toBe(strip(words.map((w) => w.text).join('')))
   })
 
+  it('英数字の言葉の間は空け、言葉の途中で改行しない', () => {
+    const words = ['Hello', 'world', 'iPhone', '15'].map((text, i) => ({
+      text,
+      start: i * 0.5,
+      end: i * 0.5 + 0.5
+    }))
+    const [c] = utteranceToTelopChunks({
+      text: 'Hello world iPhone 15',
+      words,
+      sourceStart: 0,
+      sourceEnd: 2
+    })
+    expect(c.text).toBe('Hello world\niPhone 15')
+  })
+
+  it('言葉の時刻が無ければ、発話の時間を文字数で割り振る(どの枚も長さがある)', () => {
+    const text = 'きょうはとてもいい天気ですね、みんなで浄土ヶ浜に行ってパック牛乳を飲みました'
+    const chunks = utteranceToTelopChunks({ text, words: [], sourceStart: 0, sourceEnd: 10 })
+    expect(chunks.length).toBe(2)
+    for (const c of chunks) expect(c.sourceEnd - c.sourceStart).toBeGreaterThan(3)
+    expect(chunks[0].sourceEnd).toBeCloseTo(chunks[1].sourceStart, 5)
+  })
+
+  it('頭の言いよどみのあいだは、次の言葉を出さない', () => {
+    const text = 'えーと、今日は天気がとても良いですね'
+    const words = [...text].map((ch, i) => ({ text: ch, start: i, end: i + 1 }))
+    const [c] = utteranceToTelopChunks(
+      { text, words, sourceStart: 0, sourceEnd: words.length },
+      { maxLineChars: 8, maxLines: 1 }
+    )
+    expect(c.text.startsWith('今日は')).toBe(true)
+    expect(c.sourceStart).toBe(4)
+  })
+
   it('短い発話でも最低 1 秒は出す', () => {
     const [c] = utteranceToTelopChunks({
       text: 'えっ',

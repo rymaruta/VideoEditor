@@ -292,3 +292,68 @@ describe('ネストしたシーケンス(マルチカメラのまま書き出し
     expect(r.angleAgreement).toBe(1)
   })
 })
+
+describe('つなぎ(トランジション)の付いたクリップ・文字', () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<xmeml version="4"><sequence id="s"><name>つなぎ</name><duration>300</duration>
+  <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+  <media><video>
+    <track>
+      <clipitem id="a"><name>A.MP4</name><start>0</start><end>-1</end><in>0</in><out>165</out><file id="fa"><name>A.MP4</name></file></clipitem>
+      <transitionitem><start>135</start><end>165</end></transitionitem>
+      <clipitem id="b"><name>B.MP4</name><start>-1</start><end>300</end><in>285</in><out>450</out><file id="fb"><name>B.MP4</name></file></clipitem>
+    </track>
+    <track>
+      <transitionitem><start>30</start><end>60</end></transitionitem>
+      <generatoritem id="g"><name>Text</name><start>-1</start><end>120</end><in>0</in><out>90</out>
+        <effect><parameter><parameterid>str</parameterid><value>溶けて出る文字</value></parameter></effect></generatoritem>
+    </track>
+  </video></media></sequence></xmeml>`
+  const seq = readFcp7(
+    new DOMParser().parseFromString(xml, 'text/xml').documentElement as unknown as XmlElement
+  )!
+
+  it('始まりの分からないクリップは、終わりから素材の長さぶん戻した所から', () => {
+    const b = seq.video[0][1]
+    expect(b.start).toBeCloseTo(4.5)
+    expect(b.end).toBeCloseTo(10)
+    expect(b.end - b.start).toBeCloseTo(b.out - b.in)
+  })
+
+  it('溶けて出る文字(start が -1)も落とさない', () => {
+    expect(seq.texts).toEqual([{ start: 1, end: 4, text: '溶けて出る文字' }])
+  })
+})
+
+describe('入れ子の中のマルチカメラ', () => {
+  // 普通の入れ子 N(0〜1秒)がマルチカメラ M を包み、その直後に M を直接使ったクリップ(1〜2秒)
+  const mc = `<sequence id="m"><name>M</name><rate><timebase>30</timebase></rate><media><video>
+      <track><clipitem id="m1"><name>A0001.MP4</name><start>0</start><end>9000</end><in>0</in><out>9000</out><file id="fa"><name>A0001.MP4</name></file></clipitem></track>
+      <track><clipitem id="m2"><name>B0001.MP4</name><start>0</start><end>9000</end><in>0</in><out>9000</out><file id="fb"><name>B0001.MP4</name></file></clipitem></track>
+    </video></media></sequence>`
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<xmeml version="4"><sequence id="main"><name>入れ子</name><duration>60</duration>
+  <rate><timebase>30</timebase></rate><media><video><track>
+    <clipitem id="p1"><name>N</name><start>0</start><end>30</end><in>0</in><out>30</out>
+      <sequence id="n"><name>N</name><rate><timebase>30</timebase></rate><media><video><track>
+        <clipitem id="n1"><name>M</name><start>0</start><end>300</end><in>0</in><out>300</out>${mc}</clipitem>
+      </track></video></media></sequence>
+    </clipitem>
+    <clipitem id="p2"><name>M</name><start>30</start><end>60</end><in>300</in><out>330</out><sequence id="m"/></clipitem>
+  </track></video></media></sequence></xmeml>`
+  const seq = readFcp7(
+    new DOMParser().parseFromString(xml, 'text/xml').documentElement as unknown as XmlElement
+  )!
+
+  it('親のクリップごとに別の印が付き、境目のカット点が残る。マルチカメラと数えるのは M だけ', () => {
+    const marks = seq.video[0].map((c) => c.angleUnknown)
+    expect(new Set(marks).size).toBe(2)
+    expect(seq.nested).toEqual({ count: 3, multicam: 2 })
+    const segs = seq.video[0].map((c) => ({
+      start: c.start,
+      end: c.end,
+      cameraId: `?${c.angleUnknown}`
+    }))
+    expect(cutPoints(segs)).toEqual([1])
+  })
+})

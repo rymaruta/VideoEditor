@@ -60,7 +60,6 @@ interface ReadContext {
   nested: { count: number; multicam: number }
   /** 親のクリップの通し番号(マルチカメラの展開で使う) */
   nextParent: number
-  depth: number
 }
 
 function children(el: XmlElement, tag: string): XmlElement[] {
@@ -148,14 +147,14 @@ function expandNested(
   outSec: number,
   startSec: number,
   ctx: ReadContext,
-  parentIndex: number
-): Fcp7Clip[] {
+  parentIndex: number,
+  depth: number
+): { pieces: Fcp7Clip[]; stacked: boolean } {
   const fps = rateOf(seqEl, 30)
   const media = child(child(seqEl, 'media'), kind)
-  if (!media) return []
-  const tracks = children(media, 'track').map((t) =>
-    readTrack(t, fps, { ...ctx, depth: ctx.depth + 1 })
-  )
+  if (!media) return { pieces: [], stacked: false }
+  // 文脈は複製せずに渡す(通し番号を中と外で共有しないと、別の親のクリップに同じ番号が付き、境目のカット点が消える)
+  const tracks = children(media, 'track').map((t) => readTrack(t, fps, ctx, depth + 1))
   const out: Fcp7Clip[] = []
   if (kind === 'audio') {
     for (const t of tracks)
@@ -171,7 +170,7 @@ function expandNested(
             out: c.in + (b - c.start)
           })
       }
-    return out
+    return { pieces: out, stacked: false }
   }
   // 同じ時間に2本以上のトラックのクリップが重なる = マルチカメラのソース
   let stacked = false
@@ -195,43 +194,83 @@ function expandNested(
     }
   }
   if (stacked) for (const c of out) c.angleUnknown = parentIndex
-  return out.sort((x, y) => x.start - y.start)
+  return { pieces: out.sort((x, y) => x.start - y.start), stacked }
 }
 
-function readTrack(track: XmlElement, fps: number, ctx: ReadContext): Fcp7Clip[] {
+/**
+ * つなぎ(トランジション)に掛かるクリップは start / end が -1 になる。補う:
+ * - 終わりが分かれば、終わりから素材の長さぶん戻した所が始まり(前のクリップの終わりは
+ *   つなぎの「のりしろ」まで含むので、そこを始まりにするとずれる)
+ * - 終わりも分からなければ、直前のつなぎの始まり(無ければ直前のクリップの終わり)
+ */
+function fillTransitionTimes(
+  start: number,
+  end: number,
+  length: number,
+  lastTransitionStart: number | null,
+  lastEnd: number
+): { start: number; end: number } {
+  let s = start
+  if (!(s >= 0)) s = end >= 0 ? end - length : (lastTransitionStart ?? lastEnd)
+  const e = end >= 0 ? end : s + length
+  return { start: s, end: e }
+}
+
+/** トラックの中の、つなぎの始まり(フレーム)。要素の並び順で、各クリップの直前のものを引けるように */
+function transitionStarts(track: XmlElement): Map<XmlElement, number | null> {
+  const out = new Map<XmlElement, number | null>()
+  let last: number | null = null
+  const nodes = track.childNodes
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i] as XmlElement
+    if (!n || typeof n !== 'object') continue
+    if (n.tagName === 'transitionitem') {
+      const st = num(child(n, 'start'))
+      last = st >= 0 ? st : last
+    } else if (n.tagName === 'clipitem' || n.tagName === 'generatoritem') out.set(n, last)
+  }
+  return out
+}
+
+function readTrack(track: XmlElement, fps: number, ctx: ReadContext, depth = 0): Fcp7Clip[] {
   const files = ctx.files
   const out: Fcp7Clip[] = []
+  const transitionBefore = transitionStarts(track)
   let lastEnd = 0
   for (const item of children(track, 'clipitem')) {
     if (child(item, 'enabled')?.textContent?.trim().toUpperCase() === 'FALSE') continue
     const itemFps = rateOf(item, fps)
-    let start = num(child(item, 'start'))
-    let end = num(child(item, 'end'))
     const inF = num(child(item, 'in'))
     const outF = num(child(item, 'out'))
     if (!Number.isFinite(inF) || !Number.isFinite(outF) || outF <= inF) continue
-    // つなぎ(トランジション)に掛かるクリップは start / end が -1 になる。前後から補う
-    if (!(start >= 0)) start = lastEnd * itemFps
-    if (!(end >= 0)) end = start + (outF - inF)
+    const { start, end } = fillTransitionTimes(
+      num(child(item, 'start')),
+      num(child(item, 'end')),
+      outF - inF,
+      transitionBefore.get(item) ?? null,
+      lastEnd * itemFps
+    )
     // ネストしたシーケンス(Premiere のマルチカメラもこの形で書き出される)は中身に展開する
     const nestedEl = child(item, 'sequence')
     if (nestedEl) {
       const def = ctx.sequences.get(nestedEl.getAttribute('id') ?? '') ?? nestedEl
-      if (ctx.depth >= MAX_NEST_DEPTH) continue
+      if (depth >= MAX_NEST_DEPTH) continue
       const kind = isAudioTrack(track) ? 'audio' : 'video'
       const parentIndex = ctx.nextParent++
-      const pieces = expandNested(
+      const { pieces, stacked } = expandNested(
         def,
         kind,
         inF / itemFps,
         outF / itemFps,
         start / itemFps,
         ctx,
-        parentIndex
+        parentIndex,
+        depth
       )
       if (kind === 'video') {
         ctx.nested.count++
-        if (pieces.some((p) => p.angleUnknown !== undefined)) ctx.nested.multicam++
+        // マルチカメラと数えるのは、この入れ子そのものにカメラが積まれているときだけ
+        if (stacked) ctx.nested.multicam++
       }
       out.push(...pieces)
       lastEnd = start / itemFps + (outF - inF) / itemFps
@@ -281,10 +320,22 @@ function levelOf(item: XmlElement): number | undefined {
 
 function readTexts(track: XmlElement, fps: number): Fcp7Sequence['texts'] {
   const out: Fcp7Sequence['texts'] = []
+  const transitionBefore = transitionStarts(track)
+  let lastEnd = 0
   for (const g of children(track, 'generatoritem')) {
-    const start = num(child(g, 'start'))
-    const end = num(child(g, 'end'))
+    // 溶けて出る(つなぎの付いた)文字は start / end が -1。クリップと同じく補う
+    const inF = num(child(g, 'in'))
+    const outF = num(child(g, 'out'))
+    const length = outF > inF ? outF - inF : num(child(g, 'duration'))
+    const { start, end } = fillTransitionTimes(
+      num(child(g, 'start')),
+      num(child(g, 'end')),
+      Number.isFinite(length) ? length : NaN,
+      transitionBefore.get(g) ?? null,
+      lastEnd
+    )
     if (!(start >= 0) || !(end > start)) continue
+    lastEnd = end
     // 文字の値は effect > parameter(parameterid が str / text)
     const params = g.getElementsByTagName('parameter')
     let text = ''
@@ -309,8 +360,7 @@ export function readFcp7(root: XmlElement): Fcp7Sequence | null {
     files: definitionTable(root, 'file', (f) => Boolean(child(f, 'name') || child(f, 'pathurl'))),
     sequences: definitionTable(root, 'sequence', (s) => Boolean(child(s, 'media'))),
     nested: { count: 0, multicam: 0 },
-    nextParent: 0,
-    depth: 0
+    nextParent: 0
   }
   const media = child(seq, 'media')
   const video: Fcp7Clip[][] = []

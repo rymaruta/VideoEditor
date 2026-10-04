@@ -195,6 +195,10 @@ export function normalizeShowStyle(raw: unknown): ShowStyle {
       style[key] = INTEGER_KEYS.includes(key) ? Math.round(c) : c
     }
   }
+  // 学んだときと同じ決まり(最短 < 最長、残す間 < 詰める間)を、保存していた値にも当てる
+  if (style.maxShotSec < style.minShotSec + 1) style.maxShotSec = round2(style.minShotSec + 1)
+  if (style.keepPauseSec >= style.maxPauseSec)
+    style.keepPauseSec = round2(Math.max(LIMITS.keepPauseSec[0], style.maxPauseSec * 0.5))
   return style
 }
 
