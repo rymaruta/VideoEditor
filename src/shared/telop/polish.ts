@@ -91,17 +91,21 @@ export function findBreak(chars: readonly string[], from: number, max: number): 
     }
   }
   if (best > 0 && bestScore > -Infinity) return best
-  // ぶら下げ: 次の行頭が禁則なら、その文字まで前の行に入れる
-  let k = limit
-  while (k < chars.length && NO_LINE_START.test(chars[k])) k++
-  return k
+  // ぶら下げ: 次の行頭が禁則なら、その1文字だけ前の行に入れる。
+  // 禁則の文字が続く(「すごーーーー…い」)ときは、ぶら下げ続けると1行が際限なく長くなり
+  // 画面からはみ出すので、禁則を破って上限の位置で切る
+  if (NO_LINE_START.test(chars[limit])) {
+    const k = limit + 1
+    if (k >= chars.length || !NO_LINE_START.test(chars[k])) return k
+  }
+  return limit
 }
 
 /**
  * 行の区切りを、**長さを揃えて**決める(終わりの位置の並び)。
  * 前から1行ずつ上限まで詰めると、最後の行に数文字だけ残る(「…パック牛乳で / ある」)。
  * 残りを何行で書くかを先に決め、その平均の長さの近くで良い区切りを探す。
- * 各行は `maxLine` 以内(区切れる所が無いときの禁則のぶら下げだけは超えうる)。
+ * 各行は `maxLine` 以内(区切れる所が無いときの禁則のぶら下げで、1文字だけ超えうる)。
  */
 export function balancedLineEnds(chars: readonly string[], maxLine: number): number[] {
   const ends: number[] = []

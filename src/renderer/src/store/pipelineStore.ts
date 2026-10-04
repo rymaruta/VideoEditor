@@ -747,6 +747,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         `発言テロップの配置: 顔に掛かるため上へ移した ${placed.moved} 枚、上下とも顔に掛かる ${placed.review.length} 枚`
       )
     } catch (e) {
+      // 前の作り直しの要確認を残すと、今の配置と食い違う(もう無いテロップを指す)
+      set({ telopReviews: [] })
       setStep('placement', { state: 'error', note: formatIpcError(e) })
       log(`顔の検出ができませんでした(テロップは下のまま): ${formatIpcError(e)}`)
     }

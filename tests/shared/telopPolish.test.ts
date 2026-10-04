@@ -52,6 +52,14 @@ describe('改行の禁則', () => {
     // 「ちょ|っと」: 小さい「っ」を行頭に置かない
     expect(breakScore([...'ちょっと'], 2)).toBe(-Infinity)
   })
+
+  it('禁則の文字が続いても、1行が上限を1文字より多く超えない(はみ出さない)', () => {
+    for (const text of ['すごーーーーーーーーーーーーーーーーーい', 'あ…………………………………………………………']) {
+      const lines = wrapTelopLines(text, 14)
+      expect(lines.join('')).toBe(text)
+      for (const l of lines) expect([...l].length).toBeLessThanOrEqual(15)
+    }
+  })
 })
 
 describe('utteranceToTelopChunks と整え', () => {
