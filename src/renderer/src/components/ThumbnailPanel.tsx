@@ -5,6 +5,7 @@ import { formatIpcError } from '../lib/ipcError'
 import { ImageIcon, DownloadIcon, SparklesIcon, WandIcon } from './icons'
 import { targetResolution } from '@shared/resolution'
 import { safeFileBaseName } from '@shared/fileName'
+import { ColorField } from './ColorField'
 import type { TextPosition } from '@shared/types'
 
 // サムネイルの短辺。長辺はプロジェクトのアスペクト比から targetResolution() が決める
@@ -294,10 +295,10 @@ export function ThumbnailPanel(): React.JSX.Element {
             </label>
             <label>
               色
-              <input
-                type="color"
+              <ColorField
+                label="サムネイルの文字の色"
                 value={style.color}
-                onChange={(e) => setStyle((s) => ({ ...s, color: e.target.value }))}
+                onChange={(hex) => setStyle((s) => ({ ...s, color: hex }))}
               />
             </label>
             <label>

@@ -1,6 +1,7 @@
 import type { FontFamily, TextAnimation, TextStyle } from '@shared/types'
 import { FONT_FAMILY_OPTIONS, TEXT_ANIMATION_MS } from '@shared/textStyle'
 import { useSettingsStore } from '../store/settingsStore'
+import { ColorField } from './ColorField'
 
 /**
  * テロップの見た目の欄(文字 → 字間 → 塗り → 縁 → 外側の縁 → 影 → 帯 → 登場)。
@@ -105,11 +106,10 @@ export function TelopStyleFields({
       </PropRow>
 
       <PropRow label="塗り">
-        <input
-          type="color"
-          aria-label="文字の色"
+        <ColorField
+          label="文字の色"
           value={style.color}
-          onChange={(e) => patch({ color: e.target.value })}
+          onChange={(hex) => patch({ color: hex })}
         />
         <label className="checkbox-label" title="文字の色を上から下へのグラデーションにします">
           <input
@@ -120,11 +120,10 @@ export function TelopStyleFields({
           グラデーション
         </label>
         {style.gradientColor && (
-          <input
-            type="color"
-            aria-label="グラデーションの下の色"
+          <ColorField
+            label="グラデーションの下の色"
             value={style.gradientColor}
-            onChange={(e) => patch({ gradientColor: e.target.value })}
+            onChange={(hex) => patch({ gradientColor: hex })}
           />
         )}
       </PropRow>
@@ -140,11 +139,10 @@ export function TelopStyleFields({
             話した単語を色付け
           </label>
           {style.wordHighlight && (
-            <input
-              type="color"
-              aria-label="色付けの色"
+            <ColorField
+              label="色付けの色"
               value={style.highlightColor}
-              onChange={(e) => patch({ highlightColor: e.target.value })}
+              onChange={(hex) => patch({ highlightColor: hex })}
             />
           )}
         </PropRow>
@@ -159,11 +157,10 @@ export function TelopStyleFields({
         />
         {style.outline && (
           <>
-            <input
-              type="color"
-              aria-label="縁の色"
+            <ColorField
+              label="縁の色"
               value={style.outlineColor}
-              onChange={(e) => patch({ outlineColor: e.target.value })}
+              onChange={(hex) => patch({ outlineColor: hex })}
             />
             <input
               type="number"
@@ -190,11 +187,10 @@ export function TelopStyleFields({
         />
         {outer && (
           <>
-            <input
-              type="color"
-              aria-label="外側の縁の色"
+            <ColorField
+              label="外側の縁の色"
               value={outer.color}
-              onChange={(e) => patch({ extraStrokes: [{ ...outer, color: e.target.value }] })}
+              onChange={(hex) => patch({ extraStrokes: [{ ...outer, color: hex }] })}
             />
             <input
               type="number"
@@ -235,11 +231,10 @@ export function TelopStyleFields({
         />
         {style.background && (
           <>
-            <input
-              type="color"
-              aria-label="帯の色"
+            <ColorField
+              label="帯の色"
               value={style.backgroundColor}
-              onChange={(e) => patch({ backgroundColor: e.target.value })}
+              onChange={(hex) => patch({ backgroundColor: hex })}
             />
             <input
               type="range"

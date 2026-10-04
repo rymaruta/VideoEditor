@@ -1,4 +1,5 @@
 import { normalizeShowStyle, type ShowStyle } from '@shared/style/showStyle'
+import { addFavoriteColor, normalizeFavoriteColors } from '../lib/colorValue'
 import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
 import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
@@ -25,6 +26,7 @@ const QC_WORDS_KEY = 've-qc-words'
 const SHOW_KIT_KEY = 've-show-kit-folder'
 const SHOW_STYLE_KEY = 've-show-style'
 const AI_PROVIDER_KEY = 've-ai-provider'
+const FAVORITE_COLORS_KEY = 've-favorite-colors'
 
 /** 書き出しの音量の扱い。`off` は正規化しない */
 export type ExportLoudness = 'off' | LoudnessTarget
@@ -119,6 +121,10 @@ interface SettingsState {
   /** 構成の判定・演出テロップの提案に使う AI(既定はこのPC。無料・素材が外に出ない) */
   aiProvider: AiProvider
   setAiProvider: (provider: AiProvider) => void
+  /** お気に入りの色(`#rrggbb`。新しいものが先頭)。テロップ・サムネイルの色の欄で使い回す */
+  favoriteColors: string[]
+  addFavoriteColor: (color: string) => void
+  removeFavoriteColor: (color: string) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -267,6 +273,25 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     writeSetting(AI_PROVIDER_KEY, provider)
     set({ aiProvider: provider })
   },
+  favoriteColors: (() => {
+    try {
+      return normalizeFavoriteColors(JSON.parse(localStorage.getItem(FAVORITE_COLORS_KEY) ?? '[]'))
+    } catch {
+      return []
+    }
+  })(),
+  addFavoriteColor: (color) =>
+    set((s) => {
+      const favoriteColors = addFavoriteColor(s.favoriteColors, color)
+      writeSetting(FAVORITE_COLORS_KEY, JSON.stringify(favoriteColors))
+      return { favoriteColors }
+    }),
+  removeFavoriteColor: (color) =>
+    set((s) => {
+      const favoriteColors = s.favoriteColors.filter((c) => c !== color)
+      writeSetting(FAVORITE_COLORS_KEY, JSON.stringify(favoriteColors))
+      return { favoriteColors }
+    }),
   shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {
     localStorage.setItem(SHORT_NOTE_KEY, note)

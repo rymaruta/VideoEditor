@@ -10,6 +10,7 @@ import { newOverlayRange } from '../lib/textOverlayPlacement'
 import { formatTimecode } from '../lib/timelineRuler'
 import { frameSeconds } from '@shared/frameRate'
 import { TelopInspector } from './TelopInspector'
+import { ColorField } from './ColorField'
 import { PlusIcon, TypeIcon } from './icons'
 
 /**
@@ -289,11 +290,11 @@ function BulkStyleEditor({
       <div className="prop-row">
         <span className="prop-label">塗り</span>
         <div className="prop-control">
-          <input
-            type="color"
-            aria-label="文字の色"
+          <ColorField
+            label="文字の色"
             value={common('color') ?? '#ffffff'}
-            onChange={(e) => onApply({ color: e.target.value })}
+            mixed={common('color') === undefined}
+            onChange={(hex) => onApply({ color: hex })}
           />
           {common('color') === undefined && <span className="prop-unit">(混在)</span>}
         </div>
