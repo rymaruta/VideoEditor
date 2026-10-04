@@ -1061,7 +1061,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         setStep('timeline', {
           state: 'done',
           percent: 100,
-          note: `本編 ${layout.main.length} 本 · カメラ ${layout.cameras.length} · マイク ${layout.mics.length}${layout.leftOut.length ? ` · 並べなかった ${layout.leftOut.length} 本` : ''}`
+          note: `カメラ ${layout.cameras.length + 1} 台(基準カメラの素材 ${layout.main.length} 本) · マイク ${layout.mics.length} 本${layout.leftOut.length ? ` · 並べなかった ${layout.leftOut.length} 本` : ''}`
         })
         log(
           `タイムラインに並べました(基準カメラ: ${used.find((s) => s.id === layout.anchorSourceId)?.name ?? ''})`
