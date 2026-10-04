@@ -76,6 +76,8 @@ export const IPC = {
   eventsProgress: 'events:progress',
   eventsCancel: 'events:cancel',
   saveRunReport: 'app:saveRunReport',
+  saveSubtitleFile: 'telop:saveSubtitleFile',
+  openSubtitleFile: 'telop:openSubtitleFile',
   showKitSelectFolder: 'showKit:selectFolder',
   denoiseProgress: 'denoise:progress',
   denoiseCancel: 'denoise:cancel',

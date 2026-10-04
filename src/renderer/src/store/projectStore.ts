@@ -30,6 +30,7 @@ import { toCommon, type MulticamInfo, type MulticamSource } from '@shared/sync/m
 import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
 import { restyleOverlays, type TelopStyleDef } from '@shared/telop/styles'
+import { replaceInTelop } from '@shared/telop/srt'
 import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { sameProjectContent } from '../lib/projectEquality'
@@ -809,6 +810,15 @@ interface ProjectState {
   /** 足したテロップの ID を返す(足した直後に選ぶため) */
   addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => string
   addTextOverlays: (overlays: Omit<TextOverlay, 'id'>[]) => void
+  /**
+   * テロップの文字を一括で置き換える(検索と置換)。`ids` を渡すとそのテロップだけ。
+   * 置き換えた本数を返す。自動テロップは「人が直した」印を付ける(作り直しで戻さない)
+   */
+  replaceTelopText: (
+    query: string,
+    replacement: string,
+    options?: { loose?: boolean; ids?: readonly string[] }
+  ) => number
   updateTextOverlay: (id: string, patch: Partial<TextOverlay>) => void
   /** 選んだテロップのスタイルをまとめて更新する。何件でも履歴は1件 */
   updateTextOverlaysStyle: (ids: string[], patch: Partial<TextStyle>) => void
@@ -2454,6 +2464,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         }
       }
     }),
+
+  replaceTelopText: (query, replacement, options) => {
+    let count = 0
+    set((state) => {
+      const only = options?.ids ? new Set(options.ids) : null
+      const textOverlays = state.project.textOverlays.map((o) => {
+        if (only && !only.has(o.id)) return o
+        const text = replaceInTelop(o.text, query, replacement, options)
+        if (text === o.text) return o
+        count++
+        // 文字を変えたので単語の時刻(カラオケ)は使えない
+        return { ...o, text, words: undefined, ...(autoTelopKey(o) ? { edited: true } : {}) }
+      })
+      if (count === 0) return state
+      return { ...pushHistory(state), project: { ...state.project, textOverlays } }
+    })
+    return count
+  },
 
   updateTextOverlay: (id, patch) =>
     set((state) => {

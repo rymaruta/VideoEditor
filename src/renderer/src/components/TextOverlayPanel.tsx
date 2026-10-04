@@ -10,6 +10,7 @@ import { newOverlayRange } from '../lib/textOverlayPlacement'
 import { formatTimecode } from '../lib/timelineRuler'
 import { frameSeconds } from '@shared/frameRate'
 import { TelopInspector } from './TelopInspector'
+import { TelopToolsBar } from './TelopToolsBar'
 import { ColorField } from './ColorField'
 import { PlusIcon, TypeIcon } from './icons'
 import { stripTelopMarkup } from '@shared/telop/render'
@@ -166,6 +167,12 @@ export function TextOverlayPanel(): React.JSX.Element {
               ))}
             </select>
           </div>
+          <TelopToolsBar
+            onSelect={(id) => {
+              setMultiIds(new Set([id]))
+              selectOverlay(id)
+            }}
+          />
           {sorted.length === 0 ? (
             <div className="empty-state">
               <TypeIcon width={22} height={22} />

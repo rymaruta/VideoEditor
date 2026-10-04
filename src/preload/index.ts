@@ -298,6 +298,15 @@ const api = {
   },
   saveRunReport: (defaultName: string, text: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.saveRunReport, defaultName, text),
+  /** 字幕(SRT)・テロップスタイル(JSON)を保存する。選んだ場所を返す(やめたら null) */
+  saveSubtitleFile: (
+    defaultName: string,
+    text: string,
+    kind: 'srt' | 'json'
+  ): Promise<string | null> => ipcRenderer.invoke(IPC.saveSubtitleFile, defaultName, text, kind),
+  /** 字幕(SRT)・テロップスタイル(JSON)を選んで読む(やめたら null) */
+  openSubtitleFile: (kind: 'srt' | 'json'): Promise<{ path: string; text: string } | null> =>
+    ipcRenderer.invoke(IPC.openSubtitleFile, kind),
   showKitSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.showKitSelectFolder),
   onDenoiseProgress: (
     callback: (p: { done: number; total: number; percent: number }) => void

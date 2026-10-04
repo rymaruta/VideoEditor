@@ -869,6 +869,44 @@ app.whenReady().then(() => {
     await writeFile(r.filePath, text, 'utf-8')
     return r.filePath
   })
+  // 字幕(SRT)とテロップスタイル(JSON)。拡張子を決めて、選んだファイルだけを読み書きする
+  const SUBTITLE_FILTERS: Record<'srt' | 'json', Electron.FileFilter> = {
+    srt: { name: '字幕(SRT)', extensions: ['srt'] },
+    json: { name: 'テロップスタイル', extensions: ['json'] }
+  }
+  ipcMain.handle(
+    IPC.saveSubtitleFile,
+    async (event, defaultName: string, text: string, kind: 'srt' | 'json') => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options: Electron.SaveDialogOptions = {
+        title: kind === 'srt' ? '字幕を書き出す' : 'テロップスタイルを書き出す',
+        defaultPath: defaultName,
+        filters: [SUBTITLE_FILTERS[kind] ?? SUBTITLE_FILTERS.srt]
+      }
+      const r = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
+      if (r.canceled || !r.filePath) return null
+      // Windows のメモ帳・Premiere でも文字化けしないよう、SRT は BOM 付き UTF-8
+      await writeFile(r.filePath, (kind === 'srt' ? '\ufeff' : '') + text, 'utf-8')
+      return r.filePath
+    }
+  )
+  ipcMain.handle(IPC.openSubtitleFile, async (event, kind: 'srt' | 'json') => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      title: kind === 'srt' ? '字幕を読み込む' : 'テロップスタイルを読み込む',
+      properties: ['openFile'],
+      filters: [SUBTITLE_FILTERS[kind] ?? SUBTITLE_FILTERS.srt]
+    }
+    const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    const filePath = r.filePaths[0]
+    if (r.canceled || !filePath) return null
+    const st = await stat(filePath)
+    if (st.size > 20 * 1024 * 1024) throw new Error('ファイルが大きすぎます(20MB まで)')
+    const text = (await readFile(filePath, 'utf-8')).replace(/^\ufeff/, '')
+    return { path: filePath, text }
+  })
   // XML だけを読む(任意のファイルを読めないよう、拡張子と大きさを確かめる)
   ipcMain.handle(IPC.readEditXml, async (_e, filePath: string) => {
     if (!/\.xml$/i.test(filePath)) throw new Error('XML ファイルではありません')

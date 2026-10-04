@@ -1146,3 +1146,39 @@ describe('静止画の素材', () => {
     expect(st().project.clips.length).toBe(before)
   })
 })
+
+describe('テロップの検索と置換', () => {
+  beforeEach(reset)
+  it('一括で置き換え、自動テロップには直した印を付け、1回で取り消せる', () => {
+    S.setState({
+      project: {
+        ...st().project,
+        textOverlays: [
+          {
+            id: 'a',
+            text: '宮古島に到着',
+            startTime: 0,
+            endTime: 1,
+            style: defaultTextStyle(),
+            utteranceId: 'u1',
+            utteranceChunk: 0
+          },
+          { id: 'b', text: '宮古島の水', startTime: 2, endTime: 3, style: defaultTextStyle() },
+          { id: 'c', text: '関係ない', startTime: 4, endTime: 5, style: defaultTextStyle() }
+        ]
+      }
+    })
+    expect(st().replaceTelopText('宮古島', '宮古', {})).toBe(2)
+    const byId = (id: string): TextOverlay => st().project.textOverlays.find((o) => o.id === id)!
+    expect([byId('a').text, byId('b').text, byId('c').text]).toEqual([
+      '宮古に到着',
+      '宮古の水',
+      '関係ない'
+    ])
+    expect(byId('a').edited).toBe(true)
+    expect(byId('b').edited).toBeUndefined()
+    st().undo()
+    expect(byId('a').text).toBe('宮古島に到着')
+    expect(st().replaceTelopText('無い言葉', 'x')).toBe(0)
+  })
+})
