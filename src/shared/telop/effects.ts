@@ -82,15 +82,92 @@ export const AI_EFFECT_KINDS: EffectKind[] = [
 /**
  * 発言に重ねて出す種類(発言の頭から)。ほかの種類は発言の終わりから出す(ツッコミは言い終わってから)
  */
-export const EFFECT_AT_LINE_START: ReadonlySet<EffectKind> = new Set(['name', 'emphasis'])
+export const EFFECT_AT_LINE_START: ReadonlySet<EffectKind> = new Set([
+  'name',
+  'emphasis',
+  'translate',
+  'dialect',
+  'bubble'
+])
 
-/** 種類ごとの出す長さ(秒)。人物紹介は読む時間を長めに */
+/** 発言と同じ長さだけ出す種類(字幕の類)。短すぎる発言でも最低これだけは出す */
+export const EFFECT_FOLLOWS_LINE: ReadonlySet<EffectKind> = new Set([
+  'translate',
+  'dialect',
+  'bubble'
+])
+export const EFFECT_MIN_LINE_SEC = 1.5
+
+/** 種類ごとの出す長さ(秒)。人物紹介・札の類は読む時間を長めに */
 export function effectDuration(kind: EffectKind): number {
-  return kind === 'name' ? 3.5 : EFFECT_DURATION_SEC
+  switch (kind) {
+    case 'name':
+      return 3.5
+    case 'price':
+      return 4.5
+    case 'route':
+    case 'chapter':
+    case 'teaser':
+    case 'clock':
+      return 3.5
+    case 'laugh':
+      return 2
+    default:
+      return EFFECT_DURATION_SEC
+  }
 }
+
+/**
+ * 画面のどこに出る種類か。同じ場所に出るものだけ、前のテロップと間を空ける
+ * (左上の時刻と、真ん中のツッコミは同時に出てよい)
+ */
+export function effectLane(kind: EffectKind): string {
+  switch (kind) {
+    case 'name':
+      return 'name'
+    case 'laugh':
+    case 'clock':
+    case 'route':
+      return 'top-left'
+    case 'price':
+    case 'counter':
+      return 'top-right'
+    case 'place':
+    case 'situation':
+    case 'corner':
+    case 'quiz':
+      return 'top'
+    case 'translate':
+    case 'dialect':
+      return 'subtitle'
+    case 'note':
+      return 'note'
+    case 'bubble':
+      return 'bubble'
+    default:
+      return 'center'
+  }
+}
+
+/** 値段は誤りが許されないので、AI の提案でも自動では置かない(この自信度で頭打ち) */
+export const PRICE_MAX_CONFIDENCE = 0.6
 
 export const AUTO_PLACE_CONFIDENCE = 0.8
 const MAX_TEXT_CHARS = 20
+/** 札の類は長めでよい(店名・品名・値段、出発・手段・到着) */
+function maxCharsFor(kind: EffectKind): number {
+  switch (kind) {
+    case 'price':
+      return 40
+    case 'route':
+    case 'translate':
+      return 32
+    case 'dialect':
+      return 26
+    default:
+      return MAX_TEXT_CHARS
+  }
+}
 
 export interface EffectLine {
   id: string
@@ -102,8 +179,10 @@ export interface EffectLine {
 
 export interface EffectProposal {
   id: string
-  /** この発言の後に出す */
+  /** この発言の後に出す(`at` があればそちらが優先) */
   afterLineId: string
+  /** 発言に結び付かない種類(笑い・時刻・章)の、出す時刻(共通の時刻) */
+  at?: number
   kind: EffectKind
   text: string
   confidence: number
@@ -122,7 +201,12 @@ const EXAMPLES = {
   situation: 'ここまで歩いて40分',
   place: '浄土ヶ浜',
   sfx: 'ドーン!',
-  note: '※撮影時の価格です'
+  note: '※撮影時の価格です',
+  translate: '本当においしい!',
+  dialect: 'とってもおいしいね',
+  teaser: 'まさかの展開に…!?',
+  price: '海鮮食堂|うに丼|2,800円',
+  route: '宮古駅→車で20分→浄土ヶ浜'
 } as const
 
 /** 比べるための形(全角・半角、空白・記号の違いをならす) */
@@ -152,10 +236,15 @@ ${note ? `方針: ${note}\n` : ''}
 - emphasis: 強調(発言の中の印象的な言葉を大きく出す。**発言の中の言葉をそのまま**抜き出す)
 - sfx: 擬音(場面の空気を表す音の文字。例「${EXAMPLES.sfx}」「シーン…」)
 - note: 注釈(誤解されそうな所の補足。「※」で始める。例「${EXAMPLES.note}」)
+- translate: 翻訳字幕(**外国語の発言だけ**。その発言の日本語訳。例「${EXAMPLES.translate}」)
+- dialect: 方言の補足(方言・聞き取りにくい日本語の発言の、標準語での意味。例「${EXAMPLES.dialect}」)
+- teaser: 引き(見どころの少し前の発言の後に、続きへの期待をあおる短い文。中身は発言の流れにあることだけ。例「${EXAMPLES.teaser}」)
+- price: 店名・価格(発言に出た店名・品名・値段を「店名|品名|値段」の形で。**値段は発言の中の数字だけ**。例「${EXAMPLES.price}」)
+- route: 移動ルート(発言から分かる移動を「出発→手段と時間→到着」の形で。例「${EXAMPLES.route}」)
 決まり:
-- 1つの文は${MAX_TEXT_CHARS}字以内。発言を書き換えたり、言っていない事実を作ったりしない
+- 1つの文は${MAX_TEXT_CHARS}字以内(price・route・translate は30字まで)。発言を書き換えたり、言っていない事実を作ったりしない
 - 例の文をそのまま使わない。同じ文を何度も使わない
-- 地名・状況説明・注釈は、発言の中に根拠があるものだけ
+- 地名・状況説明・注釈・店名・価格・移動ルートは、発言の中に根拠があるものだけ
 - 強調は発言の中の言葉だけ(言い換えない)
 - 多すぎると邪魔なので、本当に効くものだけ(目安: 1分に1つまで)
 - confidence: 0〜1(番組でそのまま使えると思う確からしさ)
@@ -190,7 +279,7 @@ export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[])
       !ids.has(after) ||
       !kind ||
       !text ||
-      [...text].length > MAX_TEXT_CHARS ||
+      [...text].length > maxCharsFor(kind) ||
       Number.isNaN(confidence)
     )
       continue
@@ -198,23 +287,96 @@ export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[])
     // ただし例と同じ言葉が、その発言の中に本当にある(地名など)なら残す
     const key = textKey(text)
     const lineKey = textKey(lineText.get(after) ?? '')
-    const copied = EXAMPLE_KEYS.has(key) && !lineKey.includes(key)
+    // (訳の類は発言で中身が決まるので、例と同じ文になっても写しとはみなさない)
+    const copied =
+      EXAMPLE_KEYS.has(key) &&
+      !lineKey.includes(key) &&
+      kind !== 'translate' &&
+      kind !== 'dialect'
     if (!key || copied || seen.has(key)) continue
     // 強調は発言の中の言葉そのままに限る(言っていない言葉を大きく出さない)
     if (kind === 'emphasis' && !lineKey.includes(key)) continue
+    // 翻訳は外国語の発言だけ(日本語の発言に訳を付けない)
+    if (kind === 'translate' && !isForeignLine(lineText.get(after) ?? '')) continue
+    // 値段は発言の中の数字だけ(言っていない値段を出さない)
+    if (kind === 'price' && !priceInLine(text, lineText.get(after) ?? '')) continue
+    const shown = formatEffectText(kind, text)
+    if (!shown) continue
     seen.add(key)
-    // 注釈は「※」で始める(番組の注釈の書き方)
-    const shown = kind === 'note' && !/^[※*]/.test(text) ? `※${text}` : text
+    let conf = Math.max(0, Math.min(1, confidence))
+    if (kind === 'price') conf = Math.min(conf, PRICE_MAX_CONFIDENCE)
     out.push({
       id: `fx-${after}-${out.length}`,
       afterLineId: after,
       kind,
       text: shown,
-      confidence: Math.max(0, Math.min(1, confidence)),
+      confidence: conf,
       reason: typeof o.reason === 'string' ? o.reason.trim().slice(0, 200) : ''
     })
   }
   return out
+}
+
+/** 外国語(ラテン文字など)が主の発言か。日本語の文字が少しでも多ければ日本語とみなす */
+export function isForeignLine(text: string): boolean {
+  const letters = [...text].filter((c) => /\p{L}/u.test(c))
+  if (letters.length === 0) return false
+  const japanese = letters.filter((c) =>
+    /[\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Han}]/u.test(c)
+  ).length
+  return japanese / letters.length < 0.3
+}
+
+/** 値段の数字が発言の中にあるか(「2,800円」と「にせんはっぴゃく」は比べられないので、数字だけ見る) */
+function priceInLine(answer: string, line: string): boolean {
+  const digits = (s: string): string[] =>
+    (s.normalize('NFKC').match(/\d[\d,]*/g) ?? []).map((d) => d.replace(/,/g, ''))
+  const asked = digits(answer.split('|').pop() ?? answer)
+  if (asked.length === 0) return true // 値段の無い札(店名だけ)は良い
+  const said = new Set(digits(line))
+  return asked.every((d) => said.has(d))
+}
+
+/**
+ * AI の答えを、種類ごとの見せ方の文にする(部分の装飾の印を付ける)。
+ * - 注釈: 「※」で始める
+ * - 引き: 1行目に「このあと」
+ * - 店名・価格: 「店名|品名|値段」→ 1行目に店名、2行目に品名と **値段**
+ * - 移動ルート: 「出発→手段→到着」→ 手段を小さく
+ */
+export function formatEffectText(kind: EffectKind, text: string): string {
+  const t = text.trim()
+  switch (kind) {
+    case 'note':
+      return /^[※*]/.test(t) ? t : `※${t}`
+    case 'teaser': {
+      const body = t.replace(/^(この)?あと[、,\s]*/u, '').trim()
+      return body ? `このあと\n${body}` : ''
+    }
+    case 'price': {
+      const parts = t
+        .split(/[|｜/]/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+      if (parts.length >= 3) return `${parts[0]}\n${parts[1]} **${parts.slice(2).join(' ')}**`
+      if (parts.length === 2) return `${parts[0]}\n**${parts[1]}**`
+      return parts[0] ?? ''
+    }
+    case 'route': {
+      const parts = t
+        .split(/\s*(?:→|->|⇒)\s*/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+      if (parts.length >= 3)
+        return `${parts[0]} __→ ${parts.slice(1, -1).join(' → ')} →__ ${parts[parts.length - 1]}`
+      if (parts.length === 2) return `${parts[0]} __→__ ${parts[1]}`
+      return t
+    }
+    case 'dialect':
+      return /^[(（]/.test(t) ? t : `(訳:${t})`
+    default:
+      return t
+  }
 }
 
 /** 種類ごとの見た目(テロップスタイルの管理で「演出・○○」を作れば、そちらが優先される) */
@@ -616,7 +778,8 @@ export function effectSchema(lines: readonly EffectLine[]): Record<string, unkno
             after: { enum: lines.map((l) => l.id) },
             kind: { enum: AI_EFFECT_KINDS },
             reason: { type: 'string', maxLength: 120 },
-            text: { type: 'string', maxLength: MAX_TEXT_CHARS + 4 },
+            // 札の類(店名・価格)は長いので、いちばん長い種類に合わせる
+            text: { type: 'string', maxLength: 44 },
             confidence: { type: 'number' }
           },
           required: ['after', 'kind', 'reason', 'text', 'confidence']

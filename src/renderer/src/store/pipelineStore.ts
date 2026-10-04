@@ -1,4 +1,10 @@
 import { countEvents } from '@shared/events/audioEvents'
+import {
+  bubbleProposals,
+  chapterProposals,
+  clockProposals,
+  laughProposals
+} from '@shared/telop/autoEffects'
 import { isImagePath } from '@shared/mediaExtensions'
 import { stillAssetFrom } from '../lib/stillAsset'
 import {
@@ -147,6 +153,8 @@ interface PipelineState {
   effectChosen: string[]
   /** 今の仮編集の、タイムラインと共通の時刻の対応(演出テロップを置き直すのに使う) */
   lastSpans: RoughCut['spans']
+  /** 最後に置いた発言テロップ(吹き出しをやめたときに、その発言のものを戻す) */
+  speechTelops: Omit<TextOverlay, 'id'>[]
   /** 演出テロップを置く/外す(すぐタイムラインに反映する) */
   setEffectChosen: (id: string, chosen: boolean) => void
   /** 顔の検出で、上下どちらに置いても顔に掛かった発言テロップ(要確認) */
@@ -759,14 +767,37 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     if (!aiAsked) {
       const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
       const lines = effectLines(project, info, plan.cut.spans)
-      // 人物紹介(名前スーパー)は AI を使わずに、各出演者の最初の発言へ(AI を使わない設定でも付ける)
-      const names = nameProposals(lines)
-      if (names.length > 0)
-        log(`人物紹介: ${names.map((n) => n.text).join('・')} の最初の発言に名前を出します`)
-      // 前の作り直しで人が外した人物紹介は外したままにする(id は名前から決まる)
+      // AI を使わずに決まる演出テロップ(AI を使わない設定でも付ける):
+      // 人物紹介(各出演者の最初の発言)・笑いの添え字・章タイトル・時刻・吹き出し
+      const nameList = nameProposals(lines)
+      if (nameList.length > 0)
+        log(`人物紹介: ${nameList.map((n) => n.text).join('・')} の最初の発言に名前を出します`)
+      const chapters = chapterProposals(get().scenes, get().judgements, plan.selection.kept)
+      const firstKept = get()
+        .scenes.filter((sc) => plan.selection.kept.includes(sc.id))
+        .sort((a, b) => a.start - b.start)[0]
+      const clockTimes = chapters.length
+        ? chapters.map((c) => c.at!)
+        : firstKept
+          ? [firstKept.start]
+          : []
+      const names = [
+        ...nameList,
+        ...laughProposals(project.audioEvents ?? []),
+        ...chapters,
+        ...clockProposals(clockTimes, info, recordedAtByAsset(project, get().syncedFiles)),
+        ...bubbleProposals(lines)
+      ]
+      const autoCount = (kind: string): number => names.filter((n) => n.kind === kind).length
+      if (names.length > nameList.length)
+        log(
+          `自動の演出テロップ: 笑い ${autoCount('laugh')}・章 ${autoCount('chapter')}・時刻 ${autoCount('clock')}・吹き出し ${autoCount('bubble')}(時刻・吹き出し・小さい笑いは提案だけ。演出テロップのタブで選べます)`
+        )
+      // 前の作り直しで人が外したものは外したままにする(id は名前・時刻・発言から決まる)
       const prevIds = new Set(get().effects.map((e) => e.id))
       const prevChosen = new Set(get().effectChosen)
       const nameChosen = names
+        .filter((n) => n.confidence >= AUTO_PLACE_CONFIDENCE)
         .filter((n) => !prevIds.has(n.id) || prevChosen.has(n.id))
         .map((n) => n.id)
       if (provider === 'off' || (provider === 'gemini' && !apiKey)) {
@@ -778,7 +809,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             (provider === 'off'
               ? 'AI を使わない設定です'
               : 'Gemini の鍵がありません(このPCの AI に切り替えると提案します)') +
-            (names.length > 0 ? ` · 人物紹介 ${names.length}` : '')
+            (names.length > 0 ? ` · AI を使わない提案 ${names.length}` : '')
         })
       } else {
         setStep('effects', { state: 'run', percent: 30, note: 'AI が提案中' })
@@ -831,8 +862,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       plan.cut.spans,
       usePresetStore.getState().captionPresets
     )
-    set({ lastSpans: plan.cut.spans })
-    useProjectStore.getState().applyRoughCut(plan.cut, [...telops, ...effectTelops], overrides)
+    // 吹き出しにした発言は、発言テロップを出さない(同じ言葉が2か所に出る)
+    const bubbled = bubbledUtterances(get().effects, get().effectChosen)
+    set({ lastSpans: plan.cut.spans, speechTelops: telops })
+    useProjectStore
+      .getState()
+      .applyRoughCut(
+        plan.cut,
+        [...telops.filter((o) => !o.utteranceId || !bubbled.has(o.utteranceId)), ...effectTelops],
+        overrides
+      )
     if (hasOverrides(overrides))
       log(
         `本編の手直しを当て直しました(削った区間 ${overrides!.removed.length}・足した区間 ${overrides!.added.length}・替えたカメラ ${overrides!.angles.length})`
@@ -870,6 +909,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     effects: [],
     effectChosen: [],
     lastSpans: [],
+    speechTelops: [],
     setEffectChosen: (id, chosen) => {
       const next = chosen
         ? [...new Set([...get().effectChosen, id])]
@@ -882,6 +922,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // 対応は今の本編から作る(作り直したあとに元に戻す・手で詰めると、覚えていた対応は古い)
       const spans = spansOfClips(project.clips, project.multicam)
       if (spans.length === 0) return
+      // 吹き出しは発言テロップの代わりに出す: 選んだら発言テロップを外し、外したら戻す
+      const fx = get().effects.find((e) => e.id === id)
+      const speech =
+        fx?.kind === 'bubble'
+          ? {
+              utteranceId: fx.afterLineId,
+              telops: chosen
+                ? []
+                : get().speechTelops.filter((o) => o.utteranceId === fx.afterLineId)
+            }
+          : undefined
       useProjectStore
         .getState()
         .setEffectTelops(
@@ -892,7 +943,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             project.multicam,
             spans,
             usePresetStore.getState().captionPresets
-          )
+          ),
+          speech
         )
     },
     setTargetMinutes: (minutes) => set({ targetMinutes: Math.max(0, minutes) }),
@@ -946,7 +998,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         denoiseFailures: [],
         effects: [],
         effectChosen: [],
-        lastSpans: []
+        lastSpans: [],
+        speechTelops: []
       }))
     },
 
@@ -969,7 +1022,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         denoiseFailures: [],
         effects: [],
         effectChosen: [],
-        lastSpans: []
+        lastSpans: [],
+        speechTelops: []
       }),
 
     scanFolder: async (root) => {
@@ -1133,6 +1187,23 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             subject: u.subject
           }))
         )
+        // 撮影開始の時刻を企画に覚える(開き直しても時刻スーパーを出せるように)。人の操作ではないので履歴に積まない
+        {
+          const p = useProjectStore.getState().project
+          const times = recordedAtByAsset(p, files)
+          if (p.multicam && times.size > 0)
+            useProjectStore.setState({
+              project: {
+                ...p,
+                multicam: {
+                  ...p.multicam,
+                  files: p.multicam.files.map((f) =>
+                    times.has(f.assetId) ? { ...f, recordedAt: times.get(f.assetId) } : f
+                  )
+                }
+              }
+            })
+        }
         // 再生できない形式(HEVC など)は、素材一覧の側でプレビュー用の変換を始める
         emitMenuCommand('assets.checkPreview')
         void window.api.libraryRemember(assets.map((a) => a.filePath)).catch(() => {})
@@ -1189,6 +1260,38 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     markReviewed: (key, reviewed) => useProjectStore.getState().setReviewed(key, reviewed)
   }
 })
+
+/** 吹き出しを選んだ発言(発言テロップの代わりに吹き出しで出す) */
+function bubbledUtterances(
+  effects: readonly EffectProposal[],
+  chosen: readonly string[]
+): Set<string> {
+  const set = new Set(chosen)
+  return new Set(
+    effects.filter((e) => e.kind === 'bubble' && set.has(e.id)).map((e) => e.afterLineId)
+  )
+}
+
+/**
+ * 素材ごとの撮影開始時刻(ms)。同期した素材の一覧(この起動で読んだもの)か、
+ * 企画に覚えた値(開き直したとき)から取る
+ */
+function recordedAtByAsset(
+  project: Project,
+  synced: readonly SyncInputFile[]
+): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const f of project.multicam?.files ?? [])
+    if (typeof f.recordedAt === 'number') out.set(f.assetId, f.recordedAt)
+  const byPath = new Map(
+    synced.filter((f) => f.recordedAt !== undefined).map((f) => [f.path, f.recordedAt!])
+  )
+  for (const a of project.assets) {
+    const t = byPath.get(a.denoisedFrom ?? a.filePath) ?? byPath.get(a.filePath)
+    if (t !== undefined) out.set(a.id, t)
+  }
+  return out
+}
 
 // 別のプロジェクトを開いた・新しく作ったら、前の回の自動編集の結果を捨てる
 // (残すと「仮編集を作り直す」が前の回の場面の区切りで今の回を切り、要確認にも前の回の項目が出る)

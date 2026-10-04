@@ -20,6 +20,8 @@ export interface MulticamFile {
   start: number
   rate: number
   duration: number
+  /** 撮影開始の時刻(ms、素材の記録から。時刻スーパーに使う) */
+  recordedAt?: number
 }
 
 export interface MulticamInfo {

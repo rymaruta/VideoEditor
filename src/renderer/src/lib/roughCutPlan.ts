@@ -36,7 +36,10 @@ import {
   effectSchema,
   EFFECT_AT_LINE_START,
   effectDuration,
+  EFFECT_FOLLOWS_LINE,
   EFFECT_LABEL,
+  EFFECT_MIN_LINE_SEC,
+  effectLane,
   effectStyle,
   parseEffectAnswer,
   type EffectLine,
@@ -374,27 +377,35 @@ export function effectOverlays(
   const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
   const utterance = new Map((project.transcript ?? []).map((u) => [u.id, u]))
   const out: Omit<TextOverlay, 'id'>[] = []
-  let lastEnd = -Infinity
+  // 画面の同じ場所に出るものだけ、前のテロップと間を空ける(左上の時刻と真ん中のツッコミは同時でよい)
+  const laneEnd = new Map<string, number>()
   const placed = proposals
     .filter((p) => chosen.has(p.id))
     .map((p) => {
       const u = utterance.get(p.afterLineId)
       const f = u ? fileOf.get(u.assetId) : undefined
-      // 人物紹介・強調は発言に重ねて頭から、ほかは言い終わってから
+      // 笑い・時刻・章は時刻で、人物紹介・強調・字幕の類は発言の頭から、ほかは言い終わってから
       const at =
-        u && f
-          ? EFFECT_AT_LINE_START.has(p.kind)
-            ? toCommon(f, u.sourceStart) + 0.05
-            : toCommon(f, u.sourceEnd) - 0.05
-          : null
+        p.at !== undefined
+          ? p.at
+          : u && f
+            ? EFFECT_AT_LINE_START.has(p.kind)
+              ? toCommon(f, u.sourceStart) + 0.05
+              : toCommon(f, u.sourceEnd) - 0.05
+            : null
       const t = at !== null ? roughTimelineAt(spans, at) : null
-      return { p, t }
+      // 字幕の類(翻訳・方言・吹き出し)は発言と同じ長さだけ出す
+      const lineSec =
+        u && f && EFFECT_FOLLOWS_LINE.has(p.kind)
+          ? Math.max(EFFECT_MIN_LINE_SEC, (u.sourceEnd - u.sourceStart) / (f.rate || 1))
+          : null
+      return { p, t, lineSec }
     })
-    .filter((x): x is { p: EffectProposal; t: number } => x.t !== null)
+    .filter((x): x is { p: EffectProposal; t: number; lineSec: number | null } => x.t !== null)
     .sort((a, b) => a.t - b.t)
   let lastName: Omit<TextOverlay, 'id'> | null = null
-  for (const { p, t } of placed) {
-    // 人物紹介は置き場所が別(左下)なので、ほかの演出テロップとの間隔は気にしない
+  for (const { p, t, lineSec } of placed) {
+    const lane = effectLane(p.kind)
     // 名前どうしは同じ場所に出るので、前の名前を最低 0.5 秒は見せてから次を出す。
     // 0.5 秒未満で続くと、前の名前を下げても 0.5 秒は残るので2つが重なっていた
     const start =
@@ -402,8 +413,8 @@ export function effectOverlays(
         ? lastName
           ? Math.max(t, lastName.startTime + 0.5)
           : t
-        : Math.max(t, lastEnd + 0.2)
-    const duration = effectDuration(p.kind)
+        : Math.max(t, (laneEnd.get(lane) ?? -Infinity) + 0.2)
+    const duration = lineSec ?? effectDuration(p.kind)
     // 次の人の名前が出るときは、前の人の名前を下げる(同じ場所に重ねない)
     if (p.kind === 'name' && lastName && lastName.endTime > start) lastName.endTime = start
     // 「演出・ツッコミ」のように名前の付いたテロップスタイルがあれば、そちらを使う
@@ -417,7 +428,7 @@ export function effectOverlays(
       source: 'auto',
       effectId: p.id
     })
-    if (p.kind !== 'name') lastEnd = start + duration
+    if (p.kind !== 'name') laneEnd.set(lane, start + duration)
     else lastName = out[out.length - 1]
   }
   return out

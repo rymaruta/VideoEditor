@@ -600,7 +600,10 @@ function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
       sourceId: f.sourceId as string,
       start: asFinite(f.start, 0),
       rate: asFinite(f.rate, 1) > 0 ? asFinite(f.rate, 1) : 1,
-      duration: asNonNegative(f.duration, 0)
+      duration: asNonNegative(f.duration, 0),
+      ...(typeof f.recordedAt === 'number' && Number.isFinite(f.recordedAt)
+        ? { recordedAt: f.recordedAt }
+        : {})
     }))
   return { anchorSourceId: r.anchorSourceId, sources, files }
 }
@@ -841,7 +844,14 @@ interface ProjectState {
     overrides?: CutOverrides
   ) => void
   /** 演出テロップ(提案から置いたもの)を入れ替える(取り消し1回で戻る) */
-  setEffectTelops: (telops: Omit<TextOverlay, 'id'>[]) => void
+  /**
+   * 演出テロップを入れ替える。`speech` を渡すと、その発言の発言テロップも入れ替える
+   * (吹き出しにした発言は発言テロップを外し、吹き出しをやめたら戻す。1回の取り消しで両方戻る)
+   */
+  setEffectTelops: (
+    telops: Omit<TextOverlay, 'id'>[],
+    speech?: { utteranceId: string; telops: Omit<TextOverlay, 'id'>[] }
+  ) => void
   /**
    * 自動の SE・BGM のトラックを入れ替える(前に自動で置いたものは消える)。素材が無ければ足す。
    * 仮編集を入れた直後に続けて呼ぶので履歴は積まない(取り消し1回で仮編集の前に戻る)。
@@ -2637,14 +2647,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  setEffectTelops: (telops) =>
+  setEffectTelops: (telops, speech) =>
     set((state) => ({
       ...pushHistory(state),
       project: {
         ...state.project,
         editedTelops: rememberEditedTelops(state.project.textOverlays, state.project.editedTelops),
         textOverlays: [
-          ...state.project.textOverlays.filter((o) => !o.effectId),
+          ...state.project.textOverlays.filter(
+            (o) => !o.effectId && (!speech || o.utteranceId !== speech.utteranceId)
+          ),
+          ...(speech
+            ? mergeManualTelops(
+                state.project.textOverlays,
+                speech.telops,
+                new Set(state.project.dismissedTelops ?? []),
+                state.project.editedTelops
+              ).map((o) => ({ ...o, id: uuid() }))
+            : []),
           ...mergeManualTelops(
             state.project.textOverlays,
             telops,

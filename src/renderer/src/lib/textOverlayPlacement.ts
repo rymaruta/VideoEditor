@@ -37,17 +37,17 @@ export const MIN_OVERLAY_DURATION = 0.1
  */
 export function newOverlayRange(
   playheadTime: number,
-  totalDuration: number
+  totalDuration: number,
+  /** 長さ(秒)。種類によって違う(カウンターは長く出し続けるなど) */
+  duration = DEFAULT_OVERLAY_DURATION
 ): { startTime: number; endTime: number } {
+  const length = Number.isFinite(duration) && duration > 0 ? duration : DEFAULT_OVERLAY_DURATION
   const playhead = Number.isFinite(playheadTime) ? Math.max(0, playheadTime) : 0
   const total = Number.isFinite(totalDuration) && totalDuration > 0 ? totalDuration : 0
   if (total <= 0) {
-    return { startTime: playhead, endTime: playhead + DEFAULT_OVERLAY_DURATION }
+    return { startTime: playhead, endTime: playhead + length }
   }
   const startTime = Math.min(playhead, Math.max(0, total - MIN_OVERLAY_DURATION))
-  const endTime = Math.max(
-    startTime + MIN_OVERLAY_DURATION,
-    Math.min(startTime + DEFAULT_OVERLAY_DURATION, total)
-  )
+  const endTime = Math.max(startTime + MIN_OVERLAY_DURATION, Math.min(startTime + length, total))
   return { startTime, endTime }
 }

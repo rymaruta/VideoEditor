@@ -65,3 +65,52 @@ describe('effectOverlays — 人物紹介どうしを重ねない', () => {
     expect(out[0].endTime).toBeCloseTo(11.05, 9)
   })
 })
+
+describe('effectOverlays — 種類ごとの時刻と場所', () => {
+  const project = {
+    transcript: [line('u1', 20, 26), line('u2', 21, 22)]
+  } as unknown as Project
+  const fx = (
+    id: string,
+    kind: EffectProposal['kind'],
+    extra: Partial<EffectProposal> = {}
+  ): EffectProposal => ({
+    id,
+    afterLineId: 'u1',
+    kind,
+    text: id,
+    confidence: 1,
+    reason: '',
+    ...extra
+  })
+
+  it('時刻で決まる種類(笑い・章)はその時刻に、場所の違う種類は同時に出せる', () => {
+    const out = effectOverlays(
+      [fx('l', 'laugh', { at: 30, afterLineId: '' }), fx('t', 'tsukkomi', { afterLineId: 'u1' })],
+      new Set(['l', 't']),
+      project,
+      info,
+      spans,
+      []
+    )
+    const at = Object.fromEntries(out.map((o) => [o.text, o.startTime]))
+    expect(at.l).toBeCloseTo(30, 9)
+    // ツッコミ(真ん中)は笑い(左上)と重なってよい: 言い終わり 26 秒の直前から
+    expect(at.t).toBeCloseTo(25.95, 9)
+  })
+
+  it('翻訳は発言の頭から、発言と同じ長さ(短い発言でも最低 1.5 秒)', () => {
+    const out = effectOverlays(
+      [fx('a', 'translate'), fx('b', 'translate', { afterLineId: 'u2' })],
+      new Set(['a', 'b']),
+      project,
+      info,
+      spans,
+      []
+    )
+    expect([out[0].startTime, out[0].endTime - out[0].startTime]).toEqual([20.05, 6])
+    // 同じ場所(字幕)なので、前の翻訳が終わるまで待つ
+    expect(out[1].startTime).toBeGreaterThanOrEqual(out[0].endTime)
+    expect(out[1].endTime - out[1].startTime).toBeCloseTo(1.5, 9)
+  })
+})

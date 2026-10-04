@@ -12,6 +12,8 @@ import { frameSeconds } from '@shared/frameRate'
 import { TelopInspector } from './TelopInspector'
 import { ColorField } from './ColorField'
 import { PlusIcon, TypeIcon } from './icons'
+import { stripTelopMarkup } from '@shared/telop/render'
+import { HOW_LABEL, TELOP_KINDS } from '@shared/telop/kinds'
 
 /**
  * テロップ(デザイン案の「テロップ」タブ)。左に一覧、右に選んだテロップの設定。
@@ -109,6 +111,21 @@ export function TextOverlayPanel(): React.JSX.Element {
     selectOverlay(id)
   }
 
+  /** 種類から足す(見本の文と、その種類の見た目・長さで) */
+  function handleAddKind(kindId: string): void {
+    const kind = TELOP_KINDS.find((k) => k.id === kindId)
+    if (!kind) return
+    const store = useProjectStore.getState()
+    const id = addTextOverlay({
+      text: kind.sample,
+      ...newOverlayRange(store.playheadTime, getTotalDuration(project), kind.seconds),
+      style: kind.style(),
+      source: 'manual'
+    })
+    setMultiIds(new Set([id]))
+    selectOverlay(id)
+  }
+
   const currentPage = clampPage(page, sorted.length, LIST_PAGE)
   const range = pageSlice(currentPage, sorted.length, LIST_PAGE)
   const pages = pageCount(sorted.length, LIST_PAGE)
@@ -127,6 +144,27 @@ export function TextOverlayPanel(): React.JSX.Element {
               <PlusIcon width={12} height={12} />
               追加
             </button>
+            <select
+              className="telop-kind-add"
+              aria-label="種類から追加"
+              title="ナレーション・クイズ・カウンター・手書きなど、種類の見た目と見本の文で再生位置に足します"
+              value=""
+              onChange={(e) => {
+                handleAddKind(e.target.value)
+                e.target.value = ''
+              }}
+            >
+              <option value="">種類から追加…</option>
+              {(['manual', 'ai', 'auto'] as const).map((how) => (
+                <optgroup key={how} label={HOW_LABEL[how]}>
+                  {TELOP_KINDS.filter((k) => k.how === how).map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
           </div>
           {sorted.length === 0 ? (
             <div className="empty-state">
@@ -146,11 +184,17 @@ export function TextOverlayPanel(): React.JSX.Element {
                     aria-selected={isSel}
                     className={`telop-row ${isSel ? 'selected' : ''}`}
                     style={{ borderLeftColor: speakerColor(o.speaker) }}
-                    title={o.speaker ? `${o.speaker}: ${o.text}` : o.text}
+                    title={
+                      o.speaker
+                        ? `${o.speaker}: ${stripTelopMarkup(o.text)}`
+                        : stripTelopMarkup(o.text)
+                    }
                     onClick={(e) => handleRowClick(e, o)}
                   >
                     <span className="telop-row-tc">{formatTimecode(o.startTime, fps)}</span>
-                    <span className="telop-row-text">{o.text.replace(/\n/g, ' ') || '(空)'}</span>
+                    <span className="telop-row-text">
+                      {stripTelopMarkup(o.text).replace(/\n/g, ' ') || '(空)'}
+                    </span>
                   </li>
                 )
               })}
