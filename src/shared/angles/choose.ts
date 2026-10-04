@@ -1,4 +1,5 @@
 import type { CutRange } from '../cut/tighten'
+import { GAP_TOLERANCE } from '../sync/multicam'
 
 /**
  * アングルの自動切り替え(計画書 §5.7)。今は顔の検出を使わない、規則による選び方:
@@ -42,16 +43,53 @@ function covers(cam: AngleCamera, a: number, b: number): boolean {
   return cam.coverage.some((c) => c.start <= a + 1e-6 && c.end >= b - 1e-6)
 }
 
+/**
+ * 録っている区間を並べ、分割ファイルのつなぎ目のごく短い隙間(同期の丸めで 20ms ほど)はつなぐ。
+ * つながないと、つなぎ目で別のカメラへ一瞬(1フレーム未満)切り替わってしまう
+ */
+function joinCoverage(cam: AngleCamera): AngleCamera {
+  const sorted = [...cam.coverage].sort((a, b) => a.start - b.start)
+  const out: AngleCamera['coverage'] = []
+  for (const c of sorted) {
+    const last = out[out.length - 1]
+    if (last && c.start <= last.end + GAP_TOLERANCE) last.end = Math.max(last.end, c.end)
+    else out.push({ start: c.start, end: c.end })
+  }
+  return { ...cam, coverage: out }
+}
+
+/** 1フレームに満たないショットは前(先頭なら後ろ)のショットに含める(画が一瞬だけ替わるのを防ぐ) */
+function absorbSlivers(shots: Shot[]): Shot[] {
+  const out: Shot[] = []
+  for (const s of shots) {
+    if (s.end - s.start <= 1e-3) continue
+    const last = out[out.length - 1]
+    const touching = last && Math.abs(last.end - s.start) < 1e-6
+    if (touching && s.end - s.start < GAP_TOLERANCE) {
+      last.end = s.end
+      continue
+    }
+    if (touching && last.end - last.start < GAP_TOLERANCE) {
+      // 前が細切れ(先頭にできたもの)なら、こちらへ含める
+      out[out.length - 1] = { ...s, start: last.start }
+      continue
+    }
+    out.push({ ...s })
+  }
+  return out
+}
+
 export function chooseAngles(
   pieces: readonly CutRange[],
-  cameras: readonly AngleCamera[],
+  inputCameras: readonly AngleCamera[],
   anchorId: string,
   lines: readonly AngleLine[],
   options: AngleOptions = {}
 ): Shot[] {
   const minShot = options.minShotSec ?? 2
   const maxShot = options.maxShotSec ?? 8
-  if (cameras.length === 0) return []
+  if (inputCameras.length === 0) return []
+  const cameras = inputCameras.map(joinCoverage)
   const anchor = cameras.find((c) => c.id === anchorId) ?? cameras[0]
   const sortedLines = [...lines].sort((a, b) => a.start - b.start)
   const subjectCam = (speaker: string | undefined): AngleCamera | undefined =>
@@ -168,5 +206,5 @@ export function chooseAngles(
       t = e
     }
   }
-  return fixed.filter((s) => s.end - s.start > 1e-3)
+  return absorbSlivers(fixed)
 }

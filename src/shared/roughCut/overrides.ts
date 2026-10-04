@@ -1,6 +1,6 @@
 import type { CutRange } from '../cut/tighten'
 import type { Shot } from '../angles/choose'
-import { fileAt, toCommon, type MulticamInfo } from '../sync/multicam'
+import { coversRange, fileAt, toCommon, type MulticamInfo } from '../sync/multicam'
 
 /**
  * 本編(カット・アングル)の人の修正を、仮編集の作り直しで上書きしない(計画書 §5.13)。
@@ -162,10 +162,9 @@ export function applyAngleOverrides(
     for (const s of out) {
       const start = Math.max(s.start, a.start)
       const end = Math.min(s.end, a.end)
-      const covered =
-        end - start > EPS &&
-        fileAt(info, a.cameraId, start) !== null &&
-        fileAt(info, a.cameraId, end - EPS / 2) !== null
+      // 頭と終わりだけでなく途中も録っているか(録画を止めた間に掛かれば当てない)。
+      // 分割ファイルのつなぎ目のごく短い隙間は続いているとみなす
+      const covered = end - start > EPS && coversRange(info, a.cameraId, start, end)
       if (!covered || s.cameraId === a.cameraId) {
         next.push(s)
         continue

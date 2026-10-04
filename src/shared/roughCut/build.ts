@@ -1,4 +1,4 @@
-import { fileAt, toSource, type MulticamInfo } from '../sync/multicam'
+import { fileAt, GAP_TOLERANCE, nextFileStart, toSource, type MulticamInfo } from '../sync/multicam'
 import type { Shot } from '../angles/choose'
 
 /**
@@ -49,12 +49,33 @@ export function buildRoughCut(
   const main: RoughMainClip[] = []
   // 本編: ショットを素材の切れ目で分けて並べる
   const placed: { start: number; end: number }[] = []
+  const anchorIsCamera = info.sources.some(
+    (x) => x.id === info.anchorSourceId && x.kind === 'camera'
+  )
   for (const s of shots) {
     let t = s.start
     while (t < s.end - 1e-6) {
-      const f = fileAt(info, s.cameraId, t)
-      if (!f) break
-      const end = Math.min(s.end, f.start + f.duration / f.rate)
+      let f = fileAt(info, s.cameraId, t)
+      let end = f ? Math.min(s.end, f.start + f.duration / f.rate) : t
+      if (!f) {
+        // ショットのカメラが録っていない時間(分割ファイルのつなぎ目・録画を止めた間)。
+        // ショットを切り捨てず、ごく短い隙間は飛ばして次のファイルへ続け、
+        // 長い隙間は基準カメラで埋める(基準カメラも録っていなければ飛ばす)
+        const resume = Math.min(s.end, nextFileStart(info, s.cameraId, t))
+        const anchor =
+          anchorIsCamera && resume - t >= GAP_TOLERANCE
+            ? fileAt(info, info.anchorSourceId, t)
+            : null
+        if (!anchor) {
+          t =
+            resume - t >= GAP_TOLERANCE
+              ? Math.min(resume, nextFileStart(info, info.anchorSourceId, t))
+              : resume
+          continue
+        }
+        f = anchor
+        end = Math.min(resume, f.start + f.duration / f.rate)
+      }
       main.push({
         assetId: f.assetId,
         inPoint: toSource(f, t),

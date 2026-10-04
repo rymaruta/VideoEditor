@@ -126,6 +126,33 @@ describe('applyCutOverrides / applyAngleOverrides', () => {
     ])
   })
 
+  it('替えたカメラが途中で録画を止めていれば当てない(分割ファイルのごく短い隙間は続いているとみなす)', () => {
+    const gapInfo: MulticamInfo = {
+      anchorSourceId: 'A',
+      sources: info.sources,
+      files: [
+        { assetId: 'a1', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+        { assetId: 'b1', sourceId: 'B', start: 0, rate: 1, duration: 20 },
+        { assetId: 'b2', sourceId: 'B', start: 20.02, rate: 1, duration: 19.98 },
+        // 40〜60 は録画を止めていた
+        { assetId: 'b3', sourceId: 'B', start: 60, rate: 1, duration: 40 }
+      ]
+    }
+    const shots = applyAngleOverrides(
+      [{ start: 0, end: 100, cameraId: 'A', reason: 'default' }],
+      [
+        { start: 10, end: 30, cameraId: 'B' },
+        { start: 35, end: 70, cameraId: 'B' }
+      ],
+      gapInfo
+    )
+    expect(shots.map((s) => [s.start, s.end, s.cameraId])).toEqual([
+      [0, 10, 'A'],
+      [10, 30, 'B'],
+      [30, 100, 'A']
+    ])
+  })
+
   it('替えたカメラはショットを分けて当てる。録っていない時間には当てない', () => {
     const shots = applyAngleOverrides(
       [{ start: 0, end: 30, cameraId: 'A', reason: 'default' }],

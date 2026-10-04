@@ -39,6 +39,21 @@ describe('solvePlacements', () => {
     expect(r.placements.find((p) => p.id === 'A2')!.method).toBe('clock')
   })
 
+  it('続けて録った分割ファイルは、1秒単位の録画時刻ではなく前のファイルの長さでつなぐ', () => {
+    const r = solvePlacements(
+      [
+        { id: 'C1', sourceId: 'C', duration: 1000.5, recordedAt: 5000 },
+        // 録画時刻は秒に丸められて 1001(本当は 1000.5 秒後に続いている)
+        { id: 'C2', sourceId: 'C', duration: 600, recordedAt: 6001 },
+        // 間が空いた録画は、録画時刻の差のまま
+        { id: 'C3', sourceId: 'C', duration: 60, recordedAt: 7000 }
+      ],
+      []
+    )
+    expect(startOf(r, 'C2') - startOf(r, 'C1')).toBeCloseTo(1000.5, 6)
+    expect(startOf(r, 'C3') - startOf(r, 'C2')).toBeCloseTo(999, 6)
+  })
+
   it('つながらない素材は最後に並べて要確認にする', () => {
     const r = solvePlacements(files, [
       { a: 'M1', b: 'A1', offset: 5, confidence: 100 },

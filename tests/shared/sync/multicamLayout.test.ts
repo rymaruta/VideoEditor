@@ -96,3 +96,37 @@ describe('buildMulticamLayout', () => {
     expect(l.mics[0].pieces[0].speed).toBeCloseTo(1.0001, 9)
   })
 })
+
+describe('buildMulticamLayout: 分割ファイルのつなぎ目', () => {
+  it('同じトラックのクリップがごくわずか重なれば後ろの頭を削り、1フレーム未満の断片は置かない', () => {
+    const l = buildMulticamLayout(
+      [
+        { id: 'A', name: 'カメラA', kind: 'camera' },
+        { id: 'M', name: 'マイク1', kind: 'mic' }
+      ],
+      [
+        { id: 'A1', sourceId: 'A', duration: 1000 },
+        { id: 'M1', sourceId: 'M', duration: 500.0004 },
+        { id: 'M2', sourceId: 'M', duration: 500 },
+        // 本編の終わりに 0.01 秒だけ掛かるマイクの録音
+        { id: 'M3', sourceId: 'M', duration: 30 }
+      ],
+      [
+        { id: 'A1', start: 0, method: 'audio', rate: 1 },
+        { id: 'M1', start: 0, method: 'audio', rate: 1 },
+        { id: 'M2', start: 500, method: 'audio', rate: 1 },
+        { id: 'M3', start: 999.99, method: 'audio', rate: 1 }
+      ]
+    )!
+    const pieces = l.mics[0].pieces
+    expect(pieces.map((p) => p.fileId)).toEqual(['M1', 'M2'])
+    expect(pieces[1].startTime).toBeCloseTo(500.0004, 9)
+    expect(pieces[1].inPoint).toBeCloseTo(0.0004, 9)
+    for (let i = 1; i < pieces.length; i++) {
+      const prev = pieces[i - 1]
+      expect(pieces[i].startTime).toBeGreaterThanOrEqual(
+        prev.startTime + (prev.outPoint - prev.inPoint) / prev.speed - 1e-9
+      )
+    }
+  })
+})

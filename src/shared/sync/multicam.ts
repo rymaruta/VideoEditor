@@ -28,6 +28,42 @@ export interface MulticamInfo {
   files: MulticamFile[]
 }
 
+/**
+ * これより短い隙間・重なり・断片は「無いもの」とみなす(秒)。60p の3フレーム・30p の1.5フレーム。
+ * 分割ファイル(チャプター)のつなぎ目には、同期の丸めで 20ms ほどの隙間や重なりが出る。
+ * そのまま扱うと、1フレームに満たないカメラの切り替えや、重なった音声クリップになる
+ */
+export const GAP_TOLERANCE = 0.05
+
+/** 共通の時刻 t より後に始まる、その機材の次の素材の頭(無ければ Infinity) */
+export function nextFileStart(info: MulticamInfo, sourceId: string, t: number): number {
+  let next = Infinity
+  for (const f of info.files)
+    if (f.sourceId === sourceId && f.start > t) next = Math.min(next, f.start)
+  return next
+}
+
+/** その機材が start〜end を途切れずに録っているか(GAP_TOLERANCE 未満の隙間は続いているとみなす) */
+export function coversRange(
+  info: MulticamInfo,
+  sourceId: string,
+  start: number,
+  end: number
+): boolean {
+  let t = start
+  while (t < end - GAP_TOLERANCE / 2) {
+    const f = fileAt(info, sourceId, t)
+    if (f) {
+      t = f.start + f.duration / f.rate
+      continue
+    }
+    const next = nextFileStart(info, sourceId, t)
+    if (next - t >= GAP_TOLERANCE) return false
+    t = next
+  }
+  return true
+}
+
 /** 共通の時刻 t を録っている、その機材の素材(無ければ null) */
 export function fileAt(info: MulticamInfo, sourceId: string, t: number): MulticamFile | null {
   for (const f of info.files) {

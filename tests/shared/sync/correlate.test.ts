@@ -66,6 +66,16 @@ describe('fft', () => {
 })
 
 describe('matchFeatures', () => {
+  it('音の無い素材(空の包絡線)は、NaN を出さずに「一致なし」にする', () => {
+    const empty = onsetFeature(new Float32Array(0))
+    expect(empty).toHaveLength(0)
+    const other = onsetFeature(
+      Float32Array.from({ length: 6000 }, (_, i) => (i % 37 === 0 ? 1 : 0.01))
+    )
+    expect(matchFeatures(other, empty)).toBeNull()
+    expect(matchFeatures(empty, other)).toBeNull()
+  })
+
   const rate = 8000
   const master = speechLike(400, rate, 7)
 
@@ -116,6 +126,28 @@ describe('refineOffset', () => {
     const bFull = rerecord(src.subarray(shift), 0.4, 0.01, 2)
     const bWin = bFull.subarray(s + bStart, s + bStart + 10 * rate)
     const r = refineOffset(aWin, bWin, rate, coarse)
+    expect(Math.abs(r.offset - shift / rate)).toBeLessThan(0.0005)
+    expect(r.sharpness).toBeGreaterThan(5)
+  })
+
+  it('時計のずれで中ほどの値から大きく離れた位置も、探す幅を広げれば詰められる', () => {
+    const rate = 16000
+    const src = speechLike(30, rate, 11)
+    // 中ほどで測った offset は 0.01。頭の側では時計のずれで 0.4 秒離れている
+    const trueOffset = 0.4123
+    const shift = Math.round(trueOffset * rate)
+    const a = rerecord(src.subarray(0, 25 * rate), 1, 0.01, 1)
+    const coarse = 0.01
+    const bStart = Math.round(-coarse * rate)
+    const s = 2 * rate
+    const aWin = a.subarray(s, s + 20 * rate)
+    const bFull = rerecord(src.subarray(shift), 0.4, 0.01, 2)
+    const bWin = bFull.subarray(s + bStart, s + bStart + 20 * rate)
+    // ±50ms では届かない
+    expect(Math.abs(refineOffset(aWin, bWin, rate, coarse).offset - shift / rate)).toBeGreaterThan(
+      0.3
+    )
+    const r = refineOffset(aWin, bWin, rate, coarse, 0.05 + 2e-4 * 3000)
     expect(Math.abs(r.offset - shift / rate)).toBeLessThan(0.0005)
     expect(r.sharpness).toBeGreaterThan(5)
   })

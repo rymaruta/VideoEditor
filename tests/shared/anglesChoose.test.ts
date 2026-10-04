@@ -82,3 +82,34 @@ describe('chooseAngles', () => {
     ])
   })
 })
+
+describe('chooseAngles: 分割ファイルのつなぎ目', () => {
+  it('つなぎ目のごく短い隙間で、別のカメラへ一瞬切り替えない', () => {
+    const chapters: AngleCamera[] = [
+      {
+        id: 'WIDE',
+        coverage: [
+          { start: 0, end: 1000 },
+          { start: 1000.02, end: 2000 }
+        ]
+      },
+      { id: 'CAMB', subject: 'B', coverage: [{ start: 0, end: 2000 }] }
+    ]
+    const shots = chooseAngles([{ start: 990, end: 1010 }], chapters, 'WIDE', [
+      { speaker: 'A', start: 990, end: 1010 }
+    ])
+    expect(shots.map((s) => [s.start, s.end, s.cameraId])).toEqual([[990, 1010, 'WIDE']])
+  })
+
+  it('録っていない時間に掛かって分けたショットでも、1フレーム未満の断片は残さない', () => {
+    const cams2: AngleCamera[] = [
+      { id: 'WIDE', coverage: [{ start: 0, end: 109.99 }] },
+      { id: 'CAMB', subject: 'B', coverage: [{ start: 0, end: 200 }] }
+    ]
+    const shots = chooseAngles([{ start: 90, end: 110 }], cams2, 'WIDE', [
+      { speaker: 'A', start: 90, end: 110 }
+    ])
+    // WIDE は区間の終わりの 0.01 秒前で止まる。そこだけ CAMB へ替える 0.01 秒のショットを作らない
+    expect(shots.map((s) => [s.start, s.end, s.cameraId])).toEqual([[90, 110, 'WIDE']])
+  })
+})

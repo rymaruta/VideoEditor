@@ -57,6 +57,9 @@ export interface SyncSolution {
 /** 食い違いとして報告する差(秒)。29.97p の 2フレーム */
 export const CONFLICT_TOLERANCE = 2 / 29.97
 
+/** 録画時刻の差がこれ以内で前のファイルの長さと合えば、途切れずに続いた分割ファイルとみなす(秒) */
+const CHAPTER_JOIN_TOLERANCE = 2
+
 interface InternalEdge extends SyncEdge {
   kind: 'audio' | 'clock'
 }
@@ -83,10 +86,14 @@ export function solvePlacements(
       .filter((f) => f.recordedAt !== undefined)
       .sort((x, y) => x.recordedAt! - y.recordedAt!)
     for (let i = 1; i < timed.length; i++) {
+      const prev = timed[i - 1]
+      const delta = timed[i].recordedAt! - prev.recordedAt!
       edges.push({
-        a: timed[i - 1].id,
+        a: prev.id,
         b: timed[i].id,
-        offset: timed[i].recordedAt! - timed[i - 1].recordedAt!,
+        // 録画時刻は1秒単位なので、差がほぼ前のファイルの長さなら途切れずに続いた分割ファイル
+        // (チャプター)とみなし、ファイルの長さ(フレーム単位で正確)を使う
+        offset: Math.abs(delta - prev.duration) < CHAPTER_JOIN_TOLERANCE ? prev.duration : delta,
         confidence: 0,
         kind: 'clock'
       })

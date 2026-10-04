@@ -7,6 +7,7 @@ import syncWorkerPath from './syncWorker?modulePath'
 import { ffmpegPath, ffprobePath } from './ffmpegService'
 import { MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
 import { classifyFootage, type FootageScan, type ProbedFile } from '@shared/ingest/classify'
+import { recordedAtFromTags, tagValue as tag } from '@shared/ingest/recordedAt'
 import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
 
 /**
@@ -75,17 +76,6 @@ function ffprobeJson(path: string): Promise<FfprobeJson> {
   })
 }
 
-/** タグを大文字小文字を区別せずに引く */
-function tag(tags: Record<string, string> | undefined, ...names: string[]): string | undefined {
-  if (!tags) return undefined
-  const lower = Object.fromEntries(Object.entries(tags).map(([k, v]) => [k.toLowerCase(), v]))
-  for (const n of names) {
-    const v = lower[n.toLowerCase()]
-    if (v && v.trim()) return v.trim()
-  }
-  return undefined
-}
-
 async function probeFile(root: string, path: string): Promise<ProbedFile> {
   const [info, st] = await Promise.all([ffprobeJson(path), stat(path)])
   const streams = info.streams ?? []
@@ -93,8 +83,8 @@ async function probeFile(root: string, path: string): Promise<ProbedFile> {
   const audio = streams.find((s) => s.codec_type === 'audio')
   const duration = Number(info.format?.duration ?? video?.duration ?? audio?.duration ?? 0)
   const tags = { ...(audio?.tags ?? {}), ...(video?.tags ?? {}), ...(info.format?.tags ?? {}) }
-  const created = tag(tags, 'creation_time', 'com.apple.quicktime.creationdate', 'date')
-  const recordedAt = created ? Date.parse(created) / 1000 : NaN
+  // BWF の wav は日付と時刻が別のタグに入るので、組み合わせて読む(shared/ingest/recordedAt)
+  const recordedAt = recordedAtFromTags(tags)
   const make = tag(tags, 'com.apple.quicktime.make', 'make', 'com.android.manufacturer')
   const model = tag(tags, 'com.apple.quicktime.model', 'model', 'com.android.model')
   return {
@@ -105,7 +95,7 @@ async function probeFile(root: string, path: string): Promise<ProbedFile> {
     hasAudio: Boolean(audio),
     width: video?.width,
     height: video?.height,
-    recordedAt: Number.isFinite(recordedAt) ? recordedAt : undefined,
+    recordedAt,
     device: [make, model].filter(Boolean).join(' ') || undefined,
     size: st.size
   }

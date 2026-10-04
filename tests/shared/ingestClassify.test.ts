@@ -27,6 +27,11 @@ describe('fileNamePrefix', () => {
     expect(fileNamePrefix('C0001.MP4')).toBe('C')
     expect(fileNamePrefix('0001.MP4')).toBe('')
   })
+
+  it('英字以外の名前の頭も取る', () => {
+    expect(fileNamePrefix('カメラ_0001.MP4')).toBe('カメラ')
+    expect(fileNamePrefix('ä-0001.MP4')).toBe('Ä')
+  })
 })
 
 describe('classifyFootage', () => {
@@ -74,6 +79,36 @@ describe('classifyFootage', () => {
     ])
     expect(sources).toHaveLength(2)
     expect(sources.find((s) => s.files.length === 2)!.basis).toContain('ファイル名 GX')
+  })
+
+  it('カードを替えて別のフォルダに続けて撮ったカメラは1台にまとめる', () => {
+    const sources = classifyFootage([
+      file('CamA/Card1/C0001.MP4', { device: 'Sony FX3', recordedAt: 0, duration: 600 }),
+      file('CamA/Card1/C0002.MP4', { device: 'Sony FX3', recordedAt: 600, duration: 600 }),
+      file('CamA/Card2/C0001.MP4', { device: 'Sony FX3', recordedAt: 1300, duration: 600 }),
+      file('DCIM/100CANON/MVI_0001.MP4', { device: 'Canon R6', recordedAt: 0, duration: 900 }),
+      file('DCIM/101CANON/MVI_0001.MP4', { device: 'Canon R6', recordedAt: 1000, duration: 900 })
+    ])
+    expect(sources).toHaveLength(2)
+    const sony = sources.find((s) => s.files.length === 3)!
+    expect(sony.files.map((f) => f.relativePath)).toEqual([
+      'CamA/Card1/C0001.MP4',
+      'CamA/Card1/C0002.MP4',
+      'CamA/Card2/C0001.MP4'
+    ])
+    expect(sony.basis).toContain('Card1・Card2')
+    expect(sources.find((s) => s.files.length === 2)!.files[1].relativePath).toBe(
+      'DCIM/101CANON/MVI_0001.MP4'
+    )
+  })
+
+  it('同じ機種でも同じ時間に撮っていれば・時刻が分からなければ別のカメラのまま', () => {
+    const sources = classifyFootage([
+      file('CAM_A/C0001.MP4', { device: 'Sony FX3', recordedAt: 0, duration: 600 }),
+      file('CAM_B/C0001.MP4', { device: 'Sony FX3', recordedAt: 10, duration: 600 }),
+      file('CAM_C/C0001.MP4', { device: 'Sony FX3' })
+    ])
+    expect(sources).toHaveLength(3)
   })
 
   it('音も映像も無いファイルは除く', () => {

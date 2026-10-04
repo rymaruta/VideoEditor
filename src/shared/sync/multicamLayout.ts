@@ -1,4 +1,5 @@
 import type { SourceKind } from '../ingest/classify'
+import { GAP_TOLERANCE } from './multicam'
 import type { Placement } from './solve'
 
 /**
@@ -57,6 +58,30 @@ export interface MulticamLayout {
 
 const EPS = 1e-6
 
+/**
+ * 同じトラックの続くファイルが、同期の丸めでごくわずか(1フレーム未満)重なることがある。
+ * 重なったクリップは置けないので、後ろのクリップの頭を前のクリップの終わりまで削る
+ */
+function trimOverlaps(pieces: LayoutPiece[]): LayoutPiece[] {
+  const out: LayoutPiece[] = []
+  for (const p of pieces) {
+    const last = out[out.length - 1]
+    const lastEnd = last ? last.startTime + (last.outPoint - last.inPoint) / last.speed : -Infinity
+    const overlap = lastEnd - p.startTime
+    if (overlap > EPS && overlap < GAP_TOLERANCE) {
+      const trimmed = {
+        ...p,
+        startTime: lastEnd,
+        inPoint: p.inPoint + overlap * p.speed
+      }
+      if ((trimmed.outPoint - trimmed.inPoint) / trimmed.speed >= GAP_TOLERANCE) out.push(trimmed)
+      continue
+    }
+    out.push(p)
+  }
+  return out
+}
+
 export function buildMulticamLayout(
   sources: readonly LayoutSource[],
   files: readonly LayoutFile[],
@@ -109,7 +134,11 @@ export function buildMulticamLayout(
     const { start, rate } = place.get(f.id)!
     const begin = Math.max(start, lastEnd)
     const end = start + spanOf(f)
-    if (end - begin <= EPS) continue
+    // 1フレームに満たない断片(前のファイルと重なった残りなど)は本編に置かない
+    if (end - begin < GAP_TOLERANCE) {
+      lastEnd = Math.max(lastEnd, end)
+      continue
+    }
     segments.push({
       fileId: f.id,
       start: begin,
@@ -133,7 +162,8 @@ export function buildMulticamLayout(
     for (const seg of segments) {
       const a = Math.max(start, seg.start)
       const b = Math.min(end, seg.end)
-      if (b - a <= EPS) continue
+      // 区間の端に1フレーム未満だけ掛かった断片は置かない
+      if (b - a < GAP_TOLERANCE) continue
       pieces.push({
         fileId: f.id,
         startTime: seg.timeline + (a - seg.start),
@@ -151,10 +181,12 @@ export function buildMulticamLayout(
       .map((s) => ({
         sourceId: s.id,
         name: s.name,
-        pieces: synced
-          .filter((f) => f.sourceId === s.id)
-          .flatMap(mapFile)
-          .sort((x, y) => x.startTime - y.startTime)
+        pieces: trimOverlaps(
+          synced
+            .filter((f) => f.sourceId === s.id)
+            .flatMap(mapFile)
+            .sort((x, y) => x.startTime - y.startTime)
+        )
       }))
       .filter((g) => g.pieces.length > 0)
 

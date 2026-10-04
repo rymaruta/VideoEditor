@@ -39,9 +39,27 @@ export interface FootageSource {
 /** ファイル名の頭の「機材を表す部分」。数字の手前まで(区切り記号は落とす) */
 export function fileNamePrefix(fileName: string): string {
   const base = fileName.replace(/\.[^.]+$/, '')
-  const m = /^([A-Za-z_\-\s]*?)[-_\s]?\d/.exec(base)
+  // 「カメラ_0001」「Ä-01」のような英字以外の名前もあるので、文字は Unicode の文字全般で見る
+  const m = /^([\p{L}_\-\s]*?)[-_\s]?\d/u.exec(base)
   const prefix = (m ? m[1] : base).replace(/[-_\s]+$/, '')
   return prefix.toUpperCase()
+}
+
+function parentOf(folder: string): string {
+  const i = folder.lastIndexOf('/')
+  return i < 0 ? '' : folder.slice(0, i)
+}
+
+/** 録画時刻が全部分かっているときだけ、その素材群の [始まり, 終わり](秒) */
+function recordedRange(files: readonly ProbedFile[]): [number, number] | undefined {
+  let start = Infinity
+  let end = -Infinity
+  for (const f of files) {
+    if (f.recordedAt === undefined) return undefined
+    start = Math.min(start, f.recordedAt)
+    end = Math.max(end, f.recordedAt + f.duration)
+  }
+  return files.length > 0 ? [start, end] : undefined
 }
 
 function folderOf(relativePath: string): string {
@@ -71,6 +89,8 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
       device?: string
       files: ProbedFile[]
       chain?: number
+      /** カードを替えて続けて撮ったとまとめた、ほかのフォルダ */
+      moreFolders?: string[]
     }
   >()
   for (const f of media) {
@@ -108,13 +128,46 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
     chains.forEach((files, i) => groups.set(`${key}#${i}`, { ...g, files, chain: i }))
   }
 
+  // カメラはカードを替えると別のフォルダ(CamA/Card1 → Card2、DCIM/100CANON → 101CANON)に入り、
+  // ファイル名も C0001 からやり直すことがある。同じ親フォルダ・同じ機種・同じ頭の名前で、
+  // 録画時刻が重ならない(前のカードが終わった後に始まっている)ものは1台のカメラの続きとする。
+  // 同じ時間に撮っていれば、同じ機種でも別のカメラ。時刻が分からないものはまとめない
+  const camGroups = [...groups.entries()]
+    .filter(([, g]) => g.kind === 'camera')
+    .map(([key, g]) => ({ key, g, range: recordedRange(g.files) }))
+    .filter((c): c is typeof c & { range: [number, number] } => c.range !== undefined)
+    .sort((a, b) => a.range[0] - b.range[0])
+  const camChains: { group: (typeof camGroups)[number]['g']; parent: string; end: number }[] = []
+  for (const c of camGroups) {
+    const parent = parentOf(c.g.folder)
+    const chain = camChains.find(
+      (x) =>
+        x.parent === parent &&
+        x.group.device === c.g.device &&
+        x.group.prefix === c.g.prefix &&
+        x.end <= c.range[0] + 1
+    )
+    if (!chain) {
+      camChains.push({ group: c.g, parent, end: c.range[1] })
+      continue
+    }
+    chain.group.files.push(...c.g.files)
+    if (c.g.folder !== chain.group.folder && !chain.group.moreFolders?.includes(c.g.folder)) {
+      chain.group.moreFolders = [...(chain.group.moreFolders ?? []), c.g.folder]
+    }
+    chain.end = Math.max(chain.end, c.range[1])
+    groups.delete(c.key)
+  }
+
   // フォルダ1つに1グループなら「フォルダ名」、混ざっていれば「フォルダ名 + 頭の文字/機種」で呼ぶ
   const perFolder = new Map<string, number>()
   for (const g of groups.values()) perFolder.set(g.folder, (perFolder.get(g.folder) ?? 0) + 1)
 
   const list = [...groups.values()].map((g) => {
     g.files.sort(byRecordingOrder)
-    const folderName = g.folder.split('/').pop() ?? ''
+    const folderName = [g.folder, ...(g.moreFolders ?? [])]
+      .map((f) => f.split('/').pop() ?? '')
+      .join('・')
     const detail = g.prefix || g.device || ''
     const basis =
       (perFolder.get(g.folder) ?? 0) > 1 || !folderName
