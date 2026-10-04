@@ -80,6 +80,23 @@ const finite = (v: number, fallback: number): number => (Number.isFinite(v) ? v 
 const positive = (v: number, fallback: number): number =>
   Number.isFinite(v) && v > 0 ? v : fallback
 
+/** 描く先ごとに、最後に入れた書体の指定と、そのときの `ctx.font` の値 */
+const fontState = new WeakMap<object, { requested: string; actual: string }>()
+
+/**
+ * `ctx.font` を入れる。**同じ書体ならもう一度入れない。**
+ * Chromium は代入のたびに書体を解決し直し、ページの Web フォントの状態によっては
+ * 1回に 0.4〜2 秒かかる(実測: 30分の回で、シークのたびに画面が 1〜2.3 秒止まった。
+ * 原因は1枚ごとに2回入れていた `700 40px sans-serif`)。
+ * 描く先の大きさを変えると `ctx.font` は既定に戻るので、今の値も比べて確かめる。
+ */
+export function setCanvasFont(ctx: Pick<TelopContext, 'font'>, font: string): void {
+  const last = fontState.get(ctx)
+  if (last && last.requested === font && ctx.font === last.actual) return
+  ctx.font = font
+  fontState.set(ctx, { requested: font, actual: ctx.font })
+}
+
 export function telopFont(style: TextStyle, sizePx: number): string {
   const family = TELOP_FONT_STACKS[style.fontFamily] ?? 'sans-serif'
   return `${style.italic ? 'italic ' : ''}${style.bold ? 700 : 400} ${sizePx}px ${family}`
@@ -220,7 +237,7 @@ export function layoutTelop(
   const style = source.style
   const fontSize = positive(style.fontSize, 1)
   const spacing = finite(style.letterSpacing, 0)
-  ctx.font = telopFont(style, fontSize)
+  setCanvasFont(ctx, telopFont(style, fontSize))
   const cache = new Map<string, number>()
   const advance = (ch: string): number => {
     let w = cache.get(ch)
@@ -313,7 +330,7 @@ export function drawTelop(
   if (style.rotation) ctx.rotate((finite(style.rotation, 0) * Math.PI) / 180)
   if (anim.scale !== 1) ctx.scale(anim.scale, anim.scale)
   ctx.globalAlpha = anim.opacity
-  ctx.font = telopFont(style, fs)
+  setCanvasFont(ctx, telopFont(style, fs))
   ctx.textBaseline = 'middle'
   ctx.textAlign = 'left'
   ctx.lineJoin = 'round'

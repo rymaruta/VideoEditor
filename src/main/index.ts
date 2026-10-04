@@ -33,6 +33,7 @@ import {
   VIDEO_EXTENSIONS
 } from '@shared/mediaExtensions'
 import { ensurePreviewProxy } from './previewProxyService'
+import { MediaJobQueue } from './mediaJobQueue'
 import { scanLongFormWindows } from './longFormService'
 import {
   probeMedia,
@@ -82,6 +83,9 @@ import type {
   QualityPreset,
   ResolutionHeight
 } from '@shared/types'
+
+/** タイムラインの波形・サムネイル。同時に走らせる ffmpeg を抑え、結果を覚える(理由は mediaJobQueue) */
+const timelineImages = new MediaJobQueue<string>(2)
 
 loadEnvFile()
 
@@ -435,7 +439,9 @@ app.whenReady().then(() => {
     filePaths.filter((p) => !existsSync(p))
   )
   ipcMain.handle(IPC.generateThumbnail, async (_e, filePath: string, atSeconds: number) =>
-    generateThumbnailDataUrl(filePath, atSeconds)
+    timelineImages.request(`thumb|${filePath}|${atSeconds}`, () =>
+      generateThumbnailDataUrl(filePath, atSeconds)
+    )
   )
   ipcMain.handle(
     IPC.generateFrame,
@@ -449,7 +455,19 @@ app.whenReady().then(() => {
       cropCenter?: { x: number; y: number },
       blurBackground?: boolean
     ) =>
-      generateFrameDataUrl(filePath, atSeconds, width, height, fillCrop, cropCenter, blurBackground)
+      timelineImages.request(
+        `frame|${filePath}|${atSeconds}|${width}x${height}|${fillCrop}|${cropCenter?.x},${cropCenter?.y}|${blurBackground}`,
+        () =>
+          generateFrameDataUrl(
+            filePath,
+            atSeconds,
+            width,
+            height,
+            fillCrop,
+            cropCenter,
+            blurBackground
+          )
+      )
   )
   ipcMain.handle(
     IPC.generateWaveform,
@@ -460,7 +478,10 @@ app.whenReady().then(() => {
       rangeEnd: number,
       width: number,
       height: number
-    ) => generateWaveformDataUrl(filePath, rangeStart, rangeEnd, width, height)
+    ) =>
+      timelineImages.request(`wave|${filePath}|${rangeStart}|${rangeEnd}|${width}x${height}`, () =>
+        generateWaveformDataUrl(filePath, rangeStart, rangeEnd, width, height)
+      )
   )
   ipcMain.handle(
     IPC.detectSilence,
