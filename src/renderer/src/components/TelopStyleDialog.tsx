@@ -10,6 +10,9 @@ import { useProjectStore } from '../store/projectStore'
 import { usePresetStore, type CaptionPreset } from '../store/presetStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { loadTelopFonts } from '../lib/telopFonts'
+import { buildStyleFile, parseStyleFile, uniqueStyleNames } from '../lib/telopStyleFile'
+import { formatIpcError } from '../lib/ipcError'
+import { safeFileBaseName } from '@shared/fileName'
 import { PropRow, TelopStyleFields } from './TelopStyleFields'
 import { Segmented } from './AppearanceControls'
 import { TelopLookGallery, type LookItem } from './TelopLookGallery'
@@ -57,6 +60,8 @@ export function TelopStyleDialog(): React.JSX.Element | null {
   const [pickMode, setPickMode] = useState<'apply' | 'new'>('apply')
   const [fontEpoch, setFontEpoch] = useState(0)
   const [playing, setPlaying] = useState(false)
+  // スタイルのファイルの読み込み・書き出しの結果
+  const [fileMessage, setFileMessage] = useState<{ text: string; error?: boolean } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useMenuCommand((id) => {
@@ -172,6 +177,54 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     patchSelected({ style: applyLook(selected.style, item.style) })
   }
 
+  async function exportStyles(scope: 'selected' | 'all'): Promise<void> {
+    if (!draft) return
+    const list = scope === 'selected' ? (selected ? [selected] : []) : draft
+    if (list.length === 0) return
+    setFileMessage(null)
+    const base =
+      scope === 'selected' && selected
+        ? safeFileBaseName(selected.name || 'テロップスタイル')
+        : 'テロップスタイル'
+    try {
+      const path = await window.api.saveSubtitleFile(
+        `${base}.json`,
+        buildStyleFile(list.map((p) => ({ name: p.name, style: p.style }))),
+        'json'
+      )
+      if (path) setFileMessage({ text: `${list.length} 個のスタイルを書き出しました: ${path}` })
+    } catch (e) {
+      setFileMessage({ text: `書き出せませんでした: ${formatIpcError(e)}`, error: true })
+    }
+  }
+
+  async function importStyles(): Promise<void> {
+    setFileMessage(null)
+    try {
+      const file = await window.api.openSubtitleFile('json')
+      if (!file) return
+      const parsed = parseStyleFile(file.text)
+      if (!parsed.ok) {
+        setFileMessage({ text: parsed.error, error: true })
+        return
+      }
+      const added: CaptionPreset[] = uniqueStyleNames(draft ?? [], parsed.styles).map((s) => ({
+        id: uuid(),
+        name: s.name,
+        style: s.style
+      }))
+      setDraft((prev) => [...(prev ?? []), ...added])
+      setSelectedId(added[0].id)
+      setFileMessage({
+        text:
+          `${added.length} 個のスタイルを読み込みました(OK で確定します)` +
+          (parsed.skipped > 0 ? `。読めなかった ${parsed.skipped} 個は飛ばしました` : '')
+      })
+    } catch (e) {
+      setFileMessage({ text: `読み込めませんでした: ${formatIpcError(e)}`, error: true })
+    }
+  }
+
   function removeSelected(): void {
     if (!selected) return
     const used = usage.get(selected.id) ?? 0
@@ -285,6 +338,33 @@ export function TelopStyleDialog(): React.JSX.Element | null {
               <button className="small-button danger" disabled={!selected} onClick={removeSelected}>
                 削除
               </button>
+            </div>
+            <div className="telop-style-list-actions telop-style-file-actions">
+              <button
+                className="small-button"
+                title="ほかの PC・番組で作ったテロップスタイルのファイル(.json)を読み込みます"
+                onClick={() => void importStyles()}
+              >
+                スタイルを読み込む…
+              </button>
+              <select
+                className="telop-style-export"
+                aria-label="スタイルを書き出す"
+                title="テロップスタイルをファイル(.json)に書き出して、ほかの PC・番組で使えるようにします"
+                value=""
+                disabled={draft.length === 0}
+                onChange={(e) => {
+                  const v = e.target.value
+                  e.target.value = ''
+                  if (v === 'selected' || v === 'all') void exportStyles(v)
+                }}
+              >
+                <option value="">スタイルを書き出す…</option>
+                <option value="selected" disabled={!selected}>
+                  選んでいるスタイル
+                </option>
+                <option value="all">すべてのスタイル({draft.length})</option>
+              </select>
             </div>
           </div>
 
@@ -420,12 +500,17 @@ export function TelopStyleDialog(): React.JSX.Element | null {
         </div>
 
         <div className="dialog-footer">
-          <span className="dialog-footer-label">
-            {selected
-              ? usedCount > 0
-                ? `変更は、このスタイルを使っているテロップ ${usedCount.toLocaleString()} 本に反映されます`
-                : 'このスタイルを使っているテロップはまだありません'
-              : ''}
+          <span
+            className={`dialog-footer-label ${fileMessage?.error ? 'telop-style-file-error' : ''}`}
+            role={fileMessage ? 'status' : undefined}
+          >
+            {fileMessage
+              ? fileMessage.text
+              : selected
+                ? usedCount > 0
+                  ? `変更は、このスタイルを使っているテロップ ${usedCount.toLocaleString()} 本に反映されます`
+                  : 'このスタイルを使っているテロップはまだありません'
+                : ''}
           </span>
           <div className="dialog-footer-spacer" />
           <button className="small-button" onClick={() => setDraft(null)}>
