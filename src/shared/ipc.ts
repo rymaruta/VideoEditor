@@ -31,6 +31,8 @@ export const IPC = {
   downloadAudioAsset: 'audioLibrary:download',
   getEnvApiKeys: 'settings:getEnvApiKeys',
   setDirtyState: 'project:setDirtyState',
+  setBusyState: 'app:setBusyState',
+  notifyDone: 'app:notifyDone',
   checkAutosave: 'project:checkAutosave',
   loadAutosave: 'project:loadAutosave',
   autosaveProject: 'project:autosave',

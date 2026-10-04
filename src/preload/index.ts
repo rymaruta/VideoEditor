@@ -196,6 +196,11 @@ const api = {
     ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName),
   getEnvApiKeys: (): Promise<EnvApiKeys> => ipcRenderer.invoke(IPC.getEnvApiKeys),
   setDirtyState: (dirty: boolean): void => ipcRenderer.send(IPC.setDirtyState, dirty),
+  /** 長い処理の最中か(スリープさせない・タスクバーに進み具合・閉じる前に確かめる)。終わったら null */
+  setBusyState: (state: { label: string; percent?: number } | null): void =>
+    ipcRenderer.send(IPC.setBusyState, state),
+  /** 長い処理が終わったことを知らせる(アプリを見ていないときだけ通知) */
+  notifyDone: (title: string, body: string): void => ipcRenderer.send(IPC.notifyDone, title, body),
   checkAutosave: (): Promise<{
     exists: boolean
     mtimeMs?: number

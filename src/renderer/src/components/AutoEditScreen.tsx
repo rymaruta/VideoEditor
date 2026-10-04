@@ -15,6 +15,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { parseDictionary } from '@shared/telop/polish'
 import type { AiProvider } from '@shared/llm'
 import { speakerColor } from '@shared/speaker'
+import { formatRemaining, remainingMs } from '../lib/eta'
 import { AUTO_PLACE_CONFIDENCE, EFFECT_LABEL } from '@shared/telop/effects'
 
 /**
@@ -44,8 +45,11 @@ function stepStateLabel(step: StepStatus): string {
   switch (step.state) {
     case 'done':
       return step.elapsedMs !== undefined ? `完了 · ${formatElapsed(step.elapsedMs)}` : '完了'
-    case 'run':
-      return `実行中 ${Math.round(step.percent)}%`
+    case 'run': {
+      // 長い工程(文字起こしなど)は、残り時間の目安も出す
+      const rest = remainingMs(step.startedAt, step.percent, Date.now())
+      return `実行中 ${Math.round(step.percent)}%${rest !== null ? ` · ${formatRemaining(rest)}` : ''}`
+    }
     case 'error':
       return 'エラー'
     case 'skipped':
@@ -263,7 +267,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 className="small-button"
                 disabled={!scan || sources.length === 0}
                 onClick={() => void runPipeline()}
-                title="同期からやり直します(タイムラインには新しいトラックとして加わります)"
+                title="同期からやり直します(前に並べた収録素材と自動で置いたものは入れ替わります。手で入れたクリップ・トラックは残ります)"
               >
                 {steps.sync.state === 'wait' ? '開始' : 'やり直す'}
               </button>

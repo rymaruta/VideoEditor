@@ -25,6 +25,7 @@ import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import { buildMulticamLayout } from '@shared/sync/multicamLayout'
 import type { MediaAsset } from '@shared/types'
 import { onProjectSwitch, useProjectStore } from './projectStore'
+import { overallPercent, reportBusy } from '../lib/busyReporter'
 import { useSettingsStore } from './settingsStore'
 import { parseDictionary } from '@shared/telop/polish'
 import { usePresetStore } from './presetStore'
@@ -1177,3 +1178,27 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 // 別のプロジェクトを開いた・新しく作ったら、前の回の自動編集の結果を捨てる
 // (残すと「仮編集を作り直す」が前の回の場面の区切りで今の回を切り、要確認にも前の回の項目が出る)
 onProjectSwitch(() => usePipelineStore.getState().resetResults())
+
+// 自動編集の最中は、PC をスリープさせず、タスクバーに進み具合を出す。終わったら知らせる
+usePipelineStore.subscribe((s, prev) => {
+  if (s.running) {
+    const current = STEPS.find((st) => s.steps[st.id].state === 'run')
+    reportBusy('pipeline', {
+      label: `自動編集${current ? `(${current.label})` : ''}`,
+      percent: overallPercent(STEPS.map((st) => s.steps[st.id]))
+    })
+  } else if (prev.running) {
+    reportBusy('pipeline', null)
+    const failed = STEPS.filter((st) => s.steps[st.id].state === 'error')
+    if (failed.length > 0)
+      window.api.notifyDone(
+        '自動編集で止まった工程があります',
+        failed.map((st) => `${st.label}: ${s.steps[st.id].note ?? ''}`).join('\n')
+      )
+    else
+      window.api.notifyDone(
+        '自動編集が終わりました',
+        `${useProjectStore.getState().project.name} — 仕上がりを確かめて、要確認の項目を見てください`
+      )
+  }
+})

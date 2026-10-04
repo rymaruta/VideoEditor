@@ -35,6 +35,7 @@ import {
 import { ensurePreviewProxy } from './previewProxyService'
 import { MediaJobQueue } from './mediaJobQueue'
 import { killLiveProcesses } from './liveProcesses'
+import { currentBusy, notifyDone, setBusy, type BusyState } from './busyState'
 import { scanLongFormWindows } from './longFormService'
 import {
   probeMedia,
@@ -106,6 +107,8 @@ function fileStamp(filePath: string): string {
 loadEnvFile()
 
 let hasUnsavedChanges = false
+/** 処理の途中でも閉じると決めた(保存の確認で戻ったら取り消す) */
+let quitWhileBusy = false
 let autosavePath = ''
 /** このセッションで自動保存を1回でも書いたか(前回のぶんを退避するのは最初の1回だけ) */
 let autosaveOverwrittenThisSession = false
@@ -183,6 +186,23 @@ function createWindow(): void {
 
   mainWindow.on('close', (e) => {
     saveWindowState(mainWindow)
+    // 長い処理の最中なら、まず確かめる(閉じると途中までの処理が失われる)
+    const running = currentBusy()
+    if (running && !quitWhileBusy) {
+      const choice = dialog.showMessageBoxSync(mainWindow, {
+        type: 'warning',
+        buttons: ['中止して終了', 'キャンセル'],
+        defaultId: 1,
+        cancelId: 1,
+        message: `${running.label}の途中です`,
+        detail: '終了すると、途中までの処理は失われます。終了しますか?'
+      })
+      if (choice !== 0) {
+        e.preventDefault()
+        return
+      }
+      quitWhileBusy = true
+    }
     if (!hasUnsavedChanges) {
       // ここでファイルが残っているのは、前回の復元確認を「あとで決める」で見送った
       // ぶんだけ(保存・開く・新規では clearAutosave が消している)。消してしまうと
@@ -202,7 +222,7 @@ function createWindow(): void {
     if (choice === 0) {
       hasUnsavedChanges = false
       mainWindow.close()
-    }
+    } else quitWhileBusy = false
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -589,6 +609,12 @@ app.whenReady().then(() => {
   ipcMain.on(IPC.setDirtyState, (_e, dirty: boolean) => {
     hasUnsavedChanges = dirty
   })
+  ipcMain.on(IPC.setBusyState, (e, state: BusyState | null) =>
+    setBusy(BrowserWindow.fromWebContents(e.sender), state)
+  )
+  ipcMain.on(IPC.notifyDone, (e, title: string, body: string) =>
+    notifyDone(BrowserWindow.fromWebContents(e.sender), String(title), String(body))
+  )
   ipcMain.handle(IPC.checkAutosave, () => autosaveStatus(autosavePath))
   ipcMain.handle(IPC.loadAutosave, () => loadProjectFile(autosavePath))
   /**

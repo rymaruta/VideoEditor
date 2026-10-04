@@ -16,6 +16,7 @@ import type { TelopLayerPayload } from '@shared/telop/layer'
 import type { AspectRatio, ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
 import { FolderIcon, PlayCircleIcon, TrashIcon } from './icons'
 import { ExportQcPanel } from './ExportQcPanel'
+import { reportBusy } from '../lib/busyReporter'
 import { useQcStore } from '../store/qcStore'
 
 /**
@@ -113,6 +114,11 @@ export function ExportDialog(): React.JSX.Element | null {
   })
 
   useEffect(() => window.api.onExportProgress((p) => setProgress(p)), [])
+  // 書き出しの最中は、PC をスリープさせず、タスクバーに進み具合を出す
+  useEffect(() => {
+    reportBusy('export', running ? { label: '書き出し', percent: progress?.percent } : null)
+  }, [running, progress?.percent])
+  useEffect(() => () => reportBusy('export', null), [])
 
   // GPU が使えるかは開いたときに1回だけ調べる(main 側も結果を覚えている)
   useEffect(() => {
@@ -215,12 +221,16 @@ export function ExportDialog(): React.JSX.Element | null {
     try {
       await runOne(project.aspectRatio, resolutionHeight, quality, outputPath)
       setDonePath(outputPath)
+      window.api.notifyDone('書き出しが終わりました', outputPath)
       // 書き出した動画をそのまま確認する(黒味・フリーズ・無音・ラウドネス・テロップ)
       void useQcStore.getState().run(outputPath, loudness)
       if (openFolderAfter) await window.api.showItemInFolder(outputPath).catch(() => {})
     } catch (e) {
       const message = formatIpcError(e)
-      if (message !== 'EXPORT_CANCELED') setError(message)
+      if (message !== 'EXPORT_CANCELED') {
+        setError(message)
+        window.api.notifyDone('書き出しに失敗しました', message)
+      }
     } finally {
       setRunning(false)
       setProgress(null)
@@ -258,6 +268,7 @@ export function ExportDialog(): React.JSX.Element | null {
     }
     setRunning(false)
     setProgress(null)
+    window.api.notifyDone('まとめての書き出しが終わりました', folder)
     if (lastPath && openFolderAfter) await window.api.showItemInFolder(lastPath).catch(() => {})
   }
 
