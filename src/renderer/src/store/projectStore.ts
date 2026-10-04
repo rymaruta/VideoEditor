@@ -2631,39 +2631,85 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           }
         })
       ]
+      // 本編に残した差し込みの画(静止画・タイトルなど)の分だけ、後ろの声とテロップを後ろへずらす。
+      // 仮編集の声・テロップの時刻は差し込みの無いタイムラインのものなので、そのままだと差し込みの長さだけずれる
+      const fresh: Project = {
+        ...state.project,
+        clips,
+        audioTracks,
+        // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す
+        videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
+        // 作り直すときに今の本編と比べられるよう、組んだ本編を共通の時刻で覚える
+        roughCutAuto: state.project.multicam
+          ? coverageOfClips(cut.main, state.project.multicam)
+          : undefined,
+        cutOverrides: hasOverrides(overrides) ? overrides : undefined,
+        // 人が直したテロップは文字と見た目を残し、人が消したものは足し直さない。
+        // 直した内容はプロジェクトに覚える(場面を落として外れても、戻したときに直した内容で出す)
+        editedTelops: rememberEditedTelops(state.project.textOverlays, state.project.editedTelops),
+        textOverlays: [
+          ...state.project.textOverlays
+            .filter((o) => !o.utteranceId && !o.effectId)
+            .map((o) => {
+              if (!o.linkedClipId) return o
+              const to = relink(o.linkedClipId, o.linkOffset ?? 0)
+              return to
+                ? { ...o, linkedClipId: to.id, linkOffset: to.offset }
+                : { ...o, linkedClipId: undefined, linkOffset: undefined }
+            }),
+          ...mergeManualTelops(
+            state.project.textOverlays,
+            telops,
+            new Set(state.project.dismissedTelops ?? []),
+            state.project.editedTelops
+          ).map((o) => ({ ...o, id: uuid() }))
+        ]
+      }
+      const rebuiltProject =
+        clips !== rebuilt && state.project.multicam
+          ? followMainEdit({ ...fresh, clips: rebuilt }, fresh, true)
+          : fresh
       return {
         __noFollow: true,
         ...pushHistory(state),
         selectedClipId: null,
         multiSelectedClipIds: [],
         selectedOverlayId: null,
+        project: rebuiltProject
+      }
+    }),
+
+  setEffectTelops: (telops, speech) =>
+    set((state) => {
+      // 置いたままの演出テロップは、今の時刻を残す(1つ選び直しただけで、人が動かした他のものが戻らないように)
+      const placedAt = new Map(
+        state.project.textOverlays
+          .filter((o) => o.effectId)
+          .map((o) => [o.effectId!, { startTime: o.startTime, endTime: o.endTime }])
+      )
+      telops = telops.map((t) =>
+        t.effectId && placedAt.has(t.effectId) ? { ...t, ...placedAt.get(t.effectId)! } : t
+      )
+      return {
+        ...pushHistory(state),
         project: {
           ...state.project,
-          clips,
-          audioTracks,
-          // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す
-          videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
-          // 作り直すときに今の本編と比べられるよう、組んだ本編を共通の時刻で覚える
-          roughCutAuto: state.project.multicam
-            ? coverageOfClips(cut.main, state.project.multicam)
-            : undefined,
-          cutOverrides: hasOverrides(overrides) ? overrides : undefined,
-          // 人が直したテロップは文字と見た目を残し、人が消したものは足し直さない。
-          // 直した内容はプロジェクトに覚える(場面を落として外れても、戻したときに直した内容で出す)
           editedTelops: rememberEditedTelops(
             state.project.textOverlays,
             state.project.editedTelops
           ),
           textOverlays: [
-            ...state.project.textOverlays
-              .filter((o) => !o.utteranceId && !o.effectId)
-              .map((o) => {
-                if (!o.linkedClipId) return o
-                const to = relink(o.linkedClipId, o.linkOffset ?? 0)
-                return to
-                  ? { ...o, linkedClipId: to.id, linkOffset: to.offset }
-                  : { ...o, linkedClipId: undefined, linkOffset: undefined }
-              }),
+            ...state.project.textOverlays.filter(
+              (o) => !o.effectId && (!speech || o.utteranceId !== speech.utteranceId)
+            ),
+            ...(speech
+              ? mergeManualTelops(
+                  state.project.textOverlays,
+                  speech.telops,
+                  new Set(state.project.dismissedTelops ?? []),
+                  state.project.editedTelops
+                ).map((o) => ({ ...o, id: uuid() }))
+              : []),
             ...mergeManualTelops(
               state.project.textOverlays,
               telops,
@@ -2674,34 +2720,6 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         }
       }
     }),
-
-  setEffectTelops: (telops, speech) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        editedTelops: rememberEditedTelops(state.project.textOverlays, state.project.editedTelops),
-        textOverlays: [
-          ...state.project.textOverlays.filter(
-            (o) => !o.effectId && (!speech || o.utteranceId !== speech.utteranceId)
-          ),
-          ...(speech
-            ? mergeManualTelops(
-                state.project.textOverlays,
-                speech.telops,
-                new Set(state.project.dismissedTelops ?? []),
-                state.project.editedTelops
-              ).map((o) => ({ ...o, id: uuid() }))
-            : []),
-          ...mergeManualTelops(
-            state.project.textOverlays,
-            telops,
-            new Set(state.project.dismissedTelops ?? []),
-            state.project.editedTelops
-          ).map((o) => ({ ...o, id: uuid() }))
-        ]
-      }
-    })),
 
   setTranscript: (transcript) =>
     set((state) => ({
@@ -4051,7 +4069,12 @@ function relinkToRebuiltClips(
  * 人が自分で置いたもの(自動の印の無いトラック・テロップ)と、本編に紐づくものは動かさない
  * (紐づくものは `syncLinked…` が本編のクリップに合わせる)。
  */
-function followMainEdit(prev: Project, next: Project): Project {
+function followMainEdit(
+  prev: Project,
+  next: Project,
+  /** 仮編集を入れた直後: 動かすのは入れたばかりの声と自動テロップだけ(前の回の自動 SE・BGM・CG は置き直される) */
+  onlyRebuilt = false
+): Project {
   const info = next.multicam
   if (!info || prev.multicam !== info) return next
   const before = spansOfClips(prev.clips, info)
@@ -4089,7 +4112,7 @@ function followMainEdit(prev: Project, next: Project): Project {
       }))
   }
   const follows = (t: { multicamSourceId?: string; autoRole?: string }): boolean =>
-    Boolean(t.multicamSourceId || t.autoRole)
+    Boolean(t.multicamSourceId || (!onlyRebuilt && t.autoRole))
   const gaps = uncoveredSpans(after, segs)
 
   const audioTracks = next.audioTracks.map((t) => {

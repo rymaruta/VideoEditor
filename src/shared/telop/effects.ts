@@ -242,7 +242,7 @@ ${note ? `方針: ${note}\n` : ''}
 - price: 店名・価格(発言に出た店名・品名・値段を「店名|品名|値段」の形で。**値段は発言の中の数字だけ**。例「${EXAMPLES.price}」)
 - route: 移動ルート(発言から分かる移動を「出発→手段と時間→到着」の形で。例「${EXAMPLES.route}」)
 決まり:
-- 1つの文は${MAX_TEXT_CHARS}字以内(price・route・translate は30字まで)。発言を書き換えたり、言っていない事実を作ったりしない
+- 1つの文は${MAX_TEXT_CHARS}字以内(price は40字・route と translate は32字・dialect は26字まで)。発言を書き換えたり、言っていない事実を作ったりしない
 - 例の文をそのまま使わない。同じ文を何度も使わない
 - 地名・状況説明・注釈・店名・価格・移動ルートは、発言の中に根拠があるものだけ
 - 強調は発言の中の言葉だけ(言い換えない)
@@ -289,10 +289,7 @@ export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[])
     const lineKey = textKey(lineText.get(after) ?? '')
     // (訳の類は発言で中身が決まるので、例と同じ文になっても写しとはみなさない)
     const copied =
-      EXAMPLE_KEYS.has(key) &&
-      !lineKey.includes(key) &&
-      kind !== 'translate' &&
-      kind !== 'dialect'
+      EXAMPLE_KEYS.has(key) && !lineKey.includes(key) && kind !== 'translate' && kind !== 'dialect'
     if (!key || copied || seen.has(key)) continue
     // 強調は発言の中の言葉そのままに限る(言っていない言葉を大きく出さない)
     if (kind === 'emphasis' && !lineKey.includes(key)) continue
@@ -306,7 +303,8 @@ export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[])
     let conf = Math.max(0, Math.min(1, confidence))
     if (kind === 'price') conf = Math.min(conf, PRICE_MAX_CONFIDENCE)
     out.push({
-      id: `fx-${after}-${out.length}`,
+      // 同じ発言・同じ種類・同じ文なら同じ ID(頼み直しても、人が消した・直した印が別の提案に付かない)
+      id: `fx-${after}-${kind}-${key}`,
       afterLineId: after,
       kind,
       text: shown,
@@ -328,10 +326,19 @@ export function isForeignLine(text: string): boolean {
 }
 
 /** 値段の数字が発言の中にあるか(「2,800円」と「にせんはっぴゃく」は比べられないので、数字だけ見る) */
+/** 「店名|品名|値段」を欄に分ける(全角の｜も)。値段の中の「/」(1,000円/人)は分けない */
+function splitPriceAnswer(text: string): string[] {
+  return text
+    .split(/[|｜]/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+}
+
 function priceInLine(answer: string, line: string): boolean {
   const digits = (s: string): string[] =>
     (s.normalize('NFKC').match(/\d[\d,]*/g) ?? []).map((d) => d.replace(/,/g, ''))
-  const asked = digits(answer.split('|').pop() ?? answer)
+  // 店名に数字があっても(第2食堂)、確かめるのは値段の欄だけ
+  const asked = digits(splitPriceAnswer(answer).pop() ?? answer)
   if (asked.length === 0) return true // 値段の無い札(店名だけ)は良い
   const said = new Set(digits(line))
   return asked.every((d) => said.has(d))
@@ -350,14 +357,12 @@ export function formatEffectText(kind: EffectKind, text: string): string {
     case 'note':
       return /^[※*]/.test(t) ? t : `※${t}`
     case 'teaser': {
-      const body = t.replace(/^(この)?あと[、,\s]*/u, '').trim()
+      // 先頭の「このあと」や、区切りの付いた「あと、」だけ外す(「あと5分で」の「あと」は文の一部)
+      const body = t.replace(/^(このあと|あと(?=[、,\s…]))[、,\s…]*/u, '').trim()
       return body ? `このあと\n${body}` : ''
     }
     case 'price': {
-      const parts = t
-        .split(/[|｜/]/)
-        .map((x) => x.trim())
-        .filter(Boolean)
+      const parts = splitPriceAnswer(t)
       if (parts.length >= 3) return `${parts[0]}\n${parts[1]} **${parts.slice(2).join(' ')}**`
       if (parts.length === 2) return `${parts[0]}\n**${parts[1]}**`
       return parts[0] ?? ''
@@ -373,7 +378,7 @@ export function formatEffectText(kind: EffectKind, text: string): string {
       return t
     }
     case 'dialect':
-      return /^[(（]/.test(t) ? t : `(訳:${t})`
+      return /^[(（]/.test(t) ? t : `(訳:${t.replace(/^訳[:：]\s*/u, '')})`
     default:
       return t
   }

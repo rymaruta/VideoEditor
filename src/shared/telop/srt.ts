@@ -41,7 +41,7 @@ export function parseSrtTime(text: string): number {
 export function parseSrt(text: string): { start: number; end: number; text: string }[] {
   const out: { start: number; end: number; text: string }[] = []
   const blocks = text
-    .replace(/^﻿/, '')
+    .replace(/^\ufeff/, '')
     .replace(/\r\n?/g, '\n')
     .split(/\n\s*\n/)
   for (const block of blocks) {

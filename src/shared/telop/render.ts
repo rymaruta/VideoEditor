@@ -178,9 +178,19 @@ export function wrapGlyphs(
         line = rest
         width = rest.reduce((s, x) => s + advance(x.ch, x), 0)
       } else {
-        lines.push(line)
-        line = []
-        width = 0
+        // ルビの掛かった親文字の途中では折らない(折ると、親文字が2行に分かれてルビが出せない)
+        let cut = line.length
+        for (let k = line.length - 1; k >= 0; k--) {
+          const len = line[k].rubyLen ?? 0
+          if (line[k].ruby && k + len > line.length) {
+            cut = k
+            break
+          }
+        }
+        const rest = cut > 0 ? line.slice(cut) : []
+        lines.push(cut > 0 ? line.slice(0, cut) : line)
+        line = rest
+        width = rest.reduce((s, x) => s + advance(x.ch, x), 0)
       }
     }
     line.push(g)
@@ -385,8 +395,21 @@ export function charEntranceAt(
  * 書き出しの文字数の確認・一覧の表示など、印を見せたくない所で使う
  */
 export function stripTelopMarkup(text: string): string {
-  return (text ?? '').replace(/《[^《》\n]*》/g, '').replace(/\*\*|__|｜/g, '')
+  // 描くときと同じ読み方で外す(正規表現で別に外すと、飾りの《》や文字の｜まで消え、描いた文字と食い違う)
+  return parseTelopMarkup(text)
+    .map((g) => g.ch)
+    .join('')
 }
+
+/** 描く文字とルビの文字をすべて(フォントを先に読み込むのに使う) */
+export function telopDrawnChars(text: string): string {
+  return parseTelopMarkup(text)
+    .map((g) => g.ch + (g.ruby ?? ''))
+    .join('')
+}
+
+/** 「｜」が無いときにルビとみなす読み(かな・長音・英字だけ。《速報》のような飾りの括弧はルビにしない) */
+const RUBY_READING = /^[\p{sc=Hiragana}\p{sc=Katakana}ー・a-zA-Z\s]+$/u
 
 /** ルビの親文字にする文字(「｜」が無いときは、《 の直前に続く漢字) */
 const RUBY_BASE = /[\p{sc=Han}々〆ヶ]/u
@@ -416,8 +439,13 @@ export function parseTelopMarkup(text: string): Glyph[] {
       continue
     }
     if (chars[i] === '｜') {
-      rubyStart = out.length
-      continue
+      // 同じ行の後ろに《 があるときだけルビの始まり。無ければ文字の「｜」
+      const nl = chars.indexOf('\n', i + 1)
+      const open = chars.indexOf('《', i + 1)
+      if (open > i && (nl < 0 || open < nl)) {
+        rubyStart = out.length
+        continue
+      }
     }
     if (chars[i] === '《') {
       const close = chars.indexOf('》', i + 1)
@@ -429,7 +457,7 @@ export function parseTelopMarkup(text: string): Glyph[] {
           from = out.length
           while (from > 0 && RUBY_BASE.test(out[from - 1].ch)) from--
         }
-        if (from < out.length && reading) {
+        if (from < out.length && reading && (rubyStart >= 0 || RUBY_READING.test(reading))) {
           out[from] = { ...out[from], ruby: reading, rubyLen: out.length - from }
           rubyStart = -1
           i = close
@@ -646,7 +674,9 @@ export function layoutTelop(
     topFromAnchor = -blockHeight / 2
   }
   return {
-    lines: lines.map(({ rubySpace: _r, ...l }) => l),
+    // ルビの分の幅は配置の中だけで使う(外には出さない)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    lines: lines.map(({ rubySpace, ...l }) => l),
     fontSize,
     lineHeight,
     blockWidth,
@@ -996,22 +1026,26 @@ export function drawTelop(
     setCanvasFont(ctx, telopFont(style, size))
   }
   /** 1文字を、その文字の動き(移動・回転・拡大・透明)を付けて描く。`fn` は文字の左端・中心の高さで描く */
-  const put = (c: Cell, fn: (x: number, y: number) => void): void => {
+  // `off` は文字の向きに関係なくずらす量(影。縦書きで回した文字でも、影は他の文字と同じ向きに落とす)
+  const put = (c: Cell, fn: (x: number, y: number) => void, off = { x: 0, y: 0 }): void => {
     switchSize(c.g.size)
     if (!c.dx && !c.dy && !c.rot && c.scale === 1 && c.alpha === 1) {
-      fn(c.x - c.g.width / 2, c.y)
+      fn(c.x - c.g.width / 2 + off.x, c.y + off.y)
       return
     }
     ctx.save()
-    ctx.translate(c.x + c.dx, c.y + c.dy)
+    ctx.translate(c.x + c.dx + off.x, c.y + c.dy + off.y)
     if (c.rot) ctx.rotate(c.rot)
     if (c.scale !== 1) ctx.scale(c.scale, c.scale)
     if (c.alpha !== 1) ctx.globalAlpha = ctx.globalAlpha * c.alpha
     fn(-c.g.width / 2, 0)
     ctx.restore()
   }
-  const eachCell = (fn: (c: Cell, x: number, y: number) => void): void => {
-    for (const c of all) put(c, (x, y) => fn(c, x, y))
+  const eachCell = (
+    fn: (c: Cell, x: number, y: number) => void,
+    off?: { x: number; y: number }
+  ): void => {
+    for (const c of all) put(c, (x, y) => fn(c, x, y), off)
     switchSize(fs)
   }
 
@@ -1103,11 +1137,14 @@ export function drawTelop(
     }
     ctx.fillStyle = shadowFill
     ctx.strokeStyle = shadowFill
-    eachCell((c, x, y) => {
-      ctx.lineWidth = ringWidth(c, outer)
-      if (outer > 0) ctx.strokeText(c.g.ch, x + sh.dx, y + sh.dy)
-      ctx.fillText(c.g.ch, x + sh.dx, y + sh.dy)
-    })
+    eachCell(
+      (c, x, y) => {
+        ctx.lineWidth = ringWidth(c, outer)
+        if (outer > 0) ctx.strokeText(c.g.ch, x, y)
+        ctx.fillText(c.g.ch, x, y)
+      },
+      { x: sh.dx, y: sh.dy }
+    )
     if (shadowBlur > 0) {
       ctx.restore()
       setCanvasFont(ctx, telopFont(style, currentSize))

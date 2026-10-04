@@ -149,3 +149,33 @@ describe('AI の種類ごとの見せ方', () => {
     expect(out[1].confidence).toBe(PRICE_MAX_CONFIDENCE)
   })
 })
+
+describe('見せ方の細かい所', () => {
+  it('引きの「あと5分で」は文の一部として残す', () => {
+    expect(formatEffectText('teaser', 'あと少しで頂上…!?')).toBe('このあと\nあと少しで頂上…!?')
+    expect(formatEffectText('teaser', 'あと、衝撃の結末')).toBe('このあと\n衝撃の結末')
+  })
+  it('方言の「訳:」は二重に付けない。価格の「/人」は分けない', () => {
+    expect(formatEffectText('dialect', '訳:おいしい')).toBe('(訳:おいしい)')
+    expect(formatEffectText('price', '食堂|うに丼|1,000円/人')).toBe('食堂\nうに丼 **1,000円/人**')
+  })
+  it('店名の数字は値段の確かめに使わない。ID は順番に依らない', () => {
+    const lines = [line('l1', 'うに丼は2800円')]
+    const out = parseEffectAnswer(
+      {
+        effects: [
+          {
+            after: 'l1',
+            kind: 'price',
+            text: '第2食堂｜うに丼｜2,800円',
+            confidence: 0.9,
+            reason: ''
+          }
+        ]
+      },
+      lines
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].id).not.toMatch(/-0$/)
+  })
+})

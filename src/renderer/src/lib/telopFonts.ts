@@ -1,4 +1,4 @@
-import { stripTelopMarkup, telopFontWeight, TELOP_FONT_STACKS } from '@shared/telop/render'
+import { telopDrawnChars, telopFontWeight, TELOP_FONT_STACKS } from '@shared/telop/render'
 import type { TextStyle } from '@shared/types'
 
 /**
@@ -21,7 +21,8 @@ export async function loadTelopFonts(
     if (!family || !family.startsWith('"')) continue // PC の標準書体は読み込み不要
     const key = `${t.style.italic ? 'italic ' : ''}${telopFontWeight(t.style)} 40px ${family}`
     const set = chars.get(key) ?? new Set<string>()
-    for (const ch of stripTelopMarkup(t.text)) set.add(ch)
+    // ルビの文字も読み込む(読み込まないと、ルビだけ代わりの書体で焼かれる)
+    for (const ch of telopDrawnChars(t.text)) set.add(ch)
     chars.set(key, set)
   }
   let loaded = false

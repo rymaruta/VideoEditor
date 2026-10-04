@@ -1108,11 +1108,27 @@ describe('仮編集の作り直しで、人が決めた音・差し込んだク�
         [0, 9],
         [21, 30]
       ]),
-      []
+      [
+        {
+          text: '後半',
+          startTime: 10,
+          endTime: 11,
+          style: defaultTextStyle(),
+          utteranceId: 'u2',
+          utteranceChunk: 0
+        }
+      ]
     )
     expect(
       st().project.clips.map((c) => (c.id === 'broll' ? 'broll' : `${c.inPoint}-${c.outPoint}`))
     ).toEqual(['0-9', 'broll', '21-30'])
+    // 差し込み(3秒)の後ろの声とテロップは、差し込みの長さだけ後ろへ(素材の 22 秒 = タイムラインの 13 秒)
+    const mic = st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    expect(mic.clips.map((c) => [c.startTime, c.inPoint, c.outPoint])).toEqual([
+      [0, 0, 9],
+      [12, 21, 30]
+    ])
+    expect(st().project.textOverlays.find((o) => o.utteranceId === 'u2')?.startTime).toBe(13)
   })
 })
 

@@ -114,3 +114,34 @@ describe('effectOverlays — 種類ごとの時刻と場所', () => {
     expect(out[1].endTime - out[1].startTime).toBeCloseTo(1.5, 9)
   })
 })
+
+describe('effectOverlays — 削った場面の頭に当たった章', () => {
+  it('間を詰めて削った所に当たったら、直後に残っている所の頭へ寄せる', () => {
+    const project = { transcript: [] } as unknown as Project
+    const cutSpans = [
+      { timeline: 0, start: 9.85, end: 30 },
+      { timeline: 20.15, start: 399.85, end: 420 }
+    ]
+    const chapter = (id: string, at: number): EffectProposal => ({
+      id,
+      afterLineId: '',
+      at,
+      kind: 'chapter',
+      text: id,
+      confidence: 1,
+      reason: ''
+    })
+    const out = effectOverlays(
+      [chapter('c1', 9.8), chapter('c2', 399.8), chapter('far', 100)],
+      new Set(['c1', 'c2', 'far']),
+      project,
+      info,
+      cutSpans,
+      []
+    )
+    expect(out.map((o) => [o.text, Number(o.startTime.toFixed(2))])).toEqual([
+      ['c1', 0.05],
+      ['c2', 20.2]
+    ])
+  })
+})

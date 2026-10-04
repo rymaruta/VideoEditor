@@ -365,6 +365,9 @@ export async function proposeEffects(
   }
 }
 
+/** 時刻で決まる演出テロップを、削った所の直後へ寄せてよい長さ(秒) */
+export const TIMED_EFFECT_SNAP_SEC = 20
+
 /** 選んだ提案を、仮編集のタイムラインに置く(発言の終わりから。前の演出テロップとは重ねない) */
 export function effectOverlays(
   proposals: readonly EffectProposal[],
@@ -393,7 +396,15 @@ export function effectOverlays(
               ? toCommon(f, u.sourceStart) + 0.05
               : toCommon(f, u.sourceEnd) - 0.05
             : null
-      const t = at !== null ? roughTimelineAt(spans, at) : null
+      let t = at !== null ? roughTimelineAt(spans, at) : null
+      // 時刻で決まる種類(章・時刻・笑い)が、間を詰めて削った場面の頭に当たったら、
+      // その直後に残っている所の頭へ寄せる(寄せないと、章タイトルがほぼ必ず消える)
+      if (t === null && at !== null && p.at !== undefined) {
+        const next = spans
+          .filter((sp) => sp.start >= at && sp.start - at <= TIMED_EFFECT_SNAP_SEC)
+          .sort((a, b) => a.start - b.start)[0]
+        if (next) t = next.timeline + 0.05
+      }
       // 字幕の類(翻訳・方言・吹き出し)は発言と同じ長さだけ出す
       const lineSec =
         u && f && EFFECT_FOLLOWS_LINE.has(p.kind)
