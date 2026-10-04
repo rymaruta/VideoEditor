@@ -96,3 +96,47 @@ export function findBreak(chars: readonly string[], from: number, max: number): 
   while (k < chars.length && NO_LINE_START.test(chars[k])) k++
   return k
 }
+
+/**
+ * 行の区切りを、**長さを揃えて**決める(終わりの位置の並び)。
+ * 前から1行ずつ上限まで詰めると、最後の行に数文字だけ残る(「…パック牛乳で / ある」)。
+ * 残りを何行で書くかを先に決め、その平均の長さの近くで良い区切りを探す。
+ * 各行は `maxLine` 以内(区切れる所が無いときの禁則のぶら下げだけは超えうる)。
+ */
+export function balancedLineEnds(chars: readonly string[], maxLine: number): number[] {
+  const ends: number[] = []
+  const max = Math.max(1, Math.floor(maxLine))
+  let from = 0
+  while (from < chars.length) {
+    const remaining = chars.length - from
+    if (remaining <= max) {
+      ends.push(chars.length)
+      break
+    }
+    const lines = Math.ceil(remaining / max)
+    const target = Math.ceil(remaining / lines)
+    const slack = Math.max(2, Math.ceil(max / 4))
+    // 残りが、あと (lines - 1) 行に収まる長さより短くは切らない(切ると1行増える)
+    const lo = Math.max(1, target - slack, remaining - max * (lines - 1))
+    // 区切りの良さから、平均の長さからの離れ具合を引いて比べる(良い区切りでも遠すぎれば選ばない)
+    let best = -1
+    let bestValue = -Infinity
+    let bestDist = Infinity
+    for (let len = Math.min(max, target + slack); len >= lo; len--) {
+      const sc = breakScore(chars, from + len)
+      if (sc === -Infinity) continue
+      const dist = Math.abs(len - target)
+      const value = sc - dist * 0.5
+      // 同じ値なら、平均の長さに近い方
+      if (value > bestValue || (value === bestValue && dist < bestDist)) {
+        best = from + len
+        bestValue = value
+        bestDist = dist
+      }
+    }
+    const cut = best > from ? best : findBreak(chars, from, max)
+    ends.push(cut)
+    from = cut
+  }
+  return ends
+}

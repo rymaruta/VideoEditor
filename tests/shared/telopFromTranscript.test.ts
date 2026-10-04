@@ -21,11 +21,28 @@ describe('wrapTelopLines', () => {
     ])
   })
 
-  it('句読点が前の方にしか無ければ、文字数で改行する', () => {
+  it('行の長さを揃え、その近くの良い区切り(助詞の後)で改行する', () => {
     expect(wrapTelopLines('木曜日、停戦会談は何の進展もないまま終了', 14)).toEqual([
-      '木曜日、停戦会談は何の進展も',
-      'ないまま終了'
+      '木曜日、停戦会談は何の',
+      '進展もないまま終了'
     ])
+  })
+
+  it('長い発話の最後の1枚が数文字だけにならず、どの1枚も2行に収まる(1行18字でも)', () => {
+    const text = '森永の美味しい牛乳は濃い青色に牛乳瓶をあしらったデザインのパック牛乳である'
+    for (const maxLineChars of [14, 18]) {
+      const chunks = utteranceToTelopChunks(
+        { text, words: [{ text, start: 0, end: 5 }], sourceStart: 0, sourceEnd: 5 },
+        { maxLineChars }
+      )
+      for (const c of chunks) {
+        const lines = c.text.split('\n')
+        expect(lines.length).toBeLessThanOrEqual(2)
+        for (const l of lines) expect([...l].length).toBeLessThanOrEqual(maxLineChars)
+        expect([...c.text.replace(/\s/g, '')].length).toBeGreaterThan(6)
+      }
+      expect(chunks.map((c) => c.text.replace(/\n/g, '')).join('')).toBe(text)
+    }
   })
 })
 

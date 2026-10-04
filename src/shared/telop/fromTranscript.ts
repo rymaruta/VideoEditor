@@ -1,5 +1,5 @@
 import type { AsrWord, TranscriptUtterance } from '../transcript'
-import { applyDictionary, findBreak, removeFillers, type DictionaryEntry } from './polish'
+import { applyDictionary, balancedLineEnds, removeFillers, type DictionaryEntry } from './polish'
 
 /**
  * 発話を発言テロップの単位に区切る(計画書 §5.8 の手前の、仮の整形)。
@@ -53,14 +53,14 @@ function charTimes(words: readonly AsrWord[]): { ch: string; start: number; end:
 /** 1行に収まるよう改行を入れる(禁則を守り、句読点・助詞の後を優先) */
 export function wrapTelopLines(text: string, maxLineChars: number): string[] {
   const chars = [...text]
-  const lines: string[] = []
-  let i = 0
-  while (i < chars.length) {
-    const cut = findBreak(chars, i, maxLineChars)
-    lines.push(chars.slice(i, cut).join('').trim())
-    i = cut
-  }
-  return lines.filter((l) => l.length > 0)
+  let from = 0
+  return balancedLineEnds(chars, maxLineChars)
+    .map((end) => {
+      const line = chars.slice(from, end).join('').trim()
+      from = end
+      return line
+    })
+    .filter((l) => l.length > 0)
 }
 
 export function utteranceToTelopChunks(
@@ -70,31 +70,32 @@ export function utteranceToTelopChunks(
   const maxLine = options.maxLineChars ?? 14
   const maxLines = options.maxLines ?? 2
   const minDur = options.minDurationSec ?? 1.0
-  const perChunk = maxLine * maxLines
 
   const timed = u.words.length > 0 ? charTimes(u.words) : []
   const raw = timed.length > 0 ? timed.map((c) => c.ch).join('') : u.text
-  // 1枚に収まる長さで、句読点の位置を優先して切る
-  const pieces: { from: number; to: number }[] = []
   const chars = [...raw]
-  let i = 0
-  while (i < chars.length) {
-    const to = findBreak(chars, i, perChunk)
-    pieces.push({ from: i, to })
-    i = to
-  }
+  // 1枚の長さを揃えて区切ってから、1枚ずつ改行する。前から1枚ずつ上限まで詰めると、最後の1枚が
+  // 数文字だけになり(「ある」だけが 1.8秒出る)、詰めた1枚は禁則の位置しだいで3行になる。
+  // 1枚の上限は 行数×1行 より少し短くし、改行の位置を選ぶ余地を残す(余地が無いと3行になる)
+  const sheetMax = Math.max(maxLine, maxLine * maxLines - Math.ceil(maxLine / 8))
+  const ends = balancedLineEnds(chars, sheetMax)
+  const pieces = ends.map((end, i) => ({ from: i === 0 ? 0 : ends[i - 1], to: end }))
 
-  const chunks: TelopChunk[] = []
-  for (const p of pieces) {
-    let body = chars.slice(p.from, p.to).join('')
+  const polish = (text: string): string => {
+    let body = text
     if (options.removeFillers !== false) body = removeFillers(body)
     if (options.dictionary?.length) body = applyDictionary(body, options.dictionary)
-    const text = tidyTelopText(body)
+    return tidyTelopText(body)
+  }
+  const chunks: TelopChunk[] = []
+  for (const p of pieces) {
+    // 言いよどみを除く・辞書で直すと長さが変わるので、整えた文で改行し直す
+    const text = wrapTelopLines(polish(chars.slice(p.from, p.to).join('')), maxLine).join('\n')
     if (!text) continue
     const start = timed.length > 0 ? timed[p.from].start : u.sourceStart
     const end = timed.length > 0 ? timed[p.to - 1].end : u.sourceEnd
     chunks.push({
-      text: wrapTelopLines(text, maxLine).join('\n'),
+      text,
       sourceStart: start,
       sourceEnd: Math.max(end, start + minDur)
     })
