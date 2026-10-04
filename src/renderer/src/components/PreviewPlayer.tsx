@@ -1,6 +1,14 @@
 import { ColorMatchFilters } from './ColorMatchFilters'
 import { colorMatchCss } from '../lib/colorMatchCss'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties
+} from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
@@ -81,7 +89,12 @@ import {
   followPreviewTime,
   seekPreviewTime
 } from '../lib/previewSync'
-import { applyPendingPreviewLoad, type PendingPreviewLoad } from '../lib/pendingPreviewLoad'
+import {
+  applyPendingPreviewLoad,
+  toMediaTime,
+  type PendingPreviewLoad
+} from '../lib/pendingPreviewLoad'
+import { canSwapToStandby, standbyTargetFor, type StandbyTarget } from '../lib/previewStandby'
 
 const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
   'sans-serif': 'sans-serif',
@@ -556,6 +569,9 @@ const mainVoiceProbes = new Set<{ analyser: AnalyserNode; gain: () => number }>(
  * なって同じく倍率1に戻る(実測: 消して置き直したあとの倍率は **1.0000**)。
  * どちらも「いま画面にある要素に付いているか」を毎フレーム見れば起きない。
  */
+/** 本編の要素ごとの analyser(付けられなかった要素は null) */
+const elementAnalysers = new WeakMap<HTMLVideoElement, AnalyserNode | null>()
+
 function useMainAudioDucking(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   enabled: boolean,
@@ -591,10 +607,17 @@ function useMainAudioDucking(
     const analyserForCurrentElement = (): AnalyserNode | null => {
       const el = videoRef.current
       if (el === attachedElRef.current) return analyserRef.current
-      // 要素が変わった(初めて生えた / 作り直された)。前の analyser は死んだ要素のもの。
+      // 要素が変わった(初めて生えた / 作り直された / 控えの要素と入れ替わった)。
       analyserRef.current = null
       attachedElRef.current = el
       if (!el) return null
+      // 一度付けた要素には付け直せない(`createMediaElementSource` は要素ごとに1回だけ)。
+      // 本編の要素は2つを入れ替えて使うので、要素ごとに覚えておいて使い回す
+      const known = elementAnalysers.get(el)
+      if (known !== undefined) {
+        analyserRef.current = known
+        return known
+      }
       const ctx = getSharedAudioContext()
       try {
         if (!ctx) throw new Error('no audio context')
@@ -608,6 +631,7 @@ function useMainAudioDucking(
       } catch {
         analyserRef.current = null
       }
+      elementAnalysers.set(el, analyserRef.current)
       void ctx?.resume()
       return analyserRef.current
     }
@@ -852,7 +876,8 @@ export function PreviewPlayer(): React.JSX.Element {
   // 長尺向けの書き出しを選んでいるときは、テロップを書き出しと同じ共通レンダラで描く
   const drawsTelopsOnCanvas = useSettingsStore((s) => s.exportEngine === 'segmented')
 
-  const videoRef = useRef<HTMLVideoElement>(null)
+  // いま映している方の再生要素(2つのうちどちらか。理由は previewStandby)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const frameRef = useRef<HTMLDivElement>(null)
   // 枠の高さは左右パネルのドラッグ・ウィンドウリサイズ・プレビューの拡大で変わるので、
   // 実測して追従させる。テロップの換算倍率の分母になる。
@@ -869,6 +894,9 @@ export function PreviewPlayer(): React.JSX.Element {
   const [isExpanded, setIsExpanded] = useState(false)
   const [volume, setVolume] = useState(readStoredVolume)
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === 'true')
+  // 控えの要素と入れ替えるとき(再生ループの中)に、いまの音量・消音を入れるため
+  const volumeRef = useRef(volume)
+  const mutedRef = useRef(muted)
   const [scrubbingPreview, setScrubbingPreview] = useState(false)
   const [playbackError, setPlaybackError] = useState<string | null>(null)
   const scrubTrackRef = useRef<HTMLDivElement>(null)
@@ -1092,7 +1120,25 @@ export function PreviewPlayer(): React.JSX.Element {
     }
   }, [scrubbingPreview, total, seekTo])
 
-  const [activeSrc, setActiveSrc] = useState<string | null>(null)
+  // 本編の再生要素は2つ。片方を映し、もう片方に次のクリップを先に用意しておく(理由は previewStandby)
+  const slotRefs = useRef<(HTMLVideoElement | null)[]>([null, null])
+  const [slotSrc, setSlotSrc] = useState<(string | null)[]>([null, null])
+  const [activeSlot, setActiveSlot] = useState(0)
+  const activeSlotRef = useRef(0)
+  /** 控えの要素に用意した中身(読み込み終わったらその位置へ入れる) */
+  const standbyRef = useRef<StandbyTarget | null>(null)
+  const activeSrc = slotSrc[activeSlot]
+  // 要素の受け口は描画ごとに作り直さない(作り直すと毎回 null → 要素の順で呼ばれる)
+  const attachSlot0 = useCallback((el: HTMLVideoElement | null): void => {
+    slotRefs.current[0] = el
+    if (activeSlotRef.current === 0) videoRef.current = el
+  }, [])
+  const attachSlot1 = useCallback((el: HTMLVideoElement | null): void => {
+    slotRefs.current[1] = el
+    if (activeSlotRef.current === 1) videoRef.current = el
+  }, [])
+  const setActiveSrc = (url: string | null): void =>
+    setSlotSrc((prev) => prev.map((v, i) => (i === activeSlotRef.current ? url : v)))
   /** `src` を差し替えたときに、読み込み終わってから入れる位置(理由は pendingPreviewLoad) */
   const pendingLoadRef = useRef<PendingPreviewLoad | null>(null)
   // Long-lived closures (the rAF playback loop below) call loadClipForTime across many
@@ -1100,6 +1146,53 @@ export function PreviewPlayer(): React.JSX.Element {
   // snapshot of `activeSrc` state. A ref is always current regardless of which
   // render's closure reads it, so use it for the actual comparison.
   const activeSrcRef = useRef<string | null>(null)
+
+  /** 切れ目が近づいたら、次のクリップを控えの要素に読み込んで頭の位置で待たせる */
+  function prepareStandby(tc: TimedClip, globalTime: number): void {
+    const next = nextTimedClip(timedClips, tc)
+    const asLike = (c: TimedClip): Parameters<typeof standbyTargetFor>[0] => ({
+      url: previewSourceUrl(c.asset),
+      inPoint: c.clip.inPoint,
+      outPoint: c.clip.outPoint,
+      speed: c.clip.speed || 1,
+      clipId: c.clip.id,
+      end: c.end
+    })
+    const target = standbyTargetFor(asLike(tc), next ? asLike(next) : null, globalTime)
+    if (!target) return
+    const prepared = standbyRef.current
+    if (prepared && prepared.clipId === target.clipId && prepared.url === target.url) return
+    standbyRef.current = target
+    const slot = 1 - activeSlotRef.current
+    const el = slotRefs.current[slot]
+    if (el) {
+      el.pause()
+      el.muted = true
+    }
+    if (el && el.getAttribute('src') === target.url) {
+      // 同じ素材が読み込み済み: 位置だけ合わせる
+      el.currentTime = toMediaTime(target.time)
+    } else {
+      // 別の素材: 読み込み終わったら位置を入れる(handleStandbyLoaded)
+      setSlotSrc((prev) => prev.map((v, i) => (i === slot ? target.url : v)))
+    }
+  }
+
+  /** 2つの要素の通知。映している方は従来どおり、控えの方は用意の続きだけ */
+  function handleSlotEvent(kind: 'ended' | 'error' | 'loaded', el: HTMLVideoElement): void {
+    const active = el === videoRef.current
+    if (kind === 'loaded') return active ? handleLoadedMetadata() : handleStandbyLoaded(el)
+    if (!active) return
+    if (kind === 'ended') setIsPlaying(false)
+    else handleVideoError()
+  }
+
+  /** 控えの要素が読み込み終わった: 用意したい位置へ */
+  function handleStandbyLoaded(el: HTMLVideoElement): void {
+    const target = standbyRef.current
+    el.muted = true
+    if (target && el.getAttribute('src') === target.url) el.currentTime = toMediaTime(target.time)
+  }
 
   function loadClipForTime(time: number, resumePlaying: boolean): void {
     const tc = findTimedClipAt(timedClips, time)
@@ -1113,6 +1206,30 @@ export function PreviewPlayer(): React.JSX.Element {
     const url = previewSourceUrl(tc.asset)
     const speed = tc.clip.speed || 1
     const localTime = tc.clip.inPoint + (time - tc.start) * speed
+    // 控えの要素に、この位置が用意できていれば入れ替えるだけ(読み込み直し・シークを待たない)
+    const standbySlot = 1 - activeSlotRef.current
+    const standbyEl = slotRefs.current[standbySlot]
+    if (canSwapToStandby(standbyEl, standbyRef.current, url, localTime) && standbyEl) {
+      const previous = videoRef.current
+      activeSlotRef.current = standbySlot
+      videoRef.current = standbyEl
+      activeSrcRef.current = url
+      standbyRef.current = null
+      pendingLoadRef.current = null
+      // 見た目の入れ替えは React の描画を待たずにその場で(1コマでも前の画を残さない)
+      standbyEl.style.visibility = 'visible'
+      standbyEl.playbackRate = toPlaybackRate(speed)
+      standbyEl.volume = volumeRef.current
+      standbyEl.muted = mutedRef.current || tc.clip.audioDetached === true
+      if (resumePlaying) standbyEl.play().catch(() => {})
+      if (previous) {
+        previous.pause()
+        previous.muted = true
+        previous.style.visibility = 'hidden'
+      }
+      setActiveSlot(standbySlot)
+      return
+    }
     if (activeSrcRef.current !== url) {
       activeSrcRef.current = url
       // **読み込み直しを挟むときは、ここで位置を入れない。** `src` を差し替えると
@@ -1139,7 +1256,6 @@ export function PreviewPlayer(): React.JSX.Element {
     if (!seekRequest) return
     // Reacting to an external event (timeline click) and driving the <video> element's
     // imperative API — not derivable from props/state, so this is not a "derived state" effect.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadClipForTime(seekRequest.time, isPlaying)
     // Intentionally only re-running on a new seek request, not on every isPlaying change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1219,6 +1335,7 @@ export function PreviewPlayer(): React.JSX.Element {
         const speed = tc.clip.speed || 1
         const globalTime = tc.start + (video.currentTime - tc.clip.inPoint) / speed
         setPlayheadTime(globalTime)
+        prepareStandby(tc, globalTime)
 
         if (video.currentTime >= tc.clip.outPoint - 0.02) {
           const next = nextTimedClip(timedClips, tc)
@@ -1243,11 +1360,13 @@ export function PreviewPlayer(): React.JSX.Element {
     findTimedClipAt(timedClips, playheadTime)?.clip.audioDetached ?? false
 
   useEffect(() => {
+    volumeRef.current = volume
+    mutedRef.current = muted
     if (videoRef.current) {
       videoRef.current.volume = volume
       videoRef.current.muted = muted || activeClipAudioDetached
     }
-  }, [volume, muted, activeSrc, activeClipAudioDetached])
+  }, [volume, muted, activeSrc, activeSlot, activeClipAudioDetached])
 
   // ダッキングを使っているトラックが1つでもあるときだけ、本編のレベル測定を始める。
   // 使っていないプロジェクトでは本編の音声経路に一切触らない。
@@ -1309,14 +1428,22 @@ export function PreviewPlayer(): React.JSX.Element {
               />
             )}
             {activeSrc ? (
-              <video
-                ref={videoRef}
-                src={activeSrc}
-                style={{ ...cropFit, filter: colorMatchCss(activeAsset) }}
-                onEnded={() => setIsPlaying(false)}
-                onError={handleVideoError}
-                onLoadedMetadata={handleLoadedMetadata}
-              />
+              [0, 1].map((slot) => (
+                <video
+                  key={slot}
+                  ref={slot === 0 ? attachSlot0 : attachSlot1}
+                  src={slotSrc[slot] ?? undefined}
+                  // 控えの要素は見せない(音は用意するときに止める。入れ替えはその場で切り替える)
+                  style={{
+                    ...cropFit,
+                    filter: colorMatchCss(activeAsset),
+                    visibility: slot === activeSlot ? 'visible' : 'hidden'
+                  }}
+                  onEnded={(e) => handleSlotEvent('ended', e.currentTarget)}
+                  onError={(e) => handleSlotEvent('error', e.currentTarget)}
+                  onLoadedMetadata={(e) => handleSlotEvent('loaded', e.currentTarget)}
+                />
+              ))
             ) : (
               <div className="preview-empty">
                 <ClapperboardIcon width={32} height={32} />
