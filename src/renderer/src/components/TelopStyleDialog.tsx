@@ -343,9 +343,10 @@ export function TelopStyleDialog(): React.JSX.Element | null {
               <button
                 className="small-button"
                 title="ほかの PC・番組で作ったテロップスタイルのファイル(.json)を読み込みます"
+                aria-label="スタイルを読み込む"
                 onClick={() => void importStyles()}
               >
-                スタイルを読み込む…
+                読み込む…
               </button>
               <select
                 className="telop-style-export"
@@ -359,7 +360,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
                   if (v === 'selected' || v === 'all') void exportStyles(v)
                 }}
               >
-                <option value="">スタイルを書き出す…</option>
+                <option value="">書き出す…</option>
                 <option value="selected" disabled={!selected}>
                   選んでいるスタイル
                 </option>

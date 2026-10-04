@@ -1442,7 +1442,7 @@ h3 {
   transition: width 0.2s ease;
 }
 
-/* 共通テロップレンダラで描く層(長尺向けの書き出しを選んでいるとき)。操作は下の DOM の箱が受ける */
+/* テロップは共通テロップレンダラでこの層に描く(書き出しと同じ絵)。操作は下の透明な DOM の箱が受ける */
 .telop-canvas-layer {
   position: absolute;
   inset: 0;
@@ -1452,7 +1452,7 @@ h3 {
   z-index: 3;
 }
 
-/* 共通レンダラで描いているときの DOM の箱は、つかむための当たり判定だけにする(絵は描かない) */
+/* DOM の箱は、つかむための当たり判定だけ(絵は描かない) */
 .overlay-text.overlay-hitbox-only,
 .overlay-text.overlay-hitbox-only * {
   color: transparent !important;
@@ -1473,118 +1473,6 @@ h3 {
 
 .overlay-text:hover {
   outline-color: rgba(255, 255, 255, 0.5);
-}
-
-/* テロップの縦位置・左右の余白は PreviewPlayer が @shared/textStyle の
-   TEXT_MARGIN_V_RATIO / TEXT_MARGIN_H_RATIO からインラインで付ける。
-   ここに数字を書き戻さないこと——書き出し(ASS の MarginV / MarginL/R)と2箇所に
-   分かれた結果、縦は下だけ 10% と 8%、左右は 5% と 2.08% で食い違っていた。 */
-
-/* 長さは PreviewPlayer が @shared/textStyle の TEXT_ANIMATION_MS から
-   --overlay-anim-duration に入れる。ここに秒を書き戻さないこと——書き出し(ASS の
-   \move / \t / \fad の時刻)と2箇所に分かれると、片方だけ動いて黙ってズレる。
-   括弧内の値は変数が来なかったときの保険で、TEXT_ANIMATION_MS と同じ数。
-
-   **効き方は linear。** 書き出しの ASS には加減速を書く手段が無く(`\move` に
-   パラメータが無い / `\t` の accel はべき乗のみ)、CSS の `ease`
-   (cubic-bezier(.25,.1,.25,1)) を表せない。**変えられるのは画面側だけ**なので、
-   画面を書き出しに寄せる。`ease` のままだと、経過25%(87.5ms)の時点で画面は移動を
-   40.9% 終えているのに書き出しは 25.6% しか進んでおらず、同じ演出が別の速さで動く。 */
-.anim-fadeIn {
-  animation: overlayFadeIn var(--overlay-anim-duration, 0.3s) linear;
-}
-
-.anim-popIn {
-  animation: overlayPopIn var(--overlay-anim-duration, 0.2s) linear;
-}
-
-.anim-slideInUp {
-  animation: overlaySlideInUp var(--overlay-anim-duration, 0.35s) linear;
-}
-
-.anim-slideInDown {
-  animation: overlaySlideInDown var(--overlay-anim-duration, 0.35s) linear;
-}
-
-.anim-bounce {
-  animation: overlayBounce var(--overlay-anim-duration, 0.5s) linear;
-}
-
-@keyframes overlayFadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes overlayPopIn {
-  from {
-    transform: scale(0.6);
-  }
-  to {
-    transform: scale(1);
-  }
-}
-
-/* 飛び込む距離は PreviewPlayer が @shared/textStyle の TEXT_SLIDE_OFFSET_RATIO と
-   枠の実寸から --overlay-slide-offset に入れる。ここに px を書き戻さないこと——
-   固定の 40px だったため、枠 236px の既定レイアウトでは枠高の 16.92% 動き、
-   書き出し(ASS の \move = キャンバス高の 5.97%)の 2.8倍だった。しかも枠は
-   overflow: hidden なので、出だしはテロップが枠の外に出て1画素も見えなかった。 */
-@keyframes overlaySlideInUp {
-  from {
-    transform: translateY(var(--overlay-slide-offset, 0px));
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes overlaySlideInDown {
-  from {
-    transform: translateY(calc(var(--overlay-slide-offset, 0px) * -1));
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes overlayBounce {
-  0% {
-    transform: scale(0.3);
-    opacity: 0;
-  }
-  50% {
-    transform: scale(1.15);
-    opacity: 1;
-  }
-  70% {
-    transform: scale(0.92);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-.typewriter-char {
-  display: inline-block;
-  opacity: 0;
-  animation: overlayTypewriterChar 0.05s linear forwards;
-}
-
-@keyframes overlayTypewriterChar {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 .icon-button.active {
@@ -6785,4 +6673,123 @@ h3 {
   flex-direction: column;
   gap: 2px;
 }
+.telop-style-file-actions {
+  border-top: 0;
+  padding-top: 0;
+}
+.telop-style-file-actions .small-button,
+.telop-style-export {
+  flex: 1;
+  min-width: 0;
+  padding-left: 6px;
+  padding-right: 6px;
+  font-size: 11px;
+  justify-content: center;
+}
+.telop-style-dialog select.telop-style-export {
+  height: 26px;
+  padding: 0 4px;
+}
+.dialog-footer-label.telop-style-file-error {
+  color: #ff8f9a;
+}
 /* ================================================================== テロップの見た目の欄 ここまで */
+
+/* ================================================================== テロップ一覧の道具(TelopToolsBar)・種類から追加 */
+.telop-list-head {
+  gap: 6px;
+}
+.telop-list-head > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.telop-list-head .small-button {
+  height: 24px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+select.telop-kind-add {
+  height: 24px;
+  max-width: 128px;
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 11.5px;
+  line-height: normal;
+}
+.telop-tools {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+}
+.telop-tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.telop-tools-row .small-button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.telop-tools .small-button.active {
+  background: #34414f;
+  border-color: var(--accent-1);
+  color: #fff;
+}
+.telop-find {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: #1f1f1f;
+}
+.telop-find input[type='search'],
+.telop-find input[type='text'] {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: normal;
+  min-width: 0;
+}
+.telop-find-loose {
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.telop-find-loose input[type='checkbox'] {
+  width: 13px;
+  height: 13px;
+}
+.telop-find-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.telop-find-actions .small-button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.telop-find-count {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.telop-tools-message {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* ================================================================== テロップ一覧の道具 ここまで */
