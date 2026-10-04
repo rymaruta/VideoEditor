@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { loadTelopFonts } from '../lib/telopFonts'
 import type { AspectRatio, TextOverlay } from '@shared/types'
 import { textCanvasSize } from '@shared/resolution'
 import { drawTelop, type TelopContext } from '@shared/telop/render'
@@ -24,6 +25,17 @@ export function TelopCanvasLayer({
   aspectRatio: AspectRatio
 }): React.JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null)
+  // 同梱フォントを読み込み終えたら描き直す(最初の1回は代わりの書体で描かれる)
+  const [fontsReady, setFontsReady] = useState(0)
+  useEffect(() => {
+    let alive = true
+    void loadTelopFonts(overlays).then((loaded) => {
+      if (alive && loaded) setFontsReady((n) => n + 1)
+    })
+    return () => {
+      alive = false
+    }
+  }, [overlays])
 
   useEffect(() => {
     const canvas = ref.current
@@ -41,7 +53,7 @@ export function TelopCanvasLayer({
     for (const o of overlays) {
       drawTelop(ctx as TelopContext, o, time, { width: w, height: h }, textCanvas)
     }
-  }, [overlays, time, frameWidth, frameHeight, aspectRatio])
+  }, [overlays, time, frameWidth, frameHeight, aspectRatio, fontsReady])
 
   return <canvas ref={ref} className="telop-canvas-layer" />
 }

@@ -24,9 +24,22 @@ export const SE_FOR_EFFECT: Record<EffectKind, SeCategory | null> = {
   corner: 'コーナー',
   emphasis: 'ツッコミ',
   sfx: 'ツッコミ',
-  // 注釈・人物紹介には音を付けない(落ち着いて読ませる)
+  chapter: '場面転換',
+  teaser: 'コーナー',
+  quiz: 'コーナー',
+  route: '状況',
+  price: '地名',
+  hand: 'ツッコミ',
+  // 注釈・人物紹介・字幕の類には音を付けない(落ち着いて読ませる)。笑いは笑い声そのものが鳴っている
   note: null,
-  name: null
+  name: null,
+  laugh: null,
+  clock: null,
+  bubble: null,
+  translate: null,
+  dialect: null,
+  narration: null,
+  counter: null
 }
 
 /** フォルダ名の言い換え(英語・よくある別名)。比べるときは小文字・空白なしで */

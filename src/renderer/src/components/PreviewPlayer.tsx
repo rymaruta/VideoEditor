@@ -69,6 +69,7 @@ import {
 } from './icons'
 
 import { TelopCanvasLayer } from './TelopCanvasLayer'
+import { TELOP_FONT_STACKS } from '@shared/telop/render'
 import { ShortsUiMockup } from './ShortsUiMockup'
 import { shortsSafeAreaInset } from '../lib/shortsSafeArea'
 import type {
@@ -96,13 +97,7 @@ import {
 } from '../lib/pendingPreviewLoad'
 import { canSwapToStandby, standbyTargetFor, type StandbyTarget } from '../lib/previewStandby'
 
-const FONT_STACKS: Record<TextStyle['fontFamily'], string> = {
-  'sans-serif': 'sans-serif',
-  serif: 'serif',
-  'M PLUS Rounded 1c': '"M PLUS Rounded 1c", sans-serif',
-  'Noto Sans JP': '"Noto Sans JP", sans-serif',
-  'Noto Serif JP': '"Noto Serif JP", serif'
-}
+const FONT_STACKS = TELOP_FONT_STACKS
 
 /**
  * `text-shadow` に入れる長さを安全な数値にする。

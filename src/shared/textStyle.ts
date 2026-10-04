@@ -1,4 +1,14 @@
-import type { FontFamily, TelopStroke, TextAnimation, TextPosition, TextStyle } from './types'
+import type {
+  FontFamily,
+  TelopBubbleTail,
+  TelopGradient,
+  TelopPointer,
+  TelopSpanStyle,
+  TelopStroke,
+  TextAnimation,
+  TextPosition,
+  TextStyle
+} from './types'
 
 /**
  * テロップの上下の余白(**枠の高さ**に対する比)。
@@ -202,21 +212,26 @@ export function defaultTextStyle(overrides: Partial<TextStyle> = {}): TextStyle 
   }
 }
 
-export const FONT_FAMILY_OPTIONS: { value: FontFamily; label: string }[] = [
-  { value: 'sans-serif', label: 'ゴシック体' },
-  { value: 'serif', label: '明朝体' },
-  { value: 'M PLUS Rounded 1c', label: '丸ゴシック' },
-  { value: 'Noto Sans JP', label: 'Noto Sans JP' },
-  { value: 'Noto Serif JP', label: 'Noto Serif JP' }
+/**
+ * 書体。ゴシック体・明朝体以外はアプリに同梱している(どの PC でも同じ見た目で書き出せる)。
+ * `group` は選ぶ欄での見出し
+ */
+export const FONT_FAMILY_OPTIONS: { value: FontFamily; label: string; group: string }[] = [
+  { value: 'Noto Sans JP', label: 'Noto Sans JP(ゴシック)', group: '基本' },
+  { value: 'Noto Serif JP', label: 'Noto Serif JP(明朝)', group: '基本' },
+  { value: 'M PLUS Rounded 1c', label: 'M PLUS Rounded(丸ゴシック)', group: '基本' },
+  { value: 'Dela Gothic One', label: 'デラゴシック(極太)', group: 'バラエティ' },
+  { value: 'RocknRoll One', label: 'ロックンロール(太丸)', group: 'バラエティ' },
+  { value: 'Kosugi Maru', label: '小杉丸ゴシック', group: 'バラエティ' },
+  { value: 'Zen Maru Gothic', label: 'Zen 丸ゴシック', group: 'バラエティ' },
+  { value: 'Shippori Mincho', label: 'しっぽり明朝(ナレーション)', group: '明朝' },
+  { value: 'Yomogi', label: 'よもぎ(手書き)', group: '手書き' },
+  { value: 'Klee One', label: 'クレー(ペン字)', group: '手書き' },
+  { value: 'sans-serif', label: 'ゴシック体(PC の標準)', group: 'PC の標準' },
+  { value: 'serif', label: '明朝体(PC の標準)', group: 'PC の標準' }
 ]
 
-const FONT_FAMILIES: readonly FontFamily[] = [
-  'sans-serif',
-  'serif',
-  'M PLUS Rounded 1c',
-  'Noto Sans JP',
-  'Noto Serif JP'
-]
+const FONT_FAMILIES: readonly FontFamily[] = FONT_FAMILY_OPTIONS.map((f) => f.value)
 const TEXT_POSITIONS: readonly TextPosition[] = ['top', 'center', 'bottom']
 const TEXT_ANIMATIONS: readonly TextAnimation[] = [
   'none',
@@ -298,7 +313,115 @@ export function normalizeTextStyle(raw: unknown): TextStyle {
     gradientColor:
       typeof raw.gradientColor === 'string' && raw.gradientColor.length > 0
         ? raw.gradientColor
-        : undefined
+        : undefined,
+    fontWeight:
+      typeof raw.fontWeight === 'number' && Number.isFinite(raw.fontWeight)
+        ? Math.min(900, Math.max(100, Math.round(raw.fontWeight / 100) * 100))
+        : undefined,
+    fillGradient: normalizeGradient(raw.fillGradient),
+    outlineGradient: normalizeGradient(raw.outlineGradient),
+    opacity: optionalNumber(raw.opacity, 0, 1),
+    lineHeight: optionalNumber(raw.lineHeight, 0.6, 3),
+    align:
+      raw.align === 'left' || raw.align === 'right' || raw.align === 'center'
+        ? raw.align
+        : undefined,
+    shadowColor: optionalString(raw.shadowColor),
+    shadowOpacity: optionalNumber(raw.shadowOpacity, 0, 1),
+    shadowAngle: optionalNumber(raw.shadowAngle, -360, 360),
+    shadowDistance: optionalNumber(raw.shadowDistance, 0, 200),
+    shadowBlur: optionalNumber(raw.shadowBlur, 0, 200),
+    glow: isRecord(raw.glow)
+      ? {
+          color: asNonEmptyString(raw.glow.color, '#ffffff'),
+          size: Math.min(200, asNonNegative(raw.glow.size, 12)),
+          opacity: Math.min(1, asNonNegative(raw.glow.opacity, 0.8))
+        }
+      : undefined,
+    backgroundShape:
+      raw.backgroundShape === 'block' ||
+      raw.backgroundShape === 'bubble' ||
+      raw.backgroundShape === 'lines'
+        ? raw.backgroundShape
+        : undefined,
+    backgroundRadius: optionalNumber(raw.backgroundRadius, 0, 500),
+    backgroundPadding: isRecord(raw.backgroundPadding)
+      ? {
+          x: Math.min(500, asNonNegative(raw.backgroundPadding.x, 0)),
+          y: Math.min(500, asNonNegative(raw.backgroundPadding.y, 0))
+        }
+      : undefined,
+    backgroundGradient: normalizeGradient(raw.backgroundGradient),
+    backgroundBorder: isRecord(raw.backgroundBorder)
+      ? {
+          color: asNonEmptyString(raw.backgroundBorder.color, '#ffffff'),
+          width: Math.min(100, asNonNegative(raw.backgroundBorder.width, 0))
+        }
+      : undefined,
+    backgroundSkew: optionalNumber(raw.backgroundSkew, -45, 45),
+    bubbleTail: normalizeTail(raw.bubbleTail),
+    firstLine: normalizeSpan(raw.firstLine),
+    accent: normalizeSpan(raw.accent),
+    sub: normalizeSpan(raw.sub),
+    pointer: normalizePointer(raw.pointer)
+  }
+}
+
+function optionalNumber(value: unknown, min: number, max: number): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : undefined
+}
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/** グラデーション。色が2つ未満なら無し。止まり位置は 0〜1 に収めて並べ直す(最大8色) */
+export function normalizeGradient(raw: unknown): TelopGradient | undefined {
+  if (!isRecord(raw) || !Array.isArray(raw.stops)) return undefined
+  const stops = raw.stops
+    .filter(isRecord)
+    .map((s) => ({
+      at: Math.min(1, Math.max(0, asFinite(s.at, 0))),
+      color: asNonEmptyString(s.color, '#ffffff')
+    }))
+    .sort((a, b) => a.at - b.at)
+    .slice(0, 8)
+  if (stops.length < 2) return undefined
+  return { angle: asFinite(raw.angle, 0), stops }
+}
+
+function normalizeSpan(raw: unknown): TelopSpanStyle | undefined {
+  if (!isRecord(raw)) return undefined
+  const out: TelopSpanStyle = {
+    scale: optionalNumber(raw.scale, 0.2, 5),
+    color: optionalString(raw.color),
+    gradient: normalizeGradient(raw.gradient)
+  }
+  return out.scale === undefined && out.color === undefined && out.gradient === undefined
+    ? undefined
+    : out
+}
+
+function normalizeTail(raw: unknown): TelopBubbleTail | undefined {
+  if (!isRecord(raw)) return undefined
+  const side = raw.side
+  if (side !== 'top' && side !== 'bottom' && side !== 'left' && side !== 'right') return undefined
+  return {
+    side,
+    at: Math.min(1, Math.max(0, asFinite(raw.at, 0.3))),
+    length: Math.min(400, asNonNegative(raw.length, 24))
+  }
+}
+
+function normalizePointer(raw: unknown): TelopPointer | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    dx: Math.min(2, Math.max(-2, asFinite(raw.dx, 0.1))),
+    dy: Math.min(2, Math.max(-2, asFinite(raw.dy, 0.1))),
+    color: asNonEmptyString(raw.color, '#ffffff'),
+    width: Math.min(60, asNonNegative(raw.width, 6)),
+    hand: raw.hand === true ? true : undefined
   }
 }
 
@@ -310,7 +433,12 @@ function normalizeStrokes(raw: unknown): TelopStroke[] | undefined {
     if (!isRecord(s)) continue
     const width = asNonNegative(s.width, 0)
     if (width <= 0) continue
-    out.push({ color: asNonEmptyString(s.color, '#ffffff'), width })
+    const gradient = normalizeGradient(s.gradient)
+    out.push({
+      color: asNonEmptyString(s.color, '#ffffff'),
+      width,
+      ...(gradient ? { gradient } : {})
+    })
   }
   return out.length > 0 ? out : undefined
 }

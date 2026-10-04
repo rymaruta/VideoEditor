@@ -1,3 +1,4 @@
+import { loadTelopFonts } from './telopFonts'
 import type { Sequence } from '@shared/sequence/types'
 import type { AspectRatio, Project } from '@shared/types'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
@@ -43,7 +44,8 @@ export async function rasterizeTelopLayer(
   canvas.height = seq.height
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('テロップを描く Canvas を用意できませんでした')
-  // 書き出しで使うフォントが読み込み済みであることを待つ(未読込だと代わりの字形で描かれる)
+  // 書き出しで使うフォントを読み込んでから描く(未読込だと代わりの字形で焼かれる)
+  await loadTelopFonts([...sources.values()])
   await document.fonts?.ready
 
   const images: Uint8Array[] = [await canvasToPng(canvas)]

@@ -64,7 +64,52 @@ export type TextAnimation =
   'none' | 'fadeIn' | 'popIn' | 'slideInUp' | 'slideInDown' | 'bounce' | 'typewriter'
 
 export type FontFamily =
-  'sans-serif' | 'serif' | 'M PLUS Rounded 1c' | 'Noto Sans JP' | 'Noto Serif JP'
+  | 'sans-serif'
+  | 'serif'
+  | 'M PLUS Rounded 1c'
+  | 'Noto Sans JP'
+  | 'Noto Serif JP'
+  | 'Dela Gothic One'
+  | 'RocknRoll One'
+  | 'Kosugi Maru'
+  | 'Zen Maru Gothic'
+  | 'Yomogi'
+  | 'Klee One'
+  | 'Shippori Mincho'
+
+/**
+ * 色のグラデーション(Premiere の「線形グラデーション」と同じ考え方)。
+ * `angle` は向き(度)。0 は上→下、90 は左→右。色の止まり位置 `at` は 0〜1。
+ */
+export interface TelopGradient {
+  angle: number
+  stops: { at: number; color: string }[]
+}
+
+/** 文字の一部(`**強調**`・`__小さく__`)や1行目だけに当てる見た目 */
+export interface TelopSpanStyle {
+  /** 文字の大きさの倍率(1 で本文と同じ) */
+  scale?: number
+  color?: string
+  gradient?: TelopGradient
+}
+
+/** 吹き出しのしっぽ。`side` の辺の `at`(0〜1)の所から、`length` px 外へ伸びる */
+export interface TelopBubbleTail {
+  side: 'top' | 'bottom' | 'left' | 'right'
+  at: number
+  length: number
+}
+
+/** 矢印(手書き風の「ここ!」など)。先端はテロップの中心からの位置(枠に対する比) */
+export interface TelopPointer {
+  dx: number
+  dy: number
+  color: string
+  width: number
+  /** 手書き風に少し揺らす */
+  hand?: boolean
+}
 
 export interface TextStyle {
   fontFamily: FontFamily
@@ -92,13 +137,60 @@ export interface TextStyle {
    * 共通テロップレンダラ(`@shared/telop/render`)で描く。従来の書き出し(ASS)には出ない。
    */
   extraStrokes?: TelopStroke[]
-  /** 指定すると文字の塗りを上(`color`)→下(この色)の縦グラデーションにする */
+  /** 指定すると文字の塗りを上(`color`)→下(この色)の縦グラデーションにする(旧形式。`fillGradient` が優先) */
   gradientColor?: string
+
+  // --- 以下は共通テロップレンダラの装飾(Premiere のエッセンシャルグラフィックス相当) ---
+  /** 文字の太さ(100〜900)。指定すると `bold` より優先(極太 900 など) */
+  fontWeight?: number
+  /** 文字の塗りのグラデーション。指定すると `color` より優先 */
+  fillGradient?: TelopGradient
+  /** 縁取りのグラデーション */
+  outlineGradient?: TelopGradient
+  /** 文字全体の不透明度(0〜1。未指定は 1) */
+  opacity?: number
+  /** 行の高さ(文字サイズに対する倍率。未指定は 1.2) */
+  lineHeight?: number
+  /** 行揃え(未指定は中央) */
+  align?: 'left' | 'center' | 'right'
+  /** 影の色・不透明度・向き(度。45 で右下)・距離(px)・ぼかし(px) */
+  shadowColor?: string
+  shadowOpacity?: number
+  shadowAngle?: number
+  shadowDistance?: number
+  shadowBlur?: number
+  /** 光彩(文字の周りをぼかした色で光らせる) */
+  glow?: { color: string; size: number; opacity: number }
+  /**
+   * 背景の形。`lines` は行ごとの帯(従来)、`block` は全体を1枚の板、`bubble` は吹き出し。
+   * 未指定は `lines`
+   */
+  backgroundShape?: 'lines' | 'block' | 'bubble'
+  /** 背景の角の丸み(px) */
+  backgroundRadius?: number
+  /** 背景の余白(px)。未指定は文字サイズから決める */
+  backgroundPadding?: { x: number; y: number }
+  backgroundGradient?: TelopGradient
+  /** 背景の枠線 */
+  backgroundBorder?: { color: string; width: number }
+  /** 背景を斜めにする(度。帯を平行四辺形にする) */
+  backgroundSkew?: number
+  /** 吹き出しのしっぽ(`backgroundShape: 'bubble'` のとき) */
+  bubbleTail?: TelopBubbleTail
+  /** 1行目だけの見た目(章タイトルの「第2章」、店名など) */
+  firstLine?: TelopSpanStyle
+  /** `**…**` で囲んだ所の見た目(価格・数字・「Q.」など) */
+  accent?: TelopSpanStyle
+  /** `__…__` で囲んだ所の見た目(移動ルートの「車で20分」など) */
+  sub?: TelopSpanStyle
+  /** 矢印 */
+  pointer?: TelopPointer
 }
 
 export interface TelopStroke {
   color: string
   width: number
+  gradient?: TelopGradient
 }
 
 export interface TranscriptWord {
