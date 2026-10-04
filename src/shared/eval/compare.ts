@@ -31,9 +31,17 @@ export interface EditComparison {
   totalClips: number
   /** 結び付けられなかったファイル名 */
   unmatchedFiles: string[]
+  /**
+   * 完成版のうち、選んだカメラが XML から分からなかった時間(秒)。マルチカメラのまま書き出された所で、
+   * アングルの一致の計算から外している(採用区間・カット点には使う)
+   */
+  angleUnknownSec: number
 }
 
 export const CUT_TOLERANCE_SEC = 0.5
+
+/** 選んだカメラが分からない区間の印 */
+const UNKNOWN_ANGLE = '?'
 
 function total(ranges: readonly Range[]): number {
   return ranges.reduce((t, r) => t + (r.end - r.start), 0)
@@ -85,7 +93,12 @@ export function humanCoverage(
       unmatched.add(c.fileName)
       continue
     }
-    segs.push({ start: toCommon(f, c.in), end: toCommon(f, c.out), cameraId: f.sourceId })
+    segs.push({
+      start: toCommon(f, c.in),
+      end: toCommon(f, c.out),
+      // カメラが分からない所は、親のクリップごとに別の印(境目がカット点になり、アングルの比較からは外れる)
+      cameraId: c.angleUnknown !== undefined ? `${UNKNOWN_ANGLE}${c.angleUnknown}` : f.sourceId
+    })
   }
   return { segs, matched: segs.length, total: main.length, unmatched: [...unmatched] }
 }
@@ -106,10 +119,16 @@ export function compareEdits(
   // アングル: 両方が残した時間を 0.1 秒ごとに見る
   let same = 0
   let seen = 0
+  let unknown = 0
   for (const r of both)
     for (let t = r.start + 0.05; t < r.end; t += 0.1) {
+      const h = cameraAt(human.segs, t)
+      if (h?.startsWith(UNKNOWN_ANGLE)) {
+        unknown++
+        continue
+      }
       seen++
-      if (cameraAt(human.segs, t) === cameraAt(auto, t)) same++
+      if (h === cameraAt(auto, t)) same++
     }
   const hc = cutPoints(human.segs)
   const ac = cutPoints(auto)
@@ -123,6 +142,7 @@ export function compareEdits(
     angleAgreement: seen > 0 ? same / seen : NaN,
     matchedClips: human.matched,
     totalClips: human.total,
-    unmatchedFiles: human.unmatched
+    unmatchedFiles: human.unmatched,
+    angleUnknownSec: unknown * 0.1
   }
 }

@@ -188,3 +188,107 @@ describe('compareEdits', () => {
     ).toEqual([5, 10, 20])
   })
 })
+
+/**
+ * Premiere がマルチカメラのまま書き出した形: 親のクリップがネストしたシーケンスを指す。
+ * マルチカメラのソース(mc)は、同期したカメラA(V1)・カメラB(V2。5秒遅れて回った)を積んだもの。
+ * どのカメラを選んだかは XML に残らない。plain は1トラックだけの普通のネスト。
+ */
+const NESTED_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<xmeml version="4">
+  <sequence id="main">
+    <name>マルチカメラのまま</name><duration>450</duration>
+    <rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>
+    <media>
+      <video>
+        <track>
+          <clipitem id="p1"><name>MC</name><start>0</start><end>150</end><in>300</in><out>450</out>
+            <sequence id="mc"><name>MC</name><rate><timebase>30</timebase></rate>
+              <media><video>
+                <track><clipitem id="m1"><name>A0001.MP4</name><start>0</start><end>9000</end><in>0</in><out>9000</out>
+                  <file id="fa"><name>A0001.MP4</name></file></clipitem></track>
+                <track><clipitem id="m2"><name>B0001.MP4</name><start>150</start><end>9000</end><in>0</in><out>8850</out>
+                  <file id="fb"><name>B0001.MP4</name></file></clipitem></track>
+              </video></media>
+            </sequence>
+          </clipitem>
+          <clipitem id="p2"><name>MC</name><start>150</start><end>300</end><in>450</in><out>600</out>
+            <sequence id="mc"/>
+          </clipitem>
+          <clipitem id="p3"><name>plain</name><start>300</start><end>450</end><in>0</in><out>150</out>
+            <sequence id="plain"><name>plain</name><rate><timebase>30</timebase></rate>
+              <media><video><track>
+                <clipitem id="q1"><name>A0001.MP4</name><start>0</start><end>300</end><in>900</in><out>1200</out>
+                  <file id="fa"/></clipitem>
+              </track></video></media>
+            </sequence>
+          </clipitem>
+        </track>
+      </video>
+    </media>
+  </sequence>
+</xmeml>`
+
+describe('ネストしたシーケンス(マルチカメラのまま書き出した XML)', () => {
+  const nestedRoot = new DOMParser().parseFromString(NESTED_XML, 'text/xml')
+  const seq = readFcp7(nestedRoot.documentElement as unknown as XmlElement)!
+
+  it('中身のカメラの素材に展開する。カメラが積まれている所は「選んだカメラが分からない」印を付ける', () => {
+    expect(seq.nested).toEqual({ count: 3, multicam: 2 })
+    expect(
+      seq.video[0].map((c) => [c.fileName, c.start, c.end, c.in, c.out, c.angleUnknown])
+    ).toEqual([
+      // 上のトラック(カメラB)を仮に入れる。B は 5 秒遅れて回ったので、ソースの 10 秒 = B の 5 秒
+      ['B0001.MP4', 0, 5, 5, 10, 0],
+      ['B0001.MP4', 5, 10, 10, 15, 1],
+      ['A0001.MP4', 10, 15, 30, 35, undefined]
+    ])
+  })
+
+  it('比べるとき、採用区間とカット点には使い、アングルの一致からは外す', () => {
+    const info: MulticamInfo = {
+      anchorSourceId: 'A',
+      sources: [
+        { id: 'A', name: 'カメラA', kind: 'camera' },
+        { id: 'B', name: 'カメラB', kind: 'camera' }
+      ],
+      files: [
+        { assetId: 'a', sourceId: 'A', start: 0, rate: 1, duration: 300 },
+        { assetId: 'b', sourceId: 'B', start: 5, rate: 1, duration: 300 }
+      ]
+    }
+    const asset = (id: string, fileName: string): Project['assets'][number] => ({
+      id,
+      filePath: `/x/${fileName}`,
+      fileName,
+      duration: 300,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      hasAudio: true,
+      hasVideo: true
+    })
+    const project: Project = {
+      id: 'p',
+      name: 'p',
+      aspectRatio: '16:9',
+      assets: [asset('a', 'A0001.MP4'), asset('b', 'B0001.MP4')],
+      // 自動: 共通の 10〜15 秒をカメラA、15〜20 秒をカメラB、30〜35 秒をカメラA
+      clips: [
+        { id: '1', assetId: 'a', inPoint: 10, outPoint: 15, speed: 1 },
+        { id: '2', assetId: 'b', inPoint: 10, outPoint: 15, speed: 1 },
+        { id: '3', assetId: 'a', inPoint: 30, outPoint: 35, speed: 1 }
+      ],
+      audioTracks: [],
+      videoOverlayTracks: [],
+      textOverlays: []
+    }
+    const r = compareEdits(seq, project, info)
+    expect(r.iou).toBeCloseTo(1)
+    // 人のカット点(15 = 親のクリップの境目、20 と 30 = 飛び)を自動も全部切っている
+    expect(r.cutRecall).toBe(1)
+    expect(r.angleUnknownSec).toBeCloseTo(10, 0)
+    // 比べたのはカメラが分かる 30〜35 秒だけ(どちらもカメラA)
+    expect(r.angleAgreement).toBe(1)
+  })
+})

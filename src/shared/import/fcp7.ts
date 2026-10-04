@@ -31,6 +31,13 @@ export interface Fcp7Clip {
   fileDuration?: number
   /** 音量(Audio Levels。1 = 0dB。音声のクリップだけ) */
   gain?: number
+  /**
+   * ネストしたシーケンスを展開したクリップのうち、**どのカメラを選んだか XML から分からない**もの
+   * (マルチカメラのソースシーケンス: 同じ時間に複数のカメラが積まれている)。
+   * 時間(採用区間・カット点)は正しいが、カメラは一番上のトラックを仮に入れてある。
+   * 値は親のクリップの通し番号(親のクリップの境目がカット点になる)
+   */
+  angleUnknown?: number
 }
 
 export interface Fcp7Sequence {
@@ -42,6 +49,18 @@ export interface Fcp7Sequence {
   audio: Fcp7Clip[][]
   /** 文字のジェネレーター(テロップ)。タイムラインの秒 */
   texts: { start: number; end: number; text: string }[]
+  /** 展開したネストしたシーケンスの数と、そのうちカメラが分からなかった(マルチカメラの)数 */
+  nested: { count: number; multicam: number }
+}
+
+/** 読み取りの文脈(文書の中の、ID で参照されるファイル・シーケンスの定義) */
+interface ReadContext {
+  files: Map<string, XmlElement>
+  sequences: Map<string, XmlElement>
+  nested: { count: number; multicam: number }
+  /** 親のクリップの通し番号(マルチカメラの展開で使う) */
+  nextParent: number
+  depth: number
 }
 
 function children(el: XmlElement, tag: string): XmlElement[] {
@@ -84,19 +103,103 @@ function decodePath(url: string | undefined): string | undefined {
 }
 
 /** 文書の中の、ID で参照されるファイルの定義(2回目以降は `<file id="x"/>` だけになる) */
-function fileTable(root: XmlElement, fps: number): Map<string, XmlElement> {
+function definitionTable(
+  root: XmlElement,
+  tag: 'file' | 'sequence',
+  isDefinition: (el: XmlElement) => boolean
+): Map<string, XmlElement> {
   const table = new Map<string, XmlElement>()
-  const files = root.getElementsByTagName('file')
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i]
-    const id = f.getAttribute('id')
-    if (id && (child(f, 'name') || child(f, 'pathurl')) && !table.has(id)) table.set(id, f)
+  const els = root.getElementsByTagName(tag)
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i]
+    const id = el.getAttribute('id')
+    if (id && isDefinition(el) && !table.has(id)) table.set(id, el)
   }
-  void fps
   return table
 }
 
-function readTrack(track: XmlElement, fps: number, files: Map<string, XmlElement>): Fcp7Clip[] {
+/** ネストを辿る深さの上限(壊れた XML の循環参照で止まらなくならないように) */
+const MAX_NEST_DEPTH = 4
+
+/** 区間 [a, b) から、すでに埋まっている区間を除いた残り */
+function uncovered(a: number, b: number, covered: readonly [number, number][]): [number, number][] {
+  let pieces: [number, number][] = [[a, b]]
+  for (const [c, d] of covered)
+    pieces = pieces.flatMap(([x, y]): [number, number][] =>
+      d <= x || c >= y
+        ? [[x, y]]
+        : [
+            ...(c > x ? [[x, c] as [number, number]] : []),
+            ...(d < y ? [[d, y] as [number, number]] : [])
+          ]
+    )
+  return pieces.filter(([x, y]) => y - x > 1e-3)
+}
+
+/**
+ * ネストしたシーケンスの [inSec, outSec) を、親のタイムラインの startSec からに展開する。
+ * 映像は**上のトラックが見える**ので、上から順に、まだ埋まっていない時間だけを取る。
+ * 同じ時間に複数のトラックのクリップが重なっていれば、マルチカメラのソース(選んだカメラは XML に無い)とみなす。
+ */
+function expandNested(
+  seqEl: XmlElement,
+  kind: 'video' | 'audio',
+  inSec: number,
+  outSec: number,
+  startSec: number,
+  ctx: ReadContext,
+  parentIndex: number
+): Fcp7Clip[] {
+  const fps = rateOf(seqEl, 30)
+  const media = child(child(seqEl, 'media'), kind)
+  if (!media) return []
+  const tracks = children(media, 'track').map((t) =>
+    readTrack(t, fps, { ...ctx, depth: ctx.depth + 1 })
+  )
+  const out: Fcp7Clip[] = []
+  if (kind === 'audio') {
+    for (const t of tracks)
+      for (const c of t) {
+        const a = Math.max(inSec, c.start)
+        const b = Math.min(outSec, c.end)
+        if (b - a > 1e-3)
+          out.push({
+            ...c,
+            start: startSec + (a - inSec),
+            end: startSec + (b - inSec),
+            in: c.in + (a - c.start),
+            out: c.in + (b - c.start)
+          })
+      }
+    return out
+  }
+  // 同じ時間に2本以上のトラックのクリップが重なる = マルチカメラのソース
+  let stacked = false
+  const covered: [number, number][] = []
+  for (let ti = tracks.length - 1; ti >= 0; ti--) {
+    for (const c of tracks[ti]) {
+      const a = Math.max(inSec, c.start)
+      const b = Math.min(outSec, c.end)
+      if (b - a <= 1e-3) continue
+      const free = uncovered(a, b, covered)
+      if (free.length !== 1 || free[0][0] !== a || free[0][1] !== b) stacked = true
+      for (const [x, y] of free)
+        out.push({
+          ...c,
+          start: startSec + (x - inSec),
+          end: startSec + (y - inSec),
+          in: c.in + (x - c.start),
+          out: c.in + (y - c.start)
+        })
+      covered.push([a, b])
+    }
+  }
+  if (stacked) for (const c of out) c.angleUnknown = parentIndex
+  return out.sort((x, y) => x.start - y.start)
+}
+
+function readTrack(track: XmlElement, fps: number, ctx: ReadContext): Fcp7Clip[] {
+  const files = ctx.files
   const out: Fcp7Clip[] = []
   let lastEnd = 0
   for (const item of children(track, 'clipitem')) {
@@ -110,6 +213,30 @@ function readTrack(track: XmlElement, fps: number, files: Map<string, XmlElement
     // つなぎ(トランジション)に掛かるクリップは start / end が -1 になる。前後から補う
     if (!(start >= 0)) start = lastEnd * itemFps
     if (!(end >= 0)) end = start + (outF - inF)
+    // ネストしたシーケンス(Premiere のマルチカメラもこの形で書き出される)は中身に展開する
+    const nestedEl = child(item, 'sequence')
+    if (nestedEl) {
+      const def = ctx.sequences.get(nestedEl.getAttribute('id') ?? '') ?? nestedEl
+      if (ctx.depth >= MAX_NEST_DEPTH) continue
+      const kind = isAudioTrack(track) ? 'audio' : 'video'
+      const parentIndex = ctx.nextParent++
+      const pieces = expandNested(
+        def,
+        kind,
+        inF / itemFps,
+        outF / itemFps,
+        start / itemFps,
+        ctx,
+        parentIndex
+      )
+      if (kind === 'video') {
+        ctx.nested.count++
+        if (pieces.some((p) => p.angleUnknown !== undefined)) ctx.nested.multicam++
+      }
+      out.push(...pieces)
+      lastEnd = start / itemFps + (outF - inF) / itemFps
+      continue
+    }
     const fileEl = child(item, 'file')
     const ref = fileEl?.getAttribute('id')
     const def = (ref && files.get(ref)) || fileEl
@@ -132,6 +259,12 @@ function readTrack(track: XmlElement, fps: number, files: Map<string, XmlElement
     out.push(clip)
   }
   return out
+}
+
+/** 音声のトラックか(親の `<audio>` の中にあるか) */
+function isAudioTrack(track: XmlElement): boolean {
+  const parent = (track as unknown as { parentNode?: XmlElement | null }).parentNode
+  return parent?.tagName === 'audio'
 }
 
 /** クリップに掛かった Audio Levels(倍率)。無ければ undefined */
@@ -172,24 +305,31 @@ export function readFcp7(root: XmlElement): Fcp7Sequence | null {
   const seq = root.getElementsByTagName('sequence')[0]
   if (!seq) return null
   const fps = rateOf(seq, 30)
-  const files = fileTable(root, fps)
+  const ctx: ReadContext = {
+    files: definitionTable(root, 'file', (f) => Boolean(child(f, 'name') || child(f, 'pathurl'))),
+    sequences: definitionTable(root, 'sequence', (s) => Boolean(child(s, 'media'))),
+    nested: { count: 0, multicam: 0 },
+    nextParent: 0,
+    depth: 0
+  }
   const media = child(seq, 'media')
   const video: Fcp7Clip[][] = []
   const audio: Fcp7Clip[][] = []
   const texts: Fcp7Sequence['texts'] = []
   for (const track of children(child(media, 'video') ?? seq, 'track')) {
-    video.push(readTrack(track, fps, files))
+    video.push(readTrack(track, fps, ctx))
     texts.push(...readTexts(track, fps))
   }
   for (const track of children(child(media, 'audio') ?? seq, 'track'))
-    audio.push(readTrack(track, fps, files))
+    audio.push(readTrack(track, fps, ctx))
   return {
     name: child(seq, 'name')?.textContent?.trim() ?? '',
     fps,
     duration: num(child(seq, 'duration')) / fps || 0,
     video,
     audio,
-    texts: texts.sort((a, b) => a.start - b.start)
+    texts: texts.sort((a, b) => a.start - b.start),
+    nested: ctx.nested
   }
 }
 

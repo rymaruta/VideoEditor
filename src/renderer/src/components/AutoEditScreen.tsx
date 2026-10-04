@@ -597,6 +597,15 @@ export function AutoEditScreen(): React.JSX.Element | null {
                           {formatTimecode(comparison.result.overlapSec, 30)}
                         </dd>
                       </dl>
+                      {comparison.result.angleUnknownSec > 0.5 && (
+                        <p className="form-note">
+                          マルチカメラのまま書き出された所(
+                          {formatTimecode(comparison.result.angleUnknownSec, 30)}
+                          )は、選んだカメラが XML に残らないためアングルの比較から外しました。
+                          Premiere でシーケンスを選び「マルチカメラ &gt;
+                          統合」してから書き出すと比べられます。
+                        </p>
+                      )}
                       {comparison.result.unmatchedFiles.length > 0 && (
                         <p className="form-note">
                           この回の素材に見つからないため比べなかったクリップ:{' '}
