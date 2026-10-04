@@ -25,6 +25,10 @@ import { TelopLookGallery, type LookItem } from './TelopLookGallery'
  * スタイルは企画をまたいで使う(番組のテロップは回が変わっても同じなので、毎回作り直さない)。
  */
 
+/** 動きの見本の長さ(出てから消えるまで)と、次に出るまでの間 */
+const PLAY_SECONDS = 3
+const PLAY_GAP_SECONDS = 0.6
+
 type SampleBackground = 'frame' | 'gray' | 'white' | 'black'
 
 const SAMPLE_BG: Record<Exclude<SampleBackground, 'frame'>, string> = {
@@ -52,6 +56,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
   // 見た目の一覧を押したとき: 選んでいるスタイルに当てる / 新しいスタイルとして足す
   const [pickMode, setPickMode] = useState<'apply' | 'new'>('apply')
   const [fontEpoch, setFontEpoch] = useState(0)
+  const [playing, setPlaying] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useMenuCommand((id) => {
@@ -93,32 +98,49 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     }
   }, [selected, sampleText])
 
-  // 見本を描く。書き出しと同じ関数で描くので、ここで見える絵がそのまま出る
+  // 見本を描く。書き出しと同じ関数で描くので、ここで見える絵がそのまま出る。
+  // 「動きを再生」中は、出てから消えるまで(PLAY_SECONDS 秒)を繰り返し描く
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !selected) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     const { width: w, height: h } = canvas
-    ctx.clearRect(0, 0, w, h)
-    const video = document.querySelector<HTMLVideoElement>('.preview-frame video')
-    if (background === 'frame' && video && video.readyState >= 2) {
-      ctx.drawImage(video, 0, 0, w, h)
-    } else {
-      ctx.fillStyle = background === 'frame' ? SAMPLE_BG.gray : SAMPLE_BG[background]
-      ctx.fillRect(0, 0, w, h)
-    }
     // 見本は置き場所の設定に関係なく、枠の中ほどに出す(どの位置のスタイルでも見えるように)
     const style: TextStyle = { ...selected.style, customPosition: undefined, position: 'center' }
-    drawTelop(
-      ctx as unknown as TelopContext,
-      { text: sampleText || ' ', startTime: 0, endTime: 1e9, style },
+    const video = document.querySelector<HTMLVideoElement>('.preview-frame video')
+    const paint = (time: number, endTime: number): void => {
+      ctx.clearRect(0, 0, w, h)
+      if (background === 'frame' && video && video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, w, h)
+      } else {
+        ctx.fillStyle = background === 'frame' ? SAMPLE_BG.gray : SAMPLE_BG[background]
+        ctx.fillRect(0, 0, w, h)
+      }
+      drawTelop(
+        ctx as unknown as TelopContext,
+        { text: sampleText || ' ', startTime: 0, endTime, style },
+        time,
+        { width: w, height: h },
+        textCanvasSize(project.aspectRatio)
+      )
+    }
+    if (!playing) {
       // 登場の動きが終わった後の姿を見せる
-      10,
-      { width: w, height: h },
-      textCanvasSize(project.aspectRatio)
-    )
-  }, [selected, sampleText, background, project.aspectRatio, fontEpoch])
+      paint(10, 1e9)
+      return
+    }
+    let raf = 0
+    const t0 = performance.now()
+    const tick = (now: number): void => {
+      // 消えた後に少し間を空けてから、もう一度出す
+      const t = ((now - t0) / 1000) % (PLAY_SECONDS + PLAY_GAP_SECONDS)
+      paint(t, PLAY_SECONDS)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [selected, sampleText, background, project.aspectRatio, fontEpoch, playing])
 
   if (!draft) return null
 
@@ -294,6 +316,15 @@ export function TelopStyleDialog(): React.JSX.Element | null {
                   <option value="black">黒</option>
                 </select>
               </label>
+              <button
+                type="button"
+                className={`small-button ${playing ? 'active' : ''}`}
+                aria-pressed={playing}
+                title={`入り・出・ループの動きを、${PLAY_SECONDS} 秒のテロップとして繰り返し再生します`}
+                onClick={() => setPlaying((v) => !v)}
+              >
+                {playing ? '■ 止める' : '▶ 動きを再生'}
+              </button>
             </div>
             {selected && (
               <div className="telop-style-auto">

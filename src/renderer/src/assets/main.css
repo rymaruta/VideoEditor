@@ -6255,3 +6255,534 @@ h3 {
 .color-popover-favorite-remove:focus-visible {
   opacity: 1;
 }
+
+/* ================================================================== テロップの見た目の欄(アピアランス)
+ * TelopStyleFields / AppearanceControls / GradientEditor / TelopLookGallery の見た目。
+ * Premiere のエッセンシャルグラフィックスのように、項目ごとに畳める見出しで区切る。
+ * ================================================================== */
+.telop-style-fields {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 0;
+}
+
+/* 畳める見出し */
+.style-section {
+  border-top: 1px solid var(--border-soft);
+}
+.style-section:last-child {
+  border-bottom: 1px solid var(--border-soft);
+}
+.style-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+.style-section-toggle {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+  justify-content: flex-start;
+  gap: 6px;
+}
+.style-section-toggle:hover:not(:disabled) {
+  background: transparent;
+  color: #fff;
+}
+.style-section-toggle:active:not(:disabled) {
+  transform: none;
+}
+.style-section-chevron {
+  flex-shrink: 0;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+.style-section.open .style-section-chevron {
+  transform: none;
+}
+.style-section-title {
+  white-space: nowrap;
+}
+.style-section-summary {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.style-section.off .style-section-title {
+  color: var(--text-2);
+}
+.style-section-check {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0 2px 0 4px;
+}
+.style-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 10px 18px;
+}
+.style-section-off,
+.style-note {
+  margin: 0 0 4px;
+}
+.style-note code {
+  padding: 0 3px;
+  border-radius: 2px;
+  background: #2e2e2e;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.telop-style-fields .prop-label {
+  width: 68px;
+}
+.telop-style-fields .prop-control {
+  flex: 1;
+}
+.telop-style-fields .prop-control select.prop-wide {
+  max-width: none;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 数値(つまみ + 数値欄) */
+.num-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.num-slider input[type='range'] {
+  width: 120px;
+  min-width: 60px;
+}
+.num-slider .prop-num {
+  width: 56px;
+  padding: 0 4px 0 6px;
+}
+
+/* 切り替えボタンの組 */
+.seg-group {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.seg-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+  background: #262626;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  gap: 5px;
+}
+.seg-button:last-child {
+  border-right: 0;
+}
+.seg-button:hover:not(:disabled) {
+  border-color: var(--border);
+  color: var(--text-1);
+}
+.seg-button:active:not(:disabled) {
+  transform: none;
+}
+.seg-button.active {
+  background: #34414f;
+  color: #fff;
+}
+.seg-grad-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+/* 小さな四角いボタン(×・↑↓・矢印の向き) */
+.icon-chip {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.icon-chip.danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+.link-button {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-1);
+  font-size: 11px;
+}
+.link-button:hover:not(:disabled) {
+  background: transparent;
+  text-decoration: underline;
+}
+
+/* 塗り(単色 / グラデーション) */
+.fill-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 3px 0;
+}
+.fill-field-head .prop-control {
+  gap: 8px;
+}
+
+/* グラデーションの編集欄 */
+.grad-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: #1f1f1f;
+}
+.grad-bar-wrap {
+  position: relative;
+  padding: 0 6px;
+}
+.grad-bar {
+  position: relative;
+  height: 18px;
+  border-radius: 2px;
+  cursor: copy;
+  /* 透けて見える所が分かるように市松模様を敷く */
+  background: repeating-conic-gradient(#555 0 25%, #3a3a3a 0 50%) 0 0 / 8px 8px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.grad-bar-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+}
+.grad-handles {
+  position: relative;
+  height: 14px;
+}
+.grad-handle {
+  position: absolute;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  padding: 0;
+  border: 2px solid #d0d0d0;
+  border-radius: 2px;
+  background: var(--stop);
+  cursor: ew-resize;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  touch-action: none;
+}
+.grad-handle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  margin-left: -4px;
+  border: 4px solid transparent;
+  border-bottom-color: #d0d0d0;
+  border-top: 0;
+}
+.grad-handle:hover:not(:disabled) {
+  background: var(--stop);
+  border-color: #fff;
+}
+.grad-handle:active:not(:disabled) {
+  transform: none;
+}
+.grad-handle.selected {
+  border-color: var(--accent-1);
+  z-index: 1;
+}
+.grad-handle.selected::before {
+  border-bottom-color: var(--accent-1);
+}
+.grad-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.grad-row-label {
+  width: 34px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.grad-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.grad-angle-presets {
+  display: inline-flex;
+  gap: 2px;
+}
+.angle-chip {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.angle-chip span {
+  display: inline-block;
+  line-height: 1;
+}
+.angle-chip.active {
+  background: #34414f;
+  color: #fff;
+}
+.angle-dial {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: grab;
+  border-radius: 50%;
+  touch-action: none;
+}
+.angle-dial:focus-visible {
+  outline: 2px solid var(--accent-1);
+  outline-offset: 1px;
+}
+.angle-dial-ring {
+  fill: #262626;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.angle-dial-hand {
+  stroke: var(--text-1);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.angle-dial-tip {
+  fill: var(--accent-1);
+}
+.grad-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.grad-preset {
+  padding: 2px 6px 2px 2px;
+  height: 22px;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+  background: #262626;
+}
+.grad-preset-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+/* 縁の一覧・部分の装飾のカード */
+.stroke-card,
+.span-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px;
+  padding: 6px 8px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: #1f1f1f;
+}
+.stroke-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+.stroke-card-title,
+.span-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.stroke-card-sub {
+  margin-left: 4px;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.stroke-card-tools {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+.stroke-card .prop-label,
+.span-card .prop-label {
+  width: 52px;
+}
+.span-card-head {
+  min-height: 24px;
+}
+.span-card.off {
+  margin: 0;
+  padding: 2px 8px;
+  border-color: transparent;
+  background: transparent;
+}
+.add-row-button {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+/* 矢印の向き */
+.dir-pad {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+/* 見た目の一覧(プリセット) */
+.look-open-button {
+  gap: 5px;
+}
+.look-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.look-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.look-group-count {
+  font-weight: 400;
+}
+.look-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.look-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 3px 3px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  min-width: 0;
+}
+.look-item:hover:not(:disabled) {
+  background: #2c2c2c;
+  border-color: var(--border);
+}
+.look-item.active {
+  border-color: var(--accent-1);
+  background: var(--accent-soft);
+}
+.look-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  border-radius: 2px;
+  background: #3a3a3a;
+}
+.look-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-2);
+  text-align: left;
+}
+.look-item.active .look-name {
+  color: #fff;
+}
+.look-picker {
+  width: 860px;
+  max-width: calc(100vw - 32px);
+  height: 640px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.look-picker-backdrop {
+  background: rgba(5, 5, 8, 0.4);
+  backdrop-filter: none;
+}
+.look-picker-hint {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid #161616;
+}
+.look-picker-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+.telop-style-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.telop-style-gallery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.telop-style-gallery .look-grid {
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+}
+.telop-style-sample-controls .small-button.active {
+  background: #34414f;
+  border-color: var(--accent-1);
+  color: #fff;
+}
+.motion-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* ================================================================== テロップの見た目の欄 ここまで */

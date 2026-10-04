@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { TextStyle } from '@shared/types'
-import { drawTelop, type TelopContext } from '@shared/telop/render'
+import { drawTelop, layoutTelop, type TelopContext } from '@shared/telop/render'
 import { HOW_LABEL, TELOP_KINDS, type TelopKindInfo } from '@shared/telop/kinds'
 import { loadTelopFonts } from '../lib/telopFonts'
 
@@ -22,8 +22,8 @@ export interface LookItem {
   group: string
 }
 
-/** 見本の仮想キャンバス。本物(1920x1080)より小さくして、小さな見本でも文字を読める大きさにする */
-const THUMB_CANVAS = { w: 800, h: 450 }
+/** 見本の仮想キャンバスの基準(本物と同じ 16:9 の 1080) */
+const BASE_CANVAS = { w: 1920, h: 1080 }
 const THUMB_W = 240
 const THUMB_H = 135
 
@@ -46,7 +46,7 @@ function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): voi
 }
 
 /** 見本を1枚描く(置き場所は無視して中央に) */
-export function drawLookThumb(canvas: HTMLCanvasElement, text: string, style: TextStyle): void {
+function drawLookThumb(canvas: HTMLCanvasElement, text: string, style: TextStyle): void {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const { width: w, height: h } = canvas
@@ -62,12 +62,28 @@ export function drawLookThumb(canvas: HTMLCanvasElement, text: string, style: Te
     // 見本は登場の動きを終えた姿で見せる
     animation: 'none'
   }
+  const source = { text: text || ' ', startTime: 0, endTime: 1e9, style: centered }
+  // 小さな見本でも読めるよう、文字の塊が枠の 8 割ほどになるまで寄って描く
+  // (仮想キャンバスを小さくする = 拡大。塊が収まる大きさなので折り返しは変わらない)
+  const layout = layoutTelop(ctx as unknown as TelopContext, source, BASE_CANVAS)
+  const reach =
+    (style.outline ? style.outlineWidth : 0) +
+    (style.extraStrokes ?? []).reduce((a, s) => a + s.width, 0)
+  const bw = layout.blockWidth + reach * 2 + (style.background ? layout.fontSize : 0)
+  const bh = layout.blockHeight + reach * 2 + (style.background ? layout.fontSize * 0.6 : 0)
+  const zoom = Math.max(
+    1,
+    Math.min(4, (BASE_CANVAS.w * 0.8) / Math.max(1, bw), (BASE_CANVAS.h * 0.6) / Math.max(1, bh))
+  )
   drawTelop(
     ctx as unknown as TelopContext,
-    { text: text || ' ', startTime: 0, endTime: 1e9, style: centered },
+    source,
     1,
     { width: w, height: h },
-    THUMB_CANVAS
+    {
+      w: BASE_CANVAS.w / zoom,
+      h: BASE_CANVAS.h / zoom
+    }
   )
 }
 
@@ -82,7 +98,7 @@ function kindItem(k: TelopKindInfo): LookItem {
 }
 
 /** 種類ごとの見た目 + 保存したスタイル */
-export function buildLookItems(
+function buildLookItems(
   saved: readonly { id: string; name: string; style: TextStyle }[],
   savedSample: string
 ): LookItem[] {

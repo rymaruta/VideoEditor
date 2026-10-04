@@ -215,7 +215,8 @@ export function FillField({
   gradient,
   onChange,
   allowInherit = false,
-  fallbackColor = '#ffffff'
+  fallbackColor = '#ffffff',
+  rowLabel = '色'
 }: {
   label: string
   color: string | undefined
@@ -224,6 +225,8 @@ export function FillField({
   allowInherit?: boolean
   /** 「本文と同じ」から切り替えたときに始める色 */
   fallbackColor?: string
+  /** 左の見出し(ほかの欄と列を揃える) */
+  rowLabel?: string
 }): React.JSX.Element {
   const mode: FillMode = gradient ? 'gradient' : color || !allowInherit ? 'solid' : 'inherit'
   const solid = color ?? fallbackColor
@@ -247,29 +250,32 @@ export function FillField({
   ]
   return (
     <div className="fill-field">
-      <div className="fill-field-head">
-        <Segmented
-          label={`${label}の種類`}
-          value={mode}
-          options={options}
-          onChange={(m) => {
-            if (m === mode) return
-            if (m === 'inherit') onChange({ color: undefined, gradient: undefined })
-            else if (m === 'solid')
-              onChange({
-                color: gradient ? (color ?? colorFromGradient(gradient)) : solid,
-                gradient: undefined
-              })
-            else onChange({ color, gradient: gradientFromColor(solid) })
-          }}
-        />
-        {mode === 'solid' && (
-          <ColorField
-            label={label}
-            value={solid}
-            onChange={(hex) => onChange({ color: hex, gradient: undefined })}
+      <div className="prop-row fill-field-head">
+        <span className="prop-label">{rowLabel}</span>
+        <div className="prop-control">
+          <Segmented
+            label={`${label}の種類`}
+            value={mode}
+            options={options}
+            onChange={(m) => {
+              if (m === mode) return
+              if (m === 'inherit') onChange({ color: undefined, gradient: undefined })
+              else if (m === 'solid')
+                onChange({
+                  color: gradient ? (color ?? colorFromGradient(gradient)) : solid,
+                  gradient: undefined
+                })
+              else onChange({ color, gradient: gradientFromColor(solid) })
+            }}
           />
-        )}
+          {mode === 'solid' && (
+            <ColorField
+              label={label}
+              value={solid}
+              onChange={(hex) => onChange({ color: hex, gradient: undefined })}
+            />
+          )}
+        </div>
       </div>
       {mode === 'gradient' && gradient && (
         <GradientEditor

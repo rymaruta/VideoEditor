@@ -1,12 +1,26 @@
+import { useState } from 'react'
 import type {
   FontFamily,
+  TelopCharAnimation,
+  TelopExitAnimation,
+  TelopLoopAnimation,
   TelopBubbleTail,
   TelopSpanStyle,
   TelopStroke,
   TextAnimation,
   TextStyle
 } from '@shared/types'
-import { FONT_FAMILY_OPTIONS, TEXT_ANIMATION_MS, textBoxPaddingPx } from '@shared/textStyle'
+import {
+  CHAR_ANIMATION_LABEL,
+  CHAR_ANIMATIONS,
+  EXIT_ANIMATION_LABEL,
+  EXIT_ANIMATIONS,
+  FONT_FAMILY_OPTIONS,
+  LOOP_ANIMATION_LABEL,
+  LOOP_ANIMATIONS,
+  TEXT_ANIMATION_MS,
+  textBoxPaddingPx
+} from '@shared/textStyle'
 import { TELOP_LINE_HEIGHT_EM, telopFontWeight } from '@shared/telop/render'
 import {
   addStroke,
@@ -114,24 +128,7 @@ export function TelopStyleFields({
       <PointerSection style={style} patch={patch} />
       <StyleSection id="motion" title="位置・動き" defaultOpen>
         {placement}
-        <PropRow label="登場">
-          <select
-            aria-label="登場の動き"
-            value={style.animation}
-            onChange={(e) => patch({ animation: e.target.value as TextAnimation })}
-          >
-            {ANIMATIONS.map((a) => (
-              <option key={a.value} value={a.value}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-          {TEXT_ANIMATION_MS[style.animation] > 0 && (
-            <span className="prop-unit">
-              {(TEXT_ANIMATION_MS[style.animation] / 1000).toFixed(2)} 秒
-            </span>
-          )}
-        </PropRow>
+        <MotionFields style={style} patch={patch} />
         {showKaraoke && (
           <PropRow label="カラオケ">
             <label className="checkbox-label">
@@ -158,6 +155,130 @@ export function TelopStyleFields({
 
 type SectionProps = { style: TextStyle; patch: (p: Partial<TextStyle>) => void }
 
+// ------------------------------------------------------------------ 9. 動き(CapCut の 入り / 出 / ループ)
+
+type MotionTab = 'in' | 'out' | 'loop'
+
+function MotionFields({ style, patch }: SectionProps): React.JSX.Element {
+  const [tab, setTab] = useState<MotionTab>('in')
+  const charAnim = style.charAnimation ?? 'none'
+  const exitAnim = style.exitAnimation ?? 'none'
+  const loopAnim = style.loopAnimation ?? 'none'
+  const mark = (on: boolean): string => (on ? ' •' : '')
+  return (
+    <div className="motion-fields">
+      <PropRow label="動き">
+        <Segmented
+          label="動きの種類"
+          value={tab}
+          options={[
+            {
+              value: 'in',
+              label: `入り${mark(style.animation !== 'none' || charAnim !== 'none')}`,
+              title: '出てくるときの動き'
+            },
+            { value: 'out', label: `出${mark(exitAnim !== 'none')}`, title: '消えるときの動き' },
+            {
+              value: 'loop',
+              label: `ループ${mark(loopAnim !== 'none')}`,
+              title: '出ている間ずっと続く動き'
+            }
+          ]}
+          onChange={setTab}
+        />
+      </PropRow>
+      {tab === 'in' && (
+        <>
+          <PropRow label="全体">
+            <select
+              aria-label="登場の動き(全体)"
+              value={style.animation}
+              onChange={(e) => patch({ animation: e.target.value as TextAnimation })}
+            >
+              {ANIMATIONS.map((a) => (
+                <option key={a.value} value={a.value}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+            {TEXT_ANIMATION_MS[style.animation] > 0 && (
+              <span className="prop-unit">
+                {(TEXT_ANIMATION_MS[style.animation] / (style.animationSpeed ?? 1) / 1000).toFixed(
+                  2
+                )}{' '}
+                秒
+              </span>
+            )}
+          </PropRow>
+          <PropRow label="1文字ずつ">
+            <select
+              aria-label="1文字ずつの登場"
+              value={charAnim}
+              onChange={(e) => {
+                const v = e.target.value as TelopCharAnimation
+                patch({ charAnimation: v === 'none' ? undefined : v })
+              }}
+            >
+              {CHAR_ANIMATIONS.map((a) => (
+                <option key={a} value={a}>
+                  {CHAR_ANIMATION_LABEL[a]}
+                </option>
+              ))}
+            </select>
+          </PropRow>
+        </>
+      )}
+      {tab === 'out' && (
+        <PropRow label="消え方">
+          <select
+            aria-label="消えるときの動き"
+            value={exitAnim}
+            onChange={(e) => {
+              const v = e.target.value as TelopExitAnimation
+              patch({ exitAnimation: v === 'none' ? undefined : v })
+            }}
+          >
+            {EXIT_ANIMATIONS.map((a) => (
+              <option key={a} value={a}>
+                {EXIT_ANIMATION_LABEL[a]}
+              </option>
+            ))}
+          </select>
+        </PropRow>
+      )}
+      {tab === 'loop' && (
+        <PropRow label="ループ">
+          <select
+            aria-label="出ている間の動き"
+            value={loopAnim}
+            onChange={(e) => {
+              const v = e.target.value as TelopLoopAnimation
+              patch({ loopAnimation: v === 'none' ? undefined : v })
+            }}
+          >
+            {LOOP_ANIMATIONS.map((a) => (
+              <option key={a} value={a}>
+                {LOOP_ANIMATION_LABEL[a]}
+              </option>
+            ))}
+          </select>
+        </PropRow>
+      )}
+      <PropRow label="速さ" title="入り・出・ループの動きの速さ(1 が標準)">
+        <NumberSlider
+          label="動きの速さ"
+          value={style.animationSpeed ?? 1}
+          onChange={(v) => patch({ animationSpeed: v === 1 ? undefined : v })}
+          min={0.25}
+          max={4}
+          step={0.05}
+          unit="倍"
+        />
+      </PropRow>
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ 1. テキスト
 
 function TextSection({ style, patch }: SectionProps): React.JSX.Element {
@@ -168,7 +289,7 @@ function TextSection({ style, patch }: SectionProps): React.JSX.Element {
       id="text"
       title="テキスト"
       defaultOpen
-      summary={`${fontLabel?.replace(/(.*)/, '') ?? ''} ${style.fontSize}px`}
+      summary={`${fontLabel?.split(/[((]/)[0].trim() ?? ''} ${style.fontSize}px`}
     >
       <PropRow label="書体">
         <select
@@ -236,18 +357,54 @@ function TextSection({ style, patch }: SectionProps): React.JSX.Element {
           I
         </button>
       </PropRow>
+      <PropRow label="組み方">
+        <Segmented
+          label="組み方"
+          value={style.vertical ? 'v' : 'h'}
+          options={[
+            { value: 'h', label: '横書き' },
+            { value: 'v', label: '縦書き', title: '右の列から左へ。長音・括弧は縦向きに回します' }
+          ]}
+          onChange={(v) => patch({ vertical: v === 'v' ? true : undefined })}
+        />
+      </PropRow>
       <PropRow label="揃え">
         <Segmented
-          label="行揃え"
+          label={style.vertical ? '列の揃え' : '行揃え'}
           value={style.align ?? 'center'}
-          options={[
-            { value: 'left', label: <AlignGlyph align="left" />, title: '左揃え' },
-            { value: 'center', label: <AlignGlyph align="center" />, title: '中央揃え' },
-            { value: 'right', label: <AlignGlyph align="right" />, title: '右揃え' }
-          ]}
+          options={
+            style.vertical
+              ? [
+                  { value: 'left', label: '上', title: '上揃え' },
+                  { value: 'center', label: '中', title: '中央揃え' },
+                  { value: 'right', label: '下', title: '下揃え' }
+                ]
+              : [
+                  { value: 'left', label: <AlignGlyph align="left" />, title: '左揃え' },
+                  { value: 'center', label: <AlignGlyph align="center" />, title: '中央揃え' },
+                  { value: 'right', label: <AlignGlyph align="right" />, title: '右揃え' }
+                ]
+          }
           onChange={(v) => patch({ align: v === 'center' ? undefined : v })}
         />
       </PropRow>
+      {!style.vertical && (
+        <PropRow
+          label="アーチ"
+          title="文字を弧に沿って曲げます(正で山なり、負で谷なり。0 でまっすぐ)"
+        >
+          <NumberSlider
+            label="アーチ(曲げ)"
+            value={style.arc ?? 0}
+            onChange={(v) => patch({ arc: v === 0 ? undefined : v })}
+            min={-270}
+            max={270}
+            sliderMin={-180}
+            sliderMax={180}
+            unit="度"
+          />
+        </PropRow>
+      )}
       <PropRow label="字間">
         <NumberSlider
           label="字間"
@@ -313,6 +470,7 @@ function FillSection({ style, patch }: SectionProps): React.JSX.Element {
     >
       <FillField
         label="文字の塗り"
+        rowLabel="塗り"
         color={style.color}
         gradient={gradient}
         onChange={({ color, gradient: g }) =>
@@ -596,7 +754,7 @@ function BackgroundSection({ style, patch }: SectionProps): React.JSX.Element {
           </PropRow>
           {tail && (
             <>
-              <PropRow label="しっぽの位置">
+              <PropRow label="しっぽ位置">
                 <NumberSlider
                   label="しっぽの位置"
                   value={tail.at}
@@ -607,7 +765,7 @@ function BackgroundSection({ style, patch }: SectionProps): React.JSX.Element {
                   unit="%"
                 />
               </PropRow>
-              <PropRow label="しっぽの長さ">
+              <PropRow label="しっぽ長さ">
                 <NumberSlider
                   label="しっぽの長さ"
                   value={tail.length}
@@ -688,6 +846,7 @@ function ShadowSection({ style, patch }: SectionProps): React.JSX.Element {
           onChange={(v) => patch({ shadowAngle: v, shadowDistance: s.distance })}
         />
         <NumberSlider
+          slider={false}
           label="影の角度"
           value={s.angle}
           onChange={(v) => patch({ shadowAngle: v, shadowDistance: s.distance })}
@@ -793,13 +952,14 @@ function SpanSection({ style, patch }: SectionProps): React.JSX.Element {
     <StyleSection id="spans" title="部分の装飾" summary={used > 0 ? `${used} 種類` : undefined}>
       <p className="hint-text style-note">
         本文で <code>**強調**</code> と囲んだ所、<code>__小さく__</code> と囲んだ所、
-        改行の前の1行目だけを、別の大きさ・色にできます(値段・「Q.」・章の番号など)。
+        改行の前の1行目だけを、別の大きさ・色にできます(値段・「Q.」・章の番号など)。 ふりがなは{' '}
+        <code>漢字《かんじ》</code> または <code>｜親文字《るび》</code> と書きます。
       </p>
       {SPAN_KINDS.map((k) => {
         const span = style[k.key]
         const set = (next: TelopSpanStyle | undefined): void => patch({ [k.key]: next })
         return (
-          <div key={k.key} className="span-card">
+          <div key={k.key} className={`span-card ${span ? '' : 'off'}`}>
             <label className="checkbox-label span-card-head">
               <input
                 type="checkbox"

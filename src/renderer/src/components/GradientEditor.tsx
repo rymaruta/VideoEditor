@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { TelopGradient } from '@shared/types'
 import {
   addGradientStop,
@@ -38,7 +38,9 @@ export function GradientEditor({
   const barRef = useRef<HTMLDivElement>(null)
   // 引きずっている間は、親から戻る前の最新の値と番号を持つ
   const latest = useRef(value)
-  latest.current = value
+  useLayoutEffect(() => {
+    latest.current = value
+  }, [value])
   const dragIndex = useRef<number | null>(null)
 
   const sel = Math.min(selected, value.stops.length - 1)
