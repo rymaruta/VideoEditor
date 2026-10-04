@@ -3,6 +3,7 @@ import type { RoughCut } from '@shared/roughCut/build'
 import { decideTelopPlacement } from '@shared/telop/avoidFaces'
 import { textCanvasSize } from '@shared/resolution'
 import type { AspectRatio } from '@shared/types'
+import { autoTelopKey } from '@shared/telop/manual'
 
 /**
  * 発言テロップを、顔を隠さない位置へ(計画書 §5.8)。
@@ -14,7 +15,8 @@ import type { AspectRatio } from '@shared/types'
 export interface PlacementResult {
   telops: Omit<TextOverlay, 'id'>[]
   moved: number
-  review: { startTime: number; text: string }[]
+  /** `key` は作り直しても変わらない、自動テロップの鍵(`autoTelopKey`)。時刻は作り直すと動く */
+  review: { startTime: number; text: string; key: string | null }[]
   /** 画を調べられなかった枚数 */
   unchecked: number
 }
@@ -91,7 +93,8 @@ export async function placeTelopsAvoidingFaces(
       moved++
       return { ...o, style: { ...o.style, position: 'top' as const } }
     }
-    if (decision === 'review') review.push({ startTime: o.startTime, text: o.text })
+    if (decision === 'review')
+      review.push({ startTime: o.startTime, text: o.text, key: autoTelopKey(o) })
     return o
   })
   return { telops: out, moved, review, unchecked }

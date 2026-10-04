@@ -4,6 +4,7 @@ import { AUTO_PLACE_CONFIDENCE } from '@shared/telop/effects'
 import type { Project } from '@shared/types'
 import type { QcReport } from '../store/qcStore'
 import { placedUtterances } from './transcriptTimeline'
+import { autoTelopKey } from '@shared/telop/manual'
 
 /**
  * 要確認の一覧(計画書 §5.13)。自動編集の各工程が「自信の低い箇所」をここへ出し、人はここから直す。
@@ -35,9 +36,9 @@ export interface ReviewSources {
   syncIssues: readonly SyncIssue[]
   /** 同期の素材の名前(ファイルの ID → 表示名) */
   fileLabel: (fileId: string) => string
-  /** 同期の結果の、共通の時刻(秒)— タイムラインに並べた直後の位置 */
+  /** その素材が今のタイムラインで映る時刻(秒)。本編に残っていなければ undefined */
   placedStart: (fileId: string) => number | undefined
-  telopReviews: readonly { startTime: number; text: string }[]
+  telopReviews: readonly { startTime: number; text: string; key?: string | null }[]
   colorIssues: readonly { name: string; verdict: keyof typeof COLOR_VERDICT_TEXT }[]
   denoiseFailures: readonly { fileName: string; error: string }[]
   effects: readonly { id: string; text: string; confidence: number }[]
@@ -95,16 +96,23 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       tab: 'transcript'
     })
 
+  // 作り直し・文字の直し・前のクリップの削除でテロップの時刻や文字は変わるので、
+  // 自動テロップの鍵(発話+何枚目)で探し、印もその鍵で付ける(時刻で付けると作り直しで印が消える)
+  const dismissed = new Set(s.project.dismissedTelops ?? [])
   for (const r of s.telopReviews) {
-    const overlay = s.project.textOverlays.find(
-      (o) => Math.abs(o.startTime - r.startTime) < 1e-3 && o.text === r.text
-    )
+    if (r.key && dismissed.has(r.key)) continue // 人が消したテロップ
+    const overlay = r.key
+      ? s.project.textOverlays.find((o) => autoTelopKey(o) === r.key)
+      : s.project.textOverlays.find(
+          (o) => Math.abs(o.startTime - r.startTime) < 1e-3 && o.text === r.text
+        )
+    const text = overlay?.text ?? r.text
     items.push({
-      key: `telop-face:${r.startTime.toFixed(2)}`,
+      key: `telop-face:${r.key ?? r.startTime.toFixed(2)}`,
       area: 'telop',
       kind: 'テロップと顔',
-      text: `「${r.text.replace(/\n/g, ' ').slice(0, 30)}」— 上下どちらに置いても顔に掛かります。位置を確かめてください`,
-      at: r.startTime,
+      text: `「${text.replace(/\n/g, ' ').slice(0, 30)}」— 上下どちらに置いても顔に掛かります。位置を確かめてください`,
+      at: overlay?.startTime ?? r.startTime,
       overlayId: overlay?.id
     })
   }
@@ -129,10 +137,9 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
   const pending = s.effects.filter((e) => !chosen.has(e.id) && e.confidence < AUTO_PLACE_CONFIDENCE)
   if (pending.length > 0)
     items.push({
-      key: `effects-pending:${pending
-        .map((e) => e.id)
-        .sort()
-        .join(',')}`,
+      // 提案は1回の通しで1度しか作らないので、鍵は固定。中身(どれが残っているか)で鍵を変えると、
+      // 1件選ぶたびに「確認済み」が外れて項目が出直す
+      key: 'effects-pending',
       area: 'effects',
       kind: '演出テロップ',
       text: `自信が低く自動では置かなかった提案が ${pending.length} 件あります(「演出テロップ」タブで選べます)`,

@@ -50,4 +50,60 @@ describe('buildReviewItems', () => {
     expect(items.find((i) => i.area === 'effects')?.text).toContain('1 件')
     expect(openReviewCount(items, [items[0].key])).toBe(4)
   })
+
+  it('テロップと顔の項目は、作り直し・文字の直しで時刻や文字が変わっても同じ鍵で同じテロップを指す', () => {
+    const base = {
+      syncIssues: [],
+      fileLabel: (id: string) => id,
+      placedStart: () => undefined,
+      colorIssues: [],
+      denoiseFailures: [],
+      effects: [],
+      effectChosen: [],
+      qc: null
+    }
+    const telop = {
+      id: 'o1',
+      text: '直した文字',
+      startTime: 7,
+      endTime: 9,
+      utteranceId: 'u1',
+      utteranceChunk: 0
+    } as Project['textOverlays'][number]
+    const items = buildReviewItems({
+      ...base,
+      project: { ...project, textOverlays: [telop] },
+      telopReviews: [{ startTime: 12, text: '元の文字', key: 'u:u1#0' }]
+    })
+    expect(items[0].key).toBe('telop-face:u:u1#0')
+    expect(items[0].overlayId).toBe('o1')
+    expect(items[0].at).toBe(7)
+    // 人が消したテロップの項目は出さない
+    const gone = buildReviewItems({
+      ...base,
+      project: { ...project, dismissedTelops: ['u:u1#0'] },
+      telopReviews: [{ startTime: 12, text: '元の文字', key: 'u:u1#0' }]
+    })
+    expect(gone).toEqual([])
+  })
+
+  it('自信の低い演出テロップの項目は、どれかを選んでも鍵が変わらない', () => {
+    const run = (chosen: string[]): string | undefined =>
+      buildReviewItems({
+        project,
+        syncIssues: [],
+        fileLabel: (id) => id,
+        placedStart: () => undefined,
+        telopReviews: [],
+        colorIssues: [],
+        denoiseFailures: [],
+        effects: [
+          { id: 'e1', text: 'a', confidence: 0.5 },
+          { id: 'e2', text: 'b', confidence: 0.5 }
+        ],
+        effectChosen: chosen,
+        qc: null
+      }).find((i) => i.area === 'effects')?.key
+    expect(run([])).toBe(run(['e1']))
+  })
 })

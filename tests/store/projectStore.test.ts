@@ -857,6 +857,27 @@ describe('自動の版面CG', () => {
     st().setAutoCg([], [])
     expect(st().project.videoOverlayTracks.filter((t) => t.autoRole)).toHaveLength(0)
   })
+  it('CG のトラックの大きさ・位置を手で変えたら、作り直しでも全面に戻さない', () => {
+    const cgAsset: Project['assets'][number] = {
+      id: 'cg1',
+      filePath: '/cg/a.mov',
+      fileName: 'a.mov',
+      duration: 3,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      hasAudio: false,
+      hasVideo: true
+    }
+    const place = [{ path: '/cg/a.mov', startTime: 4, inPoint: 0, outPoint: 3, keyword: 'うまい' }]
+    st().setAutoCg(place, [cgAsset])
+    const id = st().project.videoOverlayTracks.find((t) => t.autoRole === 'cg')!.id
+    st().setVideoOverlayTrackScale(id, 0.5)
+    st().setVideoOverlayTrackPosition(id, 'top-left')
+    st().setAutoCg(place, [])
+    const kept = st().project.videoOverlayTracks.filter((t) => t.position === 'top-left')
+    expect(kept.map((t) => t.scale)).toEqual([0.5])
+  })
 })
 
 describe('人の修正を作り直しで上書きしない', () => {
@@ -890,6 +911,20 @@ describe('人の修正を作り直しで上書きしない', () => {
     expect(st().project.reviewed).toEqual(['sync:x'])
     st().setReviewed('sync:x', false)
     expect(st().project.reviewed).toBeUndefined()
+  })
+
+  it('「このままでよい」は未保存の印を立て、取り消し・やり直しの1件になる', () => {
+    useProjectStore.setState({ isDirty: false })
+    st().setProjectName('名前を変えた')
+    st().setReviewed('k2', true)
+    expect(st().isDirty).toBe(true)
+    st().undo()
+    expect(st().project.reviewed).toBeUndefined()
+    st().undo()
+    expect(st().project.name).not.toBe('名前を変えた')
+    st().redo()
+    st().redo()
+    expect(st().project.reviewed).toEqual(['k2'])
   })
 
   it('直したテロップは、場面を落としてタイムラインから外れても、戻したときに直した内容で出る', () => {
@@ -948,6 +983,112 @@ describe('仮編集の作り直しで、人が決めた音・差し込んだク�
     )
     const after = st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
     expect([after.muted, after.volume]).toEqual([true, 0.5])
+  })
+
+  it('本編のクリップを消す・伸ばすと、ピンマイクの声と自動テロップが本編に付いてくる', () => {
+    S.setState({ project: { ...st().project, multicam: info, clips: [], textOverlays: [] } })
+    st().applyRoughCut(
+      cutOf([
+        [0, 10],
+        [20, 30],
+        [40, 50]
+      ]),
+      [
+        {
+          text: '二つ目',
+          startTime: 11,
+          endTime: 12,
+          style: defaultTextStyle(),
+          utteranceId: 'u2',
+          utteranceChunk: 0
+        },
+        {
+          text: '一つ目',
+          startTime: 2,
+          endTime: 3,
+          style: defaultTextStyle(),
+          utteranceId: 'u1',
+          utteranceChunk: 0
+        }
+      ]
+    )
+    const micClips = (): [number, number, number][] =>
+      st()
+        .project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+        .clips.map((c) => [c.startTime, c.inPoint, c.outPoint])
+    st().removeClip(st().project.clips[0].id)
+    // 映像は素材の 20 秒から。声も 20 秒から、テロップも 10 秒前へ
+    expect(st().project.clips[0].inPoint).toBe(20)
+    expect(micClips()).toEqual([
+      [0, 20, 30],
+      [10, 40, 50]
+    ])
+    const telops = st().project.textOverlays.filter((o) => o.utteranceId)
+    expect(telops.map((o) => [o.text, o.startTime, o.endTime])).toEqual([['二つ目', 1, 2]])
+    // 取り消すと元どおり
+    st().undo()
+    expect(micClips()[0]).toEqual([0, 0, 10])
+    st().redo()
+    // 本編のクリップを伸ばすと、新しく見えた所に声が入る
+    const first = st().project.clips[0]
+    st().updateClipTrim(first.id, 20, 35)
+    expect(micClips()).toEqual([
+      [0, 20, 30],
+      [10, 30, 35],
+      [15, 40, 50]
+    ])
+  })
+
+  it('仮編集を作り直しても、本編に紐づけた手置きのテロップは同じ場面のクリップに付いたまま', () => {
+    const camAsset: Project['assets'][number] = {
+      id: 'camA',
+      filePath: '/rec/camA.mp4',
+      fileName: 'camA.mp4',
+      duration: 100,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      hasAudio: true,
+      hasVideo: true
+    }
+    S.setState({
+      project: { ...st().project, multicam: info, assets: [camAsset], clips: [], textOverlays: [] }
+    })
+    st().applyRoughCut(
+      cutOf([
+        [0, 10],
+        [20, 30]
+      ]),
+      []
+    )
+    const second = st().project.clips[1]
+    S.setState({
+      project: {
+        ...st().project,
+        textOverlays: [
+          {
+            id: 'manual',
+            text: '手置き',
+            startTime: 12,
+            endTime: 13,
+            style: defaultTextStyle(),
+            linkedClipId: second.id,
+            linkOffset: 2
+          }
+        ]
+      }
+    })
+    // 頭の 5 秒を落として作り直す: 素材の 22 秒は、タイムラインの 7 秒へ
+    st().applyRoughCut(
+      cutOf([
+        [5, 10],
+        [20, 30]
+      ]),
+      []
+    )
+    const o = st().project.textOverlays.find((x) => x.id === 'manual')!
+    expect(o.linkedClipId).toBe(st().project.clips[1].id)
+    expect([o.startTime, o.linkOffset]).toEqual([7, 2])
   })
 
   it('収録素材以外のクリップ(差し込みの画)は、直前のクリップの続きに入れ直す', () => {

@@ -150,7 +150,7 @@ interface PipelineState {
   /** 演出テロップを置く/外す(すぐタイムラインに反映する) */
   setEffectChosen: (id: string, chosen: boolean) => void
   /** 顔の検出で、上下どちらに置いても顔に掛かった発言テロップ(要確認) */
-  telopReviews: { startTime: number; text: string }[]
+  telopReviews: { startTime: number; text: string; key: string | null }[]
   /** 色を合わせられなかったカメラ(要確認に出す) */
   colorIssues: { name: string; verdict: Exclude<ColorMatchVerdict, 'matched' | 'same'> }[]
   /** ノイズ除去ができなかったピンマイク(要確認に出す) */
@@ -753,17 +753,27 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       log(`顔の検出ができませんでした(テロップは下のまま): ${formatIpcError(e)}`)
     }
     // 演出テロップ: 提案は最初の1回だけ AI に頼み、作り直しでは選んだものを置き直す
-    if (get().effects.length === 0 && get().steps.effects.state !== 'done') {
+    // 人物紹介(AI を使わない)だけが入っているときは、まだ AI に頼んでいない。AI の設定を
+    // 入れてから作り直したときに頼めるよう、人物紹介の有無ではなく工程の状態で見る
+    const aiAsked = get().steps.effects.state === 'done'
+    if (!aiAsked) {
       const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
       const lines = effectLines(project, info, plan.cut.spans)
       // 人物紹介(名前スーパー)は AI を使わずに、各出演者の最初の発言へ(AI を使わない設定でも付ける)
       const names = nameProposals(lines)
       if (names.length > 0)
         log(`人物紹介: ${names.map((n) => n.text).join('・')} の最初の発言に名前を出します`)
+      // 前の作り直しで人が外した人物紹介は外したままにする(id は名前から決まる)
+      const prevIds = new Set(get().effects.map((e) => e.id))
+      const prevChosen = new Set(get().effectChosen)
+      const nameChosen = names
+        .filter((n) => !prevIds.has(n.id) || prevChosen.has(n.id))
+        .map((n) => n.id)
       if (provider === 'off' || (provider === 'gemini' && !apiKey)) {
-        set({ effects: names, effectChosen: names.map((n) => n.id) })
+        set({ effects: names, effectChosen: nameChosen })
         setStep('effects', {
-          state: names.length > 0 ? 'done' : 'skipped',
+          // 'done' にすると、あとで AI を使える設定にしても二度と頼まない
+          state: 'skipped',
           note:
             (provider === 'off'
               ? 'AI を使わない設定です'
@@ -788,9 +798,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             (p) => setStep('effects', { percent: p.percent, note: p.note })
           )
           const proposals = [...names, ...aiProposals]
-          const auto = proposals
-            .filter((p) => p.confidence >= AUTO_PLACE_CONFIDENCE)
-            .map((p) => p.id)
+          const auto = [
+            ...nameChosen,
+            ...aiProposals.filter((p) => p.confidence >= AUTO_PLACE_CONFIDENCE).map((p) => p.id)
+          ]
           set({ effects: proposals, effectChosen: auto })
           const failNote = failed > 0 ? ` · AI が答えられなかった ${failed}/${total}` : ''
           setStep('effects', {
@@ -805,6 +816,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
                 'このPCの AI が小さいモデルのときに起きやすく、GPU で大きいモデルを使うと減ります'
             )
         } catch (e) {
+          // AI が失敗しても、AI の要らない人物紹介は付ける
+          set({ effects: names, effectChosen: nameChosen })
           setStep('effects', { state: 'error', note: formatIpcError(e) })
           log(`演出テロップの提案ができませんでした: ${formatIpcError(e)}`)
         }
@@ -1182,7 +1195,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 onProjectSwitch(() => usePipelineStore.getState().resetResults())
 
 // 自動編集の最中は、PC をスリープさせず、タスクバーに進み具合を出す。終わったら知らせる
+// 走り出したときの各工程の状態。作り直しでは前の通しの失敗が残っているので、
+// この回に新しく止まった工程だけを知らせる
+let stepsAtStart: Record<StepId, StepStatus> | null = null
 usePipelineStore.subscribe((s, prev) => {
+  if (s.running && !prev.running) stepsAtStart = s.steps
   if (s.running) {
     const current = STEPS.find((st) => s.steps[st.id].state === 'run')
     reportBusy('pipeline', {
@@ -1191,7 +1208,12 @@ usePipelineStore.subscribe((s, prev) => {
     })
   } else if (prev.running) {
     reportBusy('pipeline', null)
-    const failed = STEPS.filter((st) => s.steps[st.id].state === 'error')
+    const before = stepsAtStart
+    stepsAtStart = null
+    // 人が中止したときは知らせない(「終わりました」と出すと誤解する)
+    const changed = STEPS.filter((st) => s.steps[st.id] !== before?.[st.id])
+    if (changed.some((st) => s.steps[st.id].note === '中止しました')) return
+    const failed = changed.filter((st) => s.steps[st.id].state === 'error')
     if (failed.length > 0)
       window.api.notifyDone(
         '自動編集で止まった工程があります',

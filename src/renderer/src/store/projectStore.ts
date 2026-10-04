@@ -1,9 +1,17 @@
 import type { AudioEventWindow } from '@shared/events/audioEvents'
 import {
+  isIdentityMapping,
+  mapTimelineRange,
+  sourcePieces,
+  timelineMapping,
+  uncoveredSpans
+} from '@shared/roughCut/follow'
+import {
   angleAlternatives,
   coverageOfClips,
   hasOverrides,
   reinsertExtraClips,
+  spansOfClips,
   type CameraSeg,
   type CutOverrides,
   type Range
@@ -18,7 +26,7 @@ import type { PlacedCg } from '@shared/finish/cg'
 import type { PlacedSound } from '@shared/finish/sound'
 import type { ColorMatch } from '@shared/color/match'
 import type { RoughCut } from '@shared/roughCut/build'
-import type { MulticamInfo, MulticamSource } from '@shared/sync/multicam'
+import { toCommon, type MulticamInfo, type MulticamSource } from '@shared/sync/multicam'
 import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
 import { restyleOverlays, type TelopStyleDef } from '@shared/telop/styles'
@@ -200,6 +208,9 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
 }
 
 type SignedTrack = {
+  name?: string
+  position?: string
+  scale?: number
   muted?: boolean
   volume?: number
   duckingEnabled?: boolean
@@ -228,6 +239,17 @@ function legacySignatureOf(track: SignedTrack): string {
  * 「手を付けていない」とみなされ、作り直しで消音していない BGM に戻っていた)
  */
 function autoSignatureOf(track: SignedTrack): string {
+  // v3: 名前・CG の位置・大きさも入れる(v2 では CG を小さく・隅へ寄せても作り直しで全面に戻った)
+  return (
+    'v3|' +
+    JSON.stringify([track.name ?? '', track.position ?? '', track.scale ?? 1]) +
+    '|' +
+    signatureV2(track)
+  )
+}
+
+/** v2 の要約(v2 の印で保存した企画を読むときに比べる) */
+function signatureV2(track: SignedTrack): string {
   const head = [
     track.muted ? 1 : 0,
     track.volume ?? 1,
@@ -259,8 +281,9 @@ function isUntouchedAuto(
   track: SignedTrack & { autoRole?: string; autoSignature?: string }
 ): boolean {
   if (!track.autoRole || track.autoSignature === undefined) return false
+  if (track.autoSignature.startsWith('v3|')) return track.autoSignature === autoSignatureOf(track)
   return track.autoSignature.startsWith('v2|')
-    ? track.autoSignature === autoSignatureOf(track)
+    ? track.autoSignature === signatureV2(track)
     : track.autoSignature === legacySignatureOf(track)
 }
 
@@ -625,6 +648,11 @@ interface ProjectState {
    * 関門が必ず剥がすので、ストアの中に残ることはない。
    */
   __historyPush?: true
+  /**
+   * 本編を丸ごと組み直す書き込み(仮編集を入れる・同期の結果を並べる)の印。声・テロップも
+   * 同時に新しい位置で入るので、本編に付いていかせる処理(`followMainEdit`)を通さない
+   */
+  __noFollow?: true
   currentFilePath: string | null
   isDirty: boolean
   selectedClipId: string | null
@@ -1292,9 +1320,12 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         // 落とすことになったときに戻せるよう、まとめ判定の目印を先に控える。
         // `partial` を評価すると、その中の `pushHistory` が目印を書き換えてしまう。
         const coalescingMark = historyCoalescingMark()
-        const patch = (typeof partial === 'function' ? partial(state) : partial) as
+        let patch = (typeof partial === 'function' ? partial(state) : partial) as
           Partial<ProjectState> | undefined
         if (!patch || patch.__historyPush !== true) return patch as Partial<ProjectState>
+        if (patch.__noFollow) patch = omitKeys(patch, ['__noFollow'])
+        else if (patch.project && patch.project.clips !== state.project.clips)
+          patch = { ...patch, project: followMainEdit(state.project, patch.project) }
         if (!patch.project || !sameProjectContent(patch.project, state.project)) {
           return omitKeys(patch, ['__historyPush'])
         }
@@ -1307,7 +1338,14 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         // 中身が同じなら、履歴・未保存・企画の差し替えを丸ごと落とす。
         // `project` を差し替えないことで**参照も保たれる**ので、保存済み判定
         // (`markSaved` の `state.project !== savedProject`)も巻き添えにならない。
-        const others = omitKeys(patch, ['__historyPush', 'project', 'past', 'future', 'isDirty'])
+        const others = omitKeys(patch, [
+          '__historyPush',
+          '__noFollow',
+          'project',
+          'past',
+          'future',
+          'isDirty'
+        ])
         // 何も残らないときは `state` をそのまま返す。zustand は同じ参照なら
         // 購読者に通知しないので、余計な再描画も起きない。
         return Object.keys(others).length === 0 ? state : others
@@ -1610,6 +1648,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           }))
       }))
       return {
+        __noFollow: true,
         ...pushHistory(state),
         project: {
           ...base,
@@ -2506,13 +2545,29 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const clips = state.project.multicam
         ? reinsertExtraClips(state.project.clips, rebuilt, state.project.multicam)
         : rebuilt
+      // 本編のクリップは作り直すと ID が変わるので、本編に紐づけた手置きのテロップ・分離音声を、
+      // 同じ共通の時刻を映す新しいクリップへ紐づけ直す(しないと紐づきが外れ、元の時刻に取り残される)
+      const relink = relinkToRebuiltClips(state.project.clips, clips, state.project.multicam)
       const previousTracks = new Map(
         state.project.audioTracks
           .filter((t) => t.multicamSourceId)
           .map((t) => [t.multicamSourceId!, t])
       )
       const audioTracks: AudioTrack[] = [
-        ...state.project.audioTracks.filter((t) => !t.multicamSourceId),
+        ...state.project.audioTracks
+          .filter((t) => !t.multicamSourceId)
+          .map((t) =>
+            t.clips.some((c) => c.linkedClipId)
+              ? {
+                  ...t,
+                  clips: t.clips.map((c) => {
+                    if (!c.linkedClipId) return c
+                    const to = relink(c.linkedClipId, 0, c.assetId)
+                    return to ? { ...c, linkedClipId: to.id } : { ...c, linkedClipId: undefined }
+                  })
+                }
+              : t
+          ),
         ...cut.audio.map((a) => {
           // 人が決めた消音・ダッキング・音量(仮編集が決めた値から変えたもの)は作り直しても残す
           const prev = previousTracks.get(a.sourceId)
@@ -2539,6 +2594,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         })
       ]
       return {
+        __noFollow: true,
         ...pushHistory(state),
         selectedClipId: null,
         multiSelectedClipIds: [],
@@ -2561,7 +2617,15 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             state.project.editedTelops
           ),
           textOverlays: [
-            ...state.project.textOverlays.filter((o) => !o.utteranceId && !o.effectId),
+            ...state.project.textOverlays
+              .filter((o) => !o.utteranceId && !o.effectId)
+              .map((o) => {
+                if (!o.linkedClipId) return o
+                const to = relink(o.linkedClipId, o.linkOffset ?? 0)
+                return to
+                  ? { ...o, linkedClipId: to.id, linkOffset: to.offset }
+                  : { ...o, linkedClipId: undefined, linkOffset: undefined }
+              }),
             ...mergeManualTelops(
               state.project.textOverlays,
               telops,
@@ -2728,11 +2792,48 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       if (!info || !clip) return state
       const alt = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clip
       if (!alt) return state
+      // 分離した音声(このクリップに紐づく音声クリップ)も同じカメラへ替える。
+      // 替えないと、映像は新しいカメラ・音は前のカメラのまま、前のカメラの素材に新しいカメラの
+      // in/out が写され、カメラ間の時刻のずれの分だけ音がずれる(実測: 3秒)
+      const altAsset = state.project.assets.find((a) => a.id === alt.assetId)
+      const altHasAudio = altAsset?.hasAudio !== false
+      const linked = state.project.audioTracks.some((t) =>
+        t.clips.some((c) => c.linkedClipId === clipId)
+      )
+      const audioTracks = !linked
+        ? state.project.audioTracks
+        : state.project.audioTracks
+            .map((t) => {
+              if (!t.clips.some((c) => c.linkedClipId === clipId)) return t
+              const clips = altHasAudio
+                ? t.clips.map((c) =>
+                    c.linkedClipId === clipId
+                      ? {
+                          ...c,
+                          assetId: alt.assetId,
+                          inPoint: alt.inPoint,
+                          outPoint: alt.outPoint,
+                          speed: alt.speed
+                        }
+                      : c
+                  )
+                : t.clips.filter((c) => c.linkedClipId !== clipId)
+              return { ...t, clips }
+            })
+            .filter((t) => t.clips.length > 0)
       return {
         ...pushHistory(state),
         project: {
           ...state.project,
-          clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, ...alt } : c))
+          clips: state.project.clips.map((c) =>
+            c.id !== clipId
+              ? c
+              : // 新しいカメラに音が無いので、分離した音声ごと外した。分離の印も戻す
+                linked && !altHasAudio
+                ? { ...c, ...alt, audioDetached: false }
+                : { ...c, ...alt }
+          ),
+          audioTracks
         }
       }
     }),
@@ -2742,7 +2843,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const cur = state.project.reviewed ?? []
       const next = reviewed ? [...new Set([...cur, key])] : cur.filter((k) => k !== key)
       if (next.length === cur.length && next.every((k, i) => k === cur[i])) return state
-      return { project: { ...state.project, reviewed: next.length > 0 ? next : undefined } }
+      // 履歴に積む(未保存の印も立つ)。積まないと、自動保存に拾われず閉じても警告が出ないうえ、
+      // 手前の編集を取り消したときに、その時点の企画ごと印が消える
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, reviewed: next.length > 0 ? next : undefined }
+      }
     }),
 
   undismissTelops: (keys) =>
@@ -2751,6 +2857,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const next = cur.filter((k) => !keys.includes(k))
       if (next.length === cur.length) return state
       return {
+        ...pushHistory(state),
         project: { ...state.project, dismissedTelops: next.length > 0 ? next : undefined }
       }
     }),
@@ -3854,6 +3961,135 @@ function syncLinkedTextOverlays(project: Project): Project {
     return { ...o, startTime, endTime, words: shiftOverlayWords(o.words, startTime - o.startTime) }
   })
   return changed ? { ...project, textOverlays } : project
+}
+
+/**
+ * 作り直す前の本編のクリップ(の、先頭から `offset` 秒の所)が映していた共通の時刻を、
+ * 作り直したあとの本編で映しているクリップと、その先頭からの秒を返す。
+ * 作り直しでも残るクリップ(差し込みの画など)は ID が同じなのでそのまま。
+ * `sameAsset` を渡すと、同じ素材のクリップにだけ紐づける(分離音声: 別のカメラに紐づくと
+ * そのカメラの in/out が音に写され、カメラ間の時刻のずれの分だけ音がずれる)
+ */
+function relinkToRebuiltClips(
+  oldClips: readonly Clip[],
+  newClips: readonly Clip[],
+  info: MulticamInfo | undefined
+): (clipId: string, offset: number, sameAsset?: string) => { id: string; offset: number } | null {
+  const newIds = new Set(newClips.map((c) => c.id))
+  return (clipId, offset, sameAsset) => {
+    if (newIds.has(clipId)) return { id: clipId, offset }
+    if (!info) return null
+    const old = oldClips.find((c) => c.id === clipId)
+    const f = old && info.files.find((x) => x.assetId === old.assetId)
+    if (!old || !f) return null
+    const common = toCommon(f, old.inPoint + offset * (old.speed || 1))
+    for (const c of newClips) {
+      if (sameAsset && c.assetId !== sameAsset) continue
+      const g = info.files.find((x) => x.assetId === c.assetId)
+      if (!g) continue
+      const start = toCommon(g, c.inPoint)
+      const end = toCommon(g, c.outPoint)
+      if (common >= start - 1e-6 && common < end) return { id: c.id, offset: common - start }
+    }
+    return null
+  }
+}
+
+/**
+ * 本編(収録素材のカメラ)を手で消す・詰める・伸ばす・並べ替えたとき、本編に紐づいていない
+ * ピンマイクの声・周りの音・自動テロップ・自動の SE/BGM/CG を、同じ共通の時刻を映している所へ動かす。
+ * 動かさないと、そこから後ろの声とテロップが詰めた分だけずれたまま書き出される。
+ * 本編から消えた区間のものは消え、伸ばして新しく見えた区間にはピンマイクの声を足す。
+ * 人が自分で置いたもの(自動の印の無いトラック・テロップ)と、本編に紐づくものは動かさない
+ * (紐づくものは `syncLinked…` が本編のクリップに合わせる)。
+ */
+function followMainEdit(prev: Project, next: Project): Project {
+  const info = next.multicam
+  if (!info || prev.multicam !== info) return next
+  const before = spansOfClips(prev.clips, info)
+  const after = spansOfClips(next.clips, info)
+  if (before.length === 0) return next
+  const segs = timelineMapping(before, after)
+  if (isIdentityMapping(segs, before, after)) return next
+
+  const remapClip = <
+    C extends {
+      id: string
+      startTime: number
+      inPoint: number
+      outPoint: number
+      speed?: number
+      fadeIn?: number
+      fadeOut?: number
+    }
+  >(
+    c: C
+  ): C[] => {
+    const speed = c.speed || 1
+    const end = c.startTime + (c.outPoint - c.inPoint) / speed
+    const pieces = mapTimelineRange(segs, c.startTime, end)
+    return pieces
+      .filter((p) => p.to - p.from > 1e-3)
+      .map((p, i, all) => ({
+        ...c,
+        id: i === 0 ? c.id : uuid(),
+        startTime: p.at,
+        inPoint: c.inPoint + (p.from - c.startTime) * speed,
+        outPoint: c.inPoint + (p.to - c.startTime) * speed,
+        fadeIn: i === 0 ? c.fadeIn : undefined,
+        fadeOut: i === all.length - 1 ? c.fadeOut : undefined
+      }))
+  }
+  const follows = (t: { multicamSourceId?: string; autoRole?: string }): boolean =>
+    Boolean(t.multicamSourceId || t.autoRole)
+  const gaps = uncoveredSpans(after, segs)
+
+  const audioTracks = next.audioTracks.map((t) => {
+    if (!follows(t)) return t
+    const untouched = isUntouchedAuto(t)
+    const moved = t.clips.flatMap((c) => (c.linkedClipId ? [c] : remapClip(c)))
+    // 伸ばして新しく見えた所: 収録素材のトラックなら、その機材の音を足す
+    const added =
+      t.multicamSourceId && gaps.length > 0
+        ? gaps.flatMap((g) =>
+            sourcePieces(info, t.multicamSourceId!, g).map((p) => ({
+              id: uuid(),
+              assetId: p.assetId,
+              startTime: p.startTime,
+              inPoint: p.inPoint,
+              outPoint: p.outPoint,
+              ...(Math.abs(p.speed - 1) > 1e-9 ? { speed: p.speed } : {})
+            }))
+          )
+        : []
+    const clips = [...moved, ...added].sort((a, b) => a.startTime - b.startTime)
+    const track = { ...t, clips }
+    // 手を付けていない自動のトラックは、動かしたあとも「手を付けていない」のまま(作り直しで入れ替わる)
+    return untouched ? withAutoSignature(track) : track
+  })
+  const videoOverlayTracks = next.videoOverlayTracks.map((t) => {
+    if (!follows(t)) return t
+    const untouched = isUntouchedAuto(t)
+    const track = { ...t, clips: t.clips.flatMap((c) => remapClip(c)) }
+    return untouched ? withAutoSignature(track) : track
+  })
+  const textOverlays = next.textOverlays.flatMap((o) => {
+    if (o.linkedClipId || autoTelopKey(o) === null) return [o]
+    const pieces = mapTimelineRange(segs, o.startTime, o.endTime)
+    // 本編から消えた発言のテロップは消す(場面を戻して作り直せば、また入る)
+    if (pieces.length === 0) return []
+    const startTime = pieces[0].at
+    let endTime = startTime + (pieces[0].to - pieces[0].from)
+    for (const p of pieces.slice(1)) {
+      if (Math.abs(p.at - endTime) > 1e-6) break
+      endTime = p.at + (p.to - p.from)
+    }
+    if (sameNumber(startTime, o.startTime) && sameNumber(endTime, o.endTime)) return [o]
+    return [
+      { ...o, startTime, endTime, words: shiftOverlayWords(o.words, startTime - o.startTime) }
+    ]
+  })
+  return { ...next, audioTracks, videoOverlayTracks, textOverlays }
 }
 
 // Runs the mirror as a silent follow-up correction (no history entry of its own):
