@@ -1,4 +1,4 @@
-import type { TextOverlay } from '../types'
+import type { EditedTelop, TextOverlay } from '../types'
 
 /**
  * 人の修正を、自動編集の作り直しで上書きしない(計画書 §5.13)。
@@ -27,9 +27,11 @@ export function isManualEdit(patch: Partial<TextOverlay>): boolean {
 export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
   existing: readonly TextOverlay[],
   incoming: readonly T[],
-  dismissed: ReadonlySet<string>
+  dismissed: ReadonlySet<string>,
+  /** 覚えておいた人の修正(今タイムラインに無いものも含む) */
+  remembered: Readonly<Record<string, EditedTelop>> = {}
 ): T[] {
-  const edited = new Map<string, TextOverlay>()
+  const edited = new Map<string, EditedTelop>(Object.entries(remembered))
   for (const o of existing) {
     const key = autoTelopKey(o)
     if (key && o.edited) edited.set(key, o)
@@ -56,4 +58,23 @@ export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
     })
   }
   return out
+}
+
+/** 今あるテロップの人の修正を、覚えておいた修正に重ねる(新しい修正が勝つ) */
+export function rememberEditedTelops(
+  existing: readonly TextOverlay[],
+  remembered: Readonly<Record<string, EditedTelop>> | undefined
+): Record<string, EditedTelop> | undefined {
+  const out: Record<string, EditedTelop> = { ...(remembered ?? {}) }
+  for (const o of existing) {
+    const key = autoTelopKey(o)
+    if (!key || !o.edited) continue
+    out[key] = {
+      text: o.text,
+      style: o.style,
+      ...(o.styleId !== undefined ? { styleId: o.styleId } : {}),
+      ...(o.speaker !== undefined ? { speaker: o.speaker } : {})
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
 }

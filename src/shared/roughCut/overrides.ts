@@ -76,6 +76,29 @@ export function coverageOfClips(
   return out
 }
 
+/**
+ * 今の本編のクリップから、タイムラインの時刻 ↔ 共通の時刻 の対応を作る(仮編集の `spans` と同じ形)。
+ * 作り直した直後の対応を覚えて使うと、元に戻す・手で詰めたあとに古い対応で置いてしまう
+ */
+export function spansOfClips(
+  clips: readonly { assetId: string; inPoint: number; outPoint: number; speed?: number }[],
+  info: MulticamInfo
+): { timeline: number; start: number; end: number }[] {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const out: { timeline: number; start: number; end: number }[] = []
+  let cursor = 0
+  for (const c of clips) {
+    const f = fileOf.get(c.assetId)
+    if (f) {
+      const start = toCommon(f, c.inPoint)
+      const end = toCommon(f, c.outPoint)
+      if (end - start > EPS) out.push({ timeline: cursor, start, end })
+    }
+    cursor += Math.max(0, c.outPoint - c.inPoint) / (c.speed || 1)
+  }
+  return out
+}
+
 /** 前に自動で組んだ本編(`auto`)と今の本編(`current`)を比べ、人の判断を読み取って前の判断に重ねる */
 export function updateOverrides(
   previous: CutOverrides | undefined,
@@ -195,4 +218,65 @@ export function angleAlternatives(
           : {})
       }
     })
+}
+
+/**
+ * 作り直した本編(`rebuilt`)に、前の本編(`previous`)にあった収録素材以外のクリップを入れ直す。
+ * 各クリップは、前の本編で直前にあった収録素材のクリップの終わり(共通の時刻)を目印に、
+ * 作り直した本編でその時刻を含む(または直前の)クリップの後ろへ置く。目印が無ければ頭に置く
+ */
+export function reinsertExtraClips<
+  C extends { assetId: string; inPoint: number; outPoint: number }
+>(previous: readonly C[], rebuilt: readonly C[], info: MulticamInfo): C[] {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const extras: { clip: C; anchor: number }[] = []
+  let anchor = -Infinity
+  for (const c of previous) {
+    const f = fileOf.get(c.assetId)
+    if (f) anchor = toCommon(f, c.outPoint)
+    else extras.push({ clip: c, anchor })
+  }
+  if (extras.length === 0) return [...rebuilt]
+  // 作り直した本編の各クリップの始まり(共通の時刻)
+  const starts = rebuilt.map((c) => {
+    const f = fileOf.get(c.assetId)
+    return f ? toCommon(f, c.inPoint) : -Infinity
+  })
+  const out: C[] = []
+  const after = new Map<number, C[]>()
+  for (const e of extras) {
+    // 目印より前に始まる最後のクリップの後ろ(-1 なら頭)
+    let idx = -1
+    for (let i = 0; i < rebuilt.length; i++) if (starts[i] < e.anchor - EPS) idx = i
+    const list = after.get(idx) ?? []
+    list.push(e.clip)
+    after.set(idx, list)
+  }
+  out.push(...(after.get(-1) ?? []))
+  rebuilt.forEach((c, i) => {
+    out.push(c)
+    out.push(...(after.get(i) ?? []))
+  })
+  return out
+}
+
+/**
+ * 場面を「残す」「落とす」と人がはっきり決めたら、その場面の中の本編の修正(削った・足した区間)より
+ * その決定を優先する。残すと決めた場面の中で前に削った区間は戻し、落とすと決めた場面の中で足した区間は外す
+ * (でないと、前に手で削った場面は「残す」にしても戻らない)
+ */
+export function releaseOverridesForScenes(
+  o: CutOverrides | undefined,
+  scenes: readonly { id: string; start: number; end: number }[],
+  keep: Readonly<Record<string, boolean>>
+): CutOverrides | undefined {
+  if (!o) return o
+  const kept = scenes.filter((sc) => keep[sc.id] === true)
+  const dropped = scenes.filter((sc) => keep[sc.id] === false)
+  if (kept.length === 0 && dropped.length === 0) return o
+  return {
+    removed: subtractRanges(o.removed, kept),
+    added: subtractRanges(o.added, dropped),
+    angles: o.angles
+  }
 }

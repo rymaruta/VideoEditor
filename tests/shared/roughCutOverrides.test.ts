@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  releaseOverridesForScenes,
   angleAlternatives,
   applyAngleOverrides,
   applyCutOverrides,
@@ -159,5 +160,26 @@ describe('angleAlternatives', () => {
         (a) => a.sourceId === 'B'
       )?.clip
     ).toBeUndefined()
+  })
+})
+
+describe('releaseOverridesForScenes', () => {
+  it('残すと決めた場面の中の削った区間は戻し、落とすと決めた場面の中の足した区間は外す', () => {
+    const o = {
+      removed: [{ start: 10, end: 20 }],
+      added: [{ start: 40, end: 50 }],
+      angles: []
+    }
+    const scenes = [
+      { id: 'a', start: 0, end: 15 },
+      { id: 'b', start: 35, end: 60 }
+    ]
+    expect(releaseOverridesForScenes(o, scenes, { a: true, b: false })).toEqual({
+      removed: [{ start: 15, end: 20 }],
+      added: [],
+      angles: []
+    })
+    // 決めていなければそのまま
+    expect(releaseOverridesForScenes(o, scenes, {})).toBe(o)
   })
 })

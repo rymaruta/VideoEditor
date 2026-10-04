@@ -796,7 +796,7 @@ describe('自動の SE・BGM', () => {
     expect(again[0].clips[0].startTime).toBe(5)
   })
 
-  it('手で直した自動のトラックは、作り直しても消さずに残す(自動の印は外す)', () => {
+  it('手で直した自動のトラックは、作り直しても消さずに残し、その種類は二重に置かない', () => {
     st().setAutoSounds(
       [{ role: 'se', clips: [placed('/se/a.wav', 2)] }],
       [kitAsset('se1', '/se/a.wav')]
@@ -805,8 +805,25 @@ describe('自動の SE・BGM', () => {
     st().updateAudioClipStart(track.id, track.clips[0].id, 3)
     st().setAutoSounds([{ role: 'se', clips: [placed('/se/a.wav', 9)] }], [])
     const tracks = st().project.audioTracks.filter((t) => t.name === 'SE(自動)')
-    expect(tracks).toHaveLength(2)
-    expect(tracks.find((t) => !t.autoRole)?.clips[0].startTime).toBe(3)
+    expect(tracks).toHaveLength(1)
+    expect(tracks[0].clips[0].startTime).toBe(3)
+    expect(tracks[0].autoSignature).toBeUndefined()
+    // もう一度作り直しても、手で直したトラックのまま
+    st().setAutoSounds([{ role: 'se', clips: [placed('/se/a.wav', 12)] }], [])
+    expect(st().project.audioTracks.filter((t) => t.name === 'SE(自動)')).toHaveLength(1)
+  })
+
+  it('消音・トラックの音量を変えただけでも、手で直したとみなす', () => {
+    st().setAutoSounds(
+      [{ role: 'bgm', clips: [placed('/bgm/a.wav', 0)] }],
+      [kitAsset('b1', '/bgm/a.wav')]
+    )
+    const track = st().project.audioTracks.find((t) => t.autoRole === 'bgm')!
+    st().toggleAudioTrackMute(track.id)
+    st().setAutoSounds([{ role: 'bgm', clips: [placed('/bgm/a.wav', 0)] }], [])
+    const bgm = st().project.audioTracks.filter((t) => t.autoRole === 'bgm')
+    expect(bgm).toHaveLength(1)
+    expect(bgm[0].muted).toBe(true)
   })
 })
 
@@ -873,6 +890,88 @@ describe('人の修正を作り直しで上書きしない', () => {
     expect(st().project.reviewed).toEqual(['sync:x'])
     st().setReviewed('sync:x', false)
     expect(st().project.reviewed).toBeUndefined()
+  })
+
+  it('直したテロップは、場面を落としてタイムラインから外れても、戻したときに直した内容で出る', () => {
+    st().applyRoughCut(cut, [telop('u1', '一', 0), telop('u2', '二', 2)])
+    const one = st().project.textOverlays.find((o) => o.text === '一')!
+    st().updateTextOverlay(one.id, { text: '一(直した)' })
+    // 場面を落とした(u1 の発言が仮編集から外れた)
+    st().applyRoughCut(cut, [telop('u2', '二', 0)])
+    expect(st().project.textOverlays.some((o) => o.utteranceId === 'u1')).toBe(false)
+    // 場面を戻した
+    st().applyRoughCut(cut, [telop('u1', '一', 0), telop('u2', '二', 2)])
+    expect(st().project.textOverlays.find((o) => o.utteranceId === 'u1')?.text).toBe('一(直した)')
+  })
+})
+
+describe('仮編集の作り直しで、人が決めた音・差し込んだクリップを残す', () => {
+  beforeEach(reset)
+  const info = {
+    anchorSourceId: 'A',
+    sources: [
+      { id: 'A', name: 'カメラA', kind: 'camera' as const },
+      { id: 'M', name: '出演者A', kind: 'mic' as const }
+    ],
+    files: [
+      { assetId: 'camA', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+      { assetId: 'micM', sourceId: 'M', start: 0, rate: 1, duration: 100 }
+    ]
+  }
+  const cutOf = (
+    ranges: [number, number][]
+  ): Parameters<ReturnType<typeof st>['applyRoughCut']>[0] => {
+    let t = 0
+    const main = ranges.map(([a, b]) => ({ assetId: 'camA', inPoint: a, outPoint: b, speed: 1 }))
+    const clips = ranges.map(([a, b]) => {
+      const c = { assetId: 'micM', startTime: t, inPoint: a, outPoint: b, speed: 1 }
+      t += b - a
+      return c
+    })
+    return {
+      main,
+      audio: [{ name: '出演者A', sourceId: 'M', volume: 1, clips }],
+      duration: t,
+      spans: []
+    }
+  }
+
+  it('マイクの消音・手で変えた音量は残し、手を付けていない音量は仮編集の値に合わせる', () => {
+    S.setState({ project: { ...st().project, multicam: info } })
+    st().applyRoughCut(cutOf([[0, 10]]), [])
+    const mic = st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    st().toggleAudioTrackMute(mic.id)
+    st().setAudioTrackVolume(mic.id, 0.5)
+    st().applyRoughCut(
+      { ...cutOf([[0, 8]]), audio: [{ ...cutOf([[0, 8]]).audio[0], volume: 0.9 }] },
+      []
+    )
+    const after = st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    expect([after.muted, after.volume]).toEqual([true, 0.5])
+  })
+
+  it('収録素材以外のクリップ(差し込みの画)は、直前のクリップの続きに入れ直す', () => {
+    S.setState({ project: { ...st().project, multicam: info, clips: [] } })
+    st().applyRoughCut(
+      cutOf([
+        [0, 10],
+        [20, 30]
+      ]),
+      []
+    )
+    const insert = { id: 'broll', assetId: 'broll-asset', inPoint: 0, outPoint: 3, speed: 1 }
+    const clips = st().project.clips
+    S.setState({ project: { ...st().project, clips: [clips[0], insert, clips[1]] } })
+    st().applyRoughCut(
+      cutOf([
+        [0, 9],
+        [21, 30]
+      ]),
+      []
+    )
+    expect(
+      st().project.clips.map((c) => (c.id === 'broll' ? 'broll' : `${c.inPoint}-${c.outPoint}`))
+    ).toEqual(['0-9', 'broll', '21-30'])
   })
 })
 

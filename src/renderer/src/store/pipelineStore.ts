@@ -1,7 +1,13 @@
 import { countEvents } from '@shared/events/audioEvents'
 import { isImagePath } from '@shared/mediaExtensions'
 import { stillAssetFrom } from '../lib/stillAsset'
-import { coverageOfClips, hasOverrides, updateOverrides } from '@shared/roughCut/overrides'
+import {
+  coverageOfClips,
+  hasOverrides,
+  releaseOverridesForScenes,
+  spansOfClips,
+  updateOverrides
+} from '@shared/roughCut/overrides'
 import { planCg } from '@shared/finish/cg'
 import {
   fallbackMood,
@@ -18,7 +24,7 @@ import type { FootageScan, FootageSource, ProbedFile, SourceKind } from '@shared
 import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import { buildMulticamLayout } from '@shared/sync/multicamLayout'
 import type { MediaAsset } from '@shared/types'
-import { useProjectStore } from './projectStore'
+import { onProjectSwitch, useProjectStore } from './projectStore'
 import { useSettingsStore } from './settingsStore'
 import { parseDictionary } from '@shared/telop/polish'
 import { usePresetStore } from './presetStore'
@@ -175,6 +181,8 @@ interface PipelineState {
   cancel: () => void
   markReviewed: (key: string, reviewed: boolean) => void
   reset: () => void
+  /** 自動編集の結果(構成・提案・要確認など)だけを捨てる。取り込んだフォルダは残す */
+  resetResults: () => void
 }
 
 const initialSteps = (): Record<StepId, StepStatus> => ({
@@ -537,6 +545,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         assets
       )
       useProjectStore.getState().setAutoCg(cg, assets)
+      // 手で直した自動のトラックは残し、その種類は置き直していない。本編を作り直していれば時刻がずれうるので知らせる
+      {
+        const p = useProjectStore.getState().project
+        const edited = [
+          ...p.audioTracks.filter((t) => t.autoRole && t.autoSignature === undefined),
+          ...p.videoOverlayTracks.filter((t) => t.autoRole && t.autoSignature === undefined)
+        ].map((t) => t.name)
+        if (edited.length > 0)
+          log(
+            `手で直した ${edited.join('・')} はそのまま残し、置き直していません(本編を作り直した後は、時刻が合っているか確かめてください。置き直すにはトラックを消してから作り直します)`
+          )
+      }
       // 足した素材(ProRes の CG など)が画面で再生できない形式なら、素材一覧の側でプレビュー用に変換する
       if (assets.length > 0) emitMenuCommand('assets.checkPreview')
       const seCats = Object.keys(kit.se).length
@@ -672,13 +692,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     setStep('cut', { state: 'run', percent: 0, note: '音の大きさを読み込み中' })
     const activity = await activityOf(project, info)
     // 前に組んだ本編と今の本編を比べ、人が削った・足した区間、替えたカメラを読み取る
-    const overrides = project.roughCutAuto
-      ? updateOverrides(
-          project.cutOverrides,
-          project.roughCutAuto,
-          coverageOfClips(project.clips, info)
-        )
-      : project.cutOverrides
+    const overrides = releaseOverridesForScenes(
+      project.roughCutAuto
+        ? updateOverrides(
+            project.cutOverrides,
+            project.roughCutAuto,
+            coverageOfClips(project.clips, info)
+          )
+        : project.cutOverrides,
+      get().scenes,
+      get().keep
+    )
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
       targetSec: get().targetMinutes * 60,
@@ -826,7 +850,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // 選び直したら、前に手で消していても置き直す
       if (chosen) useProjectStore.getState().undismissTelops([`e:${id}`])
       const project = useProjectStore.getState().project
-      if (!project.multicam || get().lastSpans.length === 0) return
+      if (!project.multicam) return
+      // 対応は今の本編から作る(作り直したあとに元に戻す・手で詰めると、覚えていた対応は古い)
+      const spans = spansOfClips(project.clips, project.multicam)
+      if (spans.length === 0) return
       useProjectStore
         .getState()
         .setEffectTelops(
@@ -835,7 +862,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             new Set(next),
             project,
             project.multicam,
-            get().lastSpans,
+            spans,
             usePresetStore.getState().captionPresets
           )
         )
@@ -874,6 +901,26 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 
     addLog: (text) => log(text),
     setScreenOpen: (open) => set({ screenOpen: open }),
+
+    resetResults: () => {
+      activityCache = null
+      set((s) => ({
+        // 取り込み(フォルダの読み取り)の結果は残す。それより後の工程の結果だけ捨てる
+        steps: { ...initialSteps(), ingest: s.steps.ingest },
+        report: null,
+        scenes: [],
+        judgements: [],
+        judgeSource: null,
+        keep: {},
+        roughCut: null,
+        telopReviews: [],
+        colorIssues: [],
+        denoiseFailures: [],
+        effects: [],
+        effectChosen: [],
+        lastSpans: []
+      }))
+    },
 
     reset: () =>
       set({
@@ -958,6 +1005,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         setStep('sync', { state: 'error', note: 'カメラの素材がありません' })
         return
       }
+      // やり直すときは、前の回の結果(構成・提案・要確認・音の有無の目印)を捨ててから始める。
+      // 残すと「提案は済んだ」と飛ばされ、前の発話に付いた提案は新しい発話に結び付かずに全部消える
+      get().resetResults()
       set({ running: true, report: null, syncedFiles: files })
 
       // --- 同期
@@ -1111,3 +1161,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     markReviewed: (key, reviewed) => useProjectStore.getState().setReviewed(key, reviewed)
   }
 })
+
+// 別のプロジェクトを開いた・新しく作ったら、前の回の自動編集の結果を捨てる
+// (残すと「仮編集を作り直す」が前の回の場面の区切りで今の回を切り、要確認にも前の回の項目が出る)
+onProjectSwitch(() => usePipelineStore.getState().resetResults())

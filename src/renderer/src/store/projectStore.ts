@@ -3,11 +3,17 @@ import {
   angleAlternatives,
   coverageOfClips,
   hasOverrides,
+  reinsertExtraClips,
   type CameraSeg,
   type CutOverrides,
   type Range
 } from '@shared/roughCut/overrides'
-import { autoTelopKey, isManualEdit, mergeManualTelops } from '@shared/telop/manual'
+import {
+  autoTelopKey,
+  isManualEdit,
+  mergeManualTelops,
+  rememberEditedTelops
+} from '@shared/telop/manual'
 import type { PlacedCg } from '@shared/finish/cg'
 import type { PlacedSound } from '@shared/finish/sound'
 import type { ColorMatch } from '@shared/color/match'
@@ -41,6 +47,7 @@ import type {
   EditTemplate,
   MediaAsset,
   PipPosition,
+  EditedTelop,
   Project,
   TextOverlay,
   TextStyle,
@@ -192,19 +199,69 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
   }
 }
 
-/** 自動の SE・BGM のトラックの中身の要約(手で直したかを見分ける) */
-function autoSignatureOf(track: {
+type SignedTrack = {
+  muted?: boolean
+  volume?: number
+  duckingEnabled?: boolean
+  hidden?: boolean
   clips: {
     assetId: string
     startTime: number
     inPoint: number
     outPoint: number
     volume?: number
+    fadeIn?: number
+    fadeOut?: number
   }[]
-}): string {
+}
+
+/** 前の版の要約(クリップの位置と音量だけ)。前の版で保存したプロジェクトを読むため */
+function legacySignatureOf(track: SignedTrack): string {
   return track.clips
     .map((c) => [c.assetId, c.startTime, c.inPoint, c.outPoint, c.volume ?? 1].join(','))
     .join(';')
+}
+
+/**
+ * 自動の SE・BGM・CG のトラックの中身の要約(手で直したかを見分ける)。
+ * トラックの消音・音量・ダッキング・表示、クリップのフェードも入れる(入れないと、BGM を消音しても
+ * 「手を付けていない」とみなされ、作り直しで消音していない BGM に戻っていた)
+ */
+function autoSignatureOf(track: SignedTrack): string {
+  const head = [
+    track.muted ? 1 : 0,
+    track.volume ?? 1,
+    track.duckingEnabled ? 1 : 0,
+    track.hidden ? 1 : 0
+  ]
+  return (
+    'v2|' +
+    head.join(',') +
+    '|' +
+    track.clips
+      .map((c) =>
+        [
+          c.assetId,
+          c.startTime,
+          c.inPoint,
+          c.outPoint,
+          c.volume ?? 1,
+          c.fadeIn ?? 0,
+          c.fadeOut ?? 0
+        ].join(',')
+      )
+      .join(';')
+  )
+}
+
+/** 自動で置いたまま手を付けていないトラックか(作り直しで入れ替えてよい) */
+function isUntouchedAuto(
+  track: SignedTrack & { autoRole?: string; autoSignature?: string }
+): boolean {
+  if (!track.autoRole || track.autoSignature === undefined) return false
+  return track.autoSignature.startsWith('v2|')
+    ? track.autoSignature === autoSignatureOf(track)
+    : track.autoSignature === legacySignatureOf(track)
 }
 
 function withAutoSignature<T extends AudioTrack | VideoOverlayTrack>(track: T): T {
@@ -330,6 +387,10 @@ function normalizeAudioTrack(
     voice: raw.voice === true ? true : undefined,
     autoRole: raw.autoRole === 'se' || raw.autoRole === 'bgm' ? raw.autoRole : undefined,
     autoSignature: typeof raw.autoSignature === 'string' ? raw.autoSignature : undefined,
+    autoVolume:
+      typeof raw.autoVolume === 'number' && Number.isFinite(raw.autoVolume)
+        ? raw.autoVolume
+        : undefined,
     volume: asNonNegative(raw.volume, 1),
     clips: asRecordArray<Record<string, unknown>>(raw.clips)
       .map((c) => normalizeAudioClip(c, durationOf))
@@ -434,6 +495,7 @@ function normalizeLoadedProject(project: Project): Project {
     multicam: normalizeMulticam(raw.multicam),
     reviewed: asStringArray(raw.reviewed),
     dismissedTelops: asStringArray(raw.dismissedTelops),
+    editedTelops: normalizeEditedTelops(raw.editedTelops),
     roughCutAuto: normalizeSegs(raw.roughCutAuto, true) as CameraSeg[] | undefined,
     cutOverrides: normalizeOverrides(raw.cutOverrides),
     audioEvents: Array.isArray(raw.audioEvents)
@@ -1121,6 +1183,34 @@ function applyInsertedClips(project: Project, built: InsertedClips): Project {
  * (呼び出し側が必ず自分で決める)。`draggingAssetId` はドラッグの終わりに必ず下ろされる
  * 一時的な印なので、ここでは触らない。
  */
+/**
+ * 別のプロジェクトへ切り替わったときに知らせる先(自動編集の結果を捨てる)。
+ * 自動編集のストアはこのストアを読むので、こちらからは読まずに知らせだけを受け付ける
+ */
+const projectSwitchListeners = new Set<() => void>()
+export function onProjectSwitch(listener: () => void): () => void {
+  projectSwitchListeners.add(listener)
+  return () => projectSwitchListeners.delete(listener)
+}
+
+/** 保存していた「人が直したテロップ」を読み直す(壊れた項目は捨てる) */
+function normalizeEditedTelops(raw: unknown): Record<string, EditedTelop> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, EditedTelop> = {}
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!v || typeof v !== 'object') continue
+    const r = v as Record<string, unknown>
+    if (typeof r.text !== 'string') continue
+    out[key] = {
+      text: r.text,
+      style: normalizeTextStyle(r.style),
+      ...(typeof r.styleId === 'string' ? { styleId: r.styleId } : {}),
+      ...(typeof r.speaker === 'string' ? { speaker: r.speaker } : {})
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 function projectSwitchReset(): Pick<
   ProjectState,
   | 'past'
@@ -1351,6 +1441,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   newProject: () => {
     resetHistoryCoalescing()
+    projectSwitchListeners.forEach((l) => l())
     set({
       ...projectSwitchReset(),
       project: createBlankProject(),
@@ -1367,6 +1458,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 「起点はもう積んである」と誤って判断して履歴を1件も積まない(`newProject` と
     // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
     resetHistoryCoalescing()
+    projectSwitchListeners.forEach((l) => l())
     // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
@@ -1440,6 +1532,32 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   addMulticamTimeline: (assets, layout, assetIdOf, aspectRatio, sources) =>
     set((state) => {
+      // 同じプロジェクトでやり直すときは、前に並べた収録素材・自動で置いたもの・前の判断を外してから並べる。
+      // 残すと、カメラ・マイクのトラックが二重になり、前の仮編集を「人が足した区間」と読み違えて
+      // 収録全体が本編に戻る
+      const prev = sources ? state.project.multicam : undefined
+      const prevAssets = new Set(prev?.files.map((f) => f.assetId) ?? [])
+      const base: Project = prev
+        ? {
+            ...state.project,
+            assets: state.project.assets.filter((a) => !prevAssets.has(a.id)),
+            clips: state.project.clips.filter((c) => !prevAssets.has(c.assetId)),
+            videoOverlayTracks: state.project.videoOverlayTracks.filter(
+              (t) => !t.multicamSourceId && !t.autoRole
+            ),
+            audioTracks: state.project.audioTracks.filter(
+              (t) => !t.multicamSourceId && !t.autoRole
+            ),
+            textOverlays: state.project.textOverlays.filter(
+              (o) => !(o.source === 'auto' && (o.utteranceId || o.effectId))
+            ),
+            roughCutAuto: undefined,
+            cutOverrides: undefined,
+            dismissedTelops: undefined,
+            editedTelops: undefined,
+            reviewed: undefined
+          }
+        : state.project
       const idOf = (fileId: string): string | undefined => assetIdOf[fileId]
       const main: Clip[] = layout.main
         .filter((m) => idOf(m.fileId))
@@ -1494,8 +1612,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return {
         ...pushHistory(state),
         project: {
-          ...state.project,
-          aspectRatio: aspectRatio ?? state.project.aspectRatio,
+          ...base,
+          aspectRatio: aspectRatio ?? base.aspectRatio,
           multicam: sources
             ? {
                 anchorSourceId: layout.anchorSourceId,
@@ -1510,11 +1628,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                     duration: p.duration
                   }))
               }
-            : state.project.multicam,
-          assets: [...state.project.assets, ...assets],
-          clips: [...state.project.clips, ...main],
-          videoOverlayTracks: [...state.project.videoOverlayTracks, ...cameras],
-          audioTracks: [...state.project.audioTracks, ...mics]
+            : base.multicam,
+          assets: [...base.assets, ...assets],
+          clips: [...base.clips, ...main],
+          videoOverlayTracks: [...base.videoOverlayTracks, ...cameras],
+          audioTracks: [...base.audioTracks, ...mics]
         }
       }
     }),
@@ -2374,7 +2492,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   applyRoughCut: (cut, telops, overrides) =>
     set((state) => {
-      const clips: Clip[] = cut.main.map((m) => ({
+      const rebuilt: Clip[] = cut.main.map((m) => ({
         id: uuid(),
         assetId: m.assetId,
         inPoint: m.inPoint,
@@ -2383,25 +2501,42 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         // 本編のカメラの音は使わない(声はピンマイク、周りの音は別トラック)
         audioDetached: true
       }))
+      // 人が本編に入れた収録素材以外のクリップ(差し込みの画・静止画・タイトル)は消さずに、
+      // 直前の収録素材のクリップの続きに入れ直す(同じクリップなので、結び付いたテロップも外れない)
+      const clips = state.project.multicam
+        ? reinsertExtraClips(state.project.clips, rebuilt, state.project.multicam)
+        : rebuilt
+      const previousTracks = new Map(
+        state.project.audioTracks
+          .filter((t) => t.multicamSourceId)
+          .map((t) => [t.multicamSourceId!, t])
+      )
       const audioTracks: AudioTrack[] = [
         ...state.project.audioTracks.filter((t) => !t.multicamSourceId),
-        ...cut.audio.map((a) => ({
-          id: uuid(),
-          name: a.name,
-          multicamSourceId: a.sourceId,
-          muted: false,
-          volume: a.volume,
-          duckingEnabled: false,
-          voice: state.project.multicam?.sources.find((x) => x.id === a.sourceId)?.kind === 'mic',
-          clips: a.clips.map((c) => ({
+        ...cut.audio.map((a) => {
+          // 人が決めた消音・ダッキング・音量(仮編集が決めた値から変えたもの)は作り直しても残す
+          const prev = previousTracks.get(a.sourceId)
+          const volumeChanged =
+            prev !== undefined && prev.autoVolume !== undefined && prev.volume !== prev.autoVolume
+          return {
             id: uuid(),
-            assetId: c.assetId,
-            startTime: c.startTime,
-            inPoint: c.inPoint,
-            outPoint: c.outPoint,
-            ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {})
-          }))
-        }))
+            name: a.name,
+            multicamSourceId: a.sourceId,
+            muted: prev?.muted ?? false,
+            volume: volumeChanged ? prev!.volume : a.volume,
+            autoVolume: a.volume,
+            duckingEnabled: prev?.duckingEnabled ?? false,
+            voice: state.project.multicam?.sources.find((x) => x.id === a.sourceId)?.kind === 'mic',
+            clips: a.clips.map((c) => ({
+              id: uuid(),
+              assetId: c.assetId,
+              startTime: c.startTime,
+              inPoint: c.inPoint,
+              outPoint: c.outPoint,
+              ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {})
+            }))
+          }
+        })
       ]
       return {
         ...pushHistory(state),
@@ -2419,13 +2554,19 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             ? coverageOfClips(cut.main, state.project.multicam)
             : undefined,
           cutOverrides: hasOverrides(overrides) ? overrides : undefined,
-          // 人が直したテロップは文字と見た目を残し、人が消したものは足し直さない
+          // 人が直したテロップは文字と見た目を残し、人が消したものは足し直さない。
+          // 直した内容はプロジェクトに覚える(場面を落として外れても、戻したときに直した内容で出す)
+          editedTelops: rememberEditedTelops(
+            state.project.textOverlays,
+            state.project.editedTelops
+          ),
           textOverlays: [
             ...state.project.textOverlays.filter((o) => !o.utteranceId && !o.effectId),
             ...mergeManualTelops(
               state.project.textOverlays,
               telops,
-              new Set(state.project.dismissedTelops ?? [])
+              new Set(state.project.dismissedTelops ?? []),
+              state.project.editedTelops
             ).map((o) => ({ ...o, id: uuid() }))
           ]
         }
@@ -2437,12 +2578,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       ...pushHistory(state),
       project: {
         ...state.project,
+        editedTelops: rememberEditedTelops(state.project.textOverlays, state.project.editedTelops),
         textOverlays: [
           ...state.project.textOverlays.filter((o) => !o.effectId),
           ...mergeManualTelops(
             state.project.textOverlays,
             telops,
-            new Set(state.project.dismissedTelops ?? [])
+            new Set(state.project.dismissedTelops ?? []),
+            state.project.editedTelops
           ).map((o) => ({ ...o, id: uuid() }))
         ]
       }
@@ -2476,10 +2619,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const idOf = new Map(assets.map((a) => [a.filePath, a.id]))
       const placed = clips.filter((c) => idOf.has(c.path))
       const kept = state.project.videoOverlayTracks
-        .filter((t) => !t.autoRole || t.autoSignature !== autoSignatureOf(t))
-        .map((t) => (t.autoRole ? { ...t, autoRole: undefined, autoSignature: undefined } : t))
+        .filter((t) => !isUntouchedAuto(t))
+        .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
+      // 手で直した CG のトラックがあれば、新しくは置かない(二重にしない)
+      const cgEdited = kept.some((t) => t.autoRole === 'cg')
       const track: VideoOverlayTrack | null =
-        placed.length > 0
+        placed.length > 0 && !cgEdited
           ? withAutoSignature({
               id: uuid(),
               name: 'CG(自動)',
@@ -2536,15 +2681,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               }))
           })
         )
-      // 手で直した自動のトラックは消さずに残し、自動の印だけ外す
+      // 手で直した自動のトラックは消さずに残す(種類の印は残し、要約を外して「手で直した」にする)。
+      // その種類は新しく置かない(置くと SE が二重に鳴り、BGM が2曲同時に流れる)
       const kept = state.project.audioTracks
-        .filter((t) => !t.autoRole || t.autoSignature !== autoSignatureOf(t))
-        .map((t) => (t.autoRole ? { ...t, autoRole: undefined, autoSignature: undefined } : t))
+        .filter((t) => !isUntouchedAuto(t))
+        .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
+      const editedRoles = new Set(kept.filter((t) => t.autoRole).map((t) => t.autoRole))
       return {
         project: {
           ...state.project,
           assets,
-          audioTracks: [...kept, ...tracks]
+          audioTracks: [...kept, ...tracks.filter((t) => !editedRoles.has(t.autoRole))]
         }
       }
     }),

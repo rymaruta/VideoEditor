@@ -169,6 +169,8 @@ export interface AudioTrack {
   autoRole?: 'se' | 'bgm'
   /** 自動で置いたときの中身の要約。今の中身と違えば手で直したとみなし、作り直しで消さない */
   autoSignature?: string
+  /** 仮編集が決めた音量(収録素材のトラック)。今の音量と違えば手で変えたとみなし、作り直しでも残す */
+  autoVolume?: number
   clips: AudioTrackClip[]
 }
 
@@ -207,6 +209,14 @@ export interface VideoOverlayTrack {
   clips: VideoOverlayClip[]
 }
 
+/** 人が直した自動テロップの中身 */
+export interface EditedTelop {
+  text: string
+  style: TextStyle
+  styleId?: string
+  speaker?: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -225,6 +235,11 @@ export interface Project {
   reviewed?: string[]
   /** 人が消した自動テロップの鍵(`autoTelopKey`)。作り直しても足し直さない */
   dismissedTelops?: string[]
+  /**
+   * 人が直した自動テロップ(鍵 → 直した文字と見た目)。タイムラインから一度外れても(場面を落とした・
+   * 仕上がりの長さを変えた)、また出てきたときに直した内容で出す
+   */
+  editedTelops?: Record<string, EditedTelop>
   /** 前に自動で組んだ本編(共通の時刻とカメラ)。作り直すときに今の本編と比べて、人の修正を読み取る */
   roughCutAuto?: CameraSeg[]
   /** 本編の人の修正(削った・足した区間、替えたカメラ)。作り直しても当て直す */
