@@ -1,4 +1,5 @@
 import type { EffectKind } from '../telop/effects'
+import { stripTelopMarkup } from '../telop/render'
 
 /**
  * SE・BGM の自動配置(計画書 §5.9)。
@@ -138,7 +139,7 @@ export function planSoundEffects(
             {
               time: e.time,
               category: category as string,
-              reason: `${category}「${e.text.slice(0, 12)}」`
+              reason: `${category}「${stripTelopMarkup(e.text).replace(/\n/g, ' ').slice(0, 12)}」`
             }
           ]
         : []

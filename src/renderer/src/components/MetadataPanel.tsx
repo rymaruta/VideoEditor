@@ -10,13 +10,15 @@ import {
   VideoMetadata
 } from '../lib/metadataGeneration'
 import { formatIpcError } from '../lib/ipcError'
+import { stripTelopMarkup } from '@shared/telop/render'
 import { KeyIcon, SparklesIcon, CopyIcon, MegaphoneIcon, ShuffleIcon } from './icons'
 
 function buildTranscript(project: ReturnType<typeof useProjectStore.getState>['project']): string {
+  // AI に渡すのは発言の文字(演出テロップは番組側の言葉なので混ぜない)。装飾の印・ルビの読みは外す
   return project.textOverlays
-    .slice()
+    .filter((o) => !o.effectId)
     .sort((a, b) => a.startTime - b.startTime)
-    .map((o) => o.text)
+    .map((o) => stripTelopMarkup(o.text).replace(/\n/g, ''))
     .join('\n')
 }
 

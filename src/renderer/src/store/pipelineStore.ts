@@ -49,8 +49,14 @@ import {
   scenesFor
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces } from '../lib/telopPlacement'
-import { AUTO_PLACE_CONFIDENCE, nameProposals, type EffectProposal } from '@shared/telop/effects'
-import type { RoughCut } from '@shared/roughCut/build'
+import {
+  AI_EFFECT_KINDS,
+  AUTO_PLACE_CONFIDENCE,
+  nameProposals,
+  type EffectProposal
+} from '@shared/telop/effects'
+import { roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
+import { mapTimelineRange, timelineMapping } from '@shared/roughCut/follow'
 import { formatIpcError } from '../lib/ipcError'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { detectTurns, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
@@ -760,15 +766,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       setStep('placement', { state: 'error', note: formatIpcError(e) })
       log(`顔の検出ができませんでした(テロップは下のまま): ${formatIpcError(e)}`)
     }
-    // 演出テロップ: 提案は最初の1回だけ AI に頼み、作り直しでは選んだものを置き直す
-    // 人物紹介(AI を使わない)だけが入っているときは、まだ AI に頼んでいない。AI の設定を
-    // 入れてから作り直したときに頼めるよう、人物紹介の有無ではなく工程の状態で見る
-    const aiAsked = get().steps.effects.state === 'done'
-    if (!aiAsked) {
+    // 演出テロップ。AI を使わずに決まるもの(人物紹介・笑い・章・時刻・吹き出し)は、残した場面が
+    // 変わるので作り直しのたびに作り直す。AI の提案は最初の1回だけ頼み、作り直しでは同じものを置き直す。
+    // 人物紹介だけが入っているときは、まだ AI に頼んでいない(AI の設定を入れてから作り直せば頼む)
+    {
+      const aiAsked = get().steps.effects.state === 'done'
       const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
       const lines = effectLines(project, info, plan.cut.spans)
-      // AI を使わずに決まる演出テロップ(AI を使わない設定でも付ける):
-      // 人物紹介(各出演者の最初の発言)・笑いの添え字・章タイトル・時刻・吹き出し
       const nameList = nameProposals(lines)
       if (nameList.length > 0)
         log(`人物紹介: ${nameList.map((n) => n.text).join('・')} の最初の発言に名前を出します`)
@@ -781,27 +785,54 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         : firstKept
           ? [firstKept.start]
           : []
-      const names = [
+      // 笑いの間隔は、仮編集に残った笑いどうしで数える(削った場面の笑いで、残した笑いを消さない)
+      const keptEvents = (project.audioEvents ?? []).filter(
+        (e) => roughTimelineAt(plan.cut.spans, (e.start + e.end) / 2) !== null
+      )
+      // 吹き出しの文字は、辞書で直した発言テロップの文字にする(生の文字起こしにしない)
+      const speechText = new Map<string, string>()
+      for (const o of telops)
+        if (o.utteranceId)
+          speechText.set(
+            o.utteranceId,
+            `${speechText.get(o.utteranceId) ?? ''}${o.text.replace(/\n/g, '')}`
+          )
+      const autos = [
         ...nameList,
-        ...laughProposals(project.audioEvents ?? []),
+        ...laughProposals(keptEvents),
         ...chapters,
         ...clockProposals(clockTimes, info, recordedAtByAsset(project, get().syncedFiles)),
-        ...bubbleProposals(lines)
+        ...bubbleProposals(lines).map((b) => ({
+          ...b,
+          text: speechText.get(b.afterLineId) ?? b.text
+        }))
       ]
-      const autoCount = (kind: string): number => names.filter((n) => n.kind === kind).length
-      if (names.length > nameList.length)
+      const autoCount = (kind: string): number => autos.filter((n) => n.kind === kind).length
+      if (autos.length > nameList.length)
         log(
           `自動の演出テロップ: 笑い ${autoCount('laugh')}・章 ${autoCount('chapter')}・時刻 ${autoCount('clock')}・吹き出し ${autoCount('bubble')}(時刻・吹き出し・小さい笑いは提案だけ。演出テロップのタブで選べます)`
         )
-      // 前の作り直しで人が外したものは外したままにする(id は名前・時刻・発言から決まる)
+      // 前にもあった提案は、人が選んだ・外した状態を保つ。新しい提案は自信の高いものだけ置く
       const prevIds = new Set(get().effects.map((e) => e.id))
       const prevChosen = new Set(get().effectChosen)
-      const nameChosen = names
-        .filter((n) => n.confidence >= AUTO_PLACE_CONFIDENCE)
-        .filter((n) => !prevIds.has(n.id) || prevChosen.has(n.id))
-        .map((n) => n.id)
-      if (provider === 'off' || (provider === 'gemini' && !apiKey)) {
-        set({ effects: names, effectChosen: nameChosen })
+      const chooseFrom = (list: readonly EffectProposal[]): string[] =>
+        list
+          .filter((p) =>
+            prevIds.has(p.id) ? prevChosen.has(p.id) : p.confidence >= AUTO_PLACE_CONFIDENCE
+          )
+          .map((p) => p.id)
+      const aiKinds = new Set<string>(AI_EFFECT_KINDS)
+      const keepAi = get().effects.filter((e) => aiKinds.has(e.kind))
+      const apply = (ai: readonly EffectProposal[]): number => {
+        const proposals = [...autos, ...ai]
+        const chosen = chooseFrom(proposals)
+        set({ effects: proposals, effectChosen: chosen })
+        return chosen.length
+      }
+      if (aiAsked) {
+        apply(keepAi)
+      } else if (provider === 'off' || (provider === 'gemini' && !apiKey)) {
+        apply([])
         setStep('effects', {
           // 'done' にすると、あとで AI を使える設定にしても二度と頼まない
           state: 'skipped',
@@ -809,7 +840,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             (provider === 'off'
               ? 'AI を使わない設定です'
               : 'Gemini の鍵がありません(このPCの AI に切り替えると提案します)') +
-            (names.length > 0 ? ` · AI を使わない提案 ${names.length}` : '')
+            (autos.length > 0 ? ` · AI を使わない提案 ${autos.length}` : '')
         })
       } else {
         setStep('effects', { state: 'run', percent: 30, note: 'AI が提案中' })
@@ -828,27 +859,23 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             },
             (p) => setStep('effects', { percent: p.percent, note: p.note })
           )
-          const proposals = [...names, ...aiProposals]
-          const auto = [
-            ...nameChosen,
-            ...aiProposals.filter((p) => p.confidence >= AUTO_PLACE_CONFIDENCE).map((p) => p.id)
-          ]
-          set({ effects: proposals, effectChosen: auto })
+          const placed = apply(aiProposals)
+          const count = autos.length + aiProposals.length
           const failNote = failed > 0 ? ` · AI が答えられなかった ${failed}/${total}` : ''
           setStep('effects', {
             state: 'done',
             percent: 100,
-            note: `提案 ${proposals.length} · 自動で置いた ${auto.length}${failNote}`
+            note: `提案 ${count} · 自動で置いた ${placed}${failNote}`
           })
-          log(`演出テロップ: 提案 ${proposals.length} 件(自信の高い ${auto.length} 件を置きました)`)
+          log(`演出テロップ: 提案 ${count} 件(自信の高い ${placed} 件を置きました)`)
           if (failed > 0)
             log(
               `演出テロップ: AI が答えを返せなかった区切りがあります(${failed}/${total})。` +
                 'このPCの AI が小さいモデルのときに起きやすく、GPU で大きいモデルを使うと減ります'
             )
         } catch (e) {
-          // AI が失敗しても、AI の要らない人物紹介は付ける
-          set({ effects: names, effectChosen: nameChosen })
+          // AI が失敗しても、AI の要らない提案は付ける
+          apply([])
           setStep('effects', { state: 'error', note: formatIpcError(e) })
           log(`演出テロップの提案ができませんでした: ${formatIpcError(e)}`)
         }
@@ -863,7 +890,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       usePresetStore.getState().captionPresets
     )
     // 吹き出しにした発言は、発言テロップを出さない(同じ言葉が2か所に出る)
-    const bubbled = bubbledUtterances(get().effects, get().effectChosen)
+    const bubbled = bubbledUtterances(
+      get().effects,
+      get().effectChosen,
+      useProjectStore.getState().project.dismissedTelops
+    )
     set({ lastSpans: plan.cut.spans, speechTelops: telops })
     useProjectStore
       .getState()
@@ -928,9 +959,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         fx?.kind === 'bubble'
           ? {
               utteranceId: fx.afterLineId,
+              // 覚えている発言テロップは仮編集を入れたときの時刻なので、今の本編の位置へ写す
+              // (そのあと本編を手で詰めた・差し込みの画がある、で位置が変わっている)
               telops: chosen
                 ? []
-                : get().speechTelops.filter((o) => o.utteranceId === fx.afterLineId)
+                : mapTelopsToTimeline(
+                    get().speechTelops.filter((o) => o.utteranceId === fx.afterLineId),
+                    get().lastSpans,
+                    spans
+                  )
             }
           : undefined
       useProjectStore
@@ -1261,14 +1298,44 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
   }
 })
 
+/** 仮編集のタイムラインの時刻で持っているテロップを、今の本編の時刻へ写す(本編から消えた所のものは捨てる) */
+function mapTelopsToTimeline<
+  T extends { startTime: number; endTime: number; words?: { start: number; end: number }[] }
+>(telops: readonly T[], from: RoughCut['spans'], to: RoughCut['spans']): T[] {
+  const segs = timelineMapping(from, to)
+  return telops.flatMap((o) => {
+    const pieces = mapTimelineRange(segs, o.startTime, o.endTime)
+    if (pieces.length === 0) return []
+    const start = pieces[0].at
+    const last = pieces[pieces.length - 1]
+    const shift = start - o.startTime
+    return [
+      {
+        ...o,
+        startTime: start,
+        endTime: Math.max(start + 0.1, last.at + (last.to - last.from)),
+        // カラオケの単語の時刻も一緒に動かす
+        ...(o.words
+          ? { words: o.words.map((w) => ({ ...w, start: w.start + shift, end: w.end + shift })) }
+          : {})
+      }
+    ]
+  })
+}
+
 /** 吹き出しを選んだ発言(発言テロップの代わりに吹き出しで出す) */
 function bubbledUtterances(
   effects: readonly EffectProposal[],
-  chosen: readonly string[]
+  chosen: readonly string[],
+  dismissed: readonly string[] = []
 ): Set<string> {
   const set = new Set(chosen)
+  // 人が吹き出しを消したなら、発言テロップを戻す(消したままだと、その発言の文字がどこにも出ない)
+  const gone = new Set(dismissed)
   return new Set(
-    effects.filter((e) => e.kind === 'bubble' && set.has(e.id)).map((e) => e.afterLineId)
+    effects
+      .filter((e) => e.kind === 'bubble' && set.has(e.id) && !gone.has(`e:${e.id}`))
+      .map((e) => e.afterLineId)
   )
 }
 
