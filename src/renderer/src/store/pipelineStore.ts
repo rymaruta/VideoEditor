@@ -739,7 +739,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       } else {
         setStep('effects', { state: 'run', percent: 30, note: 'AI が提案中' })
         try {
-          const proposals = await proposeEffects(
+          const { proposals, failed, total } = await proposeEffects(
             effectLines(project, info, plan.cut.spans),
             {
               provider,
@@ -753,12 +753,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             .filter((p) => p.confidence >= AUTO_PLACE_CONFIDENCE)
             .map((p) => p.id)
           set({ effects: proposals, effectChosen: auto })
+          const failNote = failed > 0 ? ` · AI が答えられなかった ${failed}/${total}` : ''
           setStep('effects', {
             state: 'done',
             percent: 100,
-            note: `提案 ${proposals.length} · 自動で置いた ${auto.length}`
+            note: `提案 ${proposals.length} · 自動で置いた ${auto.length}${failNote}`
           })
           log(`演出テロップ: 提案 ${proposals.length} 件(自信の高い ${auto.length} 件を置きました)`)
+          if (failed > 0)
+            log(
+              `演出テロップ: AI が答えを返せなかった区切りがあります(${failed}/${total})。` +
+                'このPCの AI が小さいモデルのときに起きやすく、GPU で大きいモデルを使うと減ります'
+            )
         } catch (e) {
           setStep('effects', { state: 'error', note: formatIpcError(e) })
           log(`演出テロップの提案ができませんでした: ${formatIpcError(e)}`)

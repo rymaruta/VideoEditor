@@ -47,20 +47,33 @@ childMain<WorkerInput>(async (input, send) => {
   const results: (unknown | null)[] = []
   for (let i = 0; i < input.requests.length; i++) {
     const req = input.requests[i]
-    try {
+    // 1回目で答えが崩れたら(同じ言葉の繰り返しで長さが尽きるなど)、繰り返しを抑えてもう1回
+    let answer: unknown | null = null
+    for (let attempt = 0; attempt < 2 && answer === null; attempt++) {
       const sequence = context.getSequence()
-      const session = new LlamaChatSession({ contextSequence: sequence })
-      const grammar = await llama.createGrammarForJsonSchema(req.schema as never)
-      const text = await session.prompt(req.prompt, {
-        grammar,
-        maxTokens: req.maxTokens ?? 4096,
-        temperature: 0.2
-      })
-      results.push(grammar.parse(text))
-      sequence.dispose()
-    } catch {
-      results.push(null)
+      try {
+        const session = new LlamaChatSession({ contextSequence: sequence })
+        const grammar = await llama.createGrammarForJsonSchema(req.schema as never)
+        const text = await session.prompt(req.prompt, {
+          grammar,
+          maxTokens: req.maxTokens ?? 4096,
+          temperature: attempt === 0 ? 0.2 : 0.4,
+          ...(attempt > 0
+            ? { repeatPenalty: { penalty: 1.15, frequencyPenalty: 0.2, lastTokens: 128 } }
+            : {})
+        })
+        answer = grammar.parse(text) as unknown
+      } catch (e) {
+        // 答えられなかった頼みは null(呼び出し側は簡易の判定で続ける)。理由は記録に残す
+        console.error(
+          `[llm] request ${i + 1} attempt ${attempt + 1} failed:`,
+          e instanceof Error ? e.message : e
+        )
+      } finally {
+        sequence.dispose()
+      }
     }
+    results.push(answer)
     post({ type: 'progress', done: i + 1, total: input.requests.length })
   }
   post({ type: 'done', results })

@@ -45,6 +45,21 @@ function clock(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+/** 頼み文の中の例。AI がそのまま写した答えは捨てる(小さいモデルで起きる) */
+const EXAMPLES: Record<Exclude<EffectKind, 'corner'>, string> = {
+  tsukkomi: 'いや早すぎ!',
+  kokoro: '(帰りたい…)',
+  situation: 'ここまで歩いて40分',
+  place: '浄土ヶ浜'
+}
+
+/** 比べるための形(全角・半角、空白・記号の違いをならす) */
+function textKey(text: string): string {
+  return text.normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '')
+}
+
+const EXAMPLE_KEYS = new Set(Object.values(EXAMPLES).map(textKey))
+
 export function buildEffectPrompt(
   lines: readonly EffectLine[],
   episodeName: string,
@@ -57,13 +72,14 @@ export function buildEffectPrompt(
 番組「${episodeName}」の発言の流れを読み、演出テロップを提案してください。
 ${note ? `方針: ${note}\n` : ''}
 種類:
-- tsukkomi: ツッコミ(発言へのひとこと。例「いや早すぎ!」)
-- kokoro: 心の声(話者の内心。例「(帰りたい…)」)
-- situation: 状況説明(例「ここまで歩いて40分」)
-- place: 地名・情報(発言に出てきた地名や店名。例「浄土ヶ浜」)
+- tsukkomi: ツッコミ(発言へのひとこと。例「${EXAMPLES.tsukkomi}」)
+- kokoro: 心の声(話者の内心。例「${EXAMPLES.kokoro}」)
+- situation: 状況説明(例「${EXAMPLES.situation}」)
+- place: 地名・情報(発言に出てきた地名や店名。例「${EXAMPLES.place}」)
 - corner: コーナー名(企画の区切り)
 決まり:
 - 1つの文は${MAX_TEXT_CHARS}字以内。発言を書き換えたり、言っていない事実を作ったりしない
+- 例の文をそのまま使わない。同じ文を何度も使わない
 - 地名・状況説明は、発言の中に根拠があるものだけ
 - 多すぎると邪魔なので、本当に効くものだけ(目安: 1分に1つまで)
 - confidence: 0〜1(番組でそのまま使えると思う確からしさ)
@@ -79,11 +95,13 @@ const KINDS = Object.keys(EFFECT_LABEL) as EffectKind[]
 
 export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[]): EffectProposal[] {
   const ids = new Set(lines.map((l) => l.id))
+  const lineText = new Map(lines.map((l) => [l.id, l.text]))
   const list =
     answer && typeof answer === 'object' && Array.isArray((answer as { effects?: unknown }).effects)
       ? ((answer as { effects: unknown[] }).effects as unknown[])
       : []
   const out: EffectProposal[] = []
+  const seen = new Set<string>()
   for (const item of list) {
     if (!item || typeof item !== 'object') continue
     const o = item as Record<string, unknown>
@@ -100,6 +118,12 @@ export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[])
       Number.isNaN(confidence)
     )
       continue
+    // 例の写し・同じ文の繰り返しは捨てる(使える提案ではない)。
+    // ただし例と同じ言葉が、その発言の中に本当にある(地名など)なら残す
+    const key = textKey(text)
+    const copied = EXAMPLE_KEYS.has(key) && !textKey(lineText.get(after) ?? '').includes(key)
+    if (!key || copied || seen.has(key)) continue
+    seen.add(key)
     out.push({
       id: `fx-${after}-${out.length}`,
       afterLineId: after,
@@ -178,13 +202,15 @@ export function effectSchema(lines: readonly EffectLine[]): Record<string, unkno
     properties: {
       effects: {
         type: 'array',
+        // 個数・文字数の上限は、小さいモデルが同じ答えを繰り返して尽きるのを防ぐ
+        maxItems: Math.max(1, Math.min(60, lines.length)),
         items: {
           type: 'object',
           properties: {
             after: { enum: lines.map((l) => l.id) },
             kind: { enum: Object.keys(EFFECT_LABEL) },
-            reason: { type: 'string' },
-            text: { type: 'string' },
+            reason: { type: 'string', maxLength: 120 },
+            text: { type: 'string', maxLength: MAX_TEXT_CHARS + 4 },
             confidence: { type: 'number' }
           },
           required: ['after', 'kind', 'reason', 'text', 'confidence']

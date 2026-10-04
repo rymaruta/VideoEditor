@@ -139,8 +139,9 @@ export function structureSchema(scenes: readonly Scene[]): Record<string, unknow
   const item = {
     type: 'object',
     properties: {
-      title: { type: 'string' },
-      reason: { type: 'string' },
+      // 文字数の上限は、小さいモデルが同じ言葉を繰り返して文字列を閉じないまま尽きるのを防ぐ
+      title: { type: 'string', maxLength: 30 },
+      reason: { type: 'string', maxLength: 120 },
       kind: { enum: KINDS },
       score: { type: 'integer' },
       mood: { enum: BGM_MOODS }

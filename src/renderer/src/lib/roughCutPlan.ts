@@ -338,7 +338,7 @@ export async function proposeEffects(
     note?: string
   },
   onProgress?: (p: AiProgress) => void
-): Promise<EffectProposal[]> {
+): Promise<{ proposals: EffectProposal[]; failed: number; total: number }> {
   const chunks: EffectLine[][] = []
   for (let i = 0; i < lines.length; i += 200) chunks.push(lines.slice(i, i + 200))
   const r = await askAiJson(
@@ -351,9 +351,14 @@ export async function proposeEffects(
     })),
     onProgress
   )
-  return r.results.flatMap((answer, i) =>
-    answer === null ? [] : parseEffectAnswer(answer, chunks[i])
-  )
+  // AI が答えを返せなかった区切りの数も返す(「提案が無い」と「答えられなかった」を分けて示す)
+  return {
+    proposals: r.results.flatMap((answer, i) =>
+      answer === null ? [] : parseEffectAnswer(answer, chunks[i])
+    ),
+    failed: r.results.filter((a) => a === null).length,
+    total: chunks.length
+  }
 }
 
 /** 選んだ提案を、仮編集のタイムラインに置く(発言の終わりから。前の演出テロップとは重ねない) */

@@ -51,6 +51,26 @@ describe('演出テロップの提案', () => {
     expect(r).toEqual([])
   })
 
+  it('頼み文の例をそのまま写した答え・同じ文の繰り返しは捨てる(発言に本当にある言葉は残す)', () => {
+    const r = parseEffectAnswer(
+      {
+        effects: [
+          { after: 'u1', kind: 'tsukkomi', text: 'いや早すぎ！', confidence: 0.5 },
+          { after: 'u1', kind: 'kokoro', text: '( 帰りたい… )', confidence: 0.5 },
+          { after: 'u1', kind: 'tsukkomi', text: 'いや何が!?', confidence: 0.5 },
+          { after: 'u2', kind: 'tsukkomi', text: 'いや何が！？', confidence: 0.5 },
+          { after: 'u2', kind: 'place', text: '浄土ヶ浜', confidence: 0.9 },
+          { after: 'u1', kind: 'place', text: '浄土ヶ浜', confidence: 0.9 }
+        ]
+      },
+      lines
+    )
+    expect(r.map((x) => [x.afterLineId, x.text])).toEqual([
+      ['u1', 'いや何が!?'],
+      ['u2', '浄土ヶ浜']
+    ])
+  })
+
   it('種類ごとに見た目と置き場所を変える', () => {
     expect(effectStyle('tsukkomi').position).toBe('center')
     expect(effectStyle('place').position).toBe('top')
