@@ -61,10 +61,14 @@ export function telopConcatList(
   if (!any) return null
   if (cursor < endFrame) entries.push({ image: 0, frames: endFrame - cursor })
   const lines = ['ffconcat version 1.0']
+  // 画像の読み込みは既定で 25fps の時刻の刻み(40ms)になり、切り替わりの時刻が 40ms 単位に丸められる
+  // (30fps で6回に1回、テロップが1フレーム遅れて出る。60fps では1フレームの動きが落ちる)。
+  // 1枚ごとにシーケンスのフレームレートを指定して、刻みをフレームに揃える
+  const rate = `option framerate ${fps.num}/${fps.den}`
   for (const e of entries)
-    lines.push(`file ${q(imagePaths[e.image])}`, `duration ${secs(e.frames)}`)
+    lines.push(`file ${q(imagePaths[e.image])}`, rate, `duration ${secs(e.frames)}`)
   // 最後の1枚は、もう一度並べないと長さが効かない(concat demuxer の決まり)
-  lines.push(`file ${q(imagePaths[entries[entries.length - 1].image])}`)
+  lines.push(`file ${q(imagePaths[entries[entries.length - 1].image])}`, rate)
   return lines.join('\n') + '\n'
 }
 

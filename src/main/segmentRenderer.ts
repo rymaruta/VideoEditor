@@ -1,6 +1,7 @@
+import { trackProcess } from './liveProcesses'
 import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
 import { spawn } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { cpus, tmpdir } from 'os'
 import { join } from 'path'
 import type { QualityPreset, TextOverlay } from '@shared/types'
@@ -93,6 +94,8 @@ function runFfmpeg(args: string[], signal?: AbortSignal): Promise<RunResult> {
     const child = spawn(ffmpegPath, ['-hide_banner', '-nostdin', '-y', ...args], {
       windowsHide: true
     })
+    // アプリを閉じたら止める(止めないと macOS・Linux では区間の ffmpeg が動き続け、一時フォルダも残る)
+    const untrack = trackProcess(child)
     const tail: string[] = []
     let pending = ''
     child.stderr.on('data', (chunk: Buffer) => {
@@ -109,10 +112,12 @@ function runFfmpeg(args: string[], signal?: AbortSignal): Promise<RunResult> {
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     child.on('error', (e) => {
+      untrack()
       signal?.removeEventListener('abort', onAbort)
       reject(e)
     })
     child.on('close', (code) => {
+      untrack()
       signal?.removeEventListener('abort', onAbort)
       if (pending) tail.push(pending)
       const stderr = tail.join('\n')
@@ -493,5 +498,29 @@ export async function exportSequenceSegmented(
     throw e
   } finally {
     rmSync(work, { recursive: true, force: true })
+  }
+}
+
+/**
+ * 前に書き出しの途中でアプリを閉じた(落ちた)ときに残った区間の一時フォルダを消す。
+ * 区間の映像は長尺だと数 GB になる。いま動いている書き出しのものを消さないよう、半日より古いものだけ
+ */
+export function cleanupStaleSegmentDirs(now = Date.now()): void {
+  const base = tmpdir()
+  let names: string[]
+  try {
+    names = readdirSync(base)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    if (!name.startsWith('ve-seg-')) continue
+    const dir = join(base, name)
+    try {
+      if (now - statSync(dir).mtimeMs > 12 * 3600 * 1000)
+        rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // 消せないものは次の起動で
+    }
   }
 }

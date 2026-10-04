@@ -1,3 +1,4 @@
+import { trackProcess } from './liveProcesses'
 import { colorMatchFilter } from '@shared/color/match'
 import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
 import ffmpeg from 'fluent-ffmpeg'
@@ -488,6 +489,12 @@ export interface ExportOptions {
 }
 
 let currentExportCommand: ffmpeg.FfmpegCommand | null = null
+
+/** アプリを閉じたら書き出しの ffmpeg も止める(終わったら一覧から外す) */
+function trackExportCommand(command: ffmpeg.FfmpegCommand): void {
+  const untrack = trackProcess(command)
+  command.on('end', untrack).on('error', untrack)
+}
 let exportInProgress = false
 let exportCancelRequested = false
 
@@ -994,7 +1001,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               // PiP も**画素を正方形に直してから**幅を決める。`scale=幅:-2` は
               // `iw/ih` から高さを出すので、SAR≠1 の素材はここでも縦長に潰れる。
               // 全面(版面CG)は縦横比を保って画面に収める。透過(アルファ)はそのまま overlay へ渡る
-              `[${myIndex}:v]${SQUARE_PIXEL_FILTER},` +
+              // 色合わせもプレビュー・本編と同じく当てる(ワイプのカメラだけ補正前の色で出ていた)
+              `[${myIndex}:v]${asset.colorMatch ? `${colorMatchFilter(asset.colorMatch)},` : ''}${SQUARE_PIXEL_FILTER},` +
                 (full
                   ? `scale=${w}:${h}:force_original_aspect_ratio=decrease,`
                   : `scale=${scaledWidth}:-2,`) +
@@ -1302,6 +1310,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           })
           .run()
         currentExportCommand = command
+        trackExportCommand(command)
         // グラフ組み立て中にキャンセルが来ていたら、ハンドルが出来たいま倒す
         if (exportCancelRequested) command.kill('SIGKILL')
       } catch {
@@ -1417,6 +1426,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         })
         .run()
       currentExportCommand = command
+      trackExportCommand(command)
       // A cancel that arrived while the filter graph was still being built has no
       // command to kill yet, so honour it as soon as the handle exists.
       if (exportCancelRequested) command.kill('SIGKILL')

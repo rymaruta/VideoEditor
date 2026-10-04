@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
@@ -101,6 +101,7 @@ export function ExportDialog(): React.JSX.Element | null {
   const [tab, setTab] = useState<SettingsTab>('video')
   const [encoder, setEncoder] = useState<'libx264' | 'h264_nvenc' | null>(null)
   const [running, setRunning] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
   const [progress, setProgress] = useState<{ percent: number; stage: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [donePath, setDonePath] = useState<string | null>(null)
@@ -181,9 +182,19 @@ export function ExportDialog(): React.JSX.Element | null {
   ): Promise<TelopLayerPayload | null> {
     // 長尺向けは、テロップを画面と同じ描画関数で先に画像にしておく(標準は ASS で焼く)
     if (engine !== 'segmented') return null
-    return prepareTelopLayerForExport(project, aspect, height, (done, total) =>
-      setProgress({ percent: 0, stage: `テロップを描画中(${done}/${total})` })
+    return prepareTelopLayerForExport(
+      project,
+      aspect,
+      height,
+      (done, total) => setProgress({ percent: 0, stage: `テロップを描画中(${done}/${total})` }),
+      abortRef.current?.signal
     )
+  }
+
+  /** 書き出しの中止。テロップの描画中(main の書き出しが始まる前)にも効くよう、こちらでも覚える */
+  function cancelExport(): void {
+    abortRef.current?.abort()
+    void window.api.cancelExport()
   }
 
   async function runOne(
@@ -194,6 +205,8 @@ export function ExportDialog(): React.JSX.Element | null {
   ): Promise<void> {
     setProgress({ percent: 0, stage: '準備中' })
     const telopLayer = await telopLayerFor(aspect, height)
+    // 描画のあいだに中止を押されていたら、書き出しを始めない(main 側の中止は、始まる前だと効かない)
+    if (abortRef.current?.signal.aborted) throw new Error('EXPORT_CANCELED')
     await window.api.exportProject({
       project,
       aspectRatio: aspect,
@@ -208,6 +221,7 @@ export function ExportDialog(): React.JSX.Element | null {
   }
 
   async function handleExport(): Promise<void> {
+    abortRef.current = new AbortController()
     setError(null)
     setDonePath(null)
     const reason = blocker()
@@ -238,6 +252,7 @@ export function ExportDialog(): React.JSX.Element | null {
   }
 
   async function handleRunQueue(): Promise<void> {
+    abortRef.current = new AbortController()
     setError(null)
     setDonePath(null)
     const reason = blocker()
@@ -250,25 +265,43 @@ export function ExportDialog(): React.JSX.Element | null {
     setRunning(true)
     setQueueStatus(Object.fromEntries(queue.map((j) => [j.id, 'pending' as JobStatus])))
     let lastPath: string | null = null
-    for (const job of queue) {
+    let doneCount = 0
+    let failedCount = 0
+    let canceledCount = 0
+    for (const [index, job] of queue.entries()) {
       setQueueStatus((prev) => ({ ...prev, [job.id]: 'running' }))
       try {
         lastPath = `${folder}/${jobFileName(project.name, job)}`
         await runOne(job.aspectRatio, job.resolutionHeight, job.quality, lastPath)
         setQueueStatus((prev) => ({ ...prev, [job.id]: 'done' }))
+        doneCount++
       } catch (e) {
         const message = formatIpcError(e)
         if (message === 'EXPORT_CANCELED') {
           setQueueStatus((prev) => ({ ...prev, [job.id]: 'pending' }))
+          // 中止したぶんと、まだ始めていないぶん
+          canceledCount = queue.length - index
           break
         }
         setQueueStatus((prev) => ({ ...prev, [job.id]: 'error' }))
         setError(message)
+        failedCount++
       }
     }
     setRunning(false)
     setProgress(null)
-    window.api.notifyDone('まとめての書き出しが終わりました', folder)
+    // 失敗・中止があっても「終わりました」だけだと、離れていた人は全部できたと思い込む
+    const summary =
+      failedCount === 0 && canceledCount === 0
+        ? 'まとめての書き出しが終わりました'
+        : [
+            `まとめての書き出し: ${doneCount}件完了`,
+            failedCount > 0 ? `${failedCount}件失敗` : '',
+            canceledCount > 0 ? `${canceledCount}件中止` : ''
+          ]
+            .filter(Boolean)
+            .join('・')
+    window.api.notifyDone(summary, folder)
     if (lastPath && openFolderAfter) await window.api.showItemInFolder(lastPath).catch(() => {})
   }
 
@@ -728,7 +761,7 @@ export function ExportDialog(): React.JSX.Element | null {
             キューに追加
           </button>
           {running ? (
-            <button className="small-button danger" onClick={() => window.api.cancelExport()}>
+            <button className="small-button danger" onClick={cancelExport}>
               書き出しを中止
             </button>
           ) : (

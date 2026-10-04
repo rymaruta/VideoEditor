@@ -290,7 +290,9 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
         y = '0'
       }
       parts.push(
-        `[${idx}:v]setpts=PTS/${num(speed)},${colorOf(item)}${shape},setsar=1,` +
+        // フレーム数で切って番号を振り直すので、先にシーケンスのフレームレートへ揃える
+        // (揃えないと 60fps のワイプが 30fps の書き出しで半分の速さになる。音は正しい速さのまま)
+        `[${idx}:v]setpts=PTS/${num(speed)},${colorOf(item)}${shape},setsar=1,fps=${fps},` +
           `tpad=stop_duration=${num(sec(frames))}:stop_mode=clone,trim=end_frame=${frames},` +
           `settb=${tb},setpts=N+${offset}[${label}]`
       )

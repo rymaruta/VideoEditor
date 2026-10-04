@@ -28,7 +28,9 @@ async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
 
 export async function rasterizeTelopLayer(
   seq: Sequence,
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  /** 書き出しの中止(長尺の 4K だと描画だけで数分かかる) */
+  signal?: AbortSignal
 ): Promise<TelopLayerPayload | null> {
   const textCanvas = textCanvasSize(seq.width >= seq.height ? '16:9' : '9:16')
   const runs = planTelopRuns(seq, textCanvas.h)
@@ -69,6 +71,7 @@ export async function rasterizeTelopLayer(
       imageByKey.set(run.imageKey, image)
     }
     out.push({ startFrame: run.startFrame, endFrame: run.endFrame, image })
+    if (signal?.aborted) throw new Error('EXPORT_CANCELED')
     if (onProgress && i % 20 === 0) onProgress(i, runs.length)
   }
   onProgress?.(runs.length, runs.length)
@@ -83,8 +86,9 @@ export async function prepareTelopLayerForExport(
   project: Project,
   aspectRatio: AspectRatio,
   resolutionHeight: number,
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  signal?: AbortSignal
 ): Promise<TelopLayerPayload | null> {
   const v2 = projectV1ToV2({ ...project, aspectRatio }, { resolution: resolutionHeight })
-  return rasterizeTelopLayer(v2.sequence, onProgress)
+  return rasterizeTelopLayer(v2.sequence, onProgress, signal)
 }

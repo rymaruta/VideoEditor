@@ -114,14 +114,19 @@ describe('telopConcatList — 区間ぶんの画像の一覧', () => {
       [
         'ffconcat version 1.0',
         "file '/w/0.png'",
+        'option framerate 30/1',
         'duration 1.000000000',
         "file '/w/1.png'",
+        'option framerate 30/1',
         'duration 1.000000000',
         "file '/w/it'\\''s.png'",
+        'option framerate 30/1',
         'duration 0.200000000',
         "file '/w/0.png'",
+        'option framerate 30/1',
         'duration 0.800000000',
-        "file '/w/0.png'"
+        "file '/w/0.png'",
+        'option framerate 30/1'
       ].join('\n') + '\n'
     )
   })
