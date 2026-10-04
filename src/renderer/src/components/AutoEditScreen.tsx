@@ -17,6 +17,7 @@ import type { AiProvider } from '@shared/llm'
 import { speakerColor } from '@shared/speaker'
 import { createEtaTracker, formatRemaining } from '../lib/eta'
 import { AUTO_PLACE_CONFIDENCE, EFFECT_LABEL } from '@shared/telop/effects'
+import { stripTelopMarkup } from '@shared/telop/render'
 
 /**
  * 自動編集の画面(自動編集 > 自動編集の画面)。デザイン案の「AutoEdit」。
@@ -730,11 +731,15 @@ export function AutoEditScreen(): React.JSX.Element | null {
                             <span style={{ width: `${fx.confidence * 100}%` }} />
                           </span>
                           <span className="structure-body effects-body">
-                            <span className="structure-title">{fx.text}</span>
+                            <span className="structure-title">
+                              {stripTelopMarkup(fx.text).replace(/\n/g, ' ')}
+                            </span>
                             <span className="form-note">
                               {line
                                 ? `${line.speaker ?? ''}「${line.text.slice(0, 30)}」の後 · `
-                                : ''}
+                                : fx.at !== undefined
+                                  ? `収録 ${Math.floor(fx.at / 60)}:${String(Math.floor(fx.at % 60)).padStart(2, '0')} · `
+                                  : ''}
                               {fx.reason}
                             </span>
                           </span>
