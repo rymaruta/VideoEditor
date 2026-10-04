@@ -4,6 +4,7 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
 import { describeFfmpegError } from './ffmpegError'
+import { detectVideoEncoder } from './segmentRenderer'
 import {
   isMonoChannelCount,
   isMultiChannelCount,
@@ -131,9 +132,9 @@ export function ensurePreviewProxy(
 
   // Written to a temporary name and renamed only on success, so an interrupted run
   // can never leave a half-written file that would later be treated as a valid cache.
-  const task = probeStreams(filePath)
+  const task = Promise.all([probeStreams(filePath), detectVideoEncoder()])
     .then(
-      ({ audioCodec, hasAudio, hasAlpha, audioChannels }) =>
+      ([{ audioCodec, hasAudio, hasAlpha, audioChannels }, encoder]) =>
         new Promise<string>((resolve, reject) => {
           const finalPath = hasAlpha ? alphaPath : outPath
           const tmpPath = hasAlpha ? `${alphaPath}.partial.webm` : `${outPath}.partial.mp4`
@@ -174,60 +175,74 @@ export function ensurePreviewProxy(
               .save(tmpPath)
             return
           }
-          const command = ffmpeg(filePath).videoCodec('libx264').outputOptions([
-            '-preset veryfast',
-            '-crf 28',
-            // 540p is plenty for a preview and roughly halves both the encode time and
-            // the file size versus 720p. Export is unaffected — it reads the original.
-            '-vf scale=-2:min(540\\,ih)',
-            '-pix_fmt yuv420p',
-            '-movflags +faststart'
-          ])
-          // Re-encoding audio that the preview can already play is wasted time; only the
-          // video stream is actually the problem in the common HEVC case.
-          if (!hasAudio) command.noAudio()
-          else if (PREVIEWABLE_AUDIO_CODECS.has(audioCodec)) command.audioCodec('copy')
-          else {
-            command.audioCodec('aac').outputOptions(['-ac 2'])
-            // `-ac 2` の裏の swresample は**モノラルを左右へ 1/√2 で配る**ので、
-            // 変換した素材だけ試聴が 3dB 小さくなる。同じモノラルでも H.264 の素材は
-            // そのまま再生されて等倍なので、**素材の符号化方式で音量が変わる**——
-            // しかも書き出しは等倍で出る(理由は `@shared/audioUpmix`)。
-            // 実測: mono の 200Hz を `-ac 2` だけで変換すると max -24.1 → -26.6 dB、
-            // この一段を足すと -23.7 dB(AAC の誤差ぶんを含めて等倍)。
-            if (isMonoChannelCount(audioChannels)) {
-              command.audioFilters(monoUpmixFilter())
-            } else if (isMultiChannelCount(audioChannels)) {
-              // 3ch 以上を畳むときは、`-ac 2` の裏の swresample が**浮動小数の出力では
-              // 行列の正規化を外す**ので、試聴だけが持ち上がって割れる。書き出しと
-              // 同じく明示して戻す(理由は `@shared/audioUpmix`)。
-              // 実測(無相関な5.1): `-ac 2` だけだと mean -10.9 dB・ピーク 0.0 dB で
-              // **430サンプルが 0dBFS に張り付く**。この一段を足すと -18.6 dB・-5.6 dB。
-              // ここを通るのは AC-3 / DTS のように**そのまま再生できない音声**で、
-              // それはまさに 5.1 を運んでいる形式でもある。
-              command.audioFilters(multiChannelDownmixFilter())
+          const encode = (gpu: boolean): void => {
+            const command = ffmpeg(filePath)
+            if (gpu) {
+              // GPU(NVIDIA)で読んで GPU で書く。4K・HEVC の多カメラの素材は CPU だと
+              // 何時間もかかる。読み(NVDEC)は使えない形式なら ffmpeg が自動で CPU に戻す
+              command
+                .inputOptions(['-hwaccel cuda'])
+                .videoCodec('h264_nvenc')
+                .outputOptions(['-preset p4', '-rc vbr', '-cq 30', '-b:v 0'])
+            } else command.videoCodec('libx264').outputOptions(['-preset veryfast', '-crf 28'])
+            command.outputOptions([
+              // 540p is plenty for a preview and roughly halves both the encode time and
+              // the file size versus 720p. Export is unaffected — it reads the original.
+              '-vf scale=-2:min(540\\,ih)',
+              '-pix_fmt yuv420p',
+              '-movflags +faststart'
+            ])
+            // Re-encoding audio that the preview can already play is wasted time; only the
+            // video stream is actually the problem in the common HEVC case.
+            if (!hasAudio) command.noAudio()
+            else if (PREVIEWABLE_AUDIO_CODECS.has(audioCodec)) command.audioCodec('copy')
+            else {
+              command.audioCodec('aac').outputOptions(['-ac 2'])
+              // `-ac 2` の裏の swresample は**モノラルを左右へ 1/√2 で配る**ので、
+              // 変換した素材だけ試聴が 3dB 小さくなる。同じモノラルでも H.264 の素材は
+              // そのまま再生されて等倍なので、**素材の符号化方式で音量が変わる**——
+              // しかも書き出しは等倍で出る(理由は `@shared/audioUpmix`)。
+              // 実測: mono の 200Hz を `-ac 2` だけで変換すると max -24.1 → -26.6 dB、
+              // この一段を足すと -23.7 dB(AAC の誤差ぶんを含めて等倍)。
+              if (isMonoChannelCount(audioChannels)) {
+                command.audioFilters(monoUpmixFilter())
+              } else if (isMultiChannelCount(audioChannels)) {
+                // 3ch 以上を畳むときは、`-ac 2` の裏の swresample が**浮動小数の出力では
+                // 行列の正規化を外す**ので、試聴だけが持ち上がって割れる。書き出しと
+                // 同じく明示して戻す(理由は `@shared/audioUpmix`)。
+                // 実測(無相関な5.1): `-ac 2` だけだと mean -10.9 dB・ピーク 0.0 dB で
+                // **430サンプルが 0dBFS に張り付く**。この一段を足すと -18.6 dB・-5.6 dB。
+                // ここを通るのは AC-3 / DTS のように**そのまま再生できない音声**で、
+                // それはまさに 5.1 を運んでいる形式でもある。
+                command.audioFilters(multiChannelDownmixFilter())
+              }
             }
-          }
-          command
-            .on('progress', (p) => {
-              if (typeof p.percent === 'number') {
-                notifyProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
-              }
-            })
-            .on('error', (err, _stdout, stderr) => {
-              rmSync(tmpPath, { force: true })
-              reject(describeFfmpegError(err, stderr))
-            })
-            .on('end', () => {
-              try {
-                renameSync(tmpPath, outPath)
-                resolve(outPath)
-              } catch (e) {
+            command
+              .on('progress', (p) => {
+                if (typeof p.percent === 'number') {
+                  notifyProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
+                }
+              })
+              .on('error', (err, _stdout, stderr) => {
                 rmSync(tmpPath, { force: true })
-                reject(e)
-              }
-            })
-            .save(tmpPath)
+                // GPU で失敗したら(同時に開ける数の上限・ドライバ)、CPU で作り直す
+                if (gpu) {
+                  notifyProgress(0)
+                  encode(false)
+                } else reject(describeFfmpegError(err, stderr))
+              })
+              .on('end', () => {
+                try {
+                  renameSync(tmpPath, outPath)
+                  resolve(outPath)
+                } catch (e) {
+                  rmSync(tmpPath, { force: true })
+                  reject(e)
+                }
+              })
+              .save(tmpPath)
+          }
+          encode(encoder === 'h264_nvenc')
         })
     )
     .finally(() => {
