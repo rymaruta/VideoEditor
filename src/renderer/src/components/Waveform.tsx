@@ -17,16 +17,23 @@ export function Waveform({
 
   useEffect(() => {
     let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
     // Debounced: props (especially start/end) can change on every mousemove while
     // trim-dragging a clip, and firing an ffmpeg subprocess per frame would flood
     // the system. Only the value the drag settles on actually needs a fetch.
-    const timer = setTimeout(() => {
+    const request = (attempt: number): void => {
       window.api
         .generateWaveform(filePath, start, end, Math.round(width), Math.round(height))
         .then((dataUrl) => {
           if (!cancelled) setUrl(dataUrl)
         })
-        .catch(() => {
+        .catch((e: unknown) => {
+          // 待ちが溢れて後回しの頼みが捨てられた(スクロール中に新しいクリップが大量に見えた)。
+          // まだ画面にあるなら、少し待って頼み直す(諦めると、その波形はずっと空のまま)
+          if (!cancelled && String(e).includes('MEDIA_JOB_DROPPED') && attempt < 5) {
+            timer = setTimeout(() => request(attempt + 1), 400 * (attempt + 1))
+            return
+          }
           // **取れなかったら、前の絵を消す。**
           //
           // 失敗を握り潰すだけだと `url` が前の範囲のまま残り、**別の範囲の波形が
@@ -44,7 +51,8 @@ export function Waveform({
           // 待っている 150ms の間は前の絵のままにしてある(でないとトリム中に点滅する)。
           if (!cancelled) setUrl(null)
         })
-    }, 150)
+    }
+    timer = setTimeout(() => request(0), 150)
     return () => {
       cancelled = true
       clearTimeout(timer)

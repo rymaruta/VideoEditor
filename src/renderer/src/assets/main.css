@@ -1363,6 +1363,14 @@ h3 {
   z-index: 1;
 }
 
+/* 本編の再生要素は2つ(映している方と、次のクリップを用意している控え)。
+   流れに置くと2つが横に並び、映している方が半分ずれて見える(見えない控えも場所を取る)。
+   どちらも枠いっぱいに重ねる。 */
+.preview-frame video.preview-main-video {
+  position: absolute;
+  inset: 0;
+}
+
 /* 余白を素材のぼかしで埋めるクリップの背景。前景の下に敷く。
    ぼかすと端の画素が薄くなって枠の縁に線が見えるので、少しだけ拡大して隠す。 */
 .preview-frame video.preview-blur-backdrop {

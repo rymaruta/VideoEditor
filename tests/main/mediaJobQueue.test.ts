@@ -26,6 +26,7 @@ describe('MediaJobQueue', () => {
     const q = new MediaJobQueue<string>(2)
     const jobs = [0, 1, 2, 3].map(() => controllable())
     const results = jobs.map((j, i) => q.request(`k${i}`, j.run))
+    await flush()
     expect(jobs.map((j) => j.started())).toEqual([true, true, false, false])
     jobs[0].finish('a')
     await flush()
@@ -74,5 +75,16 @@ describe('MediaJobQueue', () => {
     }
     await expect(q.request('k', run)).rejects.toThrow('boom')
     expect(await q.request('k', run)).toBe('ok')
+  })
+
+  it('仕事が同期的に投げても枠を返し、以後の頼みが止まらない', async () => {
+    const q = new MediaJobQueue<string>(1)
+    const boom = (): Promise<string> => {
+      throw new Error('ENOSPC')
+    }
+    await expect(q.request('a', boom)).rejects.toThrow('ENOSPC')
+    await expect(q.request('b', boom)).rejects.toThrow('ENOSPC')
+    expect(await q.request('c', async () => 'ok')).toBe('ok')
+    expect(await q.request('a', async () => 'again')).toBe('again')
   })
 })

@@ -69,8 +69,10 @@ export class MediaJobQueue<T> {
       // 新しい頼みから
       const job = this.pending.pop()!
       this.running++
-      job
-        .run()
+      // 仕事が同期的に投げても(一時フォルダを作れない等)枠と待ち人を必ず片付ける。
+      // 片付けないと枠が埋まったままになり、以後の絵がすべて止まる
+      Promise.resolve()
+        .then(job.run)
         .then(
           (value) => {
             this.cache.set(job.key, value)

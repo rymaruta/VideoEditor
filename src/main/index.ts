@@ -16,7 +16,7 @@ import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
 import {
   LINUX_OPENER_COMMAND,
@@ -84,8 +84,23 @@ import type {
   ResolutionHeight
 } from '@shared/types'
 
-/** タイムラインの波形・サムネイル。同時に走らせる ffmpeg を抑え、結果を覚える(理由は mediaJobQueue) */
+/**
+ * タイムラインの波形。同時に走らせる ffmpeg を抑え、結果を覚える(理由は mediaJobQueue)。
+ * スクロールで通り過ぎた分は捨ててよいので、待ちが溢れたら古い頼みから落とす
+ */
 const timelineImages = new MediaJobQueue<string>(2)
+/** サムネイル・フレーム。1回きりの頼み(素材の読み込み・サムネイル作り)なので、落とさない */
+const stillImages = new MediaJobQueue<string>(2, Number.POSITIVE_INFINITY)
+
+/** 結果を覚える鍵に、ファイルの中身の目印(大きさ・更新時刻)を入れる。同じ名前で置き換えた素材に古い絵を出さない */
+function fileStamp(filePath: string): string {
+  try {
+    const st = statSync(filePath)
+    return `${st.size}:${st.mtimeMs}`
+  } catch {
+    return 'missing'
+  }
+}
 
 loadEnvFile()
 
@@ -439,7 +454,7 @@ app.whenReady().then(() => {
     filePaths.filter((p) => !existsSync(p))
   )
   ipcMain.handle(IPC.generateThumbnail, async (_e, filePath: string, atSeconds: number) =>
-    timelineImages.request(`thumb|${filePath}|${atSeconds}`, () =>
+    stillImages.request(`thumb|${filePath}|${fileStamp(filePath)}|${atSeconds}`, () =>
       generateThumbnailDataUrl(filePath, atSeconds)
     )
   )
@@ -455,8 +470,8 @@ app.whenReady().then(() => {
       cropCenter?: { x: number; y: number },
       blurBackground?: boolean
     ) =>
-      timelineImages.request(
-        `frame|${filePath}|${atSeconds}|${width}x${height}|${fillCrop}|${cropCenter?.x},${cropCenter?.y}|${blurBackground}`,
+      stillImages.request(
+        `frame|${filePath}|${fileStamp(filePath)}|${atSeconds}|${width}x${height}|${fillCrop}|${cropCenter?.x},${cropCenter?.y}|${blurBackground}`,
         () =>
           generateFrameDataUrl(
             filePath,
@@ -479,8 +494,9 @@ app.whenReady().then(() => {
       width: number,
       height: number
     ) =>
-      timelineImages.request(`wave|${filePath}|${rangeStart}|${rangeEnd}|${width}x${height}`, () =>
-        generateWaveformDataUrl(filePath, rangeStart, rangeEnd, width, height)
+      timelineImages.request(
+        `wave|${filePath}|${fileStamp(filePath)}|${rangeStart}|${rangeEnd}|${width}x${height}`,
+        () => generateWaveformDataUrl(filePath, rangeStart, rangeEnd, width, height)
       )
   )
   ipcMain.handle(

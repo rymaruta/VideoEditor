@@ -1137,8 +1137,11 @@ export function PreviewPlayer(): React.JSX.Element {
     slotRefs.current[1] = el
     if (activeSlotRef.current === 1) videoRef.current = el
   }, [])
-  const setActiveSrc = (url: string | null): void =>
-    setSlotSrc((prev) => prev.map((v, i) => (i === activeSlotRef.current ? url : v)))
+  const setActiveSrc = (url: string | null): void => {
+    // 入れる先は呼んだ時点の要素(描画までに入れ替わっても、別の要素へ入れない)
+    const slot = activeSlotRef.current
+    setSlotSrc((prev) => prev.map((v, i) => (i === slot ? url : v)))
+  }
   /** `src` を差し替えたときに、読み込み終わってから入れる位置(理由は pendingPreviewLoad) */
   const pendingLoadRef = useRef<PendingPreviewLoad | null>(null)
   // Long-lived closures (the rAF playback loop below) call loadClipForTime across many
@@ -1161,7 +1164,13 @@ export function PreviewPlayer(): React.JSX.Element {
     const target = standbyTargetFor(asLike(tc), next ? asLike(next) : null, globalTime)
     if (!target) return
     const prepared = standbyRef.current
-    if (prepared && prepared.clipId === target.clipId && prepared.url === target.url) return
+    if (
+      prepared &&
+      prepared.clipId === target.clipId &&
+      prepared.url === target.url &&
+      prepared.time === target.time
+    )
+      return
     standbyRef.current = target
     const slot = 1 - activeSlotRef.current
     const el = slotRefs.current[slot]
@@ -1209,7 +1218,10 @@ export function PreviewPlayer(): React.JSX.Element {
     // 控えの要素に、この位置が用意できていれば入れ替えるだけ(読み込み直し・シークを待たない)
     const standbySlot = 1 - activeSlotRef.current
     const standbyEl = slotRefs.current[standbySlot]
-    if (canSwapToStandby(standbyEl, standbyRef.current, url, localTime) && standbyEl) {
+    // 映像のあるはずのクリップで画が出ていない(再生できない形式)なら入れ替えない。
+    // 従来どおり読み込み直して、再生できない理由を出す
+    const playable = !tc.asset.hasVideo || (standbyEl?.videoWidth ?? 0) > 0
+    if (playable && canSwapToStandby(standbyEl, standbyRef.current, url, localTime) && standbyEl) {
       const previous = videoRef.current
       activeSlotRef.current = standbySlot
       videoRef.current = standbyEl
@@ -1221,6 +1233,11 @@ export function PreviewPlayer(): React.JSX.Element {
       standbyEl.playbackRate = toPlaybackRate(speed)
       standbyEl.volume = volumeRef.current
       standbyEl.muted = mutedRef.current || tc.clip.audioDetached === true
+      // 用意した位置と少しずれていれば合わせる(止めている時は必ず。再生中は 1コマ以上ずれた時だけ。
+      // 再生中に細かく入れ直すと、そのたびにシークで引っかかる)
+      const drift = Math.abs(standbyEl.currentTime - localTime)
+      if (drift > 0.001 && (!resumePlaying || drift > 0.04))
+        standbyEl.currentTime = toMediaTime(localTime)
       if (resumePlaying) standbyEl.play().catch(() => {})
       if (previous) {
         previous.pause()
@@ -1228,6 +1245,10 @@ export function PreviewPlayer(): React.JSX.Element {
         previous.style.visibility = 'hidden'
       }
       setActiveSlot(standbySlot)
+      // 切り抜き・色合わせ・消音は再生位置のクリップから決めるので、新しいクリップへすぐ進める
+      // (待つと1〜2コマ、前のクリップの色や切り抜きで映る)
+      setPlayheadTime(time)
+      setPlaybackError(null)
       return
     }
     if (activeSrcRef.current !== url) {
@@ -1432,6 +1453,7 @@ export function PreviewPlayer(): React.JSX.Element {
                 <video
                   key={slot}
                   ref={slot === 0 ? attachSlot0 : attachSlot1}
+                  className="preview-main-video"
                   src={slotSrc[slot] ?? undefined}
                   // 控えの要素は見せない(音は用意するときに止める。入れ替えはその場で切り替える)
                   style={{
