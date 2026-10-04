@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildEffectPrompt, effectStyle, parseEffectAnswer } from '../../src/shared/telop/effects'
+import {
+  buildEffectPrompt,
+  effectSchema,
+  effectStyle,
+  nameProposals,
+  parseEffectAnswer
+} from '../../src/shared/telop/effects'
+import { planSoundEffects } from '../../src/shared/finish/sound'
 
 const lines = [
   { id: 'u1', speaker: '出演者A', text: 'えっ？ヤバイですよね', start: 12 },
@@ -71,8 +78,67 @@ describe('演出テロップの提案', () => {
     ])
   })
 
+  it('強調は発言の中の言葉だけ。注釈は「※」で始める', () => {
+    const r = parseEffectAnswer(
+      {
+        effects: [
+          { after: 'u1', kind: 'emphasis', text: 'ヤバイ', confidence: 0.9 },
+          { after: 'u1', kind: 'emphasis', text: 'すごい', confidence: 0.9 },
+          { after: 'u2', kind: 'note', text: '距離は目安です', confidence: 0.6 },
+          { after: 'u2', kind: 'sfx', text: 'シーン…', confidence: 0.5 },
+          { after: 'u2', kind: 'name', text: '出演者B', confidence: 1 }
+        ]
+      },
+      lines
+    )
+    expect(r.map((x) => [x.kind, x.text])).toEqual([
+      ['emphasis', 'ヤバイ'],
+      ['note', '※距離は目安です'],
+      ['sfx', 'シーン…']
+    ])
+    // AI に頼む種類に人物紹介は入れない
+    const schema = JSON.stringify(effectSchema(lines))
+    expect(schema).toContain('emphasis')
+    expect(schema).not.toContain('"name"')
+  })
+
+  it('人物紹介は、名前を付けた出演者の最初の発言に1回だけ(既定の名前には出さない)', () => {
+    const r = nameProposals([
+      { id: 'a', speaker: '出演者B', text: 'あ', start: 5 },
+      { id: 'b', speaker: '山田', text: 'い', start: 1 },
+      { id: 'c', speaker: '山田', text: 'う', start: 8 },
+      { id: 'd', speaker: 'マイク3', text: 'え', start: 2 },
+      { id: 'e', text: 'お', start: 3 }
+    ])
+    expect(r.map((p) => [p.afterLineId, p.text, p.kind])).toEqual([
+      ['b', '山田', 'name'],
+      ['a', '出演者B', 'name']
+    ])
+  })
+
+  it('注釈・人物紹介には SE を付けない', () => {
+    const kit = {
+      se: { ツッコミ: [{ path: '/se/a.wav', name: 'a', duration: 1 }] },
+      bgm: {},
+      cg: {}
+    }
+    const se = planSoundEffects(
+      [
+        { time: 1, kind: 'note', text: '※' },
+        { time: 3, kind: 'name', text: '山田' },
+        { time: 5, kind: 'sfx', text: 'ドーン' }
+      ],
+      [],
+      kit
+    )
+    expect(se.map((x) => x.startTime)).toEqual([5])
+  })
+
   it('種類ごとに見た目と置き場所を変える', () => {
     expect(effectStyle('tsukkomi').position).toBe('center')
     expect(effectStyle('place').position).toBe('top')
+    // 人物紹介は左下(発言テロップの下中央と重ねない)、注釈は右下に小さく
+    expect(effectStyle('name').customPosition!.x).toBeLessThan(0.5)
+    expect(effectStyle('note').fontSize).toBeLessThan(effectStyle('emphasis').fontSize)
   })
 })

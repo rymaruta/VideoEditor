@@ -34,7 +34,8 @@ import { defaultTextStyle } from '@shared/textStyle'
 import {
   buildEffectPrompt,
   effectSchema,
-  EFFECT_DURATION_SEC,
+  EFFECT_AT_LINE_START,
+  effectDuration,
   EFFECT_LABEL,
   effectStyle,
   parseEffectAnswer,
@@ -379,25 +380,39 @@ export function effectOverlays(
     .map((p) => {
       const u = utterance.get(p.afterLineId)
       const f = u ? fileOf.get(u.assetId) : undefined
-      const t = u && f ? roughTimelineAt(spans, toCommon(f, u.sourceEnd) - 0.05) : null
+      // 人物紹介・強調は発言に重ねて頭から、ほかは言い終わってから
+      const at =
+        u && f
+          ? EFFECT_AT_LINE_START.has(p.kind)
+            ? toCommon(f, u.sourceStart) + 0.05
+            : toCommon(f, u.sourceEnd) - 0.05
+          : null
+      const t = at !== null ? roughTimelineAt(spans, at) : null
       return { p, t }
     })
     .filter((x): x is { p: EffectProposal; t: number } => x.t !== null)
     .sort((a, b) => a.t - b.t)
+  let lastName: Omit<TextOverlay, 'id'> | null = null
   for (const { p, t } of placed) {
-    const start = Math.max(t, lastEnd + 0.2)
+    // 人物紹介は置き場所が別(左下)なので、ほかの演出テロップとの間隔は気にしない
+    const start = p.kind === 'name' ? t : Math.max(t, lastEnd + 0.2)
+    const duration = effectDuration(p.kind)
+    // 次の人の名前が出るときは、前の人の名前を下げる(同じ場所に重ねない)
+    if (p.kind === 'name' && lastName && lastName.endTime > start)
+      lastName.endTime = Math.max(lastName.startTime + 0.5, start)
     // 「演出・ツッコミ」のように名前の付いたテロップスタイルがあれば、そちらを使う
     const named = styles.find((s) => s.name === `演出・${EFFECT_LABEL[p.kind]}`)
     out.push({
       text: p.text,
       startTime: start,
-      endTime: start + EFFECT_DURATION_SEC,
+      endTime: start + duration,
       style: named ? { ...named.style } : effectStyle(p.kind),
       styleId: named?.id,
       source: 'auto',
       effectId: p.id
     })
-    lastEnd = start + EFFECT_DURATION_SEC
+    if (p.kind !== 'name') lastEnd = start + duration
+    else lastName = out[out.length - 1]
   }
   return out
 }

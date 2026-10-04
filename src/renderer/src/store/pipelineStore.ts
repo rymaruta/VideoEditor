@@ -42,7 +42,7 @@ import {
   scenesFor
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces } from '../lib/telopPlacement'
-import { AUTO_PLACE_CONFIDENCE, type EffectProposal } from '@shared/telop/effects'
+import { AUTO_PLACE_CONFIDENCE, nameProposals, type EffectProposal } from '@shared/telop/effects'
 import type { RoughCut } from '@shared/roughCut/build'
 import { formatIpcError } from '../lib/ipcError'
 import { emitMenuCommand } from '../lib/menuCommands'
@@ -752,19 +752,30 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     // 演出テロップ: 提案は最初の1回だけ AI に頼み、作り直しでは選んだものを置き直す
     if (get().effects.length === 0 && get().steps.effects.state !== 'done') {
       const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
+      const lines = effectLines(project, info, plan.cut.spans)
+      // 人物紹介(名前スーパー)は AI を使わずに、各出演者の最初の発言へ(AI を使わない設定でも付ける)
+      const names = nameProposals(lines)
+      if (names.length > 0)
+        log(`人物紹介: ${names.map((n) => n.text).join('・')} の最初の発言に名前を出します`)
       if (provider === 'off' || (provider === 'gemini' && !apiKey)) {
+        set({ effects: names, effectChosen: names.map((n) => n.id) })
         setStep('effects', {
-          state: 'skipped',
+          state: names.length > 0 ? 'done' : 'skipped',
           note:
-            provider === 'off'
+            (provider === 'off'
               ? 'AI を使わない設定です'
-              : 'Gemini の鍵がありません(このPCの AI に切り替えると提案します)'
+              : 'Gemini の鍵がありません(このPCの AI に切り替えると提案します)') +
+            (names.length > 0 ? ` · 人物紹介 ${names.length}` : '')
         })
       } else {
         setStep('effects', { state: 'run', percent: 30, note: 'AI が提案中' })
         try {
-          const { proposals, failed, total } = await proposeEffects(
-            effectLines(project, info, plan.cut.spans),
+          const {
+            proposals: aiProposals,
+            failed,
+            total
+          } = await proposeEffects(
+            lines,
             {
               provider,
               apiKey,
@@ -773,6 +784,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             },
             (p) => setStep('effects', { percent: p.percent, note: p.note })
           )
+          const proposals = [...names, ...aiProposals]
           const auto = proposals
             .filter((p) => p.confidence >= AUTO_PLACE_CONFIDENCE)
             .map((p) => p.id)

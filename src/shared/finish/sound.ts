@@ -16,12 +16,17 @@ export const BGM_MOODS = ['楽しい', '穏やか', '緊張', '感動', '移動'
 export type BgmMood = (typeof BGM_MOODS)[number]
 
 /** 演出テロップの種類 → SE の分類 */
-export const SE_FOR_EFFECT: Record<EffectKind, SeCategory> = {
+export const SE_FOR_EFFECT: Record<EffectKind, SeCategory | null> = {
   tsukkomi: 'ツッコミ',
   kokoro: '心の声',
   situation: '状況',
   place: '地名',
-  corner: 'コーナー'
+  corner: 'コーナー',
+  emphasis: 'ツッコミ',
+  sfx: 'ツッコミ',
+  // 注釈・人物紹介には音を付けない(落ち着いて読ませる)
+  note: null,
+  name: null
 }
 
 /** フォルダ名の言い換え(英語・よくある別名)。比べるときは小文字・空白なしで */
@@ -113,11 +118,18 @@ export function planSoundEffects(
   const rot = new Rotation()
   const out: PlacedSound[] = []
   const wants = [
-    ...effects.map((e) => ({
-      time: e.time,
-      category: SE_FOR_EFFECT[e.kind] as string,
-      reason: `${SE_FOR_EFFECT[e.kind]}「${e.text.slice(0, 12)}」`
-    })),
+    ...effects.flatMap((e) => {
+      const category = SE_FOR_EFFECT[e.kind]
+      return category
+        ? [
+            {
+              time: e.time,
+              category: category as string,
+              reason: `${category}「${e.text.slice(0, 12)}」`
+            }
+          ]
+        : []
+    }),
     // 最初の場面の頭(0秒)には置かない
     ...sceneStarts
       .filter((t) => t > 0.5)

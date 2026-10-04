@@ -2,21 +2,42 @@ import type { TextStyle } from '../types'
 import { defaultTextStyle } from '../textStyle'
 
 /**
- * 演出テロップ(計画書 §5.8): ツッコミ・心の声・状況説明・地名・コーナー名。
+ * 演出テロップ(計画書 §5.8): ツッコミ・心の声・状況説明・地名・コーナー名・強調・擬音・注釈・人物紹介。
+ * 人物紹介(名前スーパー)だけは AI を使わず、各出演者の最初の発言に自動で付ける(`nameProposals`)。
  *
  * AI(Gemini)が、発言の流れを読んで「どの発言の後に・どの種類で・何と出すか・自信度」を提案する。
  * 自信の高いもの(`AUTO_PLACE_CONFIDENCE` 以上)だけを自動で置き、残りは提案として人が選ぶ。
  * 送るのは話者つきの文字起こしだけ。発言そのものを書き換える提案は受け付けない(演出の文だけ)。
  */
 
-export type EffectKind = 'tsukkomi' | 'kokoro' | 'situation' | 'place' | 'corner'
+export type EffectKind =
+  'tsukkomi' | 'kokoro' | 'situation' | 'place' | 'corner' | 'emphasis' | 'sfx' | 'note' | 'name'
 
 export const EFFECT_LABEL: Record<EffectKind, string> = {
   tsukkomi: 'ツッコミ',
   kokoro: '心の声',
   situation: '状況説明',
   place: '地名・情報',
-  corner: 'コーナー名'
+  corner: 'コーナー名',
+  emphasis: '強調',
+  sfx: '擬音',
+  note: '注釈',
+  name: '人物紹介'
+}
+
+/** AI に提案させる種類(人物紹介は名前が分かっているので AI に頼まない) */
+export const AI_EFFECT_KINDS = (Object.keys(EFFECT_LABEL) as EffectKind[]).filter(
+  (k) => k !== 'name'
+)
+
+/**
+ * 発言に重ねて出す種類(発言の頭から)。ほかの種類は発言の終わりから出す(ツッコミは言い終わってから)
+ */
+export const EFFECT_AT_LINE_START: ReadonlySet<EffectKind> = new Set(['name', 'emphasis'])
+
+/** 種類ごとの出す長さ(秒)。人物紹介は読む時間を長めに */
+export function effectDuration(kind: EffectKind): number {
+  return kind === 'name' ? 3.5 : EFFECT_DURATION_SEC
 }
 
 export const AUTO_PLACE_CONFIDENCE = 0.8
@@ -46,12 +67,14 @@ function clock(sec: number): string {
 }
 
 /** 頼み文の中の例。AI がそのまま写した答えは捨てる(小さいモデルで起きる) */
-const EXAMPLES: Record<Exclude<EffectKind, 'corner'>, string> = {
+const EXAMPLES = {
   tsukkomi: 'いや早すぎ!',
   kokoro: '(帰りたい…)',
   situation: 'ここまで歩いて40分',
-  place: '浄土ヶ浜'
-}
+  place: '浄土ヶ浜',
+  sfx: 'ドーン!',
+  note: '※撮影時の価格です'
+} as const
 
 /** 比べるための形(全角・半角、空白・記号の違いをならす) */
 function textKey(text: string): string {
@@ -77,10 +100,14 @@ ${note ? `方針: ${note}\n` : ''}
 - situation: 状況説明(例「${EXAMPLES.situation}」)
 - place: 地名・情報(発言に出てきた地名や店名。例「${EXAMPLES.place}」)
 - corner: コーナー名(企画の区切り)
+- emphasis: 強調(発言の中の印象的な言葉を大きく出す。**発言の中の言葉をそのまま**抜き出す)
+- sfx: 擬音(場面の空気を表す音の文字。例「${EXAMPLES.sfx}」「シーン…」)
+- note: 注釈(誤解されそうな所の補足。「※」で始める。例「${EXAMPLES.note}」)
 決まり:
 - 1つの文は${MAX_TEXT_CHARS}字以内。発言を書き換えたり、言っていない事実を作ったりしない
 - 例の文をそのまま使わない。同じ文を何度も使わない
-- 地名・状況説明は、発言の中に根拠があるものだけ
+- 地名・状況説明・注釈は、発言の中に根拠があるものだけ
+- 強調は発言の中の言葉だけ(言い換えない)
 - 多すぎると邪魔なので、本当に効くものだけ(目安: 1分に1つまで)
 - confidence: 0〜1(番組でそのまま使えると思う確からしさ)
 
@@ -91,7 +118,7 @@ ${list}
 {"effects":[{"after":"発言のID","kind":"tsukkomi","text":"","confidence":0.0,"reason":"理由(日本語1文)"}]}`
 }
 
-const KINDS = Object.keys(EFFECT_LABEL) as EffectKind[]
+const KINDS = AI_EFFECT_KINDS
 
 export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[]): EffectProposal[] {
   const ids = new Set(lines.map((l) => l.id))
@@ -121,14 +148,19 @@ export function parseEffectAnswer(answer: unknown, lines: readonly EffectLine[])
     // 例の写し・同じ文の繰り返しは捨てる(使える提案ではない)。
     // ただし例と同じ言葉が、その発言の中に本当にある(地名など)なら残す
     const key = textKey(text)
-    const copied = EXAMPLE_KEYS.has(key) && !textKey(lineText.get(after) ?? '').includes(key)
+    const lineKey = textKey(lineText.get(after) ?? '')
+    const copied = EXAMPLE_KEYS.has(key) && !lineKey.includes(key)
     if (!key || copied || seen.has(key)) continue
+    // 強調は発言の中の言葉そのままに限る(言っていない言葉を大きく出さない)
+    if (kind === 'emphasis' && !lineKey.includes(key)) continue
     seen.add(key)
+    // 注釈は「※」で始める(番組の注釈の書き方)
+    const shown = kind === 'note' && !/^[※*]/.test(text) ? `※${text}` : text
     out.push({
       id: `fx-${after}-${out.length}`,
       afterLineId: after,
       kind,
-      text,
+      text: shown,
       confidence: Math.max(0, Math.min(1, confidence)),
       reason: typeof o.reason === 'string' ? o.reason.trim().slice(0, 200) : ''
     })
@@ -189,6 +221,64 @@ export function effectStyle(kind: EffectKind): TextStyle {
         bold: true,
         animation: 'slideInDown'
       }
+    case 'emphasis':
+      // 発言の言葉を画面の真ん中に大きく
+      return {
+        ...base,
+        position: 'center',
+        fontSize: 76,
+        color: '#ffffff',
+        outline: true,
+        outlineColor: '#d0021b',
+        outlineWidth: 7,
+        bold: true,
+        animation: 'popIn',
+        extraStrokes: [{ color: '#ffffff', width: 5 }]
+      }
+    case 'sfx':
+      // 右上寄りに、少し傾けて弾ませる
+      return {
+        ...base,
+        position: 'center',
+        customPosition: { x: 0.74, y: 0.3 },
+        fontSize: 84,
+        color: '#ffd400',
+        outline: true,
+        outlineColor: '#111111',
+        outlineWidth: 7,
+        bold: true,
+        rotation: -8,
+        animation: 'bounce'
+      }
+    case 'note':
+      // 右下に小さく(発言テロップの邪魔をしない)
+      return {
+        ...base,
+        position: 'bottom',
+        customPosition: { x: 0.8, y: 0.93 },
+        fontSize: 26,
+        color: '#ffffff',
+        outline: true,
+        outlineColor: '#000000',
+        outlineWidth: 3,
+        bold: false,
+        animation: 'fadeIn'
+      }
+    case 'name':
+      // 左下の名前スーパー。白い帯に濃い文字(どんな画の上でも読める)。発言テロップ(下中央)と重ならない高さ
+      return {
+        ...base,
+        position: 'bottom',
+        customPosition: { x: 0.2, y: 0.7 },
+        fontSize: 44,
+        color: '#1a1a1a',
+        outline: false,
+        bold: true,
+        background: true,
+        backgroundColor: '#ffffff',
+        backgroundOpacity: 0.92,
+        animation: 'slideInUp'
+      }
   }
 }
 
@@ -208,7 +298,7 @@ export function effectSchema(lines: readonly EffectLine[]): Record<string, unkno
           type: 'object',
           properties: {
             after: { enum: lines.map((l) => l.id) },
-            kind: { enum: Object.keys(EFFECT_LABEL) },
+            kind: { enum: AI_EFFECT_KINDS },
             reason: { type: 'string', maxLength: 120 },
             text: { type: 'string', maxLength: MAX_TEXT_CHARS + 4 },
             confidence: { type: 'number' }
@@ -219,4 +309,30 @@ export function effectSchema(lines: readonly EffectLine[]): Record<string, unkno
     },
     required: ['effects']
   }
+}
+
+/** 既定の名前(マイク1・カメラA・話者2 など)。人物紹介には出さない */
+const DEFAULT_NAME = /^(マイク|カメラ|話者|PIN|MIC|CAM)\s*[0-9０-９A-ZＡ-Ｚa-z]*$/i
+
+/**
+ * 人物紹介(名前スーパー)の提案。各出演者の最初の発言に、名前を出す(AI を使わない)。
+ * 名前を付けていない話者(既定の名前)には出さない。
+ */
+export function nameProposals(lines: readonly EffectLine[]): EffectProposal[] {
+  const seen = new Set<string>()
+  const out: EffectProposal[] = []
+  for (const l of [...lines].sort((a, b) => a.start - b.start)) {
+    const name = l.speaker?.trim()
+    if (!name || name === '?' || DEFAULT_NAME.test(name) || seen.has(name)) continue
+    seen.add(name)
+    out.push({
+      id: `name-${name}`,
+      afterLineId: l.id,
+      kind: 'name',
+      text: name,
+      confidence: 1,
+      reason: '最初の登場'
+    })
+  }
+  return out
 }
