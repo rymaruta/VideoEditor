@@ -293,14 +293,15 @@ export function ThumbnailPanel(): React.JSX.Element {
                 onChange={(e) => setStyle((s) => ({ ...s, fontSize: Number(e.target.value) }))}
               />
             </label>
-            <label>
+            {/* label で包むと、色の吹き出しの中を押すたびに見本のボタンが押され直して閉じる */}
+            <div className="overlay-item-field">
               色
               <ColorField
                 label="サムネイルの文字の色"
                 value={style.color}
                 onChange={(hex) => setStyle((s) => ({ ...s, color: hex }))}
               />
-            </label>
+            </div>
             <label>
               位置
               <select

@@ -63,7 +63,11 @@ import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
 import { fitWindowStateToDisplays, type WindowState } from './windowState'
-import { detectVideoEncoder, exportSequenceSegmented } from './segmentRenderer'
+import {
+  cleanupStaleSegmentDirs,
+  detectVideoEncoder,
+  exportSequenceSegmented
+} from './segmentRenderer'
 import { installAppMenu, updateAppMenu } from './appMenu'
 import {
   forgetLibraryFolder,
@@ -113,6 +117,29 @@ let autosavePath = ''
 /** このセッションで自動保存を1回でも書いたか(前回のぶんを退避するのは最初の1回だけ) */
 let autosaveOverwrittenThisSession = false
 let windowStatePath = ''
+
+/**
+ * 「中止して終了」で閉じたとき、main 側で動いている処理を止める。
+ * 画面が消えても文字起こし・同期・ffmpeg は動き続ける(macOS ではアプリも残る)。
+ */
+function abortBackgroundWork(): void {
+  for (const cancel of [
+    cancelAsr,
+    cancelSync,
+    cancelAudioEvents,
+    cancelDenoise,
+    cancelLlm,
+    cancelMeasureExport,
+    cancelExport
+  ]) {
+    try {
+      cancel()
+    } catch {
+      // すでに終わっている
+    }
+  }
+  killLiveProcesses()
+}
 
 function loadWindowState(): WindowState | null {
   try {
@@ -223,6 +250,23 @@ function createWindow(): void {
       hasUnsavedChanges = false
       mainWindow.close()
     } else quitWhileBusy = false
+  })
+
+  mainWindow.on('closed', () => {
+    // 閉じた画面の「処理中」が残ると、スリープ防止が外れず、次の窓(macOS)で閉じるたびに確かめられる
+    const aborted = quitWhileBusy
+    quitWhileBusy = false
+    setBusy(null, null)
+    if (!aborted) return
+    abortBackgroundWork()
+    // macOS は窓を閉じてもアプリが残る。中止すると決めたのだから終わらせる(止めた処理の後始末も兼ねる)
+    if (process.platform === 'darwin') app.quit()
+  })
+
+  // 画面が落ちると「処理中」を解く人がいなくなる。残すとスリープ防止と閉じる前の確認が続く
+  mainWindow.webContents.on('render-process-gone', () => {
+    quitWhileBusy = false
+    setBusy(mainWindow.isDestroyed() ? null : mainWindow, null)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -451,6 +495,8 @@ function hasLinuxOpener(): boolean {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.videoeditor.app')
   startLibraryWatchers()
+  // 前回、書き出しの途中で閉じた・落ちたときの一時フォルダ(数 GB になる)を片付ける
+  setTimeout(cleanupStaleSegmentDirs, 5000)
   installAppMenu(is.dev)
   ipcMain.handle(IPC.menuUpdate, (_e, next: Parameters<typeof updateAppMenu>[0]) =>
     updateAppMenu(next ?? {}, is.dev)

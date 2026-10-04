@@ -149,6 +149,25 @@ function overlayPreviewStyle(style: TextStyle, scale: number): CSSProperties {
       )
     }
   }
+  // 外側の縁(強調テロップの白縁など)。書き出しは縁の外へ順に太い縁を重ねるので、
+  // 画面でも縁の太さを足した位置へ同じ色の影を重ねる(後ろに積むほど下に描かれる)
+  let reach = style.outline ? normalizeLength(style.outlineWidth) : 0
+  for (const ring of style.extraStrokes ?? []) {
+    const width = normalizeLength(ring.width)
+    if (!(width > 0)) continue
+    reach += width
+    const r = reach * scale
+    shadows.push(
+      `-${r}px -${r}px 0 ${ring.color}`,
+      `${r}px -${r}px 0 ${ring.color}`,
+      `-${r}px ${r}px 0 ${ring.color}`,
+      `${r}px ${r}px 0 ${ring.color}`,
+      `0 -${r}px 0 ${ring.color}`,
+      `0 ${r}px 0 ${ring.color}`,
+      `-${r}px 0 0 ${ring.color}`,
+      `${r}px 0 0 ${ring.color}`
+    )
+  }
   if (style.shadow) {
     // 影も同じ。**落とし幅も濃さも共通の置き場から取る**——ここに直に書いていたので、
     // 濃さが書き出しと食い違っていた(実測: 画面 0.7 / 書き出し 0.6235。白地に置くと

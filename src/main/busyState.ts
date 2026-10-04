@@ -35,16 +35,29 @@ export function setBusy(win: BrowserWindow | null, state: BusyState | null): voi
   else win.setProgressBar(Math.max(0, Math.min(1, state.percent / 100)))
 }
 
+/**
+ * 出した通知を持っておく。持たないと GC で消え、クリックしても窓が前に出ない
+ * (Electron の Notification は JS 側の参照が切れると click が届かなくなる)。
+ */
+const liveNotifications = new Set<Notification>()
+
 /** 終わったことを知らせる。アプリを見ていないときだけ(見ていれば画面で分かる) */
 export function notifyDone(win: BrowserWindow | null, title: string, body: string): void {
   if (!win || win.isDestroyed() || win.isFocused()) return
   if (Notification.isSupported()) {
     const n = new Notification({ title, body })
+    liveNotifications.add(n)
+    const release = (): void => {
+      liveNotifications.delete(n)
+    }
     n.on('click', () => {
+      release()
       if (win.isDestroyed()) return
       if (win.isMinimized()) win.restore()
       win.focus()
     })
+    n.on('close', release)
+    n.on('failed', release)
     n.show()
   }
   // タスクバーのボタンも点滅させる(通知を切っていても気付けるように)

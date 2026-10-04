@@ -49,7 +49,6 @@ export function TelopStyleFields({
   // 外側の縁・グラデーションは共通テロップレンダラ(長尺向けの書き出し)でだけ描ける
   const drawsTelopsOnCanvas = useSettingsStore((s) => s.exportEngine === 'segmented')
   const outer = style.extraStrokes?.[0]
-  const usesCanvasOnly = Boolean(outer) || Boolean(style.gradientColor)
   return (
     <>
       <PropRow label="文字">
@@ -207,9 +206,9 @@ export function TelopStyleFields({
           </>
         )}
       </PropRow>
-      {!drawsTelopsOnCanvas && usesCanvasOnly && (
+      {!drawsTelopsOnCanvas && Boolean(style.gradientColor) && (
         <p className="hint-text prop-note">
-          外側の縁・グラデーションは、書き出し方式が「長尺向け」のときに表示・書き出しされます。
+          グラデーションは、書き出し方式が「長尺向け」のときに表示・書き出しされます。
         </p>
       )}
 

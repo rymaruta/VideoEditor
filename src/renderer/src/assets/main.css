@@ -2793,6 +2793,13 @@ h3 {
   font-size: 11px;
 }
 
+/* label にできない項目(色の欄など。label の中だと吹き出しを押すたびに閉じる) */
+.overlay-item-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .overlay-item-row input[type='number'] {
   width: 56px;
   margin-left: 4px;
@@ -6109,11 +6116,10 @@ h3 {
   outline-offset: 1px;
 }
 
+/* body に出し、位置は ColorField が見本の位置から決める(スクロールする枠で切れないように) */
 .color-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 40;
+  position: fixed;
+  z-index: 1000;
   width: 244px;
   display: flex;
   flex-direction: column;

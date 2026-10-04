@@ -269,6 +269,25 @@ function buildKaraokeText(
   return { text: parts.join(''), lines }
 }
 
+/**
+ * 外側の縁(`extraStrokes`)を、外側から順に返す。`reach` は文字の輪郭から外へ伸びる量の累計で、
+ * 縁(`outline`)が付いていればその太さから数え始める。画面の telopStrokeRings と同じ数え方。
+ */
+function extraStrokeRings(style: TextOverlay['style']): { color: string; reach: number }[] {
+  const rings: { color: string; reach: number }[] = []
+  let reach =
+    style.outline && Number.isFinite(style.outlineWidth) && style.outlineWidth > 0
+      ? style.outlineWidth
+      : 0
+  for (const s of style.extraStrokes ?? []) {
+    const w = Number.isFinite(s.width) && s.width > 0 ? s.width : 0
+    if (w <= 0) continue
+    reach += w
+    rings.push({ color: s.color, reach })
+  }
+  return rings.reverse()
+}
+
 export function buildAssContent(
   overlays: TextOverlay[],
   width: number,
@@ -375,7 +394,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     }
 
     const common = `${positionTag}${rotationTag}\\fn${style.fontFamily}\\fs${style.fontSize}\\b${bold}\\i${italic}${spacingTag}`
-    const override = `{${common}\\1c${primaryColor}${secondaryTag}${outlineTags}${shadowTags}${animationTag}}`
+    // 外側の縁(`extraStrokes`)。1つの Dialogue 行に縁は1本しか引けないので、縁1本ごとに
+    // 同じ文字・位置・動きの行を下の層に重ね、`\bord` を「内側の縁から数えた累計」にする
+    // (画面の telopStrokeRings と同じ数え方)。無視していたので、強調テロップの白い外縁が
+    // 標準の書き出しだけで消えていた。影は画面と同じく一番外の縁から落とす。
+    const extraRings = extraStrokeRings(style)
+    const override = `{${common}\\1c${primaryColor}${secondaryTag}${outlineTags}${extraRings.length > 0 ? '\\shad0' : shadowTags}${animationTag}}`
     // 1行に入る文字数は「文字入れできる幅 ÷ 文字サイズ」。`\\pos` を使うテロップは
     // 余白の指定が効かないので、枠の幅そのものから同じ比で引く。
     const fontSize = Number.isFinite(style.fontSize) && style.fontSize > 0 ? style.fontSize : 1
@@ -403,8 +427,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
     const end = toAssTime(o.endTime)
     const marginV = marginVOf(style.position)
     const boxPadding = textBoxPaddingPx(style.fontSize)
+    // 外側の縁の行(外側から順に下の層)。本文と同じ文字列なので、カラオケ・タイプライターでも一緒に出る
+    const strokeBase = style.background ? 1 : 0
+    const strokeLines = extraRings.map((ring, i) => {
+      const ringShadow = i === 0 ? shadowTags : '\\shad0'
+      const ringOverride =
+        `{${common}\\1c${primaryColor}${secondaryTag}` +
+        `\\3c${toAssColor(ring.color)}\\bord${round2(ring.reach)}${ringShadow}${animationTag}}`
+      return `Dialogue: ${strokeBase + i},${start},${end},Default,,0,0,${marginV},,${ringOverride}${text}`
+    })
+    const textLayer = strokeBase + extraRings.length
+    const textLine = `Dialogue: ${textLayer},${start},${end},Default,,0,0,${marginV},,${override}${text}`
     if (!style.background) {
-      return `Dialogue: 0,${start},${end},Default,,0,0,${marginV},,${override}${text}`
+      return [...strokeLines, textLine].join('\n')
     }
 
     // A box and an outline cannot come from the same ASS line: BorderStyle is a style
@@ -421,7 +456,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
       `\\xbord${round2(boxPadding.x)}\\ybord${round2(boxPadding.y)}\\shad0${animationTag}}`
     return [
       `Dialogue: 0,${start},${end},Boxed,,0,0,${marginV},,${boxOverride}${boxLines.map(escapeAssText).join('\\N')}`,
-      `Dialogue: 1,${start},${end},Default,,0,0,${marginV},,${override}${text}`
+      ...strokeLines,
+      textLine
     ].join('\n')
   })
 

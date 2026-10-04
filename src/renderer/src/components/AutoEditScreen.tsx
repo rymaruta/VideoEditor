@@ -15,7 +15,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { parseDictionary } from '@shared/telop/polish'
 import type { AiProvider } from '@shared/llm'
 import { speakerColor } from '@shared/speaker'
-import { formatRemaining, remainingMs } from '../lib/eta'
+import { createEtaTracker, formatRemaining } from '../lib/eta'
 import { AUTO_PLACE_CONFIDENCE, EFFECT_LABEL } from '@shared/telop/effects'
 
 /**
@@ -41,13 +41,17 @@ function stepMark(state: StepStatus['state']): string {
   return state === 'done' ? '✓' : state === 'error' ? '!' : ''
 }
 
-function stepStateLabel(step: StepStatus): string {
+/** 工程ごとの残り時間の起点(段階が変わって進み具合が戻るたびに取り直す) */
+const etaTracker = createEtaTracker()
+
+function stepStateLabel(id: string, step: StepStatus): string {
+  if (step.state !== 'run') etaTracker.reset(id)
   switch (step.state) {
     case 'done':
       return step.elapsedMs !== undefined ? `完了 · ${formatElapsed(step.elapsedMs)}` : '完了'
     case 'run': {
       // 長い工程(文字起こしなど)は、残り時間の目安も出す
-      const rest = remainingMs(step.startedAt, step.percent, Date.now())
+      const rest = etaTracker.estimate(id, step, Date.now())
       return `実行中 ${Math.round(step.percent)}%${rest !== null ? ` · ${formatRemaining(rest)}` : ''}`
     }
     case 'error':
@@ -172,7 +176,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
     const overlay = item.overlayId
       ? store.project.textOverlays.find((o) => o.id === item.overlayId)
       : undefined
-    const at = item.at ?? overlay?.startTime
+    // テロップがあれば、その今の位置へ(項目の時刻は作ったときのもので、編集で動いていることがある)
+    const at = overlay?.startTime ?? item.at
     setOpen(false)
     if (at !== undefined) store.seekTo(at)
     if (overlay) store.selectOverlay(overlay.id)
@@ -247,7 +252,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                       </span>
                     )}
                   </span>
-                  <span className="auto-edit-step-state">{stepStateLabel(st)}</span>
+                  <span className="auto-edit-step-state">{stepStateLabel(s.id, st)}</span>
                 </li>
               )
             })}

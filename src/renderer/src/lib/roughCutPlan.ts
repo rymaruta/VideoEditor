@@ -395,11 +395,17 @@ export function effectOverlays(
   let lastName: Omit<TextOverlay, 'id'> | null = null
   for (const { p, t } of placed) {
     // 人物紹介は置き場所が別(左下)なので、ほかの演出テロップとの間隔は気にしない
-    const start = p.kind === 'name' ? t : Math.max(t, lastEnd + 0.2)
+    // 名前どうしは同じ場所に出るので、前の名前を最低 0.5 秒は見せてから次を出す。
+    // 0.5 秒未満で続くと、前の名前を下げても 0.5 秒は残るので2つが重なっていた
+    const start =
+      p.kind === 'name'
+        ? lastName
+          ? Math.max(t, lastName.startTime + 0.5)
+          : t
+        : Math.max(t, lastEnd + 0.2)
     const duration = effectDuration(p.kind)
     // 次の人の名前が出るときは、前の人の名前を下げる(同じ場所に重ねない)
-    if (p.kind === 'name' && lastName && lastName.endTime > start)
-      lastName.endTime = Math.max(lastName.startTime + 0.5, start)
+    if (p.kind === 'name' && lastName && lastName.endTime > start) lastName.endTime = start
     // 「演出・ツッコミ」のように名前の付いたテロップスタイルがあれば、そちらを使う
     const named = styles.find((s) => s.name === `演出・${EFFECT_LABEL[p.kind]}`)
     out.push({
