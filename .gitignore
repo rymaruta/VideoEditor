@@ -6,3 +6,5 @@ out
 *.log*
 .env
 *.tsbuildinfo
+# 調査用の一時テスト(コミットしない)
+tests/zz*.test.ts
