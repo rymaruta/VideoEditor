@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { atempoChain, audioSpeedChain, parseLoudnormMeasurement } from '@main/ffmpegService'
+import {
+  atempoChain,
+  audioSpeedChain,
+  escapeFilterPath,
+  parseLoudnormMeasurement
+} from '@main/ffmpegService'
 import { NASTY_NUMBERS, seeded } from '../helpers/boundary'
 
 /** `atempo=a,atempo=b,...` を掛け合わせて実効の速度を出す */
@@ -143,5 +148,15 @@ describe('audioSpeedChain — 時計のずれの補正は atempo を使わない
     expect(chain).toBe('aresample=960000,asetrate=960060,aresample=48000')
     const m = /asetrate=(\d+)/.exec(audioSpeedChain(0.99997))!
     expect(Math.abs(Number(m[1]) / 960000 - 0.99997)).toBeLessThan(0.6e-6)
+  })
+})
+
+describe('escapeFilterPath — フィルターに渡すファイルの名前', () => {
+  it('Windows のパス・引用符・区切りの文字に、2段ぶんの印を付ける(引用符では囲まない)', () => {
+    expect(escapeFilterPath('C:\\Users\\a\\m.rnnn')).toBe('C\\\\:/Users/a/m.rnnn')
+    expect(escapeFilterPath("/home/O'Brien/x,y;[z].ass")).toBe(
+      String.raw`/home/O\\\'Brien/x\,y\;\[z\].ass`
+    )
+    expect(escapeFilterPath('/tmp/日本語 dir/%.ass')).toBe('/tmp/日本語 dir/%.ass')
   })
 })

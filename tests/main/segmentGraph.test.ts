@@ -241,7 +241,7 @@ describe('buildSegmentVideoGraph — 区間の映像', () => {
     })
     const ctx = ctxOf(s, { assPath: '/tmp/x.ass' })
     expect(buildSegmentVideoGraph(ctx, seg(90, 200)).filter).toContain(
-      "setpts=PTS+3/TB,subtitles=filename='/tmp/x.ass',setpts=PTS-STARTPTS"
+      "setpts=PTS+3/TB,subtitles=filename=/tmp/x.ass,setpts=PTS-STARTPTS"
     )
     expect(buildSegmentVideoGraph(ctx, seg(0, 90)).filter).not.toContain('subtitles')
     expect(buildSegmentVideoGraph(ctx, seg(130, 200)).filter).not.toContain('subtitles')

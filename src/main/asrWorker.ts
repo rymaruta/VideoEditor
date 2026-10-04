@@ -120,6 +120,8 @@ async function run(): Promise<void> {
     const group = groups[gi]
     const audio = await next!
     next = gi + 1 < groups.length ? read(groups[gi + 1]) : null
+    // 先読みが今の認識中に失敗しても「処理されない失敗」にしない(次の周の await で失敗として扱う)
+    next?.catch(() => {})
     const r = await asr(audio, OPTIONS)
     const words = (r.chunks ?? [])
       .map((c) => ({

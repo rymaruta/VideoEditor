@@ -60,8 +60,10 @@ Dialogue: 0,0:00:00.00,0:00:05.00,P,,0,0,0,,{\\pos(2,2)\\an7\\bord0\\shad0}${tex
 `
 }
 
+/** フィルターに渡すファイルの名前(理由は ffmpegService の escapeFilterPath。同じ書き方) */
 function escapeFilterPath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")
+  const inner = p.replace(/\\/g, '/').replace(/[\\':]/g, '\\$&')
+  return inner.replace(/[\\'[\],;]/g, '\\$&')
 }
 
 /** その文字列を libass に描かせて、インクの左端・右端を返す(何も描かれなければ null) */
@@ -80,7 +82,7 @@ async function inkExtent(
         '-i',
         `color=c=black:s=${PROBE_W}x${PROBE_H}:d=0.1`,
         '-vf',
-        `subtitles=filename='${escapeFilterPath(assPath)}'`,
+        `subtitles=filename=${escapeFilterPath(assPath)}`,
         '-frames:v',
         '1',
         '-f',

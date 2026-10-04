@@ -34,6 +34,7 @@ import {
 } from '@shared/mediaExtensions'
 import { ensurePreviewProxy } from './previewProxyService'
 import { MediaJobQueue } from './mediaJobQueue'
+import { killLiveProcesses } from './liveProcesses'
 import { scanLongFormWindows } from './longFormService'
 import {
   probeMedia,
@@ -830,7 +831,11 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('will-quit', () => stopLibraryWatchers())
+app.on('will-quit', () => {
+  stopLibraryWatchers()
+  // 動いている ffmpeg(ノイズ除去・試聴用素材・自動確認)を止める。macOS・Linux では親が終わっても残る
+  killLiveProcesses()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

@@ -107,6 +107,13 @@ childMain<WorkerInput>(async (input, send) => {
       ],
       { windowsHide: true }
     )
+    // 標準エラーは読み続ける(読まないと、壊れた素材でエラーが溜まって ffmpeg が書けずに止まり、
+    // こちらの読み出しも終わらない)。末尾だけ持っておき、失敗の理由にする
+    let errTail = ''
+    child.stderr.on('data', (c: Buffer) => {
+      errTail = (errTail + c.toString()).slice(-2000)
+    })
+    const exited = new Promise<number | null>((resolve) => child.on('close', resolve))
     let buf: Buffer = Buffer.alloc(0)
     let offset = 0 // この素材の何サンプル目から始まる窓か
     const classify = async (bytes: Buffer, samples: number): Promise<void> => {
@@ -138,6 +145,12 @@ childMain<WorkerInput>(async (input, send) => {
         })
       }
     }
+    // 音が読めなかった(音声の無い素材・壊れた素材)のに「笑い 0 回」とは言わない
+    const code = await exited
+    if (code !== 0)
+      throw new Error(
+        `${f.path} の音を読めませんでした(終了コード ${code})${errTail ? `: ${errTail.trim().split('\n').pop()}` : ''}`
+      )
     // 最後の半端(3 秒以上あれば調べる)
     const rest = Math.floor(buf.length / 4)
     if (rest >= 3 * SAMPLE_RATE) await classify(buf, rest)

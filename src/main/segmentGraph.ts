@@ -332,7 +332,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
   if (!ctx.telopLayer && hasTelop && ctx.assPath) {
     const out = newLabel('t')
     parts.push(
-      `[${cur}]setpts=PTS+${num(sec(segStart))}/TB,subtitles=filename='${escapeFilterPath(ctx.assPath)}',` +
+      `[${cur}]setpts=PTS+${num(sec(segStart))}/TB,subtitles=filename=${escapeFilterPath(ctx.assPath)},` +
         `setpts=PTS-STARTPTS[${out}]`
     )
     cur = out

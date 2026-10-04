@@ -453,8 +453,15 @@ export function crfForQuality(quality: QualityPreset): number {
   }
 }
 
+/**
+ * フィルターに渡すファイルの名前(引用符で囲まずに、そのまま `m=` や `filename=` の後ろに置く)。
+ * フィルターの値は2段で読まれる(フィルター全体の区切り → フィルターの中の値の区切り)ので、
+ * それぞれの段で意味のある文字に印を付ける。引用符で囲む書き方は、名前に `'` があると壊れていた
+ * (例: C:\\Users\\O'Brien\\… のノイズ除去が必ず失敗する。実測で `'`・空白・和文・`,;[]%`・`C:` を確認)
+ */
 export function escapeFilterPath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")
+  const inner = p.replace(/\\/g, '/').replace(/[\\':]/g, '\\$&')
+  return inner.replace(/[\\'[\],;]/g, '\\$&')
 }
 
 export function xfadeName(type: TransitionType): string {
@@ -1072,7 +1079,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           buildAssContent(remappedOverlays, textCanvas.w, textCanvas.h, wideEmByFont),
           'utf-8'
         )
-        filterParts.push(`[${curV}]subtitles=filename='${escapeFilterPath(assPath)}'[vout]`)
+        filterParts.push(`[${curV}]subtitles=filename=${escapeFilterPath(assPath)}[vout]`)
         videoLabel = '[vout]'
       }
       // 出力の直前で画素形式を固定する。ここが最後の砦なので、映像の枝を足しても消しても

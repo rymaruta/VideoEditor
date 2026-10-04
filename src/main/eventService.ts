@@ -40,11 +40,12 @@ export function detectAudioEvents(
       },
       (code, stderr) => {
         running = null
+        // 中止は自分で止めたときだけ。標準エラーが空でも、落ちたのなら失敗として知らせる
         reject(
           new Error(
-            canceled || code === 0 || !stderr
+            canceled
               ? 'EVENTS_CANCELED'
-              : `笑い・歓声の検出が止まりました: ${stderr}`
+              : `笑い・歓声の検出が止まりました(終了コード ${code})${stderr ? `: ${stderr}` : ''}`
           )
         )
       }

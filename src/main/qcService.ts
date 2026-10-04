@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { ffmpegPath, probeMedia } from './ffmpegService'
+import { trackProcess } from './liveProcesses'
 import { QcLogParser, qcFilter, type QcMeasurement } from '@shared/qc/media'
 
 /**
@@ -33,6 +34,8 @@ export async function measureExport(
     { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }
   )
   running = child
+  const untrack = trackProcess(child)
+  child.on('close', untrack)
   const parser = new QcLogParser()
   // ffmpeg の進み具合は改行ではなく \r で上書きされるので、両方で区切る(行を貯めない)
   let rest = ''

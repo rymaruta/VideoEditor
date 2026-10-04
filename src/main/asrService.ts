@@ -12,6 +12,7 @@ import type { AsrJob, AsrJobResult, AsrWorkerMessage } from '@shared/transcript'
  */
 
 let running: UtilityProcess | null = null
+let canceled = false
 
 export function runAsr(
   jobs: AsrJob[],
@@ -20,6 +21,7 @@ export function runAsr(
   if (running) return Promise.reject(new Error('音声認識はすでに実行中です'))
   const cacheDir = join(app.getPath('userData'), 'models')
   mkdirSync(cacheDir, { recursive: true })
+  canceled = false
   return new Promise((resolve, reject) => {
     const results: AsrJobResult[] = []
     running = runChild(
@@ -41,8 +43,14 @@ export function runAsr(
       },
       (code, stderr) => {
         running = null
+        // 中止は自分で止めたときだけ(DirectML などが標準エラーに警告を出していても中止と分かるように。
+        // 逆に、標準エラーが空のまま落ちたのを「中止」と見せない)
         reject(
-          new Error(code === 0 || !stderr ? 'ASR_CANCELED' : `音声認識が止まりました: ${stderr}`)
+          new Error(
+            canceled
+              ? 'ASR_CANCELED'
+              : `音声認識が止まりました(終了コード ${code})${stderr ? `: ${stderr}` : ''}`
+          )
         )
       }
     )
@@ -50,5 +58,6 @@ export function runAsr(
 }
 
 export function cancelAsr(): void {
+  canceled = true
   running?.kill()
 }
