@@ -5,6 +5,9 @@ import type {
   TelopPointer,
   TelopSpanStyle,
   TelopStroke,
+  TelopCharAnimation,
+  TelopExitAnimation,
+  TelopLoopAnimation,
   TextAnimation,
   TextPosition,
   TextStyle
@@ -332,8 +335,78 @@ export function normalizeTextStyle(raw: unknown): TextStyle {
     firstLine: normalizeSpan(raw.firstLine),
     accent: normalizeSpan(raw.accent),
     sub: normalizeSpan(raw.sub),
-    pointer: normalizePointer(raw.pointer)
+    pointer: normalizePointer(raw.pointer),
+    vertical: raw.vertical === true ? true : undefined,
+    arc: optionalNumber(raw.arc, -270, 270),
+    charAnimation:
+      asOneOf(raw.charAnimation, CHAR_ANIMATIONS, 'none') === 'none'
+        ? undefined
+        : (raw.charAnimation as TelopCharAnimation),
+    exitAnimation:
+      asOneOf(raw.exitAnimation, EXIT_ANIMATIONS, 'none') === 'none'
+        ? undefined
+        : (raw.exitAnimation as TelopExitAnimation),
+    loopAnimation:
+      asOneOf(raw.loopAnimation, LOOP_ANIMATIONS, 'none') === 'none'
+        ? undefined
+        : (raw.loopAnimation as TelopLoopAnimation),
+    animationSpeed: optionalNumber(raw.animationSpeed, 0.25, 4)
   }
+}
+
+export const CHAR_ANIMATIONS: readonly TelopCharAnimation[] = [
+  'none',
+  'fade',
+  'pop',
+  'drop',
+  'rise',
+  'zoom',
+  'spin'
+]
+export const EXIT_ANIMATIONS: readonly TelopExitAnimation[] = [
+  'none',
+  'fadeOut',
+  'popOut',
+  'zoomOut',
+  'slideOutDown',
+  'slideOutUp'
+]
+export const LOOP_ANIMATIONS: readonly TelopLoopAnimation[] = [
+  'none',
+  'shake',
+  'pulse',
+  'blink',
+  'float',
+  'swing',
+  'wave'
+]
+
+/** 画面に出す名前 */
+export const CHAR_ANIMATION_LABEL: Record<TelopCharAnimation, string> = {
+  none: 'なし',
+  fade: 'ふわっと',
+  pop: 'ポン',
+  drop: '上から落ちる',
+  rise: '下から上がる',
+  zoom: 'ズーム',
+  spin: '回って出る'
+}
+export const EXIT_ANIMATION_LABEL: Record<TelopExitAnimation, string> = {
+  none: 'なし',
+  fadeOut: 'フェードアウト',
+  popOut: '縮んで消える',
+  zoomOut: '広がって消える',
+  slideOutDown: '下へ抜ける',
+  slideOutUp: '上へ抜ける'
+}
+export const LOOP_ANIMATION_LABEL: Record<TelopLoopAnimation, string> = {
+  none: 'なし',
+  shake: '震える',
+  pulse: '脈打つ',
+  blink: '点滅',
+  float: 'ふわふわ',
+  swing: '揺れる',
+  wave: '文字が波打つ'
 }
 
 function optionalNumber(value: unknown, min: number, max: number): number | undefined {

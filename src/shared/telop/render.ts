@@ -144,6 +144,9 @@ export interface Glyph {
   word: number
   span?: 0 | 1 | 2
   first?: boolean
+  /** ルビ(ふりがな)。ルビが掛かる文字の先頭にだけ付け、`rubyLen` 文字ぶんに掛ける */
+  ruby?: string
+  rubyLen?: number
 }
 
 /**
@@ -211,7 +214,7 @@ export function telopAnimationAt(
   elapsedSec: number,
   canvasHeight: number
 ): TelopAnimationState {
-  const ms = Math.max(0, finite(elapsedSec, 0) * 1000)
+  const ms = Math.max(0, finite(elapsedSec, 0) * 1000) * telopSpeed(style)
   const fadeMs = TEXT_FADE_IN_MS[style.animation] ?? 0
   const opacity = fadeMs > 0 ? Math.min(1, ms / fadeMs) : 1
   const total = TEXT_ANIMATION_MS[style.animation] ?? 0
@@ -244,6 +247,137 @@ export function telopAnimationAt(
   return { opacity, scale, offsetY, visibleChars }
 }
 
+/** 動きの速さの倍率(1 が標準) */
+export function telopSpeed(style: Pick<TextStyle, 'animationSpeed'>): number {
+  const v = style.animationSpeed
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 1
+}
+
+/** 消える動きの長さ(ms、標準の速さで) */
+export const EXIT_ANIMATION_MS = 350
+/** 1文字ずつの登場: 1文字の動きの長さと、次の文字が動き出すまでの間(ms、標準の速さで) */
+export const CHAR_ANIMATION_MS = 320
+export const CHAR_STAGGER_MS = 45
+
+/** ブロック全体の動き(消える動き・ループ)。登場の動き(`telopAnimationAt`)に重ねる */
+export interface TelopMotion {
+  opacity: number
+  scale: number
+  dx: number
+  dy: number
+  /** 回転(度) */
+  rotate: number
+}
+
+const IDENTITY_MOTION: TelopMotion = { opacity: 1, scale: 1, dx: 0, dy: 0, rotate: 0 }
+
+/**
+ * 消える動きとループの、ある時刻の状態。`elapsedSec` は出てから、`remainingSec` は消えるまでの秒。
+ * 動きの大きさは文字の大きさに比例させる(大きいテロップほど大きく揺れる)
+ */
+export function telopMotionAt(
+  style: TextStyle,
+  elapsedSec: number,
+  remainingSec: number,
+  canvasHeight: number
+): TelopMotion {
+  const speed = telopSpeed(style)
+  const m = { ...IDENTITY_MOTION }
+  const em = positive(style.fontSize, 40)
+  const exitMs = EXIT_ANIMATION_MS / speed
+  const left = Math.max(0, finite(remainingSec, Infinity) * 1000)
+  if (style.exitAnimation && style.exitAnimation !== 'none' && left < exitMs) {
+    const p = 1 - left / exitMs // 0 → 1 で消える
+    switch (style.exitAnimation) {
+      case 'fadeOut':
+        m.opacity = 1 - p
+        break
+      case 'popOut':
+        m.opacity = 1 - p
+        m.scale = lerp(1, 0.6, p)
+        break
+      case 'zoomOut':
+        m.opacity = 1 - p
+        m.scale = lerp(1, 1.6, p)
+        break
+      case 'slideOutDown':
+      case 'slideOutUp': {
+        const off = textSlideOffsetPx(canvasHeight)
+        m.opacity = 1 - p
+        m.dy = (style.exitAnimation === 'slideOutDown' ? 1 : -1) * off * p
+        break
+      }
+    }
+  }
+  const t = Math.max(0, finite(elapsedSec, 0)) * speed
+  switch (style.loopAnimation) {
+    case 'shake':
+      // 細かく震える(周期の違う正弦を重ねて、規則的に見えないように)
+      m.dx += (Math.sin(t * 61) + Math.sin(t * 37) * 0.6) * em * 0.025
+      m.dy += (Math.sin(t * 53) + Math.sin(t * 29) * 0.6) * em * 0.025
+      break
+    case 'pulse':
+      m.scale *= 1 + Math.sin(t * Math.PI * 2 * 1.25) * 0.05
+      break
+    case 'blink':
+      m.opacity *= Math.sin(t * Math.PI * 2 * 1.25) >= 0 ? 1 : 0.25
+      break
+    case 'float':
+      m.dy += Math.sin(t * Math.PI * 2 * 0.5) * em * 0.12
+      break
+    case 'swing':
+      m.rotate += Math.sin(t * Math.PI * 2 * 0.6) * 4
+      break
+  }
+  return m
+}
+
+/** 1文字ごとの動き(1文字ずつの登場・波打つループ・弧に沿った曲げ)。何もしないなら null */
+interface GlyphMotion {
+  alpha: number
+  scale: number
+  dx: number
+  dy: number
+  /** 回転(ラジアン) */
+  rot: number
+}
+
+/** 1文字ずつの登場の、i 文字目の状態(出始めからの ms) */
+export function charEntranceAt(
+  kind: TextStyle['charAnimation'],
+  index: number,
+  elapsedMs: number,
+  speed: number,
+  size: number
+): GlyphMotion | null {
+  if (!kind || kind === 'none') return null
+  const local = (Math.max(0, elapsedMs) * speed - index * CHAR_STAGGER_MS) / CHAR_ANIMATION_MS
+  if (local >= 1) return null
+  const p = Math.max(0, local)
+  const ease = 1 - (1 - p) ** 3
+  const g: GlyphMotion = { alpha: p <= 0 ? 0 : Math.min(1, p * 2), scale: 1, dx: 0, dy: 0, rot: 0 }
+  switch (kind) {
+    case 'pop':
+      // 少し大きくなってから戻る
+      g.scale = p < 0.6 ? lerp(0.2, 1.25, p / 0.6) : lerp(1.25, 1, (p - 0.6) / 0.4)
+      break
+    case 'drop':
+      g.dy = -size * 0.8 * (1 - ease)
+      break
+    case 'rise':
+      g.dy = size * 0.8 * (1 - ease)
+      break
+    case 'zoom':
+      g.scale = lerp(2.4, 1, ease)
+      break
+    case 'spin':
+      g.rot = -Math.PI * (1 - ease)
+      g.scale = lerp(0.3, 1, ease)
+      break
+  }
+  return g
+}
+
 // ------------------------------------------------------------------ 部分の装飾
 
 /**
@@ -251,16 +385,24 @@ export function telopAnimationAt(
  * 書き出しの文字数の確認・一覧の表示など、印を見せたくない所で使う
  */
 export function stripTelopMarkup(text: string): string {
-  return (text ?? '').replace(/\*\*|__/g, '')
+  return (text ?? '').replace(/《[^《》\n]*》/g, '').replace(/\*\*|__|｜/g, '')
 }
 
-/** 本文を1文字ずつにし、印の中の文字に `span` を付ける。印そのものは描かない */
+/** ルビの親文字にする文字(「｜」が無いときは、《 の直前に続く漢字) */
+const RUBY_BASE = /[\p{sc=Han}々〆ヶ]/u
+
+/**
+ * 本文を1文字ずつにし、印の中の文字に `span` を付ける。印そのものは描かない。
+ * ルビは青空文庫と同じ書き方: `｜親文字《るび》`、または `漢字《かんじ》`(直前の漢字の並びに掛かる)
+ */
 export function parseTelopMarkup(text: string): Glyph[] {
   const out: Glyph[] = []
   const chars = [...(text ?? '')]
   const multiLine = chars.includes('\n')
   let span: 0 | 1 | 2 = 0
   let first = multiLine
+  // 「｜」で始めた親文字の先頭(out の位置)
+  let rubyStart = -1
   for (let i = 0; i < chars.length; i++) {
     const pair = chars[i] + (chars[i + 1] ?? '')
     if (pair === '**' && span !== 2) {
@@ -273,9 +415,32 @@ export function parseTelopMarkup(text: string): Glyph[] {
       i++
       continue
     }
+    if (chars[i] === '｜') {
+      rubyStart = out.length
+      continue
+    }
+    if (chars[i] === '《') {
+      const close = chars.indexOf('》', i + 1)
+      const nl = chars.indexOf('\n', i + 1)
+      if (close > i && (nl < 0 || close < nl)) {
+        const reading = chars.slice(i + 1, close).join('')
+        let from = rubyStart
+        if (from < 0) {
+          from = out.length
+          while (from > 0 && RUBY_BASE.test(out[from - 1].ch)) from--
+        }
+        if (from < out.length && reading) {
+          out[from] = { ...out[from], ruby: reading, rubyLen: out.length - from }
+          rubyStart = -1
+          i = close
+          continue
+        }
+      }
+    }
     if (chars[i] === '\n') {
       out.push({ ch: '\n', word: -1 })
       first = false
+      rubyStart = -1
       continue
     }
     out.push({ ch: chars[i], word: -1, ...(span ? { span } : {}), ...(first ? { first } : {}) })
@@ -299,22 +464,33 @@ function spanStyleOf(style: TextStyle, g: Glyph): TelopSpanStyle | null {
 
 // ------------------------------------------------------------------ 配置
 
-/** 置いた1文字(行の左端からの位置と、大きさ) */
+/**
+ * 置いた1文字。`x` は行(縦書きでは列)の頭からの位置、`cx`/`cy` はブロックの左上を原点にした文字の中心。
+ * 縦書きで向きを変える文字は `rot90`、句読点・小さい仮名は `nudge` だけずらす
+ */
 export interface PlacedGlyph extends Glyph {
   x: number
   size: number
   width: number
+  cx: number
+  cy: number
+  rot90?: boolean
+  nudge?: { x: number; y: number }
 }
 
 export interface TelopLayout {
   lines: {
     glyphs: PlacedGlyph[]
+    /** 行の長さ(縦書きでは列の長さ) */
     width: number
-    /** 行の上端(ブロックの上端から) */
+    /** 行の上端(ブロックの上端から)。縦書きでは列の左端(ブロックの左端から) */
     top: number
+    /** 行の高さ(縦書きでは列の幅) */
     height: number
     /** 行でいちばん大きい文字の大きさ */
     maxSize: number
+    /** 文字が占める矩形(ブロックの左上が原点。背景の帯・グラデーションに使う) */
+    rect: { x: number; y: number; w: number; h: number }
   }[]
   fontSize: number
   lineHeight: number
@@ -325,6 +501,7 @@ export interface TelopLayout {
   anchor: { x: number; y: number }
   /** アンカーに対するブロック上端の位置(アンカーからの縦の差) */
   topFromAnchor: number
+  vertical: boolean
 }
 
 /** 行の高さの倍率 */
@@ -333,12 +510,23 @@ function lineHeightOf(style: TextStyle): number {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : TELOP_LINE_HEIGHT_EM
 }
 
+/** 縦書きで 90 度回して置く文字(長音・波線・括弧・矢印・横向きの記号) */
+const VERTICAL_ROTATE = /[ー〜～…‥—―\-－=＝()（）「」『』【】［］[\]〈〉《》<>＜＞→←⇒:：;；~]/u
+/** 縦書きで右上へ寄せる句読点 */
+const VERTICAL_PUNCT = /[、。,，.．]/u
+/** 縦書きで少し右上へ寄せる小さい仮名 */
+const VERTICAL_SMALL = /[ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ]/u
+
+/** ルビの大きさ(親文字に対する比) */
+export const RUBY_SCALE = 0.45
+
 /**
  * どこに何行で置くか。位置・余白は従来の書き出しと同じ規則:
  * - 上/下寄せは枠の上下から `TEXT_MARGIN_V_RATIO`、左右は `TEXT_MARGIN_H_RATIO` の余白の中で折り返す
  * - 自由配置(`customPosition`)はブロックの中心をその点に置く
  * - 回転・拡大の軸は配置のアンカー(下寄せなら下端中央、上寄せなら上端中央、ほかは中心)
- * 文字の大きさが行の中で違うとき(強調・1行目)は、行の高さはその行のいちばん大きい文字で決める
+ * 文字の大きさが行の中で違うとき(強調・1行目)は、行の高さはその行のいちばん大きい文字で決める。
+ * 縦書きは右の列から左へ並べ、枠の高さ(上下の余白の内側)で折り返す。ルビの分だけ行(列)を広げる
  */
 export function layoutTelop(
   ctx: Pick<TelopContext, 'measureText' | 'font'>,
@@ -346,6 +534,7 @@ export function layoutTelop(
   canvas: { w: number; h: number }
 ): TelopLayout {
   const style = source.style
+  const vertical = style.vertical === true
   const fontSize = positive(style.fontSize, 1)
   const spacing = finite(style.letterSpacing, 0)
   setCanvasFont(ctx, telopFont(style, fontSize))
@@ -361,40 +550,82 @@ export function layoutTelop(
     return w
   }
   const scaleOf = (g: Glyph): number => spanStyleOf(style, g)?.scale ?? 1
-  const advance = (ch: string, g: Glyph): number => baseAdvance(ch) * scaleOf(g) + spacing
+  // 縦書きは1文字が全角の正方形を占める(半角の英数字も縦に積む)
+  const advance = vertical
+    ? (_ch: string, g: Glyph): number => fontSize * scaleOf(g) + spacing
+    : (ch: string, g: Glyph): number => baseAdvance(ch) * scaleOf(g) + spacing
   const karaoke = karaokeWords(source)
   const glyphs: Glyph[] = karaoke
     ? karaoke.flatMap((w, i) => [...w.text].map((ch) => ({ ch, word: i })))
     : parseTelopMarkup(source.text ?? '')
-  const maxWidth = Math.max(1, canvas.w - textMarginHPx(canvas.w) * 2)
-  const wrapped = wrapGlyphs(glyphs, maxWidth, advance)
+  const marginV = textMarginVPx(canvas.h)
+  const maxLength = vertical
+    ? Math.max(1, canvas.h - marginV * 2)
+    : Math.max(1, canvas.w - textMarginHPx(canvas.w) * 2)
+  const wrapped = wrapGlyphs(glyphs, maxLength, advance)
   const factor = lineHeightOf(style)
   let top = 0
   const lines = wrapped.map((g) => {
     let x = 0
     const placed: PlacedGlyph[] = g.map((glyph) => {
       const scale = scaleOf(glyph)
+      const size = fontSize * scale
       const width = baseAdvance(glyph.ch) * scale
-      const out = { ...glyph, x, size: fontSize * scale, width }
-      x += width + spacing
+      const out: PlacedGlyph = { ...glyph, x, size, width, cx: 0, cy: 0 }
+      x += (vertical ? size : width) + spacing
       return out
     })
     const maxSize = placed.reduce((m, p) => Math.max(m, p.size), placed.length > 0 ? 0 : fontSize)
-    const height = maxSize * factor
+    const rubySpace = placed.some((p) => p.ruby) ? maxSize * (RUBY_SCALE + 0.1) : 0
+    const height = maxSize * factor + rubySpace
     const line = {
       glyphs: placed,
       width: x - (placed.length > 0 ? spacing : 0),
       top,
       height,
-      maxSize
+      maxSize,
+      rubySpace,
+      rect: { x: 0, y: 0, w: 0, h: 0 }
     }
     top += height
     return line
   })
   const lineHeight = fontSize * factor
-  const blockWidth = lines.reduce((m, l) => Math.max(m, l.width), 0)
-  const blockHeight = top
-  const marginV = textMarginVPx(canvas.h)
+  const longest = lines.reduce((m, l) => Math.max(m, l.width), 0)
+  const blockWidth = vertical ? top : longest
+  const blockHeight = vertical ? longest : top
+  const align = style.align ?? (vertical ? 'left' : 'center')
+  for (const l of lines) {
+    // 行(列)の頭の位置。縦書きの「左」は上揃え、「右」は下揃え
+    const start =
+      align === 'left' ? 0 : align === 'right' ? longest - l.width : (longest - l.width) / 2
+    const textBand = l.height - l.rubySpace
+    if (!vertical) {
+      for (const g of l.glyphs) {
+        g.cx = start + g.x + g.width / 2
+        // 小さい文字は、大きい文字と下をそろえる(行の中心ではなく、ベースラインの近くへ下げる)
+        g.cy = l.top + l.rubySpace + textBand / 2 + (l.maxSize - g.size) * 0.38
+      }
+      l.rect = {
+        x: start,
+        y: l.top + l.rubySpace + (textBand - l.maxSize) / 2,
+        w: l.width,
+        h: l.maxSize
+      }
+    } else {
+      // 右の列から左へ。ルビは列の右側
+      const left = blockWidth - l.top - l.height
+      const centerX = left + textBand / 2
+      for (const g of l.glyphs) {
+        g.cx = centerX
+        g.cy = start + g.x + g.size / 2
+        if (VERTICAL_ROTATE.test(g.ch)) g.rot90 = true
+        else if (VERTICAL_PUNCT.test(g.ch)) g.nudge = { x: g.size * 0.35, y: -g.size * 0.35 }
+        else if (VERTICAL_SMALL.test(g.ch)) g.nudge = { x: g.size * 0.1, y: -g.size * 0.1 }
+      }
+      l.rect = { x: centerX - l.maxSize / 2, y: start, w: l.maxSize, h: l.width }
+    }
+  }
 
   let anchor: { x: number; y: number }
   let topFromAnchor: number
@@ -414,7 +645,16 @@ export function layoutTelop(
     anchor = { x: canvas.w / 2, y: canvas.h / 2 }
     topFromAnchor = -blockHeight / 2
   }
-  return { lines, fontSize, lineHeight, blockWidth, blockHeight, anchor, topFromAnchor }
+  return {
+    lines: lines.map(({ rubySpace: _r, ...l }) => l),
+    fontSize,
+    lineHeight,
+    blockWidth,
+    blockHeight,
+    anchor,
+    topFromAnchor,
+    vertical
+  }
 }
 
 // ------------------------------------------------------------------ 描画
@@ -543,25 +783,32 @@ function isPlainBackground(style: TextStyle): boolean {
 function backgroundRects(
   style: TextStyle,
   layout: TelopLayout,
-  lineX: (width: number) => number,
-  blockTop: number
+  origin: { x: number; y: number }
 ): { x: number; y: number; w: number; h: number }[] {
   const pad = telopBackgroundPadding(style, layout.fontSize)
   if ((style.backgroundShape ?? 'lines') === 'lines') {
     return layout.lines
       .filter((l) => l.glyphs.length > 0)
-      .map((l) => ({
-        x: lineX(l.width) - pad.x,
-        y: blockTop + l.top - pad.y,
-        w: l.width + pad.x * 2,
-        h: l.height + pad.y * 2
-      }))
+      .map((l) =>
+        layout.vertical
+          ? {
+              x: origin.x + layout.blockWidth - l.top - l.height - pad.x,
+              y: origin.y + l.rect.y - pad.y,
+              w: l.height + pad.x * 2,
+              h: l.width + pad.y * 2
+            }
+          : {
+              x: origin.x + l.rect.x - pad.x,
+              y: origin.y + l.top - pad.y,
+              w: l.width + pad.x * 2,
+              h: l.height + pad.y * 2
+            }
+      )
   }
-  const left = Math.min(...layout.lines.map((l) => lineX(l.width)))
   return [
     {
-      x: left - pad.x,
-      y: blockTop - pad.y,
+      x: origin.x - pad.x,
+      y: origin.y - pad.y,
       w: layout.blockWidth + pad.x * 2,
       h: layout.blockHeight + pad.y * 2
     }
@@ -605,6 +852,20 @@ function shadowOffset(style: TextStyle): { dx: number; dy: number } {
   return { dx: Math.cos(rad) * dist, dy: Math.sin(rad) * dist }
 }
 
+/** 描く1文字(ブロックの位置へ置いたもの)。`x`/`y` は文字の中心(アンカー基準) */
+interface Cell {
+  g: { ch: string; word: number; size: number; width: number; span?: 0 | 1 | 2; first?: boolean }
+  line: number
+  x: number
+  y: number
+  dx: number
+  dy: number
+  rot: number
+  scale: number
+  alpha: number
+  ruby: boolean
+}
+
 /**
  * テロップを1枚描く。`ctx` は描く先の枠(`frame` px)に合わせてあること。
  * `timeSeconds` はシーケンス(またはタイムライン)上の時刻で、出ていない時刻なら何も描かない。
@@ -618,22 +879,27 @@ export function drawTelop(
 ): void {
   if (!(timeSeconds >= source.startTime && timeSeconds < source.endTime)) return
   const style = source.style
-  const anim = telopAnimationAt(style, timeSeconds - source.startTime, canvas.h)
-  if (anim.opacity <= 0) return
+  const elapsed = timeSeconds - source.startTime
+  const anim = telopAnimationAt(style, elapsed, canvas.h)
+  const motion = telopMotionAt(style, elapsed, source.endTime - timeSeconds, canvas.h)
+  const opacity = anim.opacity * motion.opacity
+  if (opacity <= 0) return
   const layout = layoutTelop(ctx, source, canvas)
   const unit = frame.width / canvas.w
   const fs = layout.fontSize
   const rings = telopStrokeRings(style)
   const karaoke = karaokeWords(source)
-  const baseAlpha = anim.opacity * Math.min(1, Math.max(0, finite(style.opacity ?? 1, 1)))
+  const scale = anim.scale * motion.scale
+  const baseAlpha = opacity * Math.min(1, Math.max(0, finite(style.opacity ?? 1, 1)))
   // ぼかしは描く先の画素で効く(拡大縮小の影響を受けない)ので、枠と動きの倍率を掛ける
-  const blurPx = (v: number): number => Math.max(0, v * unit * anim.scale)
+  const blurPx = (v: number): number => Math.max(0, v * unit * scale)
 
   ctx.save()
   ctx.scale(unit, unit)
-  ctx.translate(layout.anchor.x, layout.anchor.y + anim.offsetY)
-  if (style.rotation) ctx.rotate((finite(style.rotation, 0) * Math.PI) / 180)
-  if (anim.scale !== 1) ctx.scale(anim.scale, anim.scale)
+  ctx.translate(layout.anchor.x + motion.dx, layout.anchor.y + anim.offsetY + motion.dy)
+  const rotation = finite(style.rotation, 0) + motion.rotate
+  if (rotation) ctx.rotate((rotation * Math.PI) / 180)
+  if (scale !== 1) ctx.scale(scale, scale)
   ctx.globalAlpha = baseAlpha
   setCanvasFont(ctx, telopFont(style, fs))
   ctx.textBaseline = 'middle'
@@ -641,55 +907,123 @@ export function drawTelop(
   ctx.lineJoin = 'round'
   ctx.miterLimit = 2
 
-  // 何文字目まで見せるか(タイプライター)
-  let budget = anim.visibleChars
-  const lines = layout.lines.map((l) => {
-    const take = Math.max(0, Math.min(l.glyphs.length, budget))
-    budget -= l.glyphs.length
-    return { ...l, shown: l.glyphs.slice(0, take) }
+  const origin = { x: -layout.blockWidth / 2, y: layout.topFromAnchor }
+  const speed = telopSpeed(style)
+  const elapsedMs = elapsed * 1000
+  const arcRad = !layout.vertical && style.arc ? (finite(style.arc, 0) * Math.PI) / 180 : 0
+  const wave = style.loopAnimation === 'wave'
+
+  // 見えている文字を置く(タイプライター・1文字ずつの登場・弧・波・縦書きの向き)
+  const cells: Cell[] = []
+  let index = 0
+  layout.lines.forEach((l, li) => {
+    const lineCenter = l.rect.x + l.rect.w / 2
+    const radius = arcRad ? Math.max(1, l.rect.w) / arcRad : 0
+    for (const g of l.glyphs) {
+      const i = index++
+      if (i >= anim.visibleChars) continue
+      const m = charEntranceAt(style.charAnimation, i, elapsedMs, speed, g.size)
+      if (m && m.alpha <= 0) continue
+      let dx = m?.dx ?? 0
+      let dy = m?.dy ?? 0
+      let rot = m?.rot ?? 0
+      if (radius) {
+        const u = g.cx - lineCenter
+        const theta = u / radius
+        dx += radius * Math.sin(theta) - u
+        dy += radius * (1 - Math.cos(theta))
+        rot += theta
+      }
+      if (wave) dy += Math.sin(elapsed * speed * Math.PI * 2 * 0.8 - i * 0.55) * g.size * 0.12
+      if (g.rot90) rot += Math.PI / 2
+      if (g.nudge) {
+        dx += g.nudge.x
+        dy += g.nudge.y
+      }
+      cells.push({
+        g,
+        line: li,
+        x: origin.x + g.cx,
+        y: origin.y + g.cy,
+        dx,
+        dy,
+        rot,
+        scale: m?.scale ?? 1,
+        alpha: m?.alpha ?? 1,
+        ruby: false
+      })
+    }
   })
 
-  const blockTop = layout.topFromAnchor
-  const align = style.align ?? 'center'
-  const lineX = (width: number): number =>
-    align === 'left'
-      ? -layout.blockWidth / 2
-      : align === 'right'
-        ? layout.blockWidth / 2 - width
-        : -width / 2
-  const lineCenterY = (i: number): number => blockTop + lines[i].top + lines[i].height / 2
-  // 小さい文字は、大きい文字と下をそろえる(行の中心ではなく、ベースラインの近くへ下げる)
-  const glyphY = (i: number, g: PlacedGlyph): number =>
-    lineCenterY(i) + (lines[i].maxSize - g.size) * 0.38
-  const lineRect = (i: number): { x: number; y: number; w: number; h: number } => ({
-    x: lineX(lines[i].width),
-    y: blockTop + lines[i].top + (lines[i].height - lines[i].maxSize) / 2,
-    w: Math.max(1, lines[i].width),
-    h: Math.max(1, lines[i].maxSize)
+  // ルビ(親文字の上、縦書きでは右に、小さく並べる)
+  const rubyCells: Cell[] = []
+  cells.forEach((c, k) => {
+    const g = c.g as PlacedGlyph
+    if (!g.ruby || !g.rubyLen) return
+    const base = cells.slice(k, k + g.rubyLen).filter((b) => b.line === c.line)
+    if (base.length < g.rubyLen) return // 親文字がまだ全部出ていない(タイプライター)
+    const last = base[base.length - 1]
+    const rs = g.size * RUBY_SCALE
+    const chars = [...g.ruby]
+    const alpha = Math.min(...base.map((b) => b.alpha))
+    const along = layout.vertical
+      ? { from: (c.y + c.dy + last.y + last.dy) / 2, x: c.x + c.dx + g.size / 2 + rs * 0.6 }
+      : { from: (c.x + c.dx + last.x + last.dx) / 2, y: c.y + c.dy - g.size / 2 - rs * 0.6 }
+    const total = chars.length * rs
+    chars.forEach((ch, j) => {
+      const pos = along.from - total / 2 + rs * (j + 0.5)
+      rubyCells.push({
+        g: { ch, word: -1, size: rs, width: ctx.measureText(ch).width * (rs / fs) },
+        line: c.line,
+        x: layout.vertical ? along.x! : pos,
+        y: layout.vertical ? pos : along.y!,
+        dx: 0,
+        dy: 0,
+        rot: 0,
+        scale: 1,
+        alpha,
+        ruby: true
+      })
+    })
   })
-  const blockRect = {
-    x: Math.min(...lines.map((l) => lineX(l.width))),
-    y: blockTop,
-    w: Math.max(1, layout.blockWidth),
-    h: Math.max(1, layout.blockHeight)
-  }
+  const all = [...cells, ...rubyCells]
 
-  /** 大きさの違う文字ごとに書体を入れ替えながら、見えている文字を順に描く */
+  /** 大きさの違う文字ごとに書体を入れ替える */
   let currentSize = fs
   const switchSize = (size: number): void => {
     if (size === currentSize) return
     currentSize = size
     setCanvasFont(ctx, telopFont(style, size))
   }
-  const eachGlyph = (fn: (g: PlacedGlyph, x: number, y: number, line: number) => void): void => {
-    lines.forEach((l, i) => {
-      const left = lineX(l.width)
-      for (const g of l.shown) {
-        switchSize(g.size)
-        fn(g, left + g.x, glyphY(i, g), i)
-      }
-    })
+  /** 1文字を、その文字の動き(移動・回転・拡大・透明)を付けて描く。`fn` は文字の左端・中心の高さで描く */
+  const put = (c: Cell, fn: (x: number, y: number) => void): void => {
+    switchSize(c.g.size)
+    if (!c.dx && !c.dy && !c.rot && c.scale === 1 && c.alpha === 1) {
+      fn(c.x - c.g.width / 2, c.y)
+      return
+    }
+    ctx.save()
+    ctx.translate(c.x + c.dx, c.y + c.dy)
+    if (c.rot) ctx.rotate(c.rot)
+    if (c.scale !== 1) ctx.scale(c.scale, c.scale)
+    if (c.alpha !== 1) ctx.globalAlpha = ctx.globalAlpha * c.alpha
+    fn(-c.g.width / 2, 0)
+    ctx.restore()
+  }
+  const eachCell = (fn: (c: Cell, x: number, y: number) => void): void => {
+    for (const c of all) put(c, (x, y) => fn(c, x, y))
     switchSize(fs)
+  }
+
+  const lineRect = (i: number): { x: number; y: number; w: number; h: number } => {
+    const r = layout.lines[i].rect
+    return { x: origin.x + r.x, y: origin.y + r.y, w: Math.max(1, r.w), h: Math.max(1, r.h) }
+  }
+  const blockRect = {
+    x: origin.x,
+    y: origin.y,
+    w: Math.max(1, layout.blockWidth),
+    h: Math.max(1, layout.blockHeight)
   }
   const sh = shadowOffset(style)
   const shadowAlpha = Math.min(
@@ -701,7 +1035,7 @@ export function drawTelop(
 
   // 1. 背景
   if (style.background) {
-    const rects = backgroundRects(style, layout, lineX, blockTop)
+    const rects = backgroundRects(style, layout, origin)
     const bgOpacity = Math.min(1, Math.max(0, finite(style.backgroundOpacity, 0.5)))
     if (isPlainBackground(style) && !style.shadow) {
       ctx.fillStyle = withAlpha(style.backgroundColor, bgOpacity)
@@ -741,6 +1075,8 @@ export function drawTelop(
   }
 
   const outer = rings[0]?.reach ?? 0
+  /** ルビの縁は細く(親文字と同じ太さだと、小さい字がつぶれる) */
+  const ringWidth = (c: Cell, reach: number): number => reach * 2 * (c.ruby ? 0.5 : 1)
 
   // 2. 光彩(縁ごとぼかした色で囲む)
   if (style.glow && positive(style.glow.size, 0) > 0) {
@@ -750,10 +1086,10 @@ export function drawTelop(
     ctx.globalAlpha = baseAlpha * Math.min(1, Math.max(0, finite(g.opacity, 0.8)))
     ctx.strokeStyle = g.color
     ctx.fillStyle = g.color
-    ctx.lineWidth = (outer + g.size / 2) * 2
-    eachGlyph((gl, x, y) => {
-      ctx.strokeText(gl.ch, x, y)
-      ctx.fillText(gl.ch, x, y)
+    eachCell((c, x, y) => {
+      ctx.lineWidth = ringWidth(c, outer + g.size / 2)
+      ctx.strokeText(c.g.ch, x, y)
+      ctx.fillText(c.g.ch, x, y)
     })
     ctx.restore()
     setCanvasFont(ctx, telopFont(style, currentSize))
@@ -767,10 +1103,10 @@ export function drawTelop(
     }
     ctx.fillStyle = shadowFill
     ctx.strokeStyle = shadowFill
-    ctx.lineWidth = outer * 2
-    eachGlyph((g, x, y) => {
-      if (outer > 0) ctx.strokeText(g.ch, x + sh.dx, y + sh.dy)
-      ctx.fillText(g.ch, x + sh.dx, y + sh.dy)
+    eachCell((c, x, y) => {
+      ctx.lineWidth = ringWidth(c, outer)
+      if (outer > 0) ctx.strokeText(c.g.ch, x + sh.dx, y + sh.dy)
+      ctx.fillText(c.g.ch, x + sh.dx, y + sh.dy)
     })
     if (shadowBlur > 0) {
       ctx.restore()
@@ -788,8 +1124,10 @@ export function drawTelop(
           h: blockRect.h + ring.reach * 2
         })
       : ring.color
-    ctx.lineWidth = ring.reach * 2
-    eachGlyph((g, x, y) => ctx.strokeText(g.ch, x, y))
+    eachCell((c, x, y) => {
+      ctx.lineWidth = ringWidth(c, ring.reach)
+      ctx.strokeText(c.g.ch, x, y)
+    })
   }
 
   // 5. 塗り
@@ -804,17 +1142,19 @@ export function drawTelop(
           ]
         }
       : undefined)
-  const lineFills = lines.map((_, i) =>
+  const lineFills = layout.lines.map((_, i) =>
     fillGradient ? gradientFor(ctx, fillGradient, lineRect(i)) : style.color
   )
-  eachGlyph((g, x, y, i) => {
+  eachCell((c, x, y) => {
+    const g = c.g
     const sung = karaoke && g.word >= 0 && isKaraokeWordSung(karaoke[g.word], timeSeconds)
     if (sung) ctx.fillStyle = style.highlightColor
+    else if (c.ruby) ctx.fillStyle = style.color
     else {
       const span = spanStyleOf(style, g)
       ctx.fillStyle = span?.gradient
         ? gradientFor(ctx, span.gradient, { x, y: y - g.size / 2, w: g.width, h: g.size })
-        : (span?.color ?? lineFills[i])
+        : (span?.color ?? lineFills[c.line])
     }
     ctx.fillText(g.ch, x, y)
   })
@@ -901,5 +1241,19 @@ export function telopVisualKey(
   const karaoke = karaokeWords(source)
   const sung = karaoke ? karaoke.filter((w) => isKaraokeWordSung(w, timeSeconds)).length : 0
   const chars = a.visibleChars === Infinity ? -1 : a.visibleChars
-  return `${a.opacity.toFixed(3)}|${a.scale.toFixed(4)}|${a.offsetY.toFixed(2)}|${chars}|${sung}`
+  const style = source.style
+  const elapsed = timeSeconds - source.startTime
+  const m = telopMotionAt(style, elapsed, source.endTime - timeSeconds, canvasHeight)
+  // 1文字ずつの登場の途中・波打つループは、文字ごとの位置が刻々と変わるので時刻ごとに別の絵
+  const charsMoving =
+    style.loopAnimation === 'wave' ||
+    (style.charAnimation &&
+      style.charAnimation !== 'none' &&
+      elapsed * 1000 * telopSpeed(style) <
+        CHAR_ANIMATION_MS + CHAR_STAGGER_MS * [...stripTelopMarkup(source.text)].length)
+  const motion = `${m.opacity.toFixed(3)}|${m.scale.toFixed(4)}|${m.dx.toFixed(2)}|${m.dy.toFixed(2)}|${m.rotate.toFixed(3)}`
+  return (
+    `${a.opacity.toFixed(3)}|${a.scale.toFixed(4)}|${a.offsetY.toFixed(2)}|${chars}|${sung}|${motion}` +
+    (charsMoving ? `|t${timeSeconds.toFixed(4)}` : '')
+  )
 }

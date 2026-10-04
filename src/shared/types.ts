@@ -185,7 +185,26 @@ export interface TextStyle {
   sub?: TelopSpanStyle
   /** 矢印 */
   pointer?: TelopPointer
+
+  // --- 動き・組み方(CapCut の入り/出/ループ、Premiere の縦書き・パス上の文字に相当) ---
+  /** 縦書き(右の列から左へ。長音・括弧は縦向きに回す) */
+  vertical?: boolean
+  /** 文字を弧に沿って曲げる角度(度。正で山なり、負で谷なり。横書きだけ) */
+  arc?: number
+  /** 1文字ずつ順に出る登場 */
+  charAnimation?: TelopCharAnimation
+  /** 消えるときの動き */
+  exitAnimation?: TelopExitAnimation
+  /** 出ている間ずっと続く動き */
+  loopAnimation?: TelopLoopAnimation
+  /** 動きの速さ(1 が標準。2 で倍の速さ、0.5 で半分) */
+  animationSpeed?: number
 }
+
+export type TelopCharAnimation = 'none' | 'fade' | 'pop' | 'drop' | 'rise' | 'zoom' | 'spin'
+export type TelopExitAnimation =
+  'none' | 'fadeOut' | 'popOut' | 'zoomOut' | 'slideOutDown' | 'slideOutUp'
+export type TelopLoopAnimation = 'none' | 'shake' | 'pulse' | 'blink' | 'float' | 'swing' | 'wave'
 
 export interface TelopStroke {
   color: string
