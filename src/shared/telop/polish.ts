@@ -63,10 +63,16 @@ const KANJI = /[一-鿿々]/u
  * k 文字目の手前で区切る良さ(大きいほど良い)。区切れない所は -Infinity。
  * chars[k-1] が行末、chars[k] が次の行頭になる。
  */
+/** 前の文字とくっついて1文字になるもの */
+const JOINS_PREVIOUS =
+  /^(?:\u200d|[\ufe00-\ufe0f]|[\u{1f3fb}-\u{1f3ff}]|[\u{e0020}-\u{e007f}]|\p{M})/u
+
 export function breakScore(chars: readonly string[], k: number): number {
   if (k <= 0 || k >= chars.length) return -Infinity
   const prev = chars[k - 1]
   const next = chars[k]
+  // 絵文字の組み合わせ(ZWJ・肌の色・異体字セレクタ)・後ろに付けた濁点の途中では切らない
+  if (JOINS_PREVIOUS.test(next) || prev === '\u200d') return -Infinity
   if (NO_LINE_START.test(next) || NO_LINE_END.test(prev)) return -Infinity
   if (PUNCT.test(prev)) return 3
   if (PARTICLE.test(prev) && !PARTICLE.test(next) && KANA.test(prev)) return 2

@@ -5542,7 +5542,8 @@ h3 {
   vertical-align: -1px;
 }
 .sync-legend.audio,
-.sync-bar.audio {
+.sync-bar.audio,
+.sync-bar.reference {
   background: #9ea7e0;
 }
 .sync-legend.clock,

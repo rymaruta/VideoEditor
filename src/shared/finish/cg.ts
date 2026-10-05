@@ -1,4 +1,5 @@
 import type { KitFile } from './sound'
+import { stripTelopMarkup } from '../telop/render'
 
 /**
  * 版面CG の自動配置(計画書 §5.9)。番組素材フォルダの `CG/<きっかけの言葉>/` の素材を、
@@ -23,6 +24,11 @@ export interface PlacedCg {
   keyword: string
 }
 
+/** 当てる言葉を比べる形(全角/半角・大文字小文字を揃え、空白を落とす) */
+function keyText(s: string): string {
+  return s.normalize('NFKC').toLowerCase().replace(/\s/g, '')
+}
+
 export function planCg(
   telops: readonly { text: string; startTime: number }[],
   cg: Readonly<Record<string, KitFile[]>>
@@ -35,8 +41,9 @@ export function planCg(
   let busyUntil = -Infinity
   for (const t of [...telops].sort((a, b) => a.startTime - b.startTime)) {
     if (t.startTime < busyUntil) continue
-    const text = t.text.replace(/\s/g, '')
-    const keyword = keywords.find((k) => text.includes(k.replace(/\s/g, '')))
+    // 装飾の印・ルビは外し、全角/半角の違いは無視する(「うまい!」のフォルダで「うまい！」に当てる)
+    const text = keyText(stripTelopMarkup(t.text))
+    const keyword = keywords.find((k) => text.includes(keyText(k)))
     if (!keyword) continue
     const files = cg[keyword]
     const n = used.get(keyword) ?? 0

@@ -35,10 +35,10 @@ export interface ChunkOptions {
  */
 export const FIRST_TELOP_DELAY_SEC = 0.12
 
-/** 表示用に整える(句点を落とし、読点を空白に) */
+/** 表示用に整える(句点を落とし、読点を空白に。数字の桁区切り「2,800」のカンマは残す) */
 export function tidyTelopText(text: string): string {
   return text
-    .replace(/[、,]\s*/g, ' ')
+    .replace(/、\s*|,(?!\d)\s*|(?<!\d),\s*/g, ' ')
     .replace(/[。.]+$/u, '')
     .replace(/[。]\s*/g, ' ')
     .replace(/\s+/g, ' ')

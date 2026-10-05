@@ -59,8 +59,9 @@ export interface MulticamLayout {
 const EPS = 1e-6
 
 /**
- * 同じトラックの続くファイルが、同期の丸めでごくわずか(1フレーム未満)重なることがある。
- * 重なったクリップは置けないので、後ろのクリップの頭を前のクリップの終わりまで削る
+ * 同じトラックの続くファイルが、同期の丸めでわずかに重なることがある。
+ * 重なったクリップは置けない(同じ機材の声が二重に鳴る)ので、重なりの大きさによらず、
+ * 後ろのクリップの頭を前のクリップの終わりまで削る(残りがごく短ければ捨てる)
  */
 function trimOverlaps(pieces: LayoutPiece[]): LayoutPiece[] {
   const out: LayoutPiece[] = []
@@ -68,7 +69,7 @@ function trimOverlaps(pieces: LayoutPiece[]): LayoutPiece[] {
     const last = out[out.length - 1]
     const lastEnd = last ? last.startTime + (last.outPoint - last.inPoint) / last.speed : -Infinity
     const overlap = lastEnd - p.startTime
-    if (overlap > EPS && overlap < GAP_TOLERANCE) {
+    if (overlap > EPS) {
       const trimmed = {
         ...p,
         startTime: lastEnd,

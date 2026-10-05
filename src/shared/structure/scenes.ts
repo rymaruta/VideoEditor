@@ -70,23 +70,30 @@ export function buildScenes(
   const groups: TimedLine[][] = []
   /** 長さだけで分けた(話は続いている)まとまりの頭 */
   const splitByLength = new Set<TimedLine[]>()
+  // まとまりの終わりは足しながら持つ(1行ごとに全部をなめると、1万行で1秒かかっていた)
+  const ends = new Map<TimedLine[], number>()
   for (const l of sorted) {
     const g = groups[groups.length - 1]
     if (g) {
-      const gEnd = Math.max(...g.map((x) => x.end))
+      const gEnd = ends.get(g) ?? -Infinity
       const gap = l.start - gEnd
       const long = gEnd - g[0].start >= maxScene
       if (gap < joinGap && !(long && gap >= 1)) {
         g.push(l)
+        ends.set(g, Math.max(gEnd, l.end))
         continue
       }
       if (gap < joinGap) {
-        groups.push([l])
-        splitByLength.add(groups[groups.length - 1])
+        const fresh = [l]
+        groups.push(fresh)
+        ends.set(fresh, l.end)
+        splitByLength.add(fresh)
         continue
       }
     }
-    groups.push([l])
+    const fresh = [l]
+    groups.push(fresh)
+    ends.set(fresh, l.end)
   }
   // 長さで分けた残りが短いもの(話の締めの十数秒)は、前のまとまりに戻す。
   // 独りの場面にすると点数が付かずに落ちやすく、話の途中で次の場面へ飛ぶ

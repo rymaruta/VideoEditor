@@ -30,7 +30,8 @@ export interface SyncEdge {
   center?: number
 }
 
-export type PlacementMethod = 'audio' | 'clock' | 'none'
+/** `reference` は合わせる相手がいない基準の素材(カメラ1台・1本だけ。同期の必要がない) */
+export type PlacementMethod = 'audio' | 'clock' | 'reference' | 'none'
 
 export interface Placement {
   id: string
@@ -227,11 +228,11 @@ export function solvePlacements(
       issues.push({ kind: 'unsynced', fileId: id })
     }
   }
-  // 素材が1本だけのまとまり(=基準)しかないときは、同期の必要がないので要確認にしない
-  if (main.length === 1 && groups.length > 1) {
-    method.set(main[0], 'none')
-    issues.unshift({ kind: 'unsynced', fileId: main[0] })
-  }
+  // 基準のまとまりが素材1本だけのときは、その1本を基準として使う(合わせる相手がいないだけ)。
+  // 「合わせられなかった(none)」にすると並べる対象から外れ、カメラ1台の回や、ほかの素材と
+  // 合わせられなかった回が「同期できたカメラがありません」で先へ進めなかった。
+  // 合わせられなかったほかの素材は、上で要確認に出している
+  if (main.length === 1) method.set(main[0], 'reference')
 
   // 使わなかった音の組で、位置が食い違うもの
   for (const e of unused) {

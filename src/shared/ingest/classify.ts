@@ -38,9 +38,11 @@ export interface FootageSource {
 
 /** ファイル名の頭の「機材を表す部分」。数字の手前まで(区切り記号は落とす) */
 export function fileNamePrefix(fileName: string): string {
-  const base = fileName.replace(/\.[^.]+$/, '')
+  // macOS のファイル名は濁点を分けた形(NFD)のことがあり、全角数字の名前もある。
+  // 正規化しないと「ビデオ_0001」「ビデオ_0002」が別々のカメラになる
+  const base = fileName.normalize('NFKC').replace(/\.[^.]+$/, '')
   // 「カメラ_0001」「Ä-01」のような英字以外の名前もあるので、文字は Unicode の文字全般で見る
-  const m = /^([\p{L}_\-\s]*?)[-_\s]?\d/u.exec(base)
+  const m = /^([\p{L}\p{M}_\-\s]*?)[-_\s]?\d/u.exec(base)
   const prefix = (m ? m[1] : base).replace(/[-_\s]+$/, '')
   return prefix.toUpperCase()
 }

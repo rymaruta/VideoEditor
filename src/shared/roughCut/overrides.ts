@@ -143,9 +143,25 @@ export function hasOverrides(o: CutOverrides | undefined): boolean {
 
 /** カットした区間に、人が削った区間・足した区間を当てる(足した区間は詰めずにそのまま残す) */
 export function applyCutOverrides(pieces: readonly CutRange[], o: CutOverrides): CutRange[] {
-  const kept: CutRange[] = pieces.flatMap((p) =>
-    subtractRanges([p], [...o.removed]).map((r) => ({ ...r, sceneId: p.sceneId }))
-  )
+  // 削った区間は1回だけまとめて並べ、頭で引く(区間ごとに全部を並べ直すと、2,000 × 2,000 で1秒かかっていた)
+  const removed = unionRanges(o.removed)
+  const starts = removed.map((r) => r.start)
+  const firstEndingAfter = (t: number): number => {
+    let lo = 0
+    let hi = removed.length
+    while (lo < hi) {
+      const m = (lo + hi) >> 1
+      if (removed[m].end <= t) lo = m + 1
+      else hi = m
+    }
+    return lo
+  }
+  const kept: CutRange[] = pieces.flatMap((p) => {
+    const from = firstEndingAfter(p.start)
+    let to = from
+    while (to < starts.length && starts[to] < p.end) to++
+    return subtractRanges([p], removed.slice(from, to)).map((r) => ({ ...r, sceneId: p.sceneId }))
+  })
   const add = subtractRanges(o.added, kept)
   return [...kept, ...add.map((r) => ({ ...r }))].sort((a, b) => a.start - b.start)
 }
