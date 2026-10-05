@@ -1294,6 +1294,156 @@ describe('本編を直したときの追従 — 速さ・差し込み・直し�
   })
 })
 
+describe('本編の同じ所を2回使っても、声・自動の音が増えない', () => {
+  beforeEach(reset)
+  const info = {
+    anchorSourceId: 'A',
+    sources: [
+      { id: 'A', name: 'カメラA', kind: 'camera' as const },
+      { id: 'B', name: 'カメラB', kind: 'camera' as const },
+      { id: 'M', name: '出演者A', kind: 'mic' as const }
+    ],
+    files: [
+      { assetId: 'camA', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+      { assetId: 'camB', sourceId: 'B', start: 0, rate: 1, duration: 100 },
+      { assetId: 'micM', sourceId: 'M', start: 0, rate: 1, duration: 100 }
+    ]
+  }
+  const asset = (id: string, audio = true): Project['assets'][number] => ({
+    id,
+    filePath: `/rec/${id}.mp4`,
+    fileName: `${id}.mp4`,
+    duration: 100,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    hasAudio: audio,
+    hasVideo: id !== 'micM'
+  })
+  const setup = (ranges: [number, number][]): void => {
+    S.setState({
+      project: {
+        ...st().project,
+        multicam: info,
+        assets: [asset('camA'), asset('camB'), asset('micM')],
+        clips: [],
+        textOverlays: []
+      }
+    })
+    let t = 0
+    const clips = ranges.map(([a, b]) => {
+      const c = { assetId: 'micM', startTime: t, inPoint: a, outPoint: b, speed: 1 }
+      t += b - a
+      return c
+    })
+    st().applyRoughCut(
+      {
+        main: ranges.map(([a, b]) => ({ assetId: 'camA', inPoint: a, outPoint: b, speed: 1 })),
+        audio: [{ name: '出演者A', sourceId: 'M', volume: 1, clips }],
+        duration: t,
+        spans: []
+      },
+      []
+    )
+  }
+  const mic = (): [number, number, number][] =>
+    st()
+      .project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+      .clips.map((c): [number, number, number] => [c.startTime, c.inPoint, c.outPoint])
+      .sort((a, b) => a[0] - b[0])
+
+  it('複製したあと時刻の変わらない操作を繰り返しても、ピンマイクは2本のまま', () => {
+    setup([[0, 10]])
+    st().duplicateClips([st().project.clips[0].id])
+    expect(mic()).toEqual([
+      [0, 0, 10],
+      [10, 0, 10]
+    ])
+    for (let i = 0; i < 4; i++) st().updateClipsColorLabel([st().project.clips[0].id], 'blue')
+    expect(mic()).toEqual([
+      [0, 0, 10],
+      [10, 0, 10]
+    ])
+  })
+
+  it('同じ所を切り出して足したあと、ほかのクリップを分割しても声は重ならない', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    st().addTrimmedClipToTimeline('camA', 2, 4)
+    const before = mic()
+    st().splitClipAtTime(st().project.clips[1].id, 15)
+    expect(mic()).toEqual(before)
+  })
+
+  it('カメラを替えても、人が変えた速さはそのまま', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const id = st().project.clips[0].id
+    st().updateClipSpeed(id, 2)
+    st().switchClipAngle(id, 'B')
+    const c = st().project.clips[0]
+    expect([c.assetId, c.speed]).toEqual(['camB', 2])
+  })
+
+  it('カメラを替えても、人が足した空の音声トラックは消さない', () => {
+    setup([[0, 10]])
+    const id = st().project.clips[0].id
+    st().detachClipAudio(id)
+    st().addAudioTrack('ナレーション')
+    st().switchClipAngle(id, 'B')
+    expect(st().project.audioTracks.some((t) => t.name === 'ナレーション')).toBe(true)
+  })
+})
+
+describe('編集の値の検査', () => {
+  beforeEach(() => {
+    reset()
+    st().loadProject(baseProject(), '/x/p.json')
+  })
+
+  it('全テロップをずらすと、本編に紐づくテロップも同じだけ動く', () => {
+    st().shiftAllTextOverlays(3)
+    const o = st().project.textOverlays
+    expect(o.map((x) => [x.id, x.startTime])).toEqual([
+      ['o1', 4],
+      ['o2', 8]
+    ])
+  })
+
+  it('端のすぐそばでは分割せず、短いクリップでもロールは逆へ・素材の外へ動かない', () => {
+    const n = st().project.clips.length
+    st().splitClipAtTime('c2', 7.99)
+    expect(st().project.clips).toHaveLength(n)
+    const pairs = (): [number, number][] =>
+      st().project.clips.map((c): [number, number] => [c.inPoint, c.outPoint])
+    const before = pairs()
+    st().rollTrim('c1', 'c2', -10)
+    for (const [a, b] of pairs()) expect(b).toBeGreaterThan(a)
+    expect(pairs()[0][0]).toBe(before[0][0])
+  })
+
+  it('0・負・数値でない速さ・音量・時刻は書かず、履歴も積まない', () => {
+    const past = st().past.length
+    st().updateClipSpeed('c1', 0)
+    st().updateClipSpeed('c1', -2)
+    st().updateClipsSpeed(['c1'], Number.NaN)
+    st().rollTrim('c1', 'c2', Number.NaN)
+    st().setAudioTrackVolume('t1', Number.NaN)
+    st().updateAudioClipVolume('t1', 'a1', Number.NaN)
+    st().splitAudioClipAtTime('t1', 'a1', Number.NaN)
+    st().updateAudioClipStart('t1', 'a1', Number.POSITIVE_INFINITY)
+    st().addTrimmedClipToTimeline('A', 4.6, 3.1)
+    expect(st().past.length).toBe(past)
+    expect(brokenInvariant(st().project)).toBeNull()
+    st().setAudioTrackVolume('t1', -1)
+    expect(st().project.audioTracks.find((t) => t.id === 't1')!.volume).toBe(0)
+  })
+})
+
 describe('静止画の素材', () => {
   beforeEach(reset)
   it('静止画は本編に置けない(ワイプ・全面(CG)のトラック用)', () => {

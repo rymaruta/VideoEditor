@@ -56,6 +56,95 @@ export function timelineMapping(
   return out.sort((x, y) => x.from - y.from || x.at - y.at)
 }
 
+/** 本編のクリップ1本ぶんの区間(どのクリップのものか付き) */
+export interface ClipSpan extends TimelineSpan {
+  id: string
+}
+
+/** 区間の並び `list` から [a, b) を取り除く */
+function subtractRange(list: { start: number; end: number }[], a: number, b: number): void {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const r = list[i]
+    if (r.end <= a + EPS || r.start >= b - EPS) continue
+    const rest: { start: number; end: number }[] = []
+    if (a - r.start > EPS) rest.push({ start: r.start, end: a })
+    if (r.end - b > EPS) rest.push({ start: b, end: r.end })
+    list.splice(i, 1, ...rest)
+  }
+}
+
+/**
+ * `timelineMapping` の、同じ素材の時刻が本編に2回以上出てくるときにも1対1で結ぶ版。
+ *
+ * 同じ時刻を映す所どうしを全部結ぶと、同じ所を2回使った本編(複製・貼り付け・同じ所の切り出し)では
+ * 1か所の声が2か所へ写り、編集のたびに倍に増える(実測: 色ラベルを4回変えるとピンマイクが 2 → 32 本)。
+ *
+ * 1. 前後で同じクリップ(id が同じ)は、そのクリップどうしで結ぶ
+ * 2. 残り(分割・作り直しで id が変わった所)は、まだ結んでいない所どうしを、前から順に1回ずつ結ぶ
+ */
+export function clipTimelineMapping(
+  before: readonly ClipSpan[],
+  after: readonly ClipSpan[]
+): TimelineMapSeg[] {
+  const out: TimelineMapSeg[] = []
+  const afterIndexById = new Map<string, number>()
+  after.forEach((n, k) => afterIndexById.set(n.id, k))
+  // 変更後の区間ごとの、まだ結んでいない共通の時刻
+  const free = after.map((n) => [{ start: n.start, end: n.end }])
+  const link = (o: ClipSpan, n: ClipSpan, a: number, b: number): void => {
+    out.push({
+      from: o.timeline + (a - o.start),
+      to: o.timeline + (b - o.start),
+      at: n.timeline + (a - n.start)
+    })
+  }
+  const left: { o: ClipSpan; rest: { start: number; end: number }[] }[] = []
+  for (const o of before) {
+    const rest = [{ start: o.start, end: o.end }]
+    const k = afterIndexById.get(o.id)
+    if (k !== undefined) {
+      const n = after[k]
+      const a = Math.max(o.start, n.start)
+      const b = Math.min(o.end, n.end)
+      if (b - a > EPS) {
+        link(o, n, a, b)
+        subtractRange(free[k], a, b)
+        subtractRange(rest, a, b)
+      }
+    }
+    if (rest.length > 0) left.push({ o, rest })
+  }
+  if (left.length > 0) {
+    const index = spanIndex(
+      after,
+      (n) => n.start,
+      (n) => n.end
+    )
+    // 前から順に(変更前のタイムラインの順で)、変更後のタイムラインの早い所から結ぶ
+    left.sort((x, y) => x.o.timeline - y.o.timeline)
+    for (const { o, rest } of left) {
+      const ks = index
+        .overlapping(o.start, o.end)
+        .sort((x, y) => after[x].timeline - after[y].timeline)
+      for (const k of ks) {
+        const n = after[k]
+        for (const r of [...rest]) {
+          for (const f of [...free[k]]) {
+            const a = Math.max(r.start, f.start)
+            const b = Math.min(r.end, f.end)
+            if (b - a <= EPS) continue
+            link(o, n, a, b)
+            subtractRange(free[k], a, b)
+            subtractRange(rest, a, b)
+          }
+        }
+        if (rest.length === 0) break
+      }
+    }
+  }
+  return out.sort((x, y) => x.from - y.from || x.at - y.at)
+}
+
 /**
  * 区間の並びの、[lo, hi) と重なりうるものを速く引くための索引。
  * 頭(`startOf`)で並べ、いちばん長い区間の長さぶん手前から探す。返す番号は元の並びの順

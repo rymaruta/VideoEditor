@@ -1,18 +1,18 @@
 import { isImagePath, STILL_DURATION_SEC } from '@shared/mediaExtensions'
 import type { AudioEventWindow } from '@shared/events/audioEvents'
 import {
+  clipTimelineMapping,
   isIdentityMapping,
   mapTimelineRange,
   sourcePieces,
-  timelineMapping,
-  uncoveredSpans
+  uncoveredSpans,
+  type ClipSpan
 } from '@shared/roughCut/follow'
 import {
   angleAlternatives,
   coverageOfClips,
   hasOverrides,
   reinsertExtraClips,
-  spansOfClips,
   type CameraSeg,
   type CutOverrides,
   type Range
@@ -96,6 +96,11 @@ function assetDurationOf(project: Project, assetId: string): number | undefined 
  *   - PiP が素材の終わり(6秒)を過ぎても**最後の1枚のまま24秒まで出続ける**
  * となった。素材が見つからない(オフライン)ときは尺を知りようがないので0側だけ丸める。
  */
+/** クリップの速さとして受ける値(書き出し・プレビューが扱える範囲) */
+function validSpeed(speed: number): boolean {
+  return Number.isFinite(speed) && speed >= 0.05 && speed <= 100
+}
+
 function clampSourceRange<T extends { inPoint: number; outPoint: number }>(
   clip: T,
   inPoint: number,
@@ -1924,13 +1929,16 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
       if (!asset || asset.still) return state
-      const newClip: Clip = {
-        id: uuid(),
-        assetId,
-        inPoint: Math.max(0, inPoint),
-        outPoint: Math.min(asset.duration, outPoint),
-        speed: 1
+      // 頭と終わりが逆・数値でない区間は置かない(長さが負のクリップで後ろが全部重なる)
+      if (!Number.isFinite(inPoint) || !Number.isFinite(outPoint) || outPoint <= inPoint) {
+        return state
       }
+      const newClip: Clip = clampSourceRange(
+        { id: uuid(), assetId, inPoint, outPoint, speed: 1 },
+        inPoint,
+        outPoint,
+        asset.duration
+      )
       const clips = [...state.project.clips]
       const at = index === undefined ? clips.length : Math.max(0, Math.min(clips.length, index))
       clips.splice(at, 0, newClip)
@@ -1989,13 +1997,22 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
       // Clamp against all four limits at once and in timeline seconds, so a drag that
       // would overrun one side stops at that side's limit instead of being rejected.
-      const maxForward = Math.min(
-        (leftAsset.duration - left.outPoint) / leftSpeed,
-        (right.outPoint - right.inPoint - MIN_CLIP_SOURCE_DURATION) / rightSpeed
+      if (!Number.isFinite(deltaSeconds)) return state
+      // 最短より短いクリップ(端の近くで分割したもの)では余地が負になり、逆向き・素材の外へ動いていた。
+      // 余地は 0 で止める
+      const maxForward = Math.max(
+        0,
+        Math.min(
+          (leftAsset.duration - left.outPoint) / leftSpeed,
+          (right.outPoint - right.inPoint - MIN_CLIP_SOURCE_DURATION) / rightSpeed
+        )
       )
-      const maxBackward = Math.min(
-        (left.outPoint - left.inPoint - MIN_CLIP_SOURCE_DURATION) / leftSpeed,
-        right.inPoint / rightSpeed
+      const maxBackward = Math.max(
+        0,
+        Math.min(
+          (left.outPoint - left.inPoint - MIN_CLIP_SOURCE_DURATION) / leftSpeed,
+          right.inPoint / rightSpeed
+        )
       )
       const delta = Math.max(-maxBackward, Math.min(maxForward, deltaSeconds))
       if (Math.abs(delta) < 1e-6) return state
@@ -2014,15 +2031,19 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   updateClipSpeed: (clipId, speed) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        // 分離音声にも同じ速度がミラーされる(syncLinkedAudioClips)ので、分離済みでも
-        // 速度を変えられる。
-        clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, speed } : c))
+    set((state) => {
+      // 0・負・数値でない速さは書かない(長さが負・無限のクリップになる)
+      if (!validSpeed(speed)) return state
+      return {
+        ...pushHistory(state),
+        project: {
+          ...state.project,
+          // 分離音声にも同じ速度がミラーされる(syncLinkedAudioClips)ので、分離済みでも
+          // 速度を変えられる。
+          clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, speed } : c))
+        }
       }
-    })),
+    }),
 
   updateClipTransition: (clipId, transition) =>
     set((state) => ({
@@ -2184,12 +2205,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const clips: Clip[] = []
       for (const c of state.project.clips) {
         const dur = (c.outPoint - c.inPoint) / (c.speed || 1)
-        if (c.id === clipId && absoluteTime > elapsed && absoluteTime < elapsed + dur) {
+        const splitAt =
+          c.id === clipId && absoluteTime > elapsed && absoluteTime < elapsed + dur
+            ? c.inPoint + toSourceSeconds(absoluteTime - elapsed, c.speed || 1)
+            : NaN
+        // 端のすぐそばでは分けない(最短より短いクリップは、ロールで逆へ動く・つかめない)
+        if (
+          Number.isFinite(splitAt) &&
+          splitAt - c.inPoint >= MIN_CLIP_SOURCE_DURATION &&
+          c.outPoint - splitAt >= MIN_CLIP_SOURCE_DURATION
+        ) {
           didSplit = true
           secondHalfId = uuid()
           splitOriginal = c
           const speed = c.speed || 1
-          const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - elapsed, speed)
+          const splitLocal = splitAt
           clips.push({ ...c, outPoint: splitLocal })
           splitParts.push({ ...c, outPoint: splitLocal })
           // Spread the source clip so per-clip settings that aren't listed here
@@ -2303,6 +2333,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   updateClipsSpeed: (clipIds, speed) =>
     set((state) => {
+      if (!validSpeed(speed)) return state
       const idSet = new Set(clipIds)
       return {
         ...pushHistory(state),
@@ -2926,8 +2957,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const info = state.project.multicam
       const clip = state.project.clips.find((c) => c.id === clipId)
       if (!info || !clip) return state
-      const alt = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clip
-      if (!alt) return state
+      const found = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clip
+      if (!found) return state
+      // 人が変えた速さ(素材の速さとの比)を保つ。素材の速さに戻すと長さが変わり、後ろが全部ずれる
+      const currentRate = info.files.find((f) => f.assetId === clip.assetId)?.rate || 1
+      const alt = { ...found, speed: found.speed * ((clip.speed || 1) / currentRate) }
       // 分離した音声(このクリップに紐づく音声クリップ)も同じカメラへ替える。
       // 替えないと、映像は新しいカメラ・音は前のカメラのまま、前のカメラの素材に新しいカメラの
       // in/out が写され、カメラ間の時刻のずれの分だけ音がずれる(実測: 3秒)
@@ -2956,7 +2990,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                 : t.clips.filter((c) => c.linkedClipId !== clipId)
               return { ...t, clips }
             })
-            .filter((t) => t.clips.length > 0)
+            // 外して空になったトラックだけ消す(人が用意した空のトラックは残す)
+            .filter((t, i) => t.clips.length > 0 || state.project.audioTracks[i].clips.length === 0)
       return {
         ...pushHistory(state),
         project: {
@@ -3067,7 +3102,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             ...o,
             startTime: o.startTime + shift,
             endTime: o.endTime + shift,
-            words: shiftOverlayWords(o.words, shift)
+            words: shiftOverlayWords(o.words, shift),
+            // 本編に紐づくテロップは、紐づけの位置もずらす(ずらさないと、紐づけが元の位置へ引き戻す)
+            ...(o.linkedClipId ? { linkOffset: (o.linkOffset ?? 0) + shift } : {})
           }))
         }
       }
@@ -3127,13 +3164,19 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })),
 
   setAudioTrackVolume: (trackId, volume) =>
-    set((state) => ({
-      ...pushHistory(state, `trackVolume:${trackId}`),
-      project: {
-        ...state.project,
-        audioTracks: state.project.audioTracks.map((t) => (t.id === trackId ? { ...t, volume } : t))
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(volume)
+        ? state
+        : {
+            ...pushHistory(state, `trackVolume:${trackId}`),
+            project: {
+              ...state.project,
+              audioTracks: state.project.audioTracks.map((t) =>
+                t.id === trackId ? { ...t, volume: Math.max(0, volume) } : t
+              )
+            }
+          }
+    ),
 
   addClipToAudioTrack: (trackId, assetId) =>
     set((state) => {
@@ -3159,24 +3202,28 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   updateAudioClipStart: (trackId, clipId, startTime) =>
-    set((state) => ({
-      ...pushHistory(state, `audioStart:${clipId}`),
-      project: {
-        ...state.project,
-        audioTracks: state.project.audioTracks.map((t) =>
-          t.id === trackId
-            ? {
-                ...t,
-                clips: t.clips.map((c) =>
-                  c.id === clipId
-                    ? { ...c, startTime: Math.max(0, startTime), linkedClipId: undefined }
-                    : c
-                )
-              }
-            : t
-        )
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(startTime)
+        ? state
+        : {
+            ...pushHistory(state, `audioStart:${clipId}`),
+            project: {
+              ...state.project,
+              audioTracks: state.project.audioTracks.map((t) =>
+                t.id === trackId
+                  ? {
+                      ...t,
+                      clips: t.clips.map((c) =>
+                        c.id === clipId
+                          ? { ...c, startTime: Math.max(0, startTime), linkedClipId: undefined }
+                          : c
+                      )
+                    }
+                  : t
+              )
+            }
+          }
+    ),
 
   // トラックをまたぐ移動は「元から外す」と「先へ足す」の2手だが、利用者にとっては
   // 1回のドラッグなので履歴も1件にまとめる。手で動かした時点で本編への追従は切れる
@@ -3184,6 +3231,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // トリムした瞬間に戻ってきてしまう)。
   moveAudioClipToTrack: (fromTrackId, clipId, toTrackId, startTime) =>
     set((state) => {
+      // 数値でない値(空欄・1e309 など)は書かない。NaN は取り消しの重複判定もすり抜ける
+      if (!Number.isFinite(startTime)) return state
       const from = state.project.audioTracks.find((t) => t.id === fromTrackId)
       const clip = from?.clips.find((c) => c.id === clipId)
       if (!clip || fromTrackId === toTrackId) return state
@@ -3238,72 +3287,84 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // undoable step (as opposed to updateAudioClipStart + updateAudioClipTrim, which
   // would otherwise push two separate history entries for a single drag gesture).
   updateAudioClipStartAndTrim: (trackId, clipId, startTime, inPoint, outPoint) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        audioTracks: state.project.audioTracks.map((t) =>
-          t.id === trackId
-            ? {
-                ...t,
-                clips: t.clips.map((c) =>
-                  c.id === clipId
-                    ? {
-                        ...clampSourceRange(
-                          c,
-                          inPoint,
-                          outPoint,
-                          assetDurationOf(state.project, c.assetId)
-                        ),
-                        startTime: Math.max(0, startTime),
-                        linkedClipId: undefined
-                      }
-                    : c
-                )
-              }
-            : t
-        )
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(startTime) || !Number.isFinite(inPoint) || !Number.isFinite(outPoint)
+        ? state
+        : {
+            ...pushHistory(state),
+            project: {
+              ...state.project,
+              audioTracks: state.project.audioTracks.map((t) =>
+                t.id === trackId
+                  ? {
+                      ...t,
+                      clips: t.clips.map((c) =>
+                        c.id === clipId
+                          ? {
+                              ...clampSourceRange(
+                                c,
+                                inPoint,
+                                outPoint,
+                                assetDurationOf(state.project, c.assetId)
+                              ),
+                              startTime: Math.max(0, startTime),
+                              linkedClipId: undefined
+                            }
+                          : c
+                      )
+                    }
+                  : t
+              )
+            }
+          }
+    ),
 
   updateAudioClipVolume: (trackId, clipId, volume) =>
-    set((state) => ({
-      ...pushHistory(state, `audioVolume:${clipId}`),
-      project: {
-        ...state.project,
-        audioTracks: state.project.audioTracks.map((t) =>
-          t.id === trackId
-            ? {
-                ...t,
-                clips: t.clips.map((c) =>
-                  c.id === clipId ? { ...c, volume: Math.max(0, volume) } : c
-                )
-              }
-            : t
-        )
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(volume)
+        ? state
+        : {
+            ...pushHistory(state, `audioVolume:${clipId}`),
+            project: {
+              ...state.project,
+              audioTracks: state.project.audioTracks.map((t) =>
+                t.id === trackId
+                  ? {
+                      ...t,
+                      clips: t.clips.map((c) =>
+                        c.id === clipId ? { ...c, volume: Math.max(0, volume) } : c
+                      )
+                    }
+                  : t
+              )
+            }
+          }
+    ),
 
   updateAudioClipFade: (trackId, clipId, fadeIn, fadeOut) =>
-    set((state) => ({
-      // 音量と同じく合体キーを渡す。数値を続けて動かしても Undo は1件。
-      ...pushHistory(state, `audioFade:${clipId}`),
-      project: {
-        ...state.project,
-        audioTracks: state.project.audioTracks.map((t) =>
-          t.id === trackId
-            ? {
-                ...t,
-                clips: t.clips.map((c) =>
-                  c.id === clipId
-                    ? { ...c, fadeIn: Math.max(0, fadeIn), fadeOut: Math.max(0, fadeOut) }
-                    : c
-                )
-              }
-            : t
-        )
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(fadeIn) || !Number.isFinite(fadeOut)
+        ? state
+        : {
+            // 音量と同じく合体キーを渡す。数値を続けて動かしても Undo は1件。
+            ...pushHistory(state, `audioFade:${clipId}`),
+            project: {
+              ...state.project,
+              audioTracks: state.project.audioTracks.map((t) =>
+                t.id === trackId
+                  ? {
+                      ...t,
+                      clips: t.clips.map((c) =>
+                        c.id === clipId
+                          ? { ...c, fadeIn: Math.max(0, fadeIn), fadeOut: Math.max(0, fadeOut) }
+                          : c
+                      )
+                    }
+                  : t
+              )
+            }
+          }
+    ),
 
   swapAudioClipAsset: (trackId, clipId, assetId, outPoint) =>
     set((state) => ({
@@ -3363,6 +3424,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   splitAudioClipAtTime: (trackId, clipId, absoluteTime) =>
     set((state) => {
+      // 数値でない値(空欄・1e309 など)は書かない。NaN は取り消しの重複判定もすり抜ける
+      if (!Number.isFinite(absoluteTime)) return state
       let didSplit = false
       const audioTracks = state.project.audioTracks.map((t) => {
         if (t.id !== trackId) return t
@@ -3440,15 +3503,19 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })),
 
   setVideoOverlayTrackScale: (trackId, scale) =>
-    set((state) => ({
-      ...pushHistory(state, `pipScale:${trackId}`),
-      project: {
-        ...state.project,
-        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
-          t.id === trackId ? { ...t, scale: Math.min(0.6, Math.max(0.1, scale)) } : t
-        )
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(scale)
+        ? state
+        : {
+            ...pushHistory(state, `pipScale:${trackId}`),
+            project: {
+              ...state.project,
+              videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+                t.id === trackId ? { ...t, scale: Math.min(0.6, Math.max(0.1, scale)) } : t
+              )
+            }
+          }
+    ),
 
   addClipToVideoOverlayTrack: (trackId, assetId, requestedStart) =>
     set((state) => {
@@ -3461,7 +3528,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           videoOverlayTracks: state.project.videoOverlayTracks.map((t) => {
             if (t.id !== trackId) return t
             const startTime =
-              requestedStart === undefined ? videoOverlayTrackEnd(t) : Math.max(0, requestedStart)
+              requestedStart === undefined || !Number.isFinite(requestedStart)
+                ? videoOverlayTrackEnd(t)
+                : Math.max(0, requestedStart)
             const outPoint = videoOverlayClipOutPoint(
               asset.duration,
               startTime,
@@ -3477,22 +3546,26 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   updateVideoOverlayClipStart: (trackId, clipId, startTime) =>
-    set((state) => ({
-      ...pushHistory(state, `pipStart:${clipId}`),
-      project: {
-        ...state.project,
-        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
-          t.id === trackId
-            ? {
-                ...t,
-                clips: t.clips.map((c) =>
-                  c.id === clipId ? { ...c, startTime: Math.max(0, startTime) } : c
-                )
-              }
-            : t
-        )
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(startTime)
+        ? state
+        : {
+            ...pushHistory(state, `pipStart:${clipId}`),
+            project: {
+              ...state.project,
+              videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+                t.id === trackId
+                  ? {
+                      ...t,
+                      clips: t.clips.map((c) =>
+                        c.id === clipId ? { ...c, startTime: Math.max(0, startTime) } : c
+                      )
+                    }
+                  : t
+              )
+            }
+          }
+    ),
 
   moveVideoOverlayClipToTrack: (fromTrackId, clipId, toTrackId, startTime) =>
     set((state) => {
@@ -3540,32 +3613,36 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })),
 
   updateVideoOverlayClipStartAndTrim: (trackId, clipId, startTime, inPoint, outPoint) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
-          t.id === trackId
-            ? {
-                ...t,
-                clips: t.clips.map((c) =>
-                  c.id === clipId
-                    ? {
-                        ...clampSourceRange(
-                          c,
-                          inPoint,
-                          outPoint,
-                          assetDurationOf(state.project, c.assetId)
-                        ),
-                        startTime: Math.max(0, startTime)
-                      }
-                    : c
-                )
-              }
-            : t
-        )
-      }
-    })),
+    set((state) =>
+      !Number.isFinite(startTime) || !Number.isFinite(inPoint) || !Number.isFinite(outPoint)
+        ? state
+        : {
+            ...pushHistory(state),
+            project: {
+              ...state.project,
+              videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+                t.id === trackId
+                  ? {
+                      ...t,
+                      clips: t.clips.map((c) =>
+                        c.id === clipId
+                          ? {
+                              ...clampSourceRange(
+                                c,
+                                inPoint,
+                                outPoint,
+                                assetDurationOf(state.project, c.assetId)
+                              ),
+                              startTime: Math.max(0, startTime)
+                            }
+                          : c
+                      )
+                    }
+                  : t
+              )
+            }
+          }
+    ),
 
   swapVideoOverlayClipAsset: (trackId, clipId, assetId, outPoint) =>
     set((state) => ({
@@ -3598,6 +3675,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   splitVideoOverlayClipAtTime: (trackId, clipId, absoluteTime) =>
     set((state) => {
+      // 数値でない値(空欄・1e309 など)は書かない。NaN は取り消しの重複判定もすり抜ける
+      if (!Number.isFinite(absoluteTime)) return state
       let didSplit = false
       const videoOverlayTracks = state.project.videoOverlayTracks.map((t) => {
         if (t.id !== trackId) return t
@@ -4152,12 +4231,11 @@ function followMainEdit(
 ): Project {
   const info = next.multicam
   if (!info || prev.multicam !== info) return next
-  const realBefore = spansOfClips(prev.clips, info)
-  if (realBefore.length === 0) return next
-  const realAfter = spansOfClips(next.clips, info)
-  const before = followSpans(prev.clips, info, realBefore)
-  const after = followSpans(next.clips, info, realAfter)
-  const segs = timelineMapping(before, after)
+  const before = followSpans(prev.clips, info)
+  if (!before.some((x) => x.real)) return next
+  const after = followSpans(next.clips, info)
+  // 同じクリップどうし・残りは1回ずつ結ぶ(同じ素材の時刻を2回使った本編で、声が倍々に増えないように)
+  const segs = clipTimelineMapping(before, after)
   if (isIdentityMapping(segs, before, after)) return next
 
   const remapClip = <
@@ -4219,7 +4297,10 @@ function followMainEdit(
   const follows = (t: { multicamSourceId?: string; autoRole?: string }): boolean =>
     Boolean(t.multicamSourceId || (!onlyRebuilt && t.autoRole))
   // 新しく見えた所に足す声は、収録素材のクリップの所だけ(差し込んだ素材・速さを変えたクリップには足さない)
-  const gaps = uncoveredSpans(realAfter.filter(isRealSpan(next.clips, info)), segs)
+  const gaps = uncoveredSpans(
+    after.filter((x) => x.real),
+    segs
+  )
 
   const audioTracks = next.audioTracks.map((t) => {
     if (!follows(t)) return t
@@ -4302,21 +4383,6 @@ function isRealClip(
   return Boolean(f && Math.abs((c.speed || 1) - f.rate) <= 1e-9)
 }
 
-/** `spansOfClips` の区間のうち、1:1 で写る収録素材のクリップのものか */
-function isRealSpan(
-  clips: Project['clips'],
-  info: NonNullable<Project['multicam']>
-): (s: { timeline: number }) => boolean {
-  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
-  const starts: number[] = []
-  let cursor = 0
-  for (const c of clips) {
-    if (isRealClip(c, fileOf)) starts.push(cursor)
-    cursor += Math.max(0, c.outPoint - c.inPoint) / (c.speed || 1)
-  }
-  return (s) => starts.some((t) => Math.abs(t - s.timeline) <= 1e-6)
-}
-
 /** 差し込んだ素材・速さを変えたクリップの、仮の共通の時刻の置き場(収録の時刻と重ならない遠く) */
 const PSEUDO_BASE = 1e7
 const PSEUDO_STRIDE = 1e5
@@ -4331,28 +4397,31 @@ function pseudoSlot(key: string): number {
 }
 
 /**
- * 追従に使う、タイムラインの時刻 ↔ 共通の時刻 の対応。
- * 収録素材を素材の速さで流すクリップは `spansOfClips` のまま(共通の時刻とタイムラインが 1:1)。
+ * 追従に使う、本編のクリップごとの タイムラインの時刻 ↔ 共通の時刻 の区間(クリップの id 付き)。
+ * 収録素材を素材の速さで流すクリップは共通の時刻(`real`。タイムラインと 1:1)。
  * それ以外(差し込んだ B ロール・静止画・タイトル、速さを変えたクリップ)は、クリップごとの仮の時刻を当てる。
  * 当てないと、その区間に置いた自動の BGM・SE・CG が、どこに写るか分からず切り落とされる。
  * 速さを変えたクリップは長さが合わないので、速さも鍵に入れる(速さを変えたら、その下の声・自動テロップは外す)
  */
 function followSpans(
   clips: Project['clips'],
-  info: NonNullable<Project['multicam']>,
-  real: readonly { timeline: number; start: number; end: number }[]
-): { timeline: number; start: number; end: number }[] {
+  info: NonNullable<Project['multicam']>
+): (ClipSpan & { real: boolean })[] {
   const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
-  const realOnes = real.filter(isRealSpan(clips, info))
-  const out = [...realOnes]
+  const out: (ClipSpan & { real: boolean })[] = []
   let cursor = 0
   for (const c of clips) {
     const speed = c.speed || 1
     const len = Math.max(0, c.outPoint - c.inPoint) / speed
-    if (!isRealClip(c, fileOf) && len > 1e-6) {
+    const f = fileOf.get(c.assetId)
+    if (f && isRealClip(c, fileOf)) {
+      const start = toCommon(f, c.inPoint)
+      const end = toCommon(f, c.outPoint)
+      if (end - start > 1e-6) out.push({ id: c.id, timeline: cursor, start, end, real: true })
+    } else if (len > 1e-6) {
       const base = pseudoSlot(`${c.id}@${speed}`)
       const start = base + c.inPoint / speed
-      out.push({ timeline: cursor, start, end: start + len })
+      out.push({ id: c.id, timeline: cursor, start, end: start + len, real: false })
     }
     cursor += len
   }
