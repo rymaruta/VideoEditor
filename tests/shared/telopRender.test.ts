@@ -62,7 +62,8 @@ function fakeContext(): TelopContext & { calls: Call[] } {
       calls.push({ op: 'gradient', args })
       return {
         addColorStop: (...s: unknown[]) => stops.push(s),
-        stops
+        stops,
+        args
       } as unknown as CanvasGradient
     }
   }
@@ -285,5 +286,61 @@ describe('小物', () => {
     const pop = source('あ', { animation: 'popIn' })
     expect(telopVisualKey(pop, 1.05, 1080)).not.toBe(telopVisualKey(pop, 1.1, 1080))
     expect(telopVisualKey(pop, 1.5, 1080)).toBe(telopVisualKey(pop, 2.5, 1080))
+  })
+})
+
+describe('drawTelop — 動く文字のグラデーション', () => {
+  /** 塗りに使ったグラデーションの端を、ブロックの座標(文字の移動を足し戻した位置)で返す */
+  const fillGradientEnds = (style: Partial<TextStyle>, t: number): number[][] => {
+    const ctx = fakeContext()
+    drawTelop(ctx, source('AB', style), t, { width: CANVAS.w, height: CANVAS.h }, CANVAS)
+    const out: number[][] = []
+    // 外側の save(テロップ全体の移動)の内側で、1文字ずつ save → translate したぶんを足し戻す
+    let depth = 0
+    let shift = { x: 0, y: 0 }
+    for (const c of ctx.calls) {
+      if (c.op === 'save') depth++
+      if (c.op === 'restore' && --depth < 2) shift = { x: 0, y: 0 }
+      if (c.op === 'translate' && depth >= 2) shift = { x: Number(c.args[0]), y: Number(c.args[1]) }
+      if (c.op === 'fillText' && c.fillStyle && typeof c.fillStyle === 'object') {
+        const a = (c.fillStyle as unknown as { args: number[] }).args
+        out.push([a[0] + shift.x, a[1] + shift.y, a[2] + shift.x, a[3] + shift.y])
+      }
+    }
+    return out
+  }
+
+  it('波打つ文字も、止まった文字と同じ所のグラデーションで塗る', () => {
+    const still = fillGradientEnds({ gradientColor: '#ff0000' }, 2)
+    const wave = fillGradientEnds({ gradientColor: '#ff0000', loopAnimation: 'wave' }, 2)
+    expect(still.length).toBeGreaterThan(0)
+    expect(wave.length).toBe(still.length)
+    wave.forEach((w, i) => w.forEach((v, k) => expect(v).toBeCloseTo(still[i][k], 3)))
+  })
+
+  it('読めない色の止まりがあっても描画を止めない', () => {
+    const ctx = fakeContext()
+    ;(ctx as unknown as { createLinearGradient: () => unknown }).createLinearGradient = () => ({
+      addColorStop: (_at: number, color: string) => {
+        if (color === '#ggg') throw new SyntaxError('bad color')
+      }
+    })
+    expect(() =>
+      drawTelop(
+        ctx,
+        source('AB', {
+          fillGradient: {
+            angle: 0,
+            stops: [
+              { at: 0, color: '#ggg' },
+              { at: 1, color: '#ffffff' }
+            ]
+          }
+        }),
+        2,
+        { width: CANVAS.w, height: CANVAS.h },
+        CANVAS
+      )
+    ).not.toThrow()
   })
 })

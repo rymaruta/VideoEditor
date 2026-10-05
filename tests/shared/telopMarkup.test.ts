@@ -40,3 +40,19 @@ describe('部分の装飾とルビの読み方', () => {
     expect(lines.map((l) => l.map((g) => g.ch).join(''))).toEqual(['あいう', '漢字'])
   })
 })
+
+describe('ルビの記号と、組み合わせた文字', () => {
+  it('閉じた空でない《読み》が無い「｜」は、文字としてそのまま出す', () => {
+    expect(stripTelopMarkup('｜abc《def')).toBe('｜abc《def')
+    expect(stripTelopMarkup('｜漢字《》')).toBe('｜漢字《》')
+    const g = parseTelopMarkup('｜ab《c 漢字《かんじ》')
+    expect(g.filter((x) => x.ruby).map((x) => [x.ch, x.ruby])).toEqual([['漢', 'かんじ']])
+  })
+
+  it('絵文字の組み合わせ・濁点を後ろに付けた仮名は1文字として扱う', () => {
+    expect(parseTelopMarkup('👨‍👩‍👧').length).toBe(1)
+    expect(parseTelopMarkup('👍🏽🇯🇵').length).toBe(2)
+    expect(parseTelopMarkup('か\u3099').map((g) => g.ch)).toEqual(['か\u3099'])
+    expect(parseTelopMarkup('**a**\r\nb').map((g) => g.ch)).toEqual(['a', '\r', '\n', 'b'])
+  })
+})

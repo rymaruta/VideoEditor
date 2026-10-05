@@ -3,6 +3,7 @@ import {
   buildEffectPrompt,
   effectSchema,
   effectStyle,
+  formatEffectText,
   nameProposals,
   parseEffectAnswer
 } from '../../src/shared/telop/effects'
@@ -140,5 +141,13 @@ describe('演出テロップの提案', () => {
     // 人物紹介は左下(発言テロップの下中央と重ねない)、注釈は右下に小さく
     expect(effectStyle('name').customPosition!.x).toBeLessThan(0.5)
     expect(effectStyle('note').fontSize).toBeLessThan(effectStyle('emphasis').fontSize)
+  })
+})
+
+describe('注のテロップの印', () => {
+  it('強調の印「**」で始まる注にも「※」を付ける。「※」「*」で始まる注はそのまま', () => {
+    expect(formatEffectText('note', '**撮影時**の価格')).toBe('※**撮影時**の価格')
+    expect(formatEffectText('note', '※撮影時の価格')).toBe('※撮影時の価格')
+    expect(formatEffectText('note', '*個人の感想です')).toBe('*個人の感想です')
   })
 })

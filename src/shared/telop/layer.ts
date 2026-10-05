@@ -62,7 +62,7 @@ export interface TelopLayerStageApi {
 /**
  * 区間 [start, end) のテロップの層を、ffmpeg の concat demuxer に渡す一覧にする。
  * 何も出ていない時間は0番(透明)で埋めるので、一覧の長さは区間の長さちょうどになる。
- * 秒は「フレーム数 × 1フレーム」で書く(29.97fps でも ffmpeg 側の `fps` で格子へ戻る)。
+ * 秒は「フレーム数 × 1フレーム」をマイクロ秒で書く(29.97fps でも ffmpeg 側の `fps` で格子へ戻る)。
  */
 export function telopConcatList(
   runs: TelopLayerPayload['runs'],
@@ -71,7 +71,10 @@ export function telopConcatList(
   endFrame: number,
   fps: { num: number; den: number }
 ): string | null {
-  const secs = (frames: number): string => ((frames * fps.den) / fps.num).toFixed(9)
+  // 区間の頭からの時刻(マイクロ秒に丸める)。ffmpeg は duration をマイクロ秒で切り捨てて足していくので、
+  // 1枚ごとに秒を書くと端数の切り捨てが積もり、長い書き出しの後半でテロップが1フレーム以上早く出る
+  // (実測: 60fps で 3万枚並べると 208 秒あたりから1フレーム早い)。区切りの時刻を丸めてから差を書く
+  const us = (frames: number): number => Math.round((frames * fps.den * 1e6) / fps.num)
   const q = (p: string): string => `'${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`
   const entries: { image: number; frames: number }[] = []
   let cursor = startFrame
@@ -92,8 +95,12 @@ export function telopConcatList(
   // (30fps で6回に1回、テロップが1フレーム遅れて出る。60fps では1フレームの動きが落ちる)。
   // 1枚ごとにシーケンスのフレームレートを指定して、刻みをフレームに揃える
   const rate = `option framerate ${fps.num}/${fps.den}`
-  for (const e of entries)
-    lines.push(`file ${q(imagePaths[e.image])}`, rate, `duration ${secs(e.frames)}`)
+  let at = 0
+  for (const e of entries) {
+    const d = us(at + e.frames) - us(at)
+    at += e.frames
+    lines.push(`file ${q(imagePaths[e.image])}`, rate, `duration ${(d / 1e6).toFixed(6)}`)
+  }
   // 最後の1枚は、もう一度並べないと長さが効かない(concat demuxer の決まり)
   lines.push(`file ${q(imagePaths[entries[entries.length - 1].image])}`, rate)
   return lines.join('\n') + '\n'

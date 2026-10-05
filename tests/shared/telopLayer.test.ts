@@ -155,16 +155,16 @@ describe('telopConcatList — 区間ぶんの画像の一覧', () => {
         'ffconcat version 1.0',
         "file '/w/0.png'",
         'option framerate 30/1',
-        'duration 1.000000000',
+        'duration 1.000000',
         "file '/w/1.png'",
         'option framerate 30/1',
-        'duration 1.000000000',
+        'duration 1.000000',
         "file '/w/it'\\''s.png'",
         'option framerate 30/1',
-        'duration 0.200000000',
+        'duration 0.200000',
         "file '/w/0.png'",
         'option framerate 30/1',
-        'duration 0.800000000',
+        'duration 0.800000',
         "file '/w/0.png'",
         'option framerate 30/1'
       ].join('\n') + '\n'
@@ -173,9 +173,7 @@ describe('telopConcatList — 区間ぶんの画像の一覧', () => {
 
   it('区間の途中から始まる・途中で終わるテロップは区間の中だけを並べる', () => {
     const list = telopConcatList(runs, paths, 220, 240, fps)!
-    expect(list.split('\n').filter((l) => l.startsWith('duration'))).toEqual([
-      'duration 0.666666667'
-    ])
+    expect(list.split('\n').filter((l) => l.startsWith('duration'))).toEqual(['duration 0.666667'])
   })
 
   it('テロップの無い区間は一覧を作らない', () => {
@@ -189,5 +187,23 @@ describe('telopConcatList — 区間ぶんの画像の一覧', () => {
       .filter((l) => l.startsWith('duration'))
       .reduce((s, l) => s + Number(l.slice(9)), 0)
     expect(Math.abs(sum - (300 * 1001) / 30000)).toBeLessThan(1e-6)
+  })
+
+  it('1フレームずつ何万枚並べても、ffmpeg が足していく時刻(マイクロ秒で切り捨て)がずれない', () => {
+    const many = Array.from({ length: 30000 }, (_, i) => ({
+      startFrame: i,
+      endFrame: i + 1,
+      image: 1 + (i % 2)
+    }))
+    const list = telopConcatList(many, paths, 0, 30000, { num: 60, den: 1 })!
+    // ffmpeg と同じく、各 duration をマイクロ秒に切り捨てて足す
+    let us = 0
+    let frame = 0
+    for (const l of list.split('\n').filter((x) => x.startsWith('duration'))) {
+      expect(Math.abs(us - Math.round((frame * 1e6) / 60))).toBeLessThanOrEqual(1)
+      us += Math.floor(Number(l.slice(9)) * 1e6 + 1e-6)
+      frame++
+    }
+    expect(Math.abs(us - 500 * 1e6)).toBeLessThanOrEqual(1)
   })
 })

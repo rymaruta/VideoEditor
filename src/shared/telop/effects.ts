@@ -355,7 +355,8 @@ export function formatEffectText(kind: EffectKind, text: string): string {
   const t = text.trim()
   switch (kind) {
     case 'note':
-      return /^[※*]/.test(t) ? t : `※${t}`
+      // 「*」1つは注の印。「**」は強調の印なので、注の印とはみなさない
+      return /^(※|\*(?!\*))/.test(t) ? t : `※${t}`
     case 'teaser': {
       // 先頭の「このあと」や、区切りの付いた「あと、」だけ外す(「あと5分で」の「あと」は文の一部)
       const body = t.replace(/^(このあと|あと(?=[、,\s…]))[、,\s…]*/u, '').trim()

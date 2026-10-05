@@ -409,6 +409,26 @@ export function telopDrawnChars(text: string): string {
     .join('')
 }
 
+const graphemeSegmenter =
+  typeof Intl !== 'undefined' && 'Segmenter' in Intl
+    ? new Intl.Segmenter('ja', { granularity: 'grapheme' })
+    : null
+
+/**
+ * 文字(書記素)ごとに分ける。絵文字の組み合わせ(👨‍👩‍👧・肌の色・旗)や、濁点を後ろに付けた仮名を
+ * 1文字として扱う(コードポイントで分けると、ばらばらに描かれ、途中で折り返される)
+ */
+function graphemes(text: string): string[] {
+  if (!graphemeSegmenter) return [...text]
+  const out: string[] = []
+  for (const s of graphemeSegmenter.segment(text)) {
+    // 印(** __)・改行は1文字ずつ見るので、CRLF などは分けておく
+    if (s.segment.length > 1 && /^[\r\n]+$/.test(s.segment)) out.push(...s.segment)
+    else out.push(s.segment)
+  }
+  return out
+}
+
 /** 「｜」が無いときにルビとみなす読み(かな・長音・英字だけ。《速報》のような飾りの括弧はルビにしない) */
 const RUBY_READING = /^[\p{sc=Hiragana}\p{sc=Katakana}ー・a-zA-Z\s]+$/u
 
@@ -421,7 +441,7 @@ const RUBY_BASE = /[\p{sc=Han}々〆ヶ]/u
  */
 export function parseTelopMarkup(text: string): Glyph[] {
   const out: Glyph[] = []
-  const chars = [...(text ?? '')]
+  const chars = graphemes(text ?? '')
   const multiLine = chars.includes('\n')
   let span: 0 | 1 | 2 = 0
   let first = multiLine
@@ -440,10 +460,19 @@ export function parseTelopMarkup(text: string): Glyph[] {
       continue
     }
     if (chars[i] === '｜') {
-      // 同じ行の後ろに《 があるときだけルビの始まり。無ければ文字の「｜」
+      // 同じ行の後ろに、閉じた空でない《読み》があるときだけルビの始まり。無ければ文字の「｜」
       const nl = chars.indexOf('\n', i + 1)
+      const lineEnd = nl < 0 ? chars.length : nl
       const open = chars.indexOf('《', i + 1)
-      if (open > i && (nl < 0 || open < nl)) {
+      const close = open > i ? chars.indexOf('》', open + 1) : -1
+      const reopen = open > i ? chars.indexOf('《', open + 1) : -1
+      if (
+        open > i + 1 &&
+        open < lineEnd &&
+        close > open + 1 &&
+        close < lineEnd &&
+        (reopen < 0 || reopen > close)
+      ) {
         rubyStart = out.length
         continue
       }
@@ -762,18 +791,54 @@ export function telopBackgroundPadding(
   return p ? { x: finite(p.x, 0), y: finite(p.y, 0) } : textBoxPaddingPx(fontSize)
 }
 
-/** 矩形 `r` に、向き `angle`(0 で上→下、90 で左→右)のグラデーションを掛ける */
+/** 1文字を動かして描くときの座標の変換(文字の中心へ移し、回し、拡大する) */
+interface CellTransform {
+  tx: number
+  ty: number
+  rot: number
+  scale: number
+}
+
+/** ブロックの座標の点を、文字を動かした後の座標へ写す */
+function toLocal(xf: CellTransform | undefined, x: number, y: number): { x: number; y: number } {
+  if (!xf) return { x, y }
+  const px = x - xf.tx
+  const py = y - xf.ty
+  const cos = Math.cos(-xf.rot)
+  const sin = Math.sin(-xf.rot)
+  const s = xf.scale || 1
+  return { x: (px * cos - py * sin) / s, y: (px * sin + py * cos) / s }
+}
+
+/** 色の止まりを足す。読めない色(壊れた保存データ)で描画ごと落とさない */
+function addStops(g: CanvasGradient, gradient: TelopGradient): void {
+  for (const s of gradient.stops) {
+    try {
+      g.addColorStop(Math.min(1, Math.max(0, finite(s.at, 0))), s.color)
+    } catch {
+      // 読めない色の止まりは飛ばす
+    }
+  }
+}
+
+/**
+ * 矩形 `r` に、向き `angle`(0 で上→下、90 で左→右)のグラデーションを掛ける。
+ * `xf` は、文字を動かして(移動・回転・拡大)描くときの変換。グラデーションは塗る時の座標で効くので、
+ * ブロックの座標で決めた位置を文字の座標へ写して作る(写さないと、揺れる文字だけ色がずれる)
+ */
 function gradientFor(
   ctx: TelopContext,
   gradient: TelopGradient,
-  r: { x: number; y: number; w: number; h: number }
+  r: { x: number; y: number; w: number; h: number },
+  xf?: CellTransform
 ): CanvasGradient {
+  const scale = xf?.scale || 1
   if (gradient.type === 'radial' && ctx.createRadialGradient) {
     // 中心から外へ。いちばん遠い角まで色が届く半径(CSS の radial-gradient の farthest-corner)
-    const cx = r.x + r.w / 2
-    const cy = r.y + r.h / 2
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, Math.hypot(r.w, r.h) / 2))
-    for (const s of gradient.stops) g.addColorStop(Math.min(1, Math.max(0, s.at)), s.color)
+    const c = toLocal(xf, r.x + r.w / 2, r.y + r.h / 2)
+    const radius = Math.max(1, Math.hypot(r.w, r.h) / 2) / scale
+    const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, radius)
+    addStops(g, gradient)
     return g
   }
   const rad = (finite(gradient.angle, 0) * Math.PI) / 180
@@ -783,8 +848,10 @@ function gradientFor(
   const half = Math.abs((r.w / 2) * dx) + Math.abs((r.h / 2) * dy)
   const cx = r.x + r.w / 2
   const cy = r.y + r.h / 2
-  const g = ctx.createLinearGradient(cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half)
-  for (const s of gradient.stops) g.addColorStop(Math.min(1, Math.max(0, s.at)), s.color)
+  const a = toLocal(xf, cx - dx * half, cy - dy * half)
+  const b = toLocal(xf, cx + dx * half, cy + dy * half)
+  const g = ctx.createLinearGradient(a.x, a.y, b.x, b.y)
+  addStops(g, gradient)
   return g
 }
 
@@ -1076,6 +1143,8 @@ export function drawTelop(
   }
   /** 1文字を、その文字の動き(移動・回転・拡大・透明)を付けて描く。`fn` は文字の左端・中心の高さで描く */
   // `off` は文字の向きに関係なくずらす量(影。縦書きで回した文字でも、影は他の文字と同じ向きに落とす)
+  /** いま描いている文字の変換(動かさずに描く文字は undefined) */
+  let cellXf: CellTransform | undefined
   const put = (c: Cell, fn: (x: number, y: number) => void, off = { x: 0, y: 0 }): void => {
     switchSize(c.g.size)
     if (!c.dx && !c.dy && !c.rot && c.scale === 1 && c.alpha === 1) {
@@ -1087,8 +1156,13 @@ export function drawTelop(
     if (c.rot) ctx.rotate(c.rot)
     if (c.scale !== 1) ctx.scale(c.scale, c.scale)
     if (c.alpha !== 1) ctx.globalAlpha = ctx.globalAlpha * c.alpha
-    fn(-c.g.width / 2, 0)
-    ctx.restore()
+    cellXf = { tx: c.x + c.dx + off.x, ty: c.y + c.dy + off.y, rot: c.rot, scale: c.scale }
+    try {
+      fn(-c.g.width / 2, 0)
+    } finally {
+      cellXf = undefined
+      ctx.restore()
+    }
   }
   const eachCell = (
     fn: (c: Cell, x: number, y: number) => void,
@@ -1202,15 +1276,17 @@ export function drawTelop(
 
   // 4. 縁(外側から)。線は輪郭の両側に半分ずつ乗るので、外へ伸ばしたい量の2倍の幅で引く
   for (const ring of rings) {
-    ctx.strokeStyle = ring.gradient
-      ? gradientFor(ctx, ring.gradient, {
-          x: blockRect.x - ring.reach,
-          y: blockRect.y - ring.reach,
-          w: blockRect.w + ring.reach * 2,
-          h: blockRect.h + ring.reach * 2
-        })
-      : ring.color
+    const ringRect = {
+      x: blockRect.x - ring.reach,
+      y: blockRect.y - ring.reach,
+      w: blockRect.w + ring.reach * 2,
+      h: blockRect.h + ring.reach * 2
+    }
+    const still = ring.gradient ? gradientFor(ctx, ring.gradient, ringRect) : ring.color
     eachCell((c, x, y) => {
+      // 動いている文字は、その文字の座標で作り直す
+      ctx.strokeStyle =
+        ring.gradient && cellXf ? gradientFor(ctx, ring.gradient, ringRect, cellXf) : still
       ctx.lineWidth = ringWidth(c, ring.reach)
       ctx.strokeText(c.g.ch, x, y)
     })
@@ -1240,7 +1316,10 @@ export function drawTelop(
       const span = spanStyleOf(style, g)
       ctx.fillStyle = span?.gradient
         ? gradientFor(ctx, span.gradient, { x, y: y - g.size / 2, w: g.width, h: g.size })
-        : (span?.color ?? lineFills[c.line])
+        : (span?.color ??
+          (fillGradient && cellXf
+            ? gradientFor(ctx, fillGradient, lineRect(c.line), cellXf)
+            : lineFills[c.line]))
     }
     ctx.fillText(g.ch, x, y)
   })

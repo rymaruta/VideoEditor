@@ -61,3 +61,33 @@ describe('検索と置換', () => {
     expect(replaceInTelop('abc', '', 'x')).toBe('abc')
   })
 })
+
+describe('SRT と検索・置換の境目', () => {
+  it('空行の抜けた SRT でも字幕を分けて読む', () => {
+    const cues = parseSrt(
+      '1\n00:00:01,000 --> 00:00:02,000\nHello\n2\n00:00:03,000 --> 00:00:04,000\nWorld'
+    )
+    expect(cues).toEqual([
+      { start: 1, end: 2, text: 'Hello' },
+      { start: 3, end: 4, text: 'World' }
+    ])
+  })
+
+  it('本文の空行は詰めて書き、読み戻しても後ろが消えない', () => {
+    const srt = buildSrt([{ text: 'a\n\nb', startTime: 0, endTime: 1 }])
+    expect(parseSrt(srt)).toEqual([{ start: 0, end: 1, text: 'a\nb' }])
+  })
+
+  it('ミリ秒に丸めて長さが無くなる字幕は書かない', () => {
+    expect(buildSrt([{ text: 'x', startTime: 1.0001, endTime: 1.0004 }])).toBe('')
+  })
+
+  it('区別しない置換は、検索で見つかる所を置き換える(半角カナの濁点・㍿)', () => {
+    expect(telopMatches('ｶﾞｲﾄﾞ', 'ガ', { loose: true })).toBe(true)
+    expect(replaceInTelop('ｶﾞｲﾄﾞ', 'ガ', 'X', { loose: true })).toBe('Xｲﾄﾞ')
+    expect(replaceInTelop('ｶﾞｲﾄﾞ', 'ガイド', '案内', { loose: true })).toBe('案内')
+    expect(replaceInTelop('㍿テスト', '株式会社', 'K', { loose: true })).toBe('Kテスト')
+    expect(replaceInTelop('ｶﾞ', 'カ', 'X', { loose: true })).toBe('ｶﾞ')
+    expect(replaceInTelop('ABCabc', 'b', '-', { loose: true })).toBe('A-Ca-c')
+  })
+})
