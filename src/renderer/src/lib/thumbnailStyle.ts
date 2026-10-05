@@ -23,7 +23,9 @@ export function defaultThumbnailStyle(): TextStyle {
     outlineWidth: 6,
     extraStrokes: [{ color: '#ffffff', width: 6 }],
     position: 'bottom',
-    lineHeight: 1.1
+    lineHeight: 1.1,
+    // **…** で囲んだ所は赤く大きく(「まさかの」を目立たせる)
+    accent: { scale: 1.15, color: '#ff3b3b' }
   })
 }
 

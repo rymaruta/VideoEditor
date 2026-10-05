@@ -31,7 +31,7 @@ import { TelopImageWriter } from './telopImageWriter'
  * 同時に PNG にしておく枚数。描く(1枚 1ms 未満)と PNG にする(1080p で約 10ms、4K で約 37ms。
  * ほぼ全部が GPU からの読み戻しと圧縮)・main へ送る・ディスクへ書くを重ねて、待ち時間を詰める
  */
-const ENCODE_AHEAD = 3
+const ENCODE_AHEAD = 1
 
 function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png')).then(
