@@ -183,7 +183,8 @@ function brokenInvariant(p: Project): string | null {
   }
   for (const o of p.textOverlays) {
     if (!(o.startTime >= 0 && o.endTime >= o.startTime)) return `テロップ ${o.id} の範囲が不正`
-    if (!o.style || typeof o.style.color !== 'string') return `テロップ ${o.id} の見た目が欠けている`
+    if (!o.style || typeof o.style.color !== 'string')
+      return `テロップ ${o.id} の見た目が欠けている`
   }
   return null
 }
@@ -312,7 +313,8 @@ describe('【性質】壊れた .veproj を開いても、形が整い、保存�
         // 複製して入れる(同じオブジェクトを入れると、続く書き換えが NASTY 自体を壊す)
         const picked = NASTY[Math.floor(rnd() * NASTY.length)]
         const v = picked === undefined ? undefined : structuredClone(picked)
-        if (setAt(raw, p, v)) muts.push(`${p.join('.')}=${v === undefined ? '(削除)' : JSON.stringify(v)}`)
+        if (setAt(raw, p, v))
+          muts.push(`${p.join('.')}=${v === undefined ? '(削除)' : JSON.stringify(v)}`)
       }
       const label = `#${i} ${muts.join(' / ')}`
       let first: Project
@@ -346,17 +348,20 @@ describe('【性質】壊れた .veproj を開いても、形が整い、保存�
 describe('【レグレッション】尺の分からないファイルへ再リンクしても、クリップが尺0に潰れない', () => {
   it('probe の尺が 0 なら、その素材のクリップの範囲はそのまま', () => {
     const before = loadRaw(baseProject())
-    st().relinkAsset('A', '/y/a2.mp4', 'a2.mp4', {
-      duration: 0,
-      width: 1280,
-      height: 720,
-      fps: 30,
-      hasAudio: true,
-      hasVideo: true,
-      videoCodec: 'h264',
-      audioCodec: 'aac',
-      needsPreviewProxy: false
-    }, undefined)
+    st().relinkAsset(
+      'A',
+      '/y/a2.mp4',
+      'a2.mp4',
+      {
+        duration: 0,
+        width: 1280,
+        height: 720,
+        fps: 30,
+        hasAudio: true,
+        hasVideo: true
+      },
+      undefined
+    )
     const after = st().project
     expect(after.clips.map((c) => [c.inPoint, c.outPoint])).toEqual(
       before.clips.map((c) => [c.inPoint, c.outPoint])
@@ -430,7 +435,8 @@ describe('【性質】テロップの見た目の正規化は、何度通して�
       const nf = nonFinitePath(once)
       if (nf) failures.push(`${input} → 有限でない ${nf}`)
       const twice = JSON.parse(JSON.stringify(normalizeTextStyle(once)))
-      if (JSON.stringify(twice) !== JSON.stringify(once)) failures.push(`${input} → 2回目で変わった`)
+      if (JSON.stringify(twice) !== JSON.stringify(once))
+        failures.push(`${input} → 2回目で変わった`)
     }
     expect(failures).toEqual([])
   })
@@ -461,7 +467,9 @@ describe('【レグレッション】壊れた localStorage でも設定は起�
 
   async function settingsWith(
     entries: Record<string, string>
-  ): Promise<ReturnType<(typeof import('@renderer/store/settingsStore'))['useSettingsStore']['getState']>> {
+  ): Promise<
+    ReturnType<(typeof import('@renderer/store/settingsStore'))['useSettingsStore']['getState']>
+  > {
     store.clear()
     for (const [k, v] of Object.entries(entries)) store.set(k, v)
     vi.resetModules()
@@ -487,7 +495,10 @@ describe('【レグレッション】壊れた localStorage でも設定は起�
     ['配列', '[1,2]'],
     ['数', '42'],
     ['項目が配列でない', '{"fill":"x","stroke":null}'],
-    ['要素が壊れている', '{"fill":[null,1,"a",{"id":1,"name":"x"},{"id":"ok","name":"n","values":"bad"}]}']
+    [
+      '要素が壊れている',
+      '{"fill":[null,1,"a",{"id":1,"name":"x"},{"id":"ok","name":"n","values":"bad"}]}'
+    ]
   ])('マイ設定が %s でも起動できる', async (_name, raw) => {
     const s = await settingsWith({ 've-section-presets': raw })
     expect(typeof s.sectionPresets).toBe('object')
@@ -504,7 +515,8 @@ describe('【レグレッション】壊れた localStorage でも設定は起�
     const s = await settingsWith({
       've-favorite-colors': '{not json',
       've-recent-colors': '[null, 5, "#GGGGGG", "#ff0000", "#FF0000"]',
-      've-favorite-gradients': '[{"id":"g","gradient":{"stops":[{"at":"x"}]}}, null, {"id":"h","gradient":{"angle":5,"stops":[{"at":0,"color":"red"},{"at":1,"color":"blue"}]}}]',
+      've-favorite-gradients':
+        '[{"id":"g","gradient":{"stops":[{"at":"x"}]}}, null, {"id":"h","gradient":{"angle":5,"stops":[{"at":0,"color":"red"},{"at":1,"color":"blue"}]}}]',
       've-show-style': '"string"',
       've-export-resolution': 'NaN',
       've-export-quality': 'ultra',

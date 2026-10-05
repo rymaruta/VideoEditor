@@ -1568,14 +1568,20 @@ describe('壊れたファイルを開く・素材をつなぎ直す', () => {
 
   it('長さを測れなかったファイルへつなぎ直しても、クリップを長さ0にしない', () => {
     st().loadProject(baseProject(), '/x/p.json')
-    st().relinkAsset('A', '/y/a.mp4', 'a.mp4', {
-      duration: 0,
-      width: 1920,
-      height: 1080,
-      fps: 30,
-      hasAudio: true,
-      hasVideo: true
-    })
+    st().relinkAsset(
+      'A',
+      '/y/a.mp4',
+      'a.mp4',
+      {
+        duration: 0,
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        hasAudio: true,
+        hasVideo: true
+      },
+      undefined
+    )
     const a = st().project.clips.filter((c) => c.assetId === 'A')
     expect(a.map((c) => [c.inPoint, c.outPoint])).toEqual([
       [0, 4],
@@ -1586,11 +1592,11 @@ describe('壊れたファイルを開く・素材をつなぎ直す', () => {
   it('静止画へつなぎ直すと静止画の長さのまま、動画へつなぎ直すと静止画の印を外す', () => {
     st().loadProject(baseProject(), '/x/p.json')
     const probe = { width: 1, height: 1, fps: 30, hasAudio: false, hasVideo: true }
-    st().relinkAsset('B', '/y/b.png', 'b.png', { ...probe, duration: 0.04 })
+    st().relinkAsset('B', '/y/b.png', 'b.png', { ...probe, duration: 0.04 }, undefined)
     const b = st().project.assets.find((x) => x.id === 'B')!
     expect([b.still, b.duration]).toEqual([true, 3600])
     expect(st().project.clips.find((c) => c.id === 'c2')!.outPoint).toBe(5)
-    st().relinkAsset('B', '/y/b.mp4', 'b.mp4', { ...probe, duration: 30 })
+    st().relinkAsset('B', '/y/b.mp4', 'b.mp4', { ...probe, duration: 30 }, undefined)
     expect(st().project.assets.find((x) => x.id === 'B')!.still).toBeUndefined()
   })
 })
