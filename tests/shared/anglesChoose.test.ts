@@ -48,6 +48,69 @@ describe('chooseAngles', () => {
     ])
   })
 
+  it('場面の頭は全体のカメラから入り、2秒たってから話者のカメラへ寄る', () => {
+    const lines = [
+      { speaker: 'B', start: 0.2, end: 5 },
+      { speaker: 'B', start: 5.5, end: 9 },
+      { speaker: 'B', start: 60.2, end: 64 },
+      { speaker: 'B', start: 64.5, end: 69 }
+    ]
+    const shots = chooseAngles(
+      [
+        { start: 0, end: 10, sceneId: 's1' },
+        { start: 60, end: 70, sceneId: 's3' }
+      ],
+      cams,
+      'WIDE',
+      lines
+    )
+    // 以前は場面の頭から話者のカメラ(CAMB)だった
+    expect(shots.map((s) => [s.start, s.cameraId, s.reason])).toEqual([
+      [0, 'WIDE', 'scene'],
+      [5.5, 'CAMB', 'speaker'],
+      [60, 'WIDE', 'scene'],
+      [64.5, 'CAMB', 'speaker']
+    ])
+  })
+
+  it('場面の頭でも、今が全体なら同じカメラのまま時間を飛ばさず話者のカメラへ', () => {
+    const shots = chooseAngles(
+      [
+        { start: 0, end: 10, sceneId: 's1' },
+        { start: 60, end: 70, sceneId: 's2' }
+      ],
+      cams,
+      'WIDE',
+      [
+        { speaker: 'A', start: 0.2, end: 9 },
+        { speaker: 'B', start: 60.2, end: 69 }
+      ]
+    )
+    expect(shots.map((s) => [s.start, s.cameraId])).toEqual([
+      [0, 'WIDE'],
+      [60, 'CAMB']
+    ])
+  })
+
+  it('同じ場面の中で間を詰めた切れ目は、今まで通り話者のカメラを選ぶ', () => {
+    const shots = chooseAngles(
+      [
+        { start: 0, end: 10, sceneId: 's1' },
+        { start: 12, end: 20, sceneId: 's1' }
+      ],
+      cams,
+      'WIDE',
+      [
+        { speaker: 'A', start: 0.2, end: 9 },
+        { speaker: 'B', start: 12.2, end: 19 }
+      ]
+    )
+    expect(shots.map((s) => [s.start, s.cameraId, s.reason])).toEqual([
+      [0, 'WIDE', 'scene'],
+      [12, 'CAMB', 'jump']
+    ])
+  })
+
   it('長く同じカメラが続いたら、次の話し始めで替える', () => {
     const lines = Array.from({ length: 10 }, (_, i) => ({
       speaker: 'A',

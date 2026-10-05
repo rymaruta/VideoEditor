@@ -6793,3 +6793,504 @@ select.telop-kind-add {
   overflow-wrap: anywhere;
 }
 /* ================================================================== テロップ一覧の道具 ここまで */
+
+/* ================================================================== 見た目の編集の使い勝手
+ * マイ設定(項目ごと)・見た目のコピー/貼り付け・書体の一覧・色の欄(スポイト/最近使った色)・
+ * 見た目の一覧の分類と検索・サムネイルの文字。
+ * Popover / SectionPresetMenu / LookTransfer / FontPicker / ColorField / TelopLookGallery / ThumbnailPanel
+ * ================================================================== */
+
+/* 吹き出し(body に出す。位置は Popover が決め、画面に入りきらなければ中をスクロール) */
+.app-popover {
+  position: fixed;
+  z-index: 1000;
+  max-height: calc(100vh - 16px);
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--bg-elevated-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: default;
+}
+.color-popover {
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+/* 見出しのマイ設定のボタン */
+.section-menu-button {
+  position: relative;
+  flex-shrink: 0;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  gap: 0;
+}
+.section-menu-button:hover:not(:disabled),
+.section-menu-button.open {
+  border-color: var(--border);
+  background: #2c2c2c;
+  color: var(--text-1);
+}
+.section-menu-count {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent-1);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* マイ設定の中身 */
+.section-preset-popover {
+  width: 300px;
+}
+.section-preset-panel,
+.look-apply-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.section-preset-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.section-preset-title {
+  font-weight: 600;
+  color: var(--text-1);
+}
+.section-preset-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.section-preset-save {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.section-preset-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.section-preset-name input {
+  flex: 1;
+  min-width: 120px;
+  height: 26px;
+}
+.section-preset-name .primary-button {
+  height: 26px;
+  padding: 0 10px;
+}
+.section-preset-warn {
+  width: 100%;
+  font-size: 11px;
+  color: var(--warning, #e5a84d);
+}
+.section-preset-empty {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.section-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.section-preset-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.section-preset-apply {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  height: auto;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+}
+.section-preset-apply:hover:not(:disabled) {
+  background: #2c2c2c;
+  border-color: var(--border);
+}
+.section-preset-item.active .section-preset-apply {
+  border-color: var(--accent-1);
+  background: var(--accent-soft);
+}
+.section-preset-swatch {
+  flex-shrink: 0;
+  width: 80px;
+  height: 36px;
+  border-radius: 2px;
+  background: #3a3a3a;
+}
+.section-preset-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.section-preset-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.section-preset-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.section-preset-check {
+  margin-left: auto;
+  padding-right: 4px;
+  color: var(--accent-1);
+  font-weight: 700;
+}
+.section-preset-remove {
+  opacity: 0.55;
+}
+.section-preset-item:hover .section-preset-remove,
+.section-preset-remove:focus-visible {
+  opacity: 1;
+}
+.section-preset-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: #2a2a2a;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.section-preset-message {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.section-preset-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.section-preset-foot-spacer {
+  flex: 1;
+}
+
+/* 見た目のコピー・貼り付け */
+.look-transfer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.look-transfer .small-button {
+  gap: 5px;
+}
+.look-transfer-popover {
+  width: 320px;
+}
+.look-apply-sections,
+.look-apply-targets {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.look-apply-sections {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 8px;
+}
+.look-apply-sections legend,
+.look-apply-targets legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.look-apply-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.look-apply-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.look-apply-note {
+  margin: 0;
+}
+
+/* 書体の一覧(各行をその書体で見せる) */
+.font-picker-button {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px 0 8px;
+  justify-content: space-between;
+  gap: 6px;
+  background: var(--bg-elevated-2);
+  font-size: 13px;
+  font-weight: 400;
+}
+.font-picker-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.font-picker-chevron {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.font-picker-popover {
+  padding: 8px;
+}
+.font-picker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: calc(100vw - 40px);
+}
+.font-picker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: min(420px, calc(100vh - 120px));
+  overflow-y: auto;
+}
+.font-picker-group {
+  padding: 6px 6px 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.font-picker-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.font-picker-option.cursor {
+  background: #3d3d3d;
+}
+.font-picker-option.selected {
+  color: #fff;
+}
+.font-picker-sample {
+  font-size: 18px;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+.font-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.font-picker-check {
+  color: var(--accent-1);
+  font-weight: 700;
+}
+
+/* 検索欄(見た目の一覧・書体) */
+.look-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated-2);
+  color: var(--text-3);
+}
+.look-search:focus-within {
+  border-color: var(--accent-1);
+}
+.look-search input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+}
+.look-search input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* 見た目の一覧: 分類と検索 */
+.look-gallery-bar {
+  position: sticky;
+  top: -12px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: -12px -14px 0;
+  padding: 12px 14px 8px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-soft);
+}
+.telop-style-gallery .look-gallery-bar {
+  position: static;
+  margin: 0;
+  padding: 0 0 8px;
+  background: transparent;
+}
+.look-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.look-cat {
+  height: 24px;
+  padding: 0 9px;
+  gap: 5px;
+  border-radius: 12px;
+  background: #262626;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.look-cat.active {
+  background: #34414f;
+  border-color: var(--accent-1);
+  color: #fff;
+}
+.look-cat-count {
+  font-size: 10px;
+  color: var(--text-3);
+}
+.look-cat.active .look-cat-count {
+  color: #c8d6e8;
+}
+.look-empty {
+  margin: 8px 0;
+}
+
+/* 色の欄: スポイト */
+.color-popover-dropper {
+  width: 28px;
+  height: 28px;
+}
+.color-popover-channel {
+  grid-template-columns: 14px minmax(0, 1fr) 60px;
+}
+.color-popover-channel .prop-num {
+  width: 60px;
+  padding: 0 2px 0 6px;
+}
+.color-popover-favorites.recent .color-popover-favorite-swatch {
+  border-radius: 50%;
+}
+
+/* 数値欄はドラッグで動かせる(押して離せば打ち込み) */
+.num-slider .prop-num:not(:focus) {
+  cursor: ew-resize;
+}
+
+/* サムネイルの文字 */
+.thumbnail-stage {
+  position: relative;
+  margin-bottom: 10px;
+}
+.thumbnail-stage .thumbnail-canvas {
+  display: block;
+  margin-bottom: 0;
+}
+.thumbnail-canvas.draggable {
+  cursor: move;
+  touch-action: none;
+}
+.thumbnail-stage-note {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 11px;
+  color: #ddd;
+  text-align: center;
+  pointer-events: none;
+}
+.thumbnail-empty {
+  padding: 10px 0;
+}
+.thumbnail-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.thumbnail-text textarea {
+  width: 100%;
+  resize: vertical;
+  font-size: 13px;
+}
+.thumbnail-panel .telop-style-fields {
+  margin-top: 4px;
+}
+.thumbnail-panel .look-open-button {
+  gap: 5px;
+}
+/* ================================================================== 見た目の編集の使い勝手 ここまで */

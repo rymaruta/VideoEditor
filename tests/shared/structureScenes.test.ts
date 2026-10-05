@@ -47,9 +47,21 @@ describe('buildScenes', () => {
 
   it('長すぎる話のまとまりは、次の切れ目で分ける', () => {
     const long = Array.from({ length: 30 }, (_, i) => line(i * 5, i * 5 + 3.5))
-    const s = buildScenes(long, { start: 0, end: 150 }, { maxSceneSec: 40 })
+    const s = buildScenes(long, { start: 0, end: 150 }, { maxSceneSec: 40, minTailSec: 0 })
     expect(s.length).toBeGreaterThanOrEqual(3)
     expect(s.every((x) => x.end - x.start <= 50)).toBe(true)
+  })
+
+  it('長さで分けた残りが短ければ、前の場面に含める(話の締めだけが別の場面にならない)', () => {
+    // 0〜148.5 秒まで続く話。40 秒で分けると、最後に 135〜148.5 秒(13.5 秒)の残りができる
+    const long = Array.from({ length: 30 }, (_, i) => line(i * 5, i * 5 + 3.5))
+    const s = buildScenes(long, { start: 0, end: 150 }, { maxSceneSec: 40 })
+    expect(s.map((x) => x.lines.length)).toEqual([9, 9, 12])
+    expect(s.every((x) => x.end - x.start >= 20)).toBe(true)
+    // 長い無言で分かれた所(話が終わった所)の短い場面は、そのまま残す
+    const talk = [...long.slice(0, 9), line(80, 83), line(84, 88)]
+    const t = buildScenes(talk, { start: 0, end: 90 }, { maxSceneSec: 40 })
+    expect(t.at(-1)!.lines.map((l) => l.start)).toEqual([80, 84])
   })
 })
 
@@ -71,6 +83,34 @@ describe('selectScenes', () => {
     const r = selectScenes(scenes, judgements, 1000)
     expect(r.kept).toEqual(['s1', 's3', 's4'])
     expect(r.dropped).toEqual([{ sceneId: 's2', why: 'unneeded' }])
+  })
+
+  it('点数が同じなら、番組の頭と終わりを残し、前後が落ちている場面から落とす', () => {
+    const six = Array.from({ length: 6 }, (_, i) => ({
+      id: `t${i + 1}`,
+      start: i * 60,
+      end: (i + 1) * 60,
+      lines: [],
+      speech: 40
+    }))
+    const j = six.map((x) => ({
+      sceneId: x.id,
+      score: x.id === 't4' ? 5 : 70,
+      kind: x.id === 't4' ? ('unneeded' as const) : ('normal' as const),
+      reason: ''
+    }))
+    // 不要の t4 を落とした後、残りの 300 秒から 2 場面ぶん(120 秒)を削る
+    const r = selectScenes(six, j, 180)
+    // 以前は時刻の早い順(t1・t2)に落ち、番組の頭が消えていた。
+    // 今は頭(t1)と終わり(t6)を残し、落ちた t4 の隣(t3、続いて t2 か t5)から落とす
+    expect(r.kept).toContain('t1')
+    expect(r.kept).toContain('t6')
+    expect(r.dropped.filter((d) => d.why === 'length').map((d) => d.sceneId)[0]).toBe('t3')
+    // 時間の飛ぶ所(残した場面のかたまりの数 - 1)は 1 つだけ
+    const blocks = six.filter(
+      (x, i) => r.kept.includes(x.id) && !(i > 0 && r.kept.includes(six[i - 1].id))
+    ).length
+    expect(blocks).toBe(2)
   })
 
   it('長すぎれば点数の低い場面から落とす', () => {

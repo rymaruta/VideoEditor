@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FIRST_TELOP_DELAY_SEC,
+  settleTelopTimes,
   tidyTelopText,
   utteranceToTelopChunks,
   wrapTelopLines
@@ -101,6 +103,36 @@ describe('utteranceToTelopChunks', () => {
     expect(c.sourceStart).toBe(4)
   })
 
+  it('最初の1枚は、言葉の時刻が遅れていても発話の頭(声の少し前)から出す', () => {
+    // 発話の区間(声の検出)は 24.73 秒から、音声認識の言葉の時刻は 25.17 秒から(実際の回で見た値)
+    const [c] = utteranceToTelopChunks({
+      text: '私は松井さんが書いた作文を読みました',
+      words: [{ text: '私は松井さんが書いた作文を読みました', start: 25.17, end: 28.43 }],
+      sourceStart: 24.73,
+      sourceEnd: 27.72
+    })
+    expect(c.sourceStart).toBeCloseTo(24.73 + FIRST_TELOP_DELAY_SEC, 9)
+    // 言葉の時刻のほうが早ければ、そちら(遅らせない)
+    const [d] = utteranceToTelopChunks({
+      text: 'こんにちは',
+      words: [{ text: 'こんにちは', start: 3.02, end: 4 }],
+      sourceStart: 3,
+      sourceEnd: 4
+    })
+    expect(d.sourceStart).toBe(3.02)
+  })
+
+  it('2枚目からは言葉の時刻のまま(言った時に替わる)', () => {
+    const words = [
+      { text: '木曜日、', start: 10.5, end: 11 },
+      { text: '停戦会談は何の進展もないまま終了しました。', start: 11, end: 14 },
+      { text: 'そして次の会談の日程も決まらないまま、関係者は帰国しました。', start: 14.5, end: 19 }
+    ]
+    const chunks = utteranceToTelopChunks({ text: '', words, sourceStart: 10, sourceEnd: 19 })
+    expect(chunks[0].sourceStart).toBeCloseTo(10 + FIRST_TELOP_DELAY_SEC, 9)
+    expect(chunks[1].sourceStart).toBeGreaterThan(11)
+  })
+
   it('短い発話でも最低 1 秒は出す', () => {
     const [c] = utteranceToTelopChunks({
       text: 'えっ',
@@ -137,5 +169,56 @@ describe('isLikelyHallucination', () => {
   it('無音で出がちな決まり文句を見分ける', () => {
     expect(isLikelyHallucination('ご視聴ありがとうございました')).toBe(true)
     expect(isLikelyHallucination('ありがとうございました')).toBe(false)
+  })
+})
+
+describe('settleTelopTimes — タイムラインに置いたテロップの時刻を整える', () => {
+  const t = (
+    text: string,
+    startTime: number,
+    endTime: number
+  ): {
+    text: string
+    startTime: number
+    endTime: number
+  } => ({ text, startTime, endTime })
+
+  it('0.3 秒以下の切れ目は、前のテロップを次の頭まで延ばしてつなぐ(点滅させない)', () => {
+    const out = settleTelopTimes([t('こんにちは', 0, 2), t('どうも', 2.2, 4), t('はい', 5, 6)], [])
+    expect(out.map((x) => [x.startTime, x.endTime])).toEqual([
+      [0, 2.2],
+      [2.2, 4],
+      [5, 6]
+    ])
+  })
+
+  it('カットの切れ目はまたがない。切れ目の直後に出るテロップは切れ目から出す', () => {
+    // 10 秒で時間が飛ぶ。前のテロップは 10 秒で切れ、次は切れ目の 0.07 秒後に出ていた
+    const out = settleTelopTimes([t('こんにちは', 8, 10), t('どうも', 10.07, 12)], [10])
+    expect(out.map((x) => [x.startTime, x.endTime])).toEqual([
+      [8, 10],
+      [10, 12]
+    ])
+    // 切れ目の 0.3 秒より後なら、そのまま
+    const late = settleTelopTimes([t('こんにちは', 8, 9.5), t('どうも', 10.5, 12)], [10])
+    expect(late.map((x) => [x.startTime, x.endTime])).toEqual([
+      [8, 9.5],
+      [10.5, 12]
+    ])
+  })
+
+  it('文字数に対して短い枚は、次のテロップ・カットの切れ目までの範囲で延ばす(1秒10文字)', () => {
+    const text = 'どうもありがとうございました' // 14 文字 → 1.4 秒
+    const [a] = settleTelopTimes([t(text, 0, 1.08)], [])
+    expect(a.endTime).toBeCloseTo(1.4, 9)
+    const [b] = settleTelopTimes([t(text, 0, 1.08), t('はい', 1.2, 2)], [])
+    expect(b.endTime).toBeCloseTo(1.2, 9)
+    const [c] = settleTelopTimes([t(text, 0, 1.08)], [1.1])
+    expect(c.endTime).toBeCloseTo(1.1, 9)
+  })
+
+  it('声が重なって同時に出ているテロップは延ばさない', () => {
+    const out = settleTelopTimes([t('ええ', 0, 0.3), t('ほんとに', 0.1, 2)], [])
+    expect(out[0].endTime).toBe(0.3)
   })
 })

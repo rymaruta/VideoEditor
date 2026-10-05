@@ -2,13 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { TextStyle } from '@shared/types'
 import { drawTelop, layoutTelop, type TelopContext } from '@shared/telop/render'
+import * as telopKinds from '@shared/telop/kinds'
 import { HOW_LABEL, TELOP_KINDS, type TelopKindInfo } from '@shared/telop/kinds'
 import { loadTelopFonts } from '../lib/telopFonts'
+import { matchesLookQuery, stillTelopStyle } from '../lib/appearanceEdit'
+import { SearchIcon } from './icons'
 
 /**
  * 見た目の一覧(CapCut の「テキスト > スタイル」のような、絵で選ぶプリセット)。
  * テロップの種類ごとの見た目と、保存したスタイルを小さな見本で並べる。
  * 見本は書き出しと同じ `drawTelop` で描くので、選んだとおりに出る。
+ *
+ * 種類が多い(100 以上)ので、
+ * - 上の「分類」で絞り、検索欄で名前・使いどころ・見本の文から探せる
+ * - 見本は画面に入ったものだけを描く(開くのが一瞬で済むように)
  */
 
 export interface LookItem {
@@ -20,6 +27,8 @@ export interface LookItem {
   /** 保存したスタイルなら、その ID */
   savedId?: string
   group: string
+  /** 検索で見る文(使いどころなど) */
+  keywords?: string
 }
 
 /** 見本の仮想キャンバスの基準(本物と同じ 16:9 の 1080) */
@@ -28,9 +37,10 @@ const THUMB_W = 240
 const THUMB_H = 135
 
 const SAVED_GROUP = '保存したスタイル'
+const ALL = 'すべて'
 
 /** 写真のような落ち着いた背景(空 → 地面)。白い文字・黒い文字どちらも見える明るさ */
-function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+export function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const g = ctx.createLinearGradient(0, 0, 0, h)
   g.addColorStop(0, '#7d97ad')
   g.addColorStop(0.45, '#a9a395')
@@ -45,8 +55,18 @@ function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): voi
   ctx.fillRect(0, 0, w, h)
 }
 
-/** 見本を1枚描く(置き場所は無視して中央に) */
-function drawLookThumb(canvas: HTMLCanvasElement, text: string, style: TextStyle): void {
+/**
+ * 見本を1枚描く(置き場所は無視して中央に、動きを終えた姿で)。
+ * 見た目の一覧のほか、項目ごとのマイ設定の小さな見本にも使う。
+ * `fill` は文字の塊が枠のどれだけを占めるまで寄るか。
+ */
+export function drawLookThumb(
+  canvas: HTMLCanvasElement,
+  text: string,
+  style: TextStyle,
+  fill = 0.8,
+  maxZoom = 4
+): void {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   const { width: w, height: h } = canvas
@@ -56,35 +76,50 @@ function drawLookThumb(canvas: HTMLCanvasElement, text: string, style: TextStyle
   paintBackdrop(ctx, w, h)
   ctx.restore()
   const centered: TextStyle = {
-    ...style,
+    ...stillTelopStyle(style),
     position: 'center',
     customPosition: undefined,
+    rotation: 0,
     // 見本は登場の動きを終えた姿で見せる
-    animation: 'none'
+    animation: 'none',
+    charAnimation: undefined,
+    exitAnimation: undefined
   }
+  // 見本の枠の縦横比に合わせた仮想キャンバス(横長の見本で縦に潰れないように)
+  const base = { w: BASE_CANVAS.h * (w / h), h: BASE_CANVAS.h }
   const source = { text: text || ' ', startTime: 0, endTime: 1e9, style: centered }
   // 小さな見本でも読めるよう、文字の塊が枠の 8 割ほどになるまで寄って描く
   // (仮想キャンバスを小さくする = 拡大。塊が収まる大きさなので折り返しは変わらない)
-  const layout = layoutTelop(ctx as unknown as TelopContext, source, BASE_CANVAS)
+  const layout = layoutTelop(ctx as unknown as TelopContext, source, base)
   const reach =
     (style.outline ? style.outlineWidth : 0) +
     (style.extraStrokes ?? []).reduce((a, s) => a + s.width, 0)
   const bw = layout.blockWidth + reach * 2 + (style.background ? layout.fontSize : 0)
   const bh = layout.blockHeight + reach * 2 + (style.background ? layout.fontSize * 0.6 : 0)
   const zoom = Math.max(
-    1,
-    Math.min(4, (BASE_CANVAS.w * 0.8) / Math.max(1, bw), (BASE_CANVAS.h * 0.6) / Math.max(1, bh))
+    0.5,
+    Math.min(
+      maxZoom,
+      (base.w * fill) / Math.max(1, bw),
+      (base.h * Math.min(0.75, fill)) / Math.max(1, bh)
+    )
   )
   drawTelop(
     ctx as unknown as TelopContext,
     source,
     1,
     { width: w, height: h },
-    {
-      w: BASE_CANVAS.w / zoom,
-      h: BASE_CANVAS.h / zoom
-    }
+    { w: base.w / zoom, h: base.h / zoom }
   )
+}
+
+/** 種類の分類名(分類が無い古い種類は、自動 / AI / 人が置く で分ける) */
+function categoryOf(k: TelopKindInfo): string {
+  const cat = (k as TelopKindInfo & { category?: string }).category
+  const labels = (telopKinds as unknown as { CATEGORY_LABEL?: Record<string, string> })
+    .CATEGORY_LABEL
+  if (cat) return labels?.[cat] ?? cat
+  return HOW_LABEL[k.how]
 }
 
 function kindItem(k: TelopKindInfo): LookItem {
@@ -93,7 +128,8 @@ function kindItem(k: TelopKindInfo): LookItem {
     name: k.label,
     text: k.sample,
     style: k.style(),
-    group: HOW_LABEL[k.how]
+    group: categoryOf(k),
+    keywords: `${k.use} ${k.sample} ${HOW_LABEL[k.how]}`
   }
 }
 
@@ -115,12 +151,45 @@ function buildLookItems(
   ]
 }
 
+/** 見本1枚。画面に入ってから描く(100 枚以上を一度に描くと開くのが遅くなる) */
 function LookThumb({ item, epoch }: { item: LookItem; epoch: number }): React.JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null)
+  const [visible, setVisible] = useState(false)
+  const [fontEpoch, setFontEpoch] = useState(0)
   useEffect(() => {
     const c = ref.current
-    if (c) drawLookThumb(c, item.text, item.style)
-  }, [item, epoch])
+    if (!c || visible) return
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true)
+          io.disconnect()
+        }
+      },
+      { rootMargin: '200px' }
+    )
+    io.observe(c)
+    return () => io.disconnect()
+  }, [visible])
+  // 見えたら、その見本の書体を読み込んでから描き直す
+  useEffect(() => {
+    if (!visible) return
+    let alive = true
+    void loadTelopFonts([item]).then((changed) => {
+      if (alive && changed) setFontEpoch((e) => e + 1)
+    })
+    return () => {
+      alive = false
+    }
+  }, [visible, item])
+  useEffect(() => {
+    const c = ref.current
+    if (c && visible) drawLookThumb(c, item.text, item.style)
+  }, [item, epoch, visible, fontEpoch])
   return (
     <canvas
       ref={ref}
@@ -137,7 +206,8 @@ export function TelopLookGallery({
   savedSample = 'えっ？ ヤバイですよね',
   onPick,
   activeKey,
-  showSaved = true
+  showSaved = true,
+  autoFocusSearch = false
 }: {
   saved: readonly { id: string; name: string; style: TextStyle }[]
   savedSample?: string
@@ -145,20 +215,20 @@ export function TelopLookGallery({
   /** 今当たっている見た目(枠で囲む) */
   activeKey?: string | null
   showSaved?: boolean
+  autoFocusSearch?: boolean
 }): React.JSX.Element {
   const items = useMemo(
     () => buildLookItems(showSaved ? saved : [], savedSample),
     [saved, savedSample, showSaved]
   )
   const [epoch, setEpoch] = useState(0)
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState(ALL)
 
-  // 同梱フォントは使うまで読み込まれない。読み込めたら描き直す
+  // 同梱フォントは使うまで読み込まれない。どこかで読み込めたら、見えている見本を描き直す
   useEffect(() => {
-    let alive = true
-    void loadTelopFonts(items).then((changed) => {
-      if (alive && changed) setEpoch((e) => e + 1)
-    })
     const fonts = typeof document !== 'undefined' ? document.fonts : undefined
+    let alive = true
     const onDone = (): void => {
       if (alive) setEpoch((e) => e + 1)
     }
@@ -167,20 +237,74 @@ export function TelopLookGallery({
       alive = false
       fonts?.removeEventListener?.('loadingdone', onDone)
     }
+  }, [])
+
+  const categories = useMemo(() => {
+    const out: { group: string; count: number }[] = []
+    for (const it of items) {
+      const g = out.find((x) => x.group === it.group)
+      if (g) g.count++
+      else out.push({ group: it.group, count: 1 })
+    }
+    return out
   }, [items])
+  const activeCategory = categories.some((c) => c.group === category) ? category : ALL
 
   const groups = useMemo(() => {
     const out: { group: string; items: LookItem[] }[] = []
     for (const it of items) {
+      if (activeCategory !== ALL && it.group !== activeCategory) continue
+      if (!matchesLookQuery(it, query)) continue
       const g = out.find((x) => x.group === it.group)
       if (g) g.items.push(it)
       else out.push({ group: it.group, items: [it] })
     }
     return out
-  }, [items])
+  }, [items, activeCategory, query])
 
   return (
     <div className="look-gallery">
+      <div className="look-gallery-bar">
+        <label className="look-search">
+          <SearchIcon width={13} height={13} aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="見た目を探す"
+            placeholder="名前・使いどころで探す(例: ツッコミ、値段)"
+            autoFocus={autoFocusSearch}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && query) {
+                e.stopPropagation()
+                setQuery('')
+              }
+            }}
+          />
+        </label>
+        {categories.length > 1 && (
+          <div className="look-cats" role="tablist" aria-label="見た目の分類">
+            {[{ group: ALL, count: items.length }, ...categories].map((c) => (
+              <button
+                key={c.group}
+                type="button"
+                role="tab"
+                aria-selected={activeCategory === c.group}
+                className={`look-cat ${activeCategory === c.group ? 'active' : ''}`}
+                onClick={() => setCategory(c.group)}
+              >
+                {c.group}
+                <span className="look-cat-count">{c.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {groups.length === 0 && (
+        <p className="hint-text look-empty">
+          「{query}」に合う見た目はありません。言葉を変えるか、分類を「すべて」にしてください。
+        </p>
+      )}
       {groups.map((g) => (
         <div key={g.group} className="look-group">
           <div className="look-group-head">
@@ -216,20 +340,24 @@ export function TelopLookPicker({
   onPick,
   onClose,
   activeKey,
-  sample
+  sample,
+  hint = '押すと、選んでいるテロップにすぐ当たります(置き場所はそのまま)。取り消し(Ctrl+Z)で戻せます。'
 }: {
   saved: readonly { id: string; name: string; style: TextStyle }[]
   onPick: (item: LookItem) => void
   onClose: () => void
   activeKey?: string | null
   sample?: string
+  hint?: string
 }): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
+      if (e.key !== 'Escape') return
+      // 検索欄に字があるときの Esc は、まず検索を消す(窓は閉じない)
+      const t = e.target as HTMLInputElement | null
+      if (t?.matches?.('.look-search input') && t.value) return
+      e.stopPropagation()
+      onClose()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
@@ -249,15 +377,14 @@ export function TelopLookPicker({
             ×
           </button>
         </div>
-        <p className="hint-text look-picker-hint">
-          押すと、選んでいるテロップにすぐ当たります(置き場所はそのまま)。取り消し(Ctrl+Z)で戻せます。
-        </p>
+        <p className="hint-text look-picker-hint">{hint}</p>
         <div className="look-picker-body">
           <TelopLookGallery
             saved={saved}
             savedSample={sample}
             onPick={onPick}
             activeKey={activeKey}
+            autoFocusSearch
           />
         </div>
         <div className="dialog-footer">

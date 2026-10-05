@@ -8,6 +8,8 @@ import { GAP_TOLERANCE } from '../sync/multicam'
  * 2. カットで時間を飛ばした所(つなぎ目)は、同じカメラのままだと画が跳ぶので、必ず別のカメラに替える
  * 3. 1ショットは `minShotSec` より短くしない。`maxShotSec` を超えたら、次の話し始めで別のカメラへ
  * 4. そのカメラが録っていない時間には使わない
+ * 5. 場面の頭(`CutRange.sceneId` が替わる所。番組の頭も)は基準カメラ(全体)から入る。
+ *    どこで誰と何をしているかを先に見せてから寄る(状況を見せる画)。2秒は全体のまま(規則3)
  *
  * 顔の検出(誰が映っているか・顔の大きさ)は後から点数として足せるよう、選ぶ所を1か所にまとめてある。
  */
@@ -31,7 +33,7 @@ export interface Shot {
   end: number
   cameraId: string
   /** なぜこのカメラか(画面の説明用) */
-  reason: 'speaker' | 'jump' | 'long' | 'coverage' | 'default' | 'manual'
+  reason: 'speaker' | 'jump' | 'scene' | 'long' | 'coverage' | 'default' | 'manual'
 }
 
 export interface AngleOptions {
@@ -113,9 +115,14 @@ export function chooseAngles(
   let shotStart = 0 // 今のショットの頭(タイムラインの秒)
   let timeline = 0
   let prevEnd = -Infinity
+  let prevScene: string | undefined
 
   for (const piece of pieces) {
     const jump = piece.start > prevEnd + 0.05 && shots.length > 0
+    const sceneStart =
+      piece.sceneId !== undefined &&
+      piece.sceneId !== prevScene &&
+      (shots.length === 0 || piece.start > prevEnd + 0.05)
     // 区間の中で切り替えてよい時刻: 話し始め(話者つき)
     const events = sortedLines.filter(
       (l) => l.start > piece.start + 0.05 && l.start < piece.end - 0.05
@@ -123,10 +130,17 @@ export function chooseAngles(
     const firstSpeaker = sortedLines.find(
       (l) => l.end > piece.start && l.start < piece.end
     )?.speaker
-    // 区間の頭
-    const want = subjectCam(firstSpeaker)
+    // 区間の頭(場面の頭は全体から)
+    // (今が全体なら、同じカメラで時間を飛ばさないよう話者のカメラへ)
+    const speakerCam = subjectCam(firstSpeaker)
+    const want = sceneStart ? anchor : speakerCam
     if (!current || jump || !covers(current, piece.start, piece.start + 0.05)) {
-      const cam = pick(piece.start, piece.start + 0.05, [want], jump ? current?.id : undefined)
+      const cam = pick(
+        piece.start,
+        piece.start + 0.05,
+        sceneStart ? [anchor, speakerCam] : [speakerCam],
+        jump ? current?.id : undefined
+      )
       if (cam) {
         current = cam
         shotStart = timeline
@@ -134,7 +148,14 @@ export function chooseAngles(
           start: piece.start,
           end: piece.end,
           cameraId: cam.id,
-          reason: jump ? 'jump' : want && cam.id === want.id ? 'speaker' : 'default'
+          reason:
+            sceneStart && cam.id === anchor.id
+              ? 'scene'
+              : jump
+                ? 'jump'
+                : want && cam.id === want.id
+                  ? 'speaker'
+                  : 'default'
         })
       }
     } else {
@@ -171,6 +192,7 @@ export function chooseAngles(
     }
     timeline += piece.end - piece.start
     prevEnd = piece.end
+    prevScene = piece.sceneId
   }
 
   // 録っていない時間に掛かったショットは、録っているカメラで分ける

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { TelopGradient } from '@shared/types'
 import { gradientCss, gradientFromColor, colorFromGradient } from '../lib/telopAppearance'
+import { scrubValue } from '../lib/appearanceEdit'
 import { ColorField } from './ColorField'
 import { GradientEditor } from './GradientEditor'
 import { ChevronDownIcon } from './icons'
@@ -39,6 +40,7 @@ export function StyleSection({
   enabled,
   onToggle,
   summary,
+  actions,
   children
 }: {
   id: string
@@ -49,6 +51,8 @@ export function StyleSection({
   onToggle?: (on: boolean) => void
   /** 畳んでいるときに見出しの右に出す短い説明 */
   summary?: string
+  /** 見出しの右に出す道具(マイ設定のメニューなど) */
+  actions?: React.ReactNode
   children: React.ReactNode
 }): React.JSX.Element {
   const [open, setOpenState] = useState(() => readOpen()[id] ?? defaultOpen)
@@ -72,6 +76,7 @@ export function StyleSection({
           <span className="style-section-title">{title}</span>
           {summary && <span className="style-section-summary">{summary}</span>}
         </button>
+        {actions}
         {enabled !== undefined && onToggle && (
           <input
             type="checkbox"
@@ -132,6 +137,8 @@ export function NumberSlider({
   digits?: number
 }): React.JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
+  // 数値欄を左右にドラッグして値を動かす(Premiere のホットテキスト)。押して離しただけなら打ち込み
+  const scrub = useRef<{ x: number; v: number; moved: boolean } | null>(null)
   const shown = value * scale
   const d = digits ?? (step < 1 ? Math.min(2, String(step).split('.')[1]?.length ?? 1) : 0)
   const text = Number.isFinite(shown) ? String(Number(shown.toFixed(d))) : ''
@@ -162,11 +169,37 @@ export function NumberSlider({
         max={max}
         step={step}
         value={draft ?? text}
+        title="左右にドラッグで調整(Shift で10倍、Alt で細かく)。押すと打ち込めます"
         onChange={(e) => {
           setDraft(e.target.value)
           commit(e.target.value)
         }}
         onBlur={() => setDraft(null)}
+        onPointerDown={(e) => {
+          if (e.button !== 0 || document.activeElement === e.currentTarget) return
+          e.preventDefault()
+          e.currentTarget.setPointerCapture(e.pointerId)
+          scrub.current = { x: e.clientX, v: shown, moved: false }
+        }}
+        onPointerMove={(e) => {
+          const s = scrub.current
+          if (!s) return
+          const dx = e.clientX - s.x
+          if (!s.moved && Math.abs(dx) < 3) return
+          s.moved = true
+          const k = e.shiftKey ? 10 : e.altKey ? 0.1 : 1
+          const next = scrubValue(s.v, dx, step, k, min, max)
+          if (next !== shown) onChange(next / scale)
+        }}
+        onPointerUp={(e) => {
+          const s = scrub.current
+          scrub.current = null
+          if (s && !s.moved) {
+            e.currentTarget.focus()
+            e.currentTarget.select()
+          }
+        }}
+        onPointerCancel={() => (scrub.current = null)}
       />
       {unit && <span className="prop-unit">{unit}</span>}
     </span>

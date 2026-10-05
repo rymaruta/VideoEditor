@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type {
-  FontFamily,
   TelopCharAnimation,
   TelopExitAnimation,
   TelopLoopAnimation,
@@ -33,9 +32,12 @@ import {
   strokesFromStyle,
   strokesToStyle
 } from '../lib/telopAppearance'
+import { readableBackground } from '../lib/appearanceEdit'
 import { ColorField } from './ColorField'
 import { FillField, NumberSlider, Segmented, StyleSection } from './AppearanceControls'
 import { AngleDial } from './GradientEditor'
+import { FontPicker } from './FontPicker'
+import { SectionPresetMenu } from './SectionPresetMenu'
 
 /**
  * テロップの見た目の欄。Premiere のエッセンシャルグラフィックス(アピアランス)と
@@ -56,16 +58,6 @@ const ANIMATIONS: { value: TextAnimation; label: string }[] = [
   { value: 'bounce', label: '弾む' },
   { value: 'typewriter', label: '1文字ずつ' }
 ]
-
-/** 書体を見出し(基本・バラエティ…)ごとにまとめる */
-const FONT_GROUPS = FONT_FAMILY_OPTIONS.reduce<
-  { group: string; items: typeof FONT_FAMILY_OPTIONS }[]
->((acc, f) => {
-  const g = acc.find((x) => x.group === f.group)
-  if (g) g.items.push(f)
-  else acc.push({ group: f.group, items: [f] })
-  return acc
-}, [])
 
 const TAIL_SIDES: { value: TelopBubbleTail['side']; label: string }[] = [
   { value: 'bottom', label: '下' },
@@ -126,7 +118,12 @@ export function TelopStyleFields({
       <GlowSection style={style} patch={patch} />
       <SpanSection style={style} patch={patch} />
       <PointerSection style={style} patch={patch} />
-      <StyleSection id="motion" title="位置・動き" defaultOpen>
+      <StyleSection
+        id="motion"
+        title="位置・動き"
+        defaultOpen
+        actions={<SectionPresetMenu section="motion" title="動き" style={style} onApply={patch} />}
+      >
         {placement}
         <MotionFields style={style} patch={patch} />
         {showKaraoke && (
@@ -287,27 +284,13 @@ function TextSection({ style, patch }: SectionProps): React.JSX.Element {
   return (
     <StyleSection
       id="text"
+      actions={<SectionPresetMenu section="text" title="テキスト" style={style} onApply={patch} />}
       title="テキスト"
       defaultOpen
       summary={`${fontLabel?.split(/[((]/)[0].trim() ?? ''} ${style.fontSize}px`}
     >
       <PropRow label="書体">
-        <select
-          aria-label="フォント"
-          className="prop-wide"
-          value={style.fontFamily}
-          onChange={(e) => patch({ fontFamily: e.target.value as FontFamily })}
-        >
-          {FONT_GROUPS.map((g) => (
-            <optgroup key={g.group} label={g.group}>
-              {g.items.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <FontPicker value={style.fontFamily} onChange={(v) => patch({ fontFamily: v })} />
       </PropRow>
       <PropRow label="サイズ">
         <NumberSlider
@@ -464,6 +447,7 @@ function FillSection({ style, patch }: SectionProps): React.JSX.Element {
   return (
     <StyleSection
       id="fill"
+      actions={<SectionPresetMenu section="fill" title="塗り" style={style} onApply={patch} />}
       title="塗り"
       defaultOpen
       summary={gradient ? 'グラデーション' : undefined}
@@ -492,6 +476,7 @@ function StrokeSection({ style, patch }: SectionProps): React.JSX.Element {
   return (
     <StyleSection
       id="stroke"
+      actions={<SectionPresetMenu section="stroke" title="縁" style={style} onApply={patch} />}
       title="縁(ストローク)"
       defaultOpen
       summary={list.length > 0 ? `${list.length} 本` : 'なし'}
@@ -592,9 +577,15 @@ function BackgroundSection({ style, patch }: SectionProps): React.JSX.Element {
   return (
     <StyleSection
       id="background"
+      actions={
+        <SectionPresetMenu section="background" title="背景" style={style} onApply={patch} />
+      }
       title="背景"
       enabled={style.background}
-      onToggle={(on) => patch({ background: on })}
+      // 付けたときは、文字が読める色・濃さから始める(白文字に白い帯、のようにならないように)
+      onToggle={(on) =>
+        patch(on ? { background: true, ...readableBackground(style) } : { background: false })
+      }
       summary={
         style.background ? { lines: '行ごと', block: '1枚の板', bubble: '吹き出し' }[shape] : 'なし'
       }
@@ -797,6 +788,7 @@ function ShadowSection({ style, patch }: SectionProps): React.JSX.Element {
   return (
     <StyleSection
       id="shadow"
+      actions={<SectionPresetMenu section="shadow" title="影" style={style} onApply={patch} />}
       title="影"
       enabled={style.shadow}
       onToggle={(on) => patch({ shadow: on })}
@@ -889,6 +881,7 @@ function GlowSection({ style, patch }: SectionProps): React.JSX.Element {
   return (
     <StyleSection
       id="glow"
+      actions={<SectionPresetMenu section="glow" title="光彩" style={style} onApply={patch} />}
       title="光彩(グロー)"
       enabled={Boolean(glow)}
       onToggle={(on) =>
@@ -949,7 +942,14 @@ const SPAN_KINDS: {
 function SpanSection({ style, patch }: SectionProps): React.JSX.Element {
   const used = SPAN_KINDS.filter((k) => style[k.key]).length
   return (
-    <StyleSection id="spans" title="部分の装飾" summary={used > 0 ? `${used} 種類` : undefined}>
+    <StyleSection
+      id="spans"
+      title="部分の装飾"
+      summary={used > 0 ? `${used} 種類` : undefined}
+      actions={
+        <SectionPresetMenu section="spans" title="部分の装飾" style={style} onApply={patch} />
+      }
+    >
       <p className="hint-text style-note">
         本文で <code>**強調**</code> と囲んだ所、<code>__小さく__</code> と囲んだ所、
         改行の前の1行目だけを、別の大きさ・色にできます(値段・「Q.」・章の番号など)。 ふりがなは{' '}
@@ -1013,6 +1013,7 @@ function PointerSection({ style, patch }: SectionProps): React.JSX.Element {
   return (
     <StyleSection
       id="pointer"
+      actions={<SectionPresetMenu section="pointer" title="矢印" style={style} onApply={patch} />}
       title="矢印"
       enabled={Boolean(p)}
       onToggle={(on) =>

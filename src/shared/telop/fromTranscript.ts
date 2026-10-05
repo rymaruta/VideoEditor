@@ -1,5 +1,6 @@
 import type { AsrWord, TranscriptUtterance } from '../transcript'
 import { applyDictionary, balancedLineEnds, removeFillers, type DictionaryEntry } from './polish'
+import { MIN_DISPLAY_SEC, READ_CHARS_PER_SEC } from '../qc/telop'
 
 /**
  * 発話を発言テロップの単位に区切る(計画書 §5.8 の手前の、仮の整形)。
@@ -26,6 +27,9 @@ export interface ChunkOptions {
   /** 用語の辞書 */
   dictionary?: readonly DictionaryEntry[]
 }
+
+/** 発話の最初の1枚を、発話の区間の頭から何秒後に出すか(区間の余白 0.15 秒より少し短く) */
+export const FIRST_TELOP_DELAY_SEC = 0.07
 
 /** 表示用に整える(句点を落とし、読点を空白に) */
 export function tidyTelopText(text: string): string {
@@ -109,7 +113,14 @@ export function utteranceToTelopChunks(
     const to = p.to
     for (let k = p.from + 1; k < to; k++)
       if (polish(chars.slice(k, to).join('')) === polished) from = k
-    const start = timed.length > 0 ? timed[from].start : timeAt(from)
+    let start = timed.length > 0 ? timed[from].start : timeAt(from)
+    // 発話の最初の1枚は、言葉の時刻ではなく発話の頭(声を検出した区間の頭)から出す。
+    // 音声認識の言葉の時刻は声より遅れがちで、30分の回(発話 361 件)では最初の1枚が
+    // 声の頭より 中央値 0.20 秒・90%点 0.43 秒 遅れて出ていた(テロップが声を追いかける)。
+    // 発話の区間は声の頭より 0.15 秒前から始まる(話者の判定の余白)ので、そこから
+    // `FIRST_TELOP_DELAY_SEC` 後に出すと、声のほんの少し(2フレームほど)前に出る
+    if (from === 0 && timed.length > 0 && u.sourceStart < start)
+      start = Math.max(u.sourceStart, Math.min(start, u.sourceStart + FIRST_TELOP_DELAY_SEC))
     const end = timed.length > 0 ? timed[to - 1].end : timeAt(to)
     chunks.push({
       text,
@@ -122,4 +133,67 @@ export function utteranceToTelopChunks(
     chunks[k].sourceEnd = Math.min(chunks[k].sourceEnd, chunks[k + 1].sourceStart)
   }
   return chunks
+}
+
+export interface SettleOptions {
+  /** これより短い切れ目(秒)は、前のテロップを次の頭まで延ばしてつなぐ */
+  bridgeSec?: number
+  /** 読める速さ(1秒あたりの文字数)。これより速い枚は、次のテロップ・カットまでの範囲で延ばす */
+  charsPerSec?: number
+  /** 最短の表示時間(秒) */
+  minSec?: number
+}
+
+/** 前のテロップを延ばしてつなぐ切れ目の上限(秒) */
+export const TELOP_BRIDGE_SEC = 0.3
+
+/**
+ * タイムラインに置いた発言テロップの時刻を整える(画面の点滅と読み切れない枚を無くす)。
+ *
+ * - 次のテロップまでの切れ目が `bridgeSec` 以下なら、前のテロップを次の頭まで延ばす。
+ *   0.1〜0.3 秒だけ消えてまた出ると、点滅に見える(30分の回で、最初の1枚を声の頭に合わせると
+ *   話者の替わり目でこの切れ目が 38 か所できた)
+ * - 文字数に対して短すぎる枚(自動の確認と同じ 1秒10文字・最短 0.5 秒)は、
+ *   次のテロップの頭・カットの切れ目を越えない範囲で延ばす
+ * - どちらも**カットの切れ目(`hardCuts`、タイムラインの秒)は越えない**。時間の飛んだ先の画に
+ *   前の場面のテロップが残ると、言っていない言葉が画に乗る
+ * - カットの切れ目の直後(`bridgeSec` 以内)に出るテロップは、切れ目から出す。画が替わってから
+ *   2フレームほど遅れてテロップが出ると、ちらついて見える(同じ回で、切れ目をまたぐ短い切れ目が 33 か所)
+ * - 頭を前へ動かすのはこの場合だけ。重なっているテロップ(声の重なり)は延ばさない
+ */
+export function settleTelopTimes<T extends { text: string; startTime: number; endTime: number }>(
+  telops: readonly T[],
+  hardCuts: readonly number[],
+  options: SettleOptions = {}
+): T[] {
+  const bridge = options.bridgeSec ?? TELOP_BRIDGE_SEC
+  const cps = options.charsPerSec ?? READ_CHARS_PER_SEC
+  const minSec = options.minSec ?? MIN_DISPLAY_SEC
+  const cuts = [...hardCuts].sort((a, b) => a - b)
+  const out = [...telops].sort((a, b) => a.startTime - b.startTime).map((t) => ({ ...t }))
+  // 切れ目のすぐ後に出るテロップは、切れ目(画の替わる瞬間)から出す
+  let prevEnd = -Infinity
+  for (const t of out) {
+    let cut: number | undefined
+    for (const c of cuts) if (c <= t.startTime + 1e-6) cut = c
+    if (cut !== undefined && t.startTime - cut <= bridge && prevEnd <= cut + 1e-6)
+      t.startTime = Math.min(t.startTime, cut)
+    prevEnd = Math.max(prevEnd, t.endTime)
+  }
+  for (let i = 0; i < out.length; i++) {
+    const t = out[i]
+    const cut = cuts.find((c) => c > t.startTime + 1e-6) ?? Infinity
+    const next = out[i + 1]?.startTime ?? Infinity
+    // 次のテロップがすでに重なっている(声の重なりで積んだ)なら延ばさない
+    if (next < t.endTime - 1e-6) continue
+    const limit = Math.min(cut, next)
+    if (limit <= t.endTime) continue
+    const chars = t.text.replace(/\s/g, '').length
+    const need = Math.max(minSec, chars / cps)
+    let end = t.endTime
+    if (end - t.startTime < need) end = Math.min(limit, t.startTime + need)
+    if (next <= cut && next - end > 0 && next - end <= bridge) end = next
+    t.endTime = end
+  }
+  return out
 }

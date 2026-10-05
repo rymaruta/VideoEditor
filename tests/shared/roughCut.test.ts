@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRoughCut, roughTimelineAt } from '../../src/shared/roughCut/build'
+import { buildRoughCut, CUT_FADE_SEC, roughTimelineAt } from '../../src/shared/roughCut/build'
 import type { MulticamInfo } from '../../src/shared/sync/multicam'
 
 // 共通の時間軸: カメラA は 0〜100 を2本(0〜50, 50〜100)、カメラB は 10〜100、マイクは 0〜100(時計 100ppm 速い)
@@ -58,6 +58,22 @@ describe('buildRoughCut', () => {
       ['a2', 10, 0, 10],
       ['a2', 20, 30, 40]
     ])
+  })
+
+  it('時間の飛ぶ切れ目だけ、音声のクリップに短いフェードを付ける(素材の切れ目には付けない)', () => {
+    const amb = cut.audio.find((a) => a.sourceId === 'A')!
+    // a1(40〜50)→ a2(50〜60)は素材の切れ目で音は続いている。60〜80 を飛ばした所が切れ目
+    expect(amb.clips.map((c) => [c.fadeIn ?? 0, c.fadeOut ?? 0])).toEqual([
+      [CUT_FADE_SEC, 0],
+      [0, CUT_FADE_SEC],
+      [CUT_FADE_SEC, CUT_FADE_SEC]
+    ])
+    const mic = cut.audio.find((a) => a.sourceId === 'M')!
+    expect(mic.clips.every((c) => c.fadeIn === CUT_FADE_SEC && c.fadeOut === CUT_FADE_SEC)).toBe(
+      true
+    )
+    expect(CUT_FADE_SEC).toBeGreaterThanOrEqual(0.005)
+    expect(CUT_FADE_SEC).toBeLessThanOrEqual(0.02)
   })
 
   it('共通の時刻から、仮編集のタイムラインの時刻を引ける', () => {

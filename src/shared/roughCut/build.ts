@@ -26,7 +26,19 @@ export interface RoughAudioClip {
   inPoint: number
   outPoint: number
   speed: number
+  /** 時間の飛ぶ切れ目に付ける短いフェード(秒)。続いている所には付けない */
+  fadeIn?: number
+  fadeOut?: number
 }
+
+/**
+ * 時間の飛ぶ切れ目で、音声のクリップの頭と終わりに付けるフェード(秒)。
+ * 切れ目は静かな所へ寄せてある(`snapCutsToQuiet`)が、周りの音(カメラの音)は風・車・人混みで
+ * いつも鳴っていて、別の時刻の音へ急に替わると波形が段になり「プツッ」と鳴る。
+ * 20ms は耳に音の途切れとして聞こえない長さで、段をならすには足りる(長尺向けの書き出しでは
+ * フレーム単位に丸められ、29.97fps で 1フレーム = 33ms になる)
+ */
+export const CUT_FADE_SEC = 0.02
 
 export interface RoughCut {
   main: RoughMainClip[]
@@ -117,7 +129,10 @@ export function buildRoughCut(
           startTime: span.timeline + (t - span.start),
           inPoint: toSource(f, t),
           outPoint: toSource(f, end),
-          speed: f.rate
+          speed: f.rate,
+          // 時間の飛ぶ切れ目(区間の頭と終わり)だけ。素材の切れ目は音が続いているので付けない
+          ...(Math.abs(t - span.start) < 1e-6 ? { fadeIn: CUT_FADE_SEC } : {}),
+          ...(Math.abs(end - span.end) < 1e-6 ? { fadeOut: CUT_FADE_SEC } : {})
         })
         t = end
       }

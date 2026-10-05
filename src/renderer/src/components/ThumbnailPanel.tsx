@@ -1,26 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { usePresetStore } from '../store/presetStore'
 import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { ImageIcon, DownloadIcon, SparklesIcon, WandIcon } from './icons'
 import { targetResolution } from '@shared/resolution'
 import { safeFileBaseName } from '@shared/fileName'
-import { ColorField } from './ColorField'
-import type { TextPosition } from '@shared/types'
+import { textCanvasSize } from '@shared/resolution'
+import { drawTelop, layoutTelop, type TelopContext } from '@shared/telop/render'
+import type { TextPosition, TextStyle } from '@shared/types'
+import { loadTelopFonts } from '../lib/telopFonts'
+import { lookPatch, SECTION_IDS, settledTelopTime, stillTelopStyle } from '../lib/appearanceEdit'
+import { useStyleClipboard } from '../lib/styleClipboard'
+import {
+  defaultThumbnailStyle,
+  readThumbnailStyle,
+  readThumbnailText,
+  writeThumbnailStyle,
+  writeThumbnailText
+} from '../lib/thumbnailStyle'
+import { NumberSlider } from './AppearanceControls'
+import { PropRow, TelopStyleFields } from './TelopStyleFields'
+import { paintBackdrop, TelopLookPicker, type LookItem } from './TelopLookGallery'
 
 // サムネイルの短辺。長辺はプロジェクトのアスペクト比から targetResolution() が決める
 // (9:16 なら 720x1280、16:9 なら 1280x720)。書き出しと同じ関数を使う。
 const THUMB_SHORT_SIDE = 720
 const CANDIDATE_COUNT = 6
 
-interface ThumbStyle {
-  fontSize: number
-  color: string
-  position: TextPosition
-  bold: boolean
-  outline: boolean
-}
-
+/**
+ * サムネイルの文字は、テロップと同じ見た目(TextStyle)と同じ描き方(drawTelop)で描く。
+ * 書体・グラデーション・何重もの縁・背景・影・光彩・部分の装飾(**強調**)・ルビ・縦書き・
+ * マイ設定・見た目の一覧が、テロップと同じ欄でそのまま使える。動きは止め絵なので、
+ * 登場の動きが終わってから消える動きが始まる前の姿を描く。
+ */
 export function ThumbnailPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const projectId = useProjectStore((s) => s.project.id)
@@ -28,15 +41,27 @@ export function ThumbnailPanel(): React.JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
-  const [text, setText] = useState('')
-  const [style, setStyle] = useState<ThumbStyle>({
-    fontSize: 90,
-    color: '#ffffff',
-    position: 'bottom',
-    bold: true,
-    outline: true
-  })
+  const [text, setTextState] = useState(() => readThumbnailText(projectId))
+  const [style, setStyleState] = useState<TextStyle>(readThumbnailStyle)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [image, setImage] = useState<HTMLImageElement | null>(null)
+  const [fontEpoch, setFontEpoch] = useState(0)
+  const captionPresets = usePresetStore((s) => s.captionPresets)
+  const clipStyle = useStyleClipboard((s) => s.style)
+  const clipFrom = useStyleClipboard((s) => s.from)
+  const copyLook = useStyleClipboard((s) => s.copy)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const drag = useRef<{ px: number; py: number; x: number; y: number } | null>(null)
+  const textCanvas = textCanvasSize(project.aspectRatio)
+  const setText = (t: string): void => {
+    setTextState(t)
+    writeThumbnailText(projectId, t)
+  }
+  const setStyle = (next: TextStyle): void => {
+    setStyleState(next)
+    writeThumbnailStyle(next)
+  }
+  const patch = (p: Partial<TextStyle>): void => setStyle({ ...style, ...p })
   const { w: thumbWidth, h: thumbHeight } = targetResolution(project.aspectRatio, THUMB_SHORT_SIDE)
   // 表示枠も同じ寸法から決める。CSS 側に 16/9 を書くと、9:16 プロジェクトでは
   // 720x1280 の絵を 16:9 の枠に押し込んで表示することになり、**保存される画像は
@@ -58,6 +83,7 @@ export function ThumbnailPanel(): React.JSX.Element {
     setCandidates([])
     setSelected(null)
     setError(null)
+    setTextState(readThumbnailText(projectId))
   }, [projectId])
 
   async function generateCandidates(): Promise<void> {
@@ -187,38 +213,111 @@ export function ThumbnailPanel(): React.JSX.Element {
     }
   }
 
+  // 選んだ候補の画を読み込む(描くたびに読み直すと、文字を打つたびにちらつく)
   useEffect(() => {
-    if (!selected) return
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    if (!selected) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setImage(null)
+      return
+    }
+    let alive = true
     const img = new Image()
     img.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      if (text.trim()) {
-        const y =
-          style.position === 'top'
-            ? canvas.height * 0.16
-            : style.position === 'bottom'
-              ? canvas.height * 0.84
-              : canvas.height / 2
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.font = `${style.bold ? '700' : '400'} ${style.fontSize}px sans-serif`
-        if (style.outline) {
-          ctx.lineWidth = style.fontSize * 0.14
-          ctx.strokeStyle = '#000000'
-          ctx.lineJoin = 'round'
-          ctx.strokeText(text, canvas.width / 2, y)
-        }
-        ctx.fillStyle = style.color
-        ctx.fillText(text, canvas.width / 2, y)
-      }
+      if (alive) setImage(img)
     }
     img.src = selected
-  }, [selected, text, style])
+    return () => {
+      alive = false
+    }
+  }, [selected])
+
+  // 同梱フォントは使うまで読み込まれないので、使う書体と文字を先に読み込んでから描き直す
+  useEffect(() => {
+    let alive = true
+    void loadTelopFonts([{ text, style }]).then((changed) => {
+      if (alive && changed) setFontEpoch((e) => e + 1)
+    })
+    return () => {
+      alive = false
+    }
+  }, [text, style])
+
+  // 書き出しと同じ解像度(サムネイルの実寸)で描く
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx) return
+    const { width: w, height: h } = canvas
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    if (image) ctx.drawImage(image, 0, 0, w, h)
+    else paintBackdrop(ctx, w, h)
+    if (!text.trim()) return
+    const still = stillTelopStyle(style)
+    const { time, endTime } = settledTelopTime(still, text)
+    drawTelop(
+      ctx as unknown as TelopContext,
+      { text, startTime: 0, endTime, style: still },
+      time,
+      { width: w, height: h },
+      textCanvas
+    )
+  }, [image, text, style, fontEpoch, textCanvas.w, textCanvas.h, thumbWidth, thumbHeight])
+
+  /** 文字の塊の中心(画面に対する割合)。自由配置ならその点、そうでなければ今の置き場所から測る */
+  function blockCenter(): { x: number; y: number } {
+    if (style.customPosition) return style.customPosition
+    const ctx = canvasRef.current?.getContext('2d')
+    if (!ctx || !text.trim()) return { x: 0.5, y: 0.5 }
+    const layout = layoutTelop(
+      ctx as unknown as TelopContext,
+      { text, startTime: 0, endTime: 1, style },
+      textCanvas
+    )
+    return {
+      x: layout.anchor.x / textCanvas.w,
+      y: (layout.anchor.y + layout.topFromAnchor + layout.blockHeight / 2) / textCanvas.h
+    }
+  }
+
+  // 見本の上で文字をドラッグして動かす(Canva と同じ)。動かすと自由配置になる
+  function onCanvasPointerDown(e: React.PointerEvent<HTMLCanvasElement>): void {
+    if (!text.trim() || e.button !== 0) return
+    const r = e.currentTarget.getBoundingClientRect()
+    const c = blockCenter()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drag.current = { px: (e.clientX - r.left) / r.width, py: (e.clientY - r.top) / r.height, ...c }
+  }
+  function onCanvasPointerMove(e: React.PointerEvent<HTMLCanvasElement>): void {
+    const d = drag.current
+    if (!d) return
+    const r = e.currentTarget.getBoundingClientRect()
+    const clamp = (v: number): number => Math.min(1, Math.max(0, v))
+    const x = clamp(d.x + (e.clientX - r.left) / r.width - d.px)
+    const y = clamp(d.y + (e.clientY - r.top) / r.height - d.py)
+    setStyleState((s) => ({ ...s, customPosition: { x, y } }))
+  }
+  function onCanvasPointerUp(): void {
+    if (!drag.current) return
+    drag.current = null
+    // 動かし終わったら覚える(動かしている間は書き込まない)
+    setStyleState((s) => {
+      writeThumbnailStyle(s)
+      return s
+    })
+  }
+
+  function pickLook(item: LookItem): void {
+    // 見た目だけを入れ替える。置き場所・回転は今のまま
+    setStyle({
+      ...item.style,
+      position: style.position,
+      customPosition: style.customPosition,
+      rotation: style.rotation
+    })
+  }
+
+  const pos = style.customPosition ?? null
 
   function handleDownload(): void {
     const canvas = canvasRef.current
@@ -249,79 +348,176 @@ export function ThumbnailPanel(): React.JSX.Element {
       </p>
       {error && <p className="error-text">{error}</p>}
       {candidates.length === 0 && !loading && (
-        <div className="empty-state">
-          <ImageIcon width={26} height={26} />
+        <div className="empty-state thumbnail-empty">
+          <ImageIcon width={20} height={20} />
           <p className="hint-text">上のボタンから候補を生成してください</p>
         </div>
       )}
       {candidates.length > 0 && (
-        <>
-          <div className="thumbnail-candidates">
-            {candidates.map((c, i) => (
-              <img
-                key={i}
-                src={c}
-                className={`thumbnail-candidate ${selected === c ? 'selected' : ''}`}
-                style={thumbAspect}
-                onClick={() => setSelected(c)}
-                alt={`候補${i + 1}`}
-              />
-            ))}
-          </div>
-          <canvas
-            ref={canvasRef}
-            width={thumbWidth}
-            height={thumbHeight}
-            className="thumbnail-canvas"
-            style={thumbAspect}
-          />
-          <input
-            type="text"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="サムネイルのテキスト"
-            className="thumbnail-text-input"
-          />
-          <div className="overlay-item-row">
-            <label>
-              サイズ
-              <input
-                type="number"
-                min={30}
-                max={160}
-                value={style.fontSize}
-                onChange={(e) => setStyle((s) => ({ ...s, fontSize: Number(e.target.value) }))}
-              />
-            </label>
-            {/* label で包むと、色の吹き出しの中を押すたびに見本のボタンが押され直して閉じる */}
-            <div className="overlay-item-field">
-              色
-              <ColorField
-                label="サムネイルの文字の色"
-                value={style.color}
-                onChange={(hex) => setStyle((s) => ({ ...s, color: hex }))}
-              />
-            </div>
-            <label>
-              位置
+        <div className="thumbnail-candidates">
+          {candidates.map((c, i) => (
+            <img
+              key={i}
+              src={c}
+              className={`thumbnail-candidate ${selected === c ? 'selected' : ''}`}
+              style={thumbAspect}
+              onClick={() => setSelected(c)}
+              alt={`候補${i + 1}`}
+            />
+          ))}
+        </div>
+      )}
+      <div className="thumbnail-stage">
+        <canvas
+          ref={canvasRef}
+          width={thumbWidth}
+          height={thumbHeight}
+          className={`thumbnail-canvas ${text.trim() ? 'draggable' : ''}`}
+          style={thumbAspect}
+          aria-label="サムネイルの見本(文字はドラッグで動かせます)"
+          title={text.trim() ? '文字をドラッグして動かせます' : undefined}
+          onPointerDown={onCanvasPointerDown}
+          onPointerMove={onCanvasPointerMove}
+          onPointerUp={onCanvasPointerUp}
+          onPointerCancel={onCanvasPointerUp}
+        />
+        {!selected && (
+          <span className="thumbnail-stage-note">
+            候補を作って選ぶと、ここに画が入ります(文字の見た目は先に決められます)
+          </span>
+        )}
+      </div>
+      <div className="thumbnail-text">
+        <label className="prop-label" htmlFor="thumbnail-text">
+          文字
+        </label>
+        <textarea
+          id="thumbnail-text"
+          rows={2}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="サムネイルの文字(改行で2行に。**強調** で色を変える、漢字《かんじ》でふりがな)"
+          className="thumbnail-text-input"
+        />
+      </div>
+      <PropRow label="見た目">
+        <button
+          type="button"
+          className="small-button look-open-button"
+          title="テロップの種類ごとの見た目と、保存したスタイルを絵で選びます"
+          onClick={() => setPickerOpen(true)}
+        >
+          <SparklesIcon width={12} height={12} />
+          見た目を選ぶ…
+        </button>
+        <button
+          type="button"
+          className="small-button"
+          title="サムネイルの文字の見た目を覚えます(テロップに貼り付けられます)"
+          onClick={() => copyLook(style, 'サムネイルの文字')}
+        >
+          コピー
+        </button>
+        <button
+          type="button"
+          className="small-button"
+          disabled={!clipStyle}
+          title={
+            clipStyle
+              ? `${clipFrom} からコピーした見た目を貼り付けます(置き場所はそのまま)`
+              : '先にテロップの「見た目をコピー」でコピーしてください'
+          }
+          onClick={() => clipStyle && patch(lookPatch(clipStyle, SECTION_IDS))}
+        >
+          貼り付け
+        </button>
+        <button
+          type="button"
+          className="link-button"
+          title="サムネイルの文字を、はじめの見た目(太い黄色の文字・二重の縁)に戻します"
+          onClick={() => setStyle(defaultThumbnailStyle())}
+        >
+          はじめに戻す
+        </button>
+      </PropRow>
+      {pickerOpen && (
+        <TelopLookPicker
+          saved={captionPresets}
+          sample={text.trim() || 'サムネイル'}
+          onPick={pickLook}
+          onClose={() => setPickerOpen(false)}
+          hint="押すと、サムネイルの文字にすぐ当たります(置き場所はそのまま)。"
+        />
+      )}
+      <TelopStyleFields
+        style={style}
+        onPatch={patch}
+        placement={
+          <>
+            <PropRow label="配置" title="見本の文字をドラッグしても動かせます">
               <select
-                value={style.position}
-                onChange={(e) =>
-                  setStyle((s) => ({ ...s, position: e.target.value as TextPosition }))
-                }
+                aria-label="サムネイルの文字の配置"
+                value={pos ? 'custom' : style.position}
+                onChange={(e) => {
+                  if (e.target.value === 'custom') return
+                  patch({ position: e.target.value as TextPosition, customPosition: undefined })
+                }}
               >
                 <option value="top">上</option>
                 <option value="center">中央</option>
                 <option value="bottom">下</option>
+                {pos && <option value="custom">自由配置</option>}
               </select>
-            </label>
-          </div>
-          <button className="primary-button thumbnail-download" onClick={handleDownload}>
-            <DownloadIcon width={14} height={14} />
-            PNGでダウンロード
-          </button>
-        </>
-      )}
+              {pos && (
+                <>
+                  <span className="prop-unit">X</span>
+                  <NumberSlider
+                    slider={false}
+                    label="横位置(%)"
+                    value={pos.x}
+                    onChange={(v) => patch({ customPosition: { x: v, y: pos.y } })}
+                    min={0}
+                    max={100}
+                    scale={100}
+                  />
+                  <span className="prop-unit">Y</span>
+                  <NumberSlider
+                    slider={false}
+                    label="縦位置(%)"
+                    value={pos.y}
+                    onChange={(v) => patch({ customPosition: { x: pos.x, y: v } })}
+                    min={0}
+                    max={100}
+                    scale={100}
+                    unit="%"
+                  />
+                </>
+              )}
+            </PropRow>
+            <PropRow label="回転">
+              <NumberSlider
+                label="サムネイルの文字の回転"
+                value={style.rotation}
+                onChange={(v) => patch({ rotation: v })}
+                min={-180}
+                max={180}
+                sliderMin={-30}
+                sliderMax={30}
+                unit="度"
+              />
+            </PropRow>
+          </>
+        }
+      />
+      <button
+        className="primary-button thumbnail-download"
+        onClick={handleDownload}
+        disabled={!selected}
+        title={selected ? undefined : '先に候補を作って選んでください'}
+      >
+        <DownloadIcon width={14} height={14} />
+        PNGでダウンロード
+      </button>
     </div>
   )
 }

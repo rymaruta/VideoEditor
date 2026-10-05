@@ -67,3 +67,36 @@ export function normalizeFavoriteColors(raw: unknown): string[] {
   }
   return out.slice(0, MAX_FAVORITE_COLORS)
 }
+
+/** 最近使った色の数(お気に入りとは別に、選んだ色を自動で覚えておく) */
+export const MAX_RECENT_COLORS = 12
+
+/** 最近使った色に足す(新しいものが先頭。重複は前へ移す) */
+export function pushRecentColor(list: readonly string[], color: string): string[] {
+  const hex = normalizeHex(color)
+  if (!hex) return [...list]
+  return [hex, ...list.filter((c) => c !== hex)].slice(0, MAX_RECENT_COLORS)
+}
+
+/** 保存していた「最近使った色」を読み直す */
+export function normalizeRecentColors(raw: unknown): string[] {
+  return normalizeFavoriteColors(raw).slice(0, MAX_RECENT_COLORS)
+}
+
+/** 相対輝度(0 黒 〜 1 白。WCAG の式) */
+export function relativeLuminance(color: string): number {
+  const rgb = parseColor(color)
+  if (!rgb) return 1
+  const lin = (v: number): number => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * lin(rgb.r) + 0.7152 * lin(rgb.g) + 0.0722 * lin(rgb.b)
+}
+
+/** 2色のコントラスト比(1〜21) */
+export function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a)
+  const lb = relativeLuminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}

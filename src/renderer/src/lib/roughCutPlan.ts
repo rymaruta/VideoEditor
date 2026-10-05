@@ -27,8 +27,9 @@ import { askAiJson, type AiProgress } from './ai'
 import { tightenRanges, totalLength, type CutRange } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
 import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
+import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
-import { utteranceToTelopChunks } from '@shared/telop/fromTranscript'
+import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
 import {
@@ -102,8 +103,16 @@ export async function loadActivity(project: Project, info: MulticamInfo): Promis
     })
     return { id: s.id, envelope: env }
   })
-  return activityMask(tracks)
+  const mask = activityMask(tracks)
+  levelOfActivity.set(mask, mixLevelDb(tracks))
+  return mask
 }
+
+/**
+ * `loadActivity` で読んだ音の大きさ(全マイクを足した dB、100Hz)。カット点を静かな所へ寄せるのに使う。
+ * 呼び出し側(自動編集の流れ)は鳴っている所の印だけを持ち回るので、印に結び付けて覚えておく
+ */
+const levelOfActivity = new WeakMap<Uint8Array, Float32Array>()
 
 /**
  * 場面ごとの判定。Gemini の鍵があれば AI に、無ければ(または失敗したら)簡易の点数で。
@@ -197,6 +206,8 @@ export function planRoughCut(
     style?: ShowStyle
     /** 本編の人の修正(削った・足した区間、替えたカメラ)。作り直しても当て直す */
     overrides?: CutOverrides
+    /** 全マイクを足した音の大きさ(dB、100Hz)。無ければ `loadActivity` で読んだもの */
+    level?: Float32Array
   }
 ): RoughCutPlan {
   const tighten = options.style
@@ -238,7 +249,11 @@ export function planRoughCut(
     speech,
     tighten
   )
-  const pieces = options.overrides ? applyCutOverrides(tightened, options.overrides) : tightened
+  // 時間の飛ぶ切れ目を、近くのいちばん静かな所へ寄せる(短い音の途中で切らない)。
+  // 人が足した・削った区間は人の決めた位置のまま(寄せた後に当てる)
+  const level = options.level ?? levelOfActivity.get(activity)
+  const snapped = level ? snapCutsToQuiet(tightened, level) : tightened
+  const pieces = options.overrides ? applyCutOverrides(snapped, options.overrides) : snapped
   const cameras = info.sources
     .filter((s) => s.kind === 'camera')
     .map((s) => ({
@@ -299,9 +314,13 @@ export function planRoughCut(
       })
     }
   }
-  telops.sort((a, b) => a.startTime - b.startTime)
+  // 短い切れ目をつなぎ、読み切れない枚を延ばす(時間の飛ぶカットの切れ目は越えない)
+  const settled = settleTelopTimes(
+    telops,
+    cut.spans.slice(1).map((sp) => sp.timeline)
+  )
   // 声が重なった所は、後から出たテロップを1段上へ
-  const stacked = stackSimultaneousTelops(telops, textCanvasSize(project.aspectRatio).h)
+  const stacked = stackSimultaneousTelops(settled, textCanvasSize(project.aspectRatio).h)
   return { selection, pieces, shots, cut, telops: stacked }
 }
 

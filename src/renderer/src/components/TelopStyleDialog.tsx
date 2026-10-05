@@ -16,6 +16,8 @@ import { safeFileBaseName } from '@shared/fileName'
 import { PropRow, TelopStyleFields } from './TelopStyleFields'
 import { Segmented } from './AppearanceControls'
 import { TelopLookGallery, type LookItem } from './TelopLookGallery'
+import { useStyleClipboard } from '../lib/styleClipboard'
+import { lookPatch, SECTION_IDS } from '../lib/appearanceEdit'
 
 /**
  * テロップスタイルの管理(テロップ > テロップスタイルの管理…)。デザイン案の「TelopStyles」。
@@ -61,6 +63,9 @@ export function TelopStyleDialog(): React.JSX.Element | null {
   const [fontEpoch, setFontEpoch] = useState(0)
   const [playing, setPlaying] = useState(false)
   // スタイルのファイルの読み込み・書き出しの結果
+  const clipStyle = useStyleClipboard((s) => s.style)
+  const clipFrom = useStyleClipboard((s) => s.from)
+  const copyLook = useStyleClipboard((s) => s.copy)
   const [fileMessage, setFileMessage] = useState<{ text: string; error?: boolean } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -468,6 +473,29 @@ export function TelopStyleDialog(): React.JSX.Element | null {
                     value={selected.name}
                     onChange={(e) => patchSelected({ name: e.target.value })}
                   />
+                </PropRow>
+                <PropRow label="見た目">
+                  <button
+                    type="button"
+                    className="small-button"
+                    title="このスタイルの見た目を覚えます(テロップ・サムネイルの文字に貼り付けられます)"
+                    onClick={() => copyLook(selected.style, `スタイル「${selected.name}」`)}
+                  >
+                    見た目をコピー
+                  </button>
+                  <button
+                    type="button"
+                    className="small-button"
+                    disabled={!clipStyle}
+                    title={
+                      clipStyle
+                        ? `${clipFrom} からコピーした見た目を、このスタイルに貼り付けます(既定の位置はそのまま)`
+                        : '先にテロップの「見た目をコピー」でコピーしてください'
+                    }
+                    onClick={() => clipStyle && patchStyle(lookPatch(clipStyle, SECTION_IDS))}
+                  >
+                    見た目を貼り付け
+                  </button>
                 </PropRow>
                 <TelopStyleFields
                   style={selected.style}

@@ -4,7 +4,8 @@ import {
   type PlacedClipRef,
   type TranscriptUtterance
 } from '@shared/transcript'
-import { utteranceToTelopChunks } from '@shared/telop/fromTranscript'
+import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
+import { toCommon } from '@shared/sync/multicam'
 import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
 import { stackSimultaneousTelops } from '@shared/telop/stack'
@@ -40,6 +41,28 @@ export function placedClips(project: Project): PlacedClipRef[] {
   )
   // 声を拾った素材(マイク)のクリップを先に見る
   return [...audio, ...main, ...pip]
+}
+
+/**
+ * 本編で時間が飛ぶ所(タイムラインの秒)。同じ素材の続き・マルチカムで共通の時刻が続く
+ * カメラの切り替えは、声も続いているので切れ目にしない
+ */
+export function mainHardCuts(project: Project): number[] {
+  const timed = buildTimedClips(project)
+  const fileOf = new Map((project.multicam?.files ?? []).map((f) => [f.assetId, f]))
+  const out: number[] = []
+  for (let i = 1; i < timed.length; i++) {
+    const a = timed[i - 1].clip
+    const b = timed[i].clip
+    const fa = fileOf.get(a.assetId)
+    const fb = fileOf.get(b.assetId)
+    const continuous =
+      fa && fb
+        ? Math.abs(toCommon(fa, a.outPoint) - toCommon(fb, b.inPoint)) < 0.02
+        : a.assetId === b.assetId && Math.abs(a.outPoint - b.inPoint) < 0.02
+    if (!continuous) out.push(timed[i].start)
+  }
+  return out
 }
 
 export interface PlacedUtterance {
@@ -98,7 +121,8 @@ export function telopsFromTranscript(
       })
     }
   }
-  out.sort((a, b) => a.startTime - b.startTime)
+  // 短い切れ目をつなぎ、読み切れない枚を延ばす(仮編集と同じ規則。時間の飛ぶ切れ目は越えない)
+  const settled = settleTelopTimes(out, mainHardCuts(project))
   // 声が重なった所は、後から出たテロップを1段上へ
-  return stackSimultaneousTelops(out, textCanvasSize(project.aspectRatio).h)
+  return stackSimultaneousTelops(settled, textCanvasSize(project.aspectRatio).h)
 }

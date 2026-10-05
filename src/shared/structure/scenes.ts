@@ -51,6 +51,8 @@ export interface SceneOptions {
   maxSceneSec?: number
   /** これより長い無言は「会話の無い場面」として分ける(秒) */
   quietSec?: number
+  /** 長さで分けた残りがこれより短ければ、前の場面に含める(秒) */
+  minTailSec?: number
 }
 
 export function buildScenes(
@@ -61,10 +63,13 @@ export function buildScenes(
   const joinGap = options.joinGapSec ?? 4
   const maxScene = options.maxSceneSec ?? 90
   const quiet = options.quietSec ?? 8
+  const minTail = options.minTailSec ?? 20
   const sorted = [...lines].sort((a, b) => a.start - b.start)
 
   // 話のまとまり
   const groups: TimedLine[][] = []
+  /** 長さだけで分けた(話は続いている)まとまりの頭 */
+  const splitByLength = new Set<TimedLine[]>()
   for (const l of sorted) {
     const g = groups[groups.length - 1]
     if (g) {
@@ -75,8 +80,28 @@ export function buildScenes(
         g.push(l)
         continue
       }
+      if (gap < joinGap) {
+        groups.push([l])
+        splitByLength.add(groups[groups.length - 1])
+        continue
+      }
     }
     groups.push([l])
+  }
+  // 長さで分けた残りが短いもの(話の締めの十数秒)は、前のまとまりに戻す。
+  // 独りの場面にすると点数が付かずに落ちやすく、話の途中で次の場面へ飛ぶ
+  // (30分の回で 11〜17 秒の残りが3つでき、うち2つが落ちて会話の締めが消えていた)
+  for (let i = groups.length - 1; i > 0; i--) {
+    const g = groups[i]
+    if (!splitByLength.has(g)) continue
+    const gEnd = Math.max(...g.map((x) => x.end))
+    const next = groups[i + 1]
+    // 後ろも話が続いている(さらに長さで分けた)なら、残りではない
+    if (next && splitByLength.has(next)) continue
+    if (gEnd - g[0].start < minTail) {
+      groups[i - 1].push(...g)
+      groups.splice(i, 1)
+    }
   }
 
   const scenes: Scene[] = []
@@ -188,6 +213,7 @@ export interface Selection {
 /**
  * 仕上がりの長さに収まるよう、残す場面を選ぶ。
  * 「不要」は必ず落とす。残りが長ければ点数の低い順に落とす(並びは元の時刻順のまま)。
+ * 点数が同じなら、番組の頭と終わりを残し、前後が落ちている場面から落とす。
  * `estimate` は場面を詰めた後の長さの見込み(カットで間を詰めると短くなるため)。
  */
 export function selectScenes(
@@ -207,11 +233,23 @@ export function selectScenes(
   })
   const keep = new Set(candidates.map((s) => s.id))
   let total = candidates.reduce((t, s) => t + estimate(s), 0)
-  const byScore = [...candidates].sort(
-    (a, b) => (judge.get(a.id)?.score ?? 50) - (judge.get(b.id)?.score ?? 50)
-  )
-  for (const s of byScore) {
-    if (total <= targetSec || keep.size <= 1) break
+  const score = (s: Scene): number => judge.get(s.id)?.score ?? 50
+  const index = new Map(scenes.map((s, i) => [s.id, i]))
+  /** 前後の場面がすでに落ちている(落としても時間の飛ぶ所が増えない) */
+  const besideDropped = (s: Scene): boolean => {
+    const i = index.get(s.id)!
+    return [scenes[i - 1], scenes[i + 1]].some((x) => x !== undefined && !keep.has(x.id))
+  }
+  while (total > targetSec && keep.size > 1) {
+    const left = candidates.filter((s) => keep.has(s.id))
+    const low = Math.min(...left.map(score))
+    // 点数の同じ場面どうしでは、(1) 番組の頭と終わり(残っている最初と最後の場面)は残し、
+    // (2) 前後がすでに落ちている場面を先に落とす(話の途中へ飛ぶ所を増やさない)。
+    // 以前は時刻の早い順に落ちたため、点数がそろう簡易の判定では番組の頭(出演者・場所の紹介)から消えていた
+    const edge = (s: Scene): number => (s === left[0] || s === left[left.length - 1] ? 1 : 0)
+    const s = left
+      .filter((x) => score(x) === low)
+      .sort((a, b) => edge(a) - edge(b) || Number(besideDropped(b)) - Number(besideDropped(a)))[0]
     keep.delete(s.id)
     total -= estimate(s)
     dropped.push({ sceneId: s.id, why: 'length' })

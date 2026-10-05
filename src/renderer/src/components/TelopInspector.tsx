@@ -9,6 +9,7 @@ import { CopyIcon, SparklesIcon, TrashIcon } from './icons'
 import { PropRow, TelopStyleFields } from './TelopStyleFields'
 import { NumberSlider, StyleSection } from './AppearanceControls'
 import { TelopLookPicker, type LookItem } from './TelopLookGallery'
+import { LookTransfer } from './LookTransfer'
 import { applyLook, styleForSpeaker } from '@shared/telop/styles'
 
 /**
@@ -177,6 +178,9 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
           <SparklesIcon width={12} height={12} />
           見た目を選ぶ…
         </button>
+      </PropRow>
+      <PropRow label="">
+        <LookTransfer overlay={o} />
       </PropRow>
       {pickerOpen && (
         <TelopLookPicker
