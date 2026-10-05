@@ -7,6 +7,10 @@ import { parseTelopMarkup, stripTelopMarkup, telopSourceUnits } from './render'
  * - 読み込み: 番号・時刻・文字のまとまりを読み、`{start,end,text}` にする。SRT の書式タグ(`<i>` など)は外す
  */
 
+/** 字幕に書くミリ秒(`srtTime` と同じ丸め) */
+const srtMs = (sec: number): number =>
+  Math.max(0, Math.round((Number.isFinite(sec) ? sec : 0) * 1000))
+
 /** 秒 → `00:01:02,345` */
 export function srtTime(sec: number): string {
   const ms = Math.max(0, Math.round((Number.isFinite(sec) ? sec : 0) * 1000))
@@ -23,7 +27,7 @@ export function buildSrt(
   return (
     [...telops]
       // ミリ秒に丸めて長さが無くなるもの(読み込むと捨てられる)は書かない
-      .filter((t) => stripTelopMarkup(t.text).trim() && srtTime(t.endTime) > srtTime(t.startTime))
+      .filter((t) => stripTelopMarkup(t.text).trim() && srtMs(t.endTime) > srtMs(t.startTime))
       .sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime)
       .map((t, i) => {
         // 字幕の中の空行は字幕の区切りと読まれ、後ろが消えるので詰める
@@ -153,10 +157,25 @@ export function replaceInTelop(
   )
   if (hits.length === 0) return text
   const units = telopSourceUnits(text)
-  for (const [a, b] of hits) {
+  const visible = glyphs.map((g) => g.ch)
+  // 後ろから置き換える(前の番号がずれないように)
+  for (const [a, b] of [...hits].reverse()) {
     units[glyphs[a].src!] = replacement
     for (let k = a + 1; k < b; k++) units[glyphs[k].src!] = ''
+    visible.splice(a, b - a, replacement)
   }
-  // 中身ごと置き換えて空になった印の組(「****」「____」)は外す(描くと何も出ない)
-  return units.join('').replace(/\*\*\*\*|____/g, '')
+  const expected = visible.join('')
+  let out = units.join('')
+  // 置き換えた文字が前後の「_」「*」とつながって、新しい印になってしまった(見えている文字が変わる)なら置き換えない
+  if (stripTelopMarkup(out) !== expected) return text
+  // 中身ごと置き換えて空になった印の組(「****」「____」)は外す。見えている文字が変わらないものだけ
+  // (強調の中の「____」・小さい文字の中の「****」は、印ではなく見えている文字)
+  for (let i = out.search(/\*\*\*\*|____/); i >= 0;) {
+    const removed = out.slice(0, i) + out.slice(i + 4)
+    if (stripTelopMarkup(removed) === expected) out = removed
+    else i++
+    const next = out.slice(i).search(/\*\*\*\*|____/)
+    i = next < 0 ? -1 : i + next
+  }
+  return out
 }

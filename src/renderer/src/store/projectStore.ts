@@ -314,11 +314,15 @@ function normalizeColorMatch(raw: unknown): ColorMatch | undefined {
 }
 
 /** 素材の秒で持つ区間(本編・音声・PiP に共通)。壊れた尺は素材の尺で埋める */
+/** 素材の時刻として読む上限(秒)。100 時間 */
+const MAX_SOURCE_TIME = 360000
+
 function normalizeRange(
   raw: Record<string, unknown>,
   assetDuration: number
 ): { inPoint: number; outPoint: number } {
-  const inPoint = asNonNegative(raw.inPoint, 0)
+  // 壊れた巨大な値(1e308)は、最短の長さを足しても丸めで同じ値のままになり長さ0になるので抑える
+  const inPoint = Math.min(MAX_SOURCE_TIME, asNonNegative(raw.inPoint, 0))
   // 数値でないときに 0 を入れると、尺0の「画面に出ないのに消せないクリップ」になる。
   let outPoint = asNonNegative(raw.outPoint, assetDuration)
   // 終わりが頭より前(壊れた値)だと、尺が負になってタイムラインの後ろが全部重なる。
@@ -1838,7 +1842,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             assets: state.project.assets.filter((a) => a.id !== assetId),
             clips,
             audioTracks,
-            videoOverlayTracks
+            videoOverlayTracks,
+            // 同期の記録からも外す。残すと、本編を伸ばしたときにピンマイクの声として
+            // 消した素材のクリップを足し、カメラの切り替え先にも出てしまう
+            ...(state.project.multicam?.files.some((f) => f.assetId === assetId)
+              ? {
+                  multicam: {
+                    ...state.project.multicam,
+                    files: state.project.multicam.files.filter((f) => f.assetId !== assetId)
+                  }
+                }
+              : {})
           },
           unlinkedClipIds
         ),
@@ -3569,6 +3583,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   moveVideoOverlayClipToTrack: (fromTrackId, clipId, toTrackId, startTime) =>
     set((state) => {
+      if (!Number.isFinite(startTime)) return state
       const from = state.project.videoOverlayTracks.find((t) => t.id === fromTrackId)
       const clip = from?.clips.find((c) => c.id === clipId)
       if (!clip || fromTrackId === toTrackId) return state
@@ -4232,8 +4247,11 @@ function followMainEdit(
   const info = next.multicam
   if (!info || prev.multicam !== info) return next
   const before = followSpans(prev.clips, info)
-  if (!before.some((x) => x.real)) return next
+  // 本編が空だった(初めて並べる)ときは追従しない。収録素材が無くても、速さを変えたクリップ・
+  // 差し込みの画があれば続ける(速さを戻して収録素材に戻ったとき、声を入れ直すため)
+  if (before.length === 0) return next
   const after = followSpans(next.clips, info)
+  if (!before.some((x) => x.real) && !after.some((x) => x.real)) return next
   // 同じクリップどうし・残りは1回ずつ結ぶ(同じ素材の時刻を2回使った本編で、声が倍々に増えないように)
   const segs = clipTimelineMapping(before, after)
   if (isIdentityMapping(segs, before, after)) return next
@@ -4419,7 +4437,9 @@ function followSpans(
       const end = toCommon(f, c.outPoint)
       if (end - start > 1e-6) out.push({ id: c.id, timeline: cursor, start, end, real: true })
     } else if (len > 1e-6) {
-      const base = pseudoSlot(`${c.id}@${speed}`)
+      // 素材と速さごとの仮の時刻(クリップの id ごとにすると、分割した後ろ半分が別の時刻になり、
+      // その下の自動の音・テロップが消えた)。同じ素材を2か所で使っても、対応は1回ずつ結ぶ
+      const base = pseudoSlot(`${c.assetId}@${speed}`)
       const start = base + c.inPoint / speed
       out.push({ id: c.id, timeline: cursor, start, end: start + len, real: false })
     }

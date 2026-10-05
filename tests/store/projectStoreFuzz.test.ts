@@ -587,6 +587,10 @@ function makeOps(): Op[] {
       name: 'applyRoughCut',
       run: () => {
         if (!p().multicam) return '-'
+        // 本物の作り直しは企画の同期の記録から組む。消した素材(記録から外れる)のクリップは作らない
+        const files = p().multicam!.files
+        if (!files.some((f) => f.assetId === 'camA') || !files.some((f) => f.assetId === 'micM'))
+          return '-'
         st().applyRoughCut(
           cutOf([
             [0, 8],
@@ -953,8 +957,10 @@ function makeOps(): Op[] {
 }
 
 const OPS = makeOps()
-const ROUNDS = 60
-const STEPS = 25
+// 深く回すときは FUZZ_ROUNDS / FUZZ_STEPS / FUZZ_SEED_OFFSET で増やす(既定は普段の試験で 2 秒ほど)
+const ROUNDS = Number(process.env.FUZZ_ROUNDS ?? 60)
+const STEPS = Number(process.env.FUZZ_STEPS ?? 25)
+const SEED_OFFSET = Number(process.env.FUZZ_SEED_OFFSET ?? 0)
 
 /**
  * 1ラウンド = 企画を作り直して STEPS 手。1手ごとに不変条件と「何も変えない操作は履歴を積まない」を見て、
@@ -962,7 +968,7 @@ const STEPS = 25
  * `withAuto` が false のラウンドは、履歴に積まない仕様のアクションを使わない(取り消しで戻せないため)。
  */
 function runRounds(kind: 'base' | 'multicam', seed: number, withAuto: boolean): void {
-  const rnd = seeded(seed)
+  const rnd = seeded(seed + SEED_OFFSET)
   const ops = OPS.filter((o) => withAuto || !o.noHistory)
   for (let r = 0; r < ROUNDS; r++) {
     resetTo(kind === 'base' ? baseProject() : multicamProject())

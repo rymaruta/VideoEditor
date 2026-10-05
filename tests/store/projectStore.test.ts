@@ -1399,6 +1399,107 @@ describe('本編の同じ所を2回使っても、声・自動の音が増えな
   })
 })
 
+describe('本編の追従(再監査で見つかった所)', () => {
+  beforeEach(reset)
+  const info = {
+    anchorSourceId: 'A',
+    sources: [
+      { id: 'A', name: 'カメラA', kind: 'camera' as const },
+      { id: 'M', name: '出演者A', kind: 'mic' as const }
+    ],
+    files: [
+      { assetId: 'camA', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+      { assetId: 'micM', sourceId: 'M', start: 0, rate: 1, duration: 100 }
+    ]
+  }
+  const asset = (id: string): Project['assets'][number] => ({
+    id,
+    filePath: `/rec/${id}.mp4`,
+    fileName: `${id}.mp4`,
+    duration: 100,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    hasAudio: true,
+    hasVideo: id !== 'micM'
+  })
+  const setup = (ranges: [number, number][]): void => {
+    S.setState({
+      project: {
+        ...st().project,
+        multicam: info,
+        assets: [asset('camA'), asset('micM'), asset('brollA')],
+        clips: [],
+        textOverlays: []
+      }
+    })
+    let t = 0
+    const clips = ranges.map(([a, b]) => {
+      const c = { assetId: 'micM', startTime: t, inPoint: a, outPoint: b, speed: 1 }
+      t += b - a
+      return c
+    })
+    st().applyRoughCut(
+      {
+        main: ranges.map(([a, b]) => ({ assetId: 'camA', inPoint: a, outPoint: b, speed: 1 })),
+        audio: [{ name: '出演者A', sourceId: 'M', volume: 1, clips }],
+        duration: t,
+        spans: []
+      },
+      []
+    )
+  }
+  const micTrack = (): Project['audioTracks'][number] =>
+    st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+
+  it('差し込みの画を分割しても、その下の自動 BGM は切れない', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const [c0, c1] = st().project.clips
+    const broll = { id: 'broll', assetId: 'brollA', inPoint: 0, outPoint: 6, speed: 1 }
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [c0, broll, c1],
+        audioTracks: [
+          ...st().project.audioTracks,
+          {
+            ...micTrack(),
+            id: 'bgm',
+            name: 'BGM',
+            multicamSourceId: undefined,
+            autoRole: 'bgm',
+            clips: [{ id: 'b1', assetId: 'bgmA', startTime: 0, inPoint: 0, outPoint: 26 }]
+          }
+        ]
+      }
+    })
+    st().splitClipAtTime('broll', 13)
+    const bgm = st().project.audioTracks.find((t) => t.id === 'bgm')!
+    expect(bgm.clips.map((c) => [c.startTime, c.inPoint, c.outPoint])).toEqual([[0, 0, 26]])
+  })
+
+  it('速さを変えて外れた声は、速さを戻すと戻る', () => {
+    setup([[0, 10]])
+    const id = st().project.clips[0].id
+    st().updateClipSpeed(id, 2)
+    st().updateClipSpeed(id, 1)
+    expect(micTrack().clips.map((c) => [c.startTime, c.inPoint, c.outPoint])).toEqual([[0, 0, 10]])
+  })
+
+  it('企画から消した素材のクリップを、本編を伸ばしたときに足さない', () => {
+    setup([[0, 10]])
+    st().addClipToAudioTrack(micTrack().id, 'camA')
+    st().removeAsset('micM')
+    st().updateClipTrim(st().project.clips[0].id, 0, 20)
+    // 消したピンマイクの素材のクリップが、伸ばした所に足されていない
+    const all = st().project.audioTracks.flatMap((t) => t.clips)
+    expect(all.some((c) => c.assetId === 'micM')).toBe(false)
+  })
+})
+
 describe('編集の値の検査', () => {
   beforeEach(() => {
     reset()
@@ -1439,6 +1540,8 @@ describe('編集の値の検査', () => {
     st().addTrimmedClipToTimeline('A', 4.6, 3.1)
     expect(st().past.length).toBe(past)
     expect(brokenInvariant(st().project)).toBeNull()
+    st().moveVideoOverlayClipToTrack('v1', 'p1', 'v1', Number.POSITIVE_INFINITY)
+    expect(st().past.length).toBe(past)
     st().setAudioTrackVolume('t1', -1)
     expect(st().project.audioTracks.find((t) => t.id === 't1')!.volume).toBe(0)
   })
@@ -1551,6 +1654,15 @@ describe('壊れたファイルを開く・素材をつなぎ直す', () => {
     expect(st().project.textOverlays.map((o) => [o.startTime, o.endTime])).toEqual(
       p.textOverlays.map((o) => [o.startTime, o.endTime])
     )
+  })
+
+  it('長さの分からない素材の、とても大きなイン点のクリップも長さ0にしない', () => {
+    const p = load((p) => {
+      p.assets.find((a) => a.id === p.videoOverlayTracks[0].clips[0].assetId)!.duration = -1e308
+      p.videoOverlayTracks[0].clips[0].inPoint = 1e308
+    })
+    const c = p.videoOverlayTracks[0].clips[0]
+    expect(c.outPoint).toBeGreaterThan(c.inPoint)
   })
 
   it('同じ id が2つあれば後の方に新しい id を振り、紐づく音声・テロップは最初のクリップに付いたまま', () => {
