@@ -1206,7 +1206,7 @@ function buildInsertedClips(
       const speed = c.speed || 1
       const splitLocal = c.inPoint + (atTime - elapsed) * speed
       const firstHalf = { ...c, outPoint: splitLocal }
-      const secondHalf = { ...c, id: uuid(), inPoint: splitLocal, transitionIn: undefined }
+      const secondHalf = { ...c, id: splitId(c.id), inPoint: splitLocal, transitionIn: undefined }
       before.push(firstHalf)
       after.push(secondHalf)
       split = { original: c, parts: [firstHalf, secondHalf] }
@@ -2036,8 +2036,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         project: {
           ...state.project,
           clips: state.project.clips.map((c) => {
-            if (c.id === leftClipId) return { ...c, outPoint: c.outPoint + delta * leftSpeed }
-            if (c.id === rightClipId) return { ...c, inPoint: c.inPoint + delta * rightSpeed }
+            // 端まで動かしたときの丸めの残り(-2.8e-17 など)で、素材の外を指さないように
+            if (c.id === leftClipId)
+              return {
+                ...c,
+                outPoint: Math.min(leftAsset.duration, c.outPoint + delta * leftSpeed)
+              }
+            if (c.id === rightClipId)
+              return { ...c, inPoint: Math.max(0, c.inPoint + delta * rightSpeed) }
             return c
           })
         }
@@ -2230,7 +2236,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           c.outPoint - splitAt >= MIN_CLIP_SOURCE_DURATION
         ) {
           didSplit = true
-          secondHalfId = uuid()
+          secondHalfId = splitId(c.id)
           splitOriginal = c
           const speed = c.speed || 1
           const splitLocal = splitAt
@@ -4253,7 +4259,7 @@ function followMainEdit(
   const after = followSpans(next.clips, info)
   if (!before.some((x) => x.real) && !after.some((x) => x.real)) return next
   // 同じクリップどうし・残りは1回ずつ結ぶ(同じ素材の時刻を2回使った本編で、声が倍々に増えないように)
-  const segs = clipTimelineMapping(before, after)
+  const segs = clipTimelineMapping(before, after, (id) => splitOrigins.get(id))
   if (isIdentityMapping(segs, before, after)) return next
 
   const remapClip = <
@@ -4399,6 +4405,17 @@ function isRealClip(
 ): boolean {
   const f = fileOf.get(c.assetId)
   return Boolean(f && Math.abs((c.speed || 1) - f.rate) <= 1e-9)
+}
+
+/**
+ * 分割で作った後ろ半分の id → 元のクリップの id。本編の追従で、後ろ半分を元のクリップとして先に結ぶ
+ * (結ばないと、同じ素材を差し込んだときに、後ろ半分の下の自動の音・テロップが差し込んだクリップの下へ写る)
+ */
+const splitOrigins = new Map<string, string>()
+function splitId(originalId: string): string {
+  const id = uuid()
+  splitOrigins.set(id, splitOrigins.get(originalId) ?? originalId)
+  return id
 }
 
 /** 差し込んだ素材・速さを変えたクリップの、仮の共通の時刻の置き場(収録の時刻と重ならない遠く) */

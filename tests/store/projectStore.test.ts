@@ -1481,6 +1481,35 @@ describe('本編の追従(再監査で見つかった所)', () => {
     expect(bgm.clips.map((c) => [c.startTime, c.inPoint, c.outPoint])).toEqual([[0, 0, 26]])
   })
 
+  it('差し込みの画の中に同じ素材を差し込んでも、後ろ半分の下の自動 SE は後ろ半分に付いていく', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const [c0, c1] = st().project.clips
+    const y = { id: 'y', assetId: 'brollA', inPoint: 0, outPoint: 4, speed: 1 }
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [c0, c1, y],
+        audioTracks: [
+          ...st().project.audioTracks,
+          {
+            ...micTrack(),
+            id: 'se',
+            name: 'SE',
+            multicamSourceId: undefined,
+            autoRole: 'se',
+            clips: [{ id: 's1', assetId: 'seA', startTime: 23, inPoint: 0, outPoint: 0.5 }]
+          }
+        ]
+      }
+    })
+    st().insertClipAtTime('brollA', 0, 4, 22)
+    const se = st().project.audioTracks.find((t) => t.id === 'se')!
+    expect(se.clips.map((c) => c.startTime)).toEqual([27])
+  })
+
   it('速さを変えて外れた声は、速さを戻すと戻る', () => {
     setup([[0, 10]])
     const id = st().project.clips[0].id
@@ -1513,6 +1542,20 @@ describe('編集の値の検査', () => {
       ['o1', 4],
       ['o2', 8]
     ])
+  })
+
+  it('ロールで端まで動かしても、丸めの残りで素材の外(負のイン点)を指さない', () => {
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [
+          { id: 'l', assetId: 'A', inPoint: 0, outPoint: 4, speed: 1 },
+          { id: 'r', assetId: 'A', inPoint: 0.23, outPoint: 5, speed: 0.75 }
+        ]
+      }
+    })
+    st().rollTrim('l', 'r', -100)
+    for (const c of st().project.clips) expect(c.inPoint).toBeGreaterThanOrEqual(0)
   })
 
   it('端のすぐそばでは分割せず、短いクリップでもロールは逆へ・素材の外へ動かない', () => {

@@ -157,22 +157,28 @@ export function replaceInTelop(
   )
   if (hits.length === 0) return text
   const units = telopSourceUnits(text)
-  const visible = glyphs.map((g) => g.ch)
+  // 置き換えた後に見えるはずの文字と、その装飾(強調・小さく)。置き換えた文字は、置き換えた所の頭の装飾を引き継ぐ
+  const expected: string[] = glyphs.map((g) => `${g.span ?? 0}${g.ch}`)
   // 後ろから置き換える(前の番号がずれないように)
   for (const [a, b] of [...hits].reverse()) {
     units[glyphs[a].src!] = replacement
     for (let k = a + 1; k < b; k++) units[glyphs[k].src!] = ''
-    visible.splice(a, b - a, replacement)
+    const span = glyphs[a].span ?? 0
+    expected.splice(a, b - a, ...telopSourceUnits(replacement).map((ch) => `${span}${ch}`))
   }
-  const expected = visible.join('')
+  const want = expected.join('\u0000')
+  const shape = (t: string): string =>
+    parseTelopMarkup(t)
+      .map((g) => `${g.span ?? 0}${g.ch}`)
+      .join('\u0000')
   let out = units.join('')
-  // 置き換えた文字が前後の「_」「*」とつながって、新しい印になってしまった(見えている文字が変わる)なら置き換えない
-  if (stripTelopMarkup(out) !== expected) return text
-  // 中身ごと置き換えて空になった印の組(「****」「____」)は外す。見えている文字が変わらないものだけ
+  // 置き換えた文字が前後の「_」「*」とつながって新しい印になる・近くの「*」「_」の装飾が変わるなら、置き換えない
+  if (shape(out) !== want) return text
+  // 中身ごと置き換えて空になった印の組(「****」「____」)は外す。見えている文字と装飾が変わらないものだけ
   // (強調の中の「____」・小さい文字の中の「****」は、印ではなく見えている文字)
   for (let i = out.search(/\*\*\*\*|____/); i >= 0;) {
     const removed = out.slice(0, i) + out.slice(i + 4)
-    if (stripTelopMarkup(removed) === expected) out = removed
+    if (shape(removed) === want) out = removed
     else i++
     const next = out.slice(i).search(/\*\*\*\*|____/)
     i = next < 0 ? -1 : i + next

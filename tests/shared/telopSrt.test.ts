@@ -120,6 +120,11 @@ describe('置き換えで見えている文字・印を壊さない', () => {
     expect(replaceInTelop('か_a_ｶか', 'a', '')).toBe('か_a_ｶか')
   })
 
+  it('近くの文字の「*」「_」の装飾(強調・小さく)が変わる置き換えはしない', () => {
+    expect(replaceInTelop('XX*X**か', 'X', '')).toBe('XX*X**か')
+    expect(replaceInTelop('か_X__\n', 'X', '')).toBe('か_X__\n')
+  })
+
   it('100 時間をまたぐ字幕も書き出す', () => {
     expect(buildSrt([{ text: 'x', startTime: 359999.5, endTime: 360000.5 }])).toContain(
       '99:59:59,500 --> 100:00:00,500'
