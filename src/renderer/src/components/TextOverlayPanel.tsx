@@ -14,7 +14,7 @@ import { TelopToolsBar } from './TelopToolsBar'
 import { ColorField } from './ColorField'
 import { PlusIcon, TypeIcon } from './icons'
 import { stripTelopMarkup } from '@shared/telop/render'
-import { HOW_LABEL, TELOP_KINDS } from '@shared/telop/kinds'
+import { CATEGORY_LABEL, CATEGORY_ORDER, HOW_LABEL, TELOP_KINDS } from '@shared/telop/kinds'
 
 /**
  * テロップ(デザイン案の「テロップ」タブ)。左に一覧、右に選んだテロップの設定。
@@ -148,7 +148,7 @@ export function TextOverlayPanel(): React.JSX.Element {
             <select
               className="telop-kind-add"
               aria-label="種類から追加"
-              title="ナレーション・クイズ・カウンター・手書きなど、種類の見た目と見本の文で再生位置に足します"
+              title={`${TELOP_KINDS.length} 種類の見た目と見本の文から、再生位置に足します`}
               value=""
               onChange={(e) => {
                 handleAddKind(e.target.value)
@@ -156,11 +156,12 @@ export function TextOverlayPanel(): React.JSX.Element {
               }}
             >
               <option value="">種類から追加…</option>
-              {(['manual', 'ai', 'auto'] as const).map((how) => (
-                <optgroup key={how} label={HOW_LABEL[how]}>
-                  {TELOP_KINDS.filter((k) => k.how === how).map((k) => (
+              {CATEGORY_ORDER.map((c) => (
+                <optgroup key={c} label={CATEGORY_LABEL[c]}>
+                  {TELOP_KINDS.filter((k) => k.category === c).map((k) => (
                     <option key={k.id} value={k.id}>
                       {k.label}
+                      {k.how === 'manual' ? '' : `(${HOW_LABEL[k.how]})`}
                     </option>
                   ))}
                 </optgroup>

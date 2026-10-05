@@ -686,20 +686,23 @@ export function effectStyle(kind: EffectKind): TextStyle {
         animation: 'slideInDown'
       }
     case 'narration':
-      // 明朝で、縁を付けずにやわらかい影
+      // 明朝で、細い縁とやわらかい影(縁が無いと明るい空・雪の上で読めない)
       return {
         ...base,
         position: 'bottom',
         fontFamily: 'Shippori Mincho',
-        fontSize: 42,
+        fontWeight: 700,
+        fontSize: 44,
         color: '#ffffff',
-        outline: false,
+        outline: true,
+        outlineColor: '#1a1a1a',
+        outlineWidth: 3,
         bold: false,
         letterSpacing: 2,
         shadow: true,
-        shadowBlur: 6,
-        shadowDistance: 2,
-        shadowOpacity: 0.85,
+        shadowBlur: 8,
+        shadowDistance: 3,
+        shadowOpacity: 0.7,
         animation: 'fadeIn'
       }
     case 'quiz':
@@ -757,6 +760,8 @@ export function effectStyle(kind: EffectKind): TextStyle {
         outline: true,
         outlineColor: '#ffffff',
         outlineWidth: 5,
+        // 外側に細い暗い縁(明るい画の上でも赤い文字が浮く)
+        extraStrokes: [{ color: '#1a1a1a', width: 2 }],
         bold: true,
         rotation: -6,
         pointer: { dx: -0.12, dy: 0.12, color: '#ff3b30', width: 6, hand: true },

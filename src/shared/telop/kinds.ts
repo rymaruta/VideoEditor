@@ -1,6 +1,8 @@
 import type { TextStyle } from '../types'
 import { defaultTextStyle } from '../textStyle'
 import { EFFECT_LABEL, effectStyle, type EffectKind } from './effects'
+import { CATEGORY_ORDER, TELOP_TEMPLATES, type TelopCategory } from './templates'
+export { CATEGORY_LABEL, CATEGORY_ORDER, type TelopCategory } from './templates'
 
 /**
  * テロップの種類の一覧(テロップ図鑑と同じ並び)。
@@ -11,12 +13,15 @@ import { EFFECT_LABEL, effectStyle, type EffectKind } from './effects'
  * - `seconds`: 人が置くときの既定の長さ
  */
 
-export type TelopKindId = 'speech' | EffectKind
+/** 自動・AI の種類は `EffectKind`(と発言)、型(テンプレート)は `tpl-…` */
+export type TelopKindId = string
 
 export interface TelopKindInfo {
   id: TelopKindId
   label: string
   how: 'auto' | 'ai' | 'manual'
+  /** 用途の分類(一覧・追加の欄の見出し) */
+  category: TelopCategory
   /** どこで・何に使うか(1文) */
   use: string
   sample: string
@@ -27,6 +32,7 @@ export interface TelopKindInfo {
 const kind = (
   id: EffectKind,
   how: TelopKindInfo['how'],
+  category: TelopCategory,
   use: string,
   sample: string,
   seconds = 2.5
@@ -34,47 +40,65 @@ const kind = (
   id,
   label: EFFECT_LABEL[id],
   how,
+  category,
   use,
   sample,
   seconds,
   style: () => effectStyle(id)
 })
 
-export const TELOP_KINDS: readonly TelopKindInfo[] = [
+const BASE_KINDS: readonly TelopKindInfo[] = [
   {
     id: 'speech',
     label: '発言テロップ',
     how: 'auto',
+    category: 'speech',
     use: '出演者の発言を下に出す(文字起こしから自動)',
     sample: 'ここの水 めっちゃおいしい!',
     seconds: 2.5,
     style: () => defaultTextStyle({ fontSize: 48, outlineWidth: 5, bold: true })
   },
-  kind('name', 'auto', '各出演者の最初の発言に名前を出す', '田中 太郎', 3.5),
-  kind('laugh', 'auto', '笑い声を検出した所に添える', '(一同爆笑)', 2),
+  kind('name', 'auto', 'people', '各出演者の最初の発言に名前を出す', '田中 太郎', 3.5),
+  kind('laugh', 'auto', 'reaction', '笑い声を検出した所に添える', '(一同爆笑)', 2),
   kind(
     'clock',
     'auto',
+    'info',
     '場面の頭に撮影時刻を出す(天気・気温は書き足す)',
     'AM 10:32 __晴れ 28℃__',
     3
   ),
-  kind('chapter', 'auto', '大きな場面の変わり目に章の見出しを出す', '第2章\n島の水事情', 3),
-  kind('bubble', 'auto', '短い発言を、話している人の顔の横に吹き出しで', 'えっ ここ?', 2),
-  kind('tsukkomi', 'ai', '発言へのひとこと', 'いや早すぎ!'),
-  kind('kokoro', 'ai', '話者の内心', '(帰りたい…)'),
-  kind('situation', 'ai', '状況の説明', 'ここまで歩いて40分'),
-  kind('place', 'ai', '発言に出た地名・店名', '浄土ヶ浜'),
-  kind('corner', 'ai', '企画の区切り', '大食いチャレンジ'),
-  kind('emphasis', 'ai', '発言の中の印象的な言葉を大きく', 'ヤバい'),
-  kind('sfx', 'ai', '場面の空気を音の文字で', 'ドーン!'),
-  kind('note', 'ai', '誤解されそうな所の補足', '※撮影時の価格です'),
-  kind('translate', 'ai', '外国語の発言の日本語訳', '本当においしい!'),
-  kind('dialect', 'ai', '方言・聞き取りにくい発言の意味', '(訳:とってもおいしいね)'),
-  kind('teaser', 'ai', '見どころの手前で続きをあおる', 'このあと\nまさかの展開に…!?', 3),
+  kind(
+    'chapter',
+    'auto',
+    'structure',
+    '大きな場面の変わり目に章の見出しを出す',
+    '第2章\n島の水事情',
+    3
+  ),
+  kind('bubble', 'auto', 'speech', '短い発言を、話している人の顔の横に吹き出しで', 'えっ ここ?', 2),
+  kind('tsukkomi', 'ai', 'reaction', '発言へのひとこと', 'いや早すぎ!'),
+  kind('kokoro', 'ai', 'speech', '話者の内心', '(帰りたい…)'),
+  kind('situation', 'ai', 'info', '状況の説明', 'ここまで歩いて40分'),
+  kind('place', 'ai', 'info', '発言に出た地名・店名', '浄土ヶ浜'),
+  kind('corner', 'ai', 'structure', '企画の区切り', '大食いチャレンジ'),
+  kind('emphasis', 'ai', 'reaction', '発言の中の印象的な言葉を大きく', 'ヤバい'),
+  kind('sfx', 'ai', 'sfx', '場面の空気を音の文字で', 'ドーン!'),
+  kind('note', 'ai', 'info', '誤解されそうな所の補足', '※撮影時の価格です'),
+  kind('translate', 'ai', 'speech', '外国語の発言の日本語訳', '本当においしい!'),
+  kind('dialect', 'ai', 'speech', '方言・聞き取りにくい発言の意味', '(訳:とってもおいしいね)'),
+  kind(
+    'teaser',
+    'ai',
+    'structure',
+    '見どころの手前で続きをあおる',
+    'このあと\nまさかの展開に…!?',
+    3
+  ),
   kind(
     'price',
     'ai',
+    'info',
     '店名・品名・値段の札(値段は人が確かめる)',
     '浄土ヶ浜 海鮮食堂\nうに丼 **2,800円**(税込)',
     4
@@ -82,15 +106,32 @@ export const TELOP_KINDS: readonly TelopKindInfo[] = [
   kind(
     'route',
     'ai',
+    'info',
     '移動の「どこからどこへ・どれくらい」',
     '宮古駅 __→ 車で20分 →__ 浄土ヶ浜',
     3.5
   ),
-  kind('narration', 'manual', 'ナレーションを明朝で', '一行が向かったのは、島の北端だった。', 4),
-  kind('quiz', 'manual', '出演者へのお題・問題', '**Q.** この島の人口は?', 5),
-  kind('counter', 'manual', '食べた数・残り時間などを出し続ける', '完食まで**3皿**', 10),
-  kind('hand', 'manual', '画の一部を手書きの文字と矢印で指す', 'ここ注目!', 3)
+  kind(
+    'narration',
+    'manual',
+    'speech',
+    'ナレーションを明朝で',
+    '一行が向かったのは、島の北端だった。',
+    4
+  ),
+  kind('quiz', 'manual', 'game', '出演者へのお題・問題', '**Q.** この島の人口は?', 5),
+  kind('counter', 'manual', 'game', '食べた数・残り時間などを出し続ける', '完食まで**3皿**', 10),
+  kind('hand', 'manual', 'reaction', '画の一部を手書きの文字と矢印で指す', 'ここ注目!', 3)
 ]
+
+/**
+ * テロップの種類の一覧: 自動・AI の種類と、手で置く型(テンプレート)。
+ * 用途の分類の順に並べる(同じ分類の中は、自動 → AI → 手で置く)
+ */
+export const TELOP_KINDS: readonly TelopKindInfo[] = CATEGORY_ORDER.flatMap((c) => [
+  ...BASE_KINDS.filter((k) => k.category === c),
+  ...TELOP_TEMPLATES.filter((t) => t.category === c).map((t) => ({ ...t, how: 'manual' as const }))
+])
 
 export const HOW_LABEL: Record<TelopKindInfo['how'], string> = {
   auto: '自動',
