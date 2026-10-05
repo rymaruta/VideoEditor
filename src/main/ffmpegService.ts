@@ -506,6 +506,8 @@ function trackExportCommand(command: ffmpeg.FfmpegCommand): void {
 }
 let exportInProgress = false
 let exportCancelRequested = false
+/** 本編の素材を切り出しの頭より少し手前から読む長さ(素材の秒)。1つ前の絵を読み込むため */
+const MAIN_PREROLL_SEC = 0.25
 
 // ffmpeg's atempo filter only accepts a rate between 0.5 and 2.0, so speeds outside
 // that range have to be reached by chaining several instances. Clamping to the range
@@ -805,7 +807,14 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 枝の長さは**フレーム数から作り直したほう**を使う(映像・音声・無音のどれも
         // 同じ数から切るので、1本ごとの差が生まれない)。
         const outputDuration = clipExportDurations[i]
-        command.input(asset.filePath).inputOptions([`-ss ${clip.inPoint}`, `-t ${sourceDuration}`])
+        // 少し手前から読む(長尺向けの書き出しの `addMediaInput` と同じ)。切り出しの頭が素材の
+        // フレームの間にあると、頭で見えているはずの1つ前の絵が読み込まれず、最初の1コマだけ
+        // 次の絵が出ていた。絵も音も、手前のぶんを時刻のずらし・切り落としで戻す
+        const pre = Math.min(Math.max(0, clip.inPoint), MAIN_PREROLL_SEC)
+        const preOut = pre / speed
+        command
+          .input(asset.filePath)
+          .inputOptions([`-ss ${clip.inPoint - pre}`, `-t ${sourceDuration + pre}`])
         const myIndex = inputIndex++
 
         // カメラ間の色合わせ(縮める前の画に掛ける)
@@ -866,7 +875,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 乗っているので、この `fps` は素通しで、枚数を増やしも減らしもしない。
         if (includeVideo) {
           filterParts.push(
-            `[${myIndex}:v]setpts=PTS/${speed},${colorPart}${scalePadFilter},setsar=1,` +
+            `[${myIndex}:v]setpts=PTS/${speed}${preOut > 0 ? `-${preOut}/TB` : ''},${colorPart}${scalePadFilter},setsar=1,` +
               `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
               `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)},` +
               `settb=1/${outputFps},setpts=N,fps=${outputFps}[v${i}]`
@@ -890,7 +899,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // 最初から `anullsrc` に `duration` を渡して尺ちょうどにしており、
           // ここでも**片方にだけ揃える処理が育っていた**。
           filterParts.push(
-            `[${myIndex}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+            // 手前から読んだぶんは、速さを変える前に切り落とす(音の作りは手前から読まないときと同じ)
+            `[${myIndex}:a]` +
+              (pre > 0 ? `asetpts=PTS-STARTPTS,atrim=start=${pre},asetpts=PTS-STARTPTS,` : '') +
+              `${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
               `apad,atrim=0:${outputDuration},asetpts=PTS-STARTPTS,` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )
@@ -1010,7 +1022,13 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               : [`-ss ${overlayClip.inPoint}`, `-t ${pipVisibleDuration}`]
           )
           const myIndex = inputIndex++
-          if (includeVideo) {
+          // 絵の出入りはフレームの格子に揃え、窓は半フレームずらして取る(長尺向けの書き出しと同じ)。
+          // `between` は終わりの時刻を含むので、そのままだと終わりの1枚に PiP が残り、
+          // 格子に乗らない頭では1枚遅れて出て、絵も最大1フレーム遅れていた
+          const pipFirstFrame = Math.round(pipStart * outputFps)
+          const pipEndFrame = Math.round(pipEndExport * outputFps)
+          const pipFrameStart = pipFirstFrame / outputFps
+          if (includeVideo && pipEndFrame > pipFirstFrame) {
             const pipLabel = `pip${pipCounter}`
             const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
             const full = track.position === 'full'
@@ -1023,7 +1041,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                 (full
                   ? `scale=${w}:${h}:force_original_aspect_ratio=decrease,`
                   : `scale=${scaledWidth}:-2,`) +
-                `setpts=PTS-STARTPTS+${pipStart}/TB[${pipLabel}]`
+                `setpts=PTS-STARTPTS+${pipFrameStart}/TB[${pipLabel}]`
             )
             const margin = Math.round(pipMarginPx(w))
             const xExpr = full
@@ -1038,10 +1056,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                 : `H-h-${margin}`
             // 見せる区間の終わりは `pipEndExport`(繋ぎに食われたぶんを詰め、
             // 本編の尺で頭打ちにした終わり)。音の枝も同じ値で切る。
-            const endTime = pipEndExport
+            const enableFrom = ((pipFirstFrame - 0.5) / outputFps).toFixed(6)
+            const enableTo = ((pipEndFrame - 0.5) / outputFps).toFixed(6)
             const outV = `vpip${pipCounter}`
             filterParts.push(
-              `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${pipStart}\\,${endTime})'[${outV}]`
+              `[${curV}][${pipLabel}]overlay=x=${xExpr}:y=${yExpr}:enable='between(t\\,${enableFrom}\\,${enableTo})'[${outV}]`
             )
             curV = outV
           }
@@ -1262,9 +1281,17 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(`[${curA}]asplit=${duckTracks.length + 1}${splitOutputs.join('')}`)
           mainAudioForMix = `${curA}_mixcopy`
         }
+        // 下げる音と、本編の音(サイドチェイン)を、どちらも本編の長さちょうどに揃えてから掛ける。
+        // 揃えないと、片方が先に尽きたところで、読み込み済みの音を捨てることがある(ffmpeg の
+        // 読み込みの順で毎回変わる。実測: 0〜4秒の BGM が 6 回中 4 回、0.7〜0.9 秒短く切れた)
+        const fit = `apad=whole_dur=${totalDuration.toFixed(6)},atrim=end=${totalDuration.toFixed(6)}`
         duckTracks.forEach((t, i) => {
           const duckedLabel = `${t.label}_ducked`
-          filterParts.push(`[${t.label}][${curA}_duck${i}]${duckingFilterArgs()}[${duckedLabel}]`)
+          filterParts.push(`[${t.label}]${fit}[${t.label}_fit]`)
+          filterParts.push(`[${curA}_duck${i}]${fit}[${curA}_duck${i}_fit]`)
+          filterParts.push(
+            `[${t.label}_fit][${curA}_duck${i}_fit]${duckingFilterArgs()}[${duckedLabel}]`
+          )
           t.label = duckedLabel
         })
       } else {

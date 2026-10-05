@@ -120,6 +120,11 @@ export function thumbnailScaleFilter(width: number = THUMBNAIL_WIDTH): string {
   return `${SQUARE_PIXEL_FILTER},scale=${w}:-2`
 }
 
+/** フレームの格子へ揃える `fps`(格子の数え方は `scaleToFrameFilter` の注記) */
+export function fpsFilter(fps: number | string): string {
+  return `fps=${fps}:start_time=0:round=up`
+}
+
 export function scaleToFrameFilter(
   w: number,
   h: number,
@@ -148,7 +153,11 @@ export function scaleToFrameFilter(
 ): string {
   const labelSuffix = options.labelSuffix ?? ''
   const fps = options.fps
-  const fpsPart = fps ? `,fps=${fps}` : ''
+  // 格子の数え方: 0 秒から数え(`start_time=0`)、各コマにはその時刻までに出ている最後の絵を出す
+  // (`round=up`)。素材の切り出し位置がフレームの間にあると(29.97fps の素材・区間の途中から読む枝は
+  // 必ずそう)、最初の絵は 0 秒の少し後にある。既定の数え方だとそれが2コマ目に入り、後ろの
+  // 番号の振り直しで枝全体が1コマ前へずれて、絵が音より最大 50ms 先に出ていた
+  const fpsPart = fps ? `,${fpsFilter(fps)}` : ''
   // 画素を正方形に直すのは**この関数の責任**にする。呼び出し側の先頭に足す形にすると、
   // 分岐した経路(ぼかし背景・切り抜き)や、あとから増えた呼び出し元だけが素通しになる。
   const square = `${SQUARE_PIXEL_FILTER},`

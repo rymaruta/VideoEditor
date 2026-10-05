@@ -6,7 +6,7 @@ import { telopConcatList, type TelopLayerPayload } from '@shared/telop/layer'
 import { audioClipGain } from '@shared/audioGain'
 import { normalizeFades } from '@shared/audioFade'
 import { duckingFilterArgs } from '@shared/ducking'
-import { SQUARE_PIXEL_FILTER, scaleToFrameFilter } from '@shared/videoFrame'
+import { SQUARE_PIXEL_FILTER, fpsFilter, scaleToFrameFilter } from '@shared/videoFrame'
 import {
   AUDIO_FORMAT,
   OUTPUT_SAMPLE_RATE,
@@ -65,6 +65,9 @@ export interface GraphContext {
 }
 
 /** ffmpeg に渡すフレームレートの表記(29.97 は `30000/1001`) */
+/** 動画を区間の頭より少し手前から読む長さ(素材の秒)。1つ前の絵を読み込むため */
+const PREROLL_SEC = 0.25
+
 export function fpsExpr(seq: Sequence): string {
   return seq.fps.den === 1 ? `${seq.fps.num}` : `${seq.fps.num}/${seq.fps.den}`
 }
@@ -120,18 +123,30 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
     return asset
   }
 
-  /** 素材を区間の分だけ読む入力を足し、入力番号を返す */
-  const addMediaInput = (item: MediaItem, visStart: number, visEnd: number): number => {
+  /**
+   * 素材を区間の分だけ読む入力を足し、入力番号と、絵の時刻をずらす式(`setpts` の後ろに付ける)を返す。
+   *
+   * 動画は少し手前(`PREROLL_SEC`)から読む。区間の頭が素材のフレームの間に落ちると(スローの途中で
+   * 区間が切れる・29.97fps の素材)、頭の位置で見えているはずの1つ前の絵が読み込まれず、
+   * 区間の最初の1コマだけ次の絵が出ていた。手前から読み、頭の位置を 0 秒にずらして格子に揃える
+   */
+  const addMediaInput = (
+    item: MediaItem,
+    visStart: number,
+    visEnd: number
+  ): { idx: number; shift: string } => {
     const asset = assetOf(item)
     const speed = item.speed > 0 ? item.speed : 1
     const skip = sec(visStart - item.startFrame)
+    const seek = item.sourceIn + skip * speed
+    const pre = asset.still ? 0 : Math.min(seek, PREROLL_SEC)
     inputs.push({
       path: asset.filePath,
-      seek: item.sourceIn + skip * speed,
-      duration: sec(visEnd - visStart) * speed,
+      seek: seek - pre,
+      duration: sec(visEnd - visStart) * speed + pre,
       ...(asset.still ? { still: true, framerate: `${seq.fps.num}/${seq.fps.den}` } : {})
     })
-    return inputs.length - 1
+    return { idx: inputs.length - 1, shift: pre > 0 ? `-${num(pre / speed)}/TB` : '' }
   }
 
   /** カメラ間の色合わせ(素材に付いていれば、縮める前の画に掛ける) */
@@ -150,7 +165,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
 
   /** 画面いっぱいの枠に収める枝(V1 の本編) */
   const fullFrameBranch = (item: MediaItem, visStart: number, visEnd: number): string => {
-    const idx = addMediaInput(item, visStart, visEnd)
+    const { idx, shift } = addMediaInput(item, visStart, visEnd)
     const label = newLabel('m')
     const speed = item.speed > 0 ? item.speed : 1
     const pl = item.placement
@@ -164,7 +179,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
       { labelSuffix: `_${label}`, fps }
     )
     parts.push(
-      `[${idx}:v]setpts=PTS/${num(speed)},${colorOf(item)}${scale},setsar=1,${exactFrames(visEnd - visStart)},${VIDEO_FORMAT}[${label}]`
+      `[${idx}:v]setpts=PTS/${num(speed)}${shift},${colorOf(item)}${scale},setsar=1,${exactFrames(visEnd - visStart)},${VIDEO_FORMAT}[${label}]`
     )
     return label
   }
@@ -263,7 +278,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
       const visEnd = Math.min(item.startFrame + item.durationFrames, segEnd)
       const frames = visEnd - visStart
       const offset = visStart - segStart
-      const idx = addMediaInput(item, visStart, visEnd)
+      const { idx, shift } = addMediaInput(item, visStart, visEnd)
       const label = newLabel('o')
       const speed = item.speed > 0 ? item.speed : 1
       const pl = item.placement
@@ -292,7 +307,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
       parts.push(
         // フレーム数で切って番号を振り直すので、先にシーケンスのフレームレートへ揃える
         // (揃えないと 60fps のワイプが 30fps の書き出しで半分の速さになる。音は正しい速さのまま)
-        `[${idx}:v]setpts=PTS/${num(speed)},${colorOf(item)}${shape},setsar=1,fps=${fps},` +
+        `[${idx}:v]setpts=PTS/${num(speed)}${shift},${colorOf(item)}${shape},setsar=1,${fpsFilter(fps)},` +
           `tpad=stop_duration=${num(sec(frames))}:stop_mode=clone,trim=end_frame=${frames},` +
           `settb=${tb},setpts=N+${offset}[${label}]`
       )

@@ -153,9 +153,10 @@ describe('buildSegmentVideoGraph — 区間の映像', () => {
     const g = buildSegmentVideoGraph(ctxOf(s), seg(250, 400))
     expect(g.inputs).toHaveLength(1)
     // 区間の頭は アイテムの頭から 150フレーム = 5秒。2倍速なので素材は 10 + 10 = 20秒から、150フレーム×2 = 10秒ぶん
-    expect(g.inputs[0]).toEqual({ path: '/m/a.mp4', seek: 20, duration: 10 })
+    // 1つ前の絵を読み込むため 0.25 秒手前から読み、その分を時刻のずらしで戻す
+    expect(g.inputs[0]).toEqual({ path: '/m/a.mp4', seek: 19.75, duration: 10.25 })
     expect(g.filter).toContain('trim=end_frame=150')
-    expect(g.filter).toContain('setpts=PTS/2')
+    expect(g.filter).toContain('setpts=PTS/2-0.125/TB')
     expectWellFormed(g.filter)
   })
 
