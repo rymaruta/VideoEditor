@@ -5,6 +5,12 @@ import { join } from 'path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { exportProject, ffmpegPath } from '@main/ffmpegService'
 import type { TelopLayerPayload } from '@shared/telop/layer'
+import {
+  appendTelopLayerImages,
+  beginTelopLayer,
+  releaseTelopLayer,
+  withTelopLayer
+} from '@main/telopLayerStage'
 import type { Project } from '@shared/types'
 import { defaultTextStyle } from '@shared/textStyle'
 
@@ -157,6 +163,31 @@ describe('標準の書き出しにテロップの層を重ねる', () => {
     expect(left.map(isRed)).toEqual(Array.from({ length: 30 }, (_, f) => f < 15))
     // 層の透明な所は元の映像(青)が見える
     expect(right.every(isBlue)).toBe(true)
+  }, 20000)
+
+  it('描きながら main の置き場へ送った層(`stagedId`)も同じに重なり、終われば置き場は消える', async () => {
+    // 書き出しの本番の渡し方。画像は IPC の1回に載せず、少しずつ送ってディスクへ書いてある
+    const id = beginTelopLayer(W, H)
+    try {
+      await appendTelopLayerImages(id, 0, [layerPng('empty-st.png', false)])
+      await appendTelopLayerImages(id, 1, [layerPng('red-st.png', true)])
+      const layer: TelopLayerPayload = {
+        width: W,
+        height: H,
+        stagedId: id,
+        imageCount: 2,
+        runs: [{ startFrame: 0, endFrame: 15, image: 1 }]
+      }
+      const out = await withTelopLayer(layer, () => exportWith(layer, 'out-staged.mp4'))
+      const left = pixels(out, 100, 240)
+      expect(left).toHaveLength(30)
+      expect(left.map(isRed)).toEqual(Array.from({ length: 30 }, (_, f) => f < 15))
+      await expect(appendTelopLayerImages(id, 2, [new Uint8Array(1)])).rejects.toThrow(
+        '見つかりません'
+      )
+    } finally {
+      releaseTelopLayer(id)
+    }
   }, 20000)
 
   it('層の大きさが出力と違っても、枠に合わせて重なる', async () => {

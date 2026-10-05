@@ -1,4 +1,13 @@
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { dirname, join } from 'path'
 import type { Project } from '@shared/types'
 
@@ -73,6 +82,25 @@ function describeSaveFailure(filePath: string, e: unknown): Error {
  * クラッシュで壊れることも防げる。一時ファイルは保存先と同じディレクトリに置くこと
  * (別のファイルシステムへ跨ると rename が `EXDEV` で失敗する)。
  */
+/**
+ * 書いて、**ディスクに届くまで待ってから**閉じる。
+ *
+ * rename が不可分でも、中身がまだ OS のキャッシュにしか無いうちに電源が落ちると、
+ * 「名前だけ新しく、中身は空(か途中まで)」のファイルが残りうる(ファイルシステムは名前の
+ * 書き換えと中身の書き込みの順番を保証しない。NTFS・ext4 の既定でも起きる)。
+ * そうなると上書き前の内容も消えているので、rename の前に中身を確定させる。
+ * 待つのは 1回の保存で数〜数十 ms(自動保存は 60秒ごとなので体感に響かない)
+ */
+function writeDurably(path: string, text: string): void {
+  const fd = openSync(path, 'w')
+  try {
+    writeFileSync(fd, text, 'utf-8')
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+}
+
 export function saveProjectFile(filePath: string, project: Project): void {
   // **一時ファイルの名前は、保存先の名前から作らない。**
   // `${filePath}.saving-…` のように後ろへ足すと、一時ファイルだけが名前の長さの上限
@@ -85,7 +113,7 @@ export function saveProjectFile(filePath: string, project: Project): void {
   // ファイルシステム内という条件だけなので、ディレクトリさえ変えなければよい。
   const tmpPath = join(dirname(filePath), `.ve-save-${process.pid}-${saveSequence++}.tmp`)
   try {
-    writeFileSync(tmpPath, JSON.stringify(project, null, 2), 'utf-8')
+    writeDurably(tmpPath, JSON.stringify(project, null, 2))
     renameSync(tmpPath, filePath)
   } catch (e) {
     // 書けなかったぶんを残すと、保存先の隣にゴミが溜まり続ける。

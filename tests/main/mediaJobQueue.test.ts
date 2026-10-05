@@ -87,4 +87,32 @@ describe('MediaJobQueue', () => {
     expect(await q.request('c', async () => 'ok')).toBe('ok')
     expect(await q.request('a', async () => 'again')).toBe('again')
   })
+
+  it('覚えておく結果は大きさの合計でも抑え、古く使っていないものから捨てる', async () => {
+    // 長い作業で拡大した波形・大きなフレームが溜まり続けないように
+    const q = new MediaJobQueue<string>(1, 64, 500, 10)
+    let calls = 0
+    const make = (v: string) => async (): Promise<string> => {
+      calls++
+      return v
+    }
+    await q.request('a', make('aaaa'))
+    await q.request('b', make('bbbb'))
+    // a を使ったので、次に溢れたとき捨てるのは b
+    await q.request('a', make('aaaa'))
+    await q.request('c', make('cccc'))
+    expect(q.cachedBytes).toBe(8)
+    calls = 0
+    await q.request('a', make('aaaa'))
+    await q.request('c', make('cccc'))
+    expect(calls).toBe(0)
+    await q.request('b', make('bbbb'))
+    expect(calls).toBe(1)
+    // 1つで上限を超えるものは覚えない(ほかを巻き添えに捨てない)
+    await q.request('huge', make('x'.repeat(11)))
+    expect(q.cachedBytes).toBeLessThanOrEqual(10)
+    calls = 0
+    await q.request('huge', make('x'.repeat(11)))
+    expect(calls).toBe(1)
+  })
 })

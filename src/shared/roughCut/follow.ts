@@ -31,9 +31,18 @@ export function timelineMapping(
   before: readonly TimelineSpan[],
   after: readonly TimelineSpan[]
 ): TimelineMapSeg[] {
+  // 総当たり(前 × 後)だと、2,000クリップの本編を1本消すだけで 400万組を調べる
+  // (実測: 60分・2,000クリップ・ピンマイク6本で、本編の1回の編集に 170ms)。
+  // 後の区間を共通の時刻の頭で並べておき、重なりうる所だけを調べる
+  const index = spanIndex(
+    after,
+    (n) => n.start,
+    (n) => n.end
+  )
   const out: TimelineMapSeg[] = []
   for (const o of before) {
-    for (const n of after) {
+    for (const k of index.overlapping(o.start, o.end)) {
+      const n = after[k]
       const a = Math.max(o.start, n.start)
       const b = Math.min(o.end, n.end)
       if (b - a <= EPS) continue
@@ -45,6 +54,50 @@ export function timelineMapping(
     }
   }
   return out.sort((x, y) => x.from - y.from || x.at - y.at)
+}
+
+/**
+ * 区間の並びの、[lo, hi) と重なりうるものを速く引くための索引。
+ * 頭(`startOf`)で並べ、いちばん長い区間の長さぶん手前から探す。返す番号は元の並びの順
+ * (総当たりと同じ順に結果を作るため)。数値でない端を持つ区間があれば、索引を作らず全部を返す
+ */
+function spanIndex<T>(
+  items: readonly T[],
+  startOf: (t: T) => number,
+  endOf: (t: T) => number
+): { overlapping: (lo: number, hi: number) => number[] } {
+  const all = (): number[] => items.map((_, i) => i)
+  let maxLen = 0
+  for (const t of items) {
+    const s = startOf(t)
+    const e = endOf(t)
+    if (!Number.isFinite(s) || !Number.isFinite(e)) return { overlapping: all }
+    maxLen = Math.max(maxLen, e - s)
+  }
+  const order = items.map((_, i) => i).sort((x, y) => startOf(items[x]) - startOf(items[y]))
+  const starts = order.map((i) => startOf(items[i]))
+  /** 頭が `v` 以上の最初の位置 */
+  const lowerBound = (v: number): number => {
+    let l = 0
+    let h = starts.length
+    while (l < h) {
+      const m = (l + h) >> 1
+      if (starts[m] < v) l = m + 1
+      else h = m
+    }
+    return l
+  }
+  return {
+    overlapping: (lo, hi) => {
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return all()
+      // 頭が lo - いちばん長い区間 より前のものは、lo までに終わっている(余裕を見て EPS 広く取る)
+      const out: number[] = []
+      for (let k = lowerBound(lo - maxLen - EPS); k < starts.length && starts[k] < hi + EPS; k++) {
+        out.push(order[k])
+      }
+      return out.sort((x, y) => x - y)
+    }
+  }
 }
 
 const totalLength = (spans: readonly TimelineSpan[]): number =>
@@ -70,13 +123,58 @@ export function mapTimelineRange(
   b: number
 ): TimelineMapSeg[] {
   const out: TimelineMapSeg[] = []
-  for (const s of segs) {
+  // ピンマイクのクリップ・テロップ(合わせて1万件以上)ごとに対応の全部(2,000件)をなめると
+  // 本編の1回の編集で数千万回になる。`timelineMapping` の結果は変更前の時刻の順に並んでいるので、
+  // 重なりうる所から始めて、b を過ぎたら止める
+  const range = sortedRange(segs, a, b)
+  for (let k = range.first; k < range.end; k++) {
+    const s = segs[k]
     const from = Math.max(a, s.from)
     const to = Math.min(b, s.to)
     if (to - from <= EPS) continue
     out.push({ from, to, at: s.at + (from - s.from) })
   }
   return out
+}
+
+/** 対応の並びの索引(並びは作り直さず使い回すので、並びごとに1回だけ作る) */
+const segIndexCache = new WeakMap<readonly TimelineMapSeg[], { sorted: boolean; maxLen: number }>()
+
+/** `segs` のうち [a, b) と重なりうる位置の範囲。変更前の時刻の順に並んでいなければ全部 */
+function sortedRange(
+  segs: readonly TimelineMapSeg[],
+  a: number,
+  b: number
+): { first: number; end: number } {
+  const whole = { first: 0, end: segs.length }
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return whole
+  let info = segIndexCache.get(segs)
+  if (!info) {
+    let sorted = true
+    let maxLen = 0
+    for (let k = 0; k < segs.length; k++) {
+      const s = segs[k]
+      if (!Number.isFinite(s.from) || !Number.isFinite(s.to)) sorted = false
+      if (k > 0 && !(segs[k - 1].from <= s.from)) sorted = false
+      maxLen = Math.max(maxLen, s.to - s.from)
+    }
+    info = { sorted, maxLen }
+    segIndexCache.set(segs, info)
+  }
+  if (!info.sorted) return whole
+  // 頭が a - いちばん長い区間 より前のものは a までに終わっている(余裕を見て EPS 広く取る)
+  const lo = a - info.maxLen - EPS
+  let l = 0
+  let h = segs.length
+  while (l < h) {
+    const m = (l + h) >> 1
+    if (segs[m].from < lo) l = m + 1
+    else h = m
+  }
+  let end = l
+  // 頭が b 以上のものは重ならない(from = max(a, s.from) ≥ b ≥ to)
+  while (end < segs.length && segs[end].from < b) end++
+  return { first: l, end }
 }
 
 /**
@@ -88,13 +186,23 @@ export function uncoveredSpans(
   segs: readonly TimelineMapSeg[]
 ): TimelineSpan[] {
   const out: TimelineSpan[] = []
+  // 対応を変更後の時刻(at)で引けるようにしておく(総当たりだと 2,000 × 2,000 の組を毎回作っていた)
+  const index = spanIndex(
+    segs,
+    (s) => s.at,
+    (s) => s.at + (s.to - s.from)
+  )
   for (const n of after) {
     const len = n.end - n.start
-    const covered = segs
-      .map((s) => ({
-        a: Math.max(n.timeline, s.at),
-        b: Math.min(n.timeline + len, s.at + (s.to - s.from))
-      }))
+    const covered = index
+      .overlapping(n.timeline, n.timeline + len)
+      .map((k) => {
+        const s = segs[k]
+        return {
+          a: Math.max(n.timeline, s.at),
+          b: Math.min(n.timeline + len, s.at + (s.to - s.from))
+        }
+      })
       .filter((r) => r.b - r.a > EPS)
       .sort((x, y) => x.a - y.a)
     let t = n.timeline

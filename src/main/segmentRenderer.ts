@@ -500,11 +500,25 @@ export async function exportSequenceSegmented(
 }
 
 /**
- * 前に書き出しの途中でアプリを閉じた(落ちた)ときに残った区間の一時フォルダを消す。
- * 区間の映像は長尺だと数 GB になる。いま動いている書き出しのものを消さないよう、半日より古いものだけ
+ * 前回、処理の途中でアプリを閉じた(落ちた)ときに残った一時フォルダの名前の頭。
+ * - 区間の書き出しの作業場・テロップの層の画像の置き場(長尺だと数 GB になる)
+ * - 波形・サムネイル・フレーム・書き出しのグラフや字幕の作業場(1つは小さいが、閉じるたびに
+ *   作りかけのぶんが残る。実測: 開発機の一時フォルダに `ve-wave-*` が 95個残っていた)
  */
-export function cleanupStaleSegmentDirs(now = Date.now()): void {
-  const base = tmpdir()
+const STALE_TEMP_PREFIXES = [
+  've-seg-',
+  TELOP_STAGE_PREFIX,
+  've-wave-',
+  've-thumb-',
+  've-frame-',
+  've-graph-',
+  've-subs-'
+]
+
+/**
+ * 前回の残りの一時フォルダを消す。いま動いている処理のものを消さないよう、半日より古いものだけ
+ */
+export function cleanupStaleSegmentDirs(now = Date.now(), base = tmpdir()): void {
   let names: string[]
   try {
     names = readdirSync(base)
@@ -512,8 +526,7 @@ export function cleanupStaleSegmentDirs(now = Date.now()): void {
     return
   }
   for (const name of names) {
-    // 区間の書き出しの作業場と、テロップの層の画像の置き場(落ちると数 GB 残る)
-    if (!name.startsWith('ve-seg-') && !name.startsWith(TELOP_STAGE_PREFIX)) continue
+    if (!STALE_TEMP_PREFIXES.some((prefix) => name.startsWith(prefix))) continue
     const dir = join(base, name)
     try {
       if (now - statSync(dir).mtimeMs > 12 * 3600 * 1000)

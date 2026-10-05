@@ -90,6 +90,46 @@ describe('planTelopRuns — 絵が変わる区間だけを並べる', () => {
     expect(runs.length).toBe(400 * 7 + 800)
   })
 
+  it('同じ文字・同じ見た目のテロップは、離れた時刻でも同じ絵の鍵になる(描くのは1回)', () => {
+    // 番組で何度も出る出演者名・リアクションは、出るたびに描き直さない
+    const runs = planTelopRuns(
+      seq([
+        [
+          telop('a', 0, 30, { animation: 'popIn' }),
+          telop('b', 300, 30, { animation: 'popIn' }),
+          { ...telop('c', 600, 30, { animation: 'popIn' }), text: '別の文字' },
+          telop('d', 900, 30, { animation: 'popIn', color: '#ff0000' })
+        ]
+      ]),
+      1080
+    )
+    const keysOf = (from: number): string[] =>
+      runs.filter((r) => r.startFrame >= from && r.startFrame < from + 30).map((r) => r.imageKey)
+    expect(keysOf(300)).toEqual(keysOf(0))
+    // 文字か見た目が違えば、同じ動きの瞬間でも別の絵
+    expect(keysOf(600).some((k) => keysOf(0).includes(k))).toBe(false)
+    expect(keysOf(900).some((k) => keysOf(0).includes(k))).toBe(false)
+  })
+
+  it('カラオケは語の相対時刻まで同じときだけ同じ絵の鍵になる', () => {
+    const karaoke = (id: string, start: number, split: number): TelopItem => ({
+      ...telop(id, start, 60, { wordHighlight: true }),
+      text: 'あい',
+      words: [
+        { text: 'あ', start: 0, end: split },
+        { text: 'い', start: split, end: 2 }
+      ]
+    })
+    const runs = planTelopRuns(
+      seq([[karaoke('a', 0, 1), karaoke('b', 300, 1), karaoke('c', 600, 0.5)]]),
+      1080
+    )
+    const keysAt = (from: number): string[] =>
+      runs.filter((r) => r.startFrame >= from && r.startFrame < from + 60).map((r) => r.imageKey)
+    expect(keysAt(300)).toEqual(keysAt(0))
+    expect(keysAt(600)).not.toEqual(keysAt(0))
+  })
+
   it('telopItemSource: 単語の時刻をシーケンスの絶対秒へ戻す', () => {
     const t = { ...telop('a', 60, 30), words: [{ text: 'あ', start: 0.5, end: 1 }] }
     expect(telopItemSource(t, 30)).toMatchObject({

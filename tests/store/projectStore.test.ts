@@ -1039,6 +1039,26 @@ describe('仮編集の作り直しで、人が決めた音・差し込んだク�
     ])
   })
 
+  it('本編の後ろの方を消しても、前の(動かない)ピンマイクのクリップは元のまま(履歴で共有する)', () => {
+    // 作り直すと、取り消しの履歴が1件ごとに全部のクリップを抱え、長尺で数十万個になる
+    S.setState({ project: { ...st().project, multicam: info, clips: [], textOverlays: [] } })
+    st().applyRoughCut(
+      cutOf([
+        [0, 10],
+        [20, 30],
+        [40, 50]
+      ]),
+      []
+    )
+    const mic = (): Project['audioTracks'][number] =>
+      st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    const before = mic().clips
+    st().removeClip(st().project.clips[2].id)
+    expect(mic().clips).toHaveLength(2)
+    expect(mic().clips[0]).toBe(before[0])
+    expect(mic().clips[1]).toBe(before[1])
+  })
+
   it('仮編集を作り直しても、本編に紐づけた手置きのテロップは同じ場面のクリップに付いたまま', () => {
     const camAsset: Project['assets'][number] = {
       id: 'camA',

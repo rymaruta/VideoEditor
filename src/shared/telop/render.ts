@@ -562,6 +562,46 @@ export function layoutTelop(
   source: TelopSource,
   canvas: { w: number; h: number }
 ): TelopLayout {
+  // 同じ描く先・同じテロップ(同じ値のオブジェクト)・同じキャンバス・同じ書体の読み込み具合なら、前の配置を使う。
+  // 再生中は動くテロップを毎フレーム描き直すが、配置(1文字ずつ幅を測る)が描く時間の約8割だった
+  // (実測: 再生6秒で drawTelop 294ms のうち layoutTelop 240ms、measureText 183ms → 覚えると約100ms)。
+  // 描く先ごとに分ける(画面・書き出し・QC で測り方が違う)
+  const key = `${canvas.w}x${canvas.h}|${layoutEpoch}`
+  let perCtx = layoutCache.get(ctx)
+  if (!perCtx) {
+    perCtx = new WeakMap()
+    layoutCache.set(ctx, perCtx)
+  }
+  const hit = perCtx.get(source)
+  if (hit && hit.key === key) {
+    setCanvasFont(ctx, telopFont(source.style, positive(source.style.fontSize, 1)))
+    return hit.layout
+  }
+  const layout = measureLayout(ctx, source, canvas)
+  perCtx.set(source, { key, layout })
+  return layout
+}
+
+/**
+ * 配置の覚え。テロップの値(`TelopSource`)は書き換えずに差し替える(画面の企画も書き出しの一覧も)ので、
+ * オブジェクトごとに覚えれば中身の比較は要らない。消えたテロップ・描く先のぶんは WeakMap なので自然に消える
+ */
+const layoutCache = new WeakMap<
+  object,
+  WeakMap<TelopSource, { key: string; layout: TelopLayout }>
+>()
+let layoutEpoch = 0
+
+/** 書体の読み込みが進んだら呼ぶ(同じ文字でも、測った幅が代わりの書体のものから変わる) */
+export function invalidateTelopLayouts(): void {
+  layoutEpoch++
+}
+
+function measureLayout(
+  ctx: Pick<TelopContext, 'measureText' | 'font'>,
+  source: TelopSource,
+  canvas: { w: number; h: number }
+): TelopLayout {
   const style = source.style
   const vertical = style.vertical === true
   const fontSize = positive(style.fontSize, 1)
@@ -1300,6 +1340,7 @@ export function telopVisualKey(
   const motion = `${m.opacity.toFixed(3)}|${m.scale.toFixed(4)}|${m.dx.toFixed(2)}|${m.dy.toFixed(2)}|${m.rotate.toFixed(3)}`
   return (
     `${a.opacity.toFixed(3)}|${a.scale.toFixed(4)}|${a.offsetY.toFixed(2)}|${chars}|${sung}|${motion}` +
-    (charsMoving ? `|t${timeSeconds.toFixed(4)}` : '')
+    // 経過時間で区別する(同じ動きのテロップを別の時刻に置いても、同じ絵を使い回せる)
+    (charsMoving ? `|t${elapsed.toFixed(4)}` : '')
   )
 }

@@ -69,6 +69,7 @@ import {
   exportSequenceSegmented
 } from './segmentRenderer'
 import { installAppMenu, updateAppMenu } from './appMenu'
+import { RendererCrashGuard } from './rendererRecovery'
 import {
   appendTelopLayerImages,
   beginTelopLayer,
@@ -124,6 +125,8 @@ let autosavePath = ''
 /** このセッションで自動保存を1回でも書いたか(前回のぶんを退避するのは最初の1回だけ) */
 let autosaveOverwrittenThisSession = false
 let windowStatePath = ''
+/** 画面のプロセスが落ちたら読み込み直す(続けて落ちるときは止める) */
+const rendererCrashGuard = new RendererCrashGuard()
 
 /**
  * 「中止して終了」で閉じたとき、main 側で動いている処理を止める。
@@ -271,9 +274,25 @@ function createWindow(): void {
   })
 
   // 画面が落ちると「処理中」を解く人がいなくなる。残すとスリープ防止と閉じる前の確認が続く
-  mainWindow.webContents.on('render-process-gone', () => {
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
     quitWhileBusy = false
     setBusy(mainWindow.isDestroyed() ? null : mainWindow, null)
+    if (mainWindow.isDestroyed()) return
+    // 白いまま残さず読み込み直す(起動時と同じく、自動保存から戻せる)。理由は rendererRecovery
+    if (rendererCrashGuard.shouldReload(details.reason)) {
+      // 落ちる前の作業は自動保存にしか無い。読み込み直した画面の最初の自動保存で上書きせず、
+      // 起動時と同じく退避してから書く(「あとで決める」を選んでも失われない)
+      autosaveOverwrittenThisSession = false
+      mainWindow.webContents.reload()
+      return
+    }
+    if (details.reason !== 'clean-exit') {
+      dialog.showErrorBox(
+        '画面が続けて異常終了しました',
+        `画面のプロセスが短い間に何度も終了したため、自動での再読み込みを止めました(${details.reason})。\n` +
+          'アプリを起動し直すと、自動保存から作業を戻せます。'
+      )
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {

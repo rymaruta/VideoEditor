@@ -58,6 +58,7 @@ import {
 } from './icons'
 
 import { TelopCanvasLayer } from './TelopCanvasLayer'
+import { loadTelopFonts } from '../lib/telopFonts'
 import { telopHitBounds, type TelopContext } from '@shared/telop/render'
 import { ShortsUiMockup } from './ShortsUiMockup'
 import { shortsSafeAreaInset } from '../lib/shortsSafeArea'
@@ -1300,6 +1301,16 @@ export function PreviewPlayer(): React.JSX.Element {
 
   // 時間の表示はタイムラインと同じ `時:分:秒:フレーム`(Premiere と同じ)
   const timecodeFps = Math.round(1 / frameSeconds(project.clips, project.assets))
+  // 回の全部のテロップの書体を、手が空いたときに先に読み込んでおく。読み込まれていない文字の
+  // 範囲は、テロップが初めて出た瞬間に文字の幅を測るところで書体の解決を待たされ、再生が止まる
+  // (実測: 同梱フォントのテロップが出た瞬間に 1.2〜2.4 秒止まった)。確かめ済みの文字は
+  // `loadTelopFonts` が覚えているので、文字を直すたびに走っても新しい文字の分しか調べない
+  const textOverlays = project.textOverlays
+  useEffect(() => {
+    const id = window.setTimeout(() => void loadTelopFonts(textOverlays), 500)
+    return () => window.clearTimeout(id)
+  }, [textOverlays])
+
   const activeOverlays = project.textOverlays.filter(
     (o) => playheadTime >= o.startTime && playheadTime < o.endTime
   )

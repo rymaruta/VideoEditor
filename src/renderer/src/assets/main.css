@@ -7297,3 +7297,27 @@ select.telop-kind-add {
   gap: 5px;
 }
 /* ================================================================== 見た目の編集の使い勝手 ここまで */
+
+/* パネル1つぶんのエラー表示(`PanelBoundary`)。アプリ全体の表示(`.error-boundary`)と違い、枠の中に収める */
+.panel-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.panel-error-title {
+  font-weight: 600;
+}
+
+.panel-error-message {
+  color: var(--danger, #f2495c);
+  word-break: break-all;
+}
+
+.panel-error-note {
+  color: var(--text-2);
+}

@@ -1,4 +1,9 @@
-import { telopDrawnChars, telopFontWeight, TELOP_FONT_STACKS } from '@shared/telop/render'
+import {
+  invalidateTelopLayouts,
+  telopDrawnChars,
+  telopFontWeight,
+  TELOP_FONT_STACKS
+} from '@shared/telop/render'
 import type { TextStyle } from '@shared/types'
 
 /**
@@ -28,16 +33,34 @@ export async function loadTelopFonts(
   let loaded = false
   await Promise.all(
     [...chars].map(async ([font, set]) => {
-      const text = [...set].join('')
+      // 読み込みを確かめ済みの文字は数えない(`fonts.check` は同梱フォントの範囲の数だけ照合し、
+      // 1回 15〜170ms かかる。再生中は毎フレーム呼ばれ、6秒の再生で 5.4秒をここで使っていた)
+      const done = confirmed.get(font)
+      const missing = [...set].filter((ch) => !done?.has(ch))
+      const text = missing.join('')
       if (!text.trim()) return
       try {
-        if (fonts.check(font, text)) return
-        await fonts.load(font, text)
-        loaded = true
+        if (!fonts.check(font, text)) {
+          await fonts.load(font, text)
+          loaded = true
+        }
+        const known = confirmed.get(font) ?? new Set<string>()
+        for (const ch of missing) known.add(ch)
+        confirmed.set(font, known)
       } catch {
-        // 読めなければ代わりの書体で描く
+        // 読めなければ代わりの書体で描く(確かめ済みにはしない。次にまた試す)
       }
     })
   )
+  // 書体が替わると文字の幅も替わる。覚えている配置を捨てる
+  if (loaded) invalidateTelopLayouts()
   return loaded
 }
+
+// 読み込みはここ以外(画面の別の所・ブラウザ自身)でも進むので、終わるたびに配置を捨てる
+if (typeof document !== 'undefined') {
+  document.fonts?.addEventListener?.('loadingdone', () => invalidateTelopLayouts())
+}
+
+/** 書体(`loadTelopFonts` の鍵)ごとに、読み込みを確かめ済みの文字。フォントはページから消えないので覚えておける */
+const confirmed = new Map<string, Set<string>>()

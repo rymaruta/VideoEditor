@@ -4072,6 +4072,11 @@ function relinkToRebuiltClips(
  * 人が自分で置いたもの(自動の印の無いトラック・テロップ)と、本編に紐づくものは動かさない
  * (紐づくものは `syncLinked…` が本編のクリップに合わせる)。
  */
+/** 並びの中身が(参照として)同じか */
+function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i])
+}
+
 function followMainEdit(
   prev: Project,
   next: Project,
@@ -4102,6 +4107,22 @@ function followMainEdit(
     const speed = c.speed || 1
     const end = c.startTime + (c.outPoint - c.inPoint) / speed
     const pieces = mapTimelineRange(segs, c.startTime, end)
+    // 動かないクリップは**元の値のまま**返す。作り直すと、編集した所より前の(動かない)ピンマイクの
+    // クリップまで毎回別の値になり、取り消しの履歴が1件ごとに全クリップを抱える
+    // (実測: 60分・2,000クリップ・ピンマイク6本で本編を50回直すと、履歴が 602,820 個のクリップを
+    //  抱えていた=共有ゼロ)。計算し直すと浮動小数の丸めで端が 1e-15 秒ずつ動き続けることも防ぐ
+    if (pieces.length === 1) {
+      const p = pieces[0]
+      const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9
+      if (
+        p.to - p.from > 1e-3 &&
+        same(p.at, c.startTime) &&
+        same(p.from, c.startTime) &&
+        same(p.to, end)
+      ) {
+        return [c]
+      }
+    }
     return pieces
       .filter((p) => p.to - p.from > 1e-3)
       .map((p, i, all) => ({
@@ -4137,6 +4158,10 @@ function followMainEdit(
           )
         : []
     const clips = [...moved, ...added].sort((a, b) => a.startTime - b.startTime)
+    // どのクリップも動かなかったトラックは、元のトラックのまま(履歴で共有できるように)
+    if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
+      return t
+    }
     const track = { ...t, clips }
     // 手を付けていない自動のトラックは、動かしたあとも「手を付けていない」のまま(作り直しで入れ替わる)
     return untouched ? withAutoSignature(track) : track
@@ -4144,7 +4169,11 @@ function followMainEdit(
   const videoOverlayTracks = next.videoOverlayTracks.map((t) => {
     if (!follows(t)) return t
     const untouched = isUntouchedAuto(t)
-    const track = { ...t, clips: t.clips.flatMap((c) => remapClip(c)) }
+    const clips = t.clips.flatMap((c) => remapClip(c))
+    if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
+      return t
+    }
+    const track = { ...t, clips }
     return untouched ? withAutoSignature(track) : track
   })
   const textOverlays = next.textOverlays.flatMap((o) => {

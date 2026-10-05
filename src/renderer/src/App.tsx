@@ -19,6 +19,7 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
+import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { useProjectStore } from './store/projectStore'
 import { useAutosaveStore } from './store/autosaveStore'
@@ -367,37 +368,61 @@ function App(): React.JSX.Element {
                   play state and shuttle speed all belong to the clip being auditioned and
                   must not carry over to the next one. */}
               <div className={`tab-pane ${tab === 'source' ? 'active' : ''}`}>
-                {sourceAssetId && <SourceViewer key={sourceAssetId} />}
+                {sourceAssetId && (
+                  <PanelBoundary key={sourceAssetId} name="ソース">
+                    <SourceViewer key={sourceAssetId} />
+                  </PanelBoundary>
+                )}
               </div>
               <div className={`tab-pane ${tab === 'inspector' ? 'active' : ''}`}>
-                <Inspector />
+                <PanelBoundary name="インスペクター">
+                  <Inspector />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'template' ? 'active' : ''}`}>
-                <TemplatePanel />
+                <PanelBoundary name="テンプレート">
+                  <TemplatePanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'text' ? 'active' : ''}`}>
-                <TextOverlayPanel />
+                <PanelBoundary name="テロップ">
+                  <TextOverlayPanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'narration' ? 'active' : ''}`}>
-                <NarrationPanel />
+                <PanelBoundary name="ナレーション">
+                  <NarrationPanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'thumbnail' ? 'active' : ''}`}>
-                <ThumbnailPanel />
+                <PanelBoundary name="サムネイル">
+                  <ThumbnailPanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'audio' ? 'active' : ''}`}>
-                <AudioLibraryPanel />
+                <PanelBoundary name="音源">
+                  <AudioLibraryPanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'preset' ? 'active' : ''}`}>
-                <PresetPanel />
+                <PanelBoundary name="プリセット">
+                  <PresetPanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'gametrend' ? 'active' : ''}`}>
-                <GameTrendPanel />
+                <PanelBoundary name="ゲームトレンド">
+                  <GameTrendPanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'youtube' ? 'active' : ''}`}>
-                <YouTubeTrendPanel />
+                <PanelBoundary name="YouTube トレンド">
+                  <YouTubeTrendPanel />
+                </PanelBoundary>
               </div>
               <div className={`tab-pane ${tab === 'metadata' ? 'active' : ''}`}>
-                <MetadataPanel />
+                <PanelBoundary name="メタデータ">
+                  <MetadataPanel />
+                </PanelBoundary>
               </div>
             </div>
           </section>
@@ -412,7 +437,9 @@ function App(): React.JSX.Element {
                 プログラム
               </button>
             </div>
-            <PreviewPlayer />
+            <PanelBoundary name="プログラムモニター">
+              <PreviewPlayer />
+            </PanelBoundary>
           </section>
         </div>
 
@@ -425,7 +452,9 @@ function App(): React.JSX.Element {
         {/* ===== 下段: プロジェクト / タイムライン ===== */}
         <div className="workspace-row" style={{ height: size.bottom }}>
           <section className="frame frame-bin" style={{ width: size.bin }}>
-            <MediaBin />
+            <PanelBoundary name="プロジェクト">
+              <MediaBin />
+            </PanelBoundary>
           </section>
           <div
             className={`split-handle split-col ${resizeDrag?.kind === 'bin' ? 'active' : ''}`}
@@ -433,16 +462,30 @@ function App(): React.JSX.Element {
             title="ドラッグして幅を調整"
           />
           <section className="frame frame-timeline">
-            <Timeline />
+            <PanelBoundary name="タイムライン">
+              <Timeline />
+            </PanelBoundary>
           </section>
         </div>
       </div>
-      <StatusBar />
-      <ExportDialog />
-      <TelopStyleDialog />
-      <NewEpisodeDialog />
-      <AutoEditScreen />
-      <AutosaveRestoreModal />
+      <PanelBoundary name="ステータスバー">
+        <StatusBar />
+      </PanelBoundary>
+      <PanelBoundary name="書き出し">
+        <ExportDialog />
+      </PanelBoundary>
+      <PanelBoundary name="テロップのスタイル">
+        <TelopStyleDialog />
+      </PanelBoundary>
+      <PanelBoundary name="新しい回">
+        <NewEpisodeDialog />
+      </PanelBoundary>
+      <PanelBoundary name="自動編集">
+        <AutoEditScreen />
+      </PanelBoundary>
+      <PanelBoundary name="自動保存の復元">
+        <AutosaveRestoreModal />
+      </PanelBoundary>
     </div>
   )
 }

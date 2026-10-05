@@ -9,6 +9,9 @@
  *   (シークした先、いま見えているクリップの絵が先に出る)
  * - 同じ頼みの結果は覚えておく(行き来しても作り直さない)。同時に来た同じ頼みは1回にまとめる
  * - 待ちが `maxPending` を超えたら、一番古い頼みを捨てる(スクロールで通り過ぎたクリップの分)
+ * - 覚えておく結果は**件数と大きさの両方**で抑える(古く使っていないものから捨てる)。
+ *   件数だけだと、拡大した長尺の波形(幅の広い PNG)やサムネイル用の大きなフレーム(JPEG の
+ *   data URL で1枚 数百 KB)が 500件たまり、長い作業のあいだ main が数百 MB を抱えたままになる
  */
 export class MediaJobQueue<T> {
   private running = 0
@@ -18,11 +21,15 @@ export class MediaJobQueue<T> {
     { resolve: (v: T) => void; reject: (e: unknown) => void }[]
   >()
   private readonly cache = new Map<string, T>()
+  private cacheBytes = 0
 
   constructor(
     private readonly concurrency = 2,
     private readonly maxPending = 64,
-    private readonly cacheSize = 500
+    private readonly cacheSize = 500,
+    /** 覚えておく結果の大きさの合計の上限(`sizeOf` で数える。data URL なら文字数) */
+    private readonly maxCacheBytes = 64 * 1024 * 1024,
+    private readonly sizeOf: (value: T) => number = (v) => (typeof v === 'string' ? v.length : 0)
   ) {}
 
   /** `key` が同じ頼みは同じ結果になること */
@@ -50,6 +57,29 @@ export class MediaJobQueue<T> {
     })
   }
 
+  /** 覚えている結果の大きさの合計(試験・記録用) */
+  get cachedBytes(): number {
+    return this.cacheBytes
+  }
+
+  private remember(key: string, value: T): void {
+    const size = this.sizeOf(value)
+    // 1つで上限を超えるものは覚えない(覚えると、ほかを全部捨てても収まらない)
+    if (size > this.maxCacheBytes) return
+    const old = this.cache.get(key)
+    if (old !== undefined) {
+      this.cache.delete(key)
+      this.cacheBytes -= this.sizeOf(old)
+    }
+    this.cache.set(key, value)
+    this.cacheBytes += size
+    while (this.cache.size > this.cacheSize || this.cacheBytes > this.maxCacheBytes) {
+      const oldest = this.cache.keys().next().value as string
+      this.cacheBytes -= this.sizeOf(this.cache.get(oldest) as T)
+      this.cache.delete(oldest)
+    }
+  }
+
   /** 待っている数(試験・記録用) */
   get waiting(): number {
     return this.pending.length
@@ -75,9 +105,7 @@ export class MediaJobQueue<T> {
         .then(job.run)
         .then(
           (value) => {
-            this.cache.set(job.key, value)
-            while (this.cache.size > this.cacheSize)
-              this.cache.delete(this.cache.keys().next().value as string)
+            this.remember(job.key, value)
             this.settle(job.key, (w) => w.resolve(value))
           },
           (e) => this.settle(job.key, (w) => w.reject(e))

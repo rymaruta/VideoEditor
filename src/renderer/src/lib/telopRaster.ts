@@ -27,19 +27,10 @@ import { TelopImageWriter } from './telopImageWriter'
  * 画面のプロセスが落ちる(実測は `TelopLayerPayload` のコメント)。
  */
 
-/**
- * 同時に PNG にしておく枚数。描く(1枚 1ms 未満)と PNG にする(1080p で約 10ms、4K で約 37ms。
- * ほぼ全部が GPU からの読み戻しと圧縮)・main へ送る・ディスクへ書くを重ねて、待ち時間を詰める
- */
-const ENCODE_AHEAD = 1
-
-function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png')).then(
-    async (blob) => {
-      if (!blob) throw new Error('テロップの画像を作れませんでした')
-      return new Uint8Array(await blob.arrayBuffer())
-    }
-  )
+async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) throw new Error('テロップの画像を作れませんでした')
+  return new Uint8Array(await blob.arrayBuffer())
 }
 
 export async function rasterizeTelopLayer(
@@ -72,23 +63,13 @@ export async function rasterizeTelopLayer(
     await writer.add(await canvasToPng(canvas))
     const imageByKey = new Map<string, number>()
     const out: TelopLayerPayload['runs'] = []
-    /** PNG にしている途中の絵(描いた順)。`imageKey` ごとに1つ */
-    const encoding: { key: string; png: Promise<Uint8Array> }[] = []
-    const T = ((globalThis as any).__T = { draw: 0, png: 0, add: 0, n: 0, t0: performance.now(), plan: 0 })
-    const settleOldest = async (): Promise<void> => {
-      const e = encoding.shift()!
-      let t = performance.now()
-      const b = await e.png
-      T.png += performance.now() - t
-      t = performance.now()
-      imageByKey.set(e.key, await writer.add(b))
-      T.add += performance.now() - t
-    }
+    // PNG は1枚ずつ作る。何枚か重ねて作らせても速くならず、かえって遅くなった
+    // (実測 1080p・テロップ100枚・2,149枚: 1枚ずつ 33.8秒 / 3枚重ね 43.4秒。
+    //  PNG にする時間がほぼ全部で 1枚 12.9ms、描くのは 0.2ms、中身の照合と main への送りは 1.2ms)
     for (let i = 0; i < runs.length; i++) {
       const run = runs[i]
-      if (!imageByKey.has(run.imageKey) && !encoding.some((e) => e.key === run.imageKey)) {
-        if (encoding.length >= ENCODE_AHEAD) await settleOldest()
-        const td = performance.now()
+      let image = imageByKey.get(run.imageKey)
+      if (image === undefined) {
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         const time = (run.startFrame + 1e-9) / fps
         for (const id of run.itemIds) {
@@ -102,27 +83,14 @@ export async function rasterizeTelopLayer(
               textCanvas
             )
         }
-        T.draw += performance.now() - td; T.n++
-        // `toBlob` は呼んだ時点の絵の写しを PNG にする(仕様)ので、同じ Canvas へすぐ次を描いてよい
-        const png = canvasToPng(canvas)
-        // 待つのは順番が来たとき。それまでに失敗しても、未処理の拒否にしない
-        png.catch(() => {})
-        encoding.push({ key: run.imageKey, png })
+        image = await writer.add(await canvasToPng(canvas))
+        imageByKey.set(run.imageKey, image)
       }
+      out.push({ startFrame: run.startFrame, endFrame: run.endFrame, image })
       if (signal?.aborted) throw new Error('EXPORT_CANCELED')
       if (onProgress && i % 20 === 0) onProgress(i, runs.length)
     }
-    while (encoding.length > 0) await settleOldest()
-    // 番号は PNG にし終えた順に決まるので、区間へ割り当てるのは全部が済んでから
-    for (const run of runs) {
-      out.push({
-        startFrame: run.startFrame,
-        endFrame: run.endFrame,
-        image: imageByKey.get(run.imageKey)!
-      })
-    }
     await writer.finish()
-    ;(T as any).total = performance.now() - T.t0; console.log('TIMING', JSON.stringify(T))
     if (signal?.aborted) throw new Error('EXPORT_CANCELED')
     onProgress?.(runs.length, runs.length)
     return {
