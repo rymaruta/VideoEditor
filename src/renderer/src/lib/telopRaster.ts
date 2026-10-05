@@ -74,14 +74,21 @@ export async function rasterizeTelopLayer(
     const out: TelopLayerPayload['runs'] = []
     /** PNG にしている途中の絵(描いた順)。`imageKey` ごとに1つ */
     const encoding: { key: string; png: Promise<Uint8Array> }[] = []
+    const T = ((globalThis as any).__T = { draw: 0, png: 0, add: 0, n: 0, t0: performance.now(), plan: 0 })
     const settleOldest = async (): Promise<void> => {
       const e = encoding.shift()!
-      imageByKey.set(e.key, await writer.add(await e.png))
+      let t = performance.now()
+      const b = await e.png
+      T.png += performance.now() - t
+      t = performance.now()
+      imageByKey.set(e.key, await writer.add(b))
+      T.add += performance.now() - t
     }
     for (let i = 0; i < runs.length; i++) {
       const run = runs[i]
       if (!imageByKey.has(run.imageKey) && !encoding.some((e) => e.key === run.imageKey)) {
         if (encoding.length >= ENCODE_AHEAD) await settleOldest()
+        const td = performance.now()
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         const time = (run.startFrame + 1e-9) / fps
         for (const id of run.itemIds) {
@@ -95,6 +102,7 @@ export async function rasterizeTelopLayer(
               textCanvas
             )
         }
+        T.draw += performance.now() - td; T.n++
         // `toBlob` は呼んだ時点の絵の写しを PNG にする(仕様)ので、同じ Canvas へすぐ次を描いてよい
         const png = canvasToPng(canvas)
         // 待つのは順番が来たとき。それまでに失敗しても、未処理の拒否にしない
@@ -114,6 +122,7 @@ export async function rasterizeTelopLayer(
       })
     }
     await writer.finish()
+    ;(T as any).total = performance.now() - T.t0; console.log('TIMING', JSON.stringify(T))
     if (signal?.aborted) throw new Error('EXPORT_CANCELED')
     onProgress?.(runs.length, runs.length)
     return {
