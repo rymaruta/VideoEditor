@@ -6817,6 +6817,7 @@ select.telop-kind-add {
   cursor: default;
 }
 .color-popover {
+  width: 256px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
 }
