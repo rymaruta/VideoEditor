@@ -1159,7 +1159,22 @@ function longCase(): Case {
 
 // ------------------------------------------------------------------ テスト
 
-const CASES: Case[] = FULL ? [MIXED30, HFR60, NTSC2997, longCase()] : [MIXED30, HFR60]
+/**
+ * 端の値(再監査で見つかった所): 頭が素材の 0.25 秒 + 丸めの残り(`-ss` に指数で書くと読めず失敗した)、
+ * 素材の頭のすぐ近くから読むクリップ、フレームの間から読むワイプ(頭の1コマが次の絵になっていた)
+ */
+const EDGES: Case = {
+  name: 'edges',
+  main: [
+    { src: 'A30', in: 0.55 - 0.3, out: 2.0 },
+    { src: 'A30', in: 0.1, out: 1.5 },
+    { src: 'A30', in: 3.01, out: 5.0 }
+  ],
+  pip: [{ src: 'D60pip', start: 0.5, in: 3.012, out: 4.5 }],
+  telops: [{ start: 0.2, end: 1.0 }]
+}
+
+const CASES: Case[] = FULL ? [MIXED30, HFR60, EDGES, NTSC2997, longCase()] : [MIXED30, HFR60, EDGES]
 const report: Record<string, unknown> = {}
 
 function summarize(r: EngineResult): Record<string, unknown> {
@@ -1369,50 +1384,55 @@ describe.skipIf(!HAVE_FFMPEG)('書き出しの受け入れ試験(実際の ffmpe
    * BGM は速く読めるので、どれだけ先に読んでいたかで消える長さが変わる(実測: 0〜0.86秒)。
    * 区間分割の書き出しは、BGM を区間の長さちょうどに伸ばしてから掛けるので起きない。
    */
-  it('ダッキングする BGM が終わりまで鳴る(標準・区間分割を4回ずつ)', async () => {
-    const c: Case = {
-      name: 'duckTail',
-      main: [
-        { src: 'C60', in: 1, out: 4 },
-        { src: 'C60', in: 14, out: 16 }
-      ],
-      audio: [{ volume: 1, ducking: true, clips: [{ src: 'Gtone', start: 0, in: 0, out: 4 }] }]
-    }
-    const project = buildProject(c)
-    const ends: Record<string, number[]> = { standard: [], segmented: [] }
-    for (let i = 0; i < 4; i++) {
-      for (const engine of ['standard', 'segmented'] as const) {
-        const out = join(work, 'out', `duckTail.${engine}.${i}.mp4`)
-        mkdirSync(join(work, 'out'), { recursive: true })
-        if (engine === 'standard') {
-          await exportProject({
-            project,
-            aspectRatio: '16:9',
-            resolutionHeight: OUT_H,
-            quality: 'standard',
-            outputPath: out,
-            telopLayer: null,
-            onProgress: () => {}
-          })
-        } else {
-          await exportSequenceSegmented({
-            project: projectV1ToV2(project, { resolution: OUT_H }),
-            outputPath: out,
-            quality: 'standard',
-            encoder: 'libx264',
-            telopLayer: null
-          })
-        }
-        const { mag, hop } = toneEnvelope(decodeAudioLeft(out), 3500)
-        let last = 0
-        for (let k = 0; k < mag.length; k++) if (mag[k] > 0.05) last = k
-        ends[engine].push(Number(((last * hop) / 48000).toFixed(3)))
+  it('ダッキングする BGM が終わりまで鳴る(標準・区間分割を4回ずつ。本編の途中で終わる BGM と、本編の終わりまで続く BGM)', async () => {
+    for (const bgmEnd of [4, 5]) {
+      const c: Case = {
+        name: 'duckTail',
+        main: [
+          { src: 'C60', in: 1, out: 4 },
+          { src: 'C60', in: 14, out: 16 }
+        ],
+        audio: [
+          { volume: 1, ducking: true, clips: [{ src: 'Gtone', start: 0, in: 0, out: bgmEnd }] }
+        ]
       }
+      const project = buildProject(c)
+      const ends: Record<string, number[]> = { standard: [], segmented: [] }
+      for (let i = 0; i < 4; i++) {
+        for (const engine of ['standard', 'segmented'] as const) {
+          const out = join(work, 'out', `duckTail.${engine}.${i}.mp4`)
+          mkdirSync(join(work, 'out'), { recursive: true })
+          if (engine === 'standard') {
+            await exportProject({
+              project,
+              aspectRatio: '16:9',
+              resolutionHeight: OUT_H,
+              quality: 'standard',
+              outputPath: out,
+              telopLayer: null,
+              onProgress: () => {}
+            })
+          } else {
+            await exportSequenceSegmented({
+              project: projectV1ToV2(project, { resolution: OUT_H }),
+              outputPath: out,
+              quality: 'standard',
+              encoder: 'libx264',
+              telopLayer: null
+            })
+          }
+          const { mag, hop } = toneEnvelope(decodeAudioLeft(out), 3500)
+          let last = 0
+          for (let k = 0; k < mag.length; k++) if (mag[k] > 0.05) last = k
+          ends[engine].push(Number(((last * hop) / 48000).toFixed(3)))
+        }
+      }
+      report[`duckTail${bgmEnd}`] = ends
+      // 窓が後ろ向き 10ms なので、終わりは BGM の終わり + 10ms 弱で見える(本編の終わり 5 秒で切れる)
+      for (const t of ends.segmented)
+        expect.soft(t, `区間分割の BGM の終わり(${bgmEnd})`).toBeGreaterThan(bgmEnd - 0.03)
+      for (const t of ends.standard)
+        expect.soft(t, `標準の BGM の終わり(${bgmEnd})`).toBeGreaterThan(bgmEnd - 0.03)
     }
-    report.duckTail = ends
-    // 窓が後ろ向き 10ms なので、終わりは 4.0 + 10ms 弱で見える
-    for (const t of ends.segmented) expect.soft(t).toBeGreaterThan(3.98)
-    if (STRICT)
-      for (const t of ends.standard) expect.soft(t, '標準の BGM の終わり').toBeGreaterThan(3.98)
-  }, 120_000)
+  }, 240_000)
 })

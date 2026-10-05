@@ -506,6 +506,14 @@ function trackExportCommand(command: ffmpeg.FfmpegCommand): void {
 }
 let exportInProgress = false
 let exportCancelRequested = false
+/**
+ * ffmpeg に渡す秒。`0.25 - 0.25` の丸めの残り(5.55e-17)のような値を JavaScript は指数で書き、
+ * ffmpeg の `-ss`・`atrim` は読めずに書き出しごと失敗する。小数6桁で書く
+ */
+export function ffSeconds(sec: number): string {
+  const v = Number.isFinite(sec) ? Math.max(0, sec) : 0
+  return v < 5e-7 ? '0' : v.toFixed(6)
+}
 /** 本編の素材を切り出しの頭より少し手前から読む長さ(素材の秒)。1つ前の絵を読み込むため */
 const MAIN_PREROLL_SEC = 0.25
 
@@ -814,8 +822,21 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         const preOut = pre / speed
         command
           .input(asset.filePath)
-          .inputOptions([`-ss ${clip.inPoint - pre}`, `-t ${sourceDuration + pre}`])
+          .inputOptions([
+            `-ss ${ffSeconds(clip.inPoint - pre)}`,
+            `-t ${ffSeconds(sourceDuration + pre)}`
+          ])
         const myIndex = inputIndex++
+        // 音は手前から読まない(別の入力で、切り出しの頭から読む)。音と絵の頭がそろっていない素材
+        // (絵が数フレーム遅れて始まる録画など)では、手前から読むと音の頭の位置がずれ、
+        // 切り落としたあと音が絵より先に出ていた
+        let audioIndex = myIndex
+        if (pre > 0 && asset.hasAudio && !clip.audioDetached) {
+          command
+            .input(asset.filePath)
+            .inputOptions([`-ss ${ffSeconds(clip.inPoint)}`, `-t ${ffSeconds(sourceDuration)}`])
+          audioIndex = inputIndex++
+        }
 
         // カメラ間の色合わせ(縮める前の画に掛ける)
         const colorPart = asset.colorMatch ? `${colorMatchFilter(asset.colorMatch)},` : ''
@@ -899,10 +920,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // 最初から `anullsrc` に `duration` を渡して尺ちょうどにしており、
           // ここでも**片方にだけ揃える処理が育っていた**。
           filterParts.push(
-            // 手前から読んだぶんは、速さを変える前に切り落とす(音の作りは手前から読まないときと同じ)
-            `[${myIndex}:a]` +
-              (pre > 0 ? `asetpts=PTS-STARTPTS,atrim=start=${pre},asetpts=PTS-STARTPTS,` : '') +
-              `${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+            `[${audioIndex}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
               `apad,atrim=0:${outputDuration},asetpts=PTS-STARTPTS,` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )
@@ -1015,13 +1033,30 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             totalDuration
           )
           const pipAudibleDur = Math.max(0, Math.min(pipVisibleDuration, pipEndExport - pipStart))
+          // 動画は本編と同じく少し手前から読み、頭の1コマも正しい絵にする(音は別の入力で頭から)
+          const pipPre = asset.still
+            ? 0
+            : Math.min(Math.max(0, overlayClip.inPoint), MAIN_PREROLL_SEC)
           command.input(asset.filePath).inputOptions(
             // 静止画は同じ画を、書き出しのフレームレートで必要な秒数ぶん流す
             asset.still
-              ? ['-loop 1', `-framerate ${outputFps}`, `-t ${pipVisibleDuration}`]
-              : [`-ss ${overlayClip.inPoint}`, `-t ${pipVisibleDuration}`]
+              ? ['-loop 1', `-framerate ${outputFps}`, `-t ${ffSeconds(pipVisibleDuration)}`]
+              : [
+                  `-ss ${ffSeconds(overlayClip.inPoint - pipPre)}`,
+                  `-t ${ffSeconds(pipVisibleDuration + pipPre)}`
+                ]
           )
           const myIndex = inputIndex++
+          let pipAudioIndex = myIndex
+          if (pipPre > 0 && asset.hasAudio) {
+            command
+              .input(asset.filePath)
+              .inputOptions([
+                `-ss ${ffSeconds(overlayClip.inPoint)}`,
+                `-t ${ffSeconds(pipVisibleDuration)}`
+              ])
+            pipAudioIndex = inputIndex++
+          }
           // 絵の出入りはフレームの格子に揃え、窓は半フレームずらして取る(長尺向けの書き出しと同じ)。
           // `between` は終わりの時刻を含むので、そのままだと終わりの1枚に PiP が残り、
           // 格子に乗らない頭では1枚遅れて出て、絵も最大1フレーム遅れていた
@@ -1041,7 +1076,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                 (full
                   ? `scale=${w}:${h}:force_original_aspect_ratio=decrease,`
                   : `scale=${scaledWidth}:-2,`) +
-                `setpts=PTS-STARTPTS+${pipFrameStart}/TB[${pipLabel}]`
+                (pipPre > 0
+                  ? `setpts=PTS-${ffSeconds(pipPre)}/TB+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`
+                  : `setpts=PTS-STARTPTS+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`)
             )
             const margin = Math.round(pipMarginPx(w))
             const xExpr = full
@@ -1088,7 +1125,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                 ? `atrim=0:${pipAudibleDur},`
                 : ''
             filterParts.push(
-              `[${myIndex}:a]asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
+              `[${pipAudioIndex}:a]asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
                 `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })
@@ -1284,13 +1321,16 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 下げる音と、本編の音(サイドチェイン)を、どちらも本編の長さちょうどに揃えてから掛ける。
         // 揃えないと、片方が先に尽きたところで、読み込み済みの音を捨てることがある(ffmpeg の
         // 読み込みの順で毎回変わる。実測: 0〜4秒の BGM が 6 回中 4 回、0.7〜0.9 秒短く切れた)
-        const fit = `apad=whole_dur=${totalDuration.toFixed(6)},atrim=end=${totalDuration.toFixed(6)}`
+        // `sidechaincompress` は、どちらかの入力が尽きた所で、まだ処理していない音を捨てて終わる。
+        // 長さを揃えても、どちらが先に尽きるかは読み込みの順で変わる。両方を無音で終わりなく延ばし、
+        // 掛けた後で本編の長さに切る(どちらも尽きないので、捨てられる音が無い)
         duckTracks.forEach((t, i) => {
           const duckedLabel = `${t.label}_ducked`
-          filterParts.push(`[${t.label}]${fit}[${t.label}_fit]`)
-          filterParts.push(`[${curA}_duck${i}]${fit}[${curA}_duck${i}_fit]`)
+          filterParts.push(`[${t.label}]apad[${t.label}_fit]`)
+          filterParts.push(`[${curA}_duck${i}]apad[${curA}_duck${i}_fit]`)
           filterParts.push(
-            `[${t.label}_fit][${curA}_duck${i}_fit]${duckingFilterArgs()}[${duckedLabel}]`
+            `[${t.label}_fit][${curA}_duck${i}_fit]${duckingFilterArgs()},` +
+              `atrim=end=${ffSeconds(totalDuration)}[${duckedLabel}]`
           )
           t.label = duckedLabel
         })

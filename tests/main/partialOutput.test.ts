@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { extname, join } from 'path'
 import { partialPathFor, writeViaPartial } from '../../src/main/partialOutput'
@@ -57,4 +65,21 @@ describe('書き出しは一時ファイルへ書いてから置き換える', (
     expect(existsSync(out)).toBe(false)
     expect(readdirSync(d)).toEqual([])
   })
+})
+
+describe('置き換えられないとき', () => {
+  it('書き上げた動画は消さずに残し、その場所を伝える', async () => {
+    const d = work()
+    // 置き換え先がフォルダ(ファイルで上書きできない)
+    const out = join(d, 'busy.mp4')
+    mkdirSync(join(out, 'x'), { recursive: true })
+    const err = await writeViaPartial(out, async (p) => writeFileSync(p, 'done')).catch(
+      (e: Error) => e
+    )
+    expect(err).toBeInstanceOf(Error)
+    const left = readdirSync(d).filter((f) => f.includes('.partial-'))
+    expect(left).toHaveLength(1)
+    expect((err as Error).message).toContain(left[0])
+    expect(readFileSync(join(d, left[0]), 'utf8')).toBe('done')
+  }, 10_000)
 })

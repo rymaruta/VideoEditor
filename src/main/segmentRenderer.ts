@@ -22,6 +22,7 @@ import {
   OUTPUT_SAMPLE_RATE,
   crfForQuality,
   ffmpegPath,
+  ffSeconds,
   parseLoudnormMeasurement,
   probeAudioChannels,
   type LoudnessMeasurement
@@ -164,7 +165,8 @@ function graphArgs(graph: SegmentGraph, graphPath: string): string[] {
       )
       return
     }
-    args.push('-ss', String(Math.max(0, input.seek)), '-t', String(Math.max(0.001, input.duration)))
+    // 丸めの残り(5.55e-17)を指数で書くと ffmpeg が読めないので、小数6桁で書く
+    args.push('-ss', ffSeconds(input.seek), '-t', ffSeconds(Math.max(0.001, input.duration)))
     args.push('-i', input.path)
   })
   // 理由は v1 の書き出しと同じ(コマンドラインの長さの上限・空白を含むパス)

@@ -114,6 +114,11 @@ export interface AudioItem extends ItemBase {
   kind: 'audio'
   assetId: string
   sourceIn: number
+  /**
+   * 素材の秒の終わり(クリップの出点)。長さはフレーム数に丸めるので、丸めで伸びたぶんは
+   * 出点の先の音を読まず無音にする(読むと、切った先の音が最大半フレーム漏れる)
+   */
+  sourceOut?: number
   speed: number
   /** クリップの音量(倍率)。未設定は等倍 */
   volume?: number

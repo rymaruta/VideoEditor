@@ -105,6 +105,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         startFrame,
         durationFrames,
         sourceIn: clip.inPoint,
+        sourceOut: clip.outPoint,
         speed: clip.speed || 1,
         origin: 'manual',
         linkedItemId: clip.id
@@ -241,6 +242,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         assetId: ac.assetId,
         ...range,
         sourceIn: ac.inPoint,
+        sourceOut: ac.outPoint,
         speed,
         origin: 'manual',
         ...(ac.volume !== undefined ? { volume: ac.volume } : {}),

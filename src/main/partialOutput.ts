@@ -20,13 +20,32 @@ export async function writeViaPartial<T>(
   write: (path: string) => Promise<T>
 ): Promise<T> {
   const partial = partialPathFor(outputPath)
+  let result: T
   try {
-    const result = await write(partial)
-    // 同じフォルダの中の置き換え(Windows でも、あれば上書きする)
-    renameSync(partial, outputPath)
-    return result
+    result = await write(partial)
   } catch (e) {
     rmSync(partial, { force: true })
     throw e
   }
+  // 同じフォルダの中の置き換え(Windows でも、あれば上書きする)。前の完成品を再生中・ウイルス対策の
+  // 検査中だと一時的に置き換えられないので、少し待って何度か試す。それでも駄目なら、書き上げた動画は
+  // 消さずに残し、その場所を伝える(何十分もかけた書き出しを捨てない)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      renameSync(partial, outputPath)
+      return result
+    } catch (e) {
+      if (attempt >= RENAME_RETRIES) {
+        throw new Error(
+          `書き出しは終わりましたが、「${outputPath}」を置き換えられませんでした` +
+            `(再生中・ほかのアプリが開いている可能性があります)。書き出した動画は「${partial}」に残しています。` +
+            `(${e instanceof Error ? e.message : String(e)})`
+        )
+      }
+      await new Promise((r) => setTimeout(r, RENAME_WAIT_MS))
+    }
+  }
 }
+
+const RENAME_RETRIES = 5
+const RENAME_WAIT_MS = 400

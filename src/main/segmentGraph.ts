@@ -470,10 +470,15 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       const visEnd = Math.min(item.startFrame + item.durationFrames, renderEnd)
       const skipSec = sec(visStart - item.startFrame)
       const dur = sec(visEnd - visStart)
+      const seek = item.sourceIn + skipSec * speed
       inputs.push({
         path: asset.filePath,
-        seek: item.sourceIn + skipSec * speed,
-        duration: dur * speed
+        seek,
+        // 出点の先は読まない(足りないぶんは下の apad で無音になる)
+        duration:
+          item.sourceOut !== undefined && item.sourceOut > seek
+            ? Math.min(dur * speed, item.sourceOut - seek)
+            : dur * speed
       })
       const idx = inputs.length - 1
       const label = newLabel('a')
