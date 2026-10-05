@@ -57,21 +57,43 @@ function kindItem(k: TelopKindInfo): LookItem {
   }
 }
 
-/** 種類ごとの見た目 + 保存したスタイル */
+/** 種類ごとの見た目(決まった値なので1回だけ作る) */
+let kindItems: LookItem[] | null = null
+function allKindItems(): LookItem[] {
+  if (!kindItems) kindItems = TELOP_KINDS.map(kindItem)
+  return kindItems
+}
+
+/** 保存したスタイルの見本(スタイルの値ごと。値が変わらなければ同じ見本を使う) */
+const savedItems = new WeakMap<TextStyle, LookItem>()
+
+/**
+ * 種類ごとの見た目 + 保存したスタイル。変わっていない見本は前と同じものを返す
+ * (見本は中身が変わったときだけ描き直す。スタイルの管理で1つを直すたびに、
+ * 見えている見本を全部描き直していた)
+ */
 function buildLookItems(
   saved: readonly { id: string; name: string; style: TextStyle }[],
   savedSample: string
 ): LookItem[] {
   return [
-    ...saved.map((s) => ({
-      key: `saved:${s.id}`,
-      name: s.name || '名前のないスタイル',
-      text: savedSample,
-      style: s.style,
-      savedId: s.id,
-      group: SAVED_GROUP
-    })),
-    ...TELOP_KINDS.map(kindItem)
+    ...saved.map((s) => {
+      const key = `saved:${s.id}`
+      const name = s.name || '名前のないスタイル'
+      const prev = savedItems.get(s.style)
+      if (prev && prev.key === key && prev.name === name && prev.text === savedSample) return prev
+      const item = {
+        key,
+        name,
+        text: savedSample,
+        style: s.style,
+        savedId: s.id,
+        group: SAVED_GROUP
+      }
+      savedItems.set(s.style, item)
+      return item
+    }),
+    ...allKindItems()
   ]
 }
 

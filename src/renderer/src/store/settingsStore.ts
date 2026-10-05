@@ -155,6 +155,8 @@ interface SettingsState {
   sectionPresets: Record<string, SectionPreset[]>
   addSectionPreset: (section: string, name: string, values: Partial<TextStyle>) => void
   removeSectionPreset: (section: string, id: string) => void
+  /** 消したマイ設定を、元の id・元の位置へ戻す(「元に戻す」。同じ名前の別の設定を上書きしない) */
+  restoreSectionPreset: (section: string, preset: SectionPreset, index: number) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -405,6 +407,16 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         ...s.sectionPresets,
         [section]: (s.sectionPresets[section] ?? []).filter((p) => p.id !== id)
       }
+      writeSetting(SECTION_PRESETS_KEY, JSON.stringify(sectionPresets))
+      return { sectionPresets }
+    }),
+  restoreSectionPreset: (section, preset, index) =>
+    set((s) => {
+      if (!SECTION_KEYS[section]) return s
+      const list = (s.sectionPresets[section] ?? []).filter((p) => p.id !== preset.id)
+      const at = Math.max(0, Math.min(list.length, Math.floor(index)))
+      const next = [...list.slice(0, at), preset, ...list.slice(at)].slice(0, MAX_SECTION_PRESETS)
+      const sectionPresets = { ...s.sectionPresets, [section]: next }
       writeSetting(SECTION_PRESETS_KEY, JSON.stringify(sectionPresets))
       return { sectionPresets }
     }),

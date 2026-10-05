@@ -59,6 +59,15 @@ export function GradientEditor({
     latest.current = value
   }, [value])
   const dragIndex = useRef<number | null>(null)
+  /** キーで動かして並びが入れ替わったとき、次の描画で選択を移すつまみ */
+  const focusHandle = useRef<number | null>(null)
+  const handlesRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const i = focusHandle.current
+    if (i === null) return
+    focusHandle.current = null
+    handlesRef.current?.querySelectorAll<HTMLButtonElement>('.grad-handle')[i]?.focus()
+  })
 
   const sel = Math.min(selected, value.stops.length - 1)
   const stop = value.stops[sel]
@@ -118,6 +127,8 @@ export function GradientEditor({
       const moved = moveGradientStop(value, index, s.at + step)
       onChange(moved.gradient)
       setSelected(moved.index)
+      // 隣の色を追い越すと並びが入れ替わる。手元の操作が動かした色に付いていくよう、つまみの選択を移す
+      if (moved.index !== index) focusHandle.current = moved.index
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault()
       remove(index)
@@ -139,7 +150,7 @@ export function GradientEditor({
         >
           <div className="grad-bar-fill" style={{ background: gradientBarCss(value) }} />
         </div>
-        <div className="grad-handles">
+        <div className="grad-handles" ref={handlesRef}>
           {value.stops.map((s, i) => (
             <button
               key={i}
@@ -293,7 +304,8 @@ export function GradientEditor({
             title={p.name}
             aria-label={`グラデーション「${p.name}」`}
             onClick={() => {
-              onChange(p.gradient)
+              // 円形を選んでいるときは、見本の配色を円形のまま当てる(配色の提案と同じ)
+              onChange(radial ? { ...p.gradient, type: 'radial' } : p.gradient)
               setSelected(0)
             }}
           >

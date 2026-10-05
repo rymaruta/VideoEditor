@@ -188,10 +188,11 @@ function SectionPresetPanel({
 }): React.JSX.Element {
   const addPreset = useSettingsStore((s) => s.addSectionPreset)
   const removePreset = useSettingsStore((s) => s.removeSectionPreset)
+  const restorePreset = useSettingsStore((s) => s.restoreSectionPreset)
   const clip = useStyleClipboard((s) => s.style)
   const copy = useStyleClipboard((s) => s.copy)
   const [name, setName] = useState<string | null>(null)
-  const [removed, setRemoved] = useState<SectionPreset | null>(null)
+  const [removed, setRemoved] = useState<{ preset: SectionPreset; index: number } | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const keys = SECTION_KEYS[section] ?? []
   const current = pickSection(style, keys)
@@ -296,8 +297,11 @@ function SectionPresetPanel({
                   aria-label={`「${p.name}」を消す`}
                   title="このマイ設定を消す(すぐ下で元に戻せます)"
                   onClick={() => {
+                    const index = (
+                      useSettingsStore.getState().sectionPresets[section] ?? []
+                    ).findIndex((x) => x.id === p.id)
                     removePreset(section, p.id)
-                    setRemoved(p)
+                    setRemoved({ preset: p, index })
                     setMessage(null)
                   }}
                 >
@@ -311,12 +315,13 @@ function SectionPresetPanel({
 
       {removed && (
         <div className="section-preset-undo" role="status">
-          <span>「{removed.name}」を消しました</span>
+          <span>「{removed.preset.name}」を消しました</span>
           <button
             type="button"
             className="link-button"
             onClick={() => {
-              addPreset(section, removed.name, removed.values)
+              // 元の id・位置へ戻す(作り直すと、間に保存した同じ名前の設定を上書きしてしまう)
+              restorePreset(section, removed.preset, removed.index)
               setRemoved(null)
             }}
           >

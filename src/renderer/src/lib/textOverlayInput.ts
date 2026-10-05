@@ -11,5 +11,7 @@ export function parseBulkFontSize(raw: string): number | null {
   // `Number('  ')` は 0 になる。空白だけを「サイズ0」として適用しない
   if (raw.trim() === '') return null
   const value = Number(raw)
-  return Number.isFinite(value) ? value : null
+  // 0・負のサイズは、打っている途中でも書き込まない(全部のテロップが消える・描画が崩れる)。
+  // 小さすぎる値(「30」の打ち始めの「3」)は、続きを打てるように受ける
+  return Number.isFinite(value) && value > 0 && value <= 1000 ? value : null
 }

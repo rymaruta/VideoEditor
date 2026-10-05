@@ -76,6 +76,9 @@ export function ThumbnailPanel(): React.JSX.Element {
   // object-fit: cover で中央の帯しか出ず、候補を見分けられなくなる。
   const thumbAspect = { aspectRatio: `${thumbWidth} / ${thumbHeight}` }
 
+  /** 候補を作るたび・企画を替えるたびに進める番号。古い番号の結果は捨てる */
+  const generation = useRef(0)
+
   /**
    * 別のプロジェクトを開いた/新規作成したら、前の動画から抜いた候補を捨てる。
    *
@@ -85,15 +88,20 @@ export function ThumbnailPanel(): React.JSX.Element {
    * 文字・スタイルは利用者が決めた値なので残す(結果だけ捨てる)。
    */
   useEffect(() => {
+    // 作っている途中の候補も捨てる(前の動画の候補が、あとから届いて並ばないように)
+    generation.current++
     // 外部から取ってきた結果を捨てる副作用。props から導ける値ではない。
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCandidates([])
     setSelected(null)
     setError(null)
+    setLoading(false)
     setTextState(readThumbnailText(projectId))
   }, [projectId])
 
   async function generateCandidates(): Promise<void> {
+    const gen = ++generation.current
+    const stale = (): boolean => gen !== generation.current
     setError(null)
     const timedClips = buildTimedClips(project)
     const total = totalTimelineDuration(timedClips)
@@ -126,16 +134,19 @@ export function ThumbnailPanel(): React.JSX.Element {
         )
         frames.push(dataUrl)
       }
+      if (stale()) return
       setCandidates(frames)
       setSelected(frames[0] ?? null)
     } catch (e) {
-      setError(formatIpcError(e))
+      if (!stale()) setError(formatIpcError(e))
     } finally {
-      setLoading(false)
+      if (!stale()) setLoading(false)
     }
   }
 
   async function generateHighlightCandidates(): Promise<void> {
+    const gen = ++generation.current
+    const stale = (): boolean => gen !== generation.current
     setError(null)
     const timedClips = buildTimedClips(project)
     if (timedClips.length === 0) {
@@ -188,6 +199,7 @@ export function ThumbnailPanel(): React.JSX.Element {
       }
       scored.sort((a, b) => b.score - a.score)
       const top = scored.slice(0, CANDIDATE_COUNT)
+      if (stale()) return
       if (top.length === 0) {
         setError(
           failed > 0 && firstFailure
@@ -211,12 +223,13 @@ export function ThumbnailPanel(): React.JSX.Element {
         )
         frames.push(dataUrl)
       }
+      if (stale()) return
       setCandidates(frames)
       setSelected(frames[0] ?? null)
     } catch (e) {
-      setError(formatIpcError(e))
+      if (!stale()) setError(formatIpcError(e))
     } finally {
-      setLoading(false)
+      if (!stale()) setLoading(false)
     }
   }
 
