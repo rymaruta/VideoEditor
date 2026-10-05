@@ -942,17 +942,41 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     lastSpans: [],
     speechTelops: [],
     setEffectChosen: (id, chosen) => {
-      const next = chosen
-        ? [...new Set([...get().effectChosen, id])]
-        : get().effectChosen.filter((x) => x !== id)
-      set({ effectChosen: next })
-      // 選び直したら、前に手で消していても置き直す
-      if (chosen) useProjectStore.getState().undismissTelops([`e:${id}`])
       const project = useProjectStore.getState().project
-      if (!project.multicam) return
+      const spans = project.multicam ? spansOfClips(project.clips, project.multicam) : []
+      // 選んだ印は、今の企画に置いてある演出テロップに合わせる。取り消し(Ctrl+Z)で企画から外れた
+      // 演出テロップを、選んだままと覚えていると、次に別の提案を選んだときに一緒に戻ってくる
+      let base = get().effectChosen
+      if (project.multicam && spans.length > 0) {
+        const placed = new Set(project.textOverlays.map((o) => o.effectId).filter(Boolean))
+        const dismissed = new Set(project.dismissedTelops ?? [])
+        const wouldPlace = new Set(
+          effectOverlays(
+            get().effects,
+            new Set(base),
+            project,
+            project.multicam,
+            spans,
+            usePresetStore.getState().captionPresets
+          ).map((o) => o.effectId)
+        )
+        base = base.filter((x) => !wouldPlace.has(x) || placed.has(x) || dismissed.has(`e:${x}`))
+      }
+      const next = chosen ? [...new Set([...base, id])] : base.filter((x) => x !== id)
+      set({ effectChosen: next })
       // 対応は今の本編から作る(作り直したあとに元に戻す・手で詰めると、覚えていた対応は古い)
-      const spans = spansOfClips(project.clips, project.multicam)
-      if (spans.length === 0) return
+      if (!project.multicam || spans.length === 0) {
+        // 置けないときも、選び直したら前に手で消した印は外す
+        if (chosen) useProjectStore.getState().undismissTelops([`e:${id}`])
+        return
+      }
+      // 選び直したら、前に手で消していても置き直す(置き直しと同じ1回の取り消しで戻る)
+      const undismissed = chosen
+        ? {
+            ...project,
+            dismissedTelops: (project.dismissedTelops ?? []).filter((k) => k !== `e:${id}`)
+          }
+        : project
       // 吹き出しは発言テロップの代わりに出す: 選んだら発言テロップを外し、外したら戻す
       const fx = get().effects.find((e) => e.id === id)
       const speech =
@@ -976,12 +1000,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           effectOverlays(
             get().effects,
             new Set(next),
-            project,
+            undismissed,
             project.multicam,
             spans,
             usePresetStore.getState().captionPresets
           ),
-          speech
+          speech,
+          chosen ? [`e:${id}`] : undefined
         )
     },
     setTargetMinutes: (minutes) => set({ targetMinutes: Math.max(0, minutes) }),

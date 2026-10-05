@@ -1161,6 +1161,139 @@ describe('仮編集の作り直しで、人が決めた音・差し込んだク�
   })
 })
 
+describe('本編を直したときの追従 — 速さ・差し込み・直したテロップ', () => {
+  beforeEach(reset)
+  const info = {
+    anchorSourceId: 'A',
+    sources: [
+      { id: 'A', name: 'カメラA', kind: 'camera' as const },
+      { id: 'M', name: '出演者A', kind: 'mic' as const }
+    ],
+    files: [
+      { assetId: 'camA', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+      { assetId: 'micM', sourceId: 'M', start: 0, rate: 1, duration: 100 }
+    ]
+  }
+  const cutOf = (
+    ranges: [number, number][]
+  ): Parameters<ReturnType<typeof st>['applyRoughCut']>[0] => {
+    let t = 0
+    const main = ranges.map(([a, b]) => ({ assetId: 'camA', inPoint: a, outPoint: b, speed: 1 }))
+    const clips = ranges.map(([a, b]) => {
+      const c = { assetId: 'micM', startTime: t, inPoint: a, outPoint: b, speed: 1 }
+      t += b - a
+      return c
+    })
+    return {
+      main,
+      audio: [{ name: '出演者A', sourceId: 'M', volume: 1, clips }],
+      duration: t,
+      spans: []
+    }
+  }
+  const telop = (
+    id: string,
+    text: string,
+    startTime: number,
+    endTime: number
+  ): Omit<TextOverlay, 'id'> => ({
+    text,
+    startTime,
+    endTime,
+    style: defaultTextStyle(),
+    utteranceId: id,
+    utteranceChunk: 0
+  })
+  const micClips = (): [number, number, number][] =>
+    st()
+      .project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+      .clips.map((c) => [c.startTime, c.inPoint, c.outPoint])
+
+  it('本編のクリップの速さを変えても、後ろの声は詰めた所へ動き、声どうしが重ならない', () => {
+    S.setState({ project: { ...st().project, multicam: info, clips: [], textOverlays: [] } })
+    st().applyRoughCut(
+      cutOf([
+        [0, 10],
+        [20, 30]
+      ]),
+      [telop('u2', '後半', 12, 13)]
+    )
+    st().updateClipSpeed(st().project.clips[0].id, 2)
+    // 1本目は 5 秒になる。2本目の声(素材の 20 秒〜)とテロップは 5 秒前へ
+    expect(micClips().filter((c) => c[1] >= 20)).toEqual([[5, 20, 30]])
+    const clips = micClips().sort((a, b) => a[0] - b[0])
+    for (let i = 1; i < clips.length; i++) {
+      const prev = clips[i - 1]
+      expect(prev[0] + (prev[2] - prev[1])).toBeLessThanOrEqual(clips[i][0] + 1e-9)
+    }
+    expect(st().project.textOverlays.find((o) => o.utteranceId === 'u2')?.startTime).toBe(7)
+  })
+
+  it('差し込んだ画の下の自動 BGM は、ほかの所を直しても切れない', () => {
+    S.setState({ project: { ...st().project, multicam: info, clips: [], textOverlays: [] } })
+    st().applyRoughCut(
+      cutOf([
+        [0, 10],
+        [20, 30],
+        [40, 50]
+      ]),
+      []
+    )
+    const clips = st().project.clips
+    const insert = { id: 'broll', assetId: 'broll-asset', inPoint: 0, outPoint: 3, speed: 1 }
+    const mic = st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [clips[0], insert, clips[1], clips[2]],
+        audioTracks: [
+          ...st().project.audioTracks,
+          {
+            ...mic,
+            id: 'bgm',
+            name: 'BGM',
+            multicamSourceId: undefined,
+            autoRole: 'bgm',
+            clips: [{ id: 'b1', assetId: 'bgmA', startTime: 0, inPoint: 0, outPoint: 33 }]
+          }
+        ]
+      }
+    })
+    st().removeClip(clips[2].id)
+    const bgm = st().project.audioTracks.find((t) => t.id === 'bgm')!
+    expect(bgm.clips.map((c) => [c.startTime, c.inPoint, c.outPoint])).toEqual([[0, 0, 23]])
+  })
+
+  it('人が直した自動テロップは、本編から外れて消えても、場面を戻して作り直すと直した内容で出る', () => {
+    S.setState({ project: { ...st().project, multicam: info, clips: [], textOverlays: [] } })
+    const cut = cutOf([
+      [0, 10],
+      [20, 30]
+    ])
+    st().applyRoughCut(cut, [telop('u1', '元', 2, 3)])
+    const o = st().project.textOverlays.find((x) => x.utteranceId === 'u1')!
+    st().updateTextOverlay(o.id, { text: '直した' })
+    st().removeClip(st().project.clips[0].id)
+    expect(st().project.textOverlays.find((x) => x.utteranceId === 'u1')).toBeUndefined()
+    st().applyRoughCut(cut, [telop('u1', '元', 2, 3)])
+    expect(st().project.textOverlays.find((x) => x.utteranceId === 'u1')?.text).toBe('直した')
+  })
+
+  it('長さの無い自動テロップも、本編を直したときに消さずに動かす', () => {
+    S.setState({ project: { ...st().project, multicam: info, clips: [], textOverlays: [] } })
+    st().applyRoughCut(
+      cutOf([
+        [0, 10],
+        [20, 30]
+      ]),
+      [telop('u2', '点', 12, 12)]
+    )
+    st().removeClip(st().project.clips[0].id)
+    const o = st().project.textOverlays.find((x) => x.utteranceId === 'u2')
+    expect([o?.startTime, o?.endTime]).toEqual([2, 2])
+  })
+})
+
 describe('静止画の素材', () => {
   beforeEach(reset)
   it('静止画は本編に置けない(ワイプ・全面(CG)のトラック用)', () => {

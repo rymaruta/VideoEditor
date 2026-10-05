@@ -860,7 +860,9 @@ interface ProjectState {
    */
   setEffectTelops: (
     telops: Omit<TextOverlay, 'id'>[],
-    speech?: { utteranceId: string; telops: Omit<TextOverlay, 'id'>[] }
+    speech?: { utteranceId: string; telops: Omit<TextOverlay, 'id'>[] },
+    /** 手で消した印を外すもの(選び直した提案)。同じ1回の取り消しで戻る */
+    undismiss?: string[]
   ) => void
   /**
    * 自動の SE・BGM のトラックを入れ替える(前に自動で置いたものは消える)。素材が無ければ足す。
@@ -2682,8 +2684,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  setEffectTelops: (telops, speech) =>
+  setEffectTelops: (telops, speech, undismiss) =>
     set((state) => {
+      const dismissedTelops = (state.project.dismissedTelops ?? []).filter(
+        (k) => !undismiss?.includes(k)
+      )
+      const dismissed = new Set(dismissedTelops)
       // 置いたままの演出テロップは、今の時刻を残す(1つ選び直しただけで、人が動かした他のものが戻らないように)
       const placedAt = new Map(
         state.project.textOverlays
@@ -2697,6 +2703,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ...pushHistory(state),
         project: {
           ...state.project,
+          dismissedTelops: dismissedTelops.length > 0 ? dismissedTelops : undefined,
           editedTelops: rememberEditedTelops(
             state.project.textOverlays,
             state.project.editedTelops
@@ -2709,14 +2716,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               ? mergeManualTelops(
                   state.project.textOverlays,
                   speech.telops,
-                  new Set(state.project.dismissedTelops ?? []),
+                  dismissed,
                   state.project.editedTelops
                 ).map((o) => ({ ...o, id: uuid() }))
               : []),
             ...mergeManualTelops(
               state.project.textOverlays,
               telops,
-              new Set(state.project.dismissedTelops ?? []),
+              dismissed,
               state.project.editedTelops
             ).map((o) => ({ ...o, id: uuid() }))
           ]
@@ -4085,9 +4092,11 @@ function followMainEdit(
 ): Project {
   const info = next.multicam
   if (!info || prev.multicam !== info) return next
-  const before = spansOfClips(prev.clips, info)
-  const after = spansOfClips(next.clips, info)
-  if (before.length === 0) return next
+  const realBefore = spansOfClips(prev.clips, info)
+  if (realBefore.length === 0) return next
+  const realAfter = spansOfClips(next.clips, info)
+  const before = followSpans(prev.clips, info, realBefore)
+  const after = followSpans(next.clips, info, realAfter)
   const segs = timelineMapping(before, after)
   if (isIdentityMapping(segs, before, after)) return next
 
@@ -4123,7 +4132,19 @@ function followMainEdit(
         return [c]
       }
     }
-    return pieces
+    // 写した先でつながっている切れ目(本編のクリップの境目)は1本にまとめる(BGM が細切れにならないように)
+    const merged: typeof pieces = []
+    for (const p of pieces) {
+      const last = merged[merged.length - 1]
+      if (
+        last &&
+        Math.abs(last.to - p.from) <= 1e-6 &&
+        Math.abs(last.at + (last.to - last.from) - p.at) <= 1e-6
+      ) {
+        merged[merged.length - 1] = { ...last, to: p.to }
+      } else merged.push(p)
+    }
+    return merged
       .filter((p) => p.to - p.from > 1e-3)
       .map((p, i, all) => ({
         ...c,
@@ -4137,7 +4158,8 @@ function followMainEdit(
   }
   const follows = (t: { multicamSourceId?: string; autoRole?: string }): boolean =>
     Boolean(t.multicamSourceId || (!onlyRebuilt && t.autoRole))
-  const gaps = uncoveredSpans(after, segs)
+  // 新しく見えた所に足す声は、収録素材のクリップの所だけ(差し込んだ素材・速さを変えたクリップには足さない)
+  const gaps = uncoveredSpans(realAfter.filter(isRealSpan(next.clips, info)), segs)
 
   const audioTracks = next.audioTracks.map((t) => {
     if (!follows(t)) return t
@@ -4176,23 +4198,105 @@ function followMainEdit(
     const track = { ...t, clips }
     return untouched ? withAutoSignature(track) : track
   })
+  /** 本編から消えて落とした、人が直した自動テロップ(作り直しで戻したとき、直した内容で出す) */
+  const droppedEdited: TextOverlay[] = []
   const textOverlays = next.textOverlays.flatMap((o) => {
     if (o.linkedClipId || autoTelopKey(o) === null) return [o]
-    const pieces = mapTimelineRange(segs, o.startTime, o.endTime)
+    // 長さの無いテロップは、その時刻の点を写す(区間として写すと、どこにも写らず消える)
+    const point = o.endTime - o.startTime <= 1e-6
+    const pieces = mapTimelineRange(segs, o.startTime, point ? o.startTime + 1e-3 : o.endTime)
     // 本編から消えた発言のテロップは消す(場面を戻して作り直せば、また入る)
-    if (pieces.length === 0) return []
+    if (pieces.length === 0) {
+      if (o.edited) droppedEdited.push(o)
+      return []
+    }
     const startTime = pieces[0].at
     let endTime = startTime + (pieces[0].to - pieces[0].from)
     for (const p of pieces.slice(1)) {
       if (Math.abs(p.at - endTime) > 1e-6) break
       endTime = p.at + (p.to - p.from)
     }
+    if (point) endTime = startTime + (o.endTime - o.startTime)
     if (sameNumber(startTime, o.startTime) && sameNumber(endTime, o.endTime)) return [o]
     return [
       { ...o, startTime, endTime, words: shiftOverlayWords(o.words, startTime - o.startTime) }
     ]
   })
-  return { ...next, audioTracks, videoOverlayTracks, textOverlays }
+  return {
+    ...next,
+    audioTracks,
+    videoOverlayTracks,
+    textOverlays,
+    ...(droppedEdited.length > 0
+      ? { editedTelops: rememberEditedTelops(droppedEdited, next.editedTelops) }
+      : {})
+  }
+}
+
+/** 本編のクリップが、共通の時刻に 1:1 で写る収録素材のクリップか(速さが素材の速さと同じ) */
+function isRealClip(
+  c: { assetId: string; speed?: number },
+  fileOf: ReadonlyMap<string, { rate: number }>
+): boolean {
+  const f = fileOf.get(c.assetId)
+  return Boolean(f && Math.abs((c.speed || 1) - f.rate) <= 1e-9)
+}
+
+/** `spansOfClips` の区間のうち、1:1 で写る収録素材のクリップのものか */
+function isRealSpan(
+  clips: Project['clips'],
+  info: NonNullable<Project['multicam']>
+): (s: { timeline: number }) => boolean {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const starts: number[] = []
+  let cursor = 0
+  for (const c of clips) {
+    if (isRealClip(c, fileOf)) starts.push(cursor)
+    cursor += Math.max(0, c.outPoint - c.inPoint) / (c.speed || 1)
+  }
+  return (s) => starts.some((t) => Math.abs(t - s.timeline) <= 1e-6)
+}
+
+/** 差し込んだ素材・速さを変えたクリップの、仮の共通の時刻の置き場(収録の時刻と重ならない遠く) */
+const PSEUDO_BASE = 1e7
+const PSEUDO_STRIDE = 1e5
+const pseudoSlots = new Map<string, number>()
+function pseudoSlot(key: string): number {
+  let n = pseudoSlots.get(key)
+  if (n === undefined) {
+    n = pseudoSlots.size
+    pseudoSlots.set(key, n)
+  }
+  return PSEUDO_BASE + n * PSEUDO_STRIDE
+}
+
+/**
+ * 追従に使う、タイムラインの時刻 ↔ 共通の時刻 の対応。
+ * 収録素材を素材の速さで流すクリップは `spansOfClips` のまま(共通の時刻とタイムラインが 1:1)。
+ * それ以外(差し込んだ B ロール・静止画・タイトル、速さを変えたクリップ)は、クリップごとの仮の時刻を当てる。
+ * 当てないと、その区間に置いた自動の BGM・SE・CG が、どこに写るか分からず切り落とされる。
+ * 速さを変えたクリップは長さが合わないので、速さも鍵に入れる(速さを変えたら、その下の声・自動テロップは外す)
+ */
+function followSpans(
+  clips: Project['clips'],
+  info: NonNullable<Project['multicam']>,
+  real: readonly { timeline: number; start: number; end: number }[]
+): { timeline: number; start: number; end: number }[] {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const realOnes = real.filter(isRealSpan(clips, info))
+  const out = [...realOnes]
+  let cursor = 0
+  for (const c of clips) {
+    const speed = c.speed || 1
+    const len = Math.max(0, c.outPoint - c.inPoint) / speed
+    if (!isRealClip(c, fileOf) && len > 1e-6) {
+      const base = pseudoSlot(`${c.id}@${speed}`)
+      const start = base + c.inPoint / speed
+      out.push({ timeline: cursor, start, end: start + len })
+    }
+    cursor += len
+  }
+  return out
 }
 
 // Runs the mirror as a silent follow-up correction (no history entry of its own):
