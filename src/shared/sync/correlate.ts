@@ -151,6 +151,82 @@ export function matchFeatures(
   }
 }
 
+export interface DriftMatch extends FeatureMatch {
+  /** offset を測った位置(a の時刻) */
+  center: number
+  /** b の時計の速さ(a の 1 秒が b の何秒か)。1 + ずれ */
+  rate: number
+}
+
+/**
+ * 時計がずれている長い2本を、区切った窓ごとに照らし合わせて、ずれ(offset)と時計の速さを同時に求める。
+ *
+ * 丸ごと相関を取ると、時計のずれの分だけ山が横に広がって低くなる
+ * (200ppm × 12分 = 0.15 秒 = 15 点。確からしさが 140 → 20 に落ち、「合わない」と判断されていた)。
+ * 2分の窓なら広がりは 2〜3 点に収まる。窓ごとの offset を直線に当て、外れた窓を除いてから、
+ * 3つ以上の窓が 30ms 以内で一直線に並んだときだけ信じる(偶然の一致は直線に並ばない)。
+ */
+export function matchWithDrift(
+  a: Float32Array,
+  b: Float32Array,
+  options: { windowSec?: number; maxWindows?: number } = {}
+): DriftMatch | null {
+  const winSec = options.windowSec ?? 120
+  const w = Math.round(winSec * ENVELOPE_RATE)
+  const count = Math.min(options.maxWindows ?? 8, Math.floor(b.length / w))
+  if (count < 3 || a.length < w) return null
+  const step = (b.length - w) / (count - 1)
+  let points: { c: number; o: number; m: FeatureMatch }[] = []
+  for (let k = 0; k < count; k++) {
+    const s = Math.round(k * step)
+    const m = matchFeatures(a, b.subarray(s, s + w), { minOverlapSec: winSec * 0.8 })
+    if (!m || !isReliableMatch(m)) continue
+    // 窓の頭(b の時刻 s)が a の m.offset 秒にある → b の頭は a の (m.offset - s) 秒(その位置での値)
+    points.push({ c: m.offset + winSec / 2, o: m.offset - s / ENVELOPE_RATE, m })
+  }
+  const fit = (ps: typeof points): { o0: number; k: number } => {
+    const n = ps.length
+    const mc = ps.reduce((t, p) => t + p.c, 0) / n
+    const mo = ps.reduce((t, p) => t + p.o, 0) / n
+    let num = 0
+    let den = 0
+    for (const p of ps) {
+      num += (p.c - mc) * (p.o - mo)
+      den += (p.c - mc) ** 2
+    }
+    const k = den > 0 ? num / den : 0
+    return { o0: mo - k * mc, k }
+  }
+  // 外れた窓(偶然の一致)を1つずつ除く
+  while (points.length >= 3) {
+    const { o0, k } = fit(points)
+    const res = points.map((p) => Math.abs(p.o - (o0 + k * p.c)))
+    const worst = res.indexOf(Math.max(...res))
+    if (res[worst] <= 0.03) {
+      // 時計のずれは現実の録音機の範囲(±0.2%)に限る
+      if (Math.abs(k) > 2e-3) return null
+      const center = points.reduce((t, p) => t + p.c, 0) / points.length
+      const conf = points.map((p) => p.m.confidence).sort((x, y) => x - y)
+      const dist = points.map((p) => p.m.distinctness).sort((x, y) => x - y)
+      const offset = o0 + k * center
+      return {
+        offset,
+        center,
+        // b の頭の位置が a の後ろほど手前に見える(k < 0)のは、b の時計が速いとき
+        rate: 1 - k,
+        confidence: conf[Math.floor(conf.length / 2)],
+        distinctness: dist[Math.floor(dist.length / 2)],
+        overlap:
+          (Math.min(b.length, a.length - offset * ENVELOPE_RATE) -
+            Math.max(0, -offset * ENVELOPE_RATE)) /
+          ENVELOPE_RATE
+      }
+    }
+    points = points.filter((_, i) => i !== worst)
+  }
+  return null
+}
+
 /**
  * 粗く合わせた後の細かい合わせ込み(GCC-PHAT)。
  * `aWin` は a の時刻 s からの波形、`bWin` は b の時刻 s - coarseOffset からの波形(どちらも同じ長さ・同じ周波数)。

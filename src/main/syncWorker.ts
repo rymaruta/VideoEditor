@@ -1,6 +1,12 @@
 import { parentPort, workerData } from 'worker_threads'
 import { cachedEnvelope, readWindow } from './audioPcm'
-import { isReliableMatch, matchFeatures, onsetFeature, refineOffset } from '@shared/sync/correlate'
+import {
+  isReliableMatch,
+  matchFeatures,
+  matchWithDrift,
+  onsetFeature,
+  refineOffset
+} from '@shared/sync/correlate'
 import { solvePlacements } from '@shared/sync/solve'
 import type { SyncInputFile, SyncPairResult, SyncWorkerMessage } from '@shared/sync/report'
 
@@ -118,9 +124,19 @@ async function matchPair(
   b: SyncInputFile,
   envelopes: Map<string, Float32Array>
 ): Promise<SyncPairResult | null> {
-  const m = matchFeatures(envelopes.get(a.id)!, envelopes.get(b.id)!)
+  const ea = envelopes.get(a.id)!
+  const eb = envelopes.get(b.id)!
+  let m = matchFeatures(ea, eb)
+  let reliable = m ? isReliableMatch(m) : false
+  // 丸ごとでは合わない長い2本は、時計のずれで山がつぶれていることがある。窓ごとに合わせ直す
+  if (!reliable) {
+    const d = matchWithDrift(ea, eb)
+    if (d) {
+      m = d
+      reliable = true
+    }
+  }
   if (!m) return null
-  const reliable = isReliableMatch(m)
   const result: SyncPairResult = {
     a: a.id,
     b: b.id,
@@ -132,13 +148,18 @@ async function matchPair(
     refined: false
   }
   if (!reliable) return result
+  // 窓ごとの合わせで求めた時計の速さ(下で頭と終わりを測り直せれば、そちらで置き換える)
+  if ('rate' in m && typeof m.rate === 'number') {
+    result.rate = m.rate
+    result.driftPpm = (m.rate - 1) * 1e6
+  }
   // 重なっている区間(a の時刻)の中ほどで詰める
   const ovStart = Math.max(0, m.offset)
   const ovEnd = Math.min(a.duration, m.offset + b.duration)
   // offset を測った位置。時計がずれていると、測る位置で offset が変わる(sync/solve で補正する)
-  result.center = (ovStart + ovEnd) / 2
+  result.center = 'center' in m && typeof m.center === 'number' ? m.center : (ovStart + ovEnd) / 2
   try {
-    const mid = await refineAt(a, b, m.offset, (ovStart + ovEnd) / 2)
+    const mid = await refineAt(a, b, m.offset, result.center)
     // GCC-PHAT の山が鋭くなければ(音が少ない区間など)、粗い値のままにする
     if (mid.sharpness >= 5 && Math.abs(mid.offset - m.offset) <= 0.05) {
       result.offset = mid.offset
@@ -147,10 +168,16 @@ async function matchPair(
     if (result.refined && ovEnd - ovStart >= DRIFT_MIN_OVERLAP_SEC) {
       const early = ovStart + 60
       const late = ovEnd - 60
-      const shift = driftSearchSec((late - early) / 2)
+      const center = result.center
+      // 窓ごとの合わせで時計の速さが分かっていれば、頭と終わりの offset をそこから見込んで狭く探す
+      // (見込まずに中ほどの値の周りを探すと、ずれが探す幅を越えて別の山を拾い、速さを取り違えた)
+      const known = result.rate
+      const expect = (t: number): number =>
+        known === undefined ? result.offset : result.offset + (1 - known) * (t - center)
+      const shift = known === undefined ? driftSearchSec((late - early) / 2) : 0.05
       const [e, l] = await Promise.all([
-        refineAt(a, b, result.offset, early, shift),
-        refineAt(a, b, result.offset, late, shift)
+        refineAt(a, b, expect(early), early, shift),
+        refineAt(a, b, expect(late), late, shift)
       ])
       if (e.sharpness >= 5 && l.sharpness >= 5) {
         // b の時計が速いと、a の後ろほど b の位置は手前(offset が小さく)に見える
