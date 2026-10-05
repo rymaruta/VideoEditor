@@ -1,5 +1,21 @@
 import { normalizeShowStyle, type ShowStyle } from '@shared/style/showStyle'
-import { addFavoriteColor, normalizeFavoriteColors } from '../lib/colorValue'
+import {
+  addFavoriteColor,
+  normalizeFavoriteColors,
+  normalizeRecentColors,
+  pushRecentColor
+} from '../lib/colorValue'
+import {
+  addFavoriteGradient,
+  MAX_SECTION_PRESETS,
+  normalizeFavoriteGradients,
+  normalizeSectionPresets,
+  SECTION_KEYS,
+  SECTION_LABEL,
+  type FavoriteGradient,
+  type SectionPreset
+} from '../lib/appearancePresets'
+import type { TelopGradient, TextStyle } from '@shared/types'
 import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
 import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
@@ -27,6 +43,9 @@ const SHOW_KIT_KEY = 've-show-kit-folder'
 const SHOW_STYLE_KEY = 've-show-style'
 const AI_PROVIDER_KEY = 've-ai-provider'
 const FAVORITE_COLORS_KEY = 've-favorite-colors'
+const FAVORITE_GRADIENTS_KEY = 've-favorite-gradients'
+const RECENT_COLORS_KEY = 've-recent-colors'
+const SECTION_PRESETS_KEY = 've-section-presets'
 
 /** 書き出しの音量の扱い。`off` は正規化しない */
 export type ExportLoudness = 'off' | LoudnessTarget
@@ -124,6 +143,18 @@ interface SettingsState {
   favoriteColors: string[]
   addFavoriteColor: (color: string) => void
   removeFavoriteColor: (color: string) => void
+  /** 最近使った色(自動で覚える。新しいものが先頭、12 色まで) */
+  recentColors: string[]
+  pushRecentColor: (color: string) => void
+  /** お気に入りのグラデーション(どのグラデーション欄からでも使える) */
+  favoriteGradients: FavoriteGradient[]
+  addFavoriteGradient: (gradient: TelopGradient, name?: string) => void
+  renameFavoriteGradient: (id: string, name: string) => void
+  removeFavoriteGradient: (id: string) => void
+  /** 項目(縁・影・背景・動きなど)ごとのマイ設定 */
+  sectionPresets: Record<string, SectionPreset[]>
+  addSectionPreset: (section: string, name: string, values: Partial<TextStyle>) => void
+  removeSectionPreset: (section: string, id: string) => void
   /** AIショート生成に渡す編集方針。書き直す手間を省くため次回起動時まで残す */
   shortNote: string
   setShortNote: (note: string) => void
@@ -290,6 +321,92 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       const favoriteColors = s.favoriteColors.filter((c) => c !== color)
       writeSetting(FAVORITE_COLORS_KEY, JSON.stringify(favoriteColors))
       return { favoriteColors }
+    }),
+  recentColors: (() => {
+    try {
+      return normalizeRecentColors(JSON.parse(localStorage.getItem(RECENT_COLORS_KEY) ?? '[]'))
+    } catch {
+      return []
+    }
+  })(),
+  pushRecentColor: (color) =>
+    set((s) => {
+      const recentColors = pushRecentColor(s.recentColors, color)
+      if (recentColors.join() === s.recentColors.join()) return s
+      writeSetting(RECENT_COLORS_KEY, JSON.stringify(recentColors))
+      return { recentColors }
+    }),
+  favoriteGradients: (() => {
+    try {
+      return normalizeFavoriteGradients(
+        JSON.parse(localStorage.getItem(FAVORITE_GRADIENTS_KEY) ?? '[]')
+      )
+    } catch {
+      return []
+    }
+  })(),
+  addFavoriteGradient: (gradient, name = '') =>
+    set((s) => {
+      const favoriteGradients = addFavoriteGradient(
+        s.favoriteGradients,
+        gradient,
+        name,
+        `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+      )
+      writeSetting(FAVORITE_GRADIENTS_KEY, JSON.stringify(favoriteGradients))
+      return { favoriteGradients }
+    }),
+  renameFavoriteGradient: (id, name) =>
+    set((s) => {
+      const favoriteGradients = s.favoriteGradients.map((f) =>
+        f.id === id ? { ...f, name: name.trim() || f.name } : f
+      )
+      writeSetting(FAVORITE_GRADIENTS_KEY, JSON.stringify(favoriteGradients))
+      return { favoriteGradients }
+    }),
+  removeFavoriteGradient: (id) =>
+    set((s) => {
+      const favoriteGradients = s.favoriteGradients.filter((f) => f.id !== id)
+      writeSetting(FAVORITE_GRADIENTS_KEY, JSON.stringify(favoriteGradients))
+      return { favoriteGradients }
+    }),
+  sectionPresets: (() => {
+    try {
+      return normalizeSectionPresets(
+        JSON.parse(localStorage.getItem(SECTION_PRESETS_KEY) ?? '{}'),
+        (section) => SECTION_KEYS[section]
+      )
+    } catch {
+      return {}
+    }
+  })(),
+  addSectionPreset: (section, name, values) =>
+    set((s) => {
+      const keys = SECTION_KEYS[section]
+      if (!keys) return s
+      const list = s.sectionPresets[section] ?? []
+      const preset: SectionPreset = {
+        id: `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        name: name.trim() || `${SECTION_LABEL[section] ?? ''} ${list.length + 1}`,
+        values
+      }
+      // 同じ名前は置き換える(上書き保存)
+      const next = [preset, ...list.filter((p) => p.name !== preset.name)].slice(
+        0,
+        MAX_SECTION_PRESETS
+      )
+      const sectionPresets = { ...s.sectionPresets, [section]: next }
+      writeSetting(SECTION_PRESETS_KEY, JSON.stringify(sectionPresets))
+      return { sectionPresets }
+    }),
+  removeSectionPreset: (section, id) =>
+    set((s) => {
+      const sectionPresets = {
+        ...s.sectionPresets,
+        [section]: (s.sectionPresets[section] ?? []).filter((p) => p.id !== id)
+      }
+      writeSetting(SECTION_PRESETS_KEY, JSON.stringify(sectionPresets))
+      return { sectionPresets }
     }),
   shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {

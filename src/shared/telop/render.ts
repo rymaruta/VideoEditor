@@ -55,6 +55,7 @@ export type TelopContext = Pick<
       | 'closePath'
       | 'fill'
       | 'stroke'
+      | 'createRadialGradient'
     >
   > & {
     /** ぼかし(影・光彩)。無い描く先ではぼかさずに描く */
@@ -727,6 +728,14 @@ function gradientFor(
   gradient: TelopGradient,
   r: { x: number; y: number; w: number; h: number }
 ): CanvasGradient {
+  if (gradient.type === 'radial' && ctx.createRadialGradient) {
+    // 中心から外へ。いちばん遠い角まで色が届く半径(CSS の radial-gradient の farthest-corner)
+    const cx = r.x + r.w / 2
+    const cy = r.y + r.h / 2
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, Math.hypot(r.w, r.h) / 2))
+    for (const s of gradient.stops) g.addColorStop(Math.min(1, Math.max(0, s.at)), s.color)
+    return g
+  }
   const rad = (finite(gradient.angle, 0) * Math.PI) / 180
   const dx = Math.sin(rad)
   const dy = Math.cos(rad)

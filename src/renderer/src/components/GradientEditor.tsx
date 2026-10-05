@@ -10,9 +10,15 @@ import {
   moveGradientStop,
   normalizeAngle,
   recolorGradientStop,
-  removeGradientStop
+  removeGradientStop,
+  reverseGradient,
+  distributeGradient,
+  gradientSuggestions
 } from '../lib/telopAppearance'
+import { sameGradient } from '../lib/appearancePresets'
+import { useSettingsStore } from '../store/settingsStore'
 import { ColorField } from './ColorField'
+import './gradientEditor.css'
 
 /**
  * グラデーションの編集欄(Premiere の「線形グラデーション」の止まりの帯と同じ操作)。
@@ -35,6 +41,17 @@ export function GradientEditor({
   label: string
 }): React.JSX.Element {
   const [selected, setSelected] = useState(0)
+  const favorites = useSettingsStore((s) => s.favoriteGradients)
+  const addFavorite = useSettingsStore((s) => s.addFavoriteGradient)
+  const removeFavorite = useSettingsStore((s) => s.removeFavoriteGradient)
+  // 保存するときの名前(押すと名前の欄が出る。Enter で保存)
+  const [naming, setNaming] = useState<string | null>(null)
+  const saved = favorites.find((f) => sameGradient(f.gradient, value))
+  const radial = value.type === 'radial'
+  const apply = (g: TelopGradient): void => {
+    onChange(g)
+    setSelected(0)
+  }
   const barRef = useRef<HTMLDivElement>(null)
   // 引きずっている間は、親から戻る前の最新の値と番号を持つ
   const latest = useRef(value)
@@ -182,43 +199,90 @@ export function GradientEditor({
         </div>
       )}
 
-      <div className="grad-row">
-        <span className="grad-row-label">向き</span>
-        <AngleDial
-          label={`${label}の向き`}
-          value={value.angle}
-          kind="gradient"
-          onChange={(angle) => onChange({ ...value, angle })}
-        />
-        <input
-          type="number"
-          className="prop-num"
-          aria-label={`${label}の向き(度)`}
-          min={0}
-          max={359}
-          value={normalizeAngle(value.angle)}
-          onChange={(e) => {
-            const v = Number(e.target.value)
-            if (e.target.value === '' || !Number.isFinite(v)) return
-            onChange({ ...value, angle: normalizeAngle(v) })
-          }}
-        />
-        <span className="prop-unit">度</span>
-        <div className="grad-angle-presets">
-          {[0, 45, 90, 135, 180, 270].map((a) => (
+      <div className="grad-row grad-tools">
+        <span className="grad-row-label">形</span>
+        <div className="segmented" role="radiogroup" aria-label={`${label}のグラデーションの形`}>
+          {(
+            [
+              ['linear', '直線'],
+              ['radial', '円形']
+            ] as const
+          ).map(([t, name]) => (
             <button
-              key={a}
+              key={t}
               type="button"
-              className={`angle-chip ${normalizeAngle(value.angle) === a ? 'active' : ''}`}
-              aria-label={`向きを ${a} 度に`}
-              title={`${a}°`}
-              onClick={() => onChange({ ...value, angle: a })}
+              role="radio"
+              aria-checked={(value.type ?? 'linear') === t}
+              className={(value.type ?? 'linear') === t ? 'active' : ''}
+              onClick={() =>
+                onChange(
+                  t === 'linear'
+                    ? { angle: value.angle, stops: value.stops }
+                    : { ...value, type: t }
+                )
+              }
             >
-              <span style={{ transform: `rotate(${-a}deg)` }}>↓</span>
+              {name}
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          className="small-button"
+          title="色の並びを逆にします"
+          onClick={() => onChange(reverseGradient(value))}
+        >
+          ⇄ 反転
+        </button>
+        <button
+          type="button"
+          className="small-button"
+          title="色の位置を等間隔に並べ直します"
+          onClick={() => onChange(distributeGradient(value))}
+        >
+          等間隔
+        </button>
       </div>
+
+      {!radial && (
+        <div className="grad-row">
+          <span className="grad-row-label">向き</span>
+          <AngleDial
+            label={`${label}の向き`}
+            value={value.angle}
+            kind="gradient"
+            onChange={(angle) => onChange({ ...value, angle })}
+          />
+          <input
+            type="number"
+            className="prop-num"
+            aria-label={`${label}の向き(度)`}
+            min={0}
+            max={359}
+            value={normalizeAngle(value.angle)}
+            onChange={(e) => {
+              const v = Number(e.target.value)
+              if (e.target.value === '' || !Number.isFinite(v)) return
+              onChange({ ...value, angle: normalizeAngle(v) })
+            }}
+          />
+          <span className="prop-unit">度</span>
+          <div className="grad-angle-presets">
+            {[0, 45, 90, 135, 180, 270].map((a) => (
+              <button
+                key={a}
+                type="button"
+                className={`angle-chip ${normalizeAngle(value.angle) === a ? 'active' : ''}`}
+                aria-label={`向きを ${a} 度に`}
+                title={`${a}°`}
+                onClick={() => onChange({ ...value, angle: a })}
+              >
+                <span style={{ transform: `rotate(${-a}deg)` }}>↓</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grad-presets" role="group" aria-label={`${label}のグラデーションの見本`}>
         {GRADIENT_PRESETS.map((p) => (
@@ -238,6 +302,124 @@ export function GradientEditor({
           </button>
         ))}
       </div>
+
+      {stop && (
+        <div className="grad-subhead">
+          <span>
+            「色 {sel + 1}」から作る配色
+            <span className="grad-subhead-chip" style={{ background: stop.color }} />
+          </span>
+        </div>
+      )}
+      {stop && (
+        <div className="grad-presets" role="group" aria-label={`${label}の配色の提案`}>
+          {gradientSuggestions(stop.color, value.angle).map((p) => (
+            <button
+              key={p.name}
+              type="button"
+              className="grad-preset"
+              title={`選んでいる色から作った配色「${p.name}」`}
+              aria-label={`配色の提案「${p.name}」`}
+              onClick={() => apply(radial ? { ...p.gradient, type: 'radial' } : p.gradient)}
+            >
+              <span
+                className="grad-preset-swatch"
+                style={{
+                  background: gradientCss(radial ? { ...p.gradient, type: 'radial' } : p.gradient)
+                }}
+              />
+              <span className="grad-preset-name">{p.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="grad-subhead">
+        <span>マイ配色</span>
+        {naming === null ? (
+          <button
+            type="button"
+            className="small-button"
+            disabled={Boolean(saved)}
+            title={
+              saved
+                ? `「${saved.name}」として保存済みです`
+                : '今の配色に名前を付けて保存します(どのテロップ・どの欄からでも使えます)'
+            }
+            onClick={() => setNaming('')}
+          >
+            {saved ? '保存済み' : '＋ この配色を保存'}
+          </button>
+        ) : (
+          <span className="grad-name-form">
+            <input
+              type="text"
+              autoFocus
+              aria-label="配色の名前"
+              placeholder={`配色 ${favorites.length + 1}`}
+              value={naming}
+              maxLength={20}
+              onChange={(e) => setNaming(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  addFavorite(value, naming)
+                  setNaming(null)
+                } else if (e.key === 'Escape') {
+                  e.stopPropagation()
+                  setNaming(null)
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="small-button primary"
+              onClick={() => {
+                addFavorite(value, naming)
+                setNaming(null)
+              }}
+            >
+              保存
+            </button>
+            <button type="button" className="small-button" onClick={() => setNaming(null)}>
+              やめる
+            </button>
+          </span>
+        )}
+      </div>
+      {favorites.length === 0 ? (
+        <p className="grad-empty">
+          気に入った配色を保存すると、文字・縁・背景のどのグラデーションからでも1回で選べます
+        </p>
+      ) : (
+        <div className="grad-presets" role="list" aria-label="マイ配色">
+          {favorites.map((f) => (
+            <div key={f.id} className="grad-favorite" role="listitem">
+              <button
+                type="button"
+                className={`grad-preset ${saved?.id === f.id ? 'active' : ''}`}
+                title={f.name}
+                aria-label={`マイ配色「${f.name}」を使う`}
+                onClick={() => apply(f.gradient)}
+              >
+                <span
+                  className="grad-preset-swatch"
+                  style={{ background: gradientCss(f.gradient) }}
+                />
+                <span className="grad-preset-name">{f.name}</span>
+              </button>
+              <button
+                type="button"
+                className="grad-favorite-remove"
+                aria-label={`マイ配色「${f.name}」を消す`}
+                title="マイ配色から外す"
+                onClick={() => removeFavorite(f.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

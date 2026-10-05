@@ -1,6 +1,6 @@
 import type { TelopGradient, TelopStroke, TextStyle } from '@shared/types'
 import { TEXT_SHADOW_OFFSET_PX, TEXT_SHADOW_OPACITY } from '@shared/textStyle'
-import { normalizeHex, parseColor, rgbToHex } from './colorValue'
+import { normalizeHex, parseColor, rgbToHex, type Rgb } from './colorValue'
 
 /**
  * テロップの見た目の欄(塗り・縁・背景・影…)で使う、画面に依存しない計算。
@@ -102,7 +102,109 @@ export function gradientCss(g: TelopGradient): string {
   const stops = sortGradientStops(g)
     .stops.map((s) => `${s.color} ${Math.round(clamp01(s.at) * 1000) / 10}%`)
     .join(', ')
+  if (g.type === 'radial') return `radial-gradient(circle, ${stops})`
   return `linear-gradient(${normalizeAngle(180 - g.angle)}deg, ${stops})`
+}
+
+/** 色の並びを逆にする(上が濃い ↔ 下が濃い) */
+export function reverseGradient(g: TelopGradient): TelopGradient {
+  return sortGradientStops({
+    ...g,
+    stops: g.stops.map((s) => ({ ...s, at: Math.round((1 - s.at) * 1000) / 1000 }))
+  })
+}
+
+/** 色の止まりを等間隔に並べ直す */
+export function distributeGradient(g: TelopGradient): TelopGradient {
+  const sorted = sortGradientStops(g).stops
+  const n = sorted.length
+  return {
+    ...g,
+    stops: sorted.map((s, i) => ({ ...s, at: n > 1 ? Math.round((i / (n - 1)) * 1000) / 1000 : 0 }))
+  }
+}
+
+/** RGB(0〜255)↔ HSL(色相 0〜360・彩度/明度 0〜1) */
+function rgbToHsl({ r, g, b }: Rgb): { h: number; s: number; l: number } {
+  const R = r / 255
+  const G = g / 255
+  const B = b / 255
+  const max = Math.max(R, G, B)
+  const min = Math.min(R, G, B)
+  const l = (max + min) / 2
+  const d = max - min
+  if (d === 0) return { h: 0, s: 0, l }
+  const s = d / (1 - Math.abs(2 * l - 1))
+  let h: number
+  if (max === R) h = ((G - B) / d) % 6
+  else if (max === G) h = (B - R) / d + 2
+  else h = (R - G) / d + 4
+  return { h: (h * 60 + 360) % 360, s, l }
+}
+function hslToHex(h: number, s: number, l: number): string {
+  const S = Math.min(1, Math.max(0, s))
+  const L = Math.min(1, Math.max(0, l))
+  const c = (1 - Math.abs(2 * L - 1)) * S
+  const hh = (((h % 360) + 360) % 360) / 60
+  const x = c * (1 - Math.abs((hh % 2) - 1))
+  const [r1, g1, b1] =
+    hh < 1
+      ? [c, x, 0]
+      : hh < 2
+        ? [x, c, 0]
+        : hh < 3
+          ? [0, c, x]
+          : hh < 4
+            ? [0, x, c]
+            : hh < 5
+              ? [x, 0, c]
+              : [c, 0, x]
+  const m = L - c / 2
+  return rgbToHex({
+    r: Math.round((r1 + m) * 255),
+    g: Math.round((g1 + m) * 255),
+    b: Math.round((b1 + m) * 255)
+  })
+}
+
+/**
+ * 1つの色から作る配色の提案(デザインツールの「配色のルール」と同じ考え方)。
+ * 文字の色を決めたあと「この色に合うグラデーション」を1回で選べるようにする
+ */
+export function gradientSuggestions(
+  color: string,
+  angle = 0
+): { name: string; gradient: TelopGradient }[] {
+  const rgb = parseColor(color)
+  if (!rgb) return []
+  const { h, s, l } = rgbToHsl(rgb)
+  // 無彩色(白・黒・灰)は彩度を足さない
+  const sat = s < 0.08 ? 0 : Math.max(0.55, s)
+  const g = (name: string, colors: string[]): { name: string; gradient: TelopGradient } => ({
+    name,
+    gradient: {
+      angle,
+      stops: colors.map((c, i) => ({
+        at: colors.length > 1 ? i / (colors.length - 1) : 0,
+        color: c
+      }))
+    }
+  })
+  return [
+    g('明→暗', [
+      hslToHex(h, sat, Math.min(0.9, l + 0.3)),
+      hslToHex(h, sat, Math.max(0.15, l - 0.2))
+    ]),
+    g('光沢', [
+      hslToHex(h, sat * 0.6, 0.95),
+      hslToHex(h, sat, Math.max(0.3, l)),
+      hslToHex(h, sat, Math.max(0.15, l - 0.25))
+    ]),
+    g('類似色', [hslToHex(h - 30, sat, l), hslToHex(h + 30, sat, l)]),
+    g('補色', [hslToHex(h, sat, l), hslToHex(h + 180, sat, l)]),
+    g('3色', [hslToHex(h, sat, l), hslToHex(h + 120, sat, l), hslToHex(h + 240, sat, l)]),
+    g('白から', ['#ffffff', hslToHex(h, sat, l)])
+  ]
 }
 
 /** 止まりを横一列に並べた見本(向きは無視して左→右) */

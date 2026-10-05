@@ -82,6 +82,8 @@ export type FontFamily =
  * `angle` は向き(度)。0 は上→下、90 は左→右。色の止まり位置 `at` は 0〜1。
  */
 export interface TelopGradient {
+  /** 線形(既定)か、中心から広がる円形 */
+  type?: 'linear' | 'radial'
   angle: number
   stops: { at: number; color: string }[]
 }

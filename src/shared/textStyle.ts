@@ -430,7 +430,11 @@ export function normalizeGradient(raw: unknown): TelopGradient | undefined {
     .sort((a, b) => a.at - b.at)
     .slice(0, 8)
   if (stops.length < 2) return undefined
-  return { angle: asFinite(raw.angle, 0), stops }
+  return {
+    ...(raw.type === 'radial' ? { type: 'radial' as const } : {}),
+    angle: asFinite(raw.angle, 0),
+    stops
+  }
 }
 
 function normalizeSpan(raw: unknown): TelopSpanStyle | undefined {
