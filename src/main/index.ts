@@ -15,6 +15,7 @@ import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
+import { writeViaPartial } from './partialOutput'
 import { join } from 'path'
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
@@ -477,6 +478,16 @@ async function runExport(
   payload: ExportPayload,
   onProgress: (percent: number, stage: string) => void
 ): Promise<{ success: boolean }> {
+  // 失敗・中止で、壊れた動画が完成品の名前で残らないように(`writeViaPartial`)
+  return writeViaPartial(payload.outputPath, (outputPath) =>
+    runExportTo({ ...payload, outputPath }, onProgress)
+  )
+}
+
+async function runExportTo(
+  payload: ExportPayload,
+  onProgress: (percent: number, stage: string) => void
+): Promise<{ success: boolean }> {
   if (payload.engine === 'segmented') {
     // 一括書き出しは企画と違う縦横比で書き出すことがあるので、縦横比は引数のほうを使う
     const v2 = projectV1ToV2(
@@ -534,7 +545,25 @@ function hasLinuxOpener(): boolean {
   return linuxOpenerFound
 }
 
+/**
+ * 起動は1つだけ。2つ目を開くと、その起動の片付け(`cleanupStaleSegmentDirs`)が、1つ目で書き出し中の
+ * 一時フォルダを消しうる。保存も同じファイルへ2つから書き合うことになる。2つ目は1つ目の窓を前に出して閉じる
+ */
+const hasInstanceLock = app.requestSingleInstanceLock()
+if (!hasInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  })
+}
+
 app.whenReady().then(() => {
+  if (!hasInstanceLock) return
   electronApp.setAppUserModelId('com.videoeditor.app')
   startLibraryWatchers()
   // 前回、書き出しの途中で閉じた・落ちたときの一時フォルダ(数 GB になる)を片付ける
