@@ -1091,6 +1091,15 @@ describe('仮編集の作り直しで、人が決めた音・差し込んだク�
     expect([o.startTime, o.linkOffset]).toEqual([7, 2])
   })
 
+  it('仮編集の声のクリップの切れ目のフェードを残す', () => {
+    S.setState({ project: { ...st().project, multicam: info, clips: [] } })
+    const cut = cutOf([[0, 10]])
+    cut.audio[0].clips[0] = { ...cut.audio[0].clips[0], fadeIn: 0.02, fadeOut: 0.02 }
+    st().applyRoughCut(cut, [])
+    const clip = st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!.clips[0]
+    expect([clip.fadeIn, clip.fadeOut]).toEqual([0.02, 0.02])
+  })
+
   it('収録素材以外のクリップ(差し込みの画)は、直前のクリップの続きに入れ直す', () => {
     S.setState({ project: { ...st().project, multicam: info, clips: [] } })
     st().applyRoughCut(

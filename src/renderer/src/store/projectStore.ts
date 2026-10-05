@@ -2626,7 +2626,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               startTime: c.startTime,
               inPoint: c.inPoint,
               outPoint: c.outPoint,
-              ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {})
+              ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {}),
+              // 時間の飛ぶ切れ目の短いフェード(プツッという音を消す)
+              ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
+              ...(c.fadeOut ? { fadeOut: c.fadeOut } : {})
             }))
           }
         })

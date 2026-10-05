@@ -210,7 +210,7 @@ describe('settleTelopTimes — タイムラインに置いたテロップの時�
   it('文字数に対して短い枚は、次のテロップ・カットの切れ目までの範囲で延ばす(1秒10文字)', () => {
     const text = 'どうもありがとうございました' // 14 文字 → 1.4 秒
     const [a] = settleTelopTimes([t(text, 0, 1.08)], [])
-    expect(a.endTime).toBeCloseTo(1.4, 9)
+    expect(a.endTime).toBeCloseTo(1.4, 5)
     const [b] = settleTelopTimes([t(text, 0, 1.08), t('はい', 1.2, 2)], [])
     expect(b.endTime).toBeCloseTo(1.2, 9)
     const [c] = settleTelopTimes([t(text, 0, 1.08)], [1.1])

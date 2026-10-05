@@ -28,8 +28,12 @@ export interface ChunkOptions {
   dictionary?: readonly DictionaryEntry[]
 }
 
-/** 発話の最初の1枚を、発話の区間の頭から何秒後に出すか(区間の余白 0.15 秒より少し短く) */
-export const FIRST_TELOP_DELAY_SEC = 0.07
+/**
+ * 発話の最初の1枚を、発話の区間の頭から何秒後に出すか。発話の区間は話者の判定の余白(0.15 秒)の分だけ
+ * 声より前から始まり、30分の回では本人のマイクで声が立ち上がるのは区間の頭の 0.16〜0.23 秒後(中央値 0.20)。
+ * 0.12 秒後に出すと、声の 0.08 秒(2〜3フレーム)前に出る
+ */
+export const FIRST_TELOP_DELAY_SEC = 0.12
 
 /** 表示用に整える(句点を落とし、読点を空白に) */
 export function tidyTelopText(text: string): string {
@@ -115,10 +119,10 @@ export function utteranceToTelopChunks(
       if (polish(chars.slice(k, to).join('')) === polished) from = k
     let start = timed.length > 0 ? timed[from].start : timeAt(from)
     // 発話の最初の1枚は、言葉の時刻ではなく発話の頭(声を検出した区間の頭)から出す。
-    // 音声認識の言葉の時刻は声より遅れがちで、30分の回(発話 361 件)では最初の1枚が
-    // 声の頭より 中央値 0.20 秒・90%点 0.43 秒 遅れて出ていた(テロップが声を追いかける)。
-    // 発話の区間は声の頭より 0.15 秒前から始まる(話者の判定の余白)ので、そこから
-    // `FIRST_TELOP_DELAY_SEC` 後に出すと、声のほんの少し(2フレームほど)前に出る
+    // 音声認識の言葉の時刻は声より遅れがちで、30分の回(発話 361 件)では最初の1枚の 294/312 枚が
+    // 本人の声より遅れて出ていた(中央値 0.11 秒、0.1 秒を超える遅れが 179 枚。テロップが声を追いかける)。
+    // 区間の頭から `FIRST_TELOP_DELAY_SEC` 後に出すと、声のほんの少し前に出る。
+    // 頭の言いよどみを除いた枚(from > 0)は、言いよどみのあいだに出さないよう言葉の時刻のまま
     if (from === 0 && timed.length > 0 && u.sourceStart < start)
       start = Math.max(u.sourceStart, Math.min(start, u.sourceStart + FIRST_TELOP_DELAY_SEC))
     const end = timed.length > 0 ? timed[to - 1].end : timeAt(to)
@@ -151,14 +155,14 @@ export const TELOP_BRIDGE_SEC = 0.3
  * タイムラインに置いた発言テロップの時刻を整える(画面の点滅と読み切れない枚を無くす)。
  *
  * - 次のテロップまでの切れ目が `bridgeSec` 以下なら、前のテロップを次の頭まで延ばす。
- *   0.1〜0.3 秒だけ消えてまた出ると、点滅に見える(30分の回で、最初の1枚を声の頭に合わせると
- *   話者の替わり目でこの切れ目が 38 か所できた)
+ *   0.1〜0.3 秒だけ消えてまた出ると、点滅に見える(30分の回で、最初の1枚を声の少し前に出すと
+ *   この切れ目が 39 か所でき、うち 33 か所はカットの切れ目の直後だった)
  * - 文字数に対して短すぎる枚(自動の確認と同じ 1秒10文字・最短 0.5 秒)は、
  *   次のテロップの頭・カットの切れ目を越えない範囲で延ばす
  * - どちらも**カットの切れ目(`hardCuts`、タイムラインの秒)は越えない**。時間の飛んだ先の画に
  *   前の場面のテロップが残ると、言っていない言葉が画に乗る
  * - カットの切れ目の直後(`bridgeSec` 以内)に出るテロップは、切れ目から出す。画が替わってから
- *   2フレームほど遅れてテロップが出ると、ちらついて見える(同じ回で、切れ目をまたぐ短い切れ目が 33 か所)
+ *   数フレーム遅れてテロップが出ると、ちらついて見える(画とテロップを同じ瞬間に替える)
  * - 頭を前へ動かすのはこの場合だけ。重なっているテロップ(声の重なり)は延ばさない
  */
 export function settleTelopTimes<T extends { text: string; startTime: number; endTime: number }>(
@@ -191,7 +195,8 @@ export function settleTelopTimes<T extends { text: string; startTime: number; en
     const chars = t.text.replace(/\s/g, '').length
     const need = Math.max(minSec, chars / cps)
     let end = t.endTime
-    if (end - t.startTime < need) end = Math.min(limit, t.startTime + need)
+    // 自動の確認(終わり - 頭 < 必要な長さ)に丸めの誤差で掛からないよう、ほんの少し長く
+    if (end - t.startTime < need) end = Math.min(limit, t.startTime + need + 1e-6)
     if (next <= cut && next - end > 0 && next - end <= bridge) end = next
     t.endTime = end
   }

@@ -5,6 +5,7 @@ import type { Project } from '@shared/types'
 import type { Scene, SceneJudgement } from '@shared/structure/scenes'
 import { TURN_RATE } from '@shared/diarize/micTurns'
 import type { ShowStyle } from '@shared/style/showStyle'
+import { FIRST_TELOP_DELAY_SEC } from '@shared/telop/fromTranscript'
 
 // カメラ1台・マイク1本、どちらも共通の時刻 = 素材の時刻
 const info: MulticamInfo = {
@@ -75,7 +76,7 @@ describe('planRoughCut — カット点とテロップの時刻', () => {
     })
     const [a, b] = plan.telops
     // 言葉の時刻(1.4 秒)ではなく、発話の頭の少し後
-    expect(a.startTime).toBeCloseTo(1 - plan.pieces[0].start + 0.07, 6)
+    expect(a.startTime).toBeCloseTo(1 - plan.pieces[0].start + FIRST_TELOP_DELAY_SEC, 6)
     // 2つ目は切れ目(タイムラインで2つ目の区間の頭)から
     expect(b.startTime).toBeCloseTo(plan.cut.spans[1].timeline, 6)
   })
