@@ -91,3 +91,21 @@ describe('SRT と検索・置換の境目', () => {
     expect(replaceInTelop('ABCabc', 'b', '-', { loose: true })).toBe('A-Ca-c')
   })
 })
+
+describe('検索・置換は見えている文字で', () => {
+  it('強調の印をはさんだ文字も、一覧に見えているとおりに探せる。印の「*」では見つからない', () => {
+    expect(telopMatches('完食まで**3皿**', '完食まで3皿')).toBe(true)
+    expect(telopMatches('完食まで**3皿**', 'まで3')).toBe(true)
+    expect(telopMatches('完食まで**3皿**', '*')).toBe(false)
+    expect(telopMatches('雲丹《うに》', 'うに')).toBe(false)
+  })
+
+  it('置き換えても、装飾の印・ルビの読みは残す', () => {
+    expect(replaceInTelop('完食まで**3皿**', 'まで3', 'まで5')).toBe('完食まで5**皿**')
+    expect(replaceInTelop('完食まで**3皿**', '*', '')).toBe('完食まで**3皿**')
+    expect(replaceInTelop('雲丹《うに》を食べる', '食べる', 'いただく')).toBe(
+      '雲丹《うに》をいただく'
+    )
+    expect(replaceInTelop('__小__と**大**', '小と大', '中')).toBe('__中__')
+  })
+})

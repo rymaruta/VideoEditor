@@ -148,6 +148,8 @@ export interface Glyph {
   /** ルビ(ふりがな)。ルビが掛かる文字の先頭にだけ付け、`rubyLen` 文字ぶんに掛ける */
   ruby?: string
   rubyLen?: number
+  /** 本文(書記素に分けた並び)の中の位置。検索・置換で、印を残したまま見えている文字を置き換えるのに使う */
+  src?: number
 }
 
 /**
@@ -402,6 +404,11 @@ export function stripTelopMarkup(text: string): string {
     .join('')
 }
 
+/** 本文を書記素に分けた並び(`Glyph.src` が指す並び) */
+export function telopSourceUnits(text: string): string[] {
+  return graphemes(text ?? '')
+}
+
 /** 描く文字とルビの文字をすべて(フォントを先に読み込むのに使う) */
 export function telopDrawnChars(text: string): string {
   return parseTelopMarkup(text)
@@ -496,12 +503,18 @@ export function parseTelopMarkup(text: string): Glyph[] {
       }
     }
     if (chars[i] === '\n') {
-      out.push({ ch: '\n', word: -1 })
+      out.push({ ch: '\n', word: -1, src: i })
       first = false
       rubyStart = -1
       continue
     }
-    out.push({ ch: chars[i], word: -1, ...(span ? { span } : {}), ...(first ? { first } : {}) })
+    out.push({
+      ch: chars[i],
+      word: -1,
+      src: i,
+      ...(span ? { span } : {}),
+      ...(first ? { first } : {})
+    })
   }
   return out
 }

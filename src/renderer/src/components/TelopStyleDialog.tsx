@@ -122,7 +122,14 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     const paint = (time: number, endTime: number): void => {
       ctx.clearRect(0, 0, w, h)
       if (background === 'frame' && video && video.readyState >= 2) {
-        ctx.drawImage(video, 0, 0, w, h)
+        // 縦横比を保って収める(プレビュー・書き出しと同じく、余白は黒)。引き伸ばすと
+        // 9:16 の企画に 16:9 の画が縦長につぶれて見え、文字の大きさの見当が狂う
+        ctx.fillStyle = '#000000'
+        ctx.fillRect(0, 0, w, h)
+        const vw = video.videoWidth || w
+        const vh = video.videoHeight || h
+        const k = Math.min(w / vw, h / vh)
+        ctx.drawImage(video, (w - vw * k) / 2, (h - vh * k) / 2, vw * k, vh * k)
       } else {
         ctx.fillStyle = background === 'frame' ? SAMPLE_BG.gray : SAMPLE_BG[background]
         ctx.fillRect(0, 0, w, h)

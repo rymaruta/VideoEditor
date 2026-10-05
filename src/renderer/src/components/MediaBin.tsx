@@ -331,8 +331,11 @@ export function MediaBin(): React.JSX.Element {
       })
     } else {
       items.push({ label: 'ソースで開く', onSelect: () => openInSourceViewer(asset.id) })
+      // 静止画は本編には置かない(長さを持たない)が、ワイプ・CG のトラックには置ける(ドラッグと同じ)
       if (asset.hasVideo && !asset.still) {
         items.push({ label: '本編(V1)の末尾に追加', onSelect: () => addClipToTimeline(asset.id) })
+      }
+      if (asset.hasVideo) {
         for (const t of videoOverlayTracks) {
           items.push({
             label: `${t.name}(ワイプ)に追加`,
@@ -348,7 +351,7 @@ export function MediaBin(): React.JSX.Element {
           })
         }
       }
-      if (asset.hasVideo) {
+      if (asset.hasVideo && !asset.still) {
         items.push({ label: 'ハイライトを検出…', onSelect: () => setHighlightAssetId(asset.id) })
       }
       // ピンマイクのノイズ除去(声だけの素材)。外すと元の録音に戻る(元に戻すで再び掛かる)

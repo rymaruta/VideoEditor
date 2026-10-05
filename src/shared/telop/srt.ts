@@ -1,4 +1,4 @@
-import { stripTelopMarkup } from './render'
+import { parseTelopMarkup, stripTelopMarkup, telopSourceUnits } from './render'
 
 /**
  * 字幕ファイル(SRT)の書き出し・読み込み。Premiere・DaVinci・YouTube と字幕をやり取りする。
@@ -91,38 +91,24 @@ function norm(s: string, loose: boolean): string {
   return loose ? s.normalize('NFKC').toLowerCase() : s
 }
 
-/** 本文の中に、探す文字があるか */
-export function telopMatches(text: string, query: string, options: FindOptions = {}): boolean {
-  if (!query) return false
-  return norm(text, options.loose ?? false).includes(norm(query, options.loose ?? false))
-}
-
 /**
- * 本文の中の、探す文字をすべて置き換える。区別しないときは、全角・半角の違いを無視して見つけた所を
- * 置き換える(元の文字の位置を保つため、元の並びを少しずつ伸ばしながら正規化して比べる)
+ * 見えている文字(装飾の印 `**` `__`・ルビの読みを外したもの)の並びの中で、探す文字に当たる所。
+ * [先頭, 終わり) を見えている文字の番号で返す。区別しないときは、並びを伸ばしながら正規化して比べる
+ * (半角の「ｶﾞ」は2文字で「ガ」に、「㍿」は1文字で「株式会社」になる)
  */
-export function replaceInTelop(
-  text: string,
-  query: string,
-  replacement: string,
-  options: FindOptions = {}
-): string {
-  if (!query) return text
-  if (!options.loose) return text.split(query).join(replacement)
-  // 1文字ずつではなく、伸ばしていく並び全体を正規化して比べる
-  // (半角の「ｶﾞ」は2文字で「ガ」に、「㍿」は1文字で「株式会社」になる。検索と同じ結果にする)
-  const chars = [...text]
-  const q = norm(query, true)
-  let out = ''
+function findVisible(units: readonly string[], query: string, loose: boolean): [number, number][] {
+  const q = norm(query, loose)
+  const out: [number, number][] = []
   let i = 0
-  while (i < chars.length) {
+  while (i < units.length) {
     let matched = 0
-    for (let j = i + 1; j <= chars.length; j++) {
-      const acc = norm(chars.slice(i, j).join(''), true)
+    for (let j = i + 1; j <= units.length; j++) {
+      const acc = norm(units.slice(i, j).join(''), loose)
       // 次の文字が濁点などで前の文字とくっつく(「ｶ」+「ﾞ」)なら、ここで切ると別の文字になるので取らない
       const joins =
-        j < chars.length &&
-        norm(chars.slice(i, j + 1).join(''), true) !== acc + norm(chars[j], true)
+        loose &&
+        j < units.length &&
+        norm(units.slice(i, j + 1).join(''), loose) !== acc + norm(units[j], loose)
       if (acc === q && !joins) {
         matched = j
         break
@@ -131,12 +117,46 @@ export function replaceInTelop(
       if (!q.startsWith(acc.slice(0, -1)) || acc.length > q.length + 1) break
     }
     if (matched > i) {
-      out += replacement
+      out.push([i, matched])
       i = matched
-    } else {
-      out += chars[i]
-      i++
-    }
+    } else i++
   }
   return out
+}
+
+/**
+ * 本文の中に、探す文字があるか。一覧に見えている文字で探す
+ * (「完食まで**3皿**」は「完食まで3皿」で見つかる。印の「*」では見つからない)
+ */
+export function telopMatches(text: string, query: string, options: FindOptions = {}): boolean {
+  if (!query) return false
+  const units = parseTelopMarkup(text).map((g) => g.ch)
+  return findVisible(units, query, options.loose ?? false).length > 0
+}
+
+/**
+ * 本文の中の、探す文字をすべて置き換える。見えている文字で探し、装飾の印・ルビの読みは残す
+ * (「完食まで**3皿**」の「まで3」を「まで5」にすると「完食まで5**皿**」)
+ */
+export function replaceInTelop(
+  text: string,
+  query: string,
+  replacement: string,
+  options: FindOptions = {}
+): string {
+  if (!query) return text
+  const glyphs = parseTelopMarkup(text).filter((g) => g.src !== undefined)
+  const hits = findVisible(
+    glyphs.map((g) => g.ch),
+    query,
+    options.loose ?? false
+  )
+  if (hits.length === 0) return text
+  const units = telopSourceUnits(text)
+  for (const [a, b] of hits) {
+    units[glyphs[a].src!] = replacement
+    for (let k = a + 1; k < b; k++) units[glyphs[k].src!] = ''
+  }
+  // 中身ごと置き換えて空になった印の組(「****」「____」)は外す(描くと何も出ない)
+  return units.join('').replace(/\*\*\*\*|____/g, '')
 }

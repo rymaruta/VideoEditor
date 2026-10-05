@@ -4707,6 +4707,7 @@ h3 {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   border-right: 1px solid #161616;
 }
 .telop-list-head {
@@ -4725,7 +4726,8 @@ h3 {
   padding: 0;
   overflow-y: auto;
   flex: 1;
-  min-height: 0;
+  /* 検索・置換を開いても、見つかった行が3行は見える(0 にすると一覧が消えていた) */
+  min-height: 72px;
 }
 .telop-row {
   display: flex;
@@ -4782,7 +4784,8 @@ h3 {
 @container (max-width: 680px) {
   .telop-panel-body {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 40%) minmax(0, 1fr);
+    /* 一覧の欄は、検索・置換を開いた分も含めて中身が収まる高さまで伸ばす(設定欄に重ならない) */
+    grid-template-rows: minmax(min-content, 40%) minmax(0, 1fr);
   }
   .telop-list-pane {
     border-right: 0;
