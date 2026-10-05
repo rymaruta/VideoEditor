@@ -56,7 +56,6 @@ export function FontPicker({
               setOpen(false)
               buttonRef.current?.focus()
             }}
-            width={buttonRef.current?.offsetWidth}
           />
         </Popover>
       )}
@@ -66,12 +65,10 @@ export function FontPicker({
 
 function FontList({
   value,
-  onPick,
-  width
+  onPick
 }: {
   value: FontFamily
   onPick: (v: FontFamily) => void
-  width?: number
 }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const list = useMemo(() => filterFonts(FONT_FAMILY_OPTIONS, query), [query])
@@ -96,9 +93,8 @@ function FontList({
       ?.querySelector<HTMLElement>(`[data-index="${next}"]`)
       ?.scrollIntoView({ block: 'nearest' })
   }
-  let lastGroup = ''
   return (
-    <div className="font-picker-panel" style={width ? { width: Math.max(260, width) } : undefined}>
+    <div className="font-picker-panel">
       <label className="font-picker-search look-search">
         <SearchIcon width={13} height={13} aria-hidden="true" />
         <input
@@ -137,8 +133,7 @@ function FontList({
           aria-label="書体"
         >
           {list.map((f, i) => {
-            const head = f.group !== lastGroup ? f.group : null
-            lastGroup = f.group
+            const head = i === 0 || list[i - 1].group !== f.group ? f.group : null
             return (
               <li key={f.value} role="presentation">
                 {head && <div className="font-picker-group">{head}</div>}

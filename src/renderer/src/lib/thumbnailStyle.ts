@@ -11,17 +11,17 @@ import type { TextStyle } from '@shared/types'
 const STYLE_KEY = 've-thumbnail-style'
 const TEXT_KEY_PREFIX = 've-thumbnail-text:'
 
-/** はじめのサムネイルの文字(太い書体・黄色の文字・黒と白の二重縁。小さく表示されても読める) */
+/** はじめのサムネイルの文字(太い丸ゴシック・黄色の文字・黒と白の二重縁。小さく表示されても読める) */
 export function defaultThumbnailStyle(): TextStyle {
   return defaultTextStyle({
-    fontFamily: 'Dela Gothic One',
+    fontFamily: 'RocknRoll One',
     fontSize: 150,
     color: '#ffe600',
     bold: true,
     outline: true,
     outlineColor: '#000000',
-    outlineWidth: 12,
-    extraStrokes: [{ color: '#ffffff', width: 10 }],
+    outlineWidth: 6,
+    extraStrokes: [{ color: '#ffffff', width: 6 }],
     position: 'bottom',
     lineHeight: 1.1
   })

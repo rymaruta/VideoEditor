@@ -205,19 +205,26 @@ export function ExportDialog(): React.JSX.Element | null {
   ): Promise<void> {
     setProgress({ percent: 0, stage: '準備中' })
     const telopLayer = await telopLayerFor(aspect, height)
-    // 描画のあいだに中止を押されていたら、書き出しを始めない(main 側の中止は、始まる前だと効かない)
-    if (abortRef.current?.signal.aborted) throw new Error('EXPORT_CANCELED')
-    await window.api.exportProject({
-      project,
-      aspectRatio: aspect,
-      resolutionHeight: height,
-      quality: q,
-      outputPath,
-      loudnessNormalization: loudness !== 'off',
-      loudnessTarget: loudness === 'off' ? undefined : loudness,
-      engine,
-      telopLayer
-    })
+    try {
+      // 描画のあいだに中止を押されていたら、書き出しを始めない(main 側の中止は、始まる前だと効かない)
+      if (abortRef.current?.signal.aborted) throw new Error('EXPORT_CANCELED')
+      await window.api.exportProject({
+        project,
+        aspectRatio: aspect,
+        resolutionHeight: height,
+        quality: q,
+        outputPath,
+        loudnessNormalization: loudness !== 'off',
+        loudnessTarget: loudness === 'off' ? undefined : loudness,
+        engine,
+        telopLayer
+      })
+    } finally {
+      // 層の画像(main の一時フォルダ。長尺の 4K で数 GB)は、書き出しに渡らなかったときもここで片付ける
+      // (書き出しに渡ったぶんは main が終わりに片付けている。2回目は何もしない)
+      if (telopLayer?.stagedId)
+        void window.api.telopLayer.release(telopLayer.stagedId).catch(() => {})
+    }
   }
 
   async function handleExport(): Promise<void> {

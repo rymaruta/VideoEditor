@@ -24,12 +24,39 @@ export interface TelopRun {
 /**
  * 書き出しへ渡すテロップの層(画面のプロセスが描いた画像と、それを出す区間)。
  * 画像は枠と同じ大きさの透明 PNG で、0番は何も描いていない透明の1枚。
+ *
+ * 画像の渡し方は2通り:
+ * - `stagedId`: 描きながら少しずつ main へ送って、main が一時フォルダへ書いておいたもの
+ *   (`TelopLayerStageApi`)。**書き出しはこちらを使う。** 1000枚のテロップ・ループの動きで
+ *   画像は数万枚・数 GB になり、1回の IPC に載せると画面のプロセスが落ちる
+ *   (実測: 60分・1000枚・1080p で 24,595枚。100枚ぶんの 2,228枚で既に 145MB、
+ *    送る瞬間に画面のプロセスが 1.03GB。1000枚ぶんは送れずに画面のプロセスが消えた)
+ * - `images`: 画像そのもの(テスト・小さい層用)
  */
 export interface TelopLayerPayload {
   width: number
   height: number
-  images: Uint8Array[]
+  images?: Uint8Array[]
+  /** main の一時フォルダに書いてある画像の束の番号(`beginTelopLayer` が返したもの) */
+  stagedId?: string
+  /** `stagedId` のときの画像の枚数(0番の透明を含む) */
+  imageCount?: number
   runs: { startFrame: number; endFrame: number; image: number }[]
+}
+
+/** 層の画像の枚数(どちらの渡し方でも) */
+export function telopLayerImageCount(layer: TelopLayerPayload): number {
+  return layer.stagedId !== undefined ? (layer.imageCount ?? 0) : (layer.images?.length ?? 0)
+}
+
+/**
+ * 画面のプロセスから main へ、層の画像を少しずつ送る口(preload が `window.api` に出す)。
+ * `append` は main がディスクに書き終えてから返るので、送る側が溜め込みすぎない(背圧)
+ */
+export interface TelopLayerStageApi {
+  begin: (width: number, height: number) => Promise<string>
+  append: (id: string, firstIndex: number, images: Uint8Array[]) => Promise<void>
+  release: (id: string) => Promise<void>
 }
 
 /**
@@ -93,11 +120,41 @@ export function visibleTelops(seq: Sequence): TelopItem[] {
     .flatMap((t) => t.items.filter((i): i is TelopItem => i.kind === 'telop'))
 }
 
+/**
+ * テロップの「絵の中身」の印。文字・見た目・カラオケの語(出始めからの相対時刻)が同じなら同じ印。
+ *
+ * 同じ印のテロップは、同じ動きの状態(`telopVisualKey`)なら**同じ絵**になる
+ * (`drawTelop` が時刻から使うのは、出始めからの経過・消えるまでの残り・カラオケの語の
+ * 切り替わりだけで、どれも `telopVisualKey` に入っている)。印を ID の代わりに絵の鍵へ入れると、
+ * 番組で何度も出る同じテロップ(出演者の名前・「えー！？」などのリアクション)を1枚に描くだけで済む
+ */
+function contentSignature(source: TelopSource): string {
+  const words = source.words?.map((w) => [
+    w.text,
+    w.start - source.startTime,
+    w.end - source.startTime
+  ])
+  return JSON.stringify([source.text, source.style, words ?? null])
+}
+
 export function planTelopRuns(seq: Sequence, canvasHeight: number): TelopRun[] {
   const fps = seq.fps.num / seq.fps.den
   const telops = visibleTelops(seq)
   if (telops.length === 0) return []
   const sources = new Map(telops.map((t) => [t.id, telopItemSource(t, fps)]))
+  // 長い印(見た目の JSON)を毎フレームつなげないよう、中身ごとに短い番号へ置き換える
+  const contentIds = new Map<string, string>()
+  const contentOf = new Map(
+    telops.map((t) => {
+      const sig = contentSignature(sources.get(t.id)!)
+      let id = contentIds.get(sig)
+      if (id === undefined) {
+        id = `c${contentIds.size}`
+        contentIds.set(sig, id)
+      }
+      return [t.id, id]
+    })
+  )
   // 出ている間の全フレームを、出入りの順に掃いて調べる(アニメーション・カラオケ・
   // タイプライターの切り替わりを取りこぼさないため)。出ているものだけを持ち歩くので、
   // テロップの数が増えても1フレームあたりの手間は「その瞬間に出ている数」で済む。
@@ -124,7 +181,9 @@ export function planTelopRuns(seq: Sequence, canvasHeight: number): TelopRun[] {
     if (active.length > 0) {
       const time = (f + 1e-9) / fps
       const key = active
-        .map((t) => `${t.id}:${telopVisualKey(sources.get(t.id)!, time, canvasHeight)}`)
+        .map(
+          (t) => `${contentOf.get(t.id)}:${telopVisualKey(sources.get(t.id)!, time, canvasHeight)}`
+        )
         .join(',')
       const last = runs[runs.length - 1]
       if (last && last.endFrame === f && last.imageKey === key) {

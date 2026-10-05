@@ -14,7 +14,7 @@ import type { LoudnessTarget } from '@shared/loudness'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
-import type { TelopLayerPayload } from '@shared/telop/layer'
+import type { TelopLayerPayload, TelopLayerStageApi } from '@shared/telop/layer'
 import type { LibraryFile, LibraryState } from '@shared/library'
 import type { MenuFileState, MenuShortcuts } from '@shared/appMenu'
 import type {
@@ -167,6 +167,14 @@ const api = {
     engine?: ExportEngine
     telopLayer?: TelopLayerPayload | null
   }): Promise<{ success: boolean }> => ipcRenderer.invoke(IPC.exportProject, payload),
+  /** 書き出しのテロップの層の画像を、描きながら少しずつ main へ送る(`telopLayerStage`) */
+  telopLayer: {
+    begin: (width: number, height: number): Promise<string> =>
+      ipcRenderer.invoke(IPC.telopLayerBegin, width, height),
+    append: (id: string, firstIndex: number, images: Uint8Array[]): Promise<void> =>
+      ipcRenderer.invoke(IPC.telopLayerAppend, id, firstIndex, images),
+    release: (id: string): Promise<void> => ipcRenderer.invoke(IPC.telopLayerRelease, id)
+  } satisfies TelopLayerStageApi,
   onExportProgress: (callback: (progress: ExportProgress) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, progress: ExportProgress): void =>
       callback(progress)

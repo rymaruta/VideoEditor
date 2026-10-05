@@ -260,3 +260,36 @@ export function matchesLookQuery(
     .toLowerCase()
   return words.every((w) => hay.includes(w))
 }
+
+/**
+ * 見た目を、文字の大きさごと拡大・縮小する(縁の太さ・余白・影の距離なども同じ割合で)。
+ * テロップ用の見た目をサムネイルの大きな文字に当てるときに使う(縁だけ細く見えないように)。
+ */
+export function scaleLook(style: TextStyle, factor: number): TextStyle {
+  if (!Number.isFinite(factor) || factor <= 0 || factor === 1) return style
+  const k = (v: number | undefined): number | undefined =>
+    v === undefined ? undefined : Math.round(v * factor * 100) / 100
+  return {
+    ...style,
+    fontSize: Math.max(1, Math.round(style.fontSize * factor)),
+    outlineWidth: k(style.outlineWidth) ?? style.outlineWidth,
+    letterSpacing: k(style.letterSpacing) ?? style.letterSpacing,
+    extraStrokes: style.extraStrokes?.map((s) => ({ ...s, width: k(s.width) ?? s.width })),
+    shadowDistance: k(style.shadowDistance),
+    shadowBlur: k(style.shadowBlur),
+    glow: style.glow ? { ...style.glow, size: k(style.glow.size) ?? style.glow.size } : undefined,
+    backgroundRadius: k(style.backgroundRadius),
+    backgroundPadding: style.backgroundPadding
+      ? { x: k(style.backgroundPadding.x) ?? 0, y: k(style.backgroundPadding.y) ?? 0 }
+      : undefined,
+    backgroundBorder: style.backgroundBorder
+      ? { ...style.backgroundBorder, width: k(style.backgroundBorder.width) ?? 0 }
+      : undefined,
+    bubbleTail: style.bubbleTail
+      ? { ...style.bubbleTail, length: k(style.bubbleTail.length) ?? 0 }
+      : undefined,
+    pointer: style.pointer
+      ? { ...style.pointer, width: k(style.pointer.width) ?? style.pointer.width }
+      : undefined
+  }
+}

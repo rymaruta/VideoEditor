@@ -22,7 +22,7 @@ import { useStyleClipboard } from '../lib/styleClipboard'
 import { loadTelopFonts } from '../lib/telopFonts'
 import { useSettingsStore } from '../store/settingsStore'
 import { Popover } from './Popover'
-import { drawLookThumb } from './TelopLookGallery'
+import { drawLookThumb } from '../lib/lookThumb'
 
 /**
  * 項目ごとの「マイ設定」(Photoshop のスタイル・CapCut のプリセットを項目単位にしたもの)。

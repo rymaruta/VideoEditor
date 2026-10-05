@@ -47,3 +47,23 @@ describe('お気に入りの色', () => {
     expect(normalizeFavoriteColors('oops')).toEqual([])
   })
 })
+
+describe('最近使った色・コントラスト', () => {
+  it('新しいものが先頭、重複は前へ、12 色まで', async () => {
+    const { pushRecentColor, MAX_RECENT_COLORS, normalizeRecentColors } =
+      await import('../../src/renderer/src/lib/colorValue')
+    let list: string[] = []
+    for (let i = 0; i < 20; i++)
+      list = pushRecentColor(list, `#0000${i.toString(16).padStart(2, '0')}`)
+    expect(list).toHaveLength(MAX_RECENT_COLORS)
+    expect(list[0]).toBe('#000013')
+    expect(pushRecentColor(list, '#000010')[0]).toBe('#000010')
+    expect(pushRecentColor(list, 'nope')).toEqual(list)
+    expect(normalizeRecentColors(['#FFF', 3, 'x'])).toEqual(['#ffffff'])
+  })
+  it('白と黒のコントラストは 21', async () => {
+    const { contrastRatio } = await import('../../src/renderer/src/lib/colorValue')
+    expect(contrastRatio('#ffffff', '#000000')).toBeCloseTo(21, 0)
+    expect(contrastRatio('#777777', '#777777')).toBe(1)
+  })
+})

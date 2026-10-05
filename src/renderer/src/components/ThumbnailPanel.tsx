@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
 import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
@@ -10,7 +10,13 @@ import { textCanvasSize } from '@shared/resolution'
 import { drawTelop, layoutTelop, type TelopContext } from '@shared/telop/render'
 import type { TextPosition, TextStyle } from '@shared/types'
 import { loadTelopFonts } from '../lib/telopFonts'
-import { lookPatch, SECTION_IDS, settledTelopTime, stillTelopStyle } from '../lib/appearanceEdit'
+import {
+  lookPatch,
+  scaleLook,
+  SECTION_IDS,
+  settledTelopTime,
+  stillTelopStyle
+} from '../lib/appearanceEdit'
 import { useStyleClipboard } from '../lib/styleClipboard'
 import {
   defaultThumbnailStyle,
@@ -21,7 +27,8 @@ import {
 } from '../lib/thumbnailStyle'
 import { NumberSlider } from './AppearanceControls'
 import { PropRow, TelopStyleFields } from './TelopStyleFields'
-import { paintBackdrop, TelopLookPicker, type LookItem } from './TelopLookGallery'
+import { TelopLookPicker, type LookItem } from './TelopLookGallery'
+import { paintBackdrop } from '../lib/lookThumb'
 
 // サムネイルの短辺。長辺はプロジェクトのアスペクト比から targetResolution() が決める
 // (9:16 なら 720x1280、16:9 なら 1280x720)。書き出しと同じ関数を使う。
@@ -52,7 +59,7 @@ export function ThumbnailPanel(): React.JSX.Element {
   const copyLook = useStyleClipboard((s) => s.copy)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drag = useRef<{ px: number; py: number; x: number; y: number } | null>(null)
-  const textCanvas = textCanvasSize(project.aspectRatio)
+  const textCanvas = useMemo(() => textCanvasSize(project.aspectRatio), [project.aspectRatio])
   const setText = (t: string): void => {
     setTextState(t)
     writeThumbnailText(projectId, t)
@@ -262,7 +269,7 @@ export function ThumbnailPanel(): React.JSX.Element {
       { width: w, height: h },
       textCanvas
     )
-  }, [image, text, style, fontEpoch, textCanvas.w, textCanvas.h, thumbWidth, thumbHeight])
+  }, [image, text, style, fontEpoch, textCanvas, thumbWidth, thumbHeight])
 
   /** 文字の塊の中心(画面に対する割合)。自由配置ならその点、そうでなければ今の置き場所から測る */
   function blockCenter(): { x: number; y: number } {
@@ -309,8 +316,9 @@ export function ThumbnailPanel(): React.JSX.Element {
 
   function pickLook(item: LookItem): void {
     // 見た目だけを入れ替える。置き場所・回転は今のまま
+    // テロップ用の見た目は文字が小さいので、今の文字の大きさに合わせて縁・余白ごと拡大する
     setStyle({
-      ...item.style,
+      ...scaleLook(item.style, style.fontSize / Math.max(1, item.style.fontSize)),
       position: style.position,
       customPosition: style.customPosition,
       rotation: style.rotation
@@ -347,12 +355,6 @@ export function ThumbnailPanel(): React.JSX.Element {
         「均等間隔で生成」はタイムラインを一定間隔で抽出、「ハイライトから生成」はAIが検出した音量変化やカット点などの見せ場からフレームを抽出してサムネイルの候補にします。プロジェクトのアスペクト比に合わせて、9:16なら720x1280(縦)、16:9なら1280x720で作ります。
       </p>
       {error && <p className="error-text">{error}</p>}
-      {candidates.length === 0 && !loading && (
-        <div className="empty-state thumbnail-empty">
-          <ImageIcon width={20} height={20} />
-          <p className="hint-text">上のボタンから候補を生成してください</p>
-        </div>
-      )}
       {candidates.length > 0 && (
         <div className="thumbnail-candidates">
           {candidates.map((c, i) => (
@@ -383,6 +385,7 @@ export function ThumbnailPanel(): React.JSX.Element {
         />
         {!selected && (
           <span className="thumbnail-stage-note">
+            <ImageIcon width={12} height={12} aria-hidden="true" />
             候補を作って選ぶと、ここに画が入ります(文字の見た目は先に決められます)
           </span>
         )}
@@ -424,10 +427,19 @@ export function ThumbnailPanel(): React.JSX.Element {
           disabled={!clipStyle}
           title={
             clipStyle
-              ? `${clipFrom} からコピーした見た目を貼り付けます(置き場所はそのまま)`
+              ? `${clipFrom} からコピーした見た目を貼り付けます(文字の大きさ・置き場所はそのまま)`
               : '先にテロップの「見た目をコピー」でコピーしてください'
           }
-          onClick={() => clipStyle && patch(lookPatch(clipStyle, SECTION_IDS))}
+          onClick={() =>
+            clipStyle &&
+            // テロップの見た目は文字が小さいので、今の大きさに合わせて縁・余白ごと拡大する
+            setStyle(
+              scaleLook(
+                { ...style, ...lookPatch(clipStyle, SECTION_IDS) },
+                style.fontSize / Math.max(1, clipStyle.fontSize)
+              )
+            )
+          }
         >
           貼り付け
         </button>

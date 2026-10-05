@@ -157,7 +157,9 @@ export function ColorField({
             hex={hex}
             label={label}
             onChange={onChange}
-            picking={picking}
+            onPicking={(v) => {
+              picking.current = v
+            }}
             ready={pos !== null}
             // 位置が決まるまでは見せない(左上に一瞬出るのを防ぐ)
             style={
@@ -192,7 +194,7 @@ function ColorPopover({
   hex,
   label,
   onChange,
-  picking,
+  onPicking,
   ready,
   style
 }: {
@@ -200,7 +202,8 @@ function ColorPopover({
   hex: string
   label: string
   onChange: (hex: string) => void
-  picking: React.RefObject<boolean>
+  /** スポイトで拾っている間(外を押しても閉じない) */
+  onPicking: (picking: boolean) => void
   /** 位置が決まって見えている(見えない要素にはフォーカスできない) */
   ready: boolean
   style: React.CSSProperties
@@ -237,7 +240,7 @@ function ColorPopover({
   }
   const pickFromScreen = async (): Promise<void> => {
     if (!Dropper) return
-    picking.current = true
+    onPicking(true)
     try {
       const r = await new Dropper().open()
       const next = normalizeHex(r.sRGBHex)
@@ -246,7 +249,7 @@ function ColorPopover({
       // Esc で取りやめた
     } finally {
       // 拾ったときの mousedown が先に届くので、少し待ってから外の押下を見る
-      window.setTimeout(() => (picking.current = false), 0)
+      window.setTimeout(() => onPicking(false), 0)
     }
   }
   const isFavorite = favorites.includes(hex)

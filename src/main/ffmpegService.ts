@@ -18,7 +18,8 @@ import type {
   TransitionType
 } from '@shared/types'
 import { buildAssContent } from './assSubtitle'
-import { telopConcatList, type TelopLayerPayload } from '@shared/telop/layer'
+import { telopConcatList, telopLayerImageCount, type TelopLayerPayload } from '@shared/telop/layer'
+import { materializeTelopLayer } from './telopLayerStage'
 import { measureWideAdvances } from './fontMetrics'
 import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import { createExportTimeMap } from '@shared/exportTimeline'
@@ -770,7 +771,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   // 層を受け取ったときは ASS を作らないので、測る必要も無い(測ると ffmpeg を1回余計に起こす)
   const usesTelopLayer = options.telopLayer !== undefined
   const telopLayer =
-    options.telopLayer && options.telopLayer.images.length > 0 ? options.telopLayer : null
+    options.telopLayer && telopLayerImageCount(options.telopLayer) > 0 ? options.telopLayer : null
   const wideEmByFont = usesTelopLayer
     ? new Map<string, number>()
     : await measureWideAdvances(ffmpegPath, project.textOverlays)
@@ -1376,11 +1377,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       if (telopLayer) {
         telopDir = mkdtempSync(join(tmpdir(), 've-telop-'))
         const dir = telopDir
-        const imagePaths = telopLayer.images.map((bytes, i) => {
-          const p = join(dir, `telop_${String(i).padStart(6, '0')}.png`)
-          writeFileSync(p, bytes)
-          return p
-        })
+        // 画像は描きながら main の置き場へ書いてある(`stagedId`)。バイト列で来たときだけここへ書く
+        const imagePaths = materializeTelopLayer(telopLayer, () => dir)?.imagePaths ?? []
         // 層の区間は v2 のフレーム(`projectV1ToV2`)。v2 は書き出しと同じ `createExportTimeMap` と
         // 同じフレームレートで数えるので、頭からフレームで並べればそのまま時刻が合う。
         // 一覧は本編より1秒長く(後ろは透明)作り、長さは overlay の `shortest` で本編に揃える。

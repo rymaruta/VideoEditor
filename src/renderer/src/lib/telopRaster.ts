@@ -6,10 +6,12 @@ import {
   planTelopRuns,
   telopItemSource,
   visibleTelops,
-  type TelopLayerPayload
+  type TelopLayerPayload,
+  type TelopLayerStageApi
 } from '@shared/telop/layer'
 import { drawTelop, type TelopContext } from '@shared/telop/render'
 import { textCanvasSize } from '@shared/resolution'
+import { TelopImageWriter } from './telopImageWriter'
 
 /**
  * 書き出しに重ねる「テロップの層」を、**画面と同じ描画関数**で画像にする。
@@ -19,19 +21,34 @@ import { textCanvasSize } from '@shared/resolution'
  * 重ねるだけで、文字を描かない。
  *
  * 画像は枠と同じ大きさの透明 PNG。0番は「何も無い」透明の1枚で、区間の無い時間に使う。
+ *
+ * 画像は**描きながら数 MB ずつ main へ送り、main がすぐディスクへ書く**(`TelopImageWriter`)。
+ * 全部をメモリに溜めて書き出しの IPC 1回で送ると、長尺・ループの動きでは数万枚・数 GB になり
+ * 画面のプロセスが落ちる(実測は `TelopLayerPayload` のコメント)。
  */
 
-async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
-  if (!blob) throw new Error('テロップの画像を作れませんでした')
-  return new Uint8Array(await blob.arrayBuffer())
+/**
+ * 同時に PNG にしておく枚数。描く(1枚 1ms 未満)と PNG にする(1080p で約 10ms、4K で約 37ms。
+ * ほぼ全部が GPU からの読み戻しと圧縮)・main へ送る・ディスクへ書くを重ねて、待ち時間を詰める
+ */
+const ENCODE_AHEAD = 3
+
+function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png')).then(
+    async (blob) => {
+      if (!blob) throw new Error('テロップの画像を作れませんでした')
+      return new Uint8Array(await blob.arrayBuffer())
+    }
+  )
 }
 
 export async function rasterizeTelopLayer(
   seq: Sequence,
   onProgress?: (done: number, total: number) => void,
   /** 書き出しの中止(長尺の 4K だと描画だけで数分かかる) */
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** 画像の送り先(既定は main。テストで差し替える) */
+  stage: TelopLayerStageApi = window.api.telopLayer
 ): Promise<TelopLayerPayload | null> {
   const textCanvas = textCanvasSize(seq.width >= seq.height ? '16:9' : '9:16')
   const runs = planTelopRuns(seq, textCanvas.h)
@@ -48,36 +65,69 @@ export async function rasterizeTelopLayer(
   await loadTelopFonts([...sources.values()])
   await document.fonts?.ready
 
-  const images: Uint8Array[] = [await canvasToPng(canvas)]
-  const imageByKey = new Map<string, number>()
-  const out: TelopLayerPayload['runs'] = []
-  for (let i = 0; i < runs.length; i++) {
-    const run = runs[i]
-    let image = imageByKey.get(run.imageKey)
-    if (image === undefined) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      const time = (run.startFrame + 1e-9) / fps
-      for (const id of run.itemIds) {
-        const source = sources.get(id)
-        if (source)
-          drawTelop(
-            ctx as TelopContext,
-            source,
-            time,
-            { width: seq.width, height: seq.height },
-            textCanvas
-          )
-      }
-      image = images.length
-      images.push(await canvasToPng(canvas))
-      imageByKey.set(run.imageKey, image)
+  const stagedId = await stage.begin(seq.width, seq.height)
+  const writer = new TelopImageWriter(stage, stagedId)
+  try {
+    // 0番は透明の1枚
+    await writer.add(await canvasToPng(canvas))
+    const imageByKey = new Map<string, number>()
+    const out: TelopLayerPayload['runs'] = []
+    /** PNG にしている途中の絵(描いた順)。`imageKey` ごとに1つ */
+    const encoding: { key: string; png: Promise<Uint8Array> }[] = []
+    const settleOldest = async (): Promise<void> => {
+      const e = encoding.shift()!
+      imageByKey.set(e.key, await writer.add(await e.png))
     }
-    out.push({ startFrame: run.startFrame, endFrame: run.endFrame, image })
+    for (let i = 0; i < runs.length; i++) {
+      const run = runs[i]
+      if (!imageByKey.has(run.imageKey) && !encoding.some((e) => e.key === run.imageKey)) {
+        if (encoding.length >= ENCODE_AHEAD) await settleOldest()
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        const time = (run.startFrame + 1e-9) / fps
+        for (const id of run.itemIds) {
+          const source = sources.get(id)
+          if (source)
+            drawTelop(
+              ctx as TelopContext,
+              source,
+              time,
+              { width: seq.width, height: seq.height },
+              textCanvas
+            )
+        }
+        // `toBlob` は呼んだ時点の絵の写しを PNG にする(仕様)ので、同じ Canvas へすぐ次を描いてよい
+        const png = canvasToPng(canvas)
+        // 待つのは順番が来たとき。それまでに失敗しても、未処理の拒否にしない
+        png.catch(() => {})
+        encoding.push({ key: run.imageKey, png })
+      }
+      if (signal?.aborted) throw new Error('EXPORT_CANCELED')
+      if (onProgress && i % 20 === 0) onProgress(i, runs.length)
+    }
+    while (encoding.length > 0) await settleOldest()
+    // 番号は PNG にし終えた順に決まるので、区間へ割り当てるのは全部が済んでから
+    for (const run of runs) {
+      out.push({
+        startFrame: run.startFrame,
+        endFrame: run.endFrame,
+        image: imageByKey.get(run.imageKey)!
+      })
+    }
+    await writer.finish()
     if (signal?.aborted) throw new Error('EXPORT_CANCELED')
-    if (onProgress && i % 20 === 0) onProgress(i, runs.length)
+    onProgress?.(runs.length, runs.length)
+    return {
+      width: seq.width,
+      height: seq.height,
+      stagedId,
+      imageCount: writer.count,
+      runs: out
+    }
+  } catch (e) {
+    await writer.abandon()
+    await stage.release(stagedId).catch(() => {})
+    throw e
   }
-  onProgress?.(runs.length, runs.length)
-  return { width: seq.width, height: seq.height, images, runs: out }
 }
 
 /**

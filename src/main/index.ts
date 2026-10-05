@@ -70,6 +70,13 @@ import {
 } from './segmentRenderer'
 import { installAppMenu, updateAppMenu } from './appMenu'
 import {
+  appendTelopLayerImages,
+  beginTelopLayer,
+  releaseAllTelopLayers,
+  releaseTelopLayer,
+  withTelopLayer
+} from './telopLayerStage'
+import {
   forgetLibraryFolder,
   libraryOverview,
   listLibraryFiles,
@@ -414,63 +421,75 @@ function registerWindowScopedIpcHandlers(): void {
     return result.filePaths[0]
   })
 
-  ipcMain.handle(
-    IPC.exportProject,
-    async (
-      event,
-      payload: {
-        project: Project
-        aspectRatio: AspectRatio
-        resolutionHeight: ResolutionHeight
-        quality: QualityPreset
-        outputPath: string
-        loudnessNormalization?: boolean
-        loudnessTarget?: LoudnessTarget
-        engine?: ExportEngine
-        /**
-         * 画面のプロセスが共通レンダラで描いたテロップの層(どちらの書き出し方式でも使う)。
-         * `null` は「出すテロップが無い」、省略は「層が無いので ASS で焼く」
-         */
-        telopLayer?: TelopLayerPayload | null
-      }
-    ) => {
-      const onProgress = (percent: number, stage: string): void => {
-        notifySender(event, IPC.exportProgress, { percent, stage })
-      }
-      if (payload.engine === 'segmented') {
-        // 一括書き出しは企画と違う縦横比で書き出すことがあるので、縦横比は引数のほうを使う
-        const v2 = projectV1ToV2(
-          { ...payload.project, aspectRatio: payload.aspectRatio },
-          { resolution: payload.resolutionHeight }
-        )
-        await runExclusiveExport((signal) =>
-          exportSequenceSegmented({
-            project: v2,
-            outputPath: payload.outputPath,
-            quality: payload.quality,
-            loudnessNormalization: payload.loudnessNormalization,
-            loudnessTarget: normalizeLoudnessTarget(payload.loudnessTarget),
-            telopLayer: payload.telopLayer,
-            onProgress,
-            signal
-          })
-        )
-        return { success: true }
-      }
-      await exportProject({
-        project: payload.project,
-        aspectRatio: payload.aspectRatio,
-        resolutionHeight: payload.resolutionHeight,
-        quality: payload.quality,
+  ipcMain.handle(IPC.exportProject, async (event, payload: ExportPayload) => {
+    const onProgress = (percent: number, stage: string): void => {
+      notifySender(event, IPC.exportProgress, { percent, stage })
+    }
+    // 層の画像の置き場は、書き出しが終わったら(成功・失敗・中止のどれでも)片付ける
+    return withTelopLayer(payload.telopLayer, () => runExport(payload, onProgress))
+  })
+  // テロップの層の画像は、描きながら少しずつ受け取ってディスクへ書く(`telopLayerStage`)
+  ipcMain.handle(IPC.telopLayerBegin, (_e, width: number, height: number) =>
+    beginTelopLayer(width, height)
+  )
+  ipcMain.handle(IPC.telopLayerAppend, (_e, id: string, firstIndex: number, images: Uint8Array[]) =>
+    appendTelopLayerImages(id, firstIndex, images)
+  )
+  ipcMain.handle(IPC.telopLayerRelease, (_e, id: string) => releaseTelopLayer(id))
+}
+
+interface ExportPayload {
+  project: Project
+  aspectRatio: AspectRatio
+  resolutionHeight: ResolutionHeight
+  quality: QualityPreset
+  outputPath: string
+  loudnessNormalization?: boolean
+  loudnessTarget?: LoudnessTarget
+  engine?: ExportEngine
+  /**
+   * 画面のプロセスが共通レンダラで描いたテロップの層(どちらの書き出し方式でも使う)。
+   * `null` は「出すテロップが無い」、省略は「層が無いので ASS で焼く」
+   */
+  telopLayer?: TelopLayerPayload | null
+}
+
+async function runExport(
+  payload: ExportPayload,
+  onProgress: (percent: number, stage: string) => void
+): Promise<{ success: boolean }> {
+  if (payload.engine === 'segmented') {
+    // 一括書き出しは企画と違う縦横比で書き出すことがあるので、縦横比は引数のほうを使う
+    const v2 = projectV1ToV2(
+      { ...payload.project, aspectRatio: payload.aspectRatio },
+      { resolution: payload.resolutionHeight }
+    )
+    await runExclusiveExport((signal) =>
+      exportSequenceSegmented({
+        project: v2,
         outputPath: payload.outputPath,
+        quality: payload.quality,
         loudnessNormalization: payload.loudnessNormalization,
         loudnessTarget: normalizeLoudnessTarget(payload.loudnessTarget),
         telopLayer: payload.telopLayer,
-        onProgress
+        onProgress,
+        signal
       })
-      return { success: true }
-    }
-  )
+    )
+    return { success: true }
+  }
+  await exportProject({
+    project: payload.project,
+    aspectRatio: payload.aspectRatio,
+    resolutionHeight: payload.resolutionHeight,
+    quality: payload.quality,
+    outputPath: payload.outputPath,
+    loudnessNormalization: payload.loudnessNormalization,
+    loudnessTarget: normalizeLoudnessTarget(payload.loudnessTarget),
+    telopLayer: payload.telopLayer,
+    onProgress
+  })
+  return { success: true }
 }
 
 // Chromium ships without an HEVC decoder of its own, but can use the OS one on
@@ -949,6 +968,8 @@ app.on('will-quit', () => {
   stopLibraryWatchers()
   // 動いている ffmpeg(ノイズ除去・試聴用素材・自動確認)を止める。macOS・Linux では親が終わっても残る
   killLiveProcesses()
+  // 書き出しのテロップの層の画像(長尺の 4K だと数 GB)を残さない
+  releaseAllTelopLayers()
 })
 
 app.on('window-all-closed', () => {

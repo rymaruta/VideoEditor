@@ -15,6 +15,7 @@ import {
 import { textCanvasSize } from '@shared/resolution'
 import type { TelopLayerPayload } from '@shared/telop/layer'
 import { buildAssContent } from './assSubtitle'
+import { materializeTelopLayer, TELOP_STAGE_PREFIX } from './telopLayerStage'
 import { describeFfmpegExit } from './ffmpegError'
 import {
   AUDIO_FORMAT,
@@ -342,17 +343,13 @@ export async function exportSequenceSegmented(
     // 無ければシーケンス全体で1つの ASS にし、各区間は時刻をずらして使う
     let assPath: string | undefined
     let telopLayer: GraphContext['telopLayer']
-    if (options.telopLayer && options.telopLayer.images.length > 0) {
-      const layer = options.telopLayer
+    // 画像は描きながら main の置き場へ書いてある(`stagedId`)。バイト列で来たときだけここへ書く
+    const layer = options.telopLayer ? materializeTelopLayer(options.telopLayer, () => work) : null
+    if (layer) {
       if (layer.width !== seq.width || layer.height !== seq.height) {
         throw new Error('テロップの画像の大きさが書き出しの解像度と合いません')
       }
-      const imagePaths = layer.images.map((bytes, i) => {
-        const p = join(work, `telop_${String(i).padStart(6, '0')}.png`)
-        writeFileSync(p, bytes)
-        return p
-      })
-      telopLayer = { runs: layer.runs, imagePaths }
+      telopLayer = { runs: layer.runs, imagePaths: layer.imagePaths }
     }
     // `null` は「画面のプロセスが描いた結果、出すテロップが無かった」。ASS で描き直さない
     const overlays = telopLayer || options.telopLayer === null ? [] : telopsAsOverlays(seq)
@@ -515,7 +512,8 @@ export function cleanupStaleSegmentDirs(now = Date.now()): void {
     return
   }
   for (const name of names) {
-    if (!name.startsWith('ve-seg-')) continue
+    // 区間の書き出しの作業場と、テロップの層の画像の置き場(落ちると数 GB 残る)
+    if (!name.startsWith('ve-seg-') && !name.startsWith(TELOP_STAGE_PREFIX)) continue
     const dir = join(base, name)
     try {
       if (now - statSync(dir).mtimeMs > 12 * 3600 * 1000)

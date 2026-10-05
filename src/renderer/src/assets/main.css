@@ -7096,6 +7096,7 @@ select.telop-kind-add {
   padding: 8px;
 }
 .font-picker-panel {
+  width: 320px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -7265,7 +7266,7 @@ select.telop-kind-add {
   position: absolute;
   left: 8px;
   right: 8px;
-  bottom: 8px;
+  top: 8px;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.55);
@@ -7273,9 +7274,10 @@ select.telop-kind-add {
   color: #ddd;
   text-align: center;
   pointer-events: none;
-}
-.thumbnail-empty {
-  padding: 10px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 .thumbnail-text {
   display: flex;
