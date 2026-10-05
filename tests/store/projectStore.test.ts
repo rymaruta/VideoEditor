@@ -1360,3 +1360,87 @@ describe('テロップの検索と置換', () => {
     expect(st().replaceTelopText('無い言葉', 'x')).toBe(0)
   })
 })
+
+describe('壊れたファイルを開く・素材をつなぎ直す', () => {
+  beforeEach(reset)
+  const load = (mutate: (p: Project) => void): Project => {
+    const p = JSON.parse(JSON.stringify(baseProject())) as Project
+    mutate(p)
+    st().loadProject(p, '/x/p.json')
+    return st().project
+  }
+
+  it('終わりが頭より前・素材より先のクリップは、素材の尺の中の正しい区間にする', () => {
+    const p = load((p) => {
+      p.clips[2].outPoint = -5
+      p.audioTracks[0].clips[0].outPoint = -5
+      p.videoOverlayTracks[0].clips[0].inPoint = 99999
+    })
+    expect(brokenInvariant(p)).toBeNull()
+    for (const c of [
+      ...p.clips,
+      ...p.audioTracks.flatMap((t) => t.clips),
+      ...p.videoOverlayTracks.flatMap((t) => t.clips)
+    ]) {
+      expect(c.outPoint).toBeGreaterThan(c.inPoint)
+    }
+    const pip = p.videoOverlayTracks[0].clips[0]
+    const dur = p.assets.find((a) => a.id === pip.assetId)!.duration
+    expect(pip.outPoint).toBeLessThanOrEqual(dur)
+  })
+
+  it('終わりが頭より前のテロップ・とても大きな時刻は、保存し直しても変わらない形にする', () => {
+    const p = load((p) => {
+      p.textOverlays[1].startTime = 9
+      p.textOverlays[1].endTime = 2
+      p.textOverlays[0].startTime = 1e308
+    })
+    for (const o of p.textOverlays) expect(o.endTime).toBeGreaterThanOrEqual(o.startTime)
+    const again = JSON.parse(JSON.stringify(p)) as Project
+    st().loadProject(again, '/x/p.json')
+    expect(st().project.textOverlays.map((o) => [o.startTime, o.endTime])).toEqual(
+      p.textOverlays.map((o) => [o.startTime, o.endTime])
+    )
+  })
+
+  it('同じ id が2つあれば後の方に新しい id を振り、紐づく音声・テロップは最初のクリップに付いたまま', () => {
+    const p = load((p) => {
+      p.clips[1].id = 'c1'
+      p.textOverlays[1].id = 'o1'
+      p.audioTracks[0].clips[0].id = 'a2'
+    })
+    expect(brokenInvariant(p)).toBeNull()
+    expect(new Set(p.clips.map((c) => c.id)).size).toBe(p.clips.length)
+    expect(new Set(p.textOverlays.map((o) => o.id)).size).toBe(p.textOverlays.length)
+    const linked = p.audioTracks.flatMap((t) => t.clips).find((c) => c.linkedClipId === 'c1')!
+    expect([linked.startTime, linked.inPoint, linked.outPoint]).toEqual([0, 0, 4])
+  })
+
+  it('長さを測れなかったファイルへつなぎ直しても、クリップを長さ0にしない', () => {
+    st().loadProject(baseProject(), '/x/p.json')
+    st().relinkAsset('A', '/y/a.mp4', 'a.mp4', {
+      duration: 0,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      hasAudio: true,
+      hasVideo: true
+    })
+    const a = st().project.clips.filter((c) => c.assetId === 'A')
+    expect(a.map((c) => [c.inPoint, c.outPoint])).toEqual([
+      [0, 4],
+      [2, 6]
+    ])
+  })
+
+  it('静止画へつなぎ直すと静止画の長さのまま、動画へつなぎ直すと静止画の印を外す', () => {
+    st().loadProject(baseProject(), '/x/p.json')
+    const probe = { width: 1, height: 1, fps: 30, hasAudio: false, hasVideo: true }
+    st().relinkAsset('B', '/y/b.png', 'b.png', { ...probe, duration: 0.04 })
+    const b = st().project.assets.find((x) => x.id === 'B')!
+    expect([b.still, b.duration]).toEqual([true, 3600])
+    expect(st().project.clips.find((c) => c.id === 'c2')!.outPoint).toBe(5)
+    st().relinkAsset('B', '/y/b.mp4', 'b.mp4', { ...probe, duration: 30 })
+    expect(st().project.assets.find((x) => x.id === 'B')!.still).toBeUndefined()
+  })
+})

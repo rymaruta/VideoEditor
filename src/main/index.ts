@@ -400,7 +400,10 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectRelinkFile, async (event) => {
     const result = await showOpenDialogForSender(event, {
       properties: ['openFile'],
-      filters: [{ name: 'メディアファイル', extensions: [...MEDIA_EXTENSIONS] }]
+      // 静止画の素材もつなぎ直せるように(画像を外すと、動かした PNG を選べなかった)
+      filters: [
+        { name: 'メディアファイル', extensions: [...MEDIA_EXTENSIONS, ...IMAGE_EXTENSIONS] }
+      ]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]

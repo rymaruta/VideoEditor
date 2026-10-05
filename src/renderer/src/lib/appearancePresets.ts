@@ -77,8 +77,9 @@ export function normalizeSectionPresets(
   const out: Record<string, SectionPreset[]> = {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
   for (const [section, list] of Object.entries(raw as Record<string, unknown>)) {
+    // 「toString」などの名前の項目(壊れた保存データ)で、ほかの項目まで捨てないように
     const keys = keysOf(section)
-    if (!keys || !Array.isArray(list)) continue
+    if (!Array.isArray(keys) || !Array.isArray(list)) continue
     const presets: SectionPreset[] = []
     for (const r of list) {
       if (!r || typeof r !== 'object') continue

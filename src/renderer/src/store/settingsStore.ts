@@ -376,7 +376,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     try {
       return normalizeSectionPresets(
         JSON.parse(localStorage.getItem(SECTION_PRESETS_KEY) ?? '{}'),
-        (section) => SECTION_KEYS[section]
+        (section) => (Object.hasOwn(SECTION_KEYS, section) ? SECTION_KEYS[section] : undefined)
       )
     } catch {
       return {}

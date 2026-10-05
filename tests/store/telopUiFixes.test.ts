@@ -45,3 +45,19 @@ describe('マイ設定を消して元に戻す', () => {
     expect(after[1].id).toBe(removed.id)
   })
 })
+
+describe('壊れたマイ設定の保存データ', () => {
+  it('「toString」などの名前の項目があっても、ほかの項目は読む', async () => {
+    const { normalizeSectionPresets, SECTION_KEYS } =
+      await import('@renderer/lib/appearancePresets')
+    const out = normalizeSectionPresets(
+      {
+        toString: [{ id: 'a', name: 'b', values: {} }],
+        fill: [{ id: 'f', name: '赤', values: { color: '#ff0000' } }]
+      },
+      (section) => (SECTION_KEYS as Record<string, never>)[section]
+    )
+    expect(out.fill?.map((p) => p.name)).toEqual(['赤'])
+    expect(Object.hasOwn(out, 'toString')).toBe(false)
+  })
+})

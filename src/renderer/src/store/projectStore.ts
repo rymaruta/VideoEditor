@@ -1,3 +1,4 @@
+import { isImagePath, STILL_DURATION_SEC } from '@shared/mediaExtensions'
 import type { AudioEventWindow } from '@shared/events/audioEvents'
 import {
   isIdentityMapping,
@@ -312,11 +313,16 @@ function normalizeRange(
   raw: Record<string, unknown>,
   assetDuration: number
 ): { inPoint: number; outPoint: number } {
-  return {
-    inPoint: asNonNegative(raw.inPoint, 0),
-    // 数値でないときに 0 を入れると、尺0の「画面に出ないのに消せないクリップ」になる。
-    outPoint: asNonNegative(raw.outPoint, assetDuration)
+  const inPoint = asNonNegative(raw.inPoint, 0)
+  // 数値でないときに 0 を入れると、尺0の「画面に出ないのに消せないクリップ」になる。
+  let outPoint = asNonNegative(raw.outPoint, assetDuration)
+  // 終わりが頭より前(壊れた値)だと、尺が負になってタイムラインの後ろが全部重なる。
+  // 素材の終わりまで(尺が分からなければ最短の長さ)にし、素材の尺の中へ収める
+  if (outPoint <= inPoint) {
+    outPoint = assetDuration > inPoint ? assetDuration : inPoint + MIN_CLIP_SOURCE_DURATION
   }
+  const r = clampSourceRange({ inPoint, outPoint }, inPoint, outPoint, assetDuration)
+  return { inPoint: r.inPoint, outPoint: r.outPoint }
 }
 
 function normalizeClip(
@@ -380,14 +386,18 @@ function normalizeWords(raw: unknown): TranscriptWord[] | undefined {
   return words.length > 0 ? words : undefined
 }
 
+/** テロップの時刻の上限(壊れた 1e308 などで、追従の計算が -1e308 を作らないように)。100 時間 */
+const MAX_OVERLAY_TIME = 360000
+
 function normalizeTextOverlay(raw: Record<string, unknown>): TextOverlay {
-  const startTime = asNonNegative(raw.startTime, 0)
+  const startTime = Math.min(MAX_OVERLAY_TIME, asNonNegative(raw.startTime, 0))
   return {
     ...(raw as unknown as TextOverlay),
     id: asNonEmptyString(raw.id, uuid()),
     text: typeof raw.text === 'string' ? raw.text : '',
     startTime,
-    endTime: asNonNegative(raw.endTime, startTime),
+    // 終わりが頭より前のテロップは出ない(尺が負)。頭より前へは置かない
+    endTime: Math.min(MAX_OVERLAY_TIME, Math.max(startTime, asNonNegative(raw.endTime, startTime))),
     source: asOneOf(raw.source, ['manual', 'auto'] as const, 'manual'),
     style: normalizeTextStyle(raw.style),
     words: normalizeWords(raw.words),
@@ -487,7 +497,47 @@ function normalizeBeatGrid(raw: unknown): BeatGrid | null {
  *   **生の英語**が画面に出て、**開けないまま前のプロジェクトが残る**。
  * - ビートグリッドの BPM が 100000 のファイル → 線を **50,002本**引いて開くのに 3,066ms。
  */
+/**
+ * 同じ id が2つあると、紐づく音声・テロップが別のクリップに合わせて動く(片方の時刻へ飛ぶ)。
+ * 後から出てきた方に新しい id を振る(紐づけは最初のものを指したまま)
+ */
+function uniqueIds<T extends { id: string }>(items: T[], seen: Set<string>): T[] {
+  return items.map((it) => {
+    if (!seen.has(it.id)) {
+      seen.add(it.id)
+      return it
+    }
+    const id = uuid()
+    seen.add(id)
+    return { ...it, id }
+  })
+}
+
+function dedupeLoadedIds(p: Project): Project {
+  const clipIds = new Set<string>()
+  const trackIds = new Set<string>()
+  return {
+    ...p,
+    assets: uniqueIds(p.assets, new Set()),
+    // 本編・音声・PiP のクリップは、紐づけ(linkedClipId)で互いを指すので同じ集まりで見る
+    clips: uniqueIds(p.clips, clipIds),
+    audioTracks: uniqueIds(p.audioTracks, trackIds).map((t) => ({
+      ...t,
+      clips: uniqueIds(t.clips, clipIds)
+    })),
+    videoOverlayTracks: uniqueIds(p.videoOverlayTracks, trackIds).map((t) => ({
+      ...t,
+      clips: uniqueIds(t.clips, clipIds)
+    })),
+    textOverlays: uniqueIds(p.textOverlays, new Set())
+  }
+}
+
 function normalizeLoadedProject(project: Project): Project {
+  return dedupeLoadedIds(normalizeLoadedProjectFields(project))
+}
+
+function normalizeLoadedProjectFields(project: Project): Project {
   const raw = project as unknown as Record<string, unknown>
   const assets = asRecordArray<Record<string, unknown>>(raw.assets)
     .map(normalizeAsset)
@@ -1441,7 +1491,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // pointing past the end: a 0–20s clip on a 15s replacement still read 20s on the
       // timeline while ffmpeg only produced 15s, so every telop, BGM clip and PiP after
       // it burned in 5s out of place. Clamp everything that indexes into this asset.
+      const target = state.project.assets.find((a) => a.id === assetId)
+      // 静止画は長さを持たない(置いたクリップで決める)。静止画へつなぎ直すなら、静止画の長さのまま
+      const still = isImagePath(filePath)
       const clampRange = <T extends { inPoint: number; outPoint: number }>(clip: T): T => {
+        // 長さが測れなかった(0)ファイル・静止画は詰めない。詰めると全部のクリップが長さ0で消える
+        if (still || !(probe.duration > 0)) return clip
         if (clip.outPoint <= probe.duration) return clip
         const outPoint = Math.max(0, probe.duration)
         const inPoint = Math.min(clip.inPoint, Math.max(0, outPoint - MIN_CLIP_SOURCE_DURATION))
@@ -1470,7 +1525,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                   ...a,
                   filePath,
                   fileName,
-                  duration: probe.duration,
+                  duration: still
+                    ? STILL_DURATION_SEC
+                    : probe.duration > 0
+                      ? probe.duration
+                      : (target?.duration ?? 0),
+                  still: still ? true : undefined,
                   width: probe.width,
                   height: probe.height,
                   fps: probe.fps,
