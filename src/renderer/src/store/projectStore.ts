@@ -2598,10 +2598,29 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   updateTextOverlay: (id, patch) =>
     set((state) => {
+      const current = state.project.textOverlays.find((o) => o.id === id)
+      if (!current) return state
+      // 数値欄は空欄や指数表記から NaN/Infinity を作れる。時刻をそのまま保存すると
+      // プレビューから消えるだけでなく、ASS/書き出しの時刻計算まで非有限値で汚染する。
+      // 開始は0未満へ出さず、終了は必ず開始以降にする。片側だけの更新でも現在値を基準に整える。
+      const safePatch = { ...patch }
+      if (safePatch.startTime !== undefined) {
+        if (!Number.isFinite(safePatch.startTime)) return state
+        safePatch.startTime = Math.max(0, safePatch.startTime)
+      }
+      if (safePatch.endTime !== undefined) {
+        if (!Number.isFinite(safePatch.endTime)) return state
+        safePatch.endTime = Math.max(0, safePatch.endTime)
+      }
+      const nextStart = safePatch.startTime ?? current.startTime
+      if (safePatch.endTime !== undefined) safePatch.endTime = Math.max(nextStart, safePatch.endTime)
+      else if (safePatch.startTime !== undefined && current.endTime < nextStart)
+        safePatch.endTime = nextStart
+
       // 追従中に開始時刻を直接いじったら、相対位置の方を更新する。そうしないと
       // 直後の追従補正が古い相対位置から計算し直して、編集をなかったことにしてしまう。
       const timedById =
-        patch.startTime !== undefined
+        safePatch.startTime !== undefined
           ? new Map(buildTimedClips(state.project).map((tc) => [tc.clip.id, tc]))
           : null
       return {
@@ -2610,17 +2629,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           ...state.project,
           textOverlays: state.project.textOverlays.map((o) => {
             if (o.id !== id) return o
-            const next = { ...o, ...patch }
+            const next = { ...o, ...safePatch }
             // 自動で置いたテロップを人が直したら印を付ける(作り直しで上書きしない)
-            if (autoTelopKey(o) && isManualEdit(patch)) next.edited = true
+            if (autoTelopKey(o) && isManualEdit(safePatch)) next.edited = true
             // 位置を動かす更新なら単語も連れていく。`patch.words` を明示的に渡された
             // ときはそちらが正なので触らない(自動テロップの作り直しなど)。
-            if (patch.startTime !== undefined && patch.words === undefined) {
-              next.words = shiftOverlayWords(o.words, patch.startTime - o.startTime)
+            if (safePatch.startTime !== undefined && safePatch.words === undefined) {
+              next.words = shiftOverlayWords(o.words, safePatch.startTime - o.startTime)
             }
-            if (timedById && next.linkedClipId && patch.startTime !== undefined) {
+            if (timedById && next.linkedClipId && safePatch.startTime !== undefined) {
               const tc = timedById.get(next.linkedClipId)
-              if (tc) next.linkOffset = patch.startTime - tc.start
+              if (tc) next.linkOffset = safePatch.startTime - tc.start
             }
             return next
           })
