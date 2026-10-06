@@ -156,23 +156,6 @@ describe('【レグレッション】企画を切り替えると、前の企画�
     expect(st().sourceOut).toBeNull()
   })
 
-  it('自動保存から復元すると、前の企画の自動編集ストアにも切替通知が届く', () => {
-    let calls = 0
-    const off = (() => {
-      // onProjectSwitch は本体と同じ一時状態の破棄経路を通ることを確認するため、
-      // 動的 import を使わず公開APIだけを見る。
-      return () => undefined
-    })()
-    void off
-    // restoreAutosave も load/new と同じ切替処理を通すこと自体は、下の3経路同値テストで担保する。
-    // ここでは復元後に前企画の選択・履歴が残らないことを再確認する。
-    dirtyEverything()
-    st().restoreAutosave(projB())
-    expect(st().project.name).toBe('企画B')
-    expect(st().past).toEqual([])
-    expect(calls).toBe(0)
-  })
-
   it('3経路が捨てるものは**完全に同じ**(一覧が食い違わない)', () => {
     const after: Record<string, unknown>[] = []
     for (const run of [
