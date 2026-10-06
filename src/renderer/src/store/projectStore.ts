@@ -1570,6 +1570,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   newProject: () => {
     resetHistoryCoalescing()
+    resetTransientFollowState()
     projectSwitchListeners.forEach((l) => l())
     set({
       ...projectSwitchReset(),
@@ -1587,6 +1588,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 「起点はもう積んである」と誤って判断して履歴を1件も積まない(`newProject` と
     // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
     resetHistoryCoalescing()
+    resetTransientFollowState()
     projectSwitchListeners.forEach((l) => l())
     // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
@@ -1605,6 +1607,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // 「起点はもう積んである」と誤って判断して履歴を1件も積まない(`newProject` と
     // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
     resetHistoryCoalescing()
+    resetTransientFollowState()
+    projectSwitchListeners.forEach((l) => l())
     // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
@@ -4416,6 +4420,16 @@ function splitId(originalId: string): string {
   const id = uuid()
   splitOrigins.set(id, splitOrigins.get(originalId) ?? originalId)
   return id
+}
+
+/**
+ * 分割元の対応は、直後の追従計算にだけ必要な一時情報。
+ * 企画をまたいで残すと、別企画でたまたま同じIDが出たときに誤追従するうえ、
+ * 長時間編集で無制限に増え続ける。企画切替時に必ず破棄する。
+ */
+function resetTransientFollowState(): void {
+  splitOrigins.clear()
+  pseudoSlots.clear()
 }
 
 /** 差し込んだ素材・速さを変えたクリップの、仮の共通の時刻の置き場(収録の時刻と重ならない遠く) */
