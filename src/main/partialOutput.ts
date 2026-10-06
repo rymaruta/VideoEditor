@@ -24,7 +24,13 @@ export async function writeViaPartial<T>(
   try {
     result = await write(partial)
   } catch (e) {
-    rmSync(partial, { force: true })
+    // 書き出し先が読み取り専用・外付けディスクが抜けた等では、後始末の rm 自体も
+    // 失敗しうる。後始末の例外で本来の ffmpeg/書き込みエラーを上書きしない。
+    try {
+      rmSync(partial, { force: true })
+    } catch {
+      /* 報告すべきなのは元の失敗 */
+    }
     throw e
   }
   // 同じフォルダの中の置き換え(Windows でも、あれば上書きする)。前の完成品を再生中・ウイルス対策の
