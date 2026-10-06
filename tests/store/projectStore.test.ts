@@ -1570,6 +1570,30 @@ describe('編集の値の検査', () => {
     expect(pairs()[0][0]).toBe(before[0][0])
   })
 
+  it('テロップ時刻に NaN/Infinity/負数/逆転区間を保存しない', () => {
+    const original = st().project.textOverlays.find((o) => o.id === 'o2')!
+    const past = st().past.length
+    st().updateTextOverlay('o2', { startTime: Number.NaN })
+    st().updateTextOverlay('o2', { endTime: Number.POSITIVE_INFINITY })
+    expect(st().project.textOverlays.find((o) => o.id === 'o2')).toEqual(original)
+    expect(st().past.length).toBe(past)
+
+    st().updateTextOverlay('o2', { startTime: -10 })
+    let o = st().project.textOverlays.find((x) => x.id === 'o2')!
+    expect(o.startTime).toBe(0)
+    expect(o.endTime).toBe(7)
+
+    st().updateTextOverlay('o2', { startTime: 9 })
+    o = st().project.textOverlays.find((x) => x.id === 'o2')!
+    expect(o.startTime).toBe(9)
+    expect(o.endTime).toBe(9)
+
+    st().updateTextOverlay('o2', { endTime: 3 })
+    o = st().project.textOverlays.find((x) => x.id === 'o2')!
+    expect(o.endTime).toBe(9)
+    expect(Number.isFinite(o.startTime) && Number.isFinite(o.endTime)).toBe(true)
+  })
+
   it('0・負・数値でない速さ・音量・時刻は書かず、履歴も積まない', () => {
     const past = st().past.length
     st().updateClipSpeed('c1', 0)
