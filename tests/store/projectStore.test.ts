@@ -412,26 +412,19 @@ describe('分離音声のリンク — 消えた相手を指し続けない', ()
   })
 })
 
-describe('【既知の穴】ストアはテロップの前後関係を守っていない', () => {
+describe('ストアはテロップの時刻不変条件を守る', () => {
   beforeEach(reset)
 
-  /**
-   * `updateTextOverlay` は受け取った値をそのまま入れるので、**開始だけを終了より
-   * 後ろへ**渡すと逆転したテロップができる。画面の3つの入口(数値欄・タイムラインの
-   * つまみ・プレビューのドラッグ)はどれも手前でクランプしているので**いまは届かない**が、
-   * 規則は「書き込み先に置く」が正しい(2026-09-10 に足したチェックリスト項目)。
-   * BACKLOG の候補に積んである。**直したらこのテストが落ちる**ので、
-   * そのとき期待値を「クランプされる」に書き換えること。
-   */
-  it('開始だけを終了より後ろへ渡すと、逆転したまま保存される', () => {
+  it('開始だけを終了より後ろへ渡すと、終了も開始まで追従する', () => {
     st().updateTextOverlay('o1', { startTime: 99 })
     const o = st().project.textOverlays.find((x) => x.id === 'o1')!
-    expect(o.startTime).toBeGreaterThan(o.endTime)
+    expect(o.startTime).toBe(99)
+    expect(o.endTime).toBe(99)
   })
 
-  it('負の開始も、そのまま入る', () => {
+  it('負の開始は0へクランプする', () => {
     st().updateTextOverlay('o2', { startTime: -4 })
-    expect(st().project.textOverlays.find((x) => x.id === 'o2')!.startTime).toBe(-4)
+    expect(st().project.textOverlays.find((x) => x.id === 'o2')!.startTime).toBe(0)
   })
 })
 
