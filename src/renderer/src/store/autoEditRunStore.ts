@@ -3,6 +3,7 @@ import type { AudioTrack, AutoEditPattern, MediaAsset } from '@shared/types'
 import { generateAutoEditPatterns } from '../lib/autoEdit'
 import { autoFinishTimeline, type AutoFinishResult } from '../lib/autoFinish'
 import { formatIpcError } from '../lib/ipcError'
+import { onProjectSwitch } from './projectStore'
 
 /**
  * AIおまかせ全自動編集の実行状態。
@@ -145,3 +146,26 @@ export const useAutoEditRunStore = create<AutoEditRunState>((set, get) => ({
     }
   }
 }))
+
+
+// 別プロジェクトへ切り替えたら、生成中の世代を無効化し、前の企画の候補・サムネイル・
+// 仕上げ結果を持ち越さない。start() は runToken を照合するので、遅れて返った生成結果も捨てられる。
+onProjectSwitch(() => {
+  runToken++
+  useAutoEditRunStore.setState({
+    status: 'idle',
+    patterns: [],
+    thumbnails: {},
+    recommendedId: undefined,
+    aiScoredCount: 0,
+    bgmBeat: null,
+    referenceStyle: null,
+    error: null,
+    sourceKey: '',
+    feedback: {},
+    appliedId: null,
+    finishingId: null,
+    finishResult: null,
+    finishError: null
+  })
+})
