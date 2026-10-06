@@ -1387,7 +1387,14 @@ function recordedAtByAsset(
 
 // 別のプロジェクトを開いた・新しく作ったら、前の回の自動編集の結果を捨てる
 // (残すと「仮編集を作り直す」が前の回の場面の区切りで今の回を切り、要確認にも前の回の項目が出る)
-onProjectSwitch(() => usePipelineStore.getState().resetResults())
+onProjectSwitch(() => {
+  const pipeline = usePipelineStore.getState()
+  // 自動編集の途中で「開く / 新規 / 自動保存を復元」すると、resetResults だけでは
+  // 既に走っている main 側の同期・ASR・イベント検出が生き残る。完了後にその古い結果が
+  // 新しいプロジェクトへ書き込まれるため、切替時はまず処理を中止する。
+  if (pipeline.running) pipeline.cancel()
+  pipeline.resetResults()
+})
 
 // 自動編集の最中は、PC をスリープさせず、タスクバーに進み具合を出す。終わったら知らせる
 // 走り出したときの各工程の状態。作り直しでは前の通しの失敗が残っているので、
