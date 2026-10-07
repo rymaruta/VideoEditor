@@ -178,3 +178,17 @@ export function findFreeAudioStart(
   }
   return start
 }
+
+/**
+ * ロールトリムのドラッグで、次に動かす量(タイムラインの秒)。
+ * 動いた量はいまの出点から測る(端で止められた分を「動かした」と数えると、戻すときに
+ * 境目がマウスより先へ動いていた)
+ */
+export function rollDragStep(
+  wantedSec: number,
+  startOut: number,
+  currentOut: number,
+  leftSpeed: number
+): number {
+  return wantedSec - (currentOut - startOut) / (leftSpeed || 1)
+}

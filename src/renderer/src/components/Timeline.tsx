@@ -5,14 +5,20 @@ import { useMenuCommand } from '../lib/menuCommands'
 import { formatTimecode, rulerStep, rulerTicks } from '../lib/timelineRuler'
 import { frameSeconds } from '@shared/frameRate'
 import { v4 as uuid } from 'uuid'
-import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
+import {
+  beginHistoryGesture,
+  endHistoryGesture,
+  MIN_CLIP_SOURCE_DURATION,
+  useProjectStore
+} from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import {
   audioClipDuration,
   buildTimedClips,
   rangeSelectionIds,
   totalTimelineDuration,
-  findTimedClipAt
+  findTimedClipAt,
+  rollDragStep
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
 // テロップの最短の長さは**追加のときと同じ数字**を使う。ここに別の数字を書いていたころ、
@@ -189,7 +195,9 @@ interface RollDragState {
   leftClipId: string
   rightClipId: string
   startX: number
-  applied: number
+  /** ドラッグを始めたときの左のクリップの出点(素材の秒)と速さ */
+  startOut: number
+  leftSpeed: number
 }
 
 interface TrimDragState {
@@ -1003,12 +1011,21 @@ export function Timeline(): React.JSX.Element {
       // updater: StrictMode double-invokes those, which applied every step twice and
       // moved the boundary at 2x the mouse (measured: a 40px = 1s drag rolled 2s).
       const wanted = (e.clientX - rollDragSnapshot.startX) / pixelsPerSecond
-      const step = wanted - rollDragSnapshot.applied
+      const left = useProjectStore
+        .getState()
+        .project.clips.find((c) => c.id === rollDragSnapshot.leftClipId)
+      if (!left) return
+      const step = rollDragStep(
+        wanted,
+        rollDragSnapshot.startOut,
+        left.outPoint,
+        rollDragSnapshot.leftSpeed
+      )
       if (Math.abs(step) < 1e-4) return
       rollTrim(rollDragSnapshot.leftClipId, rollDragSnapshot.rightClipId, step)
-      setRollDrag({ ...rollDragSnapshot, applied: wanted })
     }
     function handleMouseUp(): void {
+      endHistoryGesture()
       setRollDrag(null)
     }
     window.addEventListener('mousemove', handleMouseMove)
@@ -2358,11 +2375,14 @@ export function Timeline(): React.JSX.Element {
                       onMouseDown={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
+                        const left = timedClips[i - 1].clip
+                        beginHistoryGesture(`roll:${left.id}:${tc.clip.id}`)
                         setRollDrag({
-                          leftClipId: timedClips[i - 1].clip.id,
+                          leftClipId: left.id,
                           rightClipId: tc.clip.id,
                           startX: e.clientX,
-                          applied: 0
+                          startOut: left.outPoint,
+                          leftSpeed: left.speed || 1
                         })
                       }}
                     />

@@ -1159,8 +1159,23 @@ const COALESCE_MS = 700
 let lastCoalesceKey: string | null = null
 let lastCoalesceAt = 0
 
+/** ドラッグ中の操作の目印。押してから離すまでは、手を止めた時間に関わらず1件にまとめる */
+let gestureKey: string | null = null
+
 function resetHistoryCoalescing(): void {
   lastCoalesceKey = null
+}
+
+/**
+ * ドラッグの始まり・終わり。ドラッグは動かした分だけ操作を書き込むので、時間だけでまとめると、
+ * 0.7 秒より長く手を止めたところで履歴が分かれ、1回の取り消しがドラッグの途中へ戻っていた
+ */
+export function beginHistoryGesture(key: string): void {
+  gestureKey = key
+  lastCoalesceKey = null
+}
+export function endHistoryGesture(): void {
+  gestureKey = null
 }
 
 /**
@@ -1178,6 +1193,32 @@ function historyCoalescingMark(): { key: string | null; at: number } {
 function restoreHistoryCoalescing(mark: { key: string | null; at: number }): void {
   lastCoalesceKey = mark.key
   lastCoalesceAt = mark.at
+}
+
+/**
+ * 取り消し・やり直しで戻すプロジェクトに、編集の履歴に積まない裏の結果を引き継ぐ。
+ * プレビュー用のプロキシ(裏で作った変換の結果)と、笑い・歓声の検出結果は編集ではないので、
+ * 前の状態へ戻すと消えてしまう(プロキシが消えると、HEVC などの素材はプレビューできなくなる)
+ */
+function keepBackgroundResults(restored: Project, current: Project): Project {
+  const proxyOf = new Map(
+    current.assets.filter((a) => a.proxyPath).map((a) => [`${a.id}|${a.filePath}`, a.proxyPath])
+  )
+  let changed = false
+  const assets = restored.assets.map((a) => {
+    const proxy = proxyOf.get(`${a.id}|${a.filePath}`)
+    if (!proxy || a.proxyPath === proxy) return a
+    changed = true
+    return { ...a, proxyPath: proxy }
+  })
+  const events = current.audioEvents !== restored.audioEvents && current.audioEvents
+  if (!changed && !events) return restored
+  return { ...restored, assets, ...(events ? { audioEvents: current.audioEvents } : {}) }
+}
+
+/** 戻したプロジェクトにまだある文字テロップなら選んだまま、無ければ選びを外す */
+function overlayStillThere(project: Project, id: string | null): string | null {
+  return id && project.textOverlays.some((o) => o.id === id) ? id : null
 }
 
 /**
@@ -1422,7 +1463,9 @@ function pushHistory(
 ): Pick<ProjectState, 'past' | 'future' | 'isDirty' | '__historyPush'> {
   if (coalesceKey) {
     const now = Date.now()
-    const continuing = lastCoalesceKey === coalesceKey && now - lastCoalesceAt < COALESCE_MS
+    const continuing =
+      lastCoalesceKey === coalesceKey &&
+      (gestureKey === coalesceKey || now - lastCoalesceAt < COALESCE_MS)
     lastCoalesceKey = coalesceKey
     lastCoalesceAt = now
     if (continuing) {
@@ -2149,15 +2192,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   updateClipTransition: (clipId, transition) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        clips: state.project.clips.map((c) =>
-          c.id === clipId ? { ...c, transitionIn: transition } : c
-        )
+    set((state) => {
+      // 長さの欄を空にした(0)・数でない値は書かない。0 秒の繋ぎは黙ってふつうのカットになる
+      if (transition && !(Number.isFinite(transition.duration) && transition.duration > 0))
+        return state
+      return {
+        // 長さの欄に打つ1文字ごとに履歴を積まない(打ち終えた値までを1回で取り消す)
+        ...pushHistory(state, `transition:${clipId}`),
+        project: {
+          ...state.project,
+          clips: state.project.clips.map((c) =>
+            c.id === clipId ? { ...c, transitionIn: transition } : c
+          )
+        }
       }
-    })),
+    }),
 
   detachClipAudio: (clipId) =>
     set((state) => {
@@ -2601,13 +2650,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return {
         past: state.past.slice(0, -1),
         future: [state.project, ...state.future].slice(0, MAX_HISTORY),
-        project: previous,
+        project: keepBackgroundResults(previous, state.project),
         // Undoing changes the document relative to what was last written to disk.
         // Without this the save button stays disabled, the close prompt never
         // appears and no recovery draft is written — the undo is silently lost.
         isDirty: true,
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id)),
+        selectedOverlayId: overlayStillThere(previous, state.selectedOverlayId),
         // 巻き戻したプロジェクトのパスで印を付け直す。ここを飛ばすと、再リンクを
         // 取り消して**パスが実在しないものへ戻ったのに印だけ消えたまま**になり、
         // 書き出し前の「再リンクしてください」の案内も出ずに ffmpeg が失敗する。
@@ -2625,10 +2675,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return {
         past: [...state.past, state.project].slice(-MAX_HISTORY),
         future: rest,
-        project: next,
+        project: keepBackgroundResults(next, state.project),
         isDirty: true,
         selectedClipId: idSet.has(state.selectedClipId ?? '') ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => idSet.has(id)),
+        selectedOverlayId: overlayStillThere(next, state.selectedOverlayId),
         missingAssetIds: missingIdsFor(next, state.missingAssetPaths)
       }
     })
@@ -3611,9 +3662,16 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             if (c.id !== clipId) return [c]
             const dur = audioClipDuration(c)
             if (absoluteTime <= c.startTime || absoluteTime >= c.startTime + dur) return [c]
-            didSplit = true
             // タイムライン秒 → 素材秒は速度を掛ける(規則は toSourceSeconds)。
             const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - c.startTime, c.speed)
+            // 本編のカミソリと同じく、最短の長さに満たない断片は作らない(後で縮めると最短まで
+            // 戻され、次の断片に重なって音が二重になる)
+            if (
+              splitLocal - c.inPoint < MIN_CLIP_SOURCE_DURATION ||
+              c.outPoint - splitLocal < MIN_CLIP_SOURCE_DURATION
+            )
+              return [c]
+            didSplit = true
             // フェードを両方へそのまま配ると、切れ目で音が一度落ちてまた上がる。
             // 規則は `splitFades` 1箇所に置く——ここに書き写していたころ、同じ割り方を
             // する他の3経路(本編のカミソリ・無音カットなどの置き換え・ジャンプカット)は
@@ -3874,8 +3932,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             if (c.id !== clipId) return [c]
             const dur = c.outPoint - c.inPoint
             if (absoluteTime <= c.startTime || absoluteTime >= c.startTime + dur) return [c]
-            didSplit = true
             const splitLocal = c.inPoint + (absoluteTime - c.startTime)
+            // 最短の長さに満たない断片は作らない(後で縮めると最短まで戻され、次の断片に重なる)
+            if (
+              splitLocal - c.inPoint < MIN_CLIP_SOURCE_DURATION ||
+              c.outPoint - splitLocal < MIN_CLIP_SOURCE_DURATION
+            )
+              return [c]
+            didSplit = true
             return [
               { ...c, outPoint: splitLocal },
               { ...c, id: uuid(), startTime: absoluteTime, inPoint: splitLocal }
@@ -3990,8 +4054,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         for (const c of project.clips) {
           const segments: Clip[] = []
           let localStart = c.inPoint
+          // 区切りの長さはタイムラインの秒。素材の秒では速さの分だけ長い
+          const step = template.jumpCutSeconds * (c.speed || 1)
           while (localStart < c.outPoint) {
-            const localEnd = Math.min(localStart + template.jumpCutSeconds, c.outPoint)
+            let localEnd = Math.min(localStart + step, c.outPoint)
+            // 残りが最短の長さに満たなければ、この断片に含める(0.05 秒の断片を作らない)
+            if (c.outPoint - localEnd < MIN_CLIP_SOURCE_DURATION) localEnd = c.outPoint
             // Spread the source clip: rebuilding field by field dropped the crop
             // framing and, worse, the audioDetached flag — the recut clips then
             // played their embedded audio again on top of the separated track.
@@ -4000,7 +4068,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               id: uuid(),
               inPoint: localStart,
               outPoint: localEnd,
-              speed: 1,
+              // 速さはそのまま(1 に戻すと、2倍速のクリップの尺が倍になる)
               transitionIn: undefined
             })
             localStart = localEnd

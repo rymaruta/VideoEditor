@@ -1,9 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { useProjectStore } from '@renderer/store/projectStore'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  beginHistoryGesture,
+  endHistoryGesture,
+  useProjectStore
+} from '@renderer/store/projectStore'
 import type { Project, TextOverlay } from '@shared/types'
 import { defaultTextStyle } from '@shared/textStyle'
 import type { PlacedSound } from '@shared/finish/sound'
-import { audioClipDuration } from '@renderer/lib/timelineMath'
+import { audioClipDuration, rollDragStep } from '@renderer/lib/timelineMath'
+import { editTemplates } from '@shared/templates'
 import { previewSourcePath } from '@renderer/lib/previewSource'
 import { seeded } from '../helpers/boundary'
 
@@ -1942,5 +1947,97 @@ describe('壊れたファイルを開く・素材をつなぎ直す', () => {
     expect(st().project.clips.find((c) => c.id === 'c2')!.outPoint).toBe(5)
     st().relinkAsset('B', '/y/b.mp4', 'b.mp4', { ...probe, duration: 30 }, undefined)
     expect(st().project.assets.find((x) => x.id === 'B')!.still).toBeUndefined()
+  })
+})
+
+describe('タイムライン編集(第4回の調査)', () => {
+  beforeEach(reset)
+  afterEach(() => vi.useRealTimers())
+  const clip = (id: string): Project['clips'][number] =>
+    st().project.clips.find((c) => c.id === id)!
+
+  it('取り消し・やり直しでも、裏で作ったプレビュー用のプロキシは消えない', () => {
+    st().updateClipSpeed('c2', 1.5)
+    st().splitClipAtTime('c3', 9)
+    st().setAssetProxyPath('B', '/proxy/b.mp4')
+    st().undo()
+    expect(st().project.assets.find((a) => a.id === 'B')!.proxyPath).toBe('/proxy/b.mp4')
+    st().redo()
+    expect(st().project.assets.find((a) => a.id === 'B')!.proxyPath).toBe('/proxy/b.mp4')
+  })
+
+  it('取り消しで消えた文字テロップの選びを残さない', () => {
+    st().addTextOverlay({
+      text: 'x',
+      startTime: 0,
+      endTime: 1,
+      style: defaultTextStyle(),
+      source: 'manual'
+    } as Omit<TextOverlay, 'id'>)
+    const id = st().project.textOverlays.at(-1)!.id
+    S.setState({ selectedOverlayId: id })
+    st().undo()
+    expect(st().selectedOverlayId).toBeNull()
+  })
+
+  it('ジャンプカットの型は速さを保ち、最短に満たない断片を作らない', () => {
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [{ id: 'c1', assetId: 'A', inPoint: 0, outPoint: 6.05, speed: 2 }],
+        audioTracks: [],
+        textOverlays: []
+      }
+    })
+    const before = st().project.clips.reduce((t, c) => t + (c.outPoint - c.inPoint) / c.speed, 0)
+    st().applyTemplate(editTemplates.find((t) => t.jumpCutSeconds)!)
+    const clips = st().project.clips
+    expect(clips.every((c) => c.speed === 2)).toBe(true)
+    expect(clips.every((c) => c.outPoint - c.inPoint >= 0.1 - 1e-9)).toBe(true)
+    const after = clips.reduce((t, c) => t + (c.outPoint - c.inPoint) / c.speed, 0)
+    expect(after).toBeCloseTo(before, 6)
+  })
+
+  it('ワイプ・音声の分割も、最短に満たない断片を作らない', () => {
+    st().splitVideoOverlayClipAtTime('v1', 'p1', 2.01)
+    expect(st().project.videoOverlayTracks[0].clips).toHaveLength(1)
+    st().splitAudioClipAtTime('t1', 'a1', 10.99)
+    expect(st().project.audioTracks[0].clips).toHaveLength(1)
+    st().splitAudioClipAtTime('t1', 'a1', 8)
+    expect(st().project.audioTracks[0].clips).toHaveLength(2)
+  })
+
+  it('ロールのドラッグ: 端で止められた後に戻しても、境目はマウスより先へ動かない', () => {
+    const startOut = clip('c1').outPoint
+    const move = (wanted: number): void =>
+      st().rollTrim('c1', 'c2', rollDragStep(wanted, startOut, clip('c1').outPoint, 1))
+    move(-3) // c2 の入点 1 秒までしか戻せない
+    expect(clip('c1').outPoint).toBeCloseTo(3, 9)
+    move(-1.5) // マウスはまだ端の先
+    expect(clip('c1').outPoint).toBeCloseTo(3, 9)
+    move(0.5)
+    expect(clip('c1').outPoint).toBeCloseTo(4.5, 9)
+  })
+
+  it('ロールのドラッグは、途中で手を止めても1回の取り消しで元へ戻る', () => {
+    vi.useFakeTimers()
+    beginHistoryGesture('roll:c1:c2')
+    st().rollTrim('c1', 'c2', 0.5)
+    vi.advanceTimersByTime(100)
+    st().rollTrim('c1', 'c2', 0.2)
+    vi.advanceTimersByTime(1000)
+    st().rollTrim('c1', 'c2', 0.2)
+    endHistoryGesture()
+    st().undo()
+    expect(clip('c1').outPoint).toBeCloseTo(4, 9)
+  })
+
+  it('繋ぎの長さの欄: 打つ1文字ごとに履歴を積まず、空欄(0)では繋ぎを消さない', () => {
+    const past = st().past.length
+    for (const d of [0.7, 0.75, 0.8])
+      st().updateClipTransition('c2', { type: 'crossfade', duration: d })
+    expect(st().past.length).toBe(past + 1)
+    st().updateClipTransition('c2', { type: 'crossfade', duration: 0 })
+    expect(clip('c2').transitionIn).toEqual({ type: 'crossfade', duration: 0.8 })
   })
 })
