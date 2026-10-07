@@ -51,6 +51,83 @@ function ClipColorPicker({
   )
 }
 
+/**
+ * 打っている途中の値は欄の中だけに置き、確定(Enter・欄を離れる)したときだけ反映する数値の欄。
+ * 1 文字ごとに反映すると、打ちかけの値(「28」を打つ途中の「2」)でクリップが一度縮み、本編に付いて動く
+ * 自動のテロップ・効果音が縮んだ区間の外として消えていた(伸ばし直しても戻らない)
+ */
+function DraftNumber({
+  value,
+  min,
+  max,
+  step,
+  onCommit
+}: {
+  value: number
+  min: number
+  max: number
+  step: number
+  onCommit: (v: number) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = (): void => {
+    if (draft === null) return
+    const v = Number(draft)
+    setDraft(null)
+    if (draft.trim() !== '' && Number.isFinite(v)) onCommit(v)
+  }
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? String(Number(value.toFixed(2)))}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit()
+        else if (e.key === 'Escape') setDraft(null)
+      }}
+    />
+  )
+}
+
+/** つまみを動かしている間は欄の中だけで動かし、離したときに反映するスライダー(`DraftNumber` と同じ理由) */
+function DraftRange({
+  value,
+  min,
+  max,
+  step,
+  onCommit
+}: {
+  value: number
+  min: number
+  max: number
+  step: number
+  onCommit: (v: number) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<number | null>(null)
+  const commit = (): void => {
+    if (draft === null) return
+    setDraft(null)
+    onCommit(draft)
+  }
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? value}
+      onChange={(e) => setDraft(Number(e.target.value))}
+      onPointerUp={commit}
+      onKeyUp={commit}
+      onBlur={commit}
+    />
+  )
+}
+
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds)) return '0:00.00'
   const m = Math.floor(seconds / 60)
@@ -242,41 +319,37 @@ export function Inspector(): React.JSX.Element {
         </h3>
         <div className="inspector-field">
           <label>イン点(素材内)</label>
-          <input
-            type="number"
+          <DraftNumber
             min={0}
             max={asset.duration}
             step={0.1}
-            value={Number(clip.inPoint.toFixed(2))}
-            onChange={(e) => setIn(Number(e.target.value))}
+            value={clip.inPoint}
+            onCommit={setIn}
           />
         </div>
-        <input
-          type="range"
+        <DraftRange
           min={0}
           max={asset.duration}
           step={0.01}
           value={clip.inPoint}
-          onChange={(e) => setIn(Number(e.target.value))}
+          onCommit={setIn}
         />
         <div className="inspector-field">
           <label>アウト点(素材内)</label>
-          <input
-            type="number"
+          <DraftNumber
             min={0}
             max={asset.duration}
             step={0.1}
-            value={Number(clip.outPoint.toFixed(2))}
-            onChange={(e) => setOut(Number(e.target.value))}
+            value={clip.outPoint}
+            onCommit={setOut}
           />
         </div>
-        <input
-          type="range"
+        <DraftRange
           min={0}
           max={asset.duration}
           step={0.01}
           value={clip.outPoint}
-          onChange={(e) => setOut(Number(e.target.value))}
+          onCommit={setOut}
         />
         <div className="inspector-readout">
           <span>素材内の長さ {formatTime(sourceDuration)}</span>
