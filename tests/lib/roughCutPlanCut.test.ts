@@ -32,19 +32,19 @@ const utt = (id: string, start: number, end: number, text: string): unknown => (
 })
 
 describe('planRoughCut — カット点とテロップの時刻', () => {
-  // 1〜4 秒と 10〜13 秒に発話。間の 6 秒は詰める。4.20〜4.26 秒に語尾の短い音
+  // 1〜4 秒と 6〜9 秒に発話。間の 2 秒は詰める(絵として残す長さには届かない)。4.20〜4.26 秒に語尾の短い音
   const project = {
     aspectRatio: '16:9',
-    transcript: [utt('u1', 1, 4, 'こんにちは'), utt('u2', 10, 13, 'よろしくお願いします')]
+    transcript: [utt('u1', 1, 4, 'こんにちは'), utt('u2', 6, 9, 'よろしくお願いします')]
   } as unknown as Project
   const n = 30 * TURN_RATE
   const activity = new Uint8Array(n)
   activity.fill(1, 100, 400)
-  activity.fill(1, 1000, 1300)
+  activity.fill(1, 600, 900)
   const level = new Float32Array(n).fill(-56)
   level.fill(-15, 100, 400)
   level.fill(-14, 420, 426)
-  level.fill(-15, 1000, 1300)
+  level.fill(-15, 600, 900)
   // 間を 0.46 秒残す番組(前後に 0.23 秒ずつ)。切る位置がちょうど短い音に掛かる
   const wideKeep = { keepPauseSec: 0.46, maxPauseSec: 0.7 } as unknown as ShowStyle
   const scenes: Scene[] = [{ id: 's1', start: 0, end: 30, lines: [], speech: 6 }]

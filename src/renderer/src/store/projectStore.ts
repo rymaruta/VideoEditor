@@ -30,7 +30,7 @@ import type { RoughCut } from '@shared/roughCut/build'
 import { toCommon, type MulticamInfo, type MulticamSource } from '@shared/sync/multicam'
 import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
-import { restyleOverlays, type TelopStyleDef } from '@shared/telop/styles'
+import { restyleOverlays, restyleSpeechTelops, type TelopStyleDef } from '@shared/telop/styles'
 import { replaceInTelop } from '@shared/telop/srt'
 import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
@@ -895,6 +895,12 @@ interface ProjectState {
   selectOverlay: (id: string | null) => void
   /** テロップスタイルの一覧を新しくしたとき、使っているテロップへ反映する(取り消しは1回で戻る) */
   restyleTextOverlays: (styles: readonly TelopStyleDef[]) => void
+  /** 自動の発言テロップの見た目を選び直す(前の見た目のままの枚だけ。取り消せる) */
+  restyleSpeechTelops: (
+    prev: { style: TextStyle; styleId?: string },
+    next: { style: TextStyle; styleId?: string },
+    styles: readonly TelopStyleDef[]
+  ) => number
   /** 要確認の項目を「このままでよい」にする/戻す(プロジェクトに保存する) */
   setReviewed: (key: string, reviewed: boolean) => void
   /** 本編のクリップを、同じ時間の別のカメラに替える(同期した収録素材のクリップだけ) */
@@ -3103,6 +3109,15 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         project: { ...state.project, dismissedTelops: next.length > 0 ? next : undefined }
       }
     }),
+
+  restyleSpeechTelops: (prev, next, styles) => {
+    const state = get()
+    const updated = restyleSpeechTelops(state.project.textOverlays, prev, next, styles)
+    const changed = updated.filter((o, i) => o !== state.project.textOverlays[i]).length
+    if (changed > 0)
+      set({ ...pushHistory(state), project: { ...state.project, textOverlays: updated } })
+    return changed
+  },
 
   restyleTextOverlays: (styles) =>
     set((state) => {

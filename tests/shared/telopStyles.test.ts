@@ -3,6 +3,8 @@ import { defaultTextStyle } from '../../src/shared/textStyle'
 import {
   countStyleUsage,
   restyleOverlays,
+  restyleSpeechTelops,
+  speechLook,
   styleForSpeaker,
   type TelopStyleDef
 } from '../../src/shared/telop/styles'
@@ -74,5 +76,58 @@ describe('styleForSpeaker / countStyleUsage', () => {
     const counts = countStyleUsage([{ styleId: 's1' }, { styleId: 's1' }, {}, { styleId: 's2' }])
     expect(counts.get('s1')).toBe(2)
     expect(counts.get('s2')).toBe(1)
+  })
+})
+
+describe('発言テロップの見た目(speechLook / restyleSpeechTelops)', () => {
+  const mine = { id: 'my', name: 'マイ発言', style: defaultTextStyle({ color: '#ff0000' }) }
+  const assigned = {
+    id: 'a',
+    name: '出演者A用',
+    style: defaultTextStyle({ color: '#00ff00' }),
+    speakers: ['出演者A']
+  }
+
+  it('既定は「発言(白・黒縁)」の型。登録したスタイルを選ぶと styleId でつなぐ', () => {
+    const def = speechLook(undefined, [])
+    expect(def.styleId).toBeUndefined()
+    expect(def.style.outlineWidth).toBeGreaterThanOrEqual(6)
+    expect(def.style.fontSize).toBeGreaterThan(defaultTextStyle().fontSize)
+    expect(speechLook('my', [mine])).toEqual({ style: mine.style, styleId: 'my' })
+    // 消したスタイル・知らない id は既定の型
+    expect(speechLook('gone', [mine])).toEqual(def)
+    expect(speechLook('tpl-speech-yellow', []).style.color).toBe('#ffe600')
+  })
+
+  it('選び直すと、前の見た目のままの自動の発言テロップだけを替える(置き場所は残す)', () => {
+    const prev = speechLook(undefined, [])
+    const base = {
+      startTime: 0,
+      endTime: 1,
+      source: 'auto' as const,
+      utteranceId: 'u'
+    }
+    const pos = { x: 0.5, y: 0.3 }
+    const overlays = [
+      { ...base, id: '1', text: 'a', style: { ...prev.style, customPosition: pos } },
+      // 手で色を変えた枚
+      { ...base, id: '2', text: 'b', style: { ...prev.style, color: '#123456' } },
+      // 話者にスタイルを割り当てた枚
+      { ...base, id: '3', text: 'c', speaker: '出演者A', style: assigned.style, styleId: 'a' },
+      // 手で置いたテロップ
+      { ...base, id: '4', text: 'd', source: 'manual' as const, style: prev.style }
+    ]
+    const next = speechLook('my', [mine, assigned])
+    const out = restyleSpeechTelops(overlays, prev, next, [mine, assigned])
+    expect(out[0].style.color).toBe('#ff0000')
+    expect(out[0].styleId).toBe('my')
+    expect(out[0].style.customPosition).toEqual(pos)
+    expect(out[1]).toBe(overlays[1])
+    expect(out[2]).toBe(overlays[2])
+    expect(out[3]).toBe(overlays[3])
+    // 登録したスタイルから型へ戻すときは、styleId でつながっている枚を替える
+    const back = restyleSpeechTelops(out, next, prev, [mine, assigned])
+    expect(back[0].style.color).toBe('#ffffff')
+    expect(back[0].styleId).toBeUndefined()
   })
 })

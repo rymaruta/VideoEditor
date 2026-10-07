@@ -86,6 +86,21 @@ const LOWER_LEFT = { x: 0.22, y: 0.76 }
 export const TELOP_TEMPLATES: readonly TelopTemplate[] = [
   // ---------------------------------------------------------------- 発言
   tpl(
+    'speech-standard',
+    '発言(白・黒縁)',
+    'speech',
+    '発言テロップの基本。自動編集の既定',
+    'ここが中華街の入り口です',
+    2.5,
+    {
+      fontWeight: 800,
+      fontSize: 52,
+      color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 7
+    }
+  ),
+  tpl(
     'speech-yellow',
     '発言(黄)',
     'speech',

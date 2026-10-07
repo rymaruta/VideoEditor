@@ -1,4 +1,5 @@
 import type { TextOverlay, TextStyle } from '../types'
+import { TELOP_TEMPLATES } from './templates'
 
 /**
  * テロップスタイル(名前の付いた見た目)と、それを使うテロップのつながり。
@@ -21,6 +22,29 @@ export interface TelopStyleDef {
 /** スタイルの見た目を、テロップの置き場所を残したまま当てる */
 export function applyLook(overlayStyle: TextStyle, look: TextStyle): TextStyle {
   return { ...look, customPosition: overlayStyle.customPosition }
+}
+
+/** 自動で入れる発言テロップの見た目の既定(テロップの型の「発言(白・黒縁)」) */
+export const DEFAULT_SPEECH_LOOK = 'tpl-speech-standard'
+
+/** 発言テロップの見た目として選べる型(テロップの型のうち「発言」の分類) */
+export const SPEECH_LOOK_TEMPLATES = TELOP_TEMPLATES.filter((t) => t.category === 'speech')
+
+/**
+ * 自動で入れる発言テロップの見た目。`id` はテロップの型(`tpl-…`)か、登録したテロップスタイルの id。
+ * 登録したスタイルを選んだときは `styleId` でつなぐ(スタイルを直すと発言テロップも揃って変わる)。
+ * 見つからない id(消したスタイルなど)は既定の型にする
+ */
+export function speechLook(
+  id: string | undefined,
+  styles: readonly TelopStyleDef[]
+): { style: TextStyle; styleId?: string } {
+  const def = id ? styles.find((s) => s.id === id) : undefined
+  if (def) return { style: def.style, styleId: def.id }
+  const tpl =
+    SPEECH_LOOK_TEMPLATES.find((t) => t.id === id) ??
+    SPEECH_LOOK_TEMPLATES.find((t) => t.id === DEFAULT_SPEECH_LOOK)!
+  return { style: tpl.style() }
 }
 
 /** その話者に自動で使うスタイル(最初に見つかったもの)。無ければ null */
@@ -69,5 +93,30 @@ export function restyleOverlays(
     const auto = styleForSpeaker(styles, o.speaker)
     if (!auto) return o
     return { ...o, styleId: auto.id, style: applyLook(o.style, auto.style) }
+  })
+}
+
+const lookKey = (s: TextStyle): string => JSON.stringify({ ...s, customPosition: undefined })
+
+/**
+ * 自動で入れた発言テロップの見た目を、選び直した `next` に替える。
+ * 前の見た目(`prev`)のままの枚だけを替え、手で見た目を変えた枚・話者にスタイルを割り当てた枚は残す。
+ * 置き場所(顔を避けて上へ移したもの・手で動かしたもの)はそのまま
+ */
+export function restyleSpeechTelops(
+  overlays: readonly TextOverlay[],
+  prev: { style: TextStyle; styleId?: string },
+  next: { style: TextStyle; styleId?: string },
+  styles: readonly TelopStyleDef[]
+): TextOverlay[] {
+  const prevKey = lookKey(prev.style)
+  return overlays.map((o) => {
+    if (o.source !== 'auto' || o.utteranceId === undefined) return o
+    if (styleForSpeaker(styles, o.speaker)) return o
+    const following = prev.styleId
+      ? o.styleId === prev.styleId
+      : !o.styleId && lookKey(o.style) === prevKey
+    if (!following) return o
+    return { ...o, style: applyLook(o.style, next.style), styleId: next.styleId }
   })
 }

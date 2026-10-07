@@ -5712,8 +5712,9 @@ h3 {
 }
 .structure-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 8px 14px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-soft);
 }
@@ -7324,4 +7325,18 @@ select.telop-kind-add {
 
 .panel-error-note {
   color: var(--text-2);
+}
+
+/* 発言テロップの見た目を選ぶ欄(選んだ型の見本を横に出す) */
+.speech-look-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.speech-look-thumb {
+  width: 96px;
+  height: 27px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex: none;
 }

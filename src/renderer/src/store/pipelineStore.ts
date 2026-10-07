@@ -1,3 +1,4 @@
+import { speechLook } from '@shared/telop/styles'
 import { countEvents } from '@shared/events/audioEvents'
 import {
   bubbleProposals,
@@ -723,6 +724,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       targetSec: get().targetMinutes * 60,
       keep: get().keep,
       styles: usePresetStore.getState().captionPresets,
+      speechLook: speechLook(
+        useSettingsStore.getState().speechTelopLook,
+        usePresetStore.getState().captionPresets
+      ),
       dictionary: parseDictionary(useSettingsStore.getState().telopDictionary),
       style: useSettingsStore.getState().showStyle?.style
     })

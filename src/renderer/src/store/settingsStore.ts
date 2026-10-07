@@ -21,6 +21,7 @@ import type { KeymapScheme } from '../lib/keymap'
 import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
 import type { LoudnessTarget } from '@shared/loudness'
 import type { AiProvider } from '@shared/llm'
+import { DEFAULT_SPEECH_LOOK } from '@shared/telop/styles'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
@@ -42,6 +43,7 @@ const QC_WORDS_KEY = 've-qc-words'
 const SHOW_KIT_KEY = 've-show-kit-folder'
 const SHOW_STYLE_KEY = 've-show-style'
 const AI_PROVIDER_KEY = 've-ai-provider'
+const SPEECH_TELOP_LOOK_KEY = 've-speech-telop-look'
 const FAVORITE_COLORS_KEY = 've-favorite-colors'
 const FAVORITE_GRADIENTS_KEY = 've-favorite-gradients'
 const RECENT_COLORS_KEY = 've-recent-colors'
@@ -139,6 +141,12 @@ interface SettingsState {
   /** 構成の判定・演出テロップの提案に使う AI(既定はこのPC。無料・素材が外に出ない) */
   aiProvider: AiProvider
   setAiProvider: (provider: AiProvider) => void
+  /**
+   * 自動で入れる発言テロップの見た目。テロップの型(`tpl-…`)か、登録したテロップスタイルの id。
+   * 話者にスタイルを割り当てた発言は、そちらが優先
+   */
+  speechTelopLook: string
+  setSpeechTelopLook: (id: string) => void
   /** お気に入りの色(`#rrggbb`。新しいものが先頭)。テロップ・サムネイルの色の欄で使い回す */
   favoriteColors: string[]
   addFavoriteColor: (color: string) => void
@@ -304,6 +312,18 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAiProvider: (provider) => {
     writeSetting(AI_PROVIDER_KEY, provider)
     set({ aiProvider: provider })
+  },
+  speechTelopLook: (() => {
+    try {
+      return localStorage.getItem(SPEECH_TELOP_LOOK_KEY) || DEFAULT_SPEECH_LOOK
+    } catch {
+      return DEFAULT_SPEECH_LOOK
+    }
+  })(),
+  setSpeechTelopLook: (id) => {
+    const value = id || DEFAULT_SPEECH_LOOK
+    writeSetting(SPEECH_TELOP_LOOK_KEY, value)
+    set({ speechTelopLook: value })
   },
   favoriteColors: (() => {
     try {

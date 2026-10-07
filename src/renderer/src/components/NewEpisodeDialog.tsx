@@ -9,6 +9,7 @@ import { loadEditXml } from '../lib/editXml'
 import { DEFAULT_SHOW_STYLE, describeShowStyle, learnShowStyle } from '@shared/style/showStyle'
 import { formatTimecode } from '../lib/timelineRuler'
 import { sourceDuration } from '@shared/ingest/classify'
+import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 
 /**
  * 新しい回を作る(ファイル > 新しい回を作る… / Ctrl+Shift+N)。デザイン案の「NewEpisode」。
@@ -357,6 +358,13 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
               )}
             </div>
             {styleError && <p className="error-text">{styleError}</p>}
+          </div>
+
+          <div className="form-stack">
+            <label htmlFor="new-episode-speech-look">
+              発言テロップの見た目(話者にスタイルを割り当てた発言は、そちらが優先)
+            </label>
+            <SpeechTelopLookSelect id="new-episode-speech-look" restyleExisting={false} />
           </div>
 
           <label className="new-episode-target">

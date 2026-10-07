@@ -5,7 +5,7 @@ import {
   type CutOverrides
 } from '@shared/roughCut/overrides'
 import type { ShowStyle } from '@shared/style/showStyle'
-import type { Project, TextOverlay } from '@shared/types'
+import type { Project, TextOverlay, TextStyle } from '@shared/types'
 import { toCommon, type MulticamInfo } from '@shared/sync/multicam'
 import {
   buildScenes,
@@ -30,7 +30,7 @@ import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/
 import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
-import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
+import { applyLook, speechLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
 import {
   buildEffectPrompt,
@@ -201,6 +201,8 @@ export function planRoughCut(
     targetSec: number
     keep?: Record<string, boolean>
     styles: readonly TelopStyleDef[]
+    /** 話者にスタイルを割り当てていない発言テロップの見た目(`speechLook`)。無ければ既定の型 */
+    speechLook?: { style: TextStyle; styleId?: string }
     dictionary?: readonly DictionaryEntry[]
     /** 番組スタイル(過去回から学んだ間・ショットの長さ・周りの音の音量)。無ければ既定値 */
     style?: ShowStyle
@@ -279,6 +281,7 @@ export function planRoughCut(
 
   // 発言テロップ: 話者に割り当てたテロップスタイルで、仮編集の時刻に置く
   const base = defaultTextStyle()
+  const look = options.speechLook ?? speechLook(undefined, options.styles)
   const telops: Omit<TextOverlay, 'id'>[] = []
   const fileOfAsset = new Map(info.files.map((f) => [f.assetId, f]))
   for (const u of project.transcript ?? []) {
@@ -305,8 +308,8 @@ export function planRoughCut(
         text: chunk.text,
         startTime: start,
         endTime: end,
-        style: def ? applyLook(base, def.style) : { ...base },
-        styleId: def?.id,
+        style: applyLook(base, def ? def.style : look.style),
+        styleId: def ? def.id : look.styleId,
         speaker: u.speaker,
         source: 'auto',
         utteranceId: u.id,

@@ -1,4 +1,4 @@
-import type { Project, TextOverlay } from '@shared/types'
+import type { Project, TextOverlay, TextStyle } from '@shared/types'
 import {
   utteranceTimelineRange,
   type PlacedClipRef,
@@ -6,7 +6,7 @@ import {
 } from '@shared/transcript'
 import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { toCommon } from '@shared/sync/multicam'
-import { applyLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
+import { applyLook, speechLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
 import { defaultTextStyle } from '@shared/textStyle'
 import { stackSimultaneousTelops } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
@@ -91,7 +91,9 @@ export function telopsFromTranscript(
   styles: readonly TelopStyleDef[],
   dictionary: readonly DictionaryEntry[] = [],
   /** 番組スタイルで学んだ、1行の文字数・最短の表示時間 */
-  telop?: { lineChars: number; minSec: number }
+  telop?: { lineChars: number; minSec: number },
+  /** 話者にスタイルを割り当てていない発言の見た目(`speechLook`)。無ければ既定の型 */
+  look: { style: TextStyle; styleId?: string } = speechLook(undefined, styles)
 ): Omit<TextOverlay, 'id'>[] {
   const clips = placedClips(project)
   const base = defaultTextStyle()
@@ -113,8 +115,8 @@ export function telopsFromTranscript(
         text: chunk.text,
         startTime: r.start,
         endTime: r.end,
-        style: def ? applyLook(base, def.style) : { ...base },
-        styleId: def?.id,
+        style: applyLook(base, def ? def.style : look.style),
+        styleId: def ? def.id : look.styleId,
         speaker: u.speaker,
         source: 'auto',
         utteranceId: u.id

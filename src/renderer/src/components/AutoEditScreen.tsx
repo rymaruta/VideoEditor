@@ -18,6 +18,8 @@ import { speakerColor } from '@shared/speaker'
 import { createEtaTracker, formatRemaining } from '../lib/eta'
 import { AUTO_PLACE_CONFIDENCE, EFFECT_LABEL } from '@shared/telop/effects'
 import { stripTelopMarkup } from '@shared/telop/render'
+import { speechLook } from '@shared/telop/styles'
+import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 
 /**
  * 自動編集の画面(自動編集 > 自動編集の画面)。デザイン案の「AutoEdit」。
@@ -190,7 +192,11 @@ export function AutoEditScreen(): React.JSX.Element | null {
       project,
       usePresetStore.getState().captionPresets,
       parseDictionary(useSettingsStore.getState().telopDictionary),
-      learned ? { lineChars: learned.telopLineChars, minSec: learned.telopMinSec } : undefined
+      learned ? { lineChars: learned.telopLineChars, minSec: learned.telopMinSec } : undefined,
+      speechLook(
+        useSettingsStore.getState().speechTelopLook,
+        usePresetStore.getState().captionPresets
+      )
     )
     if (overlays.length === 0) return
     const store = useProjectStore.getState()
@@ -562,6 +568,10 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     <option value="gemini">Gemini(鍵が必要)</option>
                     <option value="off">使わない(簡易の点数)</option>
                   </select>
+                </label>
+                <label htmlFor="auto-edit-speech-look">
+                  発言テロップ
+                  <SpeechTelopLookSelect id="auto-edit-speech-look" />
                 </label>
                 <div className="dialog-footer-spacer" />
                 <button
