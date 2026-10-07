@@ -259,6 +259,44 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
       '96k',
       join(shoot, 'webcam', 'facecam.mp4')
     ])
+    // 名前の無い 3 トラックの OBS(1: 全部入り・2: 通話=相手の声だけ・3: ゲーム音)。配信者の声は全部入りにしか無い
+    mkdirSync(join(dir, 'tracks2', 'OBS'), { recursive: true })
+    const callOnly = wav('call.wav', renderVoice(friend, 210))
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=320x180:r=30',
+      '-i',
+      t1,
+      '-i',
+      callOnly,
+      '-i',
+      t3,
+      '-map',
+      '0:v',
+      '-map',
+      '1:a',
+      '-map',
+      '2:a',
+      '-map',
+      '3:a',
+      '-t',
+      String(DURATION),
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-crf',
+      '45',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '96k',
+      join(dir, 'tracks2', 'OBS', '2026-10-07 22-00-00.mp4')
+    ])
     // Craig: OBS の 3 秒前から
     ff([
       '-i',
@@ -270,6 +308,29 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
   afterAll(() => {
     if (!keep && dir) rmSync(dir, { recursive: true, force: true })
   })
+
+  it('名前の無い「声らしい」トラックが通話(相手の声だけ)なら、配信者の声のある全部入りだけを鳴らす', async () => {
+    const calls = { asrPaths: [] as string[] }
+    installApi(streamer, friend, calls)
+    useProjectStore.getState().newProject()
+    usePipelineStore.getState().reset()
+    useSettingsStore.setState({
+      aiProvider: 'off',
+      showKitFolder: '',
+      episodeKind: 'game',
+      editPolicy: 'highlights'
+    })
+    await usePipelineStore.getState().scanFolder(join(dir, 'tracks2'))
+    await usePipelineStore.getState().runPipeline()
+    const log = usePipelineStore.getState().log.map((l) => l.text)
+    expect(log.some((l) => l.includes('だけを鳴らします'))).toBe(true)
+    const tracks = useProjectStore.getState().project.audioTracks
+    const mixTrack = tracks.find((t) => t.name.startsWith('全部入り'))
+    expect(mixTrack?.muted).toBe(false)
+    expect(tracks.filter((t) => t !== mixTrack && t.multicamSourceId).every((t) => t.muted)).toBe(
+      true
+    )
+  }, 300_000)
 
   it('トラックを分け、役割を推し量り、声だけで盛り上がりを測る。ゲーム音と声を鳴らし、顔カメラはワイプで出す', async () => {
     const calls = { asrPaths: [] as string[] }

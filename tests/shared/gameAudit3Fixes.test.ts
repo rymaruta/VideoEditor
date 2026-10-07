@@ -16,7 +16,12 @@ describe('Craig の話者別ファイルは頭がそろっている', () => {
       { id: '/r/craig/2-hana.flac', sourceId: 'craig:2', duration: 590 }
     ]
     const edges = craigSessionEdges(
-      files.map((f) => ({ id: f.id, path: f.id, isCraig: f.id.includes('craig') }))
+      files.map((f) => ({
+        id: f.id,
+        path: f.id,
+        duration: f.duration,
+        isCraig: f.id.includes('craig')
+      }))
     )
     expect(edges).toEqual([
       { a: '/r/craig/1-taro.flac', b: '/r/craig/2-hana.flac', offset: 0, confidence: 1, rate: 1 }
@@ -37,6 +42,13 @@ describe('Craig の話者別ファイルは頭がそろっている', () => {
       ...edges
     ])
     expect(both.issues.filter((i) => i.kind === 'conflict')).toHaveLength(0)
+    // 長さのそろわない「1-名前.wav」の録音機(別々に録り始めたもの)はつながない
+    expect(
+      craigSessionEdges([
+        { id: 'a', path: '/r/rec/1-taro.wav', isCraig: true, duration: 1800 },
+        { id: 'b', path: '/r/rec/2-hana.wav', isCraig: true, duration: 1234 }
+      ])
+    ).toEqual([])
   })
 })
 

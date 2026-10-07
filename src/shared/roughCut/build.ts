@@ -246,6 +246,8 @@ export function silencedTrack(
   // ゲーム音は、全部入りを鳴らすとき(声のトラックが無い)は重ねない
   if (s.trackRole === 'game') return hasMix && !hasVoice
   if (s.trackRole === 'voice') return !hasGame && hasMix
+  // 通話(一緒に遊ぶ人の声)は全部入りにも入っている。全部入りを鳴らすときは重ねない
+  if (s.trackRole === 'call') return hasMix && !(hasGame && hasVoice)
   return false
 }
 

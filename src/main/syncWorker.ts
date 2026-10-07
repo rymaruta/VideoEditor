@@ -264,6 +264,7 @@ async function run(): Promise<void> {
         files.map((f) => ({
           id: f.id,
           path: f.path,
+          duration: f.duration,
           isCraig:
             f.sourceKind === 'mic' && craigSpeakerName(f.path.split(/[\\/]/).pop() ?? '') !== null
         }))

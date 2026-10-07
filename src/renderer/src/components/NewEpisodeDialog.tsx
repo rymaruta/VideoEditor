@@ -36,12 +36,20 @@ const KIND_COLOR: Record<EditableSource['kind'], string> = {
 
 /** 役割の欄の値(種類と、トラック・カメラの役割をまとめて1つの欄で選ぶ) */
 type RoleValue =
-  'camera' | 'camera:screen' | 'camera:face' | 'mic' | 'audio:game' | 'audio:mix' | 'skip'
+  | 'camera'
+  | 'camera:screen'
+  | 'camera:face'
+  | 'mic'
+  | 'mic:call'
+  | 'audio:game'
+  | 'audio:mix'
+  | 'skip'
 
 function roleValue(s: EditableSource, game: boolean): RoleValue {
   if (s.kind === 'camera')
     return game ? (s.cameraRole === 'face' ? 'camera:face' : 'camera:screen') : 'camera'
   if (s.kind === 'audio') return s.trackRole === 'mix' ? 'audio:mix' : 'audio:game'
+  if (s.kind === 'mic' && s.trackRole === 'call') return 'mic:call'
   return s.kind
 }
 
@@ -58,6 +66,8 @@ function rolePatch(v: RoleValue, isTrack: boolean): Partial<EditableSource> {
       return { kind: 'audio', trackRole: 'mix' }
     case 'mic':
       return { kind: 'mic', trackRole: isTrack ? 'voice' : undefined }
+    case 'mic:call':
+      return { kind: 'mic', trackRole: 'call' }
     default:
       return { kind: v }
   }
@@ -342,6 +352,9 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                         <option value="camera">カメラ</option>
                       ))}
                     <option value="mic">{s.files.some((f) => f.track) ? '声' : 'マイク'}</option>
+                    {s.files.some((f) => f.track) && (
+                      <option value="mic:call">通話(一緒に遊ぶ人の声)</option>
+                    )}
                     <option value="audio:game">ゲーム音</option>
                     {s.files.some((f) => f.track) && <option value="audio:mix">全部入り</option>}
                     <option value="skip">使わない</option>

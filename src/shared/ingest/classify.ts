@@ -248,7 +248,7 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
         return {
           id: `track:${t.parentRelativePath}#${t.index}`,
           name: `${label}(トラック${t.index + 1})`,
-          kind: t.role === 'voice' ? 'mic' : 'audio',
+          kind: t.role === 'voice' || t.role === 'call' ? 'mic' : 'audio',
           basis: `${t.parentRelativePath.split('/').pop()} の音声トラック ${t.index + 1}`,
           files: [f],
           trackRole: t.role

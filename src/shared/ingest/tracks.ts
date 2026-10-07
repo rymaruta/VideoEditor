@@ -8,10 +8,17 @@
  */
 
 /** 取り出したトラックの役割。voice = 話す人の声(文字起こし・話者・盛り上がりに使う) */
-export type TrackRole = 'voice' | 'game' | 'mix'
+/**
+ * - voice: 配信者のマイク(配信者の声だけ)
+ * - call: 通話(Discord など。一緒に遊ぶ人の声)
+ * - game: ゲーム音
+ * - mix: 全部入り(OBS のトラック1。配信者の声・通話・ゲーム音)
+ */
+export type TrackRole = 'voice' | 'call' | 'game' | 'mix'
 
 export const TRACK_ROLE_LABEL: Record<TrackRole, string> = {
   voice: '声',
+  call: '通話',
   game: 'ゲーム音',
   mix: '全部入り'
 }
@@ -30,7 +37,8 @@ export interface ExtractedTrack {
   role: TrackRole
 }
 
-const VOICE_TITLE = /mic|マイク|voice|声|discord|ディスコ|chat|vc|通話|commentary|実況/i
+const VOICE_TITLE = /mic|マイク|voice|声|commentary|実況/i
+const CALL_TITLE = /discord|ディスコ|chat|vc|通話|call|teams|zoom|skype/i
 const GAME_TITLE = /game|ゲーム|desktop|デスクトップ|system|システム|app|bgm/i
 const MIX_TITLE = /all|mix|全部|すべて|master|stream|配信/i
 
@@ -49,6 +57,14 @@ export function quietRatio(envelope: Float32Array): number {
   return v.filter((x) => x < floor).length / v.length
 }
 
+/** ずっと無音か(大きい所でも -80dBFS に届かない)。録っていないトラック */
+export function isSilentEnvelope(envelope: Float32Array): boolean {
+  const v = Array.from(envelope).filter((x) => Number.isFinite(x))
+  if (v.length === 0) return true
+  const sorted = [...v].sort((a, b) => a - b)
+  return !(sorted[Math.floor(sorted.length * 0.95)] > 1e-4)
+}
+
 /** 声のトラックとみなす、静かな時間の割合の下限 */
 export const VOICE_QUIET_RATIO = 0.3
 
@@ -56,9 +72,18 @@ export const VOICE_QUIET_RATIO = 0.3
  * トラックの役割を推し量る。名前があれば名前で、無ければ1本目は全部入り(OBS の既定は全部をトラック1に録る)、
  * ほかは音の様子(静かな時間が多ければ声、ずっと鳴っていればゲーム音)で
  */
-export function guessTrackRole(index: number, title: string | undefined, quiet: number): TrackRole {
+export function guessTrackRole(
+  index: number,
+  title: string | undefined,
+  quiet: number,
+  /** ずっと無音のトラック(録っていない Discord・マイクなど)。声とはみなさない */
+  silent = false
+): TrackRole {
+  // 無音のトラックを「声」にすると、声の入っている全部入りが止まり、実況の声が消える
+  if (silent && index > 0) return 'game'
   const t = title?.trim()
   if (t) {
+    if (CALL_TITLE.test(t)) return 'call'
     if (VOICE_TITLE.test(t)) return 'voice'
     if (GAME_TITLE.test(t)) return 'game'
     if (MIX_TITLE.test(t)) return 'mix'
@@ -133,4 +158,39 @@ export function guessCameraRole(
   if (parts.some((p) => FACE_NAME_WEAK.test(p))) return 'face'
   if (width && maxWidth && width < maxWidth * 0.75) return 'face'
   return 'screen'
+}
+
+/**
+ * 全部入りのトラックに、ほかのトラックのどれにも無い音(配信者の声など)が残っているか。
+ * 名前の無い「声らしい」トラックが配信者のマイクか、通話(一緒に遊ぶ人の声だけ)かを見分ける:
+ * 全部入り = 配信者の声 + 通話 + ゲーム音 なので、取り出したトラックで全部入りの音が説明できなければ、
+ * 配信者の声は全部入りにしか無い(声らしいトラックは通話)。
+ * 全部入りが鳴っている時刻のうち、ほかのトラックを合わせた音より 3dB 以上大きい時刻の割合で見る
+ */
+export function mixHasUnaccountedSound(
+  mix: Float32Array,
+  others: readonly Float32Array[],
+  minShare = 0.1
+): boolean {
+  const v = Array.from(mix).filter((x) => Number.isFinite(x))
+  if (v.length === 0) return false
+  const sorted = [...v].sort((a, b) => a - b)
+  const loud = sorted[Math.floor(sorted.length * 0.95)]
+  if (!(loud > 1e-5)) return false
+  const floor = loud * 0.1
+  let active = 0
+  let unexplained = 0
+  for (let i = 0; i < mix.length; i++) {
+    const m = mix[i]
+    if (!(m >= floor)) continue
+    active++
+    let e = 0
+    for (const o of others) {
+      const x = o[i]
+      if (Number.isFinite(x)) e += x * x
+    }
+    // 3dB = エネルギーで 2 倍
+    if (m * m > 2 * e) unexplained++
+  }
+  return active > 0 && unexplained / active >= minShare
 }

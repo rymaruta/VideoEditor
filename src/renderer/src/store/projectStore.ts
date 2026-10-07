@@ -673,7 +673,10 @@ function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
       name: typeof s.name === 'string' ? s.name : '',
       kind: s.kind as 'camera' | 'mic' | 'audio',
       subject: typeof s.subject === 'string' && s.subject ? s.subject : undefined,
-      ...(s.trackRole === 'voice' || s.trackRole === 'game' || s.trackRole === 'mix'
+      ...(s.trackRole === 'voice' ||
+      s.trackRole === 'call' ||
+      s.trackRole === 'game' ||
+      s.trackRole === 'mix'
         ? { trackRole: s.trackRole as TrackRole }
         : {}),
       ...(typeof s.trackOf === 'string' && s.trackOf ? { trackOf: s.trackOf } : {}),

@@ -262,3 +262,24 @@ export function sameVoice(a: MicTrack, b: MicTrack, minOverlap = 0.6): boolean {
   // 声のある時間が短すぎる(数秒)なら決めない
   return either >= 5 * TURN_RATE && both / either >= minOverlap
 }
+
+/**
+ * `track` の声のある時刻の、どれだけが `others` のどれかの声のある時刻に重なるか(0〜1)。
+ * 通話のトラック(一緒に遊ぶ人みんなの声)が、Craig の1人ずつのファイルの合わせたものと同じかを見る
+ */
+export function coveredBy(track: MicTrack, others: readonly MicTrack[]): number {
+  const st = statsOf(track)
+  const os = others.map(statsOf).filter((s): s is MicStats => s !== null)
+  if (!st || os.length === 0) return 0
+  let active = 0
+  let covered = 0
+  for (let t = 0; t < st.db.length; t++) {
+    const v = st.db[t]
+    if (Number.isNaN(v) || v < st.threshold) continue
+    active++
+    if (os.some((o) => t < o.db.length && !Number.isNaN(o.db[t]) && o.db[t] >= o.threshold))
+      covered++
+  }
+  // 声のある時間が短すぎる(数秒)なら決めない
+  return active >= 5 * TURN_RATE ? covered / active : 0
+}

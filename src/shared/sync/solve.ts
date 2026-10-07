@@ -279,19 +279,28 @@ export function solvePlacements(
  * あればそちらを使う。どの音の組よりも弱い)
  */
 export function craigSessionEdges(
-  files: readonly { id: string; path: string; isCraig: boolean }[],
+  files: readonly { id: string; path: string; isCraig: boolean; duration: number }[],
   confidence = 1
 ): SyncEdge[] {
   const dirOf = (p: string): string => p.replace(/[\\/][^\\/]*$/, '')
-  const groups = new Map<string, string[]>()
+  // 同じフォルダで、長さもそろっているもの(Craig は同じ回のファイルをどれも同じ長さに埋める)。
+  // 「1-名前.wav」の名前の、別々に録り始めた録音機のファイルは長さがそろわないので、つながない
+  const groups: { dir: string; duration: number; ids: string[] }[] = []
   for (const f of files) {
     if (!f.isCraig) continue
     const d = dirOf(f.path)
-    groups.set(d, [...(groups.get(d) ?? []), f.id])
+    const g = groups.find(
+      (x) => x.dir === d && Math.abs(x.duration - f.duration) <= CRAIG_DURATION_TOLERANCE
+    )
+    if (g) g.ids.push(f.id)
+    else groups.push({ dir: d, duration: f.duration, ids: [f.id] })
   }
   const out: SyncEdge[] = []
-  for (const ids of groups.values())
+  for (const { ids } of groups)
     for (let i = 1; i < ids.length; i++)
       out.push({ a: ids[0], b: ids[i], offset: 0, confidence, rate: 1 })
   return out
 }
+
+/** Craig の同じ回のファイルとみなす、長さの差の上限(秒) */
+const CRAIG_DURATION_TOLERANCE = 0.5

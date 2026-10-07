@@ -7,12 +7,14 @@ import {
 } from '../../src/shared/ingest/tracks'
 import { classifyFootage, type ProbedFile } from '../../src/shared/ingest/classify'
 import { silencedTrack } from '../../src/shared/roughCut/build'
+import { coveredBy, sameVoice } from '../../src/shared/diarize/micTurns'
+import { isSilentEnvelope, mixHasUnaccountedSound } from '../../src/shared/ingest/tracks'
 
 describe('OBS の音声トラックの役割', () => {
   it('名前があれば名前で、無ければ1本目は全部入り、ほかは静かな時間の割合で', () => {
     expect(guessTrackRole(1, 'Mic/Aux', 0)).toBe('voice')
     expect(guessTrackRole(2, 'ゲーム音', 0.9)).toBe('game')
-    expect(guessTrackRole(0, 'Discord', 0)).toBe('voice')
+    expect(guessTrackRole(0, 'Discord', 0)).toBe('call')
     expect(guessTrackRole(0, undefined, 0.9)).toBe('mix')
     expect(guessTrackRole(1, undefined, 0.5)).toBe('voice')
     expect(guessTrackRole(2, undefined, 0.05)).toBe('game')
@@ -163,5 +165,70 @@ describe('鳴らすトラック(silencedTrack)', () => {
     // 役割だけあって元の録画が分からない(手で役割を付けた)音源は消さない
     const manual = [src('m', 'mic', 'voice'), src('g', 'audio', 'game')]
     expect(manual.map((s) => silencedTrack(manual, s.id))).toEqual([false, false])
+  })
+})
+
+describe('通話のトラック・無音のトラック', () => {
+  const env = (f: (i: number) => number, n = 30_000): Float32Array =>
+    Float32Array.from({ length: n }, (_, i) => f(i))
+  const speaking = (period: number, phase: number) => (i: number) =>
+    Math.floor(i / period + phase) % 2 === 0 ? 0.2 : 0.0005
+  it('名前で通話・声を分け、ずっと無音のトラックは声にしない', () => {
+    expect(guessTrackRole(2, 'Discord', 0.6)).toBe('call')
+    expect(guessTrackRole(1, 'Mic/Aux', 0.6)).toBe('voice')
+    expect(guessTrackRole(2, 'Discord', 1, true)).toBe('game')
+    expect(guessTrackRole(2, undefined, 1, true)).toBe('game')
+    expect(isSilentEnvelope(new Float32Array(1000))).toBe(true)
+    expect(isSilentEnvelope(env(speaking(300, 0)))).toBe(false)
+  })
+
+  it('全部入りに、ほかのトラックに無い声(配信者)が残っていれば分かる', () => {
+    const game = env(() => 0.05)
+    const streamer = env(speaking(300, 0))
+    const friends = env(speaking(300, 1))
+    const mix = env((i) => Math.sqrt(game[i] ** 2 + streamer[i] ** 2 + friends[i] ** 2))
+    // トラック2 がゲーム音・トラック3 が友達の声だけ: 配信者の声は全部入りにしか無い
+    expect(mixHasUnaccountedSound(mix, [game, friends])).toBe(true)
+    // トラック3 が配信者の声: 全部入りはほかのトラックで説明できる
+    const mix2 = env((i) => Math.sqrt(game[i] ** 2 + streamer[i] ** 2))
+    expect(mixHasUnaccountedSound(mix2, [game, streamer])).toBe(false)
+  })
+
+  it('通話は全部入りを鳴らすときは止める。配信者の声のトラックがあれば、全部入りを止めて通話を鳴らす', () => {
+    const s = (
+      id: string,
+      kind: string,
+      trackRole: string
+    ): { id: string; kind: string; trackRole: string; trackOf: string } => ({
+      id,
+      kind,
+      trackRole,
+      trackOf: 'obs'
+    })
+    const noVoice = [s('mix', 'audio', 'mix'), s('g', 'audio', 'game'), s('c', 'mic', 'call')]
+    expect(noVoice.map((x) => silencedTrack(noVoice, x.id))).toEqual([false, true, true])
+    const withVoice = [...noVoice, s('v', 'mic', 'voice')]
+    expect(withVoice.map((x) => silencedTrack(withVoice, x.id))).toEqual([
+      true,
+      false,
+      false,
+      false
+    ])
+  })
+
+  it('通話のトラックの声が、1人ずつのマイクを合わせたものに入っていれば同じ声', () => {
+    // 2人が交互に話し、間に誰も話さない時間がある(3 拍に 1 回ずつ)
+    const third = (k: number) => (i: number) => (Math.floor(i / 300) % 3 === k ? 0.2 : 0.0005)
+    const a = env(third(0))
+    const b = env(third(1))
+    const call = env((i) => Math.max(a[i], b[i]))
+    expect(sameVoice({ id: 'c', envelope: call }, { id: 'a', envelope: a })).toBe(false)
+    expect(
+      coveredBy({ id: 'c', envelope: call }, [
+        { id: 'a', envelope: a },
+        { id: 'b', envelope: b }
+      ])
+    ).toBeGreaterThan(0.9)
+    expect(coveredBy({ id: 'c', envelope: call }, [{ id: 'a', envelope: a }])).toBeLessThan(0.6)
   })
 })

@@ -67,10 +67,12 @@ import {
 import { roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mapTimelineRange, timelineMapping } from '@shared/roughCut/follow'
 import { formatIpcError } from '../lib/ipcError'
+import { mixHasUnaccountedSound } from '@shared/ingest/tracks'
 import { emitMenuCommand } from '../lib/menuCommands'
 import {
   detectTurns,
   placeEnvelope,
+  coveredBy,
   sameVoice,
   TURN_RATE,
   type MicTrack
@@ -342,27 +344,74 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     })
     // OBS から取り出した声のトラックと、同じ人のマイク(Craig のファイルなど)が両方あれば、
     // 取り出したトラックを話者の判定・文字起こしから外し、鳴らさない(発言が2回・声が二重になる)
+    // OBS から取り出した声・通話のトラックと、同じ人のマイク(Craig のファイルなど)が両方あれば、
+    // 取り出したトラックを話者の判定・文字起こしに使わず、鳴らさない(発言が2回・声が二重になる)。
+    // 通話のトラックは、一緒に遊ぶ人みんなの声なので、Craig の何人分かのファイルを合わせたものと比べる
     const duplicates = new Set<string>()
+    const roleOf = (id: string): string | undefined =>
+      speakerSources.find((s) => s.id === id)?.trackRole
+    const ownMics = tracks.filter((o) => roleOf(o.id) === undefined)
     for (const t of tracks) {
       const src = speakerSources.find((s) => s.id === t.id)
-      if (src?.trackRole !== 'voice') continue
-      const twin = tracks.find(
-        (o) =>
-          o.id !== t.id &&
-          !duplicates.has(o.id) &&
-          speakerSources.find((s) => s.id === o.id)?.trackRole === undefined &&
-          sameVoice(t, o)
-      )
-      if (!twin) continue
+      if (src?.trackRole !== 'voice' && src?.trackRole !== 'call') continue
+      const twin = ownMics.find((o) => sameVoice(t, o))
+      const covered = !twin && coveredBy(t, ownMics) >= SAME_VOICE_COVERAGE
+      if (!twin && !covered) continue
       duplicates.add(t.id)
-      const twinName = speakerSources.find((s) => s.id === twin.id)?.name ?? ''
       log(
-        `「${src.name}」は「${twinName}」と同じ声のため、話者の判定・文字起こしに使わず、鳴らしません`
+        twin
+          ? `「${src.name}」は「${speakerSources.find((s) => s.id === twin.id)?.name ?? ''}」と同じ声のため、話者の判定・文字起こしに使わず、鳴らしません`
+          : `「${src.name}」の声は1人ずつのマイク(${ownMics.map((o) => speakerSources.find((s) => s.id === o.id)?.name ?? '').join('・')})に入っているため、話者の判定・文字起こしに使わず、鳴らしません`
       )
       const track = useProjectStore
         .getState()
         .project.audioTracks.find((x) => x.multicamSourceId === t.id && !x.muted)
       if (track) useProjectStore.getState().toggleAudioTrackMute(track.id)
+    }
+    // 全部入りに、ほかのどのトラック(ゲーム音・声・通話・1人ずつのマイク)にも無い音があれば、
+    // 全部入りだけが全員の声の入った録音(名前の無い「声らしい」トラックが、実は通話だった など)。
+    // 全部入りだけを鳴らし、ほかは鳴らさない(文字起こしには使う)
+    for (const mixSrc of used.filter((s) => s.kind === 'audio' && s.trackRole === 'mix')) {
+      const parentPathOf = (x: EditableSource): string | undefined =>
+        x.files.find((f) => f.track)?.track?.parentPath
+      const group = used.filter(
+        (x) => parentPathOf(x) !== undefined && parentPathOf(x) === parentPathOf(mixSrc)
+      )
+      const gameSrcs = group.filter((s) => s.trackRole === 'game')
+      const own = [mixSrc, ...gameSrcs]
+      const ownFiles = files.filter(
+        (f) => own.some((s) => s.id === f.sourceId) && placeOf.get(f.id)?.method !== 'none'
+      )
+      if (!ownFiles.some((f) => f.sourceId === mixSrc.id)) continue
+      const ownEnv = await window.api.footageEnvelopes(ownFiles.map(pathOf))
+      const placed = (sourceId: string): Float32Array => {
+        const env = new Float32Array(length).fill(NaN)
+        ownFiles.forEach((f, i) => {
+          if (f.sourceId !== sourceId) return
+          const p = placeOf.get(f.id)!
+          placeEnvelope(ownEnv[i], p.start, p.rate || 1, length, env)
+        })
+        return env
+      }
+      if (
+        !mixHasUnaccountedSound(placed(mixSrc.id), [
+          ...gameSrcs.map((g) => placed(g.id)),
+          ...tracks.map((t) => t.envelope)
+        ])
+      )
+        continue
+      log(
+        `「${mixSrc.name}」に、ほかのトラック・マイクに無い声があるため、「${mixSrc.name}」だけを鳴らします(ほかのトラック・マイクは文字起こしにだけ使います)`
+      )
+      const project = useProjectStore.getState().project
+      for (const t of project.audioTracks) {
+        if (!t.multicamSourceId) continue
+        const src = used.find((s) => s.id === t.multicamSourceId)
+        if (!src) continue
+        const want =
+          src.id === mixSrc.id ? false : group.includes(src) || src.kind === 'mic' ? true : t.muted
+        if (t.muted !== want) useProjectStore.getState().toggleAudioTrackMute(t.id)
+      }
     }
     const turns = detectTurns(tracks.filter((t) => !duplicates.has(t.id)))
     const overlapCount = turns.filter((t) => t.overlap).length
@@ -1688,6 +1737,8 @@ onProjectSwitch(() => {
 // 走り出したときの各工程の状態。作り直しでは前の通しの失敗が残っているので、
 // この回に新しく止まった工程だけを知らせる
 let stepsAtStart: Record<StepId, StepStatus> | null = null
+/** 通話のトラックの声のうち、1人ずつのマイクに入っている割合がこれ以上なら、同じ声とみなす */
+const SAME_VOICE_COVERAGE = 0.7
 /** 収録フォルダを読むたびに増やす(古い読み込みの結果を捨てるため) */
 let scanToken = 0
 usePipelineStore.subscribe((s, prev) => {
@@ -1743,7 +1794,7 @@ export function trackParentMap(
       else
         orphans.set(parent, [...(orphans.get(parent) ?? []), { path: f.path, role: s.trackRole }])
     }
-  const rank = (r?: string): number => (r === 'voice' ? 0 : r === 'mix' ? 1 : 2)
+  const rank = (r?: string): number => (r === 'voice' ? 0 : r === 'mix' ? 1 : r === 'call' ? 2 : 3)
   for (const group of orphans.values()) {
     const lead = [...group].sort((a, b) => rank(a.role) - rank(b.role))[0]
     for (const g of group) if (g !== lead) parentOf.set(g.path, lead.path)

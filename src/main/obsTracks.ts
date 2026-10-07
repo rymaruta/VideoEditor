@@ -3,7 +3,12 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
 import { basename, join } from 'path'
 import { cachedEnvelope } from './audioPcm'
-import { guessTrackRole, quietRatio, type ExtractedTrack } from '@shared/ingest/tracks'
+import {
+  guessTrackRole,
+  isSilentEnvelope,
+  quietRatio,
+  type ExtractedTrack
+} from '@shared/ingest/tracks'
 import type { ProbedFile } from '@shared/ingest/classify'
 
 /**
@@ -105,7 +110,7 @@ export async function extractAudioTracks(
       parentRelativePath: video.relativePath,
       index: s.index,
       ...(s.title ? { title: s.title } : {}),
-      role: guessTrackRole(s.index, s.title, quietRatio(env))
+      role: guessTrackRole(s.index, s.title, quietRatio(env), isSilentEnvelope(env))
     }
     out.push({
       path,
