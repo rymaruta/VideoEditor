@@ -22,6 +22,13 @@ import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/type
 import type { LoudnessTarget } from '@shared/loudness'
 import type { AiProvider } from '@shared/llm'
 import { DEFAULT_SPEECH_LOOK } from '@shared/telop/styles'
+import {
+  DEFAULT_POLICY,
+  EDIT_POLICIES,
+  EPISODE_KINDS,
+  type EditPolicy,
+  type EpisodeKind
+} from '@shared/structure/kind'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
@@ -44,6 +51,8 @@ const SHOW_KIT_KEY = 've-show-kit-folder'
 const SHOW_STYLE_KEY = 've-show-style'
 const AI_PROVIDER_KEY = 've-ai-provider'
 const SPEECH_TELOP_LOOK_KEY = 've-speech-telop-look'
+const EPISODE_KIND_KEY = 've-episode-kind'
+const EDIT_POLICY_KEY = 've-edit-policy'
 const FAVORITE_COLORS_KEY = 've-favorite-colors'
 const FAVORITE_GRADIENTS_KEY = 've-favorite-gradients'
 const RECENT_COLORS_KEY = 've-recent-colors'
@@ -147,6 +156,12 @@ interface SettingsState {
    */
   speechTelopLook: string
   setSpeechTelopLook: (id: string) => void
+  /** 番組の種類(ロケ・ゲーム実況)。自動編集の場面の分け方・面白い所の判定・間の詰め方が変わる */
+  episodeKind: EpisodeKind
+  setEpisodeKind: (kind: EpisodeKind) => void
+  /** 編集の方針(面白い所だけ・テンポよく・軽く整える)。種類を替えると、その種類の既定に戻す */
+  editPolicy: EditPolicy
+  setEditPolicy: (policy: EditPolicy) => void
   /** お気に入りの色(`#rrggbb`。新しいものが先頭)。テロップ・サムネイルの色の欄で使い回す */
   favoriteColors: string[]
   addFavoriteColor: (color: string) => void
@@ -324,6 +339,21 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     const value = id || DEFAULT_SPEECH_LOOK
     writeSetting(SPEECH_TELOP_LOOK_KEY, value)
     set({ speechTelopLook: value })
+  },
+  episodeKind: readChoice<EpisodeKind>(EPISODE_KIND_KEY, EPISODE_KINDS, 'location'),
+  setEpisodeKind: (kind) => {
+    writeSetting(EPISODE_KIND_KEY, kind)
+    writeSetting(EDIT_POLICY_KEY, DEFAULT_POLICY[kind])
+    set({ episodeKind: kind, editPolicy: DEFAULT_POLICY[kind] })
+  },
+  editPolicy: readChoice<EditPolicy>(
+    EDIT_POLICY_KEY,
+    EDIT_POLICIES,
+    DEFAULT_POLICY[readChoice<EpisodeKind>(EPISODE_KIND_KEY, EPISODE_KINDS, 'location')]
+  ),
+  setEditPolicy: (policy) => {
+    writeSetting(EDIT_POLICY_KEY, policy)
+    set({ editPolicy: policy })
   },
   favoriteColors: (() => {
     try {

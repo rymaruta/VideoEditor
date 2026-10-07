@@ -1,4 +1,25 @@
-import { countEvents } from '@shared/events/audioEvents'
+import {
+  CHEER_THRESHOLD,
+  countEvents,
+  LAUGH_THRESHOLD,
+  type AudioEventWindow
+} from '@shared/events/audioEvents'
+import {
+  countHype,
+  detectHype,
+  HYPE_LEAD_SEC,
+  HYPE_TAIL_SEC,
+  peakWindows,
+  type HypeMoment,
+  type PeakSpan
+} from '@shared/structure/hype'
+import {
+  DEFAULT_POLICY,
+  KIND_PROFILES,
+  POLICY_PROFILES,
+  type EditPolicy,
+  type EpisodeKind
+} from '@shared/structure/kind'
 import {
   applyAngleOverrides,
   applyCutOverrides,
@@ -68,7 +89,8 @@ export function timedLines(project: Project, info: MulticamInfo): TimedLine[] {
       start: toCommon(f, u.sourceStart),
       end: toCommon(f, u.sourceEnd),
       text: u.text,
-      overlap: u.overlap
+      overlap: u.overlap,
+      source: f.sourceId
     })
   }
   return out.sort((a, b) => a.start - b.start)
@@ -105,7 +127,44 @@ export async function loadActivity(project: Project, info: MulticamInfo): Promis
   })
   const mask = activityMask(tracks)
   levelOfActivity.set(mask, mixLevelDb(tracks))
+  sourceLevelsOfActivity.set(mask, new Map(tracks.map((t) => [t.id, mixLevelDb([t])])))
   return mask
+}
+
+/**
+ * 「面白い所だけ」で場面を絞るときの山: 声の盛り上がり(前 12 秒・後 8 秒)と、笑い(10 秒の窓の前 4 秒・後 2 秒)
+ */
+export function peakSpans(
+  hype: readonly HypeMoment[],
+  events: readonly AudioEventWindow[] | undefined
+): PeakSpan[] {
+  return [
+    ...hype.map((h) => ({ start: h.start, end: h.end, lead: HYPE_LEAD_SEC, tail: HYPE_TAIL_SEC })),
+    ...(events ?? [])
+      .filter((e) => e.laugh >= LAUGH_THRESHOLD || e.cheer >= CHEER_THRESHOLD)
+      .map((e) => ({ start: e.start, end: e.end, lead: 4, tail: 2 }))
+  ]
+}
+
+/** `loadActivity` で読んだ音源ごとの音の大きさ(dB、100Hz)。声の盛り上がりを話者ごとに測るのに使う */
+const sourceLevelsOfActivity = new WeakMap<Uint8Array, Map<string, Float32Array>>()
+
+/**
+ * 声の盛り上がり(叫び・大声)。発話を拾った音源の音で測る(ピンマイクがあればその人のマイク、
+ * 無ければ基準カメラの音)。`loadActivity` の後に呼ぶ
+ */
+export function hypeMomentsFor(
+  project: Project,
+  info: MulticamInfo,
+  activity: Uint8Array
+): HypeMoment[] {
+  const levels = sourceLevelsOfActivity.get(activity)
+  if (!levels) return []
+  const fallback = levels.get(info.anchorSourceId) ?? [...levels.values()][0]
+  return detectHype(timedLines(project, info), (l) => {
+    const src = (l as TimedLine).source
+    return (src ? levels.get(src) : undefined) ?? fallback
+  })
 }
 
 /**
@@ -127,6 +186,7 @@ export async function judgeScenes(
     episodeName: string
     targetSec: number
     note?: string
+    kind?: EpisodeKind
   },
   onProgress?: (p: AiProgress) => void
 ): Promise<{
@@ -136,7 +196,7 @@ export async function judgeScenes(
   model?: string
   device?: string
 }> {
-  const fallback = heuristicJudgements(scenes)
+  const fallback = heuristicJudgements(scenes, options.kind)
   if (options.provider === 'off' || (options.provider === 'gemini' && !options.apiKey)) {
     return { judgements: fallback, source: 'heuristic' }
   }
@@ -206,26 +266,49 @@ export function planRoughCut(
     dictionary?: readonly DictionaryEntry[]
     /** 番組スタイル(過去回から学んだ間・ショットの長さ・周りの音の音量)。無ければ既定値 */
     style?: ShowStyle
+    /** 番組の種類(場面の中を山の前後に絞るか・声の無い所を絵として残す長さ) */
+    kind?: EpisodeKind
+    /** 編集の方針(面白い所だけ・テンポよく・軽く整える)。無ければ種類の既定 */
+    policy?: EditPolicy
+    /** 山(叫び・笑い)。「面白い所だけ」で、場面の中を山の前後に絞るのに使う */
+    peaks?: readonly PeakSpan[]
     /** 本編の人の修正(削った・足した区間、替えたカメラ)。作り直しても当て直す */
     overrides?: CutOverrides
     /** 全マイクを足した音の大きさ(dB、100Hz)。無ければ `loadActivity` で読んだもの */
     level?: Float32Array
   }
 ): RoughCutPlan {
-  const tighten = options.style
-    ? { maxPauseSec: options.style.maxPauseSec, keepPauseSec: options.style.keepPauseSec }
-    : {}
+  const kind = options.kind ?? 'location'
+  const profile = KIND_PROFILES[kind]
+  const policy = POLICY_PROFILES[options.policy ?? DEFAULT_POLICY[kind]]
+  const tighten = {
+    ...profile.insert,
+    ...(options.style
+      ? { maxPauseSec: options.style.maxPauseSec, keepPauseSec: options.style.keepPauseSec }
+      : {}),
+    ...policy.tighten
+  }
   const lines = timedLines(project, info)
   const speech = lines.map((l) => ({ start: l.start, end: l.end }))
+  // 「面白い所だけ」のゲーム実況は、山のある場面を山の前後だけに絞る(山の無い場面は丸ごと)
+  const narrow = (options.policy ?? DEFAULT_POLICY[kind]) === 'highlights' && profile.peakWindows
+  const rangesOf = (s: Scene): CutRange[] =>
+    (narrow ? peakWindows(s, options.peaks ?? [], speech) : null)?.map((w) => ({
+      ...w,
+      sceneId: s.id
+    })) ?? [{ start: s.start, end: s.end, sceneId: s.id }]
   // 長さの見込みは、場面ごとに詰めた後の長さで測る
   const tightenedLength = new Map(
-    scenes.map((s) => [s.id, totalLength(tightenRanges([s], activity, speech, tighten))])
+    scenes.map((s) => [s.id, totalLength(tightenRanges(rangesOf(s), activity, speech, tighten))])
   )
+  const target = policy.useTarget ? options.targetSec : 0
   const auto = selectScenes(
     scenes,
     judgements,
-    options.targetSec || Infinity,
-    (s) => tightenedLength.get(s.id) ?? s.end - s.start
+    target || Infinity,
+    (s) => tightenedLength.get(s.id) ?? s.end - s.start,
+    target ? -Infinity : policy.minScoreWithoutTarget,
+    policy.dropUnneeded
   )
   // 手で決めた分を上書きする
   const keepSet = new Set(auto.kept)
@@ -246,7 +329,7 @@ export function planRoughCut(
   }
 
   const tightened = tightenRanges(
-    kept.map((s) => ({ start: s.start, end: s.end, sceneId: s.id })),
+    kept.flatMap(rangesOf),
     activity,
     speech,
     tighten
@@ -328,12 +411,24 @@ export function planRoughCut(
 }
 
 /** 場面を作る(カメラが録っている範囲で) */
-export function scenesFor(project: Project, info: MulticamInfo): Scene[] {
-  const scenes = buildScenes(timedLines(project, info), cameraRange(info))
-  // 笑い・歓声を検出していれば、場面ごとの回数を付ける(判定と AI への文に使う)
+export function scenesFor(
+  project: Project,
+  info: MulticamInfo,
+  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[] } = {}
+): Scene[] {
+  const scenes = buildScenes(
+    timedLines(project, info),
+    cameraRange(info),
+    KIND_PROFILES[options.kind ?? 'location'].scene
+  )
+  const hype = options.hype
+  // 笑い・歓声・声の盛り上がりを測っていれば、場面ごとの回数を付ける(判定と AI への文に使う)
   const events = project.audioEvents
-  if (!events || events.length === 0) return scenes
-  return scenes.map((s) => ({ ...s, ...countEvents(events, s.start, s.end) }))
+  return scenes.map((s) => ({
+    ...s,
+    ...(events && events.length > 0 ? countEvents(events, s.start, s.end) : {}),
+    ...(hype ? { hype: countHype(hype, s.start, s.end) } : {})
+  }))
 }
 
 /** 演出テロップの提案に渡す発言(仮編集に残っているものだけ、時刻は仮編集のタイムライン) */

@@ -15,6 +15,8 @@ export interface TimedLine {
   end: number
   text: string
   overlap: boolean
+  /** 声を拾った音源(マイク・カメラ)の ID。声の盛り上がりを、その音源の音で測る */
+  source?: string
 }
 
 export type SceneKind = 'highlight' | 'normal' | 'unneeded'
@@ -29,6 +31,8 @@ export interface Scene {
   /** 笑い・歓声の回数(音声イベントを検出したときだけ) */
   laughs?: number
   cheers?: number
+  /** 声の盛り上がり(叫び・大声)の回数(`structure/hype`。測ったときだけ) */
+  hype?: number
 }
 
 export interface SceneJudgement {
@@ -161,8 +165,12 @@ function speechSeconds(lines: readonly TimedLine[]): number {
   return total
 }
 
-/** AI を使わない簡易の点数 */
-export function heuristicJudgements(scenes: readonly Scene[]): SceneJudgement[] {
+/** AI を使わない簡易の点数。`kind` で、番組の種類ごとの見方に替える */
+export function heuristicJudgements(
+  scenes: readonly Scene[],
+  kind: 'location' | 'game' = 'location'
+): SceneJudgement[] {
+  if (kind === 'game') return scenes.map(gameJudgement)
   return scenes.map((s) => {
     const dur = Math.max(0.1, s.end - s.start)
     if (s.lines.length === 0) {
@@ -210,6 +218,60 @@ export function heuristicJudgements(scenes: readonly Scene[]): SceneJudgement[] 
   })
 }
 
+/**
+ * ゲーム実況の簡易の点数。面白い所の印は、声の盛り上がり(叫び・大声)と笑い。
+ * ロケと違い、ずっと話していても(実況は話し続けるのが普通)盛り上がりが無ければ点は伸びない。
+ * 黙々とプレイしている所(話す時間が 2 割未満で、盛り上がりも笑いも無い)は不要にする
+ */
+function gameJudgement(s: Scene): SceneJudgement {
+  const dur = Math.max(0.1, s.end - s.start)
+  if (s.lines.length === 0) {
+    return {
+      sceneId: s.id,
+      score: 5,
+      kind: 'unneeded',
+      reason: '声の無いプレイ(黙々と進める所・ロード)'
+    }
+  }
+  const density = s.speech / dur
+  const hype = s.hype ?? 0
+  const laughs = (s.laughs ?? 0) + (s.cheers ?? 0)
+  const exclaims = s.lines.reduce((n, l) => n + (l.text.match(/[!！?？]/g)?.length ?? 0), 0)
+  let turns = 0
+  for (let i = 1; i < s.lines.length; i++) {
+    if (s.lines[i].speaker && s.lines[i].speaker !== s.lines[i - 1].speaker) turns++
+  }
+  const perMin = (n: number): number => (n / dur) * 60
+  const score = Math.min(
+    100,
+    Math.round(
+      20 +
+        15 * Math.min(1, density / 0.6) +
+        35 * Math.min(1, perMin(hype) / 2) +
+        20 * Math.min(1, perMin(laughs) / 2) +
+        5 * Math.min(1, exclaims / 4) +
+        5 * Math.min(1, perMin(turns) / 8)
+    )
+  )
+  const kind: SceneKind =
+    hype === 0 && laughs === 0 && density < 0.2
+      ? 'unneeded'
+      : hype >= 2 || laughs >= 2 || score >= 70
+        ? 'highlight'
+        : 'normal'
+  const parts = [`発話 ${Math.round(density * 100)}%`]
+  if (hype) parts.push(`叫び・大声 ${hype}`)
+  if (s.laughs) parts.push(`笑い ${s.laughs}`)
+  if (s.cheers) parts.push(`歓声 ${s.cheers}`)
+  if (exclaims) parts.push(`感嘆・疑問 ${exclaims}`)
+  return {
+    sceneId: s.id,
+    score: kind === 'unneeded' ? Math.min(score, 20) : score,
+    kind,
+    reason: (kind === 'unneeded' ? '盛り上がりの無いプレイ · ' : '') + parts.join(' · ')
+  }
+}
+
 export interface Selection {
   kept: string[]
   dropped: { sceneId: string; why: 'unneeded' | 'length' }[]
@@ -227,12 +289,20 @@ export function selectScenes(
   scenes: readonly Scene[],
   judgements: readonly SceneJudgement[],
   targetSec: number,
-  estimate: (s: Scene) => number = (s) => s.end - s.start
+  estimate: (s: Scene) => number = (s) => s.end - s.start,
+  /** 点数がこれ未満の場面も「不要」と同じく落とす(見どころは残す)。「面白い所だけ」で使う */
+  minScore = -Infinity,
+  /** 「不要」の場面を落とす(「軽く整える」では落とさない) */
+  dropUnneeded = true
 ): Selection {
   const judge = new Map(judgements.map((j) => [j.sceneId, j]))
   const dropped: Selection['dropped'] = []
   const candidates = scenes.filter((s) => {
-    if (judge.get(s.id)?.kind === 'unneeded') {
+    const j = judge.get(s.id)
+    if (
+      (dropUnneeded && j?.kind === 'unneeded') ||
+      (j && j.kind !== 'highlight' && j.score < minScore)
+    ) {
       dropped.push({ sceneId: s.id, why: 'unneeded' })
       return false
     }

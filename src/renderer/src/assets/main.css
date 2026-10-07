@@ -7345,3 +7345,8 @@ select.telop-kind-add {
 .telop-style-backdrop {
   z-index: 120;
 }
+
+/* 新しい回を作る: 番組の種類・大事にすることの切り替えは、ボタンの幅だけにする */
+.new-episode-dialog .form-stack > .seg-group {
+  align-self: flex-start;
+}

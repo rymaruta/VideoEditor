@@ -19,6 +19,12 @@ import { createEtaTracker, formatRemaining } from '../lib/eta'
 import { AUTO_PLACE_CONFIDENCE, EFFECT_LABEL } from '@shared/telop/effects'
 import { stripTelopMarkup } from '@shared/telop/render'
 import { speechLook } from '@shared/telop/styles'
+import {
+  EDIT_POLICIES,
+  EDIT_POLICY_HINT,
+  EDIT_POLICY_LABEL,
+  type EditPolicy
+} from '@shared/structure/kind'
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 
 /**
@@ -87,6 +93,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const [dictOpen, setDictOpen] = useState(false)
   const dictionary = useSettingsStore((s) => s.telopDictionary)
   const aiProvider = useSettingsStore((s) => s.aiProvider)
+  const editPolicy = useSettingsStore((s) => s.editPolicy)
   const scenes = usePipelineStore((s) => s.scenes)
   const judgements = usePipelineStore((s) => s.judgements)
   const judgeSource = usePipelineStore((s) => s.judgeSource)
@@ -567,6 +574,21 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     <option value="local">このPC(無料・素材は外に出ない)</option>
                     <option value="gemini">Gemini(鍵が必要)</option>
                     <option value="off">使わない(簡易の点数)</option>
+                  </select>
+                </label>
+                <label title={EDIT_POLICY_HINT[editPolicy]}>
+                  大事にすること
+                  <select
+                    value={editPolicy}
+                    onChange={(e) =>
+                      useSettingsStore.getState().setEditPolicy(e.target.value as EditPolicy)
+                    }
+                  >
+                    {EDIT_POLICIES.map((p) => (
+                      <option key={p} value={p}>
+                        {EDIT_POLICY_LABEL[p]}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label htmlFor="auto-edit-speech-look">

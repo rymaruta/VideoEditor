@@ -10,6 +10,14 @@ import { DEFAULT_SHOW_STYLE, describeShowStyle, learnShowStyle } from '@shared/s
 import { formatTimecode } from '../lib/timelineRuler'
 import { sourceDuration } from '@shared/ingest/classify'
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
+import { Segmented } from './AppearanceControls'
+import {
+  EDIT_POLICIES,
+  EDIT_POLICY_HINT,
+  EDIT_POLICY_LABEL,
+  EPISODE_KINDS,
+  EPISODE_KIND_LABEL
+} from '@shared/structure/kind'
 
 /**
  * 新しい回を作る(ファイル > 新しい回を作る… / Ctrl+Shift+N)。デザイン案の「NewEpisode」。
@@ -50,6 +58,8 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
   const updateSource = usePipelineStore((s) => s.updateSource)
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const showKitFolder = useSettingsStore((s) => s.showKitFolder)
+  const episodeKind = useSettingsStore((s) => s.episodeKind)
+  const editPolicy = useSettingsStore((s) => s.editPolicy)
   const showStyle = useSettingsStore((s) => s.showStyle)
   const setShowStyle = useSettingsStore((s) => s.setShowStyle)
   const [learning, setLearning] = useState(false)
@@ -180,6 +190,38 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
               onChange={(e) => setName(e.target.value)}
             />
           </label>
+
+          <div className="form-stack">
+            <span>番組の種類(面白い所の見つけ方と、間の詰め方が変わります)</span>
+            <Segmented
+              label="番組の種類"
+              value={episodeKind}
+              options={EPISODE_KINDS.map((k) => ({
+                value: k,
+                label: EPISODE_KIND_LABEL[k],
+                title:
+                  k === 'game'
+                    ? '叫び・大声・笑いのある所を残し、黙々とプレイしている所を落とします'
+                    : '掛け合い・笑い・企画の要点を残し、移動・待機を落とします'
+              }))}
+              onChange={(k) => useSettingsStore.getState().setEpisodeKind(k)}
+            />
+          </div>
+
+          <div className="form-stack">
+            <span>一番大事にすること</span>
+            <Segmented
+              label="一番大事にすること"
+              value={editPolicy}
+              options={EDIT_POLICIES.map((p) => ({
+                value: p,
+                label: EDIT_POLICY_LABEL[p],
+                title: EDIT_POLICY_HINT[p]
+              }))}
+              onChange={(p) => useSettingsStore.getState().setEditPolicy(p)}
+            />
+            <span className="form-note">{EDIT_POLICY_HINT[editPolicy]}</span>
+          </div>
 
           <div className="form-stack">
             <span>収録フォルダ(カードごとコピーしたフォルダをそのまま指定)</span>
@@ -379,7 +421,14 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                 usePipelineStore.getState().setTargetMinutes(Number(e.target.value) || 0)
               }
             />
-            分<span className="form-note">(空なら長さは決めず、不要な場面だけ落とします)</span>
+            分
+            <span className="form-note">
+              {editPolicy === 'light'
+                ? '(軽く整えるときは長さに合わせて落としません)'
+                : editPolicy === 'highlights'
+                  ? '(空なら長さは決めず、盛り上がりの無い場面を落とします)'
+                  : '(空なら長さは決めず、不要な場面だけ落とします)'}
+            </span>
           </label>
 
           <label className="checkbox-label">

@@ -1,4 +1,5 @@
 import { speechLook } from '@shared/telop/styles'
+import type { HypeMoment } from '@shared/structure/hype'
 import { countEvents } from '@shared/events/audioEvents'
 import {
   bubbleProposals,
@@ -47,7 +48,9 @@ import {
   effectOverlays,
   planRoughCut,
   proposeEffects,
-  scenesFor
+  scenesFor,
+  hypeMomentsFor,
+  peakSpans
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces } from '../lib/telopPlacement'
 import {
@@ -153,6 +156,8 @@ interface PipelineState {
   judgements: SceneJudgement[]
   /** 場面の判定を AI でしたか、簡易の点数か */
   judgeSource: 'ai' | 'heuristic' | null
+  /** 声の盛り上がり(ゲーム実況で測る)。仮編集を作り直すときも、山の前後に絞るのに使う */
+  hype: HypeMoment[]
   /** 画面で手で決めた「残す / 落とす」 */
   keep: Record<string, boolean>
   /** 演出テロップの提案(AI)と、置くと決めたもの */
@@ -668,7 +673,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       return
     }
     setStep('structure', { state: 'run', percent: 0, note: '場面に分けています' })
-    const scenes = scenesFor(project, info)
+    const kind = useSettingsStore.getState().episodeKind
+    // ゲーム実況は、声の盛り上がり(叫び・大声)を面白い所の印にする
+    let hype: HypeMoment[] | undefined
+    if (kind === 'game') {
+      hype = hypeMomentsFor(project, info, await activityOf(project, info))
+      log(`声の盛り上がり(叫び・大声): ${hype.length} 回`)
+    }
+    const scenes = scenesFor(project, info, { kind, hype })
     const range = cameraRange(info)
     const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
     const { judgements, source, failure, model, device } = await judgeScenes(
@@ -678,12 +690,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         provider,
         apiKey,
         episodeName: project.name,
-        targetSec: get().targetMinutes * 60 || range.end - range.start,
-        note: get().editNote || undefined
+        targetSec: get().targetMinutes * 60 || (kind === 'game' ? 0 : range.end - range.start),
+        note: get().editNote || undefined,
+        kind
       },
       (p) => setStep('structure', { percent: p.percent, note: p.note })
     )
-    set({ scenes, judgements, judgeSource: source, keep: {} })
+    set({ scenes, judgements, judgeSource: source, keep: {}, hype: hype ?? [] })
     const highlights = judgements.filter((j) => j.kind === 'highlight').length
     const unneeded = judgements.filter((j) => j.kind === 'unneeded').length
     setStep('structure', {
@@ -729,7 +742,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         usePresetStore.getState().captionPresets
       ),
       dictionary: parseDictionary(useSettingsStore.getState().telopDictionary),
-      style: useSettingsStore.getState().showStyle?.style
+      style: useSettingsStore.getState().showStyle?.style,
+      kind: useSettingsStore.getState().episodeKind,
+      policy: useSettingsStore.getState().editPolicy,
+      peaks: peakSpans(get().hype, project.audioEvents)
     })
     const raw = plan.selection.kept.reduce((t, id) => {
       const sc = get().scenes.find((x) => x.id === id)
@@ -937,6 +953,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     scenes: [],
     judgements: [],
     judgeSource: null,
+    hype: [],
     keep: {},
     roughCut: null,
     telopReviews: [],
@@ -1058,6 +1075,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         scenes: [],
         judgements: [],
         judgeSource: null,
+        hype: [],
         keep: {},
         roughCut: null,
         telopReviews: [],
@@ -1082,6 +1100,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         scenes: [],
         judgements: [],
         judgeSource: null,
+        hype: [],
         keep: {},
         roughCut: null,
         telopReviews: [],

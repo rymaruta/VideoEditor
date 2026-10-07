@@ -15,6 +15,8 @@ export interface StructureRequestOptions {
   note?: string
   /** 答えの形: list = {"scenes":[...]}(Gemini)、keyed = {"s1":{...}}(このPCの AI。形はスキーマで縛る) */
   answerFormat?: 'list' | 'keyed'
+  /** 番組の種類(頼む文面を替える)。既定はロケ */
+  kind?: 'location' | 'game'
 }
 
 /** 1回に送る場面の数と文字数の上限 */
@@ -29,7 +31,11 @@ function clock(sec: number): string {
 
 function sceneText(s: Scene): string {
   // 笑い・歓声の回数は、文字起こしからは分からない盛り上がりの手掛かり
-  const events = [s.laughs ? `笑い${s.laughs}回` : '', s.cheers ? `歓声${s.cheers}回` : '']
+  const events = [
+    s.hype ? `叫び・大声${s.hype}回` : '',
+    s.laughs ? `笑い${s.laughs}回` : '',
+    s.cheers ? `歓声${s.cheers}回` : ''
+  ]
     .filter(Boolean)
     .join('・')
   const head = events ? `(${events})` : ''
@@ -67,6 +73,7 @@ export function buildStructurePrompt(
   const list = scenes
     .map((s) => `[${s.id}] ${clock(s.start)}〜${clock(s.end)} ${sceneText(s)}`)
     .join('\n')
+  if (options.kind === 'game') return gamePrompt(list, totalSec, options)
   return `あなたはテレビのバラエティ番組(ロケ番組)の編集者です。
 番組「${options.episodeName}」の収録素材(全体 ${clock(totalSec)})を、仕上がり ${clock(options.targetSec)} に編集します。
 以下は収録の一部を、話のまとまり(場面)ごとに並べた文字起こしです(「話者「発言」」の形)。
@@ -87,6 +94,37 @@ ${
     ? '場面の ID ごとに、title・reason(先に理由)・kind・score・mood を JSON で返してください。'
     : '次の JSON だけを返してください:\n{"scenes":[{"id":"場面のID","score":0,"kind":"normal","title":"","reason":"","mood":"楽しい"}]}'
 }`
+}
+
+function answerSpec(options: StructureRequestOptions): string {
+  return options.answerFormat === 'keyed'
+    ? '場面の ID ごとに、title・reason(先に理由)・kind・score・mood を JSON で返してください。'
+    : '次の JSON だけを返してください:\n{"scenes":[{"id":"場面のID","score":0,"kind":"normal","title":"","reason":"","mood":"楽しい"}]}'
+}
+
+/** ゲーム実況の編集者として頼む文面(面白い所だけ残す) */
+function gamePrompt(list: string, totalSec: number, options: StructureRequestOptions): string {
+  const target =
+    options.targetSec > 0 && Number.isFinite(options.targetSec)
+      ? `仕上がり ${clock(options.targetSec)} に`
+      : '面白い所だけを残して'
+  return `あなたは YouTube のゲーム実況動画の編集者です。
+「${options.episodeName}」の録画(全体 ${clock(totalSec)})を、${target}編集します。
+以下は録画の一部を、話のまとまり(場面)ごとに並べた文字起こしです(「話者「発言」」の形)。
+「叫び・大声○回」は声が普段より大きく跳ね上がった回数、「笑い○回」は実際に起きた笑いの数です。
+${options.note ? `編集方針: ${options.note}\n` : ''}
+各場面について、動画に残す価値を判定してください。
+- score: 0〜100。叫び・悲鳴・驚き・爆笑・ツッコミ・掛け合い・勝った/負けた/やられた瞬間・予想外の出来事ほど高く
+- kind: "highlight"(見どころ) / "normal"(話の流れに要る) / "unneeded"(不要: 黙々とプレイ・ロード・メニューや装備の整理・同じ説明の繰り返し・離席や待機・言い直し)
+- title: 場面の短い見出し(日本語15字以内)
+- reason: そう判定した理由(日本語1文。発言を引用してよい)
+- mood: 場面の雰囲気(BGM を選ぶのに使う)。"楽しい" / "穏やか" / "緊張" / "感動" / "移動"
+発言の内容を作り変えたり、無い発言を書いたりしないでください。
+
+場面:
+${list}
+
+${answerSpec(options)}`
 }
 
 const KINDS: SceneKind[] = ['highlight', 'normal', 'unneeded']
