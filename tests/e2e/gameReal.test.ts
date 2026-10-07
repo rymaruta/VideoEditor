@@ -38,6 +38,7 @@ import { existsSync } from 'fs'
 import { ffmpegPath, ffprobePath, probeMedia } from '@main/ffmpegService'
 import { scanFootage } from '@main/footageService'
 import { cachedEnvelope } from '@main/audioPcm'
+import { readFramesRgb } from '@main/frameService'
 import { usePipelineStore } from '@renderer/store/pipelineStore'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
@@ -58,6 +59,15 @@ import {
 } from './gameShoot'
 
 const HAVE_FFMPEG = existsSync(ffmpegPath) && existsSync(ffprobePath)
+
+/** 下の中央(横 30〜70%・縦 82〜92%)の HUD: 白い地に黒の縦縞(文字・枠のような輪郭) */
+const HUD_FILTER = [
+  'drawbox=x=96:y=148:w=128:h=18:color=white:t=fill',
+  ...Array.from(
+    { length: 16 },
+    (_, i) => `drawbox=x=${98 + i * 8}:y=150:w=3:h=14:color=black:t=fill`
+  )
+].join(',')
 
 /** 1本の動画の音: ゲームの環境音 + 爆発音(声の無い所) + 声 */
 function renderAudio(lines: Line[]): Float32Array {
@@ -122,7 +132,8 @@ function installApi(lines: Line[]): void {
     eventsRun: async () =>
       LAUGH_AT.map((at) => ({ start: at - 2, end: at + 3, laugh: 0.6, cheer: 0 })),
     onFramesProgress: noop,
-    framesRgb: async (requests: unknown[]) => requests.map(() => null),
+    framesRgb: (requests: { path: string; time: number }[], size: { w: number; h: number }) =>
+      readFramesRgb(requests, size, () => {}),
     onFaceProgress: noop,
     faceDetect: async (requests: unknown[]) => requests.map(() => []),
     onLlmProgress: noop,
@@ -178,7 +189,8 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の自動編集(面白い所だけ
       '-f',
       'lavfi',
       '-i',
-      'testsrc2=s=160x90:r=30',
+      // ゲーム画面: ずっと動く絵(模様を流し続ける)の下の中央に、動かない HUD(白地に黒の縦縞)
+      `testsrc2=s=320x180:r=30,scroll=h=0.003:v=0.002,${HUD_FILTER}`,
       '-i',
       wav,
       '-t',
@@ -268,6 +280,11 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の自動編集(面白い所だけ
     for (const q of quietKept) expect(q).toBeLessThanOrEqual(2.5)
     // 8 分の録画が、山の所だけに縮む
     expect(total).toBeLessThan(DURATION * 0.6)
+    // ゲーム画面の HUD(下の中央)を避けて、発言テロップを上へ
+    expect(log.some((l) => l.startsWith('ゲーム画面の表示(HUD)が下の中央にある'))).toBe(true)
+    const speech = useProjectStore.getState().project.textOverlays.filter((o) => o.utteranceId)
+    expect(speech.length).toBeGreaterThan(0)
+    for (const o of speech) expect(o.style.customPosition?.y ?? 1).toBeLessThan(0.8)
   }, 180_000)
 
   it('方針を替えると残し方が替わる: 面白い所だけ < テンポよく < 軽く整える', async () => {

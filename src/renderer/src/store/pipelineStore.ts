@@ -57,7 +57,7 @@ import {
   hypeMomentsFor,
   peakSpans
 } from '../lib/roughCutPlan'
-import { placeTelopsAvoidingFaces } from '../lib/telopPlacement'
+import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPlacement'
 import {
   AI_EFFECT_KINDS,
   AUTO_PLACE_CONFIDENCE,
@@ -778,9 +778,28 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     // 発言テロップを、顔を隠さない位置へ
     setStep('placement', { state: 'run', percent: 0, note: '顔を探しています' })
     let telops = plan.telops
+    // ゲーム実況: 画面の動かない表示(体力・スコア・ミニマップ)に発言テロップを重ねない
+    if (useSettingsStore.getState().episodeKind === 'game') {
+      setStep('placement', { note: 'ゲーム画面の表示を探しています' })
+      try {
+        const hud = await placeTelopsAvoidingHud(
+          telops,
+          plan.cut,
+          project.assets,
+          project.aspectRatio
+        )
+        telops = hud.telops
+        if (hud.y !== null)
+          log(
+            `ゲーム画面の表示(HUD)が下の中央にあるため、発言テロップ ${hud.moved} 枚を上へ(画面の ${Math.round(hud.y * 100)}% の高さ)`
+          )
+      } catch (e) {
+        log(`ゲーム画面の表示を調べられませんでした(下のまま置きます): ${formatIpcError(e)}`)
+      }
+    }
     try {
       const placed = await placeTelopsAvoidingFaces(
-        plan.telops,
+        telops,
         plan.cut,
         project.assets,
         project.aspectRatio,

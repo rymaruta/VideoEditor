@@ -1,6 +1,7 @@
 import type { MediaAsset, TextOverlay } from '@shared/types'
 import type { RoughCut } from '@shared/roughCut/build'
-import { decideTelopPlacement } from '@shared/telop/avoidFaces'
+import { decideTelopPlacement, telopRect } from '@shared/telop/avoidFaces'
+import { detectHud, speechYAvoidingHud } from '@shared/telop/hud'
 import { textCanvasSize } from '@shared/resolution'
 import type { AspectRatio } from '@shared/types'
 import { autoTelopKey } from '@shared/telop/manual'
@@ -98,4 +99,48 @@ export async function placeTelopsAvoidingFaces(
     return o
   })
   return { telops: out, moved, review, unchecked }
+}
+
+/** HUD を探すのに読む画の数と大きさ */
+const HUD_SAMPLES = 24
+const HUD_FRAME = { w: 160, h: 90 }
+
+/**
+ * ゲーム画面の動かない表示(HUD)を避けて、下の発言テロップを上へずらす(ゲーム実況)。
+ * 本編のあちこちから画を読み、HUD を探す(`@shared/telop/hud`)。下の中央の帯が HUD に掛かるなら、
+ * 掛からない高さへ全部の発言テロップをそろえて動かす(1枚ずつ高さが変わると読みにくい)
+ */
+export async function placeTelopsAvoidingHud(
+  telops: Omit<TextOverlay, 'id'>[],
+  cut: RoughCut,
+  assetsList: MediaAsset[],
+  aspect: AspectRatio
+): Promise<{ telops: Omit<TextOverlay, 'id'>[]; moved: number; y: number | null }> {
+  const assets = new Map(assetsList.map((a) => [a.id, a]))
+  const total = cut.duration
+  if (!(total > 0) || cut.main.length === 0) return { telops, moved: 0, y: null }
+  const requests: { path: string; time: number }[] = []
+  for (let k = 0; k < HUD_SAMPLES; k++) {
+    const f = frameAt(cut, assets, ((k + 0.5) / HUD_SAMPLES) * total)
+    if (f) requests.push({ path: f.asset.filePath, time: f.time })
+  }
+  const frames = (await window.api.framesRgb(requests, HUD_FRAME)).filter(
+    (x): x is Uint8Array => x !== null
+  )
+  const map = detectHud(frames, HUD_FRAME.w, HUD_FRAME.h)
+  if (!map) return { telops, moved: 0, y: null }
+  const canvas = textCanvasSize(aspect)
+  // 既定の位置(下)の帯の中心。2行の発言テロップで見積もる
+  const sample = telops.find((o) => o.style.position === 'bottom' && !o.style.customPosition)
+  if (!sample) return { telops, moved: 0, y: null }
+  const r = telopRect({ text: 'あ\nあ', style: sample.style }, canvas, 'bottom')
+  const y = speechYAvoidingHud(map, r.y + r.h / 2)
+  if (y === null) return { telops, moved: 0, y: null }
+  let moved = 0
+  const out = telops.map((o) => {
+    if (o.style.position !== 'bottom' || o.style.customPosition) return o
+    moved++
+    return { ...o, style: { ...o.style, customPosition: { x: 0.5, y } } }
+  })
+  return { telops: out, moved, y }
 }
