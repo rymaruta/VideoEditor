@@ -147,4 +147,23 @@ describe('buildRoughCut: カメラを替えた所の丸め', () => {
     )
     expect(cut.spans).toHaveLength(1)
   })
+  it('分割ファイルの本当の隙間(0.5ms)はつながず、ピンマイクの声は本編と同じ長さ', () => {
+    const files: MulticamInfo = {
+      anchorSourceId: 'A',
+      sources: [
+        { id: 'A', name: 'カメラA', kind: 'camera' },
+        { id: 'M', name: '出演者A', kind: 'mic' }
+      ],
+      files: [
+        { assetId: 'a1', sourceId: 'A', start: 0, rate: 1, duration: 10 },
+        { assetId: 'a2', sourceId: 'A', start: 10.0005, rate: 1, duration: 10 },
+        { assetId: 'm1', sourceId: 'M', start: 0, rate: 1, duration: 100 }
+      ]
+    }
+    const cut = buildRoughCut([{ start: 0, end: 20, cameraId: 'A', reason: 'speaker' }], files)
+    const mainLen = cut.main.reduce((t, c) => t + (c.outPoint - c.inPoint) / c.speed, 0)
+    const mic = cut.audio.find((a) => a.sourceId === 'M')!
+    const micLen = mic.clips.reduce((t, c) => t + (c.outPoint - c.inPoint) / c.speed, 0)
+    expect(micLen).toBeCloseTo(mainLen, 6)
+  })
 })

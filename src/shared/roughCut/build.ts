@@ -106,8 +106,9 @@ export function buildRoughCut(
     const last = spans[spans.length - 1]
     // カメラを替えた所は、素材の秒 ↔ 共通の秒の変換の丸めで数μs 離れることがある(実測 1.47μs)。
     // 1μs で比べると時間の飛ぶカットと見なされ、そこを越えないテロップが言い終わる前に切れていた。
-    // 1ms 未満の隙間は時間が続いているものとしてつなぐ(1ms は 1 フレームよりずっと短い)
-    if (last && Math.abs(last.end - p.start) < 1e-3) last.end = p.end
+    // 丸めの大きさ(10μs 未満)だけつなぐ。それより大きい隙間(分割ファイルのつなぎ目の本当の隙間)は
+    // つながない(つなぐと、ピンマイクの声が本編より長く続き、隙間の後ろでずれる)
+    if (last && Math.abs(last.end - p.start) < 1e-5) last.end = p.end
     else spans.push({ timeline, start: p.start, end: p.end })
     timeline += p.end - p.start
   }

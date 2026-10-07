@@ -329,6 +329,10 @@ function normalizeRange(
   // 素材の終わりまで(尺が分からなければ最短の長さ)にし、素材の尺の中へ収める
   if (outPoint <= inPoint) {
     outPoint = assetDuration > inPoint ? assetDuration : inPoint + MIN_CLIP_SOURCE_DURATION
+  } else if (!(assetDuration > 0) || outPoint <= assetDuration + 1e-6) {
+    // 正しい区間はそのまま読む。最短の長さに広げると(仮編集がカメラのファイルの切れ目で作る
+    // 数フレームのクリップなど)、後ろの本編が全部遅れ、ピンマイクの声・自動の音とずれていた
+    return { inPoint, outPoint }
   }
   const r = clampSourceRange({ inPoint, outPoint }, inPoint, outPoint, assetDuration)
   return { inPoint: r.inPoint, outPoint: r.outPoint }
@@ -1198,13 +1202,16 @@ function buildInsertedClips(
   let elapsed = 0
   for (const c of project.clips) {
     const dur = clipDuration(c)
-    if (atTime >= elapsed + dur - 1e-6) {
+    const speed = c.speed || 1
+    // 分けると最短より短い切れ端ができる位置では、分けずにクリップの端へ寄せる(`splitClipAtTime` と同じ)
+    const headSrc = (atTime - elapsed) * speed
+    const tailSrc = c.outPoint - c.inPoint - headSrc
+    if (atTime >= elapsed + dur - 1e-6 || (headSrc > 0 && tailSrc < MIN_CLIP_SOURCE_DURATION)) {
       before.push(c)
-    } else if (atTime <= elapsed + 1e-6) {
+    } else if (atTime <= elapsed + 1e-6 || headSrc < MIN_CLIP_SOURCE_DURATION) {
       after.push(c)
     } else {
-      const speed = c.speed || 1
-      const splitLocal = c.inPoint + (atTime - elapsed) * speed
+      const splitLocal = c.inPoint + headSrc
       const firstHalf = { ...c, outPoint: splitLocal }
       const secondHalf = { ...c, id: splitId(c.id), inPoint: splitLocal, transitionIn: undefined }
       before.push(firstHalf)
@@ -2617,7 +2624,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         safePatch.endTime = Math.max(0, safePatch.endTime)
       }
       const nextStart = safePatch.startTime ?? current.startTime
-      if (safePatch.endTime !== undefined) safePatch.endTime = Math.max(nextStart, safePatch.endTime)
+      if (safePatch.endTime !== undefined)
+        safePatch.endTime = Math.max(nextStart, safePatch.endTime)
       else if (safePatch.startTime !== undefined && current.endTime < nextStart)
         safePatch.endTime = nextStart
 
@@ -4280,7 +4288,6 @@ function followMainEdit(
   // 差し込みの画があれば続ける(速さを戻して収録素材に戻ったとき、声を入れ直すため)
   if (before.length === 0) return next
   const after = followSpans(next.clips, info)
-  if (!before.some((x) => x.real) && !after.some((x) => x.real)) return next
   // 同じクリップどうし・残りは1回ずつ結ぶ(同じ素材の時刻を2回使った本編で、声が倍々に増えないように)
   const segs = clipTimelineMapping(before, after, splitAncestors)
   if (isIdentityMapping(segs, before, after)) return next

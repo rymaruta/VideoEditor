@@ -1561,6 +1561,58 @@ describe('本編の追従(再監査で見つかった所)', () => {
     expect(seTimes()).toEqual([25, 28])
   })
 
+  it('仮編集の数フレームのクリップがあっても、開き直して本編と声がずれない', () => {
+    setup([
+      [0, 9.95],
+      [9.95, 10],
+      [20, 30]
+    ])
+    const micBefore = micTrack().clips.map((c) => c.startTime)
+    const lastStart = (): number =>
+      st()
+        .project.clips.slice(0, -1)
+        .reduce((t, c) => t + (c.outPoint - c.inPoint), 0)
+    const before = lastStart()
+    st().loadProject(structuredClone(st().project), '/x/p.json')
+    expect(lastStart()).toBeCloseTo(before, 9)
+    expect(micTrack().clips.map((c) => c.startTime)).toEqual(micBefore)
+  })
+
+  it('クリップの端のすぐそばへ差し込んでも、最短より短い切れ端を作らない', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    st().insertClipAtTime('brollA', 0, 2, 9.95)
+    for (const c of st().project.clips) expect(c.outPoint - c.inPoint).toBeGreaterThanOrEqual(0.1)
+  })
+
+  it('カメラを全部速さを変えていても、差し込みの画の下の自動 SE は付いていく', () => {
+    setup([[0, 10]])
+    const cam = st().project.clips[0].id
+    st().insertClipAtTime('brollA', 0, 3, 10)
+    st().updateClipSpeed(cam, 2)
+    S.setState({
+      project: {
+        ...st().project,
+        audioTracks: [
+          ...st().project.audioTracks,
+          {
+            ...micTrack(),
+            id: 'se',
+            name: 'SE',
+            multicamSourceId: undefined,
+            autoRole: 'se',
+            clips: [{ id: 's1', assetId: 'seA', startTime: 6, inPoint: 0, outPoint: 0.5 }]
+          }
+        ]
+      }
+    })
+    st().updateClipTrim(cam, 0, 8)
+    const se = st().project.audioTracks.find((t) => t.id === 'se')!
+    expect(se.clips[0].startTime).toBeCloseTo(5, 9)
+  })
+
   it('速さを変えて外れた声は、速さを戻すと戻る', () => {
     setup([[0, 10]])
     const id = st().project.clips[0].id
