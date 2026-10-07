@@ -1,4 +1,4 @@
-import type { TextOverlay, TextStyle } from '../types'
+import type { EditedTelop, TextOverlay, TextStyle } from '../types'
 import { TELOP_TEMPLATES } from './templates'
 import { hudStackBase, stackSimultaneousTelops, stackedBottomTelops } from './stack'
 
@@ -215,4 +215,38 @@ export function restyleSpeechTelops(
     const same = JSON.stringify(a.style.customPosition) === JSON.stringify(o.style.customPosition)
     return restyled.has(i) || !same ? a : o
   })
+}
+
+/**
+ * 覚えておいた人の修正(場面を落として今タイムラインに無い発言テロップのもの)にも、発言テロップの
+ * 見た目の選び直しを当てる(`restyleSpeechTelops` と同じ決まり)。場面を戻して作り直したとき、
+ * 文字だけ直した枚が前の見た目で戻ってこないように
+ */
+export function restyleEditedSpeech(
+  edited: Readonly<Record<string, EditedTelop>> | undefined,
+  prev: { style: TextStyle; styleId?: string },
+  next: { style: TextStyle; styleId?: string },
+  styles: readonly TelopStyleDef[]
+): Record<string, EditedTelop> | undefined {
+  if (!edited) return edited
+  const prevKey = lookKey(prev.style)
+  let changed = false
+  const out: Record<string, EditedTelop> = {}
+  for (const [key, e] of Object.entries(edited)) {
+    const following =
+      key.startsWith('u:') &&
+      !styleForSpeaker(styles, e.speaker) &&
+      (prev.styleId ? e.styleId === prev.styleId : !e.styleId && lookKey(e.style) === prevKey)
+    if (!following) {
+      out[key] = e
+      continue
+    }
+    changed = true
+    out[key] = {
+      ...e,
+      style: applyLook(e.style, next.style, { keepPlacement: true }),
+      styleId: next.styleId
+    }
+  }
+  return changed ? out : edited
 }

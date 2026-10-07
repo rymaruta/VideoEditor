@@ -50,8 +50,10 @@ export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
       ...n,
       text: mine.text,
       style: mine.style,
-      ...(mine.styleId !== undefined ? { styleId: mine.styleId } : {}),
-      ...(mine.speaker !== undefined ? { speaker: mine.speaker } : {}),
+      // スタイルとのつながり・話者も人の修正のとおり(見た目を手で替えてスタイルから外したもの、
+      // 話者を消したものを、作り直しでつなぎ直さない。覚えておいた修正はいつも両方を写している)
+      styleId: mine.styleId,
+      speaker: mine.speaker,
       // 文字を直していれば、単語ごとの時刻(カラオケ表示)は合わなくなるので外す
       words: sameText ? n.words : undefined,
       edited: true

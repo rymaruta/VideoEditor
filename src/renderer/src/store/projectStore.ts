@@ -33,7 +33,12 @@ import type { RoughCut } from '@shared/roughCut/build'
 import { toCommon, type MulticamInfo, type MulticamSource } from '@shared/sync/multicam'
 import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
-import { restyleOverlays, restyleSpeechTelops, type TelopStyleDef } from '@shared/telop/styles'
+import {
+  restyleEditedSpeech,
+  restyleOverlays,
+  restyleSpeechTelops,
+  type TelopStyleDef
+} from '@shared/telop/styles'
 import { replaceInTelop } from '@shared/telop/srt'
 import { create, type StateCreator } from 'zustand'
 import { v4 as uuid } from 'uuid'
@@ -3173,8 +3178,13 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       textCanvasSize(state.project.aspectRatio).h
     )
     const changed = updated.filter((o, i) => o !== state.project.textOverlays[i]).length
-    if (changed > 0)
-      set({ ...pushHistory(state), project: { ...state.project, textOverlays: updated } })
+    // 場面を落として今タイムラインに無い、人が直した発言テロップにも当てる
+    const editedTelops = restyleEditedSpeech(state.project.editedTelops, prev, next, styles)
+    if (changed > 0 || editedTelops !== state.project.editedTelops)
+      set({
+        ...pushHistory(state),
+        project: { ...state.project, textOverlays: updated, editedTelops }
+      })
     return changed
   },
 
