@@ -1212,6 +1212,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           if (!asset) return
           const dur = trackClip.outPoint - trackClip.inPoint
           if (dur <= 0) return
+          // 本編の終わりより後に始まる音は鳴らない(下で本編の終わりで切るので、長さが無くなる)
+          if (toExportTime(trackClip.startTime) >= totalDuration - 1e-6) return
           command
             .input(asset.filePath)
             .inputOptions([`-ss ${ffSeconds(trackClip.inPoint)}`, `-t ${ffSeconds(dur)}`])
@@ -1248,7 +1250,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             trackClip.startTime,
             trackClip.startTime + timelineDur
           )
-          const exportDur = clipEndExport - clipStartExport
+          // 本編の終わりより先に続く音(BGM など)は本編の終わりで切れるので、フェードアウトも
+          // 本編の終わりに掛ける(区間ごとの書き出しと同じ。掛けないと全音量のまま切れる)
+          const exportDur = Math.min(clipEndExport, totalDuration) - clipStartExport
           // 引き算の誤差(1e-16 の桁)で切りにいかないための余裕。ここより短い差は
           // 音として存在しないので、繋ぎをまたがない今までの書き出しは1バイトも変わらない。
           const TRIM_EPSILON = 1e-6

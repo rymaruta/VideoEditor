@@ -20,6 +20,8 @@ import { describeFfmpegExit } from './ffmpegError'
 import {
   AUDIO_FORMAT,
   OUTPUT_SAMPLE_RATE,
+  RESAMPLE_SPEED_LIMIT,
+  audioSpeedChain,
   crfForQuality,
   ffmpegPath,
   ffSeconds,
@@ -28,6 +30,9 @@ import {
   type LoudnessMeasurement
 } from './ffmpegService'
 import { measureWideAdvances } from './fontMetrics'
+
+/** 速さを変えた音を、アイテムの終わりより先に読む長さ(秒) */
+const STRETCH_TAIL_SEC = 0.5
 import {
   buildSegmentAudioGraph,
   buildSegmentVideoGraph,
@@ -362,7 +367,59 @@ export async function exportSequenceSegmented(
       writeFileSync(assPath, buildAssContent(overlays, canvas.w, canvas.h, wideEmByFont), 'utf-8')
     }
 
-    const ctx: GraphContext = { sequence: seq, assetsById, audioChannels, assPath, telopLayer }
+    // 速さを変えた音(atempo で伸び縮みさせるもの)は、先に1回だけ伸び縮みさせて WAV に書く。
+    // 区間ごとに atempo を掛けると、区間の境目で波形がつながらず「プツッ」と鳴る(atempo の出力は
+    // 読み始めの位置で変わる)。区間ごとに頭から読み直すと、長いクリップで読む量が長さの2乗で増える
+    const stretched = new Map<string, string>()
+    for (const t of seq.audioTracks) {
+      if (t.muted) continue
+      for (const item of t.items) {
+        const speed = item.speed > 0 ? item.speed : 1
+        if (Math.abs(speed - 1) <= RESAMPLE_SPEED_LIMIT) continue
+        const asset = assetsById.get(item.assetId)
+        if (!asset?.hasAudio) continue
+        // 区間の終わりの少し先まで(atempo は入力の終わりで出し方が変わる)
+        const want = (frameToSeconds(seq, item.durationFrames) + STRETCH_TAIL_SEC) * speed
+        const read =
+          item.sourceOut !== undefined && item.sourceOut > item.sourceIn
+            ? Math.min(want, item.sourceOut - item.sourceIn)
+            : want
+        const out = join(work, `stretch_${stretched.size}.wav`)
+        await runFfmpeg(
+          [
+            '-v',
+            'error',
+            '-ss',
+            ffSeconds(item.sourceIn),
+            '-t',
+            ffSeconds(read),
+            '-i',
+            asset.filePath,
+            '-vn',
+            '-af',
+            audioSpeedChain(speed),
+            '-c:a',
+            'pcm_f32le',
+            '-ar',
+            String(OUTPUT_SAMPLE_RATE),
+            out
+          ],
+          signal
+        )
+        stretched.set(item.id, out)
+        const ch = audioChannels.get(asset.filePath)
+        if (ch !== undefined) audioChannels.set(out, ch)
+      }
+    }
+
+    const ctx: GraphContext = {
+      sequence: seq,
+      assetsById,
+      audioChannels,
+      assPath,
+      telopLayer,
+      stretched
+    }
     const encodeArgs = videoEncodeArgs(encoder, quality, fps)
     const threadsPerJob =
       encoder === 'libx264' ? Math.max(1, Math.floor(cpus().length / parallel)) : 0

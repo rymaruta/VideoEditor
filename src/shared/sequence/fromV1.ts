@@ -67,6 +67,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
   const mainItems: MediaItem[] = []
   const mainAudioItems: AudioItem[] = []
   let prevEndFrame = 0
+  let prevClipId: string | undefined
+  let pendingFadeIn = 0
   mainClips.forEach((clip, i) => {
     // 両端を**別々に**丸める。始まりを丸めてから尺のフレーム数を足すと、繋ぎの秒数が
     // フレームに乗っていないときに終わりが1フレームずれ、繋ぎの無い次のクリップと重なる。
@@ -97,8 +99,18 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
       item.transitionIn = { type: clip.transitionIn.type, durationFrames: overlapFrames }
     }
     mainItems.push(item)
+    const hasMainAudio = Boolean(assetById.get(clip.assetId)?.hasAudio && !clip.audioDetached)
+    // 繋ぎ(クロスフェード)の相手に本編の音が無い(静止画・音を分離したクリップ)なら、音のある側を
+    // 繋ぎの長さで消す/出す(標準の書き出しは acrossfade で無音へ溶ける。区間ごとの書き出しは
+    // 相手が居ないと繋ぎにならず、ぶつっと切れて・始まっていた)
+    if (item.transitionIn) {
+      const prevAudio = mainAudioItems[mainAudioItems.length - 1]
+      const prevHadAudio = prevAudio !== undefined && prevAudio.linkedItemId === prevClipId
+      if (prevHadAudio && !hasMainAudio) prevAudio.fadeOutFrames = overlapFrames
+      if (!prevHadAudio && hasMainAudio) pendingFadeIn = overlapFrames
+    }
     // 本編の音は映像と同じ位置で鳴る(分離したクリップは音声トラック側に居るので除く)
-    if (assetById.get(clip.assetId)?.hasAudio && !clip.audioDetached) {
+    if (hasMainAudio) {
       mainAudioItems.push({
         kind: 'audio',
         id: `${clip.id}:audio`,
@@ -109,9 +121,12 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         sourceOut: clip.outPoint,
         speed: clip.speed || 1,
         origin: 'manual',
-        linkedItemId: clip.id
+        linkedItemId: clip.id,
+        ...(pendingFadeIn > 0 ? { fadeInFrames: pendingFadeIn } : {})
       })
     }
+    pendingFadeIn = 0
+    prevClipId = clip.id
     prevEndFrame = startFrame + durationFrames
   })
 

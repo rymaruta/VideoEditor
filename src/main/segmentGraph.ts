@@ -62,6 +62,12 @@ export interface GraphContext {
    * **あるときは ASS より優先する**(画面と同じ絵になるのはこちら)
    */
   telopLayer?: { runs: TelopLayerPayload['runs']; imagePaths: readonly string[] }
+  /**
+   * 速さを変えた音のアイテム(id)→ 速さを当てた後の音を先に書いた WAV(頭 = アイテムの頭)。
+   * 区間ごとに atempo を掛けると、区間の境目で波形がつながらない(読み始めで atempo の出力が変わる)。
+   * 先に1回だけ伸び縮みさせておき、どの区間もそれを等倍で読む
+   */
+  stretched?: ReadonlyMap<string, string>
 }
 
 /** ffmpeg に渡すフレームレートの表記(29.97 は `30000/1001`) */
@@ -376,9 +382,6 @@ export interface SegmentAudioGraph extends SegmentGraph {
  * ダッキングの圧縮器は直前の音量で状態を持つので、区間の頭から鳴らすと
  * 境目ごとに BGM が一瞬だけ戻る。
  */
-/** 速さを変えた音を、区間の終わりより先に読む長さ(秒) */
-const SPEED_TAIL_SEC = 0.5
-
 export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): SegmentAudioGraph {
   const seq = ctx.sequence
   const sec = (frames: number): number => frameToSeconds(seq, frames)
@@ -473,35 +476,26 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       const visEnd = Math.min(item.startFrame + item.durationFrames, renderEnd)
       const skipSec = sec(visStart - item.startFrame)
       const dur = sec(visEnd - visStart)
-      /**
-       * **速さを変えた音は、どの区間でもアイテムの頭から読む。**
-       * atempo の出力は読み始めの位置で変わる(音を切り貼りして伸び縮みさせるので、どこから
-       * 始めたかで切れ目の位置がずれる)。区間ごとに違う所から読むと、隣の区間と波形がつながらず、
-       * 区間の境目で「プツッ」と鳴る(実測: 1.25 倍の 440Hz で、境目に振幅 0.17 の段差。
-       * 標準の書き出しは頭から読むので段差なし)。頭から読み、速さを掛けた後で要る所だけ切る
-       */
-      const fromHead = Math.abs(speed - 1) > 1e-9
-      const lead = fromHead ? skipSec : 0
-      const seek = item.sourceIn + (skipSec - lead) * speed
-      // 終わりも少し先まで読む(atempo は入力の終わりで出し方が変わり、区間の終わりの直前が乱れる)
-      const want = (dur + lead + (fromHead ? SPEED_TAIL_SEC : 0)) * speed
+      // 速さを変えた音は、先に1回だけ伸び縮みさせた WAV を等倍で読む(`GraphContext.stretched`)
+      const stretchedPath = ctx.stretched?.get(item.id)
+      const seek = stretchedPath ? skipSec : item.sourceIn + skipSec * speed
+      const readSpeed = stretchedPath ? 1 : speed
       inputs.push({
-        path: asset.filePath,
+        path: stretchedPath ?? asset.filePath,
         seek,
         // 出点の先は読まない(足りないぶんは下の apad で無音になる)
         duration:
-          item.sourceOut !== undefined && item.sourceOut > seek
-            ? Math.min(want, item.sourceOut - seek)
-            : want
+          !stretchedPath && item.sourceOut !== undefined && item.sourceOut > seek
+            ? Math.min(dur * speed, item.sourceOut - seek)
+            : dur * readSpeed
       })
       const idx = inputs.length - 1
       const label = newLabel('a')
       const delay = frameToSample(seq, visStart) - frameToSample(seq, renderStart)
       parts.push(
-        `[${idx}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
-          (lead > 0 ? `atrim=start=${num(lead)},asetpts=PTS-STARTPTS,` : '') +
+        `[${idx}:a]${audioSpeedChain(readSpeed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
           `apad,atrim=0:${num(dur)},asetpts=PTS-STARTPTS,` +
-          `${audioFormatFor(ctx.audioChannels?.get(asset.filePath))},` +
+          `${audioFormatFor(ctx.audioChannels?.get(stretchedPath ?? asset.filePath))},` +
           `${envelope(item, track.items, audioClipGain(track.volume, item.volume), skipSec)},` +
           `adelay=${delay}S:all=1,${AUDIO_FORMAT}[${label}]`
       )

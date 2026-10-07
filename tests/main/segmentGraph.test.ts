@@ -478,3 +478,28 @@ describe('segmentRenderer の小物', () => {
     expect(encoderLabel('libx264')).toBe('CPU: x264')
   })
 })
+
+describe('速さを変えた音は、先に伸び縮みさせた WAV を等倍で読む', () => {
+  it('どの区間も、自分の区間のぶんだけを WAV から読む(頭から読み直さない)', () => {
+    const seq = sequence({
+      audioTracks: [
+        {
+          id: 't',
+          name: 't',
+          muted: false,
+          volume: 1,
+          duckingEnabled: false,
+          items: [audio('s', 0, 30 * 600, { speed: 1.25, sourceIn: 10 })]
+        }
+      ]
+    } as never)
+    const ctx = ctxOf(seq, { stretched: new Map([['s', '/w/stretch_0.wav']]) })
+    const g = buildSegmentAudioGraph(ctx, seg(30 * 300, 30 * 390, 3))
+    expect(g.inputs).toHaveLength(1)
+    expect(g.inputs[0].path).toBe('/w/stretch_0.wav')
+    // 区間の頭(前に読む余白を含む)からの秒を、等倍で読む。読む長さは区間の長さほど
+    expect(g.inputs[0].seek).toBeGreaterThan(290)
+    expect(g.inputs[0].duration).toBeLessThan(100)
+    expect(g.filter).not.toContain('atempo')
+  })
+})

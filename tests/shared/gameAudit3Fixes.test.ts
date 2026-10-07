@@ -95,9 +95,9 @@ describe('標準の書き出しがコマンドラインに収まるか', () => {
     expect(standardExportFits(project(3, 100), 'win32').fits).toBe(true)
     // 消音のトラックは数えない
     expect(standardExportFits(project(3, 100), 'win32').inputs).toBe(3 * 2 + 3 * 7)
-    // 一度に開く入力が多すぎれば、どの OS でも収まらない
-    expect(standardExportFits(project(60, 10), 'linux').fits).toBe(false)
-    expect(standardExportFits(project(20, 10), 'linux').fits).toBe(true)
+    // 一度に開く入力が多すぎれば(メモリが足りなくなる)、どの OS でも収まらない
+    expect(standardExportFits(project(10, 10), 'linux').fits).toBe(false)
+    expect(standardExportFits(project(6, 10), 'linux').fits).toBe(true)
   })
 })
 
