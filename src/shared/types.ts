@@ -27,6 +27,12 @@ export interface MediaAsset {
    * 外せば `filePath` をこれに戻す。差し替えた音声(キャッシュ)が無ければ、開いたときに自動で元へ戻す。
    */
   denoisedFrom?: string
+  /**
+   * ノイズを除いた音声に差し替える前の、元の録音のプレビュー用プロキシ。差し替えている間は
+   * `proxyPath` を外す(元の録音から作ったプロキシのままだと、プレビューだけノイズのある音が鳴る)。
+   * 元へ戻すときに `proxyPath` に戻す
+   */
+  proxyBeforeDenoise?: string
   /** 静止画(PNG など)。ワイプ・全面(CG)のトラックにだけ置ける。書き出しは同じ画を流し続ける */
   still?: boolean
 }

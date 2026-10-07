@@ -219,7 +219,11 @@ function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
     still: raw.still === true ? true : undefined,
     colorMatch: normalizeColorMatch(raw.colorMatch),
     denoisedFrom:
-      typeof raw.denoisedFrom === 'string' && raw.denoisedFrom ? raw.denoisedFrom : undefined
+      typeof raw.denoisedFrom === 'string' && raw.denoisedFrom ? raw.denoisedFrom : undefined,
+    proxyBeforeDenoise:
+      typeof raw.proxyBeforeDenoise === 'string' && raw.proxyBeforeDenoise && raw.denoisedFrom
+        ? raw.proxyBeforeDenoise
+        : undefined
   }
 }
 
@@ -3077,11 +3081,25 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         if (cleaned) {
           if (a.filePath === cleaned) return a
           changed = true
-          return { ...a, filePath: cleaned, denoisedFrom: a.denoisedFrom ?? a.filePath }
+          // プレビューのプロキシは差し替える前の録音から作ったもの。残すとプレビューだけノイズのある音が鳴る
+          // (ノイズを除いた音声は FLAC で、そのまま再生できる)。元へ戻すときのために覚えておく
+          return {
+            ...a,
+            filePath: cleaned,
+            denoisedFrom: a.denoisedFrom ?? a.filePath,
+            proxyPath: undefined,
+            proxyBeforeDenoise: a.denoisedFrom ? a.proxyBeforeDenoise : a.proxyPath
+          }
         }
         if (!a.denoisedFrom) return a
         changed = true
-        return { ...a, filePath: a.denoisedFrom, denoisedFrom: undefined }
+        return {
+          ...a,
+          filePath: a.denoisedFrom,
+          denoisedFrom: undefined,
+          proxyPath: a.proxyBeforeDenoise,
+          proxyBeforeDenoise: undefined
+        }
       })
       if (!changed) return state
       return {

@@ -4,6 +4,7 @@ import type { Project, TextOverlay } from '@shared/types'
 import { defaultTextStyle } from '@shared/textStyle'
 import type { PlacedSound } from '@shared/finish/sound'
 import { audioClipDuration } from '@renderer/lib/timelineMath'
+import { previewSourcePath } from '@renderer/lib/previewSource'
 import { seeded } from '../helpers/boundary'
 
 const S = useProjectStore
@@ -729,6 +730,16 @@ describe('ノイズ除去・色合わせの差し替え', () => {
     expect(asset('M').denoisedFrom).toBeUndefined()
     st().undo()
     expect(asset('M').filePath).toBe('/cache/m-clean2.flac')
+  })
+
+  it('プレビュー用のプロキシがあっても、差し替えた後はノイズを除いた音声をプレビューする。戻すとプロキシも戻る', () => {
+    st().setAssetProxyPath('M', '/proxies/m.mp4')
+    st().setAssetsDenoised({ M: '/cache/m-clean.flac' })
+    expect(previewSourcePath(asset('M'))).toBe('/cache/m-clean.flac')
+    st().setAssetsDenoised({ M: '/cache/m-clean2.flac' })
+    st().setAssetsDenoised({ M: null })
+    expect(previewSourcePath(asset('M'))).toBe('/proxies/m.mp4')
+    expect(asset('M').proxyBeforeDenoise).toBeUndefined()
   })
 
   it('開いたときの自動の戻しは、元に戻すの履歴に積まない', () => {

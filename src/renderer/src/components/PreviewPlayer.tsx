@@ -1073,8 +1073,14 @@ export function PreviewPlayer(): React.JSX.Element {
     const active = el === videoRef.current
     if (kind === 'loaded') return active ? handleLoadedMetadata() : handleStandbyLoaded(el)
     if (!active) return
-    if (kind === 'ended') setIsPlaying(false)
-    else handleVideoError()
+    if (kind === 'ended') {
+      // 素材の終わりまで使うクリップは、毎フレームの確かめ(出点の 20ms 手前)より先に
+      // 終わりの通知が来ることがある(速さ 2 倍・フレームが遅れたとき)。そこで止めず、次のクリップへ進む
+      const tc = activeTimedClipRef.current
+      const next = tc ? nextTimedClip(timedClips, tc) : null
+      if (next) loadClipForTime(next.start, true)
+      else setIsPlaying(false)
+    } else handleVideoError()
   }
 
   /** 控えの要素が読み込み終わった: 用意したい位置へ */
@@ -1239,7 +1245,7 @@ export function PreviewPlayer(): React.JSX.Element {
         setPlayheadTime(globalTime)
         prepareStandby(tc, globalTime)
 
-        if (video.currentTime >= tc.clip.outPoint - 0.02) {
+        if (video.ended || video.currentTime >= tc.clip.outPoint - 0.02) {
           const next = nextTimedClip(timedClips, tc)
           if (next) {
             loadClipForTime(next.start, isPlaying)
