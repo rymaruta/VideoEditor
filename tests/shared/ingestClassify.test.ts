@@ -133,6 +133,24 @@ describe('classifyFootage', () => {
     ).toHaveLength(2)
   })
 
+  it('カメラごとのフォルダに写したカード(CamA/DCIM と CamB/DCIM)は、時刻が続いていても別のカメラ', () => {
+    const sources = classifyFootage([
+      file('CamA/DCIM/100CANON/MVI_0001.MP4', { device: 'Canon R6', recordedAt: 0, duration: 600 }),
+      file('CamB/DCIM/100CANON/MVI_0001.MP4', {
+        device: 'Canon R6',
+        recordedAt: 700,
+        duration: 600
+      })
+    ])
+    expect(sources).toHaveLength(2)
+    // 読み込んだフォルダの直下に写したカードと、別のカードのフォルダ: 名前の頭に「・」を付けない
+    for (const s of classifyFootage([
+      file('DCIM/100CANON/MVI_0001.MP4', { device: 'X', recordedAt: 0, duration: 600 }),
+      file('Card2/DCIM/100CANON/MVI_0001.MP4', { device: 'X', recordedAt: 700, duration: 600 })
+    ]))
+      expect(s.basis).not.toMatch(/フォルダ ・|・$/)
+  })
+
   it('録音機が撮るたびに作るフォルダ(ZOOM0001 → 0002)の同じトラックは、1人のマイクにまとめる', () => {
     const mic = (take: number, tr: number): ProbedFile =>
       file(`ZOOM/ZOOM000${take}/ZOOM000${take}_Tr${tr}.WAV`, {

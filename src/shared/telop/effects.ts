@@ -1,5 +1,6 @@
 import type { TextStyle } from '../types'
 import { defaultTextStyle } from '../textStyle'
+import { AUTO_TRACK_NAME, STREAMER_SPEAKER } from '../ingest/tracks'
 
 /**
  * 演出テロップ(計画書 §5.8): ツッコミ・心の声・状況説明・地名・コーナー名・強調・擬音・注釈・人物紹介。
@@ -813,7 +814,16 @@ export function nameProposals(lines: readonly EffectLine[]): EffectProposal[] {
   const out: EffectProposal[] = []
   for (const l of [...lines].sort((a, b) => a.start - b.start)) {
     const name = l.speaker?.trim()
-    if (!name || name === '?' || DEFAULT_NAME.test(name) || seen.has(name)) continue
+    // 自動で付けた名前(マイク1・配信者・声(トラック2))は人の名前ではないので、名前スーパーにしない
+    if (
+      !name ||
+      name === '?' ||
+      DEFAULT_NAME.test(name) ||
+      name === STREAMER_SPEAKER ||
+      AUTO_TRACK_NAME.test(name) ||
+      seen.has(name)
+    )
+      continue
     seen.add(name)
     out.push({
       id: `name-${name}`,

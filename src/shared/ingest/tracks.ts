@@ -217,3 +217,9 @@ export function mixResidual(mix: Float32Array, others: readonly Float32Array[]):
   }
   return out
 }
+
+/** 全部入りにだけある声(配信者の実況)の発言の話者名(全部入りに人の名前を付けていなければ) */
+export const STREAMER_SPEAKER = '配信者'
+
+/** 取り出したトラックに自動で付けた名前(「全部入り(トラック1)」「声(トラック2)」)。人の名前ではない */
+export const AUTO_TRACK_NAME = /[((]トラック\s*\d+[))]$/

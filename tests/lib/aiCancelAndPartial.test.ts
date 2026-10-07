@@ -57,3 +57,47 @@ describe('自動編集の中止', () => {
     expect(called.sort()).toEqual(['asr', 'denoise', 'events', 'llm', 'sync'])
   })
 })
+
+describe('仮編集の作り直しの中止', () => {
+  it('動いていた工程を「中止しました」に戻し、済んだ工程(アングル)に失敗の印を付けない', async () => {
+    const { useProjectStore } = await import('@renderer/store/projectStore')
+    const stub = (): Promise<void> => Promise.resolve()
+    ;(globalThis as unknown as { window: unknown }).window = {
+      api: {
+        syncCancel: stub,
+        asrCancel: stub,
+        eventsCancel: stub,
+        llmCancel: stub,
+        denoiseCancel: stub,
+        setBusyState: () => {},
+        notifyDone: () => {},
+        // 音の大きさを読んでいる間に「中止」を押す
+        footageEnvelopes: async () => {
+          usePipelineStore.getState().cancel()
+          throw new Error('LLM_CANCELED')
+        }
+      }
+    }
+    useProjectStore.getState().newProject()
+    useProjectStore.setState({
+      project: {
+        ...useProjectStore.getState().project,
+        multicam: {
+          anchorSourceId: 'cam',
+          sources: [{ id: 'cam', name: 'カメラA', kind: 'camera' }],
+          files: [{ assetId: 'C', sourceId: 'cam', start: 0, rate: 1, duration: 30 }]
+        }
+      }
+    })
+    const steps = usePipelineStore.getState().steps
+    usePipelineStore.setState({
+      scenes: [{ id: 's1', start: 0, end: 30, lines: [], speech: 0 }],
+      steps: { ...steps, angles: { state: 'done', percent: 100 } }
+    })
+    await usePipelineStore.getState().rebuildRoughCut()
+    const after = usePipelineStore.getState().steps
+    expect(after.angles.state).toBe('done')
+    expect(after.cut).toMatchObject({ state: 'wait', note: '中止しました' })
+    expect(Object.values(after).some((s) => s.state === 'run' || s.state === 'error')).toBe(false)
+  })
+})

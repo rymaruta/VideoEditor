@@ -67,7 +67,13 @@ import {
 import { roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mapTimelineRange, timelineMapping } from '@shared/roughCut/follow'
 import { formatIpcError } from '../lib/ipcError'
-import { mixHasUnaccountedSound, mixResidual } from '@shared/ingest/tracks'
+import {
+  AUTO_TRACK_NAME,
+  mixHasUnaccountedSound,
+  mixResidual,
+  STREAMER_SPEAKER
+} from '@shared/ingest/tracks'
+export { STREAMER_SPEAKER }
 import { emitMenuCommand } from '../lib/menuCommands'
 import {
   activityMask,
@@ -512,7 +518,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           mics.length === 0
             ? undefined
             : mixSpeakers.has(j.turn.micId)
-              ? STREAMER_SPEAKER
+              ? streamerName(nameOf.get(j.turn.micId))
               : nameOf.get(j.turn.micId),
         sourceStart: j.job.start,
         sourceEnd: j.job.end,
@@ -612,6 +618,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           )
       })
       useProjectStore.getState().setAssetsDenoised(changes)
+      if (runCanceled) {
+        setStep('denoise', { state: 'wait', note: '中止しました' })
+        return
+      }
       const done = Object.keys(changes).length
       setStep('denoise', {
         state: done > 0 ? 'done' : 'error',
@@ -621,6 +631,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       log(`ピンマイクのノイズ除去: ${done} 本(素材一覧の右クリックで外せます)`)
     } catch (e) {
       const msg = formatIpcError(e)
+      // 中止したときは失敗ではない(工程の一覧に失敗の印を残さない。この後の工程へは進まない)
+      if (isCanceled(msg)) {
+        setStep('denoise', { state: 'wait', note: '中止しました' })
+        return
+      }
       setStep('denoise', { state: 'error', note: msg })
       log(`ピンマイクのノイズ除去ができませんでした(元の録音のまま): ${msg}`)
     } finally {
@@ -1338,8 +1353,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       try {
         await buildAndApply()
       } catch (e) {
-        setStep('angles', { state: 'error', note: formatIpcError(e) })
-        log(`仮編集を作り直せませんでした: ${formatIpcError(e)}`)
+        const msg = formatIpcError(e)
+        // 中止した(このPCの AI の提案を止めた など)なら、動いていた工程を「中止しました」に戻す。
+        // 済んでいた工程(アングル)に失敗の印を付けない
+        const current = REBUILD_STEPS.find((id) => get().steps[id].state === 'run')
+        if (isCanceled(msg)) {
+          if (current) setStep(current, { state: 'wait', note: '中止しました' })
+          log('仮編集の作り直しを中止しました')
+        } else {
+          setStep(current ?? 'angles', { state: 'error', note: msg })
+          log(`仮編集を作り直せませんでした: ${msg}`)
+        }
       } finally {
         set({ running: false })
       }
@@ -1689,8 +1713,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             'placement'
           ] as StepId[]
         ).find((id) => get().steps[id].state === 'run')
-        const canceled =
-          runCanceled || /ASR_CANCELED|LLM_CANCELED|DENOISE_CANCELED|PIPELINE_CANCELED/.test(msg)
+        const canceled = isCanceled(msg)
         if (current)
           setStep(current, {
             state: canceled ? 'wait' : 'error',
@@ -1799,12 +1822,23 @@ let runCanceled = false
 function stopIfCanceled(): void {
   if (runCanceled) throw new Error('PIPELINE_CANCELED')
 }
+/** 中止を押した、または中止で止まった処理の知らせか */
+function isCanceled(message: string): boolean {
+  return runCanceled || /ASR_CANCELED|LLM_CANCELED|DENOISE_CANCELED|PIPELINE_CANCELED/.test(message)
+}
+/** 仮編集の作り直しで動く工程(中止・失敗したとき、動いていたものを探す順) */
+const REBUILD_STEPS: StepId[] = ['effects', 'sound', 'timeline', 'cut', 'angles', 'placement']
 /** 通話のトラックの声のうち、1人ずつのマイクに入っている割合がこれ以上なら、同じ声とみなす */
 const SAME_VOICE_COVERAGE = 0.7
 /** 別に録ったマイクの人が話している所の前後、全部入りを話者の判定に使わない幅(秒) */
 const MIX_MASK_PAD_SEC = 0.2
-/** 全部入りにだけある声(配信者の実況)の発言の話者名 */
-export const STREAMER_SPEAKER = '配信者'
+/**
+ * 全部入りの残り(配信者の声)の発言の話者名。全部入りに人が名前を付けていればその名前、
+ * 自動の名前(「全部入り(トラック1)」)のままなら「配信者」
+ */
+function streamerName(sourceName: string | undefined): string {
+  return sourceName && !AUTO_TRACK_NAME.test(sourceName) ? sourceName : STREAMER_SPEAKER
+}
 /** 収録フォルダを読むたびに増やす(古い読み込みの結果を捨てるため) */
 let scanToken = 0
 usePipelineStore.subscribe((s, prev) => {

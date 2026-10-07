@@ -117,6 +117,15 @@ describe('演出テロップの提案', () => {
     ])
   })
 
+  it('ゲーム実況の自動の話者名(配信者・声(トラック2))には人物紹介を出さない', () => {
+    const r = nameProposals([
+      { id: 'a', speaker: '配信者', text: 'あ', start: 1 },
+      { id: 'b', speaker: '声(トラック2)', text: 'い', start: 2 },
+      { id: 'c', speaker: 'tomo', text: 'う', start: 3 }
+    ])
+    expect(r.map((p) => p.text)).toEqual(['tomo'])
+  })
+
   it('注釈・人物紹介には SE を付けない', () => {
     const kit = {
       se: { ツッコミ: [{ path: '/se/a.wav', name: 'a', duration: 1 }] },

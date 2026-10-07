@@ -86,6 +86,25 @@ function cardRoot(folder: string): string {
   return i < 0 ? folder : parts.slice(0, i).join('/')
 }
 
+/** カードのフォルダらしい名前(Card1・SD_02・Roll3・カード2) */
+const CARD_NAME = /^(card|sd|cf|cfexpress|roll|reel|disk|mag|カード)[\s_-]*\d+$/i
+
+/**
+ * カードを丸ごと写した2つのフォルダが、1台のカメラのカードを替えたものか
+ * (CamA/Card1/DCIM/100CANON と CamA/Card2/DCIM/100CANON)。カードのフォルダの親が同じで、
+ * 親が無い(読み込んだフォルダの直下)ときはカードのフォルダの名前がカードらしいときだけ
+ * (CamA/DCIM と CamB/DCIM は別々のカメラ)
+ */
+function sameCameraCards(a: string, b: string): boolean {
+  const ra = cardRoot(a)
+  const rb = cardRoot(b)
+  if (ra === a || rb === b || ra === rb || !ra || !rb) return false
+  if (parentOf(ra) !== parentOf(rb)) return false
+  if (parentOf(ra) !== '') return true
+  const last = (f: string): string => f.split('/').pop() ?? ''
+  return CARD_NAME.test(last(ra)) && CARD_NAME.test(last(rb))
+}
+
 /** ファイル名の、撮った回の番号より後ろ(ZOOM0001_Tr1 → TR1。同じ録音機の何本目のトラックか) */
 function trackTag(fileName: string): string {
   const base = fileName.normalize('NFKC').replace(/\.[^.]+$/, '')
@@ -189,11 +208,11 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
   const camChains: { group: (typeof camGroups)[number]['g']; parent: string; end: number }[] = []
   for (const c of camGroups) {
     // カードを丸ごと写したフォルダ(CamA/Card1/DCIM/100CANON と CamA/Card2/DCIM/100CANON)は、
-    // カードのフォルダの親(CamA)で比べる
-    const parent = parentOf(cardRoot(c.g.folder))
+    // カードのフォルダどうしで比べる(sameCameraCards)
+    const parent = parentOf(c.g.folder)
     const chain = camChains.find(
       (x) =>
-        x.parent === parent &&
+        (x.parent === parent || sameCameraCards(x.group.folder, c.g.folder)) &&
         x.group.device === c.g.device &&
         x.group.prefix === c.g.prefix &&
         x.end <= c.range[0] + 1
@@ -264,7 +283,11 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
     const last = (f: string): string => f.split('/').pop() ?? ''
     const names = folders.map(last)
     const folderName = [
-      ...new Set(new Set(names).size < names.length ? folders.map((f) => last(cardRoot(f))) : names)
+      ...new Set(
+        new Set(names).size < names.length
+          ? folders.map((f) => last(cardRoot(f)) || last(f))
+          : names
+      )
     ].join('・')
     const detail = g.prefix || g.device || ''
     const basis =
