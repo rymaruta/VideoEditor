@@ -64,7 +64,14 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
     const auto = o.styleId ? null : styleForSpeaker(presets, speaker)
     updateTextOverlay(
       o.id,
-      auto ? { speaker, styleId: auto.id, style: applyLook(o.style, auto.style) } : { speaker }
+      auto
+        ? {
+            speaker,
+            styleId: auto.id,
+            // 話者のスタイルが伝わるだけなので、置き場所(顔を避けて上へ移した・傾けた)は残す
+            style: applyLook(o.style, auto.style, { keepPlacement: true })
+          }
+        : { speaker }
     )
   }
   const pos = o.style.customPosition ?? defaultPositionFraction(o.style.position)

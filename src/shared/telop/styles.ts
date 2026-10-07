@@ -21,16 +21,23 @@ export interface TelopStyleDef {
 
 /**
  * スタイルの見た目を、テロップの置き場所を残したまま当てる。
- * `keepPosition` では上・下・中央の別も残す(顔を避けて上へ移した発言テロップを、見た目を替えても下へ戻さない)
+ *
+ * 置き場所の決まり: 自由配置(`customPosition`)はいつもテロップのもの。
+ * `keepPlacement` では上・下・中央の別と傾きも残す——スタイルを直した・話者に割り当てた・発言テロップの
+ * 見た目を選び直した、のように**そのテロップを選ばずに**見た目が伝わるときに使う(顔を避けて上へ移した
+ * 発言テロップを下へ戻さない、手で傾けたテロップをまっすぐに戻さない)。
+ * 人がそのテロップに見た目を選んだときは、見た目の上・下・中央に従う
  */
 export function applyLook(
   overlayStyle: TextStyle,
   look: TextStyle,
-  options: { keepPosition?: boolean } = {}
+  options: { keepPlacement?: boolean } = {}
 ): TextStyle {
   return {
     ...look,
-    ...(options.keepPosition ? { position: overlayStyle.position } : {}),
+    ...(options.keepPlacement
+      ? { position: overlayStyle.position, rotation: overlayStyle.rotation }
+      : {}),
     customPosition: overlayStyle.customPosition
   }
 }
@@ -102,7 +109,7 @@ export function restyleOverlays(
     if (o.styleId) {
       const def = byId.get(o.styleId)
       if (!def) return { ...o, styleId: undefined }
-      const style = applyLook(o.style, def.style, { keepPosition: isAutoSpeech(o) })
+      const style = applyLook(o.style, def.style, { keepPlacement: true })
       return JSON.stringify(style) === JSON.stringify(o.style) ? o : { ...o, style }
     }
     const auto = styleForSpeaker(styles, o.speaker)
@@ -110,14 +117,14 @@ export function restyleOverlays(
     return {
       ...o,
       styleId: auto.id,
-      style: applyLook(o.style, auto.style, { keepPosition: isAutoSpeech(o) })
+      style: applyLook(o.style, auto.style, { keepPlacement: true })
     }
   })
 }
 
 /** 見た目だけの鍵(置き場所は自動で動かすので比べない) */
 const lookKey = (s: TextStyle): string =>
-  JSON.stringify({ ...s, position: undefined, customPosition: undefined })
+  JSON.stringify({ ...s, position: undefined, rotation: undefined, customPosition: undefined })
 
 /**
  * 自動で入れた発言テロップの見た目を、選び直した `next` に替える。
@@ -140,7 +147,7 @@ export function restyleSpeechTelops(
     if (!following) return o
     return {
       ...o,
-      style: applyLook(o.style, next.style, { keepPosition: true }),
+      style: applyLook(o.style, next.style, { keepPlacement: true }),
       styleId: next.styleId
     }
   })

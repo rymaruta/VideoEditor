@@ -235,8 +235,11 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                     : '掛け合い・笑い・企画の要点を残し、移動・待機を落とします'
               }))}
               onChange={(k) => {
+                // 選んでいる種類を押し直したときは何もしない(方針も役割の直しも残す)
+                if (k === episodeKind) return
                 useSettingsStore.getState().setEpisodeKind(k)
-                // 音声トラックを分けるか(ゲーム実況だけ)が変わるので、選んだフォルダを読み直す
+                // 音声トラックを分けるか(ゲーム実況だけ)が変わるので、選んだフォルダを読み直す。
+                // 読んでいる最中なら、読み終わった所で種類と合わなければ読み直す
                 if (root && !scanning) void scanFolder(root)
               }}
             />

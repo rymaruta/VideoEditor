@@ -146,6 +146,8 @@ export const STEPS: { id: StepId; label: string }[] = [
 interface PipelineState {
   root: string | null
   scan: FootageScan | null
+  /** 今の `scan` を、音声トラックを分けて読んだか(ゲーム実況)。番組の種類と合わなければ読み直す */
+  scanTracks: boolean | null
   sources: EditableSource[]
   steps: Record<StepId, StepStatus>
   report: SyncReport | null
@@ -770,8 +772,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         note: '残す場面がありません(構成で残す場面を選ぶか、「大事にすること」を替えてください)'
       })
       log('残す場面が無いため、仮編集を作りませんでした(タイムラインはそのままです)')
+      // 作り直しでは、前に済んだ工程(AI に頼んだ演出テロップの提案など)をそのまま残す。
+      // 「省略」にすると、次の作り直しで AI に頼み直し、人が外した提案まで置き直してしまう
       for (const id of ['angles', 'placement', 'effects', 'sound'] as StepId[])
-        setStep(id, { state: 'skipped', note: '仮編集がありません' })
+        if (get().steps[id].state !== 'done')
+          setStep(id, { state: 'skipped', note: '仮編集がありません' })
       return
     }
     if (plan.selection.relaxed)
@@ -1189,6 +1194,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     },
     asrDevice: null,
     root: null,
+    scanTracks: null,
     scan: null,
     sources: [],
     steps: initialSteps(),
@@ -1227,6 +1233,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       set({
         shorts: { state: 'idle', done: 0, total: 0, files: [] },
         root: null,
+        scanTracks: null,
         scan: null,
         sources: [],
         steps: initialSteps(),
@@ -1249,6 +1256,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       }),
 
     scanFolder: async (root) => {
+      const token = ++scanToken
+      // 同じフォルダを読み直すときは、人が直した役割(使わない・顔カメラ・誰を映すか など)を引き継ぐ
+      const edited = get().root === root ? get().sources : []
+      // 音声トラックを分けるのはゲーム実況だけ(OBS の録画)
+      const tracks = useSettingsStore.getState().episodeKind === 'game'
       set({ root, scan: null, sources: [], steps: initialSteps(), report: null })
       setStep('ingest', { state: 'run', percent: 0, note: 'ファイルを探しています' })
       log(`収録フォルダを読み込みます: ${root}`)
@@ -1256,21 +1268,37 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         setStep('ingest', { percent: (done / Math.max(1, total)) * 100, note: `${done}/${total}` })
       )
       try {
-        // 音声トラックを分けるのはゲーム実況だけ(OBS の録画)
-        const scan = await window.api.footageScan(root, {
-          tracks: useSettingsStore.getState().episodeKind === 'game'
-        })
+        const scan = await window.api.footageScan(root, { tracks })
+        // 読んでいる間に別のフォルダ・読み直しが始まったら、この結果は捨てる
+        if (token !== scanToken) return
+        // 読んでいる間に番組の種類が替わったら(トラックを分けるかが変わる)、読み直す
+        if ((useSettingsStore.getState().episodeKind === 'game') !== tracks) {
+          set({ sources: edited })
+          return get().scanFolder(root)
+        }
         const remembered = readSourceNames()
-        const sources: EditableSource[] = scan.sources.map((s: FootageSource) => ({
-          id: s.id,
-          name: remembered[s.id] ?? s.name,
-          kind: s.kind,
-          basis: s.basis,
-          files: s.files,
-          ...(s.trackRole ? { trackRole: s.trackRole } : {}),
-          ...(s.cameraRole ? { cameraRole: s.cameraRole } : {})
-        }))
-        set({ scan, sources })
+        const sources: EditableSource[] = scan.sources
+          .map((s: FootageSource) => ({
+            id: s.id,
+            name: remembered[s.id] ?? s.name,
+            kind: s.kind,
+            basis: s.basis,
+            files: s.files,
+            ...(s.trackRole ? { trackRole: s.trackRole } : {}),
+            ...(s.cameraRole ? { cameraRole: s.cameraRole } : {})
+          }))
+          .map((s) => {
+            const prev = edited.find((x) => x.id === s.id)
+            if (!prev) return s
+            return {
+              ...s,
+              kind: prev.kind,
+              subject: prev.subject,
+              trackRole: prev.trackRole,
+              cameraRole: prev.cameraRole
+            }
+          })
+        set({ scan, sources, scanTracks: tracks })
         const count = sources.reduce((n, s) => n + s.files.length, 0)
         setStep('ingest', {
           state: 'done',
@@ -1282,6 +1310,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         )
         for (const sk of scan.skipped) log(`読み込めない: ${sk.path}(${sk.reason})`)
       } catch (e) {
+        if (token !== scanToken) return
         setStep('ingest', { state: 'error', note: formatIpcError(e) })
         log(`取り込みに失敗: ${formatIpcError(e)}`)
       } finally {
@@ -1295,6 +1324,19 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     },
 
     runPipeline: async () => {
+      // 読んだ後に番組の種類が替わっていたら(音声トラックを分けるかが違う)、読み直してから始める
+      {
+        const { root, scan, scanTracks, running } = get()
+        if (
+          !running &&
+          root &&
+          scan &&
+          scanTracks !== (useSettingsStore.getState().episodeKind === 'game')
+        ) {
+          await get().scanFolder(root)
+          if (get().steps.ingest.state !== 'done') return
+        }
+      }
       const { scan, sources, running } = get()
       if (running || !scan) return
       const used = sources.filter((s) => s.kind !== 'skip')
@@ -1428,7 +1470,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             kind: u.kind as SourceKind,
             subject: u.subject,
             ...(u.trackRole ? { trackRole: u.trackRole } : {}),
-            ...(trackParentSource(u, used) ? { trackOf: trackParentSource(u, used) } : {}),
+            // 元の動画は「使わない」にしたカメラでもよい(同じ録画のトラックどうしで鳴らし分ける)
+            ...(trackParentSource(u, sources) ? { trackOf: trackParentSource(u, sources) } : {}),
             ...(gameKind && u.kind === 'camera'
               ? { cameraRole: u.cameraRole === 'face' ? ('face' as const) : ('screen' as const) }
               : {})
@@ -1585,6 +1628,8 @@ onProjectSwitch(() => {
 // 走り出したときの各工程の状態。作り直しでは前の通しの失敗が残っているので、
 // この回に新しく止まった工程だけを知らせる
 let stepsAtStart: Record<StepId, StepStatus> | null = null
+/** 収録フォルダを読むたびに増やす(古い読み込みの結果を捨てるため) */
+let scanToken = 0
 usePipelineStore.subscribe((s, prev) => {
   if (s.running && !prev.running) stepsAtStart = s.steps
   if (s.running) {

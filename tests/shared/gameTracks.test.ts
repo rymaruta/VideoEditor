@@ -42,6 +42,15 @@ describe('OBS の音声トラックの役割', () => {
     expect(guessCameraRole('rec/a.mp4', 1920, 1920, 1)).toBe('screen')
     // 音声を2本持つ顔カメラ(空間オーディオなど)も、名前で顔カメラにする
     expect(guessCameraRole('webcam/face.mov', 1920, 1920, 2)).toBe('face')
+    // 「cam」は単語のときだけ。言葉の一部(campaign・Camp)では顔カメラにしない
+    expect(guessCameraRole('Elden Ring campaign/2024-05-01 20-00-00.mkv', 1920, 1920, 3)).toBe(
+      'screen'
+    )
+    expect(guessCameraRole('Camp/rec.mkv', 1920, 1920, 1)).toBe('screen')
+    expect(guessCameraRole('cam/rec.mp4', 1920, 1920, 1)).toBe('face')
+    expect(guessCameraRole('Surface/rec.mkv', 1920, 1920, 3)).toBe('screen')
+    expect(guessCameraRole('rec/Camera2.mp4', 1920, 1920, 1)).toBe('face')
+    expect(guessCameraRole('rec\\顔.mp4', 1920, 1920, 1)).toBe('face')
   })
 })
 

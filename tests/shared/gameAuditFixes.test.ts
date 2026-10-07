@@ -197,21 +197,18 @@ describe('発言テロップの見た目を替えても、顔を避けた置き�
     expect(out.style.fontSize).toBe(90)
     expect(out.style.position).toBe('top')
   })
-  it('スタイルを直しても、上へ移した自動の発言テロップは上のまま。手で置いたテロップはスタイルに従う', () => {
-    const def = { id: 'st', name: 'S', style: look(80) }
+  it('スタイルを直しても、テロップごとの置き場所(上・下・中央、傾き)は残す。自動・手で置いた枚とも同じ', () => {
+    const def = { id: 'st', name: 'S', style: { ...look(80), rotation: 0 } }
     const auto = telop({ ...look(60), position: 'top' }, { styleId: 'st' })
     const manual = telop(
-      { ...look(60), position: 'top' },
-      {
-        id: 'm',
-        styleId: 'st',
-        source: undefined,
-        utteranceId: undefined
-      }
+      { ...look(60), position: 'top', rotation: 15 },
+      { id: 'm', styleId: 'st', source: undefined, utteranceId: undefined }
     )
     const [a, m] = restyleOverlays([auto, manual], [def])
     expect(a.style.fontSize).toBe(80)
     expect(a.style.position).toBe('top')
-    expect(m.style.position).toBe('bottom')
+    expect(m.style.fontSize).toBe(80)
+    expect(m.style.position).toBe('top')
+    expect(m.style.rotation).toBe(15)
   })
 })

@@ -81,8 +81,13 @@ export function craigSpeakerName(fileName: string): string | null {
   return m[2]
 }
 
-/** 顔カメラらしい名前(ゲーム画面の録画と分ける) */
-const FACE_NAME = /face|facecam|webcam|cam|camera|顔|カメラ|ウェブカメ/i
+/** はっきり顔カメラと分かる名前(フォルダ・ファイル名のどこかに入る) */
+const FACE_NAME_STRONG = /(^|[^a-z])face|webcam|顔|ウェブカメ/i
+/**
+ * 顔カメラかもしれない名前。「cam」「camera」は単語として入るときだけ
+ * (`campaign`・`Camp` のような言葉の一部は数えない)
+ */
+const FACE_NAME_WEAK = /(^|[^a-z])(cam|camera)\d*([^a-z]|$)|カメラ/i
 
 export type CameraRole = 'screen' | 'face'
 
@@ -102,9 +107,11 @@ export function guessCameraRole(
   maxWidth: number,
   audioTracks: number
 ): CameraRole {
-  // 名前を先に見る(顔カメラにも空間オーディオなどで音声を2本持つ機種がある)
-  if (FACE_NAME.test(relativePath.normalize('NFKC'))) return 'face'
+  const parts = relativePath.normalize('NFKC').split(/[/\\]/)
+  // はっきりした名前を先に見る(顔カメラにも空間オーディオなどで音声を2本持つ機種がある)
+  if (parts.some((p) => FACE_NAME_STRONG.test(p))) return 'face'
   if (audioTracks >= 2) return 'screen'
+  if (parts.some((p) => FACE_NAME_WEAK.test(p))) return 'face'
   if (width && maxWidth && width < maxWidth * 0.75) return 'face'
   return 'screen'
 }

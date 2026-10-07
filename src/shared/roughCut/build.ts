@@ -172,10 +172,8 @@ export function buildRoughCut(
     clips: audioFor(m.id)
   }))
   const anchor = info.sources.find((s) => s.id === info.anchorSourceId)
-  // 基準カメラの録画からトラックを取り出していれば、基準カメラの音(= 1本目のトラック)は重ねない
-  // (取り出したトラックが同じ音を持っている)。ほかのカメラ・別のファイルのトラックは関係ない
-  const tracksExtracted = info.sources.some((s) => s.trackOf === info.anchorSourceId)
-  if (anchor && !tracksExtracted) {
+  // 基準カメラの録画から取り出したトラックが本編の音を担うなら、基準カメラの音は重ねない
+  if (anchor && !tracksReplaceAnchorAudio(info.sources, info.anchorSourceId)) {
     audio.push({
       // ピンマイクが無ければ、基準カメラの音が声も兼ねるので小さくしない
       name: mics.length > 0 ? `周りの音(${anchor.name})` : `${anchor.name} の音`,
@@ -204,6 +202,20 @@ export function buildRoughCut(
  * 無くて全部入りがあれば、全部入りだけを鳴らし、取り出した声のトラックは鳴らさない
  * (同じ声が二重に重なる)。鳴らさないトラックも文字起こし・盛り上がりには使う
  */
+/**
+ * 基準カメラの録画から取り出したトラック(全部入り・ゲーム音)を使っていて、本編の音(= 1本目のトラック)を
+ * 鳴らさなくてよいか。声のトラックだけを残したときは、ゲームの音は本編の音から鳴らす。
+ * ほかのカメラ・別のファイルのトラックは関係ない
+ */
+export function tracksReplaceAnchorAudio(
+  sources: readonly { trackOf?: string; trackRole?: string }[],
+  anchorSourceId: string
+): boolean {
+  return sources.some(
+    (s) => s.trackOf === anchorSourceId && (s.trackRole === 'mix' || s.trackRole === 'game')
+  )
+}
+
 /**
  * 人の声が入っている音源か(BGM を声の下で下げる・ダッキングの合図に使う)。
  * マイクと、OBS の「全部入り」のトラック(声もゲーム音も入っている)。

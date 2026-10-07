@@ -1,4 +1,4 @@
-import { carriesVoice, silencedTrack } from '@shared/roughCut/build'
+import { carriesVoice, silencedTrack, tracksReplaceAnchorAudio } from '@shared/roughCut/build'
 import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
 import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
 import { isImagePath, STILL_DURATION_SEC } from '@shared/mediaExtensions'
@@ -1743,7 +1743,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const idOf = (fileId: string): string | undefined => assetIdOf[fileId]
       // 基準カメラの録画から音声トラックを取り出したなら、本編の音は鳴らさない
       // (全部入りのトラックと同じ音が重なり、二重に・大きく聞こえる)
-      const anchorTracked = Boolean(sources?.some((x) => x.trackOf === layout.anchorSourceId))
+      const anchorTracked = Boolean(
+        sources && tracksReplaceAnchorAudio(sources, layout.anchorSourceId)
+      )
       const main: Clip[] = layout.main
         .filter((m) => idOf(m.fileId))
         .map((m) => ({
