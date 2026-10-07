@@ -181,14 +181,25 @@ export function restyleSpeechTelops(
     return { ...o, style, styleId: next.styleId }
   })
   if (!canvasH || to || restyled.size === 0) return out
-  // 既定の置き場所(下)へ戻した枚を、声の重なりで積み直す(作り直したときと同じ並びにする)
-  const idx = [...restyled]
+  // 既定の置き場所(下)へ戻した枚を、声の重なりで積み直す。ほかの話者の枚・段に積まれていた枚も
+  // 一緒に積み直す(選び直した枚だけを積むと、同時に出ているほかの枚と同じ段に重なる)。
+  // 手で置いた枚・顔や HUD を避けた枚は、そのまま
+  // 積み直すのは自動の発言テロップだけ(人が置いたテロップには触れない)
+  const managed = out.map((o, i) => restyled.has(i) || (stacked[i] && isAutoSpeech(o)))
+  const strip = (o: TextOverlay): TextOverlay => {
+    if (!o.style.customPosition) return o
+    const { customPosition: _drop, ...style } = o.style
+    void _drop
+    return { ...o, style }
+  }
   const again = stackSimultaneousTelops(
-    idx.map((i) => out[i]),
+    out.map((o, i) => (managed[i] ? strip(o) : o)),
     canvasH
   )
-  idx.forEach((i, k) => {
-    out[i] = again[k]
+  return out.map((o, i) => {
+    if (!managed[i]) return o
+    const a = again[i]
+    const same = JSON.stringify(a.style.customPosition) === JSON.stringify(o.style.customPosition)
+    return restyled.has(i) || !same ? a : o
   })
-  return out
 }

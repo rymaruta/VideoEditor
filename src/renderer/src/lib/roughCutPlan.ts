@@ -192,6 +192,8 @@ export async function judgeScenes(
     targetSec: number
     note?: string
     kind?: EpisodeKind
+    /** 編集の方針。「面白い所だけ」(長さの目標なし)だけ、見どころの数が残し方を決める */
+    policy?: EditPolicy
   },
   onProgress?: (p: AiProgress) => void
 ): Promise<{
@@ -239,17 +241,32 @@ export async function judgeScenes(
   if (got.size === 0)
     return { judgements: fallback, source: 'heuristic', failure: 'AI が答えませんでした' }
   // ほとんどの場面を「見どころ」にした答えは、見分けになっていない(小さなモデル・聞き取れない言葉の
-  // 文字起こしで起きる)。そのまま使うと「面白い所だけ」でも全部が残るので、声の盛り上がり・笑い・
-  // 発話の密度の点数で判定する
+  // 文字起こしで起きる)。見どころの数が残し方を決めるのは「面白い所だけ」(長さの目標なし)だけなので、
+  // そのときだけ、場面の印(見どころ・ふつう)と点数を、声の盛り上がり・笑い・発話の密度の点数に置き換える
+  // (題・理由・曲の雰囲気・「不要」の印は AI のものを使う)
+  const policy = options.policy ?? DEFAULT_POLICY[options.kind ?? 'location']
+  const decidesByHighlights =
+    policy === 'highlights' && !(options.targetSec > 0 && Number.isFinite(options.targetSec))
   const highlights = [...got.values()].filter((j) => j.kind === 'highlight').length
-  if (got.size >= MIN_SCENES_TO_CHECK && highlights > got.size * MAX_HIGHLIGHT_RATIO)
+  if (
+    decidesByHighlights &&
+    got.size >= MIN_SCENES_TO_CHECK &&
+    highlights > got.size * MAX_HIGHLIGHT_RATIO
+  ) {
     return {
-      judgements: fallback,
-      source: 'heuristic',
+      judgements: scenes.map((s) => {
+        const h = fallback.find((f) => f.sceneId === s.id)!
+        const ai = got.get(s.id)
+        if (!ai) return h
+        // 点数はどの場面も同じ物差し(点数の判定)にそろえる。AI が「不要」にした場面は落とす
+        return ai.kind === 'unneeded' ? ai : { ...ai, kind: h.kind, score: h.score }
+      }),
+      source: 'ai',
       rejected: `AI が ${got.size} 場面中 ${highlights} 場面を見どころにしたため`,
       model,
       device
     }
+  }
   return {
     judgements: scenes.map((s) => got.get(s.id) ?? fallback.find((f) => f.sceneId === s.id)!),
     source: 'ai',

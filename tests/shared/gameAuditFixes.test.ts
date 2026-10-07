@@ -271,3 +271,37 @@ describe('縦書きから横書きへ選び直すと、声の重なった発言�
     expect(back[1].style.customPosition).toEqual(vertical.style.customPosition)
   })
 })
+
+describe('見た目を選び直して積み直すとき、ほかの話者の枚と同じ段に重ねない', () => {
+  const standard = speechLook('tpl-speech-standard', [])
+  const bigger = { style: { ...standard.style, fontSize: standard.style.fontSize + 20 } }
+  const reg = [{ id: 'A-style', name: 'A', style: standard.style, speakers: ['A'] }]
+  it('話者 A(スタイル割り当て)が下、B が上の段のまま', () => {
+    const a: TextOverlay = {
+      id: 'a',
+      text: 'えーと',
+      startTime: 0,
+      endTime: 5,
+      style: speechTelopStyle(standard.style),
+      styleId: 'A-style',
+      speaker: 'A',
+      source: 'auto',
+      utteranceId: 'ua'
+    }
+    const b: TextOverlay = {
+      id: 'b',
+      text: 'それな',
+      startTime: 1,
+      endTime: 4,
+      style: speechTelopStyle(standard.style),
+      speaker: 'B',
+      source: 'auto',
+      utteranceId: 'ub'
+    }
+    const [sa, sb] = stackSimultaneousTelops([a, b], 1080)
+    const out = restyleSpeechTelops([sa, sb], standard, bigger, reg, 1080)
+    expect(out[0].style.customPosition).toBeUndefined()
+    expect(out[1].style.customPosition?.y).toBeLessThan(0.86)
+    expect(out[1].style.fontSize).toBe(standard.style.fontSize + 20)
+  })
+})

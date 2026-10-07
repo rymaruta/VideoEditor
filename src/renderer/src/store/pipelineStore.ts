@@ -710,11 +710,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         episodeName: project.name,
         targetSec: get().targetMinutes * 60 || (kind === 'game' ? 0 : range.end - range.start),
         note: get().editNote || undefined,
-        kind
+        kind,
+        policy: useSettingsStore.getState().editPolicy
       },
       (p) => setStep('structure', { percent: p.percent, note: p.note })
     )
     set({ scenes, judgements, judgeSource: source, keep: {}, hype: hype ?? [] })
+    if (rejected)
+      log(
+        `構成: ${rejected}、見分けになっていないと判断し、見どころは声の盛り上がり・笑い・発話の密度の点数で選び直しました(題・理由・不要の印は AI のもの)`
+      )
     const highlights = judgements.filter((j) => j.kind === 'highlight').length
     const unneeded = judgements.filter((j) => j.kind === 'unneeded').length
     setStep('structure', {
@@ -725,11 +730,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     log(
       source === 'ai'
         ? `構成: AI(${model ?? ''}${device ? `・${device === 'cpu' ? 'CPU' : `GPU ${device.toUpperCase()}`}` : ''})で ${scenes.length} 場面を判定しました`
-        : rejected
-          ? `構成: ${rejected}、見分けになっていないと判断し、声の盛り上がり・笑い・発話の密度の点数で判定しました`
-          : failure
-            ? `構成: AI に頼めなかったため簡易の点数で判定しました(${failure})`
-            : '構成: AI を使わない設定のため、簡易の点数(発話の密度・掛け合い・盛り上がり)で判定しました'
+        : failure
+          ? `構成: AI に頼めなかったため簡易の点数で判定しました(${failure})`
+          : '構成: AI を使わない設定のため、簡易の点数(発話の密度・掛け合い・盛り上がり)で判定しました'
     )
     await buildAndApply()
   }
