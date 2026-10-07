@@ -67,6 +67,40 @@ const KANJI = /[一-鿿々]/u
 const JOINS_PREVIOUS =
   /^(?:\u200d|[\ufe00-\ufe0f]|[\u{1f3fb}-\u{1f3ff}]|[\u{e0020}-\u{e007f}]|\p{M})/u
 
+/** 単語の途中で区切る良さ。ほかに区切れる所が無いときだけ選ばれるよう、どの区切りよりも低くする */
+export const INSIDE_WORD_SCORE = -3
+
+const wordSegmenter: Intl.Segmenter | null =
+  typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter('ja', { granularity: 'word' })
+    : null
+const boundaryCache = new WeakMap<readonly string[], Set<number>>()
+
+/**
+ * 単語の切れ目(文字の位置。`chars[k]` から新しい単語が始まる k の集合)。
+ * 音声認識の言葉の区切りは文節より長い(「ここ横浜国大の偉い人がいるような建物の前なんですが」で1つ)ので、
+ * 辞書で日本語を単語に分ける `Intl.Segmenter` を使う。使えない環境では null(従来の文字の種類だけで判断)
+ */
+function wordBoundaries(chars: readonly string[]): Set<number> | null {
+  if (!wordSegmenter) return null
+  const cached = boundaryCache.get(chars)
+  if (cached) return cached
+  // Segmenter の位置は UTF-16 の位置なので、文字(コードポイント)の位置へ直す
+  const charAt = new Map<number, number>()
+  let unit = 0
+  chars.forEach((c, i) => {
+    charAt.set(unit, i)
+    unit += c.length
+  })
+  const set = new Set<number>()
+  for (const seg of wordSegmenter.segment(chars.join(''))) {
+    const i = charAt.get(seg.index)
+    if (i !== undefined) set.add(i)
+  }
+  boundaryCache.set(chars, set)
+  return set
+}
+
 export function breakScore(chars: readonly string[], k: number): number {
   if (k <= 0 || k >= chars.length) return -Infinity
   const prev = chars[k - 1]
@@ -75,6 +109,10 @@ export function breakScore(chars: readonly string[], k: number): number {
   if (JOINS_PREVIOUS.test(next) || prev === '\u200d') return -Infinity
   if (NO_LINE_START.test(next) || NO_LINE_END.test(prev)) return -Infinity
   if (PUNCT.test(prev)) return 3
+  // 単語の途中(「カ / ラス」「で / すね」「み / たい」)では、ほかに区切れる所があれば切らない。
+  // 実写の素材(12分の食べ歩き)では、テロップの境目・改行 248 か所のうち 45 か所が単語の途中だった
+  // (「と / ころ」「200 / 0円」)
+  if (wordBoundaries(chars)?.has(k) === false) return INSIDE_WORD_SCORE
   if (PARTICLE.test(prev) && !PARTICLE.test(next) && KANA.test(prev)) return 2
   if (KANA.test(prev) && KANJI.test(next)) return 1
   return 0

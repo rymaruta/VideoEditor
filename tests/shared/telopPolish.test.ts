@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyDictionary,
   breakScore,
+  INSIDE_WORD_SCORE,
   parseDictionary,
   removeFillers
 } from '../../src/shared/telop/polish'
@@ -51,6 +52,35 @@ describe('改行の禁則', () => {
     expect(breakScore([...'坂がきつい'], 1)).toBe(0)
     // 「ちょ|っと」: 小さい「っ」を行頭に置かない
     expect(breakScore([...'ちょっと'], 2)).toBe(-Infinity)
+  })
+
+  it('単語の途中で改行しない(実写の素材で起きていた「と / ころ」「で / すね」「200 / 0円」)', () => {
+    const cases = [
+      '大学の近くにこういう面白いところがあったから寄らせてもらいました',
+      '中華街のお食事でよくあるパターンはですね私も横浜国大入学',
+      '素晴らしい中華料理まあ2000円くらい出せばお腹いっぱいね',
+      '渡っている頭いい利口なカラスの様子を皆さんにお届けする'
+    ]
+    const seg = new Intl.Segmenter('ja', { granularity: 'word' })
+    for (const text of cases) {
+      const lines = wrapTelopLines(text, 14)
+      expect(lines.join('')).toBe(text)
+      let at = 0
+      for (const l of lines.slice(0, -1)) {
+        at += l.length
+        const starts = new Set([...seg.segment(text)].map((s) => s.index))
+        expect(starts.has(at), `${lines.join(' / ')}`).toBe(true)
+      }
+    }
+    // 単語の途中は、ほかに区切れる所が無いときだけ
+    expect(breakScore([...'ところ'], 1)).toBe(INSIDE_WORD_SCORE)
+  })
+
+  it('単語の途中しか区切れない長い語も、上限で区切る(はみ出さない)', () => {
+    const text = 'アンチディスエスタブリッシュメンタリアニズム'
+    const lines = wrapTelopLines(text, 14)
+    expect(lines.join('')).toBe(text)
+    for (const l of lines) expect([...l].length).toBeLessThanOrEqual(15)
   })
 
   it('禁則の文字が続いても、1行が上限を1文字より多く超えない(はみ出さない)', () => {
