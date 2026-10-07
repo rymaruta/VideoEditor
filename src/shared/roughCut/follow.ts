@@ -85,19 +85,13 @@ function subtractRange(list: { start: number; end: number }[], a: number, b: num
 export function clipTimelineMapping(
   before: readonly ClipSpan[],
   after: readonly ClipSpan[],
-  /** 分割で新しく作ったクリップの、元のクリップの id(分けた後ろ半分も、元のクリップとして先に結ぶ) */
-  originOf: (id: string) => string | undefined = () => undefined
+  /**
+   * 分割で作ったクリップの、元になったクリップの id(近い順: 親、親の親…)。分けた後ろ半分は、
+   * 自分の id で結んだあと、元のクリップの残りとして結ぶ
+   */
+  ancestorsOf: (id: string) => readonly string[] = () => []
 ): TimelineMapSeg[] {
   const out: TimelineMapSeg[] = []
-  const afterIndexById = new Map<string, number[]>()
-  after.forEach((n, k) => {
-    for (const id of new Set([n.id, originOf(n.id)])) {
-      if (id === undefined) continue
-      const list = afterIndexById.get(id)
-      if (list) list.push(k)
-      else afterIndexById.set(id, [k])
-    }
-  })
   // 変更後の区間ごとの、まだ結んでいない共通の時刻
   const free = after.map((n) => [{ start: n.start, end: n.end }])
   const link = (o: ClipSpan, n: ClipSpan, a: number, b: number): void => {
@@ -107,24 +101,42 @@ export function clipTimelineMapping(
       at: n.timeline + (a - n.start)
     })
   }
-  const left: { o: ClipSpan; rest: { start: number; end: number }[] }[] = []
-  for (const o of before) {
-    const rest = [{ start: o.start, end: o.end }]
-    for (const k of afterIndexById.get(o.id) ?? []) {
-      const n = after[k]
-      for (const r of [...rest]) {
-        for (const f of [...free[k]]) {
-          const a = Math.max(r.start, f.start, n.start)
-          const b = Math.min(r.end, f.end, n.end)
-          if (b - a <= EPS) continue
-          link(o, n, a, b)
-          subtractRange(free[k], a, b)
-          subtractRange(rest, a, b)
-        }
+  const rests = before.map((o) => [{ start: o.start, end: o.end }])
+  /** 変更前の o の残りを、変更後の n の空いている所と結ぶ */
+  const take = (bi: number, k: number): void => {
+    const o = before[bi]
+    const n = after[k]
+    for (const r of [...rests[bi]]) {
+      for (const f of [...free[k]]) {
+        const a = Math.max(r.start, f.start, n.start)
+        const b = Math.min(r.end, f.end, n.end)
+        if (b - a <= EPS) continue
+        link(o, n, a, b)
+        subtractRange(free[k], a, b)
+        subtractRange(rests[bi], a, b)
       }
     }
-    if (rest.length > 0) left.push({ o, rest })
   }
+  // 1. 全部のクリップについて、まず同じ id どうし(先に元のクリップが後ろ半分を取らないように)
+  const afterIndexById = new Map<string, number>()
+  after.forEach((n, k) => afterIndexById.set(n.id, k))
+  before.forEach((o, bi) => {
+    const k = afterIndexById.get(o.id)
+    if (k !== undefined) take(bi, k)
+  })
+  // 2. 分割で作ったクリップを、元になったクリップの残りと結ぶ(近い祖先から)
+  const beforeIndexById = new Map<string, number>()
+  before.forEach((o, bi) => beforeIndexById.set(o.id, bi))
+  const byDepth: [number, number, number][] = []
+  after.forEach((n, k) => {
+    ancestorsOf(n.id).forEach((id, depth) => {
+      const bi = beforeIndexById.get(id)
+      if (bi !== undefined) byDepth.push([depth, k, bi])
+    })
+  })
+  byDepth.sort((x, y) => x[0] - y[0] || after[x[1]].timeline - after[y[1]].timeline)
+  for (const [, k, bi] of byDepth) take(bi, k)
+  const left = before.map((o, bi) => ({ o, rest: rests[bi] })).filter((x) => x.rest.length > 0)
   if (left.length > 0) {
     const index = spanIndex(
       after,

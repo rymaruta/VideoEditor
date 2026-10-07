@@ -1510,6 +1510,64 @@ describe('本編の追従(再監査で見つかった所)', () => {
     expect(se.clips.map((c) => c.startTime)).toEqual([27])
   })
 
+  /** 収録素材 camA [0,30] の本編1本と、自動の SE を置いた企画 */
+  const withSe = (times: number[]): void => {
+    setup([[0, 30]])
+    S.setState({
+      project: {
+        ...st().project,
+        audioTracks: [
+          ...st().project.audioTracks,
+          {
+            ...micTrack(),
+            id: 'se',
+            name: 'SE',
+            multicamSourceId: undefined,
+            autoRole: 'se',
+            clips: times.map((t, i) => ({
+              id: `s${i}`,
+              assetId: 'seA',
+              startTime: t,
+              inPoint: 0,
+              outPoint: 0.5
+            }))
+          }
+        ]
+      }
+    })
+  }
+  const seTimes = (): number[] =>
+    st()
+      .project.audioTracks.find((t) => t.id === 'se')!
+      .clips.map((c) => Math.round(c.startTime * 1000) / 1000)
+      .sort((a, b) => a - b)
+
+  it('分割した前半を伸ばしてから消しても、後ろ半分の下の SE は残る', () => {
+    withSe([12, 17, 25])
+    const c = st().project.clips[0].id
+    st().splitClipAtTime(c, 10)
+    st().updateClipTrim(c, 0, 15)
+    expect(seTimes()).toEqual([17, 22, 30])
+    st().removeClip(c)
+    expect(seTimes()).toEqual([2, 7, 15])
+  })
+
+  it('分割した前半を伸ばしてから縮め直しても、後ろ半分の下の SE は残る', () => {
+    withSe([12, 17, 25])
+    const c = st().project.clips[0].id
+    st().splitClipAtTime(c, 10)
+    st().updateClipTrim(c, 0, 15)
+    st().updateClipTrim(c, 0, 12)
+    expect(seTimes()).toEqual([14, 19, 27])
+  })
+
+  it('続けて分割したクリップの中に同じ素材を差し込んでも、後ろ半分の下の SE は後ろ半分に付いていく', () => {
+    withSe([23, 26])
+    st().splitClipAtTime(st().project.clips[0].id, 10)
+    st().insertClipAtTime('camA', 22, 24, 22)
+    expect(seTimes()).toEqual([25, 28])
+  })
+
   it('速さを変えて外れた声は、速さを戻すと戻る', () => {
     setup([[0, 10]])
     const id = st().project.clips[0].id

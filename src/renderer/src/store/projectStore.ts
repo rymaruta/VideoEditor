@@ -4259,7 +4259,7 @@ function followMainEdit(
   const after = followSpans(next.clips, info)
   if (!before.some((x) => x.real) && !after.some((x) => x.real)) return next
   // 同じクリップどうし・残りは1回ずつ結ぶ(同じ素材の時刻を2回使った本編で、声が倍々に増えないように)
-  const segs = clipTimelineMapping(before, after, (id) => splitOrigins.get(id))
+  const segs = clipTimelineMapping(before, after, splitAncestors)
   if (isIdentityMapping(segs, before, after)) return next
 
   const remapClip = <
@@ -4414,8 +4414,16 @@ function isRealClip(
 const splitOrigins = new Map<string, string>()
 function splitId(originalId: string): string {
   const id = uuid()
-  splitOrigins.set(id, splitOrigins.get(originalId) ?? originalId)
+  // 直接の親を覚える(続けて分割したときも、どのクリップから分けたかを辿れるように)
+  splitOrigins.set(id, originalId)
   return id
+}
+/** 分割の祖先(近い順) */
+function splitAncestors(id: string): string[] {
+  const out: string[] = []
+  for (let p = splitOrigins.get(id); p !== undefined && out.length < 64; p = splitOrigins.get(p))
+    out.push(p)
+  return out
 }
 
 /** 差し込んだ素材・速さを変えたクリップの、仮の共通の時刻の置き場(収録の時刻と重ならない遠く) */
