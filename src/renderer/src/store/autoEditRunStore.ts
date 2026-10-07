@@ -64,6 +64,7 @@ interface AutoEditRunState {
 // 走っている生成の世代番号。再生成や参考動画の切り替えで先に投げた生成が後から
 // 返ってきても、古い結果で新しい結果を上書きしないようにする。
 let runToken = 0
+let finishToken = 0
 
 export const useAutoEditRunStore = create<AutoEditRunState>((set, get) => ({
   status: 'idle',
@@ -135,14 +136,20 @@ export const useAutoEditRunStore = create<AutoEditRunState>((set, get) => ({
   markApplied: (patternId) => set({ appliedId: patternId }),
 
   startFinish: async (patternId, geminiApiKey) => {
+    const token = ++finishToken
     set({ finishingId: patternId, finishError: null, finishResult: null })
     try {
-      const result = await autoFinishTimeline(geminiApiKey || undefined, 'japanese')
+      const result = await autoFinishTimeline(
+        geminiApiKey || undefined,
+        'japanese',
+        () => token === finishToken
+      )
+      if (token !== finishToken) return
       set({ finishResult: result })
     } catch (e) {
-      set({ finishError: formatIpcError(e) })
+      if (token === finishToken) set({ finishError: formatIpcError(e) })
     } finally {
-      set({ finishingId: null })
+      if (token === finishToken) set({ finishingId: null })
     }
   }
 }))
@@ -152,6 +159,7 @@ export const useAutoEditRunStore = create<AutoEditRunState>((set, get) => ({
 // 仕上げ結果を持ち越さない。start() は runToken を照合するので、遅れて返った生成結果も捨てられる。
 onProjectSwitch(() => {
   runToken++
+  finishToken++
   useAutoEditRunStore.setState({
     status: 'idle',
     patterns: [],
