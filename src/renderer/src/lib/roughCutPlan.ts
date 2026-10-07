@@ -31,6 +31,7 @@ import type { Project, TextOverlay, TextStyle } from '@shared/types'
 import { toCommon, type MulticamInfo } from '@shared/sync/multicam'
 import {
   buildScenes,
+  demoteIndiscriminateHighlights,
   heuristicJudgements,
   selectScenes,
   type Scene,
@@ -192,16 +193,12 @@ export async function judgeScenes(
     targetSec: number
     note?: string
     kind?: EpisodeKind
-    /** 編集の方針。「面白い所だけ」(長さの目標なし)だけ、見どころの数が残し方を決める */
-    policy?: EditPolicy
   },
   onProgress?: (p: AiProgress) => void
 ): Promise<{
   judgements: SceneJudgement[]
   source: 'ai' | 'heuristic'
   failure?: string
-  /** AI は答えたが、見分けになっていなかったので使わなかった理由 */
-  rejected?: string
   model?: string
   device?: string
 }> {
@@ -240,33 +237,6 @@ export async function judgeScenes(
   }
   if (got.size === 0)
     return { judgements: fallback, source: 'heuristic', failure: 'AI が答えませんでした' }
-  // ほとんどの場面を「見どころ」にした答えは、見分けになっていない(小さなモデル・聞き取れない言葉の
-  // 文字起こしで起きる)。見どころの数が残し方を決めるのは「面白い所だけ」(長さの目標なし)だけなので、
-  // そのときだけ、場面の印(見どころ・ふつう)と点数を、声の盛り上がり・笑い・発話の密度の点数に置き換える
-  // (題・理由・曲の雰囲気・「不要」の印は AI のものを使う)
-  const policy = options.policy ?? DEFAULT_POLICY[options.kind ?? 'location']
-  const decidesByHighlights =
-    policy === 'highlights' && !(options.targetSec > 0 && Number.isFinite(options.targetSec))
-  const highlights = [...got.values()].filter((j) => j.kind === 'highlight').length
-  if (
-    decidesByHighlights &&
-    got.size >= MIN_SCENES_TO_CHECK &&
-    highlights > got.size * MAX_HIGHLIGHT_RATIO
-  ) {
-    return {
-      judgements: scenes.map((s) => {
-        const h = fallback.find((f) => f.sceneId === s.id)!
-        const ai = got.get(s.id)
-        if (!ai) return h
-        // 点数はどの場面も同じ物差し(点数の判定)にそろえる。AI が「不要」にした場面は落とす
-        return ai.kind === 'unneeded' ? ai : { ...ai, kind: h.kind, score: h.score }
-      }),
-      source: 'ai',
-      rejected: `AI が ${got.size} 場面中 ${highlights} 場面を見どころにしたため`,
-      model,
-      device
-    }
-  }
   return {
     judgements: scenes.map((s) => got.get(s.id) ?? fallback.find((f) => f.sceneId === s.id)!),
     source: 'ai',
@@ -275,16 +245,17 @@ export async function judgeScenes(
   }
 }
 
-/** AI の「見どころ」が多すぎないかを確かめる、場面の数の下限と、見どころの割合の上限 */
-const MIN_SCENES_TO_CHECK = 6
-const MAX_HIGHLIGHT_RATIO = 0.5
-
 export interface RoughCutPlan {
   selection: Selection
   pieces: CutRange[]
   shots: Shot[]
   cut: RoughCut
   telops: Omit<TextOverlay, 'id'>[]
+  /**
+   * 「見どころ」が多すぎて見分けになっていなかったので、場面の印と点数を点数の判定に置き換えた
+   * (`demoteIndiscriminateHighlights`)。見どころの数と場面の数
+   */
+  demoted?: { highlights: number; total: number }
 }
 
 /**
@@ -344,12 +315,19 @@ export function planRoughCut(
     scenes.map((s) => [s.id, totalLength(tightenRanges(rangesOf(s), activity, speech, tighten))])
   )
   const target = policy.useTarget ? options.targetSec : 0
+  const minScore = target ? -Infinity : policy.minScoreWithoutTarget
+  // 点数の下限で残す場面を決めるとき(「面白い所だけ」・長さの目標なし)だけ、見どころの数が残し方を
+  // 決める。ほとんどの場面が「見どころ」なら見分けになっていないので、点数の判定に置き換える
+  // (方針・目標を替えて作り直したときも、ここで決まる)
+  const checked = Number.isFinite(minScore)
+    ? demoteIndiscriminateHighlights(judgements, heuristicJudgements(scenes, kind))
+    : { judgements: [...judgements] }
   const auto = selectScenes(
     scenes,
-    judgements,
+    checked.judgements,
     target || Infinity,
     (s) => tightenedLength.get(s.id) ?? s.end - s.start,
-    target ? -Infinity : policy.minScoreWithoutTarget,
+    minScore,
     policy.dropUnneeded
   )
   // 手で決めた分を上書きする
@@ -365,7 +343,10 @@ export function planRoughCut(
       .filter((s) => !keepSet.has(s.id))
       .map((s) => ({
         sceneId: s.id,
-        why: judgements.find((j) => j.sceneId === s.id)?.kind === 'unneeded' ? 'unneeded' : 'length'
+        why:
+          checked.judgements.find((j) => j.sceneId === s.id)?.kind === 'unneeded'
+            ? 'unneeded'
+            : 'length'
       })),
     estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0),
     ...(auto.relaxed ? { relaxed: true } : {})
@@ -448,7 +429,14 @@ export function planRoughCut(
     settled,
     textCanvasSize(options.aspectRatio ?? project.aspectRatio).h
   )
-  return { selection, pieces, shots, cut, telops: stacked }
+  return {
+    selection,
+    pieces,
+    shots,
+    cut,
+    telops: stacked,
+    ...(checked.demoted ? { demoted: checked.demoted } : {})
+  }
 }
 
 /** 場面を作る(カメラが録っている範囲で) */

@@ -305,3 +305,28 @@ describe('見た目を選び直して積み直すとき、ほかの話者の枚�
     expect(out[1].style.fontSize).toBe(standard.style.fontSize + 20)
   })
 })
+
+describe('HUD を避けて上げた発言テロップも、見た目を替えたら同じ高さから積み直す', () => {
+  const standard = speechLook('tpl-speech-standard', [])
+  const bigger = { style: { ...standard.style, fontSize: standard.style.fontSize + 30 } }
+  const t = (id: string, start: number, end: number): TextOverlay => ({
+    id,
+    text: 'あいうえお',
+    startTime: start,
+    endTime: end,
+    style: speechTelopStyle(standard.style),
+    source: 'auto',
+    utteranceId: id
+  })
+  it('一番下の段は HUD を避けた高さのまま、上の段は大きくなった分だけ上へ', () => {
+    const hud = stackSimultaneousTelops([t('a', 0, 4), t('b', 1, 3), t('c', 10, 12)], 1080, {
+      baseCenter: 0.6
+    })
+    const out = restyleSpeechTelops(hud, standard, bigger, [], 1080)
+    expect(out[0].style.customPosition).toEqual({ x: 0.5, y: 0.6 })
+    expect(out[2].style.customPosition).toEqual({ x: 0.5, y: 0.6 })
+    const gap = out[0].style.customPosition!.y - out[1].style.customPosition!.y
+    // 2枚の中心の間は、大きくなった文字の高さより広い(重ならない)
+    expect(gap * 1080).toBeGreaterThan(bigger.style.fontSize)
+  })
+})

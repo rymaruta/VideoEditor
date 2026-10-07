@@ -1,6 +1,6 @@
 import type { TextOverlay, TextStyle } from '../types'
 import { TELOP_TEMPLATES } from './templates'
-import { stackSimultaneousTelops, stackedBottomTelops } from './stack'
+import { hudStackBase, stackSimultaneousTelops, stackedBottomTelops } from './stack'
 
 /**
  * テロップスタイル(名前の付いた見た目)と、それを使うテロップのつながり。
@@ -156,7 +156,11 @@ export function restyleSpeechTelops(
   const from = speechTelopStyle(prev.style).customPosition
   const to = speechTelopStyle(next.style).customPosition
   // 段に積んだ(重なりを避けて自動で1段上げた)枚も、見た目の既定の置き場所にある枚と同じに扱う
-  const stacked = canvasH ? stackedBottomTelops(overlays, canvasH) : overlays.map(() => false)
+  // HUD を避けて段ごと上げてあれば、その高さを一番下の段にして積み直す
+  const baseCenter = canvasH ? hudStackBase(overlays, canvasH) : undefined
+  const stacked = canvasH
+    ? stackedBottomTelops(overlays, canvasH, { baseCenter })
+    : overlays.map(() => false)
   const restyled = new Set<number>()
   const out = overlays.map((o, i) => {
     if (!isAutoSpeech(o)) return o
@@ -194,7 +198,8 @@ export function restyleSpeechTelops(
   }
   const again = stackSimultaneousTelops(
     out.map((o, i) => (managed[i] ? strip(o) : o)),
-    canvasH
+    canvasH,
+    { baseCenter }
   )
   return out.map((o, i) => {
     if (!managed[i]) return o

@@ -360,3 +360,35 @@ export function selectScenes(
     ...(relaxed ? { relaxed } : {})
   }
 }
+
+/** 「見どころ」が見分けになっているかを確かめる、場面の数の下限と、見どころの割合の上限 */
+const MIN_SCENES_TO_CHECK = 6
+const MAX_HIGHLIGHT_RATIO = 0.5
+
+/**
+ * ほとんどの場面を「見どころ」にした判定は、見分けになっていない(小さなモデル・聞き取れない言葉の
+ * 文字起こしで起きる)。点数の下限で残す場面を決める「面白い所だけ」でそのまま使うと全部が残るので、
+ * 場面の印(見どころ・ふつう)と点数を `heuristic`(声の盛り上がり・笑い・発話の密度)に置き換える。
+ * 題・理由・曲の雰囲気と、判定が「不要」にした印はそのまま使う。置き換えで「不要」にはしない
+ * (発話の少ない回で全部が落ちないように)
+ */
+export function demoteIndiscriminateHighlights(
+  judgements: readonly SceneJudgement[],
+  heuristic: readonly SceneJudgement[]
+): { judgements: SceneJudgement[]; demoted?: { highlights: number; total: number } } {
+  const highlights = judgements.filter((j) => j.kind === 'highlight').length
+  if (
+    judgements.length < MIN_SCENES_TO_CHECK ||
+    highlights <= judgements.length * MAX_HIGHLIGHT_RATIO
+  )
+    return { judgements: [...judgements] }
+  const byId = new Map(heuristic.map((h) => [h.sceneId, h]))
+  return {
+    judgements: judgements.map((j) => {
+      const h = byId.get(j.sceneId)
+      if (!h || j.kind === 'unneeded') return j
+      return { ...j, kind: h.kind === 'unneeded' ? 'normal' : h.kind, score: h.score }
+    }),
+    demoted: { highlights, total: judgements.length }
+  }
+}

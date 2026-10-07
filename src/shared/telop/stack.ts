@@ -62,20 +62,38 @@ export function stackSimultaneousTelops<
  */
 export function stackedBottomTelops<
   T extends Pick<TextOverlay, 'text' | 'style' | 'startTime' | 'endTime'>
->(telops: readonly T[], canvasH: number): boolean[] {
+>(telops: readonly T[], canvasH: number, options: { baseCenter?: number } = {}): boolean[] {
   const strip = (t: T): T => {
     if (t.style.position !== 'bottom' || t.style.customPosition?.x !== 0.5) return t
     const { customPosition: _drop, ...style } = t.style
     void _drop
     return { ...t, style: style as T['style'] }
   }
-  const restacked = stackSimultaneousTelops(telops.map(strip), canvasH)
+  const restacked = stackSimultaneousTelops(telops.map(strip), canvasH, options)
   return telops.map((t, i) => {
     if (t.style.position !== 'bottom') return false
     const own = t.style.customPosition
-    if (!own) return true
+    if (!own) return options.baseCenter === undefined
     if (own.x !== 0.5) return false
     const again = restacked[i].style.customPosition
     return Boolean(again) && Math.abs(again!.x - own.x) < 1e-9 && Math.abs(again!.y - own.y) < 1e-9
   })
+}
+
+/**
+ * HUD を避けて段ごと上げた発言テロップ(`placeTelopsAvoidingHud`)の、一番下の段の高さ。
+ * 下の発言テロップの2枚以上が同じ高さ(真ん中・自由配置)にあり、そこから積み直すと今の置き場所に
+ * なるなら、その高さ。無ければ undefined
+ */
+export function hudStackBase<
+  T extends Pick<TextOverlay, 'text' | 'style' | 'startTime' | 'endTime'>
+>(telops: readonly T[], canvasH: number): number | undefined {
+  const ys = telops
+    .filter((t) => t.style.position === 'bottom' && t.style.customPosition?.x === 0.5)
+    .map((t) => t.style.customPosition!.y)
+  if (ys.length < 2) return undefined
+  const base = Math.max(...ys)
+  if (ys.filter((y) => y === base).length < 2) return undefined
+  const managed = stackedBottomTelops(telops, canvasH, { baseCenter: base })
+  return telops.some((t, i) => managed[i] && t.style.customPosition?.y === base) ? base : undefined
 }

@@ -701,7 +701,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const scenes = scenesFor(project, info, { kind, hype })
     const range = cameraRange(info)
     const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
-    const { judgements, source, failure, rejected, model, device } = await judgeScenes(
+    const { judgements, source, failure, model, device } = await judgeScenes(
       scenes,
       range.end - range.start,
       {
@@ -710,16 +710,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         episodeName: project.name,
         targetSec: get().targetMinutes * 60 || (kind === 'game' ? 0 : range.end - range.start),
         note: get().editNote || undefined,
-        kind,
-        policy: useSettingsStore.getState().editPolicy
+        kind
       },
       (p) => setStep('structure', { percent: p.percent, note: p.note })
     )
     set({ scenes, judgements, judgeSource: source, keep: {}, hype: hype ?? [] })
-    if (rejected)
-      log(
-        `構成: ${rejected}、見分けになっていないと判断し、見どころは声の盛り上がり・笑い・発話の密度の点数で選び直しました(題・理由・不要の印は AI のもの)`
-      )
     const highlights = judgements.filter((j) => j.kind === 'highlight').length
     const unneeded = judgements.filter((j) => j.kind === 'unneeded').length
     setStep('structure', {
@@ -784,6 +779,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           setStep(id, { state: 'skipped', note: '仮編集がありません' })
       return
     }
+    if (plan.demoted)
+      log(
+        `構成: ${plan.demoted.total} 場面中 ${plan.demoted.highlights} 場面が「見どころ」で見分けになっていないため、見どころは声の盛り上がり・笑い・発話の密度の点数で選び直しました(題・理由・不要の印はそのまま)`
+      )
     if (plan.selection.relaxed)
       log('声の山・笑いのはっきりした場面が無かったため、点数の上位の場面を残しました(静かな回)')
     const raw = plan.selection.kept.reduce((t, id) => {
