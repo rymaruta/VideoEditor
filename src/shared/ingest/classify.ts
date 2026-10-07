@@ -73,6 +73,26 @@ function parentOf(folder: string): string {
   return i < 0 ? '' : folder.slice(0, i)
 }
 
+/** カードの中の決まったフォルダ(キヤノン・GoPro の DCIM、ソニーの PRIVATE/M4ROOT、AVCHD など) */
+const IN_CARD_FOLDER = /^(DCIM|PRIVATE|AVCHD|MP_ROOT|XDROOT|CLIP|M4ROOT|BPAV)$/i
+
+/**
+ * カードを丸ごと写したフォルダなら、カードのフォルダ(CamA/Card1/DCIM/100CANON → CamA/Card1)。
+ * そうでなければそのフォルダ
+ */
+function cardRoot(folder: string): string {
+  const parts = folder.split('/')
+  const i = parts.findIndex((p) => IN_CARD_FOLDER.test(p))
+  return i < 0 ? folder : parts.slice(0, i).join('/')
+}
+
+/** ファイル名の、撮った回の番号より後ろ(ZOOM0001_Tr1 → TR1。同じ録音機の何本目のトラックか) */
+function trackTag(fileName: string): string {
+  const base = fileName.normalize('NFKC').replace(/\.[^.]+$/, '')
+  const m = /\d+[-_\s]*(\p{L}[\p{L}\d]*)$/u.exec(base)
+  return m ? m[1].toUpperCase() : ''
+}
+
 /** 録画時刻が全部分かっているときだけ、その素材群の [始まり, 終わり](秒) */
 function recordedRange(files: readonly ProbedFile[]): [number, number] | undefined {
   let start = Infinity
@@ -168,7 +188,9 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
     .sort((a, b) => a.range[0] - b.range[0])
   const camChains: { group: (typeof camGroups)[number]['g']; parent: string; end: number }[] = []
   for (const c of camGroups) {
-    const parent = parentOf(c.g.folder)
+    // カードを丸ごと写したフォルダ(CamA/Card1/DCIM/100CANON と CamA/Card2/DCIM/100CANON)は、
+    // カードのフォルダの親(CamA)で比べる
+    const parent = parentOf(cardRoot(c.g.folder))
     const chain = camChains.find(
       (x) =>
         x.parent === parent &&
@@ -188,15 +210,62 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
     groups.delete(c.key)
   }
 
+  // 録音機(ZOOM など)は、撮るたびに別のフォルダ(ZOOM/ZOOM0001 → ZOOM0002)を作り、1人1本のトラックを
+  // 「_Tr1」「_Tr2」のように分けて書く。同じ親フォルダ・同じ機種・同じ頭の名前・同じトラックで、
+  // 録音時刻が重ならないものは、1人のマイクの続きとする(まとめないと、2人 × 3回が 6 本のマイクになり、
+  // 同じ人の発言が3つの名前に分かれる)
+  const micGroups = [...groups.entries()]
+    .filter(([, g]) => g.kind === 'mic')
+    .map(([key, g]) => {
+      const tags = new Set(g.files.map((f) => trackTag(f.relativePath.split('/').pop() ?? '')))
+      return { key, g, tag: tags.size === 1 ? [...tags][0] : '', range: recordedRange(g.files) }
+    })
+    .filter(
+      (c): c is typeof c & { range: [number, number] } => c.range !== undefined && c.tag !== ''
+    )
+    .sort((a, b) => a.range[0] - b.range[0])
+  const micChains: {
+    group: (typeof micGroups)[number]['g']
+    parent: string
+    tag: string
+    end: number
+  }[] = []
+  for (const c of micGroups) {
+    const parent = parentOf(c.g.folder)
+    const chain = micChains.find(
+      (x) =>
+        x.parent === parent &&
+        x.tag === c.tag &&
+        x.group.folder !== c.g.folder &&
+        x.group.device === c.g.device &&
+        x.group.prefix === c.g.prefix &&
+        x.end <= c.range[0] + 1
+    )
+    if (!chain) {
+      micChains.push({ group: c.g, parent, tag: c.tag, end: c.range[1] })
+      continue
+    }
+    chain.group.files.push(...c.g.files)
+    if (!chain.group.moreFolders?.includes(c.g.folder)) {
+      chain.group.moreFolders = [...(chain.group.moreFolders ?? []), c.g.folder]
+    }
+    chain.end = Math.max(chain.end, c.range[1])
+    groups.delete(c.key)
+  }
+
   // フォルダ1つに1グループなら「フォルダ名」、混ざっていれば「フォルダ名 + 頭の文字/機種」で呼ぶ
   const perFolder = new Map<string, number>()
   for (const g of groups.values()) perFolder.set(g.folder, (perFolder.get(g.folder) ?? 0) + 1)
 
   const list = [...groups.values()].map((g) => {
     g.files.sort(byRecordingOrder)
-    const folderName = [g.folder, ...(g.moreFolders ?? [])]
-      .map((f) => f.split('/').pop() ?? '')
-      .join('・')
+    // カードを丸ごと写したフォルダは、どのカードも同じ名前(100CANON)なので、カードのフォルダの名前で呼ぶ
+    const folders = [g.folder, ...(g.moreFolders ?? [])]
+    const last = (f: string): string => f.split('/').pop() ?? ''
+    const names = folders.map(last)
+    const folderName = [
+      ...new Set(new Set(names).size < names.length ? folders.map((f) => last(cardRoot(f))) : names)
+    ].join('・')
     const detail = g.prefix || g.device || ''
     const basis =
       (perFolder.get(g.folder) ?? 0) > 1 || !folderName

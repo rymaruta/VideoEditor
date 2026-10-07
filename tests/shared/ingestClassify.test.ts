@@ -102,6 +102,67 @@ describe('classifyFootage', () => {
     )
   })
 
+  it('カードを丸ごと写したフォルダ(DCIM・PRIVATE/M4ROOT)でも、カードを替えて続けて撮ったカメラは1台', () => {
+    for (const [a, b, name] of [
+      [
+        'CamA/Card1/DCIM/100CANON/MVI_0001.MP4',
+        'CamA/Card2/DCIM/100CANON/MVI_0001.MP4',
+        'Card1・Card2'
+      ],
+      [
+        'CamB/Card1/PRIVATE/M4ROOT/CLIP/C0001.MP4',
+        'CamB/Card2/PRIVATE/M4ROOT/CLIP/C0001.MP4',
+        'Card1・Card2'
+      ],
+      ['Card1/DCIM/100GOPRO/GX010001.MP4', 'Card2/DCIM/100GOPRO/GX010001.MP4', 'Card1・Card2']
+    ]) {
+      const sources = classifyFootage([
+        file(a, { device: 'X', recordedAt: 0, duration: 1800 }),
+        file(b, { device: 'X', recordedAt: 1900, duration: 1800 })
+      ])
+      expect(sources, a).toHaveLength(1)
+      expect(sources[0].files.map((f) => f.relativePath)).toEqual([a, b])
+      expect(sources[0].basis).toContain(name)
+    }
+    // 同じ時間に撮った2枚のカードは別のカメラ
+    expect(
+      classifyFootage([
+        file('Card1/DCIM/100GOPRO/GX010001.MP4', { device: 'X', recordedAt: 0, duration: 600 }),
+        file('Card2/DCIM/100GOPRO/GX010001.MP4', { device: 'X', recordedAt: 30, duration: 600 })
+      ])
+    ).toHaveLength(2)
+  })
+
+  it('録音機が撮るたびに作るフォルダ(ZOOM0001 → 0002)の同じトラックは、1人のマイクにまとめる', () => {
+    const mic = (take: number, tr: number): ProbedFile =>
+      file(`ZOOM/ZOOM000${take}/ZOOM000${take}_Tr${tr}.WAV`, {
+        hasVideo: false,
+        device: 'H6',
+        recordedAt: (take - 1) * 1000,
+        duration: 900
+      })
+    const sources = classifyFootage([
+      mic(1, 1),
+      mic(1, 2),
+      mic(2, 1),
+      mic(2, 2),
+      mic(3, 1),
+      mic(3, 2)
+    ])
+    expect(sources.map((s) => s.files.map((f) => f.relativePath.split('/').pop()))).toEqual([
+      ['ZOOM0001_Tr1.WAV', 'ZOOM0002_Tr1.WAV', 'ZOOM0003_Tr1.WAV'],
+      ['ZOOM0001_Tr2.WAV', 'ZOOM0002_Tr2.WAV', 'ZOOM0003_Tr2.WAV']
+    ])
+    expect(sources.map((s) => s.name)).toEqual(['マイク1', 'マイク2'])
+    // トラックの印の無い別々の録音機(PIN_01・PIN_02)は、時刻が続いていても別のフォルダならまとめない
+    expect(
+      classifyFootage([
+        file('PIN_A/PIN_01.WAV', { hasVideo: false, recordedAt: 0, duration: 600 }),
+        file('PIN_B/PIN_01.WAV', { hasVideo: false, recordedAt: 700, duration: 600 })
+      ])
+    ).toHaveLength(2)
+  })
+
   it('同じ機種でも同じ時間に撮っていれば・時刻が分からなければ別のカメラのまま', () => {
     const sources = classifyFootage([
       file('CAM_A/C0001.MP4', { device: 'Sony FX3', recordedAt: 0, duration: 600 }),
