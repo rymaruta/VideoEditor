@@ -45,7 +45,8 @@ function roleValue(s: EditableSource, game: boolean): RoleValue {
   return s.kind
 }
 
-function rolePatch(v: RoleValue): Partial<EditableSource> {
+/** `isTrack`: 動画から取り出した音声トラック(声を選んだら役割も「声」にする。外すと、全部入りと重なって鳴る) */
+function rolePatch(v: RoleValue, isTrack: boolean): Partial<EditableSource> {
   switch (v) {
     case 'camera:screen':
       return { kind: 'camera', cameraRole: 'screen' }
@@ -56,7 +57,7 @@ function rolePatch(v: RoleValue): Partial<EditableSource> {
     case 'audio:mix':
       return { kind: 'audio', trackRole: 'mix' }
     case 'mic':
-      return { kind: 'mic', trackRole: undefined }
+      return { kind: 'mic', trackRole: isTrack ? 'voice' : undefined }
     default:
       return { kind: v }
   }
@@ -314,7 +315,15 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                   <select
                     aria-label="役割"
                     value={roleValue(s, episodeKind === 'game')}
-                    onChange={(e) => updateSource(s.id, rolePatch(e.target.value as RoleValue))}
+                    onChange={(e) =>
+                      updateSource(
+                        s.id,
+                        rolePatch(
+                          e.target.value as RoleValue,
+                          s.files.some((f) => f.track)
+                        )
+                      )
+                    }
                   >
                     {s.files.some((f) => f.hasVideo) &&
                       (episodeKind === 'game' ? (

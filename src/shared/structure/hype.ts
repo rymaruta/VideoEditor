@@ -137,6 +137,33 @@ export const HYPE_TAIL_SEC = 8
  * 区間の端が発話の途中に掛かるなら、その発話を丸ごと入れる(言葉の途中から始めない)。
  * 近い区間(2 秒未満の切れ目)はつなぐ
  */
+/**
+ * 区間の端が発話の途中なら、発話を丸ごと入れる。広げた先がまた別の発話の途中になることがある
+ * (重なる掛け合い)ので、動かなくなるまで繰り返す
+ */
+export function widenToLines(
+  start: number,
+  end: number,
+  lines: readonly { start: number; end: number }[]
+): [number, number] {
+  let a = start
+  let b = end
+  for (let changed = true; changed;) {
+    changed = false
+    for (const l of lines) {
+      if (l.start < a && l.end > a) {
+        a = l.start
+        changed = true
+      }
+      if (l.start < b && l.end > b) {
+        b = l.end
+        changed = true
+      }
+    }
+  }
+  return [a, b]
+}
+
 export function peakWindows(
   scene: { start: number; end: number },
   peaks: readonly PeakSpan[],
@@ -150,13 +177,8 @@ export function peakWindows(
   const clamp = (t: number): number => Math.max(scene.start, Math.min(scene.end, t))
   const windows = inside
     .map((p) => {
-      let start = clamp(p.start - p.lead)
-      let end = clamp(p.end + p.tail)
-      for (const l of lines) {
-        if (l.start < start && l.end > start) start = clamp(l.start)
-        if (l.start < end && l.end > end) end = clamp(l.end)
-      }
-      return { start, end }
+      const [a, b] = widenToLines(clamp(p.start - p.lead), clamp(p.end + p.tail), lines)
+      return { start: clamp(a), end: clamp(b) }
     })
     .sort((a, b) => a.start - b.start)
   const merged: { start: number; end: number }[] = []

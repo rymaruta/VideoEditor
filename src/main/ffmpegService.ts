@@ -1052,7 +1052,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           )
           const myIndex = inputIndex++
           let pipAudioIndex = myIndex
-          if (pipPre > 0 && asset.hasAudio) {
+          if (pipPre > 0 && asset.hasAudio && !track.audioMuted) {
             command
               .input(asset.filePath)
               .inputOptions([
@@ -1105,7 +1105,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             )
             curV = outV
           }
-          if (asset.hasAudio) {
+          if (asset.hasAudio && !track.audioMuted) {
             const delayMs = Math.max(0, Math.round(pipStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
             /**

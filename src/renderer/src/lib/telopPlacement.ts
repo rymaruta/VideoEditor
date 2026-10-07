@@ -5,6 +5,7 @@ import { detectHud, speechYAvoidingHud } from '@shared/telop/hud'
 import { textCanvasSize } from '@shared/resolution'
 import type { AspectRatio } from '@shared/types'
 import { autoTelopKey } from '@shared/telop/manual'
+import { stackSimultaneousTelops, stackedBottomTelops } from '@shared/telop/stack'
 
 /**
  * 発言テロップを、顔を隠さない位置へ(計画書 §5.8)。
@@ -136,11 +137,25 @@ export async function placeTelopsAvoidingHud(
   const r = telopRect({ text: 'あ\nあ', style: sample.style }, canvas, 'bottom')
   const y = speechYAvoidingHud(map, r.y + r.h / 2)
   if (y === null) return { telops, moved: 0, y: null }
-  let moved = 0
-  const out = telops.map((o) => {
-    if (o.style.position !== 'bottom' || o.style.customPosition) return o
-    moved++
-    return { ...o, style: { ...o.style, customPosition: { x: 0.5, y } } }
+  // 段に積まれた発言テロップ(掛け合いで同時に出たもの)も、一番下の段ごとまとめて上げる
+  // (下の段だけ上げると、上の段と重なり、上の段は HUD の近くに残る)。手で置いたものには触れない
+  const managed = stackedBottomTelops(telops, canvas.h)
+  const picked = telops
+    .map((o, i) => ({ o, i }))
+    .filter(({ i }) => managed[i])
+    .map(({ o, i }) => {
+      const { customPosition: _drop, ...style } = o.style
+      void _drop
+      return { o: { ...o, style }, i }
+    })
+  const restacked = stackSimultaneousTelops(
+    picked.map((p) => p.o),
+    canvas.h,
+    { baseCenter: y }
+  )
+  const out = [...telops]
+  picked.forEach((p, k) => {
+    out[p.i] = restacked[k]
   })
-  return { telops: out, moved, y }
+  return { telops: out, moved: picked.length, y }
 }

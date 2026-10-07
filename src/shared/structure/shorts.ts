@@ -1,4 +1,4 @@
-import type { HypeMoment } from './hype'
+import { widenToLines, type HypeMoment } from './hype'
 
 /**
  * ゲーム実況のショート(縦型・15〜60 秒)にする区間を選ぶ(`docs/GAME_AUTO_EDIT_PLAN.md` G4)。
@@ -47,12 +47,7 @@ export function pickShortWindows(
   const clamp = (t: number): number => Math.max(range.start, Math.min(range.end, t))
   /** 端が発話の途中なら、発話を丸ごと入れる */
   const widen = (start: number, end: number): [number, number] => {
-    let a = start
-    let b = end
-    for (const l of lines) {
-      if (l.start < a && l.end > a) a = l.start
-      if (l.start < b && l.end > b) b = l.end
-    }
+    const [a, b] = widenToLines(start, end, lines)
     return [clamp(a), clamp(b)]
   }
 

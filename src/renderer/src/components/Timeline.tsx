@@ -519,6 +519,7 @@ export function Timeline(): React.JSX.Element {
   const addVideoOverlayTrack = useProjectStore((s) => s.addVideoOverlayTrack)
   const removeVideoOverlayTrack = useProjectStore((s) => s.removeVideoOverlayTrack)
   const toggleVideoOverlayTrackHidden = useProjectStore((s) => s.toggleVideoOverlayTrackHidden)
+  const toggleVideoOverlayTrackAudio = useProjectStore((s) => s.toggleVideoOverlayTrackAudio)
   const setVideoOverlayTrackPosition = useProjectStore((s) => s.setVideoOverlayTrackPosition)
   const setVideoOverlayTrackScale = useProjectStore((s) => s.setVideoOverlayTrackScale)
   const updateVideoOverlayClipStart = useProjectStore((s) => s.updateVideoOverlayClipStart)
@@ -2054,6 +2055,22 @@ export function Timeline(): React.JSX.Element {
                     <EyeOffIcon width={13} height={13} />
                   ) : (
                     <EyeIcon width={13} height={13} />
+                  )}
+                </button>
+                <button
+                  className="icon-button"
+                  aria-pressed={!track.audioMuted}
+                  title={
+                    track.audioMuted
+                      ? 'ワイプの音を鳴らす(いまは絵だけ。顔カメラの声はマイクの音声トラックで鳴らしています)'
+                      : 'ワイプの音を鳴らさない(絵は出したまま)'
+                  }
+                  onClick={() => toggleVideoOverlayTrackAudio(track.id)}
+                >
+                  {track.audioMuted ? (
+                    <VolumeXIcon width={13} height={13} />
+                  ) : (
+                    <Volume2Icon width={13} height={13} />
                   )}
                 </button>
                 <select

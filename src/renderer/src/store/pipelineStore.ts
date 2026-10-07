@@ -1412,6 +1412,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             kind: u.kind as SourceKind,
             subject: u.subject,
             ...(u.trackRole ? { trackRole: u.trackRole } : {}),
+            ...(trackParentSource(u, used) ? { trackOf: trackParentSource(u, used) } : {}),
             ...(gameKind && u.kind === 'camera'
               ? { cameraRole: u.cameraRole === 'face' ? ('face' as const) : ('screen' as const) }
               : {})
@@ -1630,4 +1631,11 @@ export interface ShortsProgress {
 function clockText(sec: number): string {
   const t = Math.max(0, Math.round(sec))
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+}
+
+/** 動画から取り出したトラックの音源なら、元の動画を持つ音源(カメラ)の ID */
+function trackParentSource(s: EditableSource, all: readonly EditableSource[]): string | undefined {
+  const parent = s.files.find((f) => f.track)?.track?.parentPath
+  if (!parent) return undefined
+  return all.find((x) => x.files.some((f) => f.path === parent))?.id
 }

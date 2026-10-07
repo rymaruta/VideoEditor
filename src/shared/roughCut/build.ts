@@ -172,8 +172,9 @@ export function buildRoughCut(
     clips: audioFor(m.id)
   }))
   const anchor = info.sources.find((s) => s.id === info.anchorSourceId)
-  // 取り出したトラックがあれば、基準カメラの音(= 1本目のトラック)は重ねない
-  const tracksExtracted = info.sources.some((s) => s.trackRole !== undefined)
+  // 基準カメラの録画からトラックを取り出していれば、基準カメラの音(= 1本目のトラック)は重ねない
+  // (取り出したトラックが同じ音を持っている)。ほかのカメラ・別のファイルのトラックは関係ない
+  const tracksExtracted = info.sources.some((s) => s.trackOf === info.anchorSourceId)
   if (anchor && !tracksExtracted) {
     audio.push({
       // ピンマイクが無ければ、基準カメラの音が声も兼ねるので小さくしない
@@ -204,13 +205,16 @@ export function buildRoughCut(
  * (同じ声が二重に重なる)。鳴らさないトラックも文字起こし・盛り上がりには使う
  */
 export function silencedTrack(
-  sources: readonly { id: string; kind: string; trackRole?: string }[],
+  sources: readonly { id: string; kind: string; trackRole?: string; trackOf?: string }[],
   sourceId: string
 ): boolean {
   const s = sources.find((x) => x.id === sourceId)
-  if (!s?.trackRole) return false
-  const hasGame = sources.some((x) => x.kind === 'audio' && x.trackRole === 'game')
-  const hasMix = sources.some((x) => x.kind === 'audio' && x.trackRole === 'mix')
+  // 動画から取り出したトラックだけ(別のファイルを「ゲーム音」にしたものは、ほかと重ならない)。
+  // 同じ動画から取り出したトラックどうしで決める
+  if (!s?.trackRole || !s.trackOf) return false
+  const siblings = sources.filter((x) => x.trackOf === s.trackOf)
+  const hasGame = siblings.some((x) => x.kind === 'audio' && x.trackRole === 'game')
+  const hasMix = siblings.some((x) => x.kind === 'audio' && x.trackRole === 'mix')
   if (s.trackRole === 'mix') return hasGame
   if (s.trackRole === 'voice') return !hasGame && hasMix
   return false

@@ -209,7 +209,9 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
         videoOverlayTracks: [
           pipTrack('shown', false, 'a'),
           pipTrack('hidden', true, 'b'),
-          pipTrack('silent', false, 'mute')
+          pipTrack('silent', false, 'mute'),
+          // 顔カメラ: 絵は出すが音は鳴らさない
+          { ...pipTrack('face', false, 'a'), audioMuted: true }
         ]
       })
     )
@@ -222,6 +224,7 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
       sourceIn: 2
     })
     expect(byId.get('hidden:audio')?.muted).toBe(true)
+    expect(byId.get('face:audio')?.muted).toBe(true)
     expect(byId.has('silent:audio')).toBe(false)
   })
 

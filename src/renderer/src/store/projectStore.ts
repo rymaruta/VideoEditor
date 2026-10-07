@@ -462,6 +462,7 @@ function normalizeVideoOverlayTrack(
     id: asNonEmptyString(raw.id, uuid()),
     name: asNonEmptyString(raw.name, 'PiP'),
     hidden: asBoolean(raw.hidden, false),
+    audioMuted: raw.audioMuted === true ? true : undefined,
     position: asOneOf(raw.position, PIP_POSITIONS, 'top-right'),
     // 0以下だと `scale=0:-2` で書き出しが失敗する。1超は枠からはみ出す。
     scale: scale > 0 && scale <= 1 ? scale : 0.3,
@@ -669,6 +670,7 @@ function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
       ...(s.trackRole === 'voice' || s.trackRole === 'game' || s.trackRole === 'mix'
         ? { trackRole: s.trackRole as TrackRole }
         : {}),
+      ...(typeof s.trackOf === 'string' && s.trackOf ? { trackOf: s.trackOf } : {}),
       ...(s.cameraRole === 'screen' || s.cameraRole === 'face'
         ? { cameraRole: s.cameraRole as CameraRole }
         : {})
@@ -1002,6 +1004,8 @@ interface ProjectState {
   addVideoOverlayTrack: (name: string) => void
   removeVideoOverlayTrack: (trackId: string) => void
   toggleVideoOverlayTrackHidden: (trackId: string) => void
+  /** ワイプの音だけを鳴らす/鳴らさない(絵はそのまま) */
+  toggleVideoOverlayTrackAudio: (trackId: string) => void
   setVideoOverlayTrackPosition: (trackId: string, position: PipPosition) => void
   setVideoOverlayTrackScale: (trackId: string, scale: number) => void
   /** `startTime` を渡すとその位置へ、省略するとトラック末尾へ置く */
@@ -1756,6 +1760,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         name: c.name,
         multicamSourceId: c.sourceId,
         hidden: !isFace(c.sourceId),
+        // 顔カメラの声はマイク・ゲーム機の音源で鳴らす(カメラの音も足すと二重に聞こえる)
+        ...(isFace(c.sourceId) ? { audioMuted: true } : {}),
         position: isFace(c.sourceId) ? FACE_PIP_POSITION : 'top-right',
         scale: isFace(c.sourceId) ? FACE_PIP_SCALE : 0.32,
         clips: c.pieces
@@ -2842,6 +2848,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               name: o.name,
               multicamSourceId: o.sourceId,
               hidden: prev?.hidden ?? false,
+              audioMuted: prev ? prev.audioMuted : true,
               position: prev?.position ?? FACE_PIP_POSITION,
               scale: prev?.scale ?? FACE_PIP_SCALE,
               clips: o.clips.map((c) => ({ id: uuid(), ...c }))
@@ -3609,6 +3616,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ...state.project,
         videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
           t.id === trackId ? { ...t, hidden: !t.hidden } : t
+        )
+      }
+    })),
+
+  toggleVideoOverlayTrackAudio: (trackId) =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+          t.id === trackId ? { ...t, audioMuted: t.audioMuted ? undefined : true } : t
         )
       }
     })),

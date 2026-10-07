@@ -179,7 +179,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         pipAudioTracks.push({
           id: `${li === 0 ? track.id : `${track.id}:${li + 1}`}:audio`,
           name: `${li === 0 ? track.name : `${track.name} (${li + 1})`} の音`,
-          muted: track.hidden,
+          muted: track.hidden || track.audioMuted === true,
           volume: 1,
           duckingEnabled: false,
           items: audioItems

@@ -15,6 +15,8 @@ export interface MulticamSource {
   subject?: string
   /** 動画から取り出した音声トラックの役割(声・ゲーム音・全部入り) */
   trackRole?: TrackRole
+  /** 動画から取り出した音声トラックなら、元の動画の音源(カメラ)の ID */
+  trackOf?: string
   /** ゲーム実況のカメラの役割(ゲーム画面・顔カメラ)。顔カメラはワイプで常に出す */
   cameraRole?: CameraRole
 }

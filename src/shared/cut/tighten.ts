@@ -119,6 +119,13 @@ export function tightenRanges(
       sceneId: r.sceneId
     })
   }
+  // 区間の頭を前の区間の終わりより前にしない(同じ絵を2度使わない)。区間の端を 100Hz の格子へ
+  // 外向きに丸めるぶんと、場面の終わりの絵が次の場面へはみ出すぶんが、隣と重なることがある
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1]
+    const cur = out[i]
+    if (cur.start >= prev.start && cur.start < prev.end) cur.start = Math.min(prev.end, cur.end)
+  }
   return out.filter((p) => p.end - p.start >= minPiece)
 }
 

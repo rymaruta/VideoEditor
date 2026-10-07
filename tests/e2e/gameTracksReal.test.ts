@@ -365,6 +365,8 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     expect(face).toBeDefined()
     expect(face!.hidden).toBe(false)
     expect(face!.position).toBe('bottom-right')
+    // 顔カメラの音は鳴らさない(声はマイクのトラックで鳴る。足すと遅れた声が二重に聞こえる)
+    expect(face!.audioMuted).toBe(true)
     const mainLen = project.clips.reduce((t, c) => t + (c.outPoint - c.inPoint) / (c.speed || 1), 0)
     const faceLen = face!.clips.reduce((t, c) => t + (c.outPoint - c.inPoint), 0)
     expect(Math.abs(faceLen - mainLen)).toBeLessThan(2)
@@ -411,9 +413,13 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     expect(sp.videoOverlayTracks[0]).toMatchObject({
       position: 'top-left',
       scale: 1,
-      hidden: false
+      hidden: false,
+      audioMuted: true
     })
     expect(sp.textOverlays.length).toBeGreaterThan(0)
+    // テロップは本編の終わりを越えない
+    const spLen = sp.clips.reduce((t, c) => t + (c.outPoint - c.inPoint) / (c.speed ?? 1), 0)
+    for (const o of sp.textOverlays) expect(o.endTime).toBeLessThanOrEqual(spLen + 1e-6)
     // どのショートにも叫びの山が入っている
     const shortsInfo = usePipelineStore.getState().log.filter((l) => l.text.startsWith('ショート '))
     expect(shortsInfo).toHaveLength(3)

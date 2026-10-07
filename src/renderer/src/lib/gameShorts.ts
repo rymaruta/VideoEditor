@@ -129,6 +129,8 @@ export function buildShortProject(
       name: o.name,
       multicamSourceId: o.sourceId,
       hidden: false,
+      // 声はマイクの音源で鳴らす(カメラの音を足すと二重に聞こえる)
+      audioMuted: true,
       position: SHORT_FACE_POSITION,
       scale: SHORT_FACE_SCALE,
       clips: o.clips.map((c) => ({ id: uuid(), ...c }))

@@ -30,6 +30,12 @@ describe('OBS の音声トラックの役割', () => {
     expect(craigSpeakerName('1-tomo.flac')).toBe('tomo')
     expect(craigSpeakerName('2-hanako_1234.flac')).toBe('hanako')
     expect(craigSpeakerName('ZOOM0001.WAV')).toBeNull()
+    // 録音機の日時・連番の名前は話者にしない(ロケの収録を壊さない)
+    expect(craigSpeakerName('240501-120000.WAV')).toBeNull()
+    expect(craigSpeakerName('1-0001.wav')).toBeNull()
+    expect(craigSpeakerName('2024-05-01 12-00-00.wav')).toBeNull()
+    expect(craigSpeakerName('3-たろう.ogg')).toBe('たろう')
+    expect(craigSpeakerName('4-2b_fan.flac')).toBe('2b_fan')
     expect(guessCameraRole('webcam/facecam.mp4', 640, 1920, 1)).toBe('face')
     expect(guessCameraRole('OBS/2026-10-07.mp4', 1920, 1920, 3)).toBe('screen')
     expect(guessCameraRole('rec/b.mp4', 640, 1920, 1)).toBe('face')
@@ -84,23 +90,42 @@ describe('鳴らすトラック(silencedTrack)', () => {
   const src = (
     id: string,
     kind: string,
-    trackRole?: string
-  ): { id: string; kind: string; trackRole?: string } => ({
+    trackRole?: string,
+    trackOf?: string
+  ): { id: string; kind: string; trackRole?: string; trackOf?: string } => ({
     id,
     kind,
-    trackRole
+    trackRole,
+    trackOf
   })
   it('ゲーム音があれば全部入りを鳴らさない。無ければ全部入りを鳴らし、取り出した声は鳴らさない', () => {
     const withGame = [
-      src('mix', 'audio', 'mix'),
-      src('v', 'mic', 'voice'),
-      src('g', 'audio', 'game'),
+      src('mix', 'audio', 'mix', 'obs'),
+      src('v', 'mic', 'voice', 'obs'),
+      src('g', 'audio', 'game', 'obs'),
       src('craig', 'mic')
     ]
     expect(withGame.map((s) => silencedTrack(withGame, s.id))).toEqual([true, false, false, false])
-    const mixOnly = [src('mix', 'audio', 'mix'), src('v', 'mic', 'voice'), src('craig', 'mic')]
+    const mixOnly = [
+      src('mix', 'audio', 'mix', 'obs'),
+      src('v', 'mic', 'voice', 'obs'),
+      src('craig', 'mic')
+    ]
     expect(mixOnly.map((s) => silencedTrack(mixOnly, s.id))).toEqual([false, true, false])
     const plain = [src('pin', 'mic')]
     expect(silencedTrack(plain, 'pin')).toBe(false)
+  })
+
+  it('判断は同じ録画から取り出したトラックの中だけで行う(別の録画のゲーム音で全部入りを消さない)', () => {
+    const two = [
+      src('mixA', 'audio', 'mix', 'A'),
+      src('vA', 'mic', 'voice', 'A'),
+      src('gB', 'audio', 'game', 'B'),
+      src('vB', 'mic', 'voice', 'B')
+    ]
+    expect(two.map((s) => silencedTrack(two, s.id))).toEqual([false, true, false, false])
+    // 役割だけあって元の録画が分からない(手で役割を付けた)音源は消さない
+    const manual = [src('m', 'mic', 'voice'), src('g', 'audio', 'game')]
+    expect(manual.map((s) => silencedTrack(manual, s.id))).toEqual([false, false])
   })
 })

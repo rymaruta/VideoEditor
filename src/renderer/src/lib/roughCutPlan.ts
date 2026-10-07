@@ -396,11 +396,11 @@ export function planRoughCut(
       })
     }
   }
-  // 短い切れ目をつなぎ、読み切れない枚を延ばす(時間の飛ぶカットの切れ目は越えない)
-  const settled = settleTelopTimes(
-    telops,
-    cut.spans.slice(1).map((sp) => sp.timeline)
-  )
+  // 短い切れ目をつなぎ、読み切れない枚を延ばす(時間の飛ぶカットの切れ目と、本編の終わりは越えない)
+  const settled = settleTelopTimes(telops, [
+    ...cut.spans.slice(1).map((sp) => sp.timeline),
+    cut.duration
+  ])
   // 声が重なった所は、後から出たテロップを1段上へ
   const stacked = stackSimultaneousTelops(settled, textCanvasSize(project.aspectRatio).h)
   return { selection, pieces, shots, cut, telops: stacked }

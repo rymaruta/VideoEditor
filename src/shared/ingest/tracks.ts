@@ -72,10 +72,13 @@ export function guessTrackRole(index: number, title: string | undefined, quiet: 
  * 形は「1-taro.flac」「2-hanako_1234.flac」(番号-ユーザー名[_識別番号])。合わなければ null
  */
 export function craigSpeakerName(fileName: string): string | null {
-  const m = /^(\d+)-(.+?)(?:_\d{1,4})?\.(flac|ogg|opus|wav|aac|m4a|mp3)$/i.exec(
+  const m = /^(\d{1,3})-(.+?)(?:_\d{1,4})?\.(flac|ogg|opus|wav|aac|m4a|mp3)$/i.exec(
     fileName.normalize('NFKC')
   )
-  return m ? m[2] : null
+  // 録音機の名前(`240501-120000.WAV`・`1-0001.wav`・`2024-05-01 12-00-00.wav`)と見分ける:
+  // 話者の番号は小さく(3 桁まで)、名前には文字が入る(数字と区切りだけの名前は日時・連番)
+  if (!m || !/\p{L}/u.test(m[2])) return null
+  return m[2]
 }
 
 /** 顔カメラらしい名前(ゲーム画面の録画と分ける) */

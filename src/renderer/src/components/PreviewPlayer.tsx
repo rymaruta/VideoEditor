@@ -1397,7 +1397,7 @@ export function PreviewPlayer(): React.JSX.Element {
                       playheadTime={playheadTime}
                       isPlaying={isPlaying}
                       volume={volume}
-                      muted={muted}
+                      muted={muted || track.audioMuted === true}
                       seekToken={seekToken}
                     />
                   )

@@ -313,6 +313,8 @@ export interface VideoOverlayTrack {
   /** 収録素材の同期で作ったトラックなら、その機材の ID */
   multicamSourceId?: string
   hidden: boolean
+  /** 音だけを鳴らさない(ゲーム実況の顔カメラ: 声はマイクの音源で鳴らすので、カメラの音は二重になる) */
+  audioMuted?: boolean
   position: PipPosition
   scale: number
   /** 自動で置いた版面CG のトラック(仮編集を作り直すと入れ替わる。手で直したら印を外す) */
