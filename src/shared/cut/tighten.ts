@@ -106,9 +106,16 @@ export function tightenRanges(
       }
       curEnd = blocks[i][1]
     }
+    // 場面の終わりの無音も、長ければ頭の数秒を絵として残す。場面は長い無音の所で分かれるので
+    // (8 秒以上の無音は、話の無い場面として独りになる)、無音の長さは場面の外まで見て測り、
+    // 絵は次の場面へはみ出してよい(次に音が鳴る所の手前まで)
+    let next = curEnd
+    while (next < n && !busy[next]) next++
+    const tailGap = next - curEnd
+    const tailInsert = Math.min(insertOf(tailGap), tailGap - 2 * half)
     out.push({
       start: curStart / TURN_RATE,
-      end: Math.min(b, curEnd + half) / TURN_RATE,
+      end: (tailInsert > half ? curEnd + tailInsert : Math.min(b, curEnd + half)) / TURN_RATE,
       sceneId: r.sceneId
     })
   }

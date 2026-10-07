@@ -41,6 +41,33 @@ describe('tightenRanges', () => {
     expect(r[1].start).toBeCloseTo(7.85, 9)
   })
 
+  it('場面の境目にある長い無音(料理の寄りなど)も、前の場面の話し終わりから絵として残す', () => {
+    // 1〜3 秒に話して 17 秒の無音、20〜22 秒にまた話す。場面は無音の所で3つに分かれている
+    const act = mask(30, [
+      [1, 3],
+      [20, 22]
+    ])
+    const sp = [
+      { start: 1, end: 3 },
+      { start: 20, end: 22 }
+    ]
+    const r = tightenRanges(
+      [
+        { start: 0, end: 3.5, sceneId: 's1' },
+        { start: 3.5, end: 19.5, sceneId: 's2' },
+        { start: 19.5, end: 30, sceneId: 's3' }
+      ],
+      act,
+      sp
+    )
+    expect(r).toHaveLength(2)
+    expect(r[0].sceneId).toBe('s1')
+    expect(r[0].end).toBeCloseTo(8, 9)
+    expect(r[1].start).toBeCloseTo(19.85, 9)
+    // 収録の終わりまで続く無音も、頭の数秒(8 秒の無音 → 1.5 + 0.25 × 5.5 = 2.875 秒、100Hz に丸めて 2.88)
+    expect(r[1].end).toBeCloseTo(24.88, 9)
+  })
+
   it('長い無音ほど少し長く残し、最長 5 秒で止める。2 秒の無音はふつうに詰める', () => {
     const run = (gap: number): number => {
       const end = 3 + gap + 2
