@@ -2,8 +2,9 @@ import { parentPort, workerData } from 'worker_threads'
 import { cachedEnvelope, readWindow } from './audioPcm'
 import {
   isReliableMatch,
-  matchFeatures,
+  matchWholeFile,
   matchWithDrift,
+  type FeatureMatch,
   onsetFeature,
   refineOffset
 } from '@shared/sync/correlate'
@@ -126,7 +127,7 @@ async function matchPair(
 ): Promise<SyncPairResult | null> {
   const ea = envelopes.get(a.id)!
   const eb = envelopes.get(b.id)!
-  let m = matchFeatures(ea, eb)
+  let m: FeatureMatch | null = matchWholeFile(ea, eb)
   let reliable = m ? isReliableMatch(m) : false
   // 丸ごとでは合わない長い2本は、時計のずれで山がつぶれていることがある。窓ごとに合わせ直す
   if (!reliable) {

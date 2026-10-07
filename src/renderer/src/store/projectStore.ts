@@ -329,6 +329,10 @@ function normalizeRange(
   // 素材の終わりまで(尺が分からなければ最短の長さ)にし、素材の尺の中へ収める
   if (outPoint <= inPoint) {
     outPoint = assetDuration > inPoint ? assetDuration : inPoint + MIN_CLIP_SOURCE_DURATION
+  } else if (assetDuration > 0 && inPoint < assetDuration && outPoint > assetDuration) {
+    // 素材より少し長い(素材をつなぎ直して尺が少し変わったなど)ときは、素材の終わりで止めるだけ。
+    // 最短の長さに広げると、頭が前へ動いて後ろの本編が遅れる
+    return { inPoint, outPoint: assetDuration }
   } else if (!(assetDuration > 0) || outPoint <= assetDuration + 1e-6) {
     // 正しい区間はそのまま読む。最短の長さに広げると(仮編集がカメラのファイルの切れ目で作る
     // 数フレームのクリップなど)、後ろの本編が全部遅れ、ピンマイクの声・自動の音とずれていた
@@ -1237,8 +1241,14 @@ function buildInsertedClips(
       removedClipIds.push(c.id)
     } else {
       const speed = c.speed || 1
-      kept.push({ ...c, inPoint: c.inPoint + remaining * speed, transitionIn: undefined })
+      const inPoint = c.inPoint + remaining * speed
       remaining = 0
+      // 上書きで残る切れ端が最短より短いなら、丸ごと消す(つかめない・分けられないクリップを残さない)
+      if (c.outPoint - inPoint < MIN_CLIP_SOURCE_DURATION) {
+        removedClipIds.push(c.id)
+        continue
+      }
+      kept.push({ ...c, inPoint, transitionIn: undefined })
     }
   }
   return { clips: [...before, newClip, ...kept], split, removedClipIds }

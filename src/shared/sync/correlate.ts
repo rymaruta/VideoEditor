@@ -157,6 +157,26 @@ export function matchFeatures(
   }
 }
 
+/** 短い重なりで合わせるときに求める、2番目の位置からの抜け具合 */
+const SHORT_OVERLAP_DISTINCTNESS = 4
+
+/**
+ * 2本を丸ごと照らし合わせる(同期の最初の一歩)。
+ * 既定の最短の重なり(短いほうの半分か 60 秒)で合わなければ、15 秒の重なりまで探し、2番目の位置から
+ * はっきり抜けている(抜け具合 4 以上)ときだけ信じる。カメラのファイルがマイクと 20〜59 秒しか
+ * 重ならない本当の組を拾い、無音に近い関係のない組の偶然の一致(抜け具合 1.86〜2.35)は拾わない。
+ * 実測: 本当の 20〜59 秒の重なりは抜け具合 5.65〜11.08
+ */
+export function matchWholeFile(a: Float32Array, b: Float32Array): FeatureMatch | null {
+  const m = matchFeatures(a, b)
+  if (m && isReliableMatch(m)) return m
+  const short = matchFeatures(a, b, { minOverlapSec: 15 })
+  if (short && isReliableMatch(short) && short.distinctness >= SHORT_OVERLAP_DISTINCTNESS) {
+    return short
+  }
+  return m
+}
+
 /** 窓ごとの合わせで受ける時計のずれの上限(±0.2%。現実の録音機は ±0.01% 前後) */
 const MAX_DRIFT = 2e-3
 

@@ -8,6 +8,7 @@ import ffmpegStatic from 'ffmpeg-static'
 import type { TranscriptSegment, TranscriptWord } from '@shared/types'
 import { retryableSingleton } from './retryableSingleton'
 import { describeFfmpegExit } from './ffmpegError'
+import { ffSeconds } from './ffArgs'
 
 const execFileAsync = promisify(execFile)
 
@@ -66,9 +67,9 @@ async function extractPcm16k(filePath: string, start: number, end: number): Prom
       await execFileAsync(ffmpegPath, [
         '-y',
         '-ss',
-        String(start),
+        ffSeconds(start),
         '-t',
-        String(end - start),
+        ffSeconds(end - start),
         '-i',
         filePath,
         '-ar',

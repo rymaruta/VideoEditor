@@ -225,7 +225,8 @@ export function angleAlternatives(
           ? {
               clip: {
                 assetId: g.assetId,
-                inPoint: (start - g.start) * g.rate,
+                // 素材の頭の丸めの残り(-5e-7 など)で、素材の外を指さないように
+                inPoint: Math.max(0, (start - g.start) * g.rate),
                 outPoint: (end - g.start) * g.rate,
                 speed: g.rate
               }

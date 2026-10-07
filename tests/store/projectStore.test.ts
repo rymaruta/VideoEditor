@@ -1578,6 +1578,33 @@ describe('本編の追従(再監査で見つかった所)', () => {
     expect(micTrack().clips.map((c) => c.startTime)).toEqual(micBefore)
   })
 
+  it('素材より少し長いクリップは、開き直すと素材の終わりで止めるだけ(頭は動かさない)', () => {
+    setup([
+      [0, 99.95],
+      [99.95, 100.000002],
+      [20, 30]
+    ])
+    const lastStart = (): number =>
+      st()
+        .project.clips.slice(0, -1)
+        .reduce((t, c) => t + (c.outPoint - c.inPoint), 0)
+    const before = lastStart()
+    st().loadProject(structuredClone(st().project), '/x/p.json')
+    const c = st().project.clips[1]
+    expect([c.inPoint, c.outPoint]).toEqual([99.95, 100])
+    expect(Math.abs(lastStart() - before)).toBeLessThan(1e-5)
+  })
+
+  it('上書きの終わりに最短より短い切れ端を残さない', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    st().overwriteClipAtTime('brollA', 0, 11.95, 8)
+    for (const c of st().project.clips) expect(c.outPoint - c.inPoint).toBeGreaterThanOrEqual(0.1)
+  })
+
   it('クリップの端のすぐそばへ差し込んでも、最短より短い切れ端を作らない', () => {
     setup([
       [0, 10],

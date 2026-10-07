@@ -43,9 +43,12 @@ export function formatTimecode(seconds: number, fps: number): string {
   const nominal = Math.round(real)
   // 99時間で頭打ちにする(壊れた値で表示が Infinity にならないように)
   const safe = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 99 * 3600) : 0
-  let frame = Math.round(safe * real)
   const pad = (n: number): string => String(n).padStart(2, '0')
-  const dropFrame = Math.abs(real - nominal) > 1e-3 && (nominal === 30 || nominal === 60)
+  // ドロップフレームは NTSC の 29.97 / 59.94 だけ(30.3 などの半端なレートは、今までどおり
+  // 丸めたレートで実時間から数える)
+  const dropFrame =
+    (nominal === 30 || nominal === 60) && Math.abs(real - (nominal * 1000) / 1001) < 0.01
+  let frame = Math.round(safe * (dropFrame ? real : nominal))
   if (dropFrame) {
     const drop = nominal === 30 ? 2 : 4
     const per10 = nominal * 600 - drop * 9

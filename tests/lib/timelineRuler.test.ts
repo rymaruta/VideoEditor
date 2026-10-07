@@ -51,3 +51,11 @@ describe('formatTimecode — 29.97 / 59.94 はドロップフレーム', () => {
     expect(formatTimecode(1, 25)).toBe('00:00:01:00')
   })
 })
+
+describe('formatTimecode — NTSC 以外の半端なレート', () => {
+  it('30.3 や 29.5 はドロップフレームにせず、実時間どおりに数える', () => {
+    expect(formatTimecode(600, 30.3)).toBe('00:10:00:00')
+    expect(formatTimecode(600, 29.5)).toBe('00:10:00:00')
+    expect(formatTimecode(60, 90000 / 3001)).toBe('00:01:00:00')
+  })
+})

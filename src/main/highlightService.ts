@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
+import { ffSeconds } from './ffArgs'
 import { describeFfmpegExit } from './ffmpegError'
 import type {
   HighlightCandidate,
@@ -198,9 +199,9 @@ export async function measureVisualActivity(
       '-skip_frame',
       'nokey',
       '-ss',
-      String(range.start),
+      ffSeconds(range.start),
       '-t',
-      String(duration),
+      ffSeconds(duration),
       '-i',
       filePath,
       '-an',

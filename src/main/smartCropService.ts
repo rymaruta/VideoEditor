@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { bestWindowCenter } from '@shared/cropWindow'
 import { ffmpegPath } from './ffmpegService'
+import { ffSeconds } from './ffArgs'
 
 const execFileAsync = promisify(execFile)
 
@@ -25,7 +26,7 @@ async function extractRawFrame(
     await execFileAsync(ffmpegPath, [
       '-y',
       '-ss',
-      String(Math.max(0, atSeconds)),
+      ffSeconds(atSeconds),
       '-i',
       filePath,
       '-frames:v',

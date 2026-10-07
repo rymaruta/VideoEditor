@@ -1,5 +1,6 @@
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
+import { ffSeconds } from './ffArgs'
 import { describeFfmpegExit, isNoOutputStreamFailure } from './ffmpegError'
 import type { BpmAnalysisResult } from '@shared/types'
 
@@ -43,9 +44,9 @@ function decodePcm(filePath: string, start: number, duration: number): Promise<I
   return new Promise((resolve, reject) => {
     const args = [
       '-ss',
-      String(Math.max(0, start)),
+      ffSeconds(start),
       '-t',
-      String(duration),
+      ffSeconds(duration),
       '-i',
       filePath,
       '-f',

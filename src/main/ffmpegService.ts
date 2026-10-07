@@ -25,6 +25,7 @@ import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import { createExportTimeMap } from '@shared/exportTimeline'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
+import { ffSeconds } from './ffArgs'
 import { normalizeFades } from '@shared/audioFade'
 import { SQUARE_PIXEL_FILTER, scaleToFrameFilter, thumbnailScaleFilter } from '@shared/videoFrame'
 import {
@@ -512,14 +513,6 @@ function trackExportCommand(command: ffmpeg.FfmpegCommand): void {
 }
 let exportInProgress = false
 let exportCancelRequested = false
-/**
- * ffmpeg に渡す秒。`0.25 - 0.25` の丸めの残り(5.55e-17)のような値を JavaScript は指数で書き、
- * ffmpeg の `-ss`・`atrim` は読めずに書き出しごと失敗する。小数6桁で書く
- */
-export function ffSeconds(sec: number): string {
-  const v = Number.isFinite(sec) ? Math.max(0, sec) : 0
-  return v < 5e-7 ? '0' : v.toFixed(6)
-}
 /** 本編の素材を切り出しの頭より少し手前から読む長さ(素材の秒)。1つ前の絵を読み込むため */
 const MAIN_PREROLL_SEC = 0.25
 
@@ -1614,3 +1607,5 @@ function timemarkToSeconds(timemark: string): number {
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
   return Number(timemark) || 0
 }
+
+export { ffSeconds }

@@ -3,6 +3,7 @@ import {
   ENVELOPE_RATE,
   isReliableMatch,
   matchFeatures,
+  matchWholeFile,
   matchWithDrift
 } from '../../../src/shared/sync/correlate'
 import { seeded } from '../../helpers/boundary'
@@ -74,5 +75,21 @@ describe('時計がずれた長い2本の照らし合わせ', () => {
     const { a } = pair(900, 0, 1, 1)
     const { b } = pair(900, 0, 1, 2)
     expect(matchWithDrift(a, b)).toBeNull()
+  })
+})
+
+describe('短い重なりの本当の組', () => {
+  it('マイクと 40 秒しか重ならないカメラのファイルも合わせる', () => {
+    // 1時間のマイクと、その終わりの 40 秒だけ重なる 15 分のカメラ
+    const { a } = pair(3600, 0, 1, 3)
+    const start = 3560
+    const b = new Float32Array(900 * ENVELOPE_RATE)
+    b.set(a.subarray(start * ENVELOPE_RATE, 3600 * ENVELOPE_RATE))
+    // 既定の最短の重なり(60 秒)では探さない位置
+    const plain = matchFeatures(a, b)
+    expect(plain && isReliableMatch(plain) && Math.abs(plain.offset - start) < 0.02).toBeFalsy()
+    const m = matchWholeFile(a, b)!
+    expect(isReliableMatch(m)).toBe(true)
+    expect(Math.abs(m.offset - start)).toBeLessThan(0.02)
   })
 })
