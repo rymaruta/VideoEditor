@@ -105,4 +105,17 @@ describe('収録フォルダの読み込みと番組の種類', () => {
     expect(by.get('camera:b')?.cameraRole).toBe('face')
     expect(by.has('track:a:1')).toBe(false)
   })
+  it('新しい回を作り直したら、読んでいる最中の前のフォルダの結果は出さない', async () => {
+    const api = installScan()
+    usePipelineStore.getState().reset()
+    useSettingsStore.setState({ episodeKind: 'location' })
+    const p = usePipelineStore.getState().scanFolder('/r')
+    usePipelineStore.getState().reset()
+    api.resolve[0]()
+    await p
+    const st = usePipelineStore.getState()
+    expect(st.scan).toBeNull()
+    expect(st.sources).toEqual([])
+    expect(st.root).toBeNull()
+  })
 })

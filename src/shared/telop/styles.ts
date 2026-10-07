@@ -42,6 +42,18 @@ export function applyLook(
   }
 }
 
+/**
+ * 新しく作る発言テロップの見た目。自由配置は縦書きの見た目(右端に置く)のときだけ使う。
+ * 横書きのスタイルに残っている自由配置(動かしたテロップから作ったスタイルなど)を使うと、
+ * 声の重なったテロップが段に積まれず、顔・HUD も避けられなくなる
+ */
+export function speechTelopStyle(look: TextStyle): TextStyle {
+  if (look.vertical) return { ...look }
+  const { customPosition: _drop, ...rest } = look
+  void _drop
+  return rest
+}
+
 /** 自動で入れた発言テロップ(置き場所は顔・HUD・重なりを避けて自動で決めたもの) */
 const isAutoSpeech = (o: Pick<TextOverlay, 'source' | 'utteranceId'>): boolean =>
   o.source === 'auto' && o.utteranceId !== undefined
@@ -145,10 +157,19 @@ export function restyleSpeechTelops(
       ? o.styleId === prev.styleId
       : !o.styleId && lookKey(o.style) === prevKey
     if (!following) return o
-    return {
-      ...o,
-      style: applyLook(o.style, next.style, { keepPlacement: true }),
-      styleId: next.styleId
+    // 前の見た目の置き場所のままの枚(縦書きの右端など)は、新しい見た目の置き場所へ。
+    // 顔・HUD・重なりを避けて動かした枚は、その置き場所を残す
+    const from = speechTelopStyle(prev.style).customPosition
+    const to = speechTelopStyle(next.style).customPosition
+    const own = o.style.customPosition
+    const samePlace =
+      own === from ||
+      (own !== undefined && from !== undefined && own.x === from.x && own.y === from.y)
+    const style = applyLook(o.style, next.style, { keepPlacement: true })
+    if (samePlace) {
+      if (to) style.customPosition = to
+      else delete style.customPosition
     }
+    return { ...o, style, styleId: next.styleId }
   })
 }

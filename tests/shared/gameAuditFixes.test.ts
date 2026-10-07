@@ -8,7 +8,12 @@ import { settleTelopTimes } from '../../src/shared/telop/fromTranscript'
 import type { TextOverlay, TextStyle } from '../../src/shared/types'
 import { selectScenes, type Scene } from '../../src/shared/structure/scenes'
 import { carriesVoice } from '../../src/shared/roughCut/build'
-import { restyleSpeechTelops, restyleOverlays } from '../../src/shared/telop/styles'
+import {
+  restyleSpeechTelops,
+  restyleOverlays,
+  speechLook,
+  speechTelopStyle
+} from '../../src/shared/telop/styles'
 import { defaultTextStyle } from '../../src/shared/textStyle'
 
 /**
@@ -210,5 +215,36 @@ describe('発言テロップの見た目を替えても、顔を避けた置き�
     expect(m.style.fontSize).toBe(80)
     expect(m.style.position).toBe('top')
     expect(m.style.rotation).toBe(15)
+  })
+})
+
+describe('発言テロップの自由配置は、縦書きの見た目のときだけ使う', () => {
+  const vertical = speechLook('tpl-speech-vertical', [])
+  const standard = speechLook('tpl-speech-standard', [])
+  const telop = (style: TextStyle): TextOverlay => ({
+    id: 't',
+    text: 'あ',
+    startTime: 0,
+    endTime: 1,
+    style,
+    source: 'auto',
+    utteranceId: 'u1'
+  })
+  it('新しく作るとき: 縦書きは右端、横書きのスタイルに残った自由配置は使わない', () => {
+    expect(speechTelopStyle(vertical.style).customPosition).toBeDefined()
+    expect(
+      speechTelopStyle({ ...standard.style, customPosition: { x: 0.5, y: 0.86 } }).customPosition
+    ).toBeUndefined()
+  })
+  it('縦書き ⇄ 横書きを選び直すと、置き場所も見た目に合わせて替わる。動かした枚はそのまま', () => {
+    const v = telop(speechTelopStyle(vertical.style))
+    const [h] = restyleSpeechTelops([v], vertical, standard, [])
+    expect(h.style.vertical).toBeFalsy()
+    expect(h.style.customPosition).toBeUndefined()
+    const [back] = restyleSpeechTelops([h], standard, vertical, [])
+    expect(back.style.customPosition).toEqual(vertical.style.customPosition)
+    const moved = telop({ ...speechTelopStyle(standard.style), customPosition: { x: 0.5, y: 0.7 } })
+    const [m] = restyleSpeechTelops([moved], standard, vertical, [])
+    expect(m.style.customPosition).toEqual({ x: 0.5, y: 0.7 })
   })
 })

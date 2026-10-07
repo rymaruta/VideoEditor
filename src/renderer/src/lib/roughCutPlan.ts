@@ -52,7 +52,12 @@ import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/
 import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
-import { speechLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
+import {
+  speechLook,
+  speechTelopStyle,
+  styleForSpeaker,
+  type TelopStyleDef
+} from '@shared/telop/styles'
 import {
   buildEffectPrompt,
   effectSchema,
@@ -389,8 +394,7 @@ export function planRoughCut(
         text: chunk.text,
         startTime: start,
         endTime: end,
-        // 新しく作るテロップは、見た目の置き場所(縦書きの右端など)もそのまま使う
-        style: { ...(def ? def.style : look.style) },
+        style: speechTelopStyle(def ? def.style : look.style),
         styleId: def ? def.id : look.styleId,
         speaker: u.speaker,
         source: 'auto',

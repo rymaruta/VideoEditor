@@ -1229,7 +1229,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       }))
     },
 
-    reset: () =>
+    reset: () => {
+      // 読んでいる最中の収録フォルダの結果は捨てる(新しい回の画面に前のフォルダが出ないように)
+      scanToken++
       set({
         shorts: { state: 'idle', done: 0, total: 0, files: [] },
         root: null,
@@ -1253,7 +1255,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         effectChosen: [],
         lastSpans: [],
         speechTelops: []
-      }),
+      })
+    },
 
     scanFolder: async (root) => {
       const token = ++scanToken
@@ -1372,10 +1375,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       try {
         // 動画から取り出した音声トラックは、元の動画と同じ時計・同じ頭なので照らし合わせない
         // (声だけ・ゲーム音だけのトラックは元の動画の音と似ておらず、照らし合わせると外れることがある)
+        // 元の動画を「使わない」にしたトラックは、ほかの素材と同じく照らし合わせる
+        const inSync = new Set(files.map((f) => f.path))
         const parentOf = new Map(
           used
             .flatMap((s) => s.files)
-            .flatMap((f) => (f.track ? [[f.path, f.track.parentPath]] : []))
+            .flatMap((f) =>
+              f.track && inSync.has(f.track.parentPath) ? [[f.path, f.track.parentPath]] : []
+            )
         )
         const synced = await window.api.syncRun(files.filter((f) => !parentOf.has(f.path)))
         report = withTrackPlacements(synced, files, parentOf)

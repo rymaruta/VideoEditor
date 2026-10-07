@@ -82,7 +82,7 @@ export function craigSpeakerName(fileName: string): string | null {
 }
 
 /** はっきり顔カメラと分かる名前(フォルダ・ファイル名のどこかに入る) */
-const FACE_NAME_STRONG = /(^|[^a-z])face|webcam|顔|ウェブカメ/i
+const FACE_NAME_STRONG = /(^|[^a-z])face(cam)?\d*([^a-z]|$)|webcam|顔|ウェブカメ/i
 /**
  * 顔カメラかもしれない名前。「cam」「camera」は単語として入るときだけ
  * (`campaign`・`Camp` のような言葉の一部は数えない)

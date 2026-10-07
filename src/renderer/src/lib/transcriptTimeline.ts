@@ -6,7 +6,12 @@ import {
 } from '@shared/transcript'
 import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { toCommon } from '@shared/sync/multicam'
-import { speechLook, styleForSpeaker, type TelopStyleDef } from '@shared/telop/styles'
+import {
+  speechLook,
+  speechTelopStyle,
+  styleForSpeaker,
+  type TelopStyleDef
+} from '@shared/telop/styles'
 import { stackSimultaneousTelops } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
 import type { DictionaryEntry } from '@shared/telop/polish'
@@ -113,8 +118,7 @@ export function telopsFromTranscript(
         text: chunk.text,
         startTime: r.start,
         endTime: r.end,
-        // 新しく作るテロップは、見た目の置き場所(縦書きの右端など)もそのまま使う
-        style: { ...(def ? def.style : look.style) },
+        style: speechTelopStyle(def ? def.style : look.style),
         styleId: def ? def.id : look.styleId,
         speaker: u.speaker,
         source: 'auto',
