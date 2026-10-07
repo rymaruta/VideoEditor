@@ -355,7 +355,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const src = speakerSources.find((s) => s.id === t.id)
       if (src?.trackRole !== 'voice' && src?.trackRole !== 'call') continue
       const twin = ownMics.find((o) => sameVoice(t, o))
-      const covered = !twin && coveredBy(t, ownMics) >= SAME_VOICE_COVERAGE
+      // 何人分かを合わせて比べるのは通話のトラックだけ(配信者の声のトラックを、友達のマイクを
+      // 合わせたものと比べると、友達がよく話す回で配信者の声まで外してしまう)
+      const covered =
+        !twin && src.trackRole === 'call' && coveredBy(t, ownMics) >= SAME_VOICE_COVERAGE
       if (!twin && !covered) continue
       duplicates.add(t.id)
       log(
@@ -401,8 +404,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
         continue
       log(
-        `「${mixSrc.name}」に、ほかのトラック・マイクに無い声があるため、「${mixSrc.name}」だけを鳴らします(ほかのトラック・マイクは文字起こしにだけ使います)`
+        `「${mixSrc.name}」に、ほかのトラック・マイクに無い声があるため、「${mixSrc.name}」だけを鳴らします(ほかのトラック・マイクは文字起こしにだけ使います)。「${mixSrc.name}」も話者の判定・文字起こしに使います`
       )
+      // その声(多くは配信者の実況)は全部入りにしか無いので、全部入りも話者の判定・文字起こしに使う
+      // (ほかの人の声は、その人のトラック・マイクのほうが大きく入るので、そちらの発言になる)
+      tracks.push({ id: mixSrc.id, envelope: placed(mixSrc.id) })
+      for (const f of ownFiles) if (f.sourceId === mixSrc.id) targetFiles.push(f)
+      speakerSources.push(mixSrc)
       const project = useProjectStore.getState().project
       for (const t of project.audioTracks) {
         if (!t.multicamSourceId) continue

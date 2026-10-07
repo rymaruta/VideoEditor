@@ -330,6 +330,9 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     expect(tracks.filter((t) => t !== mixTrack && t.multicamSourceId).every((t) => t.muted)).toBe(
       true
     )
+    // 配信者の声は全部入りにしか無いので、全部入りも文字起こしする
+    const asked = [...new Set(calls.asrPaths.map((p) => p.split(/[/\\]/).pop()))]
+    expect(asked.some((p) => /_track1\.m4a$/.test(p!))).toBe(true)
   }, 300_000)
 
   it('トラックを分け、役割を推し量り、声だけで盛り上がりを測る。ゲーム音と声を鳴らし、顔カメラはワイプで出す', async () => {
