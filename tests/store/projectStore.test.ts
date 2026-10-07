@@ -2033,11 +2033,56 @@ describe('タイムライン編集(第4回の調査)', () => {
   })
 
   it('繋ぎの長さの欄: 打つ1文字ごとに履歴を積まず、空欄(0)では繋ぎを消さない', () => {
+    st().updateClipTransition('c2', { type: 'crossfade', duration: 0.5 })
     const past = st().past.length
     for (const d of [0.7, 0.75, 0.8])
       st().updateClipTransition('c2', { type: 'crossfade', duration: d })
     expect(st().past.length).toBe(past + 1)
     st().updateClipTransition('c2', { type: 'crossfade', duration: 0 })
     expect(clip('c2').transitionIn).toEqual({ type: 'crossfade', duration: 0.8 })
+  })
+
+  it('繋ぎの種類を替える・外すのは、すぐ続けても1回ずつ取り消せる', () => {
+    st().updateClipTransition('c2', { type: 'crossfade', duration: 0.5 })
+    st().updateClipTransition('c2', { type: 'wipe', duration: 0.5 })
+    st().undo()
+    expect(clip('c2').transitionIn).toEqual({ type: 'crossfade', duration: 0.5 })
+    st().updateClipTransition('c2', undefined)
+    st().undo()
+    expect(clip('c2').transitionIn).toEqual({ type: 'crossfade', duration: 0.5 })
+  })
+
+  it('取り消しで別の収録を入れる前へ戻したら、新しい収録の笑いの検出結果を引き継がない', () => {
+    const ev = (start: number): { start: number; end: number; laugh: number; cheer: number } => ({
+      start,
+      end: start + 5,
+      laugh: 0.9,
+      cheer: 0
+    })
+    S.setState({
+      project: {
+        ...st().project,
+        multicam: {
+          anchorSourceId: 's',
+          sources: [{ id: 's', name: 'カメラA', kind: 'camera' }],
+          files: [{ assetId: 'A', sourceId: 's', start: 0, rate: 1, duration: 10 }]
+        }
+      }
+    })
+    st().setAudioEvents([ev(10)])
+    st().setProjectName('2本目を入れる')
+    S.setState({
+      project: {
+        ...st().project,
+        multicam: {
+          anchorSourceId: 's',
+          sources: [{ id: 's', name: 'カメラA', kind: 'camera' }],
+          files: [{ assetId: 'B', sourceId: 's', start: 0, rate: 1, duration: 8 }]
+        }
+      }
+    })
+    st().setAudioEvents([ev(40)])
+    st().undo()
+    expect(st().project.audioEvents?.[0].start).toBe(10)
   })
 })

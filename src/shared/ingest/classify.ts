@@ -92,15 +92,15 @@ const CARD_NAME = /^(card|sd|cf|cfexpress|roll|reel|disk|mag|カード)[\s_-]*\d
 /**
  * カードを丸ごと写した2つのフォルダが、1台のカメラのカードを替えたものか
  * (CamA/Card1/DCIM/100CANON と CamA/Card2/DCIM/100CANON)。カードのフォルダの親が同じで、
- * 親が無い(読み込んだフォルダの直下)ときはカードのフォルダの名前がカードらしいときだけ
- * (CamA/DCIM と CamB/DCIM は別々のカメラ)
+ * カードのフォルダの名前がどちらもカードらしいときだけ(CamA/DCIM と CamB/DCIM、
+ * Day1/CamA/DCIM と Day1/CamB/DCIM は別々のカメラ)
  */
 function sameCameraCards(a: string, b: string): boolean {
   const ra = cardRoot(a)
   const rb = cardRoot(b)
   if (ra === a || rb === b || ra === rb || !ra || !rb) return false
   if (parentOf(ra) !== parentOf(rb)) return false
-  if (parentOf(ra) !== '') return true
+  // カードのフォルダの名前がカードらしいときだけ(Day1/CamA と Day1/CamB は別々のカメラ)
   const last = (f: string): string => f.split('/').pop() ?? ''
   return CARD_NAME.test(last(ra)) && CARD_NAME.test(last(rb))
 }

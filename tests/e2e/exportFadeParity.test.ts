@@ -157,6 +157,35 @@ describe('標準と区間ごとの書き出しの、音の消え方', () => {
       expect(rms(seg, a, b), `${a}-${b}`).toBeCloseTo(rms(std, a, b), 1)
   }, 180_000)
 
+  it('前の短いクリップに音が無くても、長い繋ぎの音量は標準と同じ', async () => {
+    const t = await asset('t2', 'tone', 30)
+    const mute = await asset('mute', 'none', 5)
+    const project = {
+      ...base([t, mute]),
+      clips: [
+        { id: 'c0', assetId: 't2', inPoint: 0, outPoint: 4, speed: 1 },
+        { id: 'c1', assetId: 'mute', inPoint: 1, outPoint: 1.3, speed: 1 },
+        {
+          id: 'c2',
+          assetId: 't2',
+          inPoint: 20,
+          outPoint: 26,
+          speed: 1,
+          transitionIn: { type: 'crossfade', duration: 1 }
+        }
+      ]
+    } as unknown as Project
+    const [std, seg] = await both(project, 'silentmid')
+    for (const [a, b] of [
+      [1, 2],
+      [3.5, 3.7],
+      [3.7, 3.9],
+      [3.9, 4.1],
+      [6, 7]
+    ])
+      expect(rms(seg, a, b), `${a}-${b}`).toBeCloseTo(rms(std, a, b), 2)
+  }, 180_000)
+
   it('本編の終わりより先まで続く BGM のフェードアウトは、本編の終わりに掛かる', async () => {
     const v = await asset('v', 'none', 6)
     const bgm = await asset('bgm', 'tone', 12)

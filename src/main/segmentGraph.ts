@@ -382,6 +382,14 @@ export interface SegmentAudioGraph extends SegmentGraph {
  * ダッキングの圧縮器は直前の音量で状態を持つので、区間の頭から鳴らすと
  * 境目ごとに BGM が一瞬だけ戻る。
  */
+/** 繋ぎを前から順に畳むときの1本(本編は映像のクリップ。音の有無を持つ) */
+interface FoldItem {
+  id: string
+  startFrame: number
+  durationFrames: number
+  hasAudio: boolean
+}
+
 export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): SegmentAudioGraph {
   const seq = ctx.sequence
   const sec = (frames: number): number => frameToSeconds(seq, frames)
@@ -419,7 +427,7 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
   /** アイテム内の秒 L に対する音量の式(フェード・繋ぎの重なりを直線で) */
   const envelope = (
     item: AudioItem,
-    others: AudioItem[],
+    fold: readonly FoldItem[],
     gain: number,
     skipSec: number
   ): string => {
@@ -436,9 +444,9 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
     // 繋ぎが前の短いクリップより長いと、次のクリップは前の2本に重なる。重なる相手ごとに測ると、
     // 短いクリップを「後ろの相手」と取り違え、次のクリップがほぼ全体で下がっていた
     const end = item.startFrame + item.durationFrames
-    const k = others.indexOf(item)
+    const k = fold.findIndex((f) => f.id === item.id)
     const maxEndBefore = (j: number): number =>
-      others.slice(0, j).reduce((m, o) => Math.max(m, o.startFrame + o.durationFrames), -Infinity)
+      fold.slice(0, j).reduce((m, o) => Math.max(m, o.startFrame + o.durationFrames), -Infinity)
     const xIn = k > 0 ? Math.min(dur, Math.max(0, sec(maxEndBefore(k) - item.startFrame))) : 0
     const L = `(t+${num(skipSec)})`
     const terms: string[] = []
@@ -449,8 +457,10 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       if (d > 0) terms.push(`min(1\\,max(0\\,${num(dur)}-${L})/${num(d)})`)
     }
     // 後ろのクリップの繋ぎの区間で下げる(区間の頭・長さはこのアイテムの中の秒で)
-    for (let j = k + 1; j < others.length; j++) {
-      const next = others[j]
+    for (let j = k + 1; j < fold.length; j++) {
+      const next = fold[j]
+      // 音の無いクリップへの繋ぎは、前の音のフェードアウト(`fromV1`)で下げている
+      if (!next.hasAudio) continue
       const t = sec(maxEndBefore(j) - next.startFrame)
       if (!(t > 0) || next.startFrame >= end) continue
       const a = sec(next.startFrame - item.startFrame)
@@ -470,11 +480,26 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
   seq.audioTracks.forEach((track) => {
     if (track.muted) return
     const labels: string[] = []
-    // 本編の音は v1 と同じクリップの順(繋ぎを前から順に畳む)、ほかのトラックは時刻の順
-    const ordered =
+    // 本編の音は v1 と同じクリップの順(繋ぎを前から順に畳む)。音の無いクリップも畳む長さに入るので、
+    // 本編の映像の並びで数える(音の無い短いクリップを飛ばすと、繋ぎの区間が短くなっていた)。
+    // ほかのトラックは時刻の順
+    const audioIdOf = new Map(track.items.map((i) => [i.linkedItemId ?? i.id, i.id]))
+    const ordered: FoldItem[] =
       track.id === 'a1-main'
-        ? track.items
-        : [...track.items].sort((x, y) => x.startFrame - y.startFrame)
+        ? (seq.videoTracks[0]?.items ?? []).map((v) => ({
+            id: audioIdOf.get(v.id) ?? v.id,
+            startFrame: v.startFrame,
+            durationFrames: v.durationFrames,
+            hasAudio: audioIdOf.has(v.id)
+          }))
+        : [...track.items]
+            .sort((x, y) => x.startFrame - y.startFrame)
+            .map((i) => ({
+              id: i.id,
+              startFrame: i.startFrame,
+              durationFrames: i.durationFrames,
+              hasAudio: true
+            }))
     for (const item of track.items) {
       if (!intersects(item, renderStart, renderEnd)) continue
       const asset = ctx.assetsById.get(item.assetId)

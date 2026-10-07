@@ -151,6 +151,14 @@ describe('classifyFootage', () => {
       expect(s.basis).not.toMatch(/フォルダ ・|・$/)
   })
 
+  it('1段深いフォルダ(Day1/CamA/DCIM と Day1/CamB/DCIM)でも、別々のカメラのまま', () => {
+    const sources = classifyFootage([
+      file('Day1/CamA/DCIM/100CANON/MVI_0001.MP4', { device: 'R6', recordedAt: 0, duration: 600 }),
+      file('Day1/CamB/DCIM/100CANON/MVI_0001.MP4', { device: 'R6', recordedAt: 700, duration: 600 })
+    ])
+    expect(sources).toHaveLength(2)
+  })
+
   it('録音機が撮るたびに作るフォルダ(ZOOM0001 → 0002)の同じトラックは、1人のマイクにまとめる', () => {
     const mic = (take: number, tr: number): ProbedFile =>
       file(`ZOOM/ZOOM000${take}/ZOOM000${take}_Tr${tr}.WAV`, {

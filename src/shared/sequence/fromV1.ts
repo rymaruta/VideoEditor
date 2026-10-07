@@ -107,7 +107,11 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
       const prevAudio = mainAudioItems[mainAudioItems.length - 1]
       const prevHadAudio = prevAudio !== undefined && prevAudio.linkedItemId === prevClipId
       if (prevHadAudio && !hasMainAudio) prevAudio.fadeOutFrames = overlapFrames
-      if (!prevHadAudio && hasMainAudio) pendingFadeIn = overlapFrames
+      // 前の前のクリップの音がまだ繋ぎの区間に掛かっている(繋ぎが音の無い短いクリップより長い)なら、
+      // その音との重なり(区間ごとの書き出しのクロスフェード)で出していく。ここでも出すと二重に掛かる
+      const earlierOverlaps =
+        prevAudio !== undefined && prevAudio.startFrame + prevAudio.durationFrames > startFrame
+      if (!prevHadAudio && hasMainAudio && !earlierOverlaps) pendingFadeIn = overlapFrames
     }
     // 本編の音は映像と同じ位置で鳴る(分離したクリップは音声トラック側に居るので除く)
     if (hasMainAudio) {

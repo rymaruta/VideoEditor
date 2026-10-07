@@ -55,3 +55,19 @@ describe('ショートの終わりは発話の切れ目', () => {
     expect(lines.some((l) => l.start < w.start - 1e-6 && l.end > w.start + 1e-6)).toBe(false)
   })
 })
+
+describe('ショートの終わりを詰めても山は残す', () => {
+  it('発話の切れ目まで戻すとき、盛り上がりより前で終えない', () => {
+    const [w] = pickShortWindows(
+      [{ start: 100, end: 140, riseDb: 12 }],
+      [],
+      [
+        { start: 76, end: 95 },
+        { start: 120, end: 140.5 },
+        { start: 140, end: 160 }
+      ],
+      { start: 0, end: 300 }
+    )
+    expect(w.end).toBeGreaterThan(103)
+  })
+})

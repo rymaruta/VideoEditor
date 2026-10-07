@@ -1216,7 +1216,13 @@ function keepBackgroundResults(restored: Project, current: Project): Project {
     changed = true
     return { ...a, proxyPath: proxy }
   })
-  const events = current.audioEvents !== restored.audioEvents && current.audioEvents
+  // 検出結果は収録(同期した素材)ごとのもの。別の収録を入れる前へ戻したなら引き継がない
+  const sameRecording =
+    restored.multicam === current.multicam ||
+    JSON.stringify(restored.multicam?.files ?? null) ===
+      JSON.stringify(current.multicam?.files ?? null)
+  const events =
+    sameRecording && current.audioEvents !== restored.audioEvents && current.audioEvents
   if (!changed && !events) return restored
   return { ...restored, assets, ...(events ? { audioEvents: current.audioEvents } : {}) }
 }
@@ -1238,6 +1244,17 @@ function savedOrBackgroundOnly(current: Project, saved: Project): boolean {
   let p: Project | undefined = current
   while (p && p !== saved) p = backgroundBase.get(p)
   return p === saved
+}
+
+/** 繋ぎの書き換えの履歴のまとめ方: 同じ種類の長さだけを変えたときだけまとめる */
+function transitionHistoryKey(
+  clips: readonly Clip[],
+  clipId: string,
+  next: Transition | undefined
+): string | undefined {
+  const prev = clips.find((c) => c.id === clipId)?.transitionIn
+  if (!prev || !next || prev.type !== next.type) return undefined
+  return `transition:${clipId}:${next.type}`
 }
 
 /** 戻したプロジェクトにまだある文字テロップなら選んだまま、無ければ選びを外す */
@@ -2225,8 +2242,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       if (transition && !(Number.isFinite(transition.duration) && transition.duration > 0))
         return state
       return {
-        // 長さの欄に打つ1文字ごとに履歴を積まない(打ち終えた値までを1回で取り消す)
-        ...pushHistory(state, `transition:${clipId}`),
+        // 長さの欄に打つ1文字ごとに履歴を積まない(打ち終えた値までを1回で取り消す)。
+        // 種類を替える・外すのは1回ずつ(長さの打ち込みだけをまとめる)
+        ...pushHistory(state, transitionHistoryKey(state.project.clips, clipId, transition)),
         project: {
           ...state.project,
           clips: state.project.clips.map((c) =>

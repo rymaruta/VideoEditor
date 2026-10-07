@@ -28,6 +28,9 @@ export interface ShortOptions {
   tailSec?: number
 }
 
+/** 終わりを詰めるときも残す、いちばん強い山の頭からの長さ(秒) */
+const PEAK_KEEP_SEC = 3
+
 /** 笑い1回を、声の盛り上がりの何 dB ぶんと数えるか */
 const LAUGH_STRENGTH = 8
 
@@ -55,12 +58,13 @@ export function pickShortWindows(
    * 長すぎる区間の終わりを cap までに収める。発話の途中で切らないよう、cap より前で
    * どの発話にも掛からない時刻(発話の終わり)へ戻す。そういう時刻が無いときだけ cap で切る
    */
-  const capAtLineBreak = (a: number, cap: number): number => {
+  const capAtLineBreak = (a: number, cap: number, mustReach: number): number => {
     const inside = (t: number): boolean => lines.some((l) => l.start < t - 1e-6 && l.end > t + 1e-6)
     if (!inside(cap)) return cap
+    // 山(盛り上がり)より前で終えると、山の入っていないショットになる
     const ends = lines
       .map((l) => l.end)
-      .filter((t) => t > a + minSec && t <= cap && !inside(t))
+      .filter((t) => t > a + minSec && t >= mustReach && t <= cap && !inside(t))
       .sort((x, y) => y - x)
     return ends[0] ?? cap
   }
@@ -72,6 +76,8 @@ export function pickShortWindows(
 
   // 山ごとの区間。近い(重なる)ものはつなぐ。つないで上限を超えるなら別の区間にする
   const merged: ShortCandidate[] = []
+  // 区間ごとの、いちばん強い山の頭(長さを詰めても、山が入るところまでは残す)
+  const strongest = new Map<ShortCandidate, { strength: number; start: number }>()
   for (const p of peaks) {
     const [a, b] = widen(p.start - lead, p.end + tail)
     const last = merged[merged.length - 1]
@@ -79,7 +85,13 @@ export function pickShortWindows(
       last.end = Math.max(last.end, b)
       last.strength += p.strength
       last.peaks++
-    } else merged.push({ start: a, end: b, strength: p.strength, peaks: 1 })
+      const s = strongest.get(last)!
+      if (p.strength > s.strength) strongest.set(last, { strength: p.strength, start: p.start })
+    } else {
+      const c = { start: a, end: b, strength: p.strength, peaks: 1 }
+      merged.push(c)
+      strongest.set(c, { strength: p.strength, start: p.start })
+    }
   }
 
   // 長さを下限・上限に収める(短ければ前後に広げ、長ければ真ん中を残す)
@@ -100,7 +112,14 @@ export function pickShortWindows(
     // 広げた先からさらに広げると、続く掛け合いで区間が伸び続ける)
     const a = start !== c.start ? widen(start, start)[0] : start
     const b = end !== c.end ? widen(end, end)[1] : end
-    return { ...c, start: a, end: b > a + maxSec + 3 ? capAtLineBreak(a, a + maxSec + 3) : b }
+    return {
+      ...c,
+      start: a,
+      end:
+        b > a + maxSec + 3
+          ? capAtLineBreak(a, a + maxSec + 3, strongest.get(c)!.start + PEAK_KEEP_SEC)
+          : b
+    }
   })
 
   const chosen: ShortCandidate[] = []
