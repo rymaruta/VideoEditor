@@ -1,3 +1,4 @@
+import { standardExportFits } from '@shared/exportLimits'
 import { cachedEnvelope } from './audioPcm'
 import { readFile, stat, writeFile } from 'fs/promises'
 import os from 'os'
@@ -491,7 +492,13 @@ async function runExportTo(
   payload: ExportPayload,
   onProgress: (percent: number, stage: string) => void
 ): Promise<{ success: boolean }> {
-  if (payload.engine === 'segmented') {
+  // 標準の書き出しが OS の決まり(コマンドラインの長さ・一度に開く入力の数)に収まらなければ、
+  // 区間ごとの書き出しを使う(収まらないまま起こすと、Windows では main プロセスごと落ちる)
+  const engine =
+    payload.engine === 'segmented' || !standardExportFits(payload.project, process.platform).fits
+      ? 'segmented'
+      : payload.engine
+  if (engine === 'segmented') {
     // 一括書き出しは企画と違う縦横比で書き出すことがあるので、縦横比は引数のほうを使う
     const v2 = projectV1ToV2(
       { ...payload.project, aspectRatio: payload.aspectRatio },

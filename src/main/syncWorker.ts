@@ -8,7 +8,8 @@ import {
   onsetFeature,
   refineOffset
 } from '@shared/sync/correlate'
-import { solvePlacements } from '@shared/sync/solve'
+import { craigSessionEdges, solvePlacements } from '@shared/sync/solve'
+import { craigSpeakerName } from '@shared/ingest/tracks'
 import type { SyncInputFile, SyncPairResult, SyncWorkerMessage } from '@shared/sync/report'
 
 /**
@@ -247,16 +248,27 @@ async function run(): Promise<void> {
       recordedAt: f.recordedAt,
       camera: f.sourceKind === 'camera'
     })),
-    results
-      .filter((r) => r.reliable)
-      .map((r) => ({
-        a: r.a,
-        b: r.b,
-        offset: r.offset,
-        confidence: r.confidence,
-        rate: r.rate,
-        center: r.center
-      }))
+    [
+      ...results
+        .filter((r) => r.reliable)
+        .map((r) => ({
+          a: r.a,
+          b: r.b,
+          offset: r.offset,
+          confidence: r.confidence,
+          rate: r.rate,
+          center: r.center
+        })),
+      // Craig の話者別ファイルは頭がそろっている(あまり話さない人も、ほかの人と同じ所に置く)
+      ...craigSessionEdges(
+        files.map((f) => ({
+          id: f.id,
+          path: f.path,
+          isCraig:
+            f.sourceKind === 'mic' && craigSpeakerName(f.path.split(/[\\/]/).pop() ?? '') !== null
+        }))
+      )
+    ]
   )
   post({ type: 'progress', percent: 100, stage: '完了' })
   post({ type: 'done', report: { ...solution, pairs: results, elapsedMs: Date.now() - t0 } })

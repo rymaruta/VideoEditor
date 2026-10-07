@@ -271,3 +271,27 @@ export function solvePlacements(
     issues
   }
 }
+
+/**
+ * Craig(Discord の録音ボット)の話者別ファイルどうしの組。同じ回のファイルは、どれも録音の始まりから
+ * 無音で埋めてあるので、頭がそろっている(ずれ 0)。あまり話さない人のファイルは音で照らし合わせても
+ * 決めきれないので、同じフォルダの Craig のファイルどうしをずれ 0 でつなぐ(音で決めた組が
+ * あればそちらを使う。どの音の組よりも弱い)
+ */
+export function craigSessionEdges(
+  files: readonly { id: string; path: string; isCraig: boolean }[],
+  confidence = 1
+): SyncEdge[] {
+  const dirOf = (p: string): string => p.replace(/[\\/][^\\/]*$/, '')
+  const groups = new Map<string, string[]>()
+  for (const f of files) {
+    if (!f.isCraig) continue
+    const d = dirOf(f.path)
+    groups.set(d, [...(groups.get(d) ?? []), f.id])
+  }
+  const out: SyncEdge[] = []
+  for (const ids of groups.values())
+    for (let i = 1; i < ids.length; i++)
+      out.push({ a: ids[0], b: ids[i], offset: 0, confidence, rate: 1 })
+  return out
+}

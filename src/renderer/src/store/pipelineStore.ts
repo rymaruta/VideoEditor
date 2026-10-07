@@ -68,7 +68,13 @@ import { roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mapTimelineRange, timelineMapping } from '@shared/roughCut/follow'
 import { formatIpcError } from '../lib/ipcError'
 import { emitMenuCommand } from '../lib/menuCommands'
-import { detectTurns, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
+import {
+  detectTurns,
+  placeEnvelope,
+  sameVoice,
+  TURN_RATE,
+  type MicTrack
+} from '@shared/diarize/micTurns'
 import { turnsToJobs } from '@shared/diarize/turnJobs'
 import {
   isLikelyHallucination,
@@ -334,7 +340,31 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       })
       return { id: s.id, envelope: env }
     })
-    const turns = detectTurns(tracks)
+    // OBS から取り出した声のトラックと、同じ人のマイク(Craig のファイルなど)が両方あれば、
+    // 取り出したトラックを話者の判定・文字起こしから外し、鳴らさない(発言が2回・声が二重になる)
+    const duplicates = new Set<string>()
+    for (const t of tracks) {
+      const src = speakerSources.find((s) => s.id === t.id)
+      if (src?.trackRole !== 'voice') continue
+      const twin = tracks.find(
+        (o) =>
+          o.id !== t.id &&
+          !duplicates.has(o.id) &&
+          speakerSources.find((s) => s.id === o.id)?.trackRole === undefined &&
+          sameVoice(t, o)
+      )
+      if (!twin) continue
+      duplicates.add(t.id)
+      const twinName = speakerSources.find((s) => s.id === twin.id)?.name ?? ''
+      log(
+        `「${src.name}」は「${twinName}」と同じ声のため、話者の判定・文字起こしに使わず、鳴らしません`
+      )
+      const track = useProjectStore
+        .getState()
+        .project.audioTracks.find((x) => x.multicamSourceId === t.id && !x.muted)
+      if (track) useProjectStore.getState().toggleAudioTrackMute(track.id)
+    }
+    const turns = detectTurns(tracks.filter((t) => !duplicates.has(t.id)))
     const overlapCount = turns.filter((t) => t.overlap).length
     setStep('speakers', {
       state: 'done',

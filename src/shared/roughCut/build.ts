@@ -182,7 +182,10 @@ export function buildRoughCut(
       clips: audioFor(anchor.id)
     })
   }
-  const faces = info.sources.filter((s) => s.kind === 'camera' && s.cameraRole === 'face')
+  // 基準カメラは本編に出すので、ワイプにしない(顔カメラだけの回で、同じ絵が自分の上に重なる)
+  const faces = info.sources.filter(
+    (s) => s.kind === 'camera' && s.cameraRole === 'face' && s.id !== info.anchorSourceId
+  )
   const overlays = faces.map((c) => ({
     name: c.name,
     sourceId: c.id,

@@ -361,8 +361,9 @@ export function planRoughCut(
   const snapped = level ? snapCutsToQuiet(tightened, level) : tightened
   const pieces = options.overrides ? applyCutOverrides(snapped, options.overrides) : snapped
   const cameras = info.sources
-    // 顔カメラ(ゲーム実況)は切り替えに使わない(ワイプで常に出す)
-    .filter((s) => s.kind === 'camera' && s.cameraRole !== 'face')
+    // 顔カメラ(ゲーム実況)は切り替えに使わない(ワイプで常に出す)。ただし基準カメラは本編に使う
+    // (ゲーム画面の録画が無く、顔カメラだけの回)
+    .filter((s) => s.kind === 'camera' && (s.cameraRole !== 'face' || s.id === info.anchorSourceId))
     .map((s) => ({
       id: s.id,
       subject: s.subject,

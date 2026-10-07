@@ -236,3 +236,29 @@ export function placeEnvelope(
   }
   return out
 }
+
+/**
+ * 同じ人の声を拾っている2本のマイクか(声のある時刻がほとんど同じ)。
+ * ゲーム実況で、OBS の「マイク」のトラックと Craig のその人のファイルの両方を使うと、同じ声が
+ * 2本のマイクに入る。そのまま話者を決めると、発言がすべて2回(2人分)になる。
+ * 声のある時刻(マイクごとの「声がある」高さ以上)の重なり具合(共通 ÷ どちらか)で見る
+ */
+export function sameVoice(a: MicTrack, b: MicTrack, minOverlap = 0.6): boolean {
+  const sa = statsOf(a)
+  const sb = statsOf(b)
+  if (!sa || !sb) return false
+  const n = Math.min(sa.db.length, sb.db.length)
+  let both = 0
+  let either = 0
+  for (let t = 0; t < n; t++) {
+    const va = sa.db[t]
+    const vb = sb.db[t]
+    if (Number.isNaN(va) || Number.isNaN(vb)) continue
+    const on1 = va >= sa.threshold
+    const on2 = vb >= sb.threshold
+    if (on1 || on2) either++
+    if (on1 && on2) both++
+  }
+  // 声のある時間が短すぎる(数秒)なら決めない
+  return either >= 5 * TURN_RATE && both / either >= minOverlap
+}
