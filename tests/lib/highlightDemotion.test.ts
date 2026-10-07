@@ -98,12 +98,17 @@ describe('見分けになっていない「見どころ」', () => {
       'normal'
     ])
     expect(demoteIndiscriminateHighlights(few, heuristic).demoted).toBeUndefined()
+    // 判定がもともと点数の判定なら、置き換えても変わらないので「選び直した」としない
+    const heurAll = heuristic.map((h) => ({ ...h, kind: 'highlight' as const }))
+    expect(demoteIndiscriminateHighlights(heurAll, heurAll).demoted).toBeUndefined()
   })
 
   it('「面白い所だけ」・目標なしの仮編集では置き換え、山のある場面を残す。方針や目標を替えると置き換えない', () => {
     const all = ai(Array.from({ length: N }, () => 'highlight'))
     const h = plan(all, { policy: 'highlights', targetSec: 0 })
     expect(h.demoted).toEqual({ highlights: 8, total: 8 })
+    // 構成の画面に見せる判定も、選ぶのに使った判定
+    expect(h.judgements.filter((j) => j.kind === 'highlight').length).toBeLessThan(N)
     expect(h.selection.kept).toContain('s3')
     expect(h.selection.kept.length).toBeLessThan(N)
     const t = plan(all, { policy: 'tempo', targetSec: 0 })

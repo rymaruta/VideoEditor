@@ -156,11 +156,19 @@ export function restyleSpeechTelops(
   const from = speechTelopStyle(prev.style).customPosition
   const to = speechTelopStyle(next.style).customPosition
   // 段に積んだ(重なりを避けて自動で1段上げた)枚も、見た目の既定の置き場所にある枚と同じに扱う
+  // 段の見分けは自動の発言テロップだけで行う(人が真ん中に置いたテロップ・翻訳などの演出テロップを、
+  // HUD を避けた段や積んだ段と取り違えない)
+  const speechIdx = overlays.map((o, i) => (isAutoSpeech(o) ? i : -1)).filter((i) => i >= 0)
+  const speech = speechIdx.map((i) => overlays[i])
   // HUD を避けて段ごと上げてあれば、その高さを一番下の段にして積み直す
-  const baseCenter = canvasH ? hudStackBase(overlays, canvasH) : undefined
-  const stacked = canvasH
-    ? stackedBottomTelops(overlays, canvasH, { baseCenter })
-    : overlays.map(() => false)
+  const baseCenter = canvasH ? hudStackBase(speech, canvasH) : undefined
+  const stacked = overlays.map(() => false)
+  if (canvasH) {
+    const marks = stackedBottomTelops(speech, canvasH, { baseCenter })
+    speechIdx.forEach((i, k) => {
+      stacked[i] = marks[k]
+    })
+  }
   const restyled = new Set<number>()
   const out = overlays.map((o, i) => {
     if (!isAutoSpeech(o)) return o

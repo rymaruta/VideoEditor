@@ -165,6 +165,8 @@ interface PipelineState {
   editNote: string
   scenes: Scene[]
   judgements: SceneJudgement[]
+  /** 仮編集で場面を選ぶのに使った判定(見どころを点数の判定に置き換えたとき)。無ければ `judgements` */
+  planJudgements: SceneJudgement[] | null
   /** 場面の判定を AI でしたか、簡易の点数か */
   judgeSource: 'ai' | 'heuristic' | null
   /** 声の盛り上がり(ゲーム実況で測る)。仮編集を作り直すときも、山の前後に絞るのに使う */
@@ -714,7 +716,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       },
       (p) => setStep('structure', { percent: p.percent, note: p.note })
     )
-    set({ scenes, judgements, judgeSource: source, keep: {}, hype: hype ?? [] })
+    set({
+      scenes,
+      judgements,
+      planJudgements: null,
+      judgeSource: source,
+      keep: {},
+      hype: hype ?? []
+    })
     const highlights = judgements.filter((j) => j.kind === 'highlight').length
     const unneeded = judgements.filter((j) => j.kind === 'unneeded').length
     setStep('structure', {
@@ -779,6 +788,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           setStep(id, { state: 'skipped', note: '仮編集がありません' })
       return
     }
+    set({ planJudgements: plan.demoted ? plan.judgements : null })
+    if (plan.demoted)
+      setStep('structure', {
+        note: `場面 ${plan.judgements.length} · 見どころ ${plan.judgements.filter((j) => j.kind === 'highlight').length}(点数で選び直し) · 不要 ${plan.judgements.filter((j) => j.kind === 'unneeded').length}`
+      })
     if (plan.demoted)
       log(
         `構成: ${plan.demoted.total} 場面中 ${plan.demoted.highlights} 場面が「見どころ」で見分けになっていないため、見どころは声の盛り上がり・笑い・発話の密度の点数で選び直しました(題・理由・不要の印はそのまま)`
@@ -854,7 +868,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const nameList = nameProposals(lines)
       if (nameList.length > 0)
         log(`人物紹介: ${nameList.map((n) => n.text).join('・')} の最初の発言に名前を出します`)
-      const chapters = chapterProposals(get().scenes, get().judgements, plan.selection.kept)
+      const chapters = chapterProposals(get().scenes, plan.judgements, plan.selection.kept)
       const firstKept = get()
         .scenes.filter((sc) => plan.selection.kept.includes(sc.id))
         .sort((a, b) => a.start - b.start)[0]
@@ -1009,6 +1023,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     editNote: '',
     scenes: [],
     judgements: [],
+    planJudgements: null,
     judgeSource: null,
     hype: [],
     keep: {},
@@ -1219,6 +1234,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         report: null,
         scenes: [],
         judgements: [],
+        planJudgements: null,
         judgeSource: null,
         hype: [],
         keep: {},
@@ -1248,6 +1264,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         log: [],
         scenes: [],
         judgements: [],
+        planJudgements: null,
         judgeSource: null,
         hype: [],
         keep: {},

@@ -383,12 +383,17 @@ export function demoteIndiscriminateHighlights(
   )
     return { judgements: [...judgements] }
   const byId = new Map(heuristic.map((h) => [h.sceneId, h]))
-  return {
-    judgements: judgements.map((j) => {
-      const h = byId.get(j.sceneId)
-      if (!h || j.kind === 'unneeded') return j
-      return { ...j, kind: h.kind === 'unneeded' ? 'normal' : h.kind, score: h.score }
-    }),
-    demoted: { highlights, total: judgements.length }
-  }
+  let changed = false
+  const out = judgements.map((j) => {
+    const h = byId.get(j.sceneId)
+    if (!h || j.kind === 'unneeded') return j
+    const kind = h.kind === 'unneeded' ? 'normal' : h.kind
+    if (kind === j.kind && h.score === j.score) return j
+    changed = true
+    return { ...j, kind, score: h.score }
+  })
+  // 判定そのものが点数の判定(AI を使わない)なら、置き換えても変わらない
+  return changed
+    ? { judgements: out, demoted: { highlights, total: judgements.length } }
+    : { judgements: out }
 }

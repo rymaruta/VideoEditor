@@ -330,3 +330,37 @@ describe('HUD を避けて上げた発言テロップも、見た目を替えた
     expect(gap * 1080).toBeGreaterThan(bigger.style.fontSize)
   })
 })
+
+describe('人が真ん中に置いたテロップを、HUD を避けた段と取り違えない', () => {
+  const standard = speechLook('tpl-speech-standard', [])
+  const yellow = speechLook('tpl-speech-yellow', [])
+  const speech = (id: string, start: number, end: number): TextOverlay => ({
+    id,
+    text: 'いち\nに',
+    startTime: start,
+    endTime: end,
+    style: speechTelopStyle(standard.style),
+    source: 'auto',
+    utteranceId: id
+  })
+  const hand = (id: string, start: number, end: number): TextOverlay => ({
+    id,
+    text: '手',
+    startTime: start,
+    endTime: end,
+    style: { ...standard.style, customPosition: { x: 0.5, y: 0.95 } }
+  })
+  it('見た目を替えても、発言テロップは既定の下に戻り、手で置いた高さに寄せない', () => {
+    const ov = [
+      speech('a', 0, 3),
+      hand('h1', 4, 6),
+      speech('d', 5, 6),
+      hand('h2', 8, 9),
+      speech('c', 10, 12)
+    ]
+    const out = restyleSpeechTelops(ov, standard, yellow, [], 1080)
+    for (const i of [0, 2, 4]) expect(out[i].style.customPosition, out[i].id).toBeUndefined()
+    expect(out[1]).toBe(ov[1])
+    expect(out[3]).toBe(ov[3])
+  })
+})

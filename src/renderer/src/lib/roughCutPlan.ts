@@ -251,6 +251,8 @@ export interface RoughCutPlan {
   shots: Shot[]
   cut: RoughCut
   telops: Omit<TextOverlay, 'id'>[]
+  /** 場面を選ぶのに使った判定(見どころの置き換えの後)。構成の画面はこれを見せる */
+  judgements: SceneJudgement[]
   /**
    * 「見どころ」が多すぎて見分けになっていなかったので、場面の印と点数を点数の判定に置き換えた
    * (`demoteIndiscriminateHighlights`)。見どころの数と場面の数
@@ -435,6 +437,7 @@ export function planRoughCut(
     shots,
     cut,
     telops: stacked,
+    judgements: checked.judgements,
     ...(checked.demoted ? { demoted: checked.demoted } : {})
   }
 }
