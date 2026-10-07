@@ -72,3 +72,29 @@ export function decideTelopPlacement(
   if (!coversFace(telopRect(o, canvas, 'top'), faces)) return 'moveTop'
   return 'review'
 }
+
+/**
+ * 素材の絵が画面(テロップのキャンバス)のどこに収まるか(画面の比)。本編は縦横比を保って画面に収める
+ * (16:9 の録画を 9:16 の企画に置くと、上下に黒い帯ができる)
+ */
+export function containRect(
+  source: { width: number; height: number },
+  canvas: { w: number; h: number }
+): Rect {
+  if (!(source.width > 0 && source.height > 0)) return { x: 0, y: 0, w: 1, h: 1 }
+  const s = Math.min(canvas.w / source.width, canvas.h / source.height)
+  const w = (source.width * s) / canvas.w
+  const h = (source.height * s) / canvas.h
+  return { x: (1 - w) / 2, y: (1 - h) / 2, w, h }
+}
+
+/** 素材の絵の中の比で表した顔の枠を、画面の比へ */
+export function faceToCanvas(face: FaceBox, fit: Rect): FaceBox {
+  return {
+    ...face,
+    x: fit.x + face.x * fit.w,
+    y: fit.y + face.y * fit.h,
+    w: face.w * fit.w,
+    h: face.h * fit.h
+  }
+}

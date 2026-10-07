@@ -7,6 +7,8 @@ import { CHEER_THRESHOLD, LAUGH_THRESHOLD } from '@shared/events/audioEvents'
 import type { TelopStyleDef } from '@shared/telop/styles'
 import { carriesVoice } from '@shared/roughCut/build'
 import { PIP_MARGIN_RATIO } from '@shared/pipLayout'
+import type { CutOverrides } from '@shared/roughCut/overrides'
+import { mergeManualTelops } from '@shared/telop/manual'
 import type { DictionaryEntry } from '@shared/telop/polish'
 import { cameraRange, planRoughCut, timedLines } from './roughCutPlan'
 
@@ -35,6 +37,11 @@ export interface ShortPlanInput {
   styles: readonly TelopStyleDef[]
   speechLook: { style: TextStyle; styleId?: string }
   dictionary?: readonly DictionaryEntry[]
+  /**
+   * 本編の人の修正(削った・足した区間、替えたカメラ)。ショートにも当てる
+   * (本編で削った所 — 個人の情報・関係の無い話 — をショートに戻さない)
+   */
+  overrides?: CutOverrides
 }
 
 /** ショートにする区間(強い順) */
@@ -85,7 +92,17 @@ export function buildShortProject(
       dictionary: input.dictionary,
       kind: 'game',
       policy: 'light',
-      aspectRatio: '9:16'
+      aspectRatio: '9:16',
+      overrides: input.overrides && {
+        ...input.overrides,
+        // 足した区間は、このショートの区間の中だけ
+        added: input.overrides.added
+          .map((r) => ({
+            start: Math.max(r.start, window.start),
+            end: Math.min(r.end, window.end)
+          }))
+          .filter((r) => r.end > r.start)
+      }
     }
   )
   const cut = plan.cut
@@ -110,38 +127,54 @@ export function buildShortProject(
       // 縦の画面いっぱいに、ゲーム画面の真ん中を切り出す
       fillCrop: true
     })),
-    audioTracks: cut.audio.map((a) => ({
-      id: uuid(),
-      name: a.name,
-      multicamSourceId: a.sourceId,
-      muted: a.muted ?? false,
-      volume: a.volume,
-      autoVolume: a.volume,
-      duckingEnabled: false,
-      voice: voice.has(a.sourceId),
-      clips: a.clips.map((c) => ({
+    audioTracks: cut.audio.map((a) => {
+      // 本編で人が決めた消音・音量(仮編集が決めた値から変えたもの)は、ショートでも同じに
+      const prev = project.audioTracks.find((t) => t.multicamSourceId === a.sourceId)
+      const volumeChanged =
+        prev !== undefined && prev.autoVolume !== undefined && prev.volume !== prev.autoVolume
+      return {
         id: uuid(),
-        assetId: c.assetId,
-        startTime: c.startTime,
-        inPoint: c.inPoint,
-        outPoint: c.outPoint,
-        ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {}),
-        ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
-        ...(c.fadeOut ? { fadeOut: c.fadeOut } : {})
-      }))
-    })),
-    videoOverlayTracks: (cut.overlays ?? []).map((o) => ({
-      id: uuid(),
-      name: o.name,
-      multicamSourceId: o.sourceId,
-      hidden: false,
-      // 声はマイクの音源で鳴らす(カメラの音を足すと二重に聞こえる)
-      audioMuted: true,
-      position: SHORT_FACE_POSITION,
-      scale: SHORT_FACE_SCALE,
-      clips: o.clips.map((c) => ({ id: uuid(), ...c }))
-    })),
-    textOverlays: plan.telops.map((t) => ({ ...t, id: uuid() })),
+        name: a.name,
+        multicamSourceId: a.sourceId,
+        muted: prev?.muted ?? a.muted ?? false,
+        volume: volumeChanged ? prev!.volume : a.volume,
+        autoVolume: a.volume,
+        duckingEnabled: false,
+        voice: voice.has(a.sourceId),
+        clips: a.clips.map((c) => ({
+          id: uuid(),
+          assetId: c.assetId,
+          startTime: c.startTime,
+          inPoint: c.inPoint,
+          outPoint: c.outPoint,
+          ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {}),
+          ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
+          ...(c.fadeOut ? { fadeOut: c.fadeOut } : {})
+        }))
+      }
+    }),
+    videoOverlayTracks: (cut.overlays ?? []).map((o) => {
+      // 本編で人が決めたワイプの表示・音は、ショートでも同じに(置き場所と大きさは縦型の決まり)
+      const prev = project.videoOverlayTracks.find((t) => t.multicamSourceId === o.sourceId)
+      return {
+        id: uuid(),
+        name: o.name,
+        multicamSourceId: o.sourceId,
+        hidden: prev?.hidden ?? false,
+        // 声はマイクの音源で鳴らす(カメラの音を足すと二重に聞こえる)
+        audioMuted: prev ? prev.audioMuted === true : true,
+        position: SHORT_FACE_POSITION,
+        scale: SHORT_FACE_SCALE,
+        clips: o.clips.map((c) => ({ id: uuid(), ...c }))
+      }
+    }),
+    // 本編で人が直した文字・消したテロップは、ショートでも同じに
+    textOverlays: mergeManualTelops(
+      project.textOverlays,
+      plan.telops,
+      new Set(project.dismissedTelops ?? []),
+      project.editedTelops
+    ).map((t) => ({ ...t, id: uuid() })),
     transcript: project.transcript,
     multicam: info,
     audioEvents: project.audioEvents

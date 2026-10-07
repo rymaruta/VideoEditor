@@ -1,7 +1,12 @@
 import type { MediaAsset, TextOverlay } from '@shared/types'
 import type { RoughCut } from '@shared/roughCut/build'
-import { decideTelopPlacement, telopRect } from '@shared/telop/avoidFaces'
-import { detectHud, speechYAvoidingHud } from '@shared/telop/hud'
+import {
+  containRect,
+  decideTelopPlacement,
+  faceToCanvas,
+  telopRect
+} from '@shared/telop/avoidFaces'
+import { detectHud, hudMapToCanvas, speechYAvoidingHud } from '@shared/telop/hud'
 import { textCanvasSize } from '@shared/resolution'
 import type { AspectRatio } from '@shared/types'
 import { autoTelopKey } from '@shared/telop/manual'
@@ -90,7 +95,14 @@ export async function placeTelopsAvoidingFaces(
       unchecked++
       return o
     }
-    const decision = decideTelopPlacement(o, found, canvas)
+    // 顔の枠は素材の絵の中の比。画面の比へ写してから比べる(縦長の企画に横長の録画を置くと上下に帯ができる)
+    const req = requests[indexOf.get(key)!]
+    const fit = containRect({ width: req.width, height: req.height }, canvas)
+    const decision = decideTelopPlacement(
+      o,
+      found.map((f) => faceToCanvas(f, fit)),
+      canvas
+    )
     if (decision === 'moveTop') {
       moved++
       return { ...o, style: { ...o.style, position: 'top' as const } }
@@ -128,9 +140,14 @@ export async function placeTelopsAvoidingHud(
   const frames = (await window.api.framesRgb(requests, HUD_FRAME)).filter(
     (x): x is Uint8Array => x !== null
   )
-  const map = detectHud(frames, HUD_FRAME.w, HUD_FRAME.h)
-  if (!map) return { telops, moved: 0, y: null }
+  const found = detectHud(frames, HUD_FRAME.w, HUD_FRAME.h)
+  if (!found) return { telops, moved: 0, y: null }
   const canvas = textCanvasSize(aspect)
+  // HUD のマスは素材の絵の中の比。画面の比へ写す(縦長の企画に横長の録画を置くと上下に帯ができる)
+  const first = cut.main.map((c) => assets.get(c.assetId)).find((a) => a?.hasVideo)
+  const map = first
+    ? hudMapToCanvas(found, containRect({ width: first.width, height: first.height }, canvas))
+    : found
   // 既定の位置(下)の帯の中心。2行の発言テロップで見積もる
   const sample = telops.find((o) => o.style.position === 'bottom' && !o.style.customPosition)
   if (!sample) return { telops, moved: 0, y: null }

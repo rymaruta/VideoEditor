@@ -1139,6 +1139,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         }
         const settings = useSettingsStore.getState()
         const styles = usePresetStore.getState().captionPresets
+        // 本編の人の修正(削った・足した区間、替えたカメラ)。仮編集の作り直しと同じく読み取る
+        const overrides = project.roughCutAuto
+          ? updateOverrides(
+              project.cutOverrides,
+              project.roughCutAuto,
+              coverageOfClips(project.clips, info)
+            )
+          : project.cutOverrides
         for (let i = 0; i < windows.length; i++) {
           set({
             shorts: {
@@ -1155,6 +1163,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               info,
               hype,
               activity,
+              overrides,
               styles,
               speechLook: speechLook(settings.speechTelopLook, styles),
               dictionary: parseDictionary(settings.telopDictionary)

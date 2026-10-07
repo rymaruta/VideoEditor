@@ -135,3 +135,35 @@ export function speechYAvoidingHud(map: HudMap, defaultY: number): number | null
   }
   return Math.round(best * 1000) / 1000
 }
+
+/**
+ * 素材の絵の中の HUD のマスを、画面(テロップのキャンバス)のマスへ写す。`fit` は絵が画面に収まる所
+ * (`containRect`)。絵の外(黒い帯)は HUD 無し
+ */
+export function hudMapToCanvas(
+  map: HudMap,
+  fit: { x: number; y: number; w: number; h: number }
+): HudMap {
+  if (Math.abs(fit.w - 1) < 1e-6 && Math.abs(fit.h - 1) < 1e-6) return map
+  const cells = new Float32Array(map.cols * map.rows)
+  for (let r = 0; r < map.rows; r++) {
+    for (let c = 0; c < map.cols; c++) {
+      // 画面のマスを、絵の中の比へ戻す(絵の外は切り捨てる)
+      const x0 = (c / map.cols - fit.x) / fit.w
+      const x1 = ((c + 1) / map.cols - fit.x) / fit.w
+      const y0 = (r / map.rows - fit.y) / fit.h
+      const y1 = ((r + 1) / map.rows - fit.y) / fit.h
+      const rect = {
+        x0: Math.max(0, x0),
+        x1: Math.min(1, x1),
+        y0: Math.max(0, y0),
+        y1: Math.min(1, y1)
+      }
+      if (rect.x1 <= rect.x0 || rect.y1 <= rect.y0) continue
+      // 絵に掛かる面積の割合で薄める(マスの一部だけが絵なら、HUD もその分だけ)
+      const inside = ((rect.x1 - rect.x0) * (rect.y1 - rect.y0)) / ((x1 - x0) * (y1 - y0))
+      cells[r * map.cols + c] = hudCoverage(map, rect) * inside
+    }
+  }
+  return { cols: map.cols, rows: map.rows, cells }
+}
