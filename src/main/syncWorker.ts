@@ -36,6 +36,10 @@ const post = (m: SyncWorkerMessage): void => parentPort!.postMessage(m)
 const REFINE_SAMPLE_RATE = 16000
 const REFINE_WINDOW_SEC = 20
 const DRIFT_MIN_OVERLAP_SEC = 600
+/** 頭・中ほど・終わりの offset が一直線に並ぶとみなす幅(秒)。並ばなければ時計のずれを測れなかったとする */
+const DRIFT_LINE_TOLERANCE = 0.01
+/** 時計のずれとして信じる上限(2000ppm。安い録音機でも 500ppm ほど) */
+const MAX_DRIFT = 2e-3
 /**
  * 頭と終わりで測り直すときに探す幅(秒)。中ほどで詰めた offset からは、時計のずれの分だけ離れている
  * (200ppm で中ほどから1時間離れると 0.72 秒)ので、中ほどからの距離に比例して広げる。
@@ -166,9 +170,29 @@ async function matchPair(
   // offset を測った位置。時計がずれていると、測る位置で offset が変わる(sync/solve で補正する)
   result.center = 'center' in m && typeof m.center === 'number' ? m.center : (ovStart + ovEnd) / 2
   try {
-    const mid = await refineAt(a, b, m.offset, result.center)
+    let mid = await refineAt(a, b, result.offset, result.center)
+    // 丸ごとの相関で「合う」と出ても、長い2本は時計のずれで山が横に広がり、粗い offset が
+    // 中ほどの値にならないことがある(4時間・25ppm で中ほどから 0.1 秒以上離れ、中ほどで詰められず、
+    // 時計のずれも測らないまま終わりで 0.2 秒ずれていた)。中ほどで詰められなければ、窓ごとに合わせ直して
+    // 時計の速さと測った位置を求めてから詰める
+    if (
+      !(mid.sharpness >= 5 && Math.abs(mid.offset - result.offset) <= 0.05) &&
+      result.rate === undefined &&
+      ovEnd - ovStart >= DRIFT_MIN_OVERLAP_SEC
+    ) {
+      const d =
+        matchWithDrift(ea, eb, { around: m.offset }) ??
+        matchWithDrift(ea, eb, { around: m.offset, windowSec: 60, maxWindows: 12 })
+      if (d) {
+        result.offset = d.offset
+        result.center = d.center
+        result.rate = d.rate
+        result.driftPpm = (d.rate - 1) * 1e6
+        mid = await refineAt(a, b, d.offset, d.center)
+      }
+    }
     // GCC-PHAT の山が鋭くなければ(音が少ない区間など)、粗い値のままにする
-    if (mid.sharpness >= 5 && Math.abs(mid.offset - m.offset) <= 0.05) {
+    if (mid.sharpness >= 5 && Math.abs(mid.offset - result.offset) <= 0.05) {
       result.offset = mid.offset
       result.refined = true
     }
@@ -186,11 +210,21 @@ async function matchPair(
         refineAt(a, b, expect(early), early, shift),
         refineAt(a, b, expect(late), late, shift)
       ])
-      if (e.sharpness >= 5 && l.sharpness >= 5) {
+      // 広く探すほど、音の無い区間(雑音どうし)でもたまたま鋭い山が立つ(±1 秒では 3 回に 2 回)。
+      // 広く探したときは鋭さを厳しくし、さらに中ほどで詰めた値が頭と終わりを結ぶ直線に乗るときだけ信じる
+      // (偶然の山は中ほどの値と直線に並ばない)
+      const minSharp = shift > 0.1 ? 8 : 5
+      if (e.sharpness >= minSharp && l.sharpness >= minSharp) {
         // b の時計が速いと、a の後ろほど b の位置は手前(offset が小さく)に見える
         const drift = -(l.offset - e.offset) / (late - early)
-        result.driftPpm = drift * 1e6
-        result.rate = 1 + drift
+        const onLine = e.offset + (l.offset - e.offset) * ((center - early) / (late - early))
+        if (
+          Math.abs(onLine - result.offset) <= DRIFT_LINE_TOLERANCE &&
+          Math.abs(drift) <= MAX_DRIFT
+        ) {
+          result.driftPpm = drift * 1e6
+          result.rate = 1 + drift
+        }
       }
     }
   } catch {
