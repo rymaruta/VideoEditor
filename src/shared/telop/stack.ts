@@ -88,6 +88,9 @@ export function stackedBottomTelops<
 export function hudStackBase<
   T extends Pick<TextOverlay, 'text' | 'style' | 'startTime' | 'endTime'>
 >(telops: readonly T[], canvasH: number): number | undefined {
+  // HUD を避けて上げたあとは、下の発言テロップがどれも自由配置になる。既定の下のままの枚が
+  // 1枚でもあれば、HUD の段ではない(一番下の段を消した・顔を避けて上へ移した、ふつうの積んだ段)
+  if (telops.some((t) => t.style.position === 'bottom' && !t.style.customPosition)) return undefined
   const ys = telops
     .filter((t) => t.style.position === 'bottom' && t.style.customPosition?.x === 0.5)
     .map((t) => t.style.customPosition!.y)

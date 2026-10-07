@@ -64,19 +64,29 @@ const HALLUCINATIONS = [
 ]
 
 /**
- * 音声認識の「繰り返しの暴走」: 同じ短い言葉(10 文字まで)が切れ目なく 8 回以上続く
+ * 音声認識の「繰り返しの暴走」: 同じ短い言葉(2〜10 文字、2 種類以上の文字)が切れ目なく 8 回以上続く
  * (「ヴィヴィヴィヴィ…」「彼女彼女彼女…」「私は 私は 私は…」)。雑音・音楽・聞き取れない言葉で起きる。
- * 人が言う繰り返し(「やばいやばいやばい」)は 8 回に届かない
+ * 人が言う繰り返し(「やばいやばいやばい」)は 8 回に届かない。1 文字の繰り返し(叫び「うわああああ」・
+ * 笑い「はははは」・伸ばす「えーーーー」)は人の声なので数えない
  */
-const REPETITION_LOOP = /(\S.{0,9}?)(?:[\s、。,.]*\1){7,}/u
+const REPETITION_LOOP = /(\S.{1,9}?)(?:[\s、。,.]*\1){7,}/gu
 /** 繰り返しが発話のこれだけを占めたら、暴走とみなして捨てる */
 const LOOP_SHARE = 0.6
+
+function repetitionLoopLength(t: string): number {
+  let longest = 0
+  for (const m of t.matchAll(REPETITION_LOOP)) {
+    // 同じ文字だけの単位(「はは」「ああ」)は 1 文字の繰り返し
+    if (new Set(m[1].replace(/\s/g, '')).size < 2) continue
+    longest = Math.max(longest, m[0].length)
+  }
+  return longest
+}
 
 export function isLikelyHallucination(text: string): boolean {
   const t = text.trim()
   if (t === '' || HALLUCINATIONS.some((r) => r.test(t))) return true
-  const loop = REPETITION_LOOP.exec(t)
-  return loop !== null && loop[0].length >= t.length * LOOP_SHARE
+  return repetitionLoopLength(t) >= t.length * LOOP_SHARE
 }
 
 /** クリップの形(タイムラインでの位置を割り出すのに要る所だけ) */

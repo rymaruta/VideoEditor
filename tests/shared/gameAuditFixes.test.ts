@@ -393,3 +393,29 @@ describe('人が下に置いたテロップの上に積んだ発言テロップ�
     expect(twice[1].style.customPosition).toEqual(vertical.style.customPosition)
   })
 })
+
+describe('ロケの回で、積んだ段を HUD の段と取り違えない', () => {
+  const standard = speechLook('tpl-speech-standard', [])
+  const yellow = speechLook('tpl-speech-yellow', [])
+  const t = (id: string, start: number, end: number): TextOverlay => ({
+    id,
+    text: 'あいう',
+    startTime: start,
+    endTime: end,
+    style: speechTelopStyle(standard.style),
+    source: 'auto',
+    utteranceId: id
+  })
+  it('一番下の段を顔を避けて上へ移した組が2つあっても、ほかの枚は既定の下のまま', () => {
+    const stacked = stackSimultaneousTelops(
+      [t('a', 0, 3), t('b', 1, 3), t('c', 10, 13), t('d', 11, 13), t('e', 20, 22), t('f', 30, 32)],
+      1080
+    )
+    const moved = stacked.map((o) =>
+      o.id === 'a' || o.id === 'c' ? { ...o, style: { ...o.style, position: 'top' as const } } : o
+    )
+    const out = restyleSpeechTelops(moved, standard, yellow, [], 1080)
+    expect(out.find((o) => o.id === 'e')!.style.customPosition).toBeUndefined()
+    expect(out.find((o) => o.id === 'f')!.style.customPosition).toBeUndefined()
+  })
+})
