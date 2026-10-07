@@ -151,6 +151,9 @@ export function matchFeatures(
   }
 }
 
+/** 窓ごとの合わせで受ける時計のずれの上限(±0.2%。現実の録音機は ±0.01% 前後) */
+const MAX_DRIFT = 2e-3
+
 export interface DriftMatch extends FeatureMatch {
   /** offset を測った位置(a の時刻) */
   center: number
@@ -169,20 +172,42 @@ export interface DriftMatch extends FeatureMatch {
 export function matchWithDrift(
   a: Float32Array,
   b: Float32Array,
-  options: { windowSec?: number; maxWindows?: number } = {}
+  options: {
+    windowSec?: number
+    maxWindows?: number
+    /**
+     * 丸ごとの相関でいちばん合った offset(秒)。渡すと、窓ごとにその周り(時計のずれで動きうる幅)
+     * だけを探す。時計のずれで山は低くなるが、位置はおおむね正しい。全体を探すと 1 組 2〜4 秒かかり、
+     * 素材の多い回(合わない組が千組を超える)で同期が数十分のびていた
+     */
+    around?: number
+  } = {}
 ): DriftMatch | null {
   const winSec = options.windowSec ?? 120
   const w = Math.round(winSec * ENVELOPE_RATE)
   const count = Math.min(options.maxWindows ?? 8, Math.floor(b.length / w))
   if (count < 3 || a.length < w) return null
   const step = (b.length - w) / (count - 1)
+  // 時計のずれ(上限 ±0.2%)で、b の端は中ほどから b の長さ × 0.2% まで動きうる。余裕を足す
+  const margin = Math.round((5 + (MAX_DRIFT * b.length) / ENVELOPE_RATE) * ENVELOPE_RATE)
   let points: { c: number; o: number; m: FeatureMatch }[] = []
   for (let k = 0; k < count; k++) {
     const s = Math.round(k * step)
-    const m = matchFeatures(a, b.subarray(s, s + w), { minOverlapSec: winSec * 0.8 })
+    let lo = 0
+    let hi = a.length
+    if (options.around !== undefined && Number.isFinite(options.around)) {
+      const at = Math.round(options.around * ENVELOPE_RATE) + s
+      lo = Math.max(0, at - margin)
+      hi = Math.min(a.length, at + w + margin)
+      if (hi - lo < w * 0.8) continue
+    }
+    const m = matchFeatures(a.subarray(lo, hi), b.subarray(s, s + w), {
+      minOverlapSec: winSec * 0.8
+    })
     if (!m || !isReliableMatch(m)) continue
-    // 窓の頭(b の時刻 s)が a の m.offset 秒にある → b の頭は a の (m.offset - s) 秒(その位置での値)
-    points.push({ c: m.offset + winSec / 2, o: m.offset - s / ENVELOPE_RATE, m })
+    const offset = m.offset + lo / ENVELOPE_RATE
+    // 窓の頭(b の時刻 s)が a の offset 秒にある → b の頭は a の (offset - s) 秒(その位置での値)
+    points.push({ c: offset + winSec / 2, o: offset - s / ENVELOPE_RATE, m })
   }
   const fit = (ps: typeof points): { o0: number; k: number } => {
     const n = ps.length
@@ -204,7 +229,7 @@ export function matchWithDrift(
     const worst = res.indexOf(Math.max(...res))
     if (res[worst] <= 0.03) {
       // 時計のずれは現実の録音機の範囲(±0.2%)に限る
-      if (Math.abs(k) > 2e-3) return null
+      if (Math.abs(k) > MAX_DRIFT) return null
       const center = points.reduce((t, p) => t + p.c, 0) / points.length
       const conf = points.map((p) => p.m.confidence).sort((x, y) => x - y)
       const dist = points.map((p) => p.m.distinctness).sort((x, y) => x - y)

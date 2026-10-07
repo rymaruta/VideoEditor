@@ -50,6 +50,26 @@ describe('時計がずれた長い2本の照らし合わせ', () => {
     expect(Math.abs((d.rate - 1.0003) * 1e6)).toBeLessThan(60)
   })
 
+  it('丸ごとの相関の山の周りだけを探しても同じ答え。500ppm は1分の窓で合う', () => {
+    const { a, b } = pair(745, 0.733, 1.0005, 7)
+    const around = matchFeatures(a, b)!.offset
+    expect(matchWithDrift(a, b, { around })).toBeNull()
+    const d = matchWithDrift(a, b, { around, windowSec: 60, maxWindows: 12 })!
+    expect(Math.abs((d.rate - 1.0005) * 1e6)).toBeLessThan(60)
+    const expected = d.center - (d.center - 0.733) * 1.0005
+    expect(Math.abs(d.offset - expected)).toBeLessThan(0.03)
+  })
+
+  it('関係のない2本は合わせない(1分の窓でも)', () => {
+    for (let seed = 10; seed < 20; seed++) {
+      const { a } = pair(900, 0, 1, seed)
+      const { b } = pair(900, 0, 1, seed + 100)
+      const around = matchFeatures(a, b)!.offset
+      expect(matchWithDrift(a, b, { around })).toBeNull()
+      expect(matchWithDrift(a, b, { around, windowSec: 60, maxWindows: 12 })).toBeNull()
+    }
+  })
+
   it('関係のない2本は合わせない', () => {
     const { a } = pair(900, 0, 1, 1)
     const { b } = pair(900, 0, 1, 2)

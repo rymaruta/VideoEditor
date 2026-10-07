@@ -104,7 +104,10 @@ export function buildRoughCut(
   let timeline = 0
   for (const p of placed) {
     const last = spans[spans.length - 1]
-    if (last && Math.abs(last.end - p.start) < 1e-6) last.end = p.end
+    // カメラを替えた所は、素材の秒 ↔ 共通の秒の変換の丸めで数μs 離れることがある(実測 1.47μs)。
+    // 1μs で比べると時間の飛ぶカットと見なされ、そこを越えないテロップが言い終わる前に切れていた。
+    // 1ms 未満の隙間は時間が続いているものとしてつなぐ(1ms は 1 フレームよりずっと短い)
+    if (last && Math.abs(last.end - p.start) < 1e-3) last.end = p.end
     else spans.push({ timeline, start: p.start, end: p.end })
     timeline += p.end - p.start
   }

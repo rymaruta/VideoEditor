@@ -123,3 +123,28 @@ describe('buildRoughCut: カメラの素材の切れ目に掛かったショッ�
     expect(cut.duration).toBeCloseTo(120, 9)
   })
 })
+
+describe('buildRoughCut: カメラを替えた所の丸め', () => {
+  it('素材の秒の変換の丸めで数μs 離れても、時間の続いている区間として1つにまとめる', () => {
+    // 時計のずれた2台を続けて使う(替えた所の共通の秒が、変換の丸めで僅かに食い違う)
+    const drift: MulticamInfo = {
+      anchorSourceId: 'A',
+      sources: [
+        { id: 'A', name: 'カメラA', kind: 'camera' },
+        { id: 'B', name: 'カメラB', kind: 'camera' }
+      ],
+      files: [
+        { assetId: 'a1', sourceId: 'A', start: 0, rate: 1, duration: 4000 },
+        { assetId: 'b1', sourceId: 'B', start: 0.000001, rate: 1.0000123, duration: 4000 }
+      ]
+    }
+    const cut = buildRoughCut(
+      [
+        { start: 1699.87, end: 1704.7169996, cameraId: 'A', reason: 'speaker' },
+        { start: 1704.717001, end: 1705.06, cameraId: 'B', reason: 'speaker' }
+      ],
+      drift
+    )
+    expect(cut.spans).toHaveLength(1)
+  })
+})

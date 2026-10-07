@@ -130,7 +130,12 @@ async function matchPair(
   let reliable = m ? isReliableMatch(m) : false
   // 丸ごとでは合わない長い2本は、時計のずれで山がつぶれていることがある。窓ごとに合わせ直す
   if (!reliable) {
-    const d = matchWithDrift(ea, eb)
+    // 2分の窓で合わなければ1分の窓で(時計のずれが大きいと、2分の窓の中でも山が広がる。
+    // 実測: 500ppm・12分は2分の窓では合わず、1分の窓で合う)
+    const around = m ? { around: m.offset } : {}
+    const d =
+      matchWithDrift(ea, eb, around) ??
+      matchWithDrift(ea, eb, { ...around, windowSec: 60, maxWindows: 12 })
     if (d) {
       m = d
       reliable = true
