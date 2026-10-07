@@ -162,13 +162,13 @@ export function restyleSpeechTelops(
   const speech = speechIdx.map((i) => overlays[i])
   // HUD を避けて段ごと上げてあれば、その高さを一番下の段にして積み直す
   const baseCenter = canvasH ? hudStackBase(speech, canvasH) : undefined
-  const stacked = overlays.map(() => false)
-  if (canvasH) {
-    const marks = stackedBottomTelops(speech, canvasH, { baseCenter })
-    speechIdx.forEach((i, k) => {
-      stacked[i] = marks[k]
-    })
-  }
+  // 積んだ段の見分けは全部のテロップで行う(下に人が置いたテロップがあれば、その上が段になる)。
+  // 印を付けるのは自動の発言テロップだけ
+  const stacked = canvasH
+    ? stackedBottomTelops(overlays, canvasH, { baseCenter }).map(
+        (m, i) => m && isAutoSpeech(overlays[i])
+      )
+    : overlays.map(() => false)
   const restyled = new Set<number>()
   const out = overlays.map((o, i) => {
     if (!isAutoSpeech(o)) return o

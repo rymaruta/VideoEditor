@@ -530,7 +530,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     setStep('sound', { state: 'run', percent: 0, note: '番組素材フォルダを読み込み中' })
     try {
       const kit = await window.api.showKitScan(folder)
-      const judged = new Map(get().judgements.map((j) => [j.sceneId, j]))
+      // 曲の雰囲気の決めかねは、場面を選ぶのに使った判定(見どころを置き換えた後)の印で
+      const judged = new Map((get().planJudgements ?? get().judgements).map((j) => [j.sceneId, j]))
       const scenes = get()
         .scenes.filter((sc) => keptIds.includes(sc.id))
         .map((sc) => {
@@ -724,12 +725,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       keep: {},
       hype: hype ?? []
     })
-    const highlights = judgements.filter((j) => j.kind === 'highlight').length
-    const unneeded = judgements.filter((j) => j.kind === 'unneeded').length
     setStep('structure', {
       state: 'done',
       percent: 100,
-      note: `場面 ${scenes.length} · 見どころ ${highlights} · 不要 ${unneeded}${source === 'ai' ? ' · AI' : ' · 簡易'}`
+      note: structureNote(judgements, source, false)
     })
     log(
       source === 'ai'
@@ -789,10 +788,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       return
     }
     set({ planJudgements: plan.demoted ? plan.judgements : null })
-    if (plan.demoted)
-      setStep('structure', {
-        note: `場面 ${plan.judgements.length} · 見どころ ${plan.judgements.filter((j) => j.kind === 'highlight').length}(点数で選び直し) · 不要 ${plan.judgements.filter((j) => j.kind === 'unneeded').length}`
-      })
+    // 工程の欄の見どころの数は、場面を選ぶのに使った判定で(置き換えなかった作り直しでは元に戻す)
+    setStep('structure', {
+      note: structureNote(plan.judgements, get().judgeSource, Boolean(plan.demoted))
+    })
     if (plan.demoted)
       log(
         `構成: ${plan.demoted.total} 場面中 ${plan.demoted.highlights} 場面が「見どころ」で見分けになっていないため、見どころは声の盛り上がり・笑い・発話の密度の点数で選び直しました(題・理由・不要の印はそのまま)`
@@ -1742,6 +1741,17 @@ export interface ShortsProgress {
 function clockText(sec: number): string {
   const t = Math.max(0, Math.round(sec))
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+}
+
+/** 構成の工程の欄の文(場面・見どころ・不要の数と、判定のしかた) */
+function structureNote(
+  judgements: readonly SceneJudgement[],
+  source: 'ai' | 'heuristic' | null,
+  demoted: boolean
+): string {
+  const highlights = judgements.filter((j) => j.kind === 'highlight').length
+  const unneeded = judgements.filter((j) => j.kind === 'unneeded').length
+  return `場面 ${judgements.length} · 見どころ ${highlights}${demoted ? '(点数で選び直し)' : ''} · 不要 ${unneeded}${source === 'ai' ? ' · AI' : ' · 簡易'}`
 }
 
 /** 動画から取り出したトラックの音源なら、元の動画を持つ音源(カメラ)の ID */

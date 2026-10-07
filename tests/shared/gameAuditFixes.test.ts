@@ -364,3 +364,32 @@ describe('人が真ん中に置いたテロップを、HUD を避けた段と取
     expect(out[3]).toBe(ov[3])
   })
 })
+
+describe('人が下に置いたテロップの上に積んだ発言テロップも、続けて見た目を替えたら付いてくる', () => {
+  const standard = speechLook('tpl-speech-standard', [])
+  const yellow = speechLook('tpl-speech-yellow', [])
+  const vertical = speechLook('tpl-speech-vertical', [])
+  it('横書き → 横書き → 縦書き で、縦書きの置き場所へ', () => {
+    const manual: TextOverlay = {
+      id: 'm',
+      text: '手',
+      startTime: 0,
+      endTime: 5,
+      style: speechTelopStyle(standard.style)
+    }
+    const a: TextOverlay = {
+      id: 'a',
+      text: 'あ',
+      startTime: 1,
+      endTime: 4,
+      style: speechTelopStyle(standard.style),
+      source: 'auto',
+      utteranceId: 'a'
+    }
+    const once = restyleSpeechTelops([manual, a], standard, yellow, [], 1080)
+    expect(once[1].style.customPosition?.x).toBe(0.5)
+    expect(once[0]).toBe(manual)
+    const twice = restyleSpeechTelops(once, yellow, vertical, [], 1080)
+    expect(twice[1].style.customPosition).toEqual(vertical.style.customPosition)
+  })
+})
