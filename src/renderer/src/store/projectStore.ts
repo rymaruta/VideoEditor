@@ -1243,8 +1243,15 @@ function buildInsertedClips(
       const speed = c.speed || 1
       const inPoint = c.inPoint + remaining * speed
       remaining = 0
-      // 上書きで残る切れ端が最短より短いなら、丸ごと消す(つかめない・分けられないクリップを残さない)
-      if (c.outPoint - inPoint < MIN_CLIP_SOURCE_DURATION) {
+      // 上書きで残る切れ端が最短より短いなら、その分だけ置いたクリップを延ばして切れ端を消す
+      // (つかめない・分けられないクリップを残さない)。延ばすので後ろの位置は変わらない。
+      // 置いた素材の残りが足りなければ、切れ端は残す(後ろの位置を動かさないことを優先する)
+      const tail = (c.outPoint - inPoint) / speed
+      if (
+        c.outPoint - inPoint < MIN_CLIP_SOURCE_DURATION &&
+        newClip.outPoint + tail <= asset.duration
+      ) {
+        newClip.outPoint += tail
         removedClipIds.push(c.id)
         continue
       }
@@ -1524,6 +1531,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         // 長さが測れなかった(0)ファイル・静止画は詰めない。詰めると全部のクリップが長さ0で消える
         if (still || !(probe.duration > 0)) return clip
         if (clip.outPoint <= probe.duration) return clip
+        // 頭が新しい素材の中にあれば、終わりを素材の終わりで止めるだけ(頭を前へ動かすと、
+        // 後ろの本編が遅れて声・自動の音とずれる。開き直すときと同じ決まり)
+        if (clip.inPoint < probe.duration) return { ...clip, outPoint: probe.duration }
         const outPoint = Math.max(0, probe.duration)
         const inPoint = Math.min(clip.inPoint, Math.max(0, outPoint - MIN_CLIP_SOURCE_DURATION))
         return inPoint === clip.inPoint && outPoint === clip.outPoint

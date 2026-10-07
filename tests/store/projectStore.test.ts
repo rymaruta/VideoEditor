@@ -1601,8 +1601,32 @@ describe('本編の追従(再監査で見つかった所)', () => {
       [20, 30],
       [40, 50]
     ])
+    const tailStart = (): number =>
+      st()
+        .project.clips.slice(0, -1)
+        .reduce((t, c) => t + (c.outPoint - c.inPoint), 0)
+    const before = tailStart()
     st().overwriteClipAtTime('brollA', 0, 11.95, 8)
     for (const c of st().project.clips) expect(c.outPoint - c.inPoint).toBeGreaterThanOrEqual(0.1)
+    // 上書きは後ろの位置を動かさない
+    expect(tailStart()).toBeCloseTo(before, 9)
+  })
+
+  it('素材をつなぎ直して少し短くなっても、クリップの頭は動かさない', () => {
+    setup([
+      [0, 99.95],
+      [99.95, 100.000002],
+      [20, 30]
+    ])
+    st().relinkAsset(
+      'camA',
+      '/rec/camA2.mp4',
+      'camA2.mp4',
+      { duration: 100, width: 1920, height: 1080, fps: 30, hasAudio: true, hasVideo: true },
+      undefined
+    )
+    const c = st().project.clips[1]
+    expect([c.inPoint, c.outPoint]).toEqual([99.95, 100])
   })
 
   it('クリップの端のすぐそばへ差し込んでも、最短より短い切れ端を作らない', () => {
