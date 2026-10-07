@@ -21,7 +21,8 @@ export interface AutoFinishResult {
 
 export async function autoFinishTimeline(
   geminiApiKey: string | undefined,
-  language: string
+  language: string,
+  isCurrent: () => boolean = () => true
 ): Promise<AutoFinishResult> {
   const store = useProjectStore.getState()
   const timedClips = buildTimedClips(store.project)
@@ -33,6 +34,7 @@ export async function autoFinishTimeline(
   let failed = 0
   let firstFailure: string | null = null
   for (const tc of timedClips) {
+    if (!isCurrent()) throw new Error('AUTO_FINISH_STALE')
     if (!tc.asset.hasAudio) continue
     attempted++
     try {
@@ -42,6 +44,7 @@ export async function autoFinishTimeline(
         tc.clip.outPoint,
         language
       )
+      if (!isCurrent()) throw new Error('AUTO_FINISH_STALE')
       const speed = tc.clip.speed || 1
       for (const seg of segments) {
         const text = seg.text.trim()
@@ -57,11 +60,13 @@ export async function autoFinishTimeline(
         })
       }
     } catch (e) {
+      if (!isCurrent()) throw new Error('AUTO_FINISH_STALE')
       // 1クリップの失敗で全体は止めない(残りのクリップの字幕は付けられる)
       failed++
       if (firstFailure === null) firstFailure = formatIpcError(e)
     }
   }
+  if (!isCurrent()) throw new Error('AUTO_FINISH_STALE')
   store.addTextOverlays(overlays)
   const captionCount = overlays.length
 
@@ -77,6 +82,7 @@ export async function autoFinishTimeline(
         .join('\n')
       const total = totalTimelineDuration(timedClips)
       const frames = await captureAiFrames(timedClips, total, latestProject.aspectRatio)
+      if (!isCurrent()) throw new Error('AUTO_FINISH_STALE')
       metadata = await generateVideoMetadata(geminiApiKey, transcript, '', language, frames)
     } catch (e) {
       // メタデータは無くても字幕は残せるので中断しないが、理由は画面へ持ち帰る

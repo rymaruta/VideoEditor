@@ -3,6 +3,7 @@ import type { AudioTrack, AutoEditPattern, MediaAsset } from '@shared/types'
 import { generateAutoEditPatterns } from '../lib/autoEdit'
 import { autoFinishTimeline, type AutoFinishResult } from '../lib/autoFinish'
 import { formatIpcError } from '../lib/ipcError'
+import { onProjectSwitch } from './projectStore'
 
 /**
  * AIおまかせ全自動編集の実行状態。
@@ -63,6 +64,7 @@ interface AutoEditRunState {
 // 走っている生成の世代番号。再生成や参考動画の切り替えで先に投げた生成が後から
 // 返ってきても、古い結果で新しい結果を上書きしないようにする。
 let runToken = 0
+let finishToken = 0
 
 export const useAutoEditRunStore = create<AutoEditRunState>((set, get) => ({
   status: 'idle',
@@ -134,14 +136,44 @@ export const useAutoEditRunStore = create<AutoEditRunState>((set, get) => ({
   markApplied: (patternId) => set({ appliedId: patternId }),
 
   startFinish: async (patternId, geminiApiKey) => {
+    const token = ++finishToken
     set({ finishingId: patternId, finishError: null, finishResult: null })
     try {
-      const result = await autoFinishTimeline(geminiApiKey || undefined, 'japanese')
+      const result = await autoFinishTimeline(
+        geminiApiKey || undefined,
+        'japanese',
+        () => token === finishToken
+      )
+      if (token !== finishToken) return
       set({ finishResult: result })
     } catch (e) {
-      set({ finishError: formatIpcError(e) })
+      if (token === finishToken) set({ finishError: formatIpcError(e) })
     } finally {
-      set({ finishingId: null })
+      if (token === finishToken) set({ finishingId: null })
     }
   }
 }))
+
+
+// 別プロジェクトへ切り替えたら、生成中の世代を無効化し、前の企画の候補・サムネイル・
+// 仕上げ結果を持ち越さない。start() は runToken を照合するので、遅れて返った生成結果も捨てられる。
+onProjectSwitch(() => {
+  runToken++
+  finishToken++
+  useAutoEditRunStore.setState({
+    status: 'idle',
+    patterns: [],
+    thumbnails: {},
+    recommendedId: undefined,
+    aiScoredCount: 0,
+    bgmBeat: null,
+    referenceStyle: null,
+    error: null,
+    sourceKey: '',
+    feedback: {},
+    appliedId: null,
+    finishingId: null,
+    finishResult: null,
+    finishError: null
+  })
+})

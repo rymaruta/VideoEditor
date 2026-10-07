@@ -412,26 +412,19 @@ describe('分離音声のリンク — 消えた相手を指し続けない', ()
   })
 })
 
-describe('【既知の穴】ストアはテロップの前後関係を守っていない', () => {
+describe('ストアはテロップの時刻不変条件を守る', () => {
   beforeEach(reset)
 
-  /**
-   * `updateTextOverlay` は受け取った値をそのまま入れるので、**開始だけを終了より
-   * 後ろへ**渡すと逆転したテロップができる。画面の3つの入口(数値欄・タイムラインの
-   * つまみ・プレビューのドラッグ)はどれも手前でクランプしているので**いまは届かない**が、
-   * 規則は「書き込み先に置く」が正しい(2026-09-10 に足したチェックリスト項目)。
-   * BACKLOG の候補に積んである。**直したらこのテストが落ちる**ので、
-   * そのとき期待値を「クランプされる」に書き換えること。
-   */
-  it('開始だけを終了より後ろへ渡すと、逆転したまま保存される', () => {
+  it('開始だけを終了より後ろへ渡すと、終了も開始まで追従する', () => {
     st().updateTextOverlay('o1', { startTime: 99 })
     const o = st().project.textOverlays.find((x) => x.id === 'o1')!
-    expect(o.startTime).toBeGreaterThan(o.endTime)
+    expect(o.startTime).toBe(99)
+    expect(o.endTime).toBe(99)
   })
 
-  it('負の開始も、そのまま入る', () => {
+  it('負の開始は0へクランプする', () => {
     st().updateTextOverlay('o2', { startTime: -4 })
-    expect(st().project.textOverlays.find((x) => x.id === 'o2')!.startTime).toBe(-4)
+    expect(st().project.textOverlays.find((x) => x.id === 'o2')!.startTime).toBe(0)
   })
 })
 
@@ -1626,6 +1619,30 @@ describe('編集の値の検査', () => {
     st().rollTrim('c1', 'c2', -10)
     for (const [a, b] of pairs()) expect(b).toBeGreaterThan(a)
     expect(pairs()[0][0]).toBe(before[0][0])
+  })
+
+  it('テロップ時刻に NaN/Infinity/負数/逆転区間を保存しない', () => {
+    const original = st().project.textOverlays.find((o) => o.id === 'o2')!
+    const past = st().past.length
+    st().updateTextOverlay('o2', { startTime: Number.NaN })
+    st().updateTextOverlay('o2', { endTime: Number.POSITIVE_INFINITY })
+    expect(st().project.textOverlays.find((o) => o.id === 'o2')).toEqual(original)
+    expect(st().past.length).toBe(past)
+
+    st().updateTextOverlay('o2', { startTime: -10 })
+    let o = st().project.textOverlays.find((x) => x.id === 'o2')!
+    expect(o.startTime).toBe(0)
+    expect(o.endTime).toBe(7)
+
+    st().updateTextOverlay('o2', { startTime: 9 })
+    o = st().project.textOverlays.find((x) => x.id === 'o2')!
+    expect(o.startTime).toBe(9)
+    expect(o.endTime).toBe(9)
+
+    st().updateTextOverlay('o2', { endTime: 3 })
+    o = st().project.textOverlays.find((x) => x.id === 'o2')!
+    expect(o.endTime).toBe(9)
+    expect(Number.isFinite(o.startTime) && Number.isFinite(o.endTime)).toBe(true)
   })
 
   it('0・負・数値でない速さ・音量・時刻は書かず、履歴も積まない', () => {

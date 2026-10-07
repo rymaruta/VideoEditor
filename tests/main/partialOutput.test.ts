@@ -9,7 +9,7 @@ import {
   writeFileSync
 } from 'fs'
 import { tmpdir } from 'os'
-import { extname, join } from 'path'
+import { dirname, extname, join } from 'path'
 import { partialPathFor, writeViaPartial } from '../../src/main/partialOutput'
 
 const dirs: string[] = []
@@ -24,10 +24,11 @@ afterEach(() => {
 
 describe('書き出しは一時ファイルへ書いてから置き換える', () => {
   it('一時ファイルは同じフォルダ・同じ拡張子', () => {
-    const p = partialPathFor('/out/番組 第1回.mp4')
-    expect(p.startsWith('/out/')).toBe(true)
+    const output = join(work(), '番組 第1回.mp4')
+    const p = partialPathFor(output)
+    expect(dirname(p)).toBe(dirname(output))
     expect(extname(p)).toBe('.mp4')
-    expect(p).not.toBe('/out/番組 第1回.mp4')
+    expect(p).not.toBe(output)
   })
 
   it('成功したら本来の名前に置き換わる(前の完成品は上書き)', async () => {
