@@ -6,6 +6,7 @@ import type { Scene, SceneJudgement } from '@shared/structure/scenes'
 import { TURN_RATE } from '@shared/diarize/micTurns'
 import type { ShowStyle } from '@shared/style/showStyle'
 import { FIRST_TELOP_DELAY_SEC } from '@shared/telop/fromTranscript'
+import { defaultTextStyle } from '@shared/textStyle'
 
 // カメラ1台・マイク1本、どちらも共通の時刻 = 素材の時刻
 const info: MulticamInfo = {
@@ -79,5 +80,33 @@ describe('planRoughCut — カット点とテロップの時刻', () => {
     expect(a.startTime).toBeCloseTo(1 - plan.pieces[0].start + FIRST_TELOP_DELAY_SEC, 6)
     // 2つ目は切れ目(タイムラインで2つ目の区間の頭)から
     expect(b.startTime).toBeCloseTo(plan.cut.spans[1].timeline, 6)
+  })
+  it('発言テロップは、選んだ見た目(自分で作ったスタイル)で入る。話者に割り当てたスタイルが優先', () => {
+    const mine = { style: { ...defaultTextStyle(), color: '#ffe600', fontSize: 64 }, styleId: 'my' }
+    const plan = planRoughCut(project, info, scenes, judgements, activity, {
+      targetSec: 0,
+      styles: [],
+      speechLook: mine,
+      level
+    })
+    expect(plan.telops.length).toBeGreaterThan(0)
+    for (const t of plan.telops) {
+      expect(t.styleId).toBe('my')
+      expect(t.style.color).toBe('#ffe600')
+      expect(t.style.fontSize).toBe(64)
+    }
+    const assigned = {
+      id: 'a',
+      name: '出演者A用',
+      style: { ...defaultTextStyle(), color: '#00ff00' },
+      speakers: ['出演者A']
+    }
+    const plan2 = planRoughCut(project, info, scenes, judgements, activity, {
+      targetSec: 0,
+      styles: [assigned],
+      speechLook: mine,
+      level
+    })
+    for (const t of plan2.telops) expect(t.styleId).toBe('a')
   })
 })

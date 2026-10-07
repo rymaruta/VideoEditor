@@ -4,11 +4,13 @@ import type { TextPosition, TextStyle } from '@shared/types'
 import { defaultTextStyle } from '@shared/textStyle'
 import { textCanvasSize } from '@shared/resolution'
 import { drawTelop, telopStrokeRings, type TelopContext } from '@shared/telop/render'
-import { applyLook, countStyleUsage } from '@shared/telop/styles'
+import { applyLook, countStyleUsage, SPEECH_LOOK_TEMPLATES, speechLook } from '@shared/telop/styles'
 import { listSpeakers, speakerColor } from '@shared/speaker'
 import { useProjectStore } from '../store/projectStore'
 import { usePresetStore, type CaptionPreset } from '../store/presetStore'
 import { useMenuCommand } from '../lib/menuCommands'
+import { useTelopStyleRequest } from '../lib/telopStyleRequest'
+import { useSettingsStore } from '../store/settingsStore'
 import { loadTelopFonts } from '../lib/telopFonts'
 import { buildStyleFile, parseStyleFile, uniqueStyleNames } from '../lib/telopStyleFile'
 import { formatIpcError } from '../lib/ipcError'
@@ -69,8 +71,42 @@ export function TelopStyleDialog(): React.JSX.Element | null {
   const [fileMessage, setFileMessage] = useState<{ text: string; error?: boolean } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
+  // 「発言テロップの見た目」の欄から開いたか(OK で、選んだスタイルを自動の発言テロップに使う)
+  const [speechMode, setSpeechMode] = useState<{ restyleExisting: boolean } | null>(null)
+
+  // 発言テロップの見た目を作る: 今の見た目が登録したスタイルならそれを、型ならその見た目の
+  // 新しいスタイルを開く(型そのものは直せないので、写して自分のスタイルにする)
+  useEffect(
+    () =>
+      useTelopStyleRequest.subscribe((state) => {
+        if (state.request?.mode !== 'speech') return
+        useTelopStyleRequest.getState().clear()
+        const copy = usePresetStore
+          .getState()
+          .captionPresets.map((p) => ({ ...p, style: { ...p.style } }))
+        const current = useSettingsStore.getState().speechTelopLook
+        let id = copy.find((p) => p.id === current)?.id
+        if (!id) {
+          const tpl =
+            SPEECH_LOOK_TEMPLATES.find((t) => t.id === current) ?? SPEECH_LOOK_TEMPLATES[0]
+          const names = new Set(copy.map((p) => p.name))
+          let name = '自分の発言テロップ'
+          for (let n = 2; names.has(name); n++) name = `自分の発言テロップ ${n}`
+          const created: CaptionPreset = { id: uuid(), name, style: tpl.style() }
+          copy.push(created)
+          id = created.id
+        }
+        setDraft(copy)
+        setSelectedId(id)
+        setSpeechMode({ restyleExisting: state.request.restyleExisting })
+        setFileMessage(null)
+      }),
+    []
+  )
+
   useMenuCommand((id) => {
     if (id !== 'telop.styles') return
+    setSpeechMode(null)
     const copy = presets.map((p) => ({ ...p, style: { ...p.style } }))
     setDraft(copy)
     // 選んでいるテロップのスタイルがあれば、それを開いた状態にする
@@ -86,14 +122,22 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     return [...new Set([...fromProject, ...fromStyles])]
   }, [project.textOverlays, draft])
   const selected = draft?.find((p) => p.id === selectedId) ?? null
+  // 見本の縦横比。新しい回を作る前(企画が空)に発言テロップを作るときは、ロケの素材の横長で見せる
+  // (空の企画の既定は縦型なので、そのままだと文字の大きさの見当が狂う)
+  const sampleAspect =
+    speechMode && project.clips.length === 0 ? ('16:9' as const) : project.aspectRatio
 
   useEffect(() => {
     if (!draft) return
+    // 「新しい回を作る」・自動編集の画面の上に開くことがあるので、Esc は先に受けて下の画面へ渡さない
+    // (渡すと、下の画面まで一緒に閉じる)
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setDraft(null)
+      if (e.key !== 'Escape') return
+      e.stopImmediatePropagation()
+      setDraft(null)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [draft])
 
   // 同梱フォントは使うまで読み込まれないので、見本の文字と書体を先に読み込んで描き直す
@@ -139,7 +183,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
         { text: sampleText || ' ', startTime: 0, endTime, style },
         time,
         { width: w, height: h },
-        textCanvasSize(project.aspectRatio)
+        textCanvasSize(sampleAspect)
       )
     }
     if (!playing) {
@@ -157,7 +201,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [selected, sampleText, background, project.aspectRatio, fontEpoch, playing])
+  }, [selected, sampleText, background, sampleAspect, fontEpoch, playing])
 
   if (!draft) return null
 
@@ -272,8 +316,21 @@ export function TelopStyleDialog(): React.JSX.Element | null {
 
   function handleOk(): void {
     const next = draft!.map((p) => ({ ...p, name: p.name.trim() || '名前のないスタイル' }))
+    // 発言テロップの見た目として開いたときは、選んでいるスタイルを自動の発言テロップに使う。
+    // すでに入っている自動の発言テロップのうち、前の見た目のままの枚も替える
+    const prevLook = speechMode
+      ? speechLook(useSettingsStore.getState().speechTelopLook, presets)
+      : null
     replaceCaptionPresets(next)
-    restyleTextOverlays(usePresetStore.getState().captionPresets)
+    const saved = usePresetStore.getState().captionPresets
+    restyleTextOverlays(saved)
+    if (prevLook && selected) {
+      useSettingsStore.getState().setSpeechTelopLook(selected.id)
+      if (speechMode?.restyleExisting)
+        useProjectStore
+          .getState()
+          .restyleSpeechTelops(prevLook, speechLook(selected.id, saved), saved)
+    }
     setDraft(null)
   }
 
@@ -281,7 +338,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
   const autoSpeakers = new Set(selected?.speakers ?? [])
 
   return (
-    <div className="modal-backdrop" onMouseDown={() => setDraft(null)}>
+    <div className="modal-backdrop telop-style-backdrop" onMouseDown={() => setDraft(null)}>
       <div
         className="telop-style-dialog"
         role="dialog"
@@ -290,7 +347,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="dialog-titlebar">
-          <span>テロップスタイルの管理</span>
+          <span>{speechMode ? '発言テロップの見た目を作る' : 'テロップスタイルの管理'}</span>
           <button className="dialog-close" aria-label="閉じる" onClick={() => setDraft(null)}>
             ×
           </button>
@@ -385,8 +442,8 @@ export function TelopStyleDialog(): React.JSX.Element | null {
             <canvas
               ref={canvasRef}
               className="telop-style-sample"
-              width={project.aspectRatio === '9:16' ? 360 : 640}
-              height={project.aspectRatio === '9:16' ? 640 : 360}
+              width={sampleAspect === '9:16' ? 360 : 640}
+              height={sampleAspect === '9:16' ? 640 : 360}
             />
             <div className="telop-style-sample-controls">
               <label>
@@ -542,18 +599,24 @@ export function TelopStyleDialog(): React.JSX.Element | null {
           >
             {fileMessage
               ? fileMessage.text
-              : selected
-                ? usedCount > 0
-                  ? `変更は、このスタイルを使っているテロップ ${usedCount.toLocaleString()} 本に反映されます`
-                  : 'このスタイルを使っているテロップはまだありません'
-                : ''}
+              : speechMode && selected
+                ? `「この見た目を使う」で「${selected.name || '名前のないスタイル'}」を自動の発言テロップに使います(書体・色・縁・大きさ・動きを右で変えられます)`
+                : selected
+                  ? usedCount > 0
+                    ? `変更は、このスタイルを使っているテロップ ${usedCount.toLocaleString()} 本に反映されます`
+                    : 'このスタイルを使っているテロップはまだありません'
+                  : ''}
           </span>
           <div className="dialog-footer-spacer" />
           <button className="small-button" onClick={() => setDraft(null)}>
             キャンセル
           </button>
-          <button className="primary-button" onClick={handleOk}>
-            OK
+          <button
+            className="primary-button"
+            onClick={handleOk}
+            disabled={speechMode !== null && !selected}
+          >
+            {speechMode ? 'この見た目を使う' : 'OK'}
           </button>
         </div>
       </div>

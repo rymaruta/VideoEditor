@@ -5,11 +5,13 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { drawLookThumb } from '../lib/lookThumb'
 import { loadTelopFonts } from '../lib/telopFonts'
+import { useTelopStyleRequest } from '../lib/telopStyleRequest'
 
-const SAMPLE = 'ここが中華街の入り口です'
+const SAMPLE = 'ここが中華街です'
 
 /**
  * 自動で入れる発言テロップの見た目を選ぶ欄(テロップの型の「発言」+ 登録したテロップスタイル)。
+ * 「自分で作る…」で、テロップスタイルの管理を開いて見た目を一から作れる(作ったものがここで選ばれる)。
  * 選び直すと、すでに入っている自動の発言テロップのうち前の見た目のままの枚も替える(取り消せる)。
  * 話者にスタイルを割り当てた発言は、そちらが優先(テロップスタイルの管理で割り当てる)。
  */
@@ -80,6 +82,14 @@ export function SpeechTelopLookSelect({
           </optgroup>
         )}
       </select>
+      <button
+        type="button"
+        className="small-button"
+        onClick={() => useTelopStyleRequest.getState().openForSpeech(restyleExisting)}
+        title="書体・色・縁取り・大きさ・動きを自分で決めて、自動の発言テロップに使います"
+      >
+        自分で作る…
+      </button>
       <canvas
         ref={canvas}
         className="speech-look-thumb"

@@ -7340,3 +7340,8 @@ select.telop-kind-add {
   border: 1px solid var(--border);
   flex: none;
 }
+
+/* テロップスタイルの管理は「新しい回を作る」・自動編集の画面の上からも開く */
+.telop-style-backdrop {
+  z-index: 120;
+}
