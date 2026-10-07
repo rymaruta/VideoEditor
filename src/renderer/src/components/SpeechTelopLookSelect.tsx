@@ -7,7 +7,7 @@ import { drawLookThumb } from '../lib/lookThumb'
 import { loadTelopFonts } from '../lib/telopFonts'
 import { useTelopStyleRequest } from '../lib/telopStyleRequest'
 
-const SAMPLE = 'ここが中華街です'
+const SAMPLE = 'ここからが本番'
 
 /**
  * 自動で入れる発言テロップの見た目を選ぶ欄(テロップの型の「発言」+ 登録したテロップスタイル)。

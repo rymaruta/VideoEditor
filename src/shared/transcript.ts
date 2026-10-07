@@ -63,9 +63,20 @@ const HALLUCINATIONS = [
   /^[.。…・\s]+$/
 ]
 
+/**
+ * 音声認識の「繰り返しの暴走」: 同じ短い言葉(10 文字まで)が切れ目なく 8 回以上続く
+ * (「ヴィヴィヴィヴィ…」「彼女彼女彼女…」「私は 私は 私は…」)。雑音・音楽・聞き取れない言葉で起きる。
+ * 人が言う繰り返し(「やばいやばいやばい」)は 8 回に届かない
+ */
+const REPETITION_LOOP = /(\S.{0,9}?)(?:[\s、。,.]*\1){7,}/u
+/** 繰り返しが発話のこれだけを占めたら、暴走とみなして捨てる */
+const LOOP_SHARE = 0.6
+
 export function isLikelyHallucination(text: string): boolean {
   const t = text.trim()
-  return t === '' || HALLUCINATIONS.some((r) => r.test(t))
+  if (t === '' || HALLUCINATIONS.some((r) => r.test(t))) return true
+  const loop = REPETITION_LOOP.exec(t)
+  return loop !== null && loop[0].length >= t.length * LOOP_SHARE
 }
 
 /** クリップの形(タイムラインでの位置を割り出すのに要る所だけ) */
