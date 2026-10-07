@@ -7334,8 +7334,8 @@ select.telop-kind-add {
   gap: 6px;
 }
 .speech-look-thumb {
-  width: 96px;
-  height: 27px;
+  width: 160px;
+  height: 45px;
   border-radius: 3px;
   border: 1px solid var(--border);
   flex: none;

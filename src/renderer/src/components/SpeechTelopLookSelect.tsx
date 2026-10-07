@@ -37,7 +37,7 @@ export function SpeechTelopLookSelect({
     }
   }, [look])
   useEffect(() => {
-    if (canvas.current) drawLookThumb(canvas.current, SAMPLE, look.style)
+    if (canvas.current) drawLookThumb(canvas.current, SAMPLE, look.style, 0.92, 8)
   }, [look, fontEpoch])
 
   // 消したスタイルを指していたら、欄には既定の型を出す
@@ -83,8 +83,8 @@ export function SpeechTelopLookSelect({
       <canvas
         ref={canvas}
         className="speech-look-thumb"
-        width={192}
-        height={54}
+        width={320}
+        height={90}
         aria-label="選んだ発言テロップの見本"
       />
     </span>
