@@ -27,19 +27,60 @@ const FALLBACK_EXPORT_FPS = 30
  * 画面が30fps決め打ちのまま取り残される(実際にそうなっていた)。
  */
 export function targetFrameRate(sourceFpsList: number[]): number {
+  return rateValue(targetRate(sourceFpsList))
+}
+
+/** フレームレート(分数)。29.97 は 30000/1001 */
+export interface FrameRate {
+  num: number
+  den: number
+}
+
+/** 分数のフレームレートの値(1秒あたりのコマ数) */
+export function rateValue(r: FrameRate): number {
+  return r.num / r.den
+}
+
+/** ffmpeg に渡す形(`30` / `30000/1001`) */
+export function rateExpr(r: FrameRate): string {
+  return r.den === 1 ? `${r.num}` : `${r.num}/${r.den}`
+}
+
+/** 1コマの時間の基準(`settb` に渡す形。`1/30` / `1001/30000`) */
+export function rateTimeBase(r: FrameRate): string {
+  return `${r.den}/${r.num}`
+}
+
+/**
+ * NTSC 系のレート(23.976 / 29.97 / 59.94)。素材がこれなら、そのまま書き出す。
+ * 整数に丸めると(以前の動き)、29.97 の素材を 30 で書き出し、約 1000 コマに1コマ同じ絵が重なる
+ * (放送・配信の既定の 29.97p にも合わない)
+ */
+const NTSC_NUMS = [24000, 30000, 60000]
+
+/** 書き出しのフレームレートを分数で決める(決め方は `targetFrameRate` の注記) */
+export function targetRate(sourceFpsList: number[]): FrameRate {
   const valid = sourceFpsList.filter((f) => Number.isFinite(f) && f > 0 && f <= 240)
-  if (valid.length === 0) return FALLBACK_EXPORT_FPS
-  // 29.97 / 59.94 のような値は整数に丸める。`settb` に小数を渡すと妙な時間基準になる。
-  const rounded = Math.round(Math.max(...valid))
-  return Math.min(MAX_EXPORT_FPS, Math.max(MIN_EXPORT_FPS, rounded))
+  if (valid.length === 0) return { num: FALLBACK_EXPORT_FPS, den: 1 }
+  const top = Math.max(...valid)
+  for (const num of NTSC_NUMS) {
+    if (Math.abs(top - num / 1001) < 0.01) return { num, den: 1001 }
+  }
+  const rounded = Math.round(top)
+  return { num: Math.min(MAX_EXPORT_FPS, Math.max(MIN_EXPORT_FPS, rounded)), den: 1 }
+}
+
+/** 本編クリップが使っている素材から、そのプロジェクトの出力フレームレート(分数)を求める */
+export function projectRate(clips: Clip[], assets: MediaAsset[]): FrameRate {
+  const fpsById = new Map(assets.map((a) => [a.id, a.fps]))
+  return targetRate(
+    clips.map((c) => fpsById.get(c.assetId)).filter((f): f is number => f !== undefined)
+  )
 }
 
 /** 本編クリップが使っている素材から、そのプロジェクトの出力フレームレートを求める */
 export function projectFrameRate(clips: Clip[], assets: MediaAsset[]): number {
-  const fpsById = new Map(assets.map((a) => [a.id, a.fps]))
-  return targetFrameRate(
-    clips.map((c) => fpsById.get(c.assetId)).filter((f): f is number => f !== undefined)
-  )
+  return rateValue(projectRate(clips, assets))
 }
 
 /** 1フレームぶんの秒数。タイムライン上の移動量はこれが基準になる */

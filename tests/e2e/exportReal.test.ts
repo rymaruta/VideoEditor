@@ -5,6 +5,7 @@ import { join } from 'path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { exportProject, ffmpegPath, ffprobePath, probeMedia } from '@main/ffmpegService'
 import { exportSequenceSegmented } from '@main/segmentRenderer'
+import { targetFrameRate } from '@shared/frameRate'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
 import { planTelopRuns, type TelopLayerPayload } from '@shared/telop/layer'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
@@ -322,7 +323,8 @@ interface Expect {
 
 function expectedFor(c: Case): Expect {
   const fpsList = c.main.map((m) => assets.get(m.src)!.fps)
-  const fps = Math.min(60, Math.max(24, Math.round(Math.max(...fpsList))))
+  // アプリと同じ決め方(29.97 などの素材は 30000/1001 のまま)
+  const fps = targetFrameRate(fpsList)
   let acc = 0
   const clips = c.main.map((m) => {
     const frames = Math.round(((m.out - m.in) / (m.speed ?? 1)) * fps)

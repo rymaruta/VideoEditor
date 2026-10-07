@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { frameCountForDuration, targetFrameRate } from '@shared/frameRate'
+import { frameCountForDuration, targetFrameRate, targetRate } from '@shared/frameRate'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { pipMarginPx } from '@shared/pipLayout'
 import { safeFileBaseName, DEFAULT_PROJECT_NAME } from '@shared/fileName'
@@ -16,9 +16,15 @@ describe('targetFrameRate — 出力のフレームレート', () => {
     expect(targetFrameRate([24, 30, 60])).toBe(60)
   })
 
-  it('小数のフレームレートは丸める(29.97 → 30)', () => {
-    expect(targetFrameRate([29.97])).toBe(30)
-    expect(targetFrameRate([59.94])).toBe(60)
+  it('NTSC 系(23.976 / 29.97 / 59.94)はそのまま、ほかの小数は丸める', () => {
+    expect(targetRate([29.97])).toEqual({ num: 30000, den: 1001 })
+    expect(targetRate([30000 / 1001])).toEqual({ num: 30000, den: 1001 })
+    expect(targetRate([59.94])).toEqual({ num: 60000, den: 1001 })
+    expect(targetRate([23.976])).toEqual({ num: 24000, den: 1001 })
+    expect(targetFrameRate([29.97])).toBeCloseTo(29.97, 2)
+    expect(targetRate([25.02])).toEqual({ num: 25, den: 1 })
+    // 29.97 と 30 が混ざったら速いほう(30)
+    expect(targetRate([29.97, 30])).toEqual({ num: 30, den: 1 })
   })
 
   it('素材が無い/全部おかしいときは既定へ落ちる', () => {

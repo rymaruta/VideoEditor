@@ -27,7 +27,13 @@ import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
 import { normalizeFades } from '@shared/audioFade'
 import { SQUARE_PIXEL_FILTER, scaleToFrameFilter, thumbnailScaleFilter } from '@shared/videoFrame'
-import { frameCountForDuration, targetFrameRate } from '@shared/frameRate'
+import {
+  frameCountForDuration,
+  rateExpr,
+  rateTimeBase,
+  rateValue,
+  targetRate
+} from '@shared/frameRate'
 import { pipMarginPx } from '@shared/pipLayout'
 import { audioClipGain } from '@shared/audioGain'
 import {
@@ -731,9 +737,14 @@ export async function exportProject(options: ExportOptions): Promise<void> {
 
   // 素材に合わせた出力フレームレート。畳み込み(concat/xfade)を通すため全クリップで共通。
   // **長さの丸めに使うので、長さより先に決める。**
-  const outputFps = targetFrameRate(
+  // 29.97 などの素材は 30000/1001 のまま書き出す(整数に丸めると、約 1000 コマに1コマ同じ絵が重なる)
+  const outputRate = targetRate(
     clips.map((c) => assetById.get(c.assetId)?.fps).filter((f): f is number => f !== undefined)
   )
+  const outputFps = rateValue(outputRate)
+  /** ffmpeg に渡すレート(`30000/1001`)と、1コマの時間の基準(`1001/30000`) */
+  const fpsArg = rateExpr(outputRate)
+  const frameTb = rateTimeBase(outputRate)
   /** タイムライン(画面)の上での1本の長さ。テロップ・BGM の位置はこの秒で来る。 */
   // 位置と尺の数え方は `computeMainTrackLayout` に1つだけ置く(v2 への移行も同じ関数を使う)。
   const mainLayout = computeMainTrackLayout(clips, outputFps)
@@ -846,7 +857,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           clip.fillCrop,
           clip.cropCenter,
           clip.blurBackground,
-          { labelSuffix: String(i), fps: outputFps }
+          { labelSuffix: String(i), fps: fpsArg }
         )
         // `fps` は scaleToFrameFilter が中で付ける。ここで overlay の後ろに付けると
         // ぼかし背景のときだけ最後の1フレームが落ちる(関数側のコメント参照)。
@@ -899,7 +910,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             `[${myIndex}:v]setpts=PTS/${speed}${preOut > 0 ? `-${preOut}/TB` : ''},${colorPart}${scalePadFilter},setsar=1,` +
               `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
               `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)},` +
-              `settb=1/${outputFps},setpts=N,fps=${outputFps}[v${i}]`
+              `settb=${frameTb},setpts=N,fps=${fpsArg}[v${i}]`
           )
         }
         if (asset.hasAudio && !clip.audioDetached) {
@@ -960,7 +971,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           const outV = `vcat${i}`
           const outA = `acat${i}`
           if (includeVideo) {
-            filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=1/${outputFps}[${outV}]`)
+            filterParts.push(`[${curV}][v${i}]concat=n=2:v=1:a=0,settb=${frameTb}[${outV}]`)
           }
           filterParts.push(`[${curA}][a${i}]concat=n=2:v=0:a=1[${outA}]`)
           curV = outV
@@ -971,7 +982,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           const outA = `axf${i}`
           if (includeVideo) {
             filterParts.push(
-              `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=1/${outputFps}[${outV}]`
+              `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=${frameTb}[${outV}]`
             )
           }
           filterParts.push(`[${curA}][a${i}]acrossfade=d=${t}[${outA}]`)
@@ -1040,7 +1051,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           command.input(asset.filePath).inputOptions(
             // 静止画は同じ画を、書き出しのフレームレートで必要な秒数ぶん流す
             asset.still
-              ? ['-loop 1', `-framerate ${outputFps}`, `-t ${ffSeconds(pipVisibleDuration)}`]
+              ? ['-loop 1', `-framerate ${fpsArg}`, `-t ${ffSeconds(pipVisibleDuration)}`]
               : [
                   `-ss ${ffSeconds(overlayClip.inPoint - pipPre)}`,
                   `-t ${ffSeconds(pipVisibleDuration + pipPre)}`
@@ -1146,7 +1157,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           telopLayer && (telopLayer.width !== w || telopLayer.height !== h)
             ? `scale=${w}:${h},`
             : ''
-        filterParts.push(`[${layerIndex}:v]${layerScale}format=rgba,settb=1/${outputFps}[telop]`)
+        filterParts.push(`[${layerIndex}:v]${layerScale}format=rgba,settb=${frameTb}[telop]`)
         // 長さは本編で決める(`shortest`)。層の一覧は本編より長めに作ってあるので、先に切れることはない
         filterParts.push(`[${curV}][telop]overlay=0:0:format=auto:eof_action=pass:shortest=1[vout]`)
         videoLabel = '[vout]'
@@ -1451,11 +1462,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 一覧は本編より1秒長く(後ろは透明)作り、長さは overlay の `shortest` で本編に揃える。
         // 本編ちょうどにすると、concat の決まりで最後に足す1枚のぶん**映像が1フレーム伸びる**
         // (実測: 30フレームの本編が31フレームになった)。丸めで本編が長くても層が先に尽きない
-        const totalFrames = Math.round(mainLayout.totalExportDuration * outputFps) + outputFps
-        const list = telopConcatList(telopLayer.runs, imagePaths, 0, totalFrames, {
-          num: outputFps,
-          den: 1
-        })
+        const totalFrames =
+          Math.round(mainLayout.totalExportDuration * outputFps) + Math.ceil(outputFps)
+        const list = telopConcatList(telopLayer.runs, imagePaths, 0, totalFrames, outputRate)
         if (list) {
           telopListPath = join(dir, 'telop.ffconcat')
           writeFileSync(telopListPath, list, 'utf-8')

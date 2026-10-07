@@ -1,6 +1,6 @@
 import type { Project } from '../types'
 import { createExportTimeMap } from '../exportTimeline'
-import { projectFrameRate } from '../frameRate'
+import { projectRate, rateValue } from '../frameRate'
 import { computeMainTrackLayout } from '../mainTrackLayout'
 import { PIP_MARGIN_RATIO } from '../pipLayout'
 import { targetResolution } from '../resolution'
@@ -36,7 +36,8 @@ export interface FromV1Options {
  * v2 でもその重なりをそのまま写す(重なりは必ず繋ぎの区間の中に収まる)。
  */
 export function projectV1ToV2(project: Project, options: FromV1Options = {}): ProjectV2 {
-  const fpsNum = projectFrameRate(project.clips, project.assets)
+  const rate = projectRate(project.clips, project.assets)
+  const fpsNum = rateValue(rate)
   const toFrame = (sec: number): number => Math.round(sec * fpsNum)
   const { w, h } = targetResolution(project.aspectRatio, options.resolution ?? 1080)
   const assetById = new Map(project.assets.map((a) => [a.id, a]))
@@ -274,7 +275,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
     sequence: {
       width: w,
       height: h,
-      fps: { num: fpsNum, den: 1 },
+      fps: { num: rate.num, den: rate.den },
       videoTracks,
       audioTracks
     }
