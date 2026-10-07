@@ -229,6 +229,8 @@ export async function judgeScenes(
       for (const j of parseStructureAnswer(answer, chunks[i])) got.set(j.sceneId, j)
     })
   } catch (e) {
+    // 中止は中止のまま伝える(簡易の点数で続けると、中止したのに先の工程へ進む)
+    if (e instanceof Error && e.message.includes('LLM_CANCELED')) throw e
     return {
       judgements: fallback,
       source: 'heuristic',

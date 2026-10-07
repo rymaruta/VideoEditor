@@ -804,6 +804,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       },
       (p) => setStep('structure', { percent: p.percent, note: p.note })
     )
+    // 判定の間に中止・別の回を開いたなら、結果を書かない
+    stopIfCanceled()
     set({
       scenes,
       judgements,
@@ -1052,6 +1054,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
                 'このPCの AI が小さいモデルのときに起きやすく、GPU で大きいモデルを使うと減ります'
             )
         } catch (e) {
+          if (runCanceled) throw e
           // AI が失敗しても、AI の要らない提案は付ける
           apply([])
           setStep('effects', { state: 'error', note: formatIpcError(e) })
@@ -1303,6 +1306,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     },
     rebuildRoughCut: async () => {
       if (get().running || get().scenes.length === 0) return
+      runCanceled = false
       set({ running: true })
       try {
         await buildAndApply()
@@ -1485,6 +1489,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // やり直すときは、前の回の結果(構成・提案・要確認・音の有無の目印)を捨ててから始める。
       // 残すと「提案は済んだ」と飛ばされ、前の発話に付いた提案は新しい発話に結び付かずに全部消える
       get().resetResults()
+      runCanceled = false
       set({ running: true, report: null, syncedFiles: files })
 
       // --- 同期
@@ -1629,10 +1634,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         log(
           `タイムラインに並べました(基準カメラ: ${used.find((s) => s.id === layout.anchorSourceId)?.name ?? ''})`
         )
+        // 工程の間で中止を確かめる(中止しても、走っていた工程が答えを返して先へ進んでいた)
         await matchColors()
+        stopIfCanceled()
         await denoiseMics()
+        stopIfCanceled()
         await transcribeEpisode(used, files, report, assetIdOf, layout.anchorSourceId)
+        stopIfCanceled()
         await detectEvents()
+        stopIfCanceled()
         await structureAndCut()
       } catch (e) {
         const msg = formatIpcError(e)
@@ -1652,22 +1662,27 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             'placement'
           ] as StepId[]
         ).find((id) => get().steps[id].state === 'run')
-        const canceled = msg.includes('ASR_CANCELED')
+        const canceled =
+          runCanceled || /ASR_CANCELED|LLM_CANCELED|DENOISE_CANCELED|PIPELINE_CANCELED/.test(msg)
         if (current)
           setStep(current, {
             state: canceled ? 'wait' : 'error',
             note: canceled ? '中止しました' : msg
           })
-        log(canceled ? '文字起こしを中止しました' : `止まりました: ${msg}`)
+        log(canceled ? '自動編集を中止しました' : `止まりました: ${msg}`)
       } finally {
         set({ running: false })
       }
     },
 
     cancel: () => {
+      runCanceled = true
       void window.api.syncCancel()
       void window.api.asrCancel()
       void window.api.eventsCancel()
+      // このPCの AI(構成・演出テロップ)とノイズ除去も止める
+      void window.api.llmCancel()
+      void window.api.denoiseCancel()
     },
 
     // 確認済みはプロジェクトに保存する(開き直しても残る)
@@ -1752,6 +1767,11 @@ onProjectSwitch(() => {
 // 走り出したときの各工程の状態。作り直しでは前の通しの失敗が残っているので、
 // この回に新しく止まった工程だけを知らせる
 let stepsAtStart: Record<StepId, StepStatus> | null = null
+/** 自動編集の「中止」を押したか(工程の間で確かめて、先の工程へ進まない) */
+let runCanceled = false
+function stopIfCanceled(): void {
+  if (runCanceled) throw new Error('PIPELINE_CANCELED')
+}
 /** 通話のトラックの声のうち、1人ずつのマイクに入っている割合がこれ以上なら、同じ声とみなす */
 const SAME_VOICE_COVERAGE = 0.7
 /** 収録フォルダを読むたびに増やす(古い読み込みの結果を捨てるため) */

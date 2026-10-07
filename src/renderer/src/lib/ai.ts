@@ -69,7 +69,15 @@ export async function askAiJson(
       'Gemini API'
     )
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-    results.push(text ? parseModelJsonObject(text, 'Gemini API') : null)
+    // 1件の答えが壊れていても(途中で切れた・オブジェクトでない)、その件だけ答え無しにする
+    // (投げると、ほかの件のちゃんとした答えまで捨てることになる。このPCの AI と同じ扱い)
+    let parsed: unknown = null
+    try {
+      parsed = text ? parseModelJsonObject(text, 'Gemini API') : null
+    } catch {
+      parsed = null
+    }
+    results.push(parsed)
   }
   return { results, model: 'Gemini' }
 }
