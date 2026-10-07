@@ -176,3 +176,45 @@ describe('chooseAngles: 分割ファイルのつなぎ目', () => {
     expect(shots.map((s) => [s.start, s.end, s.cameraId])).toEqual([[90, 110, 'WIDE']])
   })
 })
+
+describe('カメラが止まっていた間に始まる区間', () => {
+  const gap: AngleCamera[] = [
+    {
+      id: 'A',
+      coverage: [
+        { start: 0, end: 12 },
+        { start: 20, end: 100 }
+      ]
+    },
+    {
+      id: 'B',
+      subject: 'b',
+      coverage: [
+        { start: 0, end: 12 },
+        { start: 20, end: 100 }
+      ]
+    }
+  ]
+  it('区間の中でカメラが録り始めた所から映し、落とした所(前の区間の先)を戻さない', () => {
+    const shots = chooseAngles(
+      [
+        { start: 0, end: 10 },
+        { start: 15, end: 30 }
+      ],
+      gap,
+      'A',
+      [
+        { speaker: 'a', start: 1, end: 9 },
+        { speaker: 'a', start: 15, end: 21 },
+        { speaker: 'b', start: 22, end: 29 }
+      ]
+    )
+    // 10〜15 秒(カットで落とした所)・12〜20 秒(どのカメラも録っていない所)は使わない
+    for (const s of shots) expect(s.end <= 10 + 1e-6 || s.start >= 20 - 1e-6).toBe(true)
+    // 20〜30 秒(録っている所)はすべて使う
+    const used = shots
+      .filter((s) => s.start >= 20 - 1e-6)
+      .reduce((t, s) => t + (s.end - s.start), 0)
+    expect(used).toBeCloseTo(10, 6)
+  })
+})

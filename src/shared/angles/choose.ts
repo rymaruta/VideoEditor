@@ -134,13 +134,27 @@ export function chooseAngles(
     // (今が全体なら、同じカメラで時間を飛ばさないよう話者のカメラへ)
     const speakerCam = subjectCam(firstSpeaker)
     const want = sceneStart ? anchor : speakerCam
+    // この区間のショットの始まり(区間の中の切り替えで、前の区間のショットを伸ばさないため)
+    const firstShotOfPiece = shots.length
     if (!current || jump || !covers(current, piece.start, piece.start + 0.05)) {
+      // 区間の頭をどのカメラも録っていない(ピンマイクだけが回っていた間に始まる)なら、
+      // 区間の中で最初にカメラが録り始める所のカメラにする(録っていない所は後で飛ばす)
+      const firstCovered = Math.min(
+        ...cameras.flatMap((c) =>
+          c.coverage
+            .filter((v) => v.end > piece.start + 1e-6 && v.start < piece.end - 0.05)
+            .map((v) => Math.max(v.start, piece.start))
+        )
+      )
+      const at = Number.isFinite(firstCovered) ? firstCovered : piece.start
       const cam = pick(
-        piece.start,
-        piece.start + 0.05,
+        at,
+        at + 0.05,
         sceneStart ? [anchor, speakerCam] : [speakerCam],
         jump ? current?.id : undefined
       )
+      // どのカメラも録っていない区間は映せない(前の区間のカメラを持ち越さない)
+      if (!cam) current = undefined
       if (cam) {
         current = cam
         shotStart = timeline
@@ -184,6 +198,8 @@ export function chooseAngles(
         reason = 'long'
       }
       if (!next || next.id === current.id) continue
+      // この区間のショットが無ければ、前の区間のショットは伸ばさない(カットで落とした所が戻る)
+      if (shots.length <= firstShotOfPiece) continue
       const last = shots[shots.length - 1]
       last.end = ev.start
       shots.push({ start: ev.start, end: piece.end, cameraId: next.id, reason })

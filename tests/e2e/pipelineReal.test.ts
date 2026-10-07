@@ -1300,7 +1300,28 @@ describe.skipIf(!HAVE_FFMPEG)('自動編集を本物の素材で端から端ま�
     }
     const missing = verify('control', withWord, null, calls).violations
     expect(missing.some((x) => x.startsWith('カット: 言葉 1/188'))).toBe(true)
-  }, 60_000)
+
+    // 人が本編にクリップを差し込んでから仮編集を作り直しても、効果音は演出テロップと同じ時刻
+    // (差し込んだ長さぶん早くずれていた)
+    const P = useProjectStore.getState()
+    const cam = P.project.assets.find((a) => a.hasVideo)!
+    P.addAsset({ ...cam, id: 'inserted-broll' })
+    // 演出テロップ(3 秒〜)より前に差し込む
+    const at = 1
+    P.insertClipAtTime('inserted-broll', 0, 3, at)
+    installApi(shoot, calls)
+    await usePipelineStore.getState().rebuildRoughCut()
+    const after = useProjectStore.getState().project
+    expect(after.clips.some((c) => c.assetId === 'inserted-broll')).toBe(true)
+    const se = after.audioTracks.filter((t) => t.autoRole === 'se').flatMap((t) => t.clips)
+    const fx = after.textOverlays.filter((o) => o.effectId && o.startTime > at + 3)
+    expect(fx.length).toBeGreaterThan(0)
+    const seAt = se.map((c) => c.startTime)
+    const nearSe = fx.filter((o) => seAt.some((t) => Math.abs(t - o.startTime) < 0.15))
+    const earlySe = fx.filter((o) => seAt.some((t) => Math.abs(t - (o.startTime - 3)) < 0.15))
+    expect(nearSe.length).toBeGreaterThan(0)
+    expect(earlySe.length).toBe(0)
+  }, 120_000)
 
   it('カメラ1台だけ(ピンマイク無し)', async () => {
     const shoot = makeShoot(library, dir, 'single', { CAM_A: ['A001'] })

@@ -1087,10 +1087,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         telops: telops.length
       }
     })
-    await placeSounds(plan.selection.kept, plan.cut.spans, effectTelops, [
-      ...telops,
-      ...effectTelops
-    ])
+    // SE・BGM・CG は、仮編集を当てた後の本編(人が差し込んだクリップ・削った区間を含む)の時刻で置く。
+    // 組んだだけの仮編集の時刻で置くと、差し込んだクリップの後ろが差し込んだ長さぶん早くずれる
+    const applied = useProjectStore.getState().project
+    const live =
+      applied.multicam && applied.clips.length > 0
+        ? spansOfClips(applied.clips, applied.multicam)
+        : plan.cut.spans
+    const onLive = <T extends Omit<TextOverlay, 'id'>>(xs: readonly T[]): T[] =>
+      live === plan.cut.spans ? [...xs] : mapTelopsToTimeline(xs, plan.cut.spans, live)
+    const liveEffects = onLive(effectTelops)
+    await placeSounds(plan.selection.kept, live, liveEffects, [...onLive(telops), ...liveEffects])
     log(
       `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${telops.length}`
     )

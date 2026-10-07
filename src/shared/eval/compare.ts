@@ -1,4 +1,4 @@
-import type { Fcp7Sequence } from '../import/fcp7'
+import type { Fcp7Clip, Fcp7Sequence } from '../import/fcp7'
 import {
   coverageOfClips,
   subtractRanges,
@@ -79,16 +79,39 @@ export function humanCoverage(
   project: Project,
   info: MulticamInfo
 ): { segs: CameraSeg[]; matched: number; total: number; unmatched: string[] } {
-  const fileByName = new Map<string, (typeof info.files)[number]>()
-  for (const f of info.files) {
+  // 完成版のクリップの素材を、この回の素材から探す。カメラ・カードが違っても名前が同じ
+  // (C0001.MP4・MVI_0001.MP4)ことがよくあるので、パスの後ろから何段そろうかで決める。
+  // 編集した PC が違うと頭の部分(ドライブ・ボリューム)は違うので、後ろからそろう段の多いほうを選ぶ
+  const parts = (p: string): string[] =>
+    decodeURIComponentSafe(p.replace(/^file:\/\/(localhost)?/i, ''))
+      .replace(/\\/g, '/')
+      .toLowerCase()
+      .split('/')
+      .filter(Boolean)
+  const candidates = info.files.flatMap((f) => {
     const asset = project.assets.find((a) => a.id === f.assetId)
-    if (asset) fileByName.set(asset.fileName.toLowerCase(), f)
+    return asset ? [{ f, parts: parts(asset.filePath), name: asset.fileName.toLowerCase() }] : []
+  })
+  const sharedTail = (a: string[], b: string[]): number => {
+    let n = 0
+    while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++
+    return n
+  }
+  const fileFor = (c: Fcp7Clip): (typeof info.files)[number] | undefined => {
+    const byName = candidates.filter((x) => x.name === c.fileName.toLowerCase())
+    if (byName.length <= 1 || !c.path) return byName.length === 1 ? byName[0].f : undefined
+    const want = parts(c.path)
+    const scored = byName.map((x) => ({ x, n: sharedTail(x.parts, want) }))
+    const best = Math.max(...scored.map((s) => s.n))
+    const top = scored.filter((s) => s.n === best)
+    // 名前しかそろわない・同じだけそろうものが複数なら、どれか決められない
+    return best >= 2 && top.length === 1 ? top[0].x.f : undefined
   }
   const main = [...(seq.video[0] ?? [])].sort((a, b) => a.start - b.start)
   const segs: CameraSeg[] = []
   const unmatched = new Set<string>()
   for (const c of main) {
-    const f = fileByName.get(c.fileName.toLowerCase())
+    const f = fileFor(c)
     if (!f) {
       unmatched.add(c.fileName)
       continue
@@ -143,5 +166,13 @@ export function compareEdits(
     angleUnknownSec: total(
       unionRanges(human.segs.filter((sg) => sg.cameraId.startsWith(UNKNOWN_ANGLE)))
     )
+  }
+}
+
+function decodeURIComponentSafe(s: string): string {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
   }
 }

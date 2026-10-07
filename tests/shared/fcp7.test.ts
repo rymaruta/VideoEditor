@@ -357,3 +357,47 @@ describe('入れ子の中のマルチカメラ', () => {
     expect(cutPoints(segs)).toEqual([1])
   })
 })
+
+describe('完成版のクリップの素材を、同じ名前のファイルと取り違えない', () => {
+  it('カードが違って名前が同じ(C0001.MP4)なら、パスの後ろの段で見分ける。決められなければ外す', async () => {
+    const { humanCoverage } = await import('../../src/shared/eval/compare')
+    const info: MulticamInfo = {
+      anchorSourceId: 'A',
+      sources: [{ id: 'A', name: 'カメラA', kind: 'camera' }],
+      files: [
+        { assetId: 'c1', sourceId: 'A', start: 0, rate: 1, duration: 1300 },
+        { assetId: 'c2', sourceId: 'A', start: 1300, rate: 1, duration: 1300 }
+      ]
+    }
+    const a = (id: string, path: string): Project['assets'][number] => ({
+      id,
+      filePath: path,
+      fileName: 'C0001.MP4',
+      duration: 1300,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      hasAudio: true,
+      hasVideo: true
+    })
+    const project = {
+      assets: [a('c1', '/x/CamA/Card1/C0001.MP4'), a('c2', '/x/CamA/Card2/C0001.MP4')]
+    } as unknown as Project
+    const clip = (path?: string): Record<string, unknown> => ({
+      start: 0,
+      end: 100,
+      in: 100,
+      out: 200,
+      fileName: 'C0001.MP4',
+      ...(path ? { path } : {})
+    })
+    const seq = (path?: string): never => ({ video: [[clip(path)]] }) as never
+    // 編集した PC が違っても(D:\\ロケ\\…)、後ろの段(Card1/C0001.MP4)でそろう
+    const r = humanCoverage(seq('D:\\\\ロケ\\\\CamA\\\\Card1\\\\C0001.MP4'), project, info)
+    expect(r.segs.map((s) => [s.start, s.end])).toEqual([[100, 200]])
+    const r2 = humanCoverage(seq('file://localhost/Volumes/R/CamA/Card2/C0001.MP4'), project, info)
+    expect(r2.segs.map((s) => [s.start, s.end])).toEqual([[1400, 1500]])
+    // パスが無い・名前しかそろわないなら、どちらか決められないので外す
+    expect(humanCoverage(seq(), project, info).unmatched).toEqual(['C0001.MP4'])
+  })
+})
