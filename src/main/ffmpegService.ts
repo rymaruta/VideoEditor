@@ -1185,7 +1185,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       // 出力の直前で画素形式を固定する。ここが最後の砦なので、映像の枝を足しても消しても
       // 成果物の形式が変わらない(上の VIDEO_FORMAT のコメント参照)。
       if (includeVideo) {
-        filterParts.push(`${videoLabel}${VIDEO_FORMAT}[vfmt]`)
+        // ワイプ(PiP)が本編の終わりまで続くと、本編が尽きた後も overlay が本編の最後の1枚を繰り返し、
+        // 映像が1フレーム長くなる(実測: 4 秒・30fps で 121 フレーム。音は 4.000 秒)。
+        // ワイプがあるときは本編のフレーム数で切る(区間分割の書き出しと同じ)
+        const trimEnd =
+          pipCounter > 0 ? `trim=end_frame=${Math.round(totalDuration * outputFps)},` : ''
+        filterParts.push(`${videoLabel}${trimEnd}${VIDEO_FORMAT}[vfmt]`)
         videoLabel = '[vfmt]'
       }
 

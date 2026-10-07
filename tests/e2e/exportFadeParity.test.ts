@@ -128,6 +128,35 @@ describe('標準と区間ごとの書き出しの、音の消え方', () => {
     }
   }, 180_000)
 
+  it('前の短いクリップより長い繋ぎでも、区間ごとの書き出しの音量は標準と同じ', async () => {
+    const t = await asset('t', 'tone', 30)
+    // 4 秒・0.3 秒(繋ぎより短い)・6 秒(1 秒のクロスフェード)。同じ音を続けるので、どこも同じ大きさのはず
+    const project = {
+      ...base([t]),
+      clips: [
+        { id: 'c0', assetId: 't', inPoint: 0, outPoint: 4, speed: 1 },
+        { id: 'c1', assetId: 't', inPoint: 10, outPoint: 10.3, speed: 1 },
+        {
+          id: 'c2',
+          assetId: 't',
+          inPoint: 20,
+          outPoint: 26,
+          speed: 1,
+          transitionIn: { type: 'crossfade', duration: 1 }
+        }
+      ]
+    } as unknown as Project
+    const [std, seg] = await both(project, 'longxfade')
+    for (const [a, b] of [
+      [1, 2],
+      [3.4, 3.9],
+      [4.5, 5],
+      [7, 8],
+      [8.8, 9.2]
+    ])
+      expect(rms(seg, a, b), `${a}-${b}`).toBeCloseTo(rms(std, a, b), 1)
+  }, 180_000)
+
   it('本編の終わりより先まで続く BGM のフェードアウトは、本編の終わりに掛かる', async () => {
     const v = await asset('v', 'none', 6)
     const bgm = await asset('bgm', 'tone', 12)

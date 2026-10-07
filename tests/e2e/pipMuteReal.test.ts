@@ -1,9 +1,10 @@
 import { execFileSync, spawnSync } from 'child_process'
+import { existsSync } from 'fs'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { exportProject, ffmpegPath, probeMedia } from '@main/ffmpegService'
+import { exportProject, ffmpegPath, ffprobePath, probeMedia } from '@main/ffmpegService'
 import { exportSequenceSegmented } from '@main/segmentRenderer'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
 import type { MediaAsset, Project } from '@shared/types'
@@ -111,6 +112,69 @@ describe('音を鳴らさないワイプ(顔カメラ)', () => {
         if (audioMuted) expect(peak).toBeLessThan(-60)
         else expect(peak).toBeGreaterThan(-20)
       }
+    }
+  }, 120_000)
+})
+
+/** 書き出した映像のフレーム数(実際に数える) */
+function frameCount(path: string): number {
+  const out = execFileSync(ffprobePath, [
+    '-v',
+    'error',
+    '-count_frames',
+    '-select_streams',
+    'v:0',
+    '-show_entries',
+    'stream=nb_read_frames',
+    '-of',
+    'csv=p=0',
+    path
+  ])
+  return Number(String(out).trim())
+}
+
+describe.skipIf(!existsSync(ffprobePath))('本編の終わりまで続くワイプ', () => {
+  it('標準の書き出しでも、映像は本編の長さちょうど(最後の1枚を足さない)', async () => {
+    const main = await asset('main2', false)
+    const face = await asset('face2', true)
+    const project = (pipFrom: number, pipIn: number, pipOut: number): Project => ({
+      id: 'p',
+      name: 'p',
+      aspectRatio: '16:9',
+      assets: [main, face],
+      clips: [{ id: 'c', assetId: 'main2', inPoint: 0, outPoint: 4, speed: 1 }],
+      audioTracks: [],
+      videoOverlayTracks: [
+        {
+          id: 'face',
+          name: '顔',
+          hidden: false,
+          position: 'top-right',
+          scale: 0.26,
+          clips: [
+            { id: 'fc', assetId: 'face2', startTime: pipFrom, inPoint: pipIn, outPoint: pipOut }
+          ]
+        }
+      ],
+      textOverlays: []
+    })
+    // 本編の終わりを越える・ちょうど終わる・途中で終わる
+    for (const [from, a, b] of [
+      [2.5, 0.5, 3.5],
+      [2.5, 0.5, 2],
+      [1, 0, 1.5]
+    ]) {
+      const out = join(work, `end-${from}-${a}-${b}.mp4`)
+      await exportProject({
+        project: project(from, a, b),
+        aspectRatio: '16:9',
+        resolutionHeight: 720,
+        quality: 'standard',
+        outputPath: out,
+        telopLayer: null,
+        onProgress: () => {}
+      })
+      expect(frameCount(out), `${from} ${a}-${b}`).toBe(120)
     }
   }, 120_000)
 })

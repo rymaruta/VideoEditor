@@ -431,19 +431,15 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
     )
     // 同じトラックで重なる相手(本編の繋ぎ)とは、重なりの区間で直線のクロスフェードにする。
     // v1 の `acrossfade`(既定の曲線は両側とも直線)と同じ足し算になる。
-    let xIn = 0
-    let xOut = 0
+    // v1 は前から順に「それまでの音」と次のクリップを繋ぐので、繋ぎの区間は
+    // [次の頭, それまでの音の終わり) で、それまでの音(前のクリップ全部)がそこで下がる。
+    // 繋ぎが前の短いクリップより長いと、次のクリップは前の2本に重なる。重なる相手ごとに測ると、
+    // 短いクリップを「後ろの相手」と取り違え、次のクリップがほぼ全体で下がっていた
     const end = item.startFrame + item.durationFrames
-    for (const o of others) {
-      if (o === item) continue
-      const oEnd = o.startFrame + o.durationFrames
-      if (o.startFrame < item.startFrame && oEnd > item.startFrame) {
-        xIn = Math.max(xIn, sec(Math.min(oEnd, end) - item.startFrame))
-      }
-      if (o.startFrame > item.startFrame && o.startFrame < end) {
-        xOut = Math.max(xOut, sec(end - o.startFrame))
-      }
-    }
+    const k = others.indexOf(item)
+    const maxEndBefore = (j: number): number =>
+      others.slice(0, j).reduce((m, o) => Math.max(m, o.startFrame + o.durationFrames), -Infinity)
+    const xIn = k > 0 ? Math.min(dur, Math.max(0, sec(maxEndBefore(k) - item.startFrame))) : 0
     const L = `(t+${num(skipSec)})`
     const terms: string[] = []
     const rampIn = (d: number): void => {
@@ -452,10 +448,17 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
     const rampOut = (d: number): void => {
       if (d > 0) terms.push(`min(1\\,max(0\\,${num(dur)}-${L})/${num(d)})`)
     }
+    // 後ろのクリップの繋ぎの区間で下げる(区間の頭・長さはこのアイテムの中の秒で)
+    for (let j = k + 1; j < others.length; j++) {
+      const next = others[j]
+      const t = sec(maxEndBefore(j) - next.startFrame)
+      if (!(t > 0) || next.startFrame >= end) continue
+      const a = sec(next.startFrame - item.startFrame)
+      terms.push(`min(1\\,max(0\\,${num(a + t)}-${L})/${num(t)})`)
+    }
     rampIn(fadeIn)
     rampOut(fadeOut)
     rampIn(xIn)
-    rampOut(xOut)
     if (terms.length === 0) return `volume=${num(gain)}`
     const g = [num(gain), ...terms].join('*')
     return `aeval=exprs='val(0)*${g}|val(1)*${g}':channel_layout=stereo`
@@ -467,6 +470,11 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
   seq.audioTracks.forEach((track) => {
     if (track.muted) return
     const labels: string[] = []
+    // 本編の音は v1 と同じクリップの順(繋ぎを前から順に畳む)、ほかのトラックは時刻の順
+    const ordered =
+      track.id === 'a1-main'
+        ? track.items
+        : [...track.items].sort((x, y) => x.startFrame - y.startFrame)
     for (const item of track.items) {
       if (!intersects(item, renderStart, renderEnd)) continue
       const asset = ctx.assetsById.get(item.assetId)
@@ -496,7 +504,7 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
         `[${idx}:a]${audioSpeedChain(readSpeed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
           `apad,atrim=0:${num(dur)},asetpts=PTS-STARTPTS,` +
           `${audioFormatFor(ctx.audioChannels?.get(stretchedPath ?? asset.filePath))},` +
-          `${envelope(item, track.items, audioClipGain(track.volume, item.volume), skipSec)},` +
+          `${envelope(item, ordered, audioClipGain(track.volume, item.volume), skipSec)},` +
           `adelay=${delay}S:all=1,${AUDIO_FORMAT}[${label}]`
       )
       // 本編(一番下の映像トラック)に紐づく音は「本編の声」。ダッキングの基準にもする
