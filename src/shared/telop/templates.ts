@@ -13,7 +13,16 @@ import { defaultTextStyle } from '../textStyle'
  */
 
 export type TelopCategory =
-  'speech' | 'reaction' | 'sfx' | 'info' | 'people' | 'structure' | 'game' | 'social' | 'emotion'
+  | 'speech'
+  | 'reaction'
+  | 'sfx'
+  | 'info'
+  | 'people'
+  | 'structure'
+  | 'game'
+  | 'play'
+  | 'social'
+  | 'emotion'
 
 export const CATEGORY_LABEL: Record<TelopCategory, string> = {
   speech: '発言',
@@ -23,6 +32,7 @@ export const CATEGORY_LABEL: Record<TelopCategory, string> = {
   people: '人物',
   structure: '番組構成',
   game: 'クイズ・ゲーム',
+  play: 'ゲーム実況',
   social: 'SNS・配信',
   emotion: '感情'
 }
@@ -36,6 +46,7 @@ export const CATEGORY_ORDER: readonly TelopCategory[] = [
   'people',
   'structure',
   'game',
+  'play',
   'social'
 ]
 
@@ -58,6 +69,7 @@ const grad = (angle: number, ...colors: string[]): TelopGradient => ({
 const GOLD = grad(0, '#fff8c4', '#ffd54f', '#ff8f00')
 const SILVER = grad(0, '#ffffff', '#cfd8dc', '#78909c')
 const FIRE = grad(0, '#fff59d', '#ff9800', '#d50000')
+const RAINBOW = grad(90, '#ff5252', '#ffd740', '#69f0ae', '#40c4ff', '#e040fb')
 
 /** 型を1つ作る。`style` は既定の見た目に重ねる値 */
 const tpl = (
@@ -173,6 +185,36 @@ export const TELOP_TEMPLATES: readonly TelopTemplate[] = [
       fontWeight: 800,
       fontSize: 50,
       outlineColor: '#1b5e20',
+      outlineWidth: 7,
+      extraStrokes: [{ color: '#ffffff', width: 3 }]
+    }
+  ),
+  tpl(
+    'speech-orange',
+    '発言(オレンジ縁)',
+    'speech',
+    '話者ごとに色を分けるときの4人目(コラボ)',
+    'いや今の絶対当たってたって',
+    2.5,
+    {
+      fontWeight: 800,
+      fontSize: 50,
+      outlineColor: '#e65100',
+      outlineWidth: 7,
+      extraStrokes: [{ color: '#ffffff', width: 3 }]
+    }
+  ),
+  tpl(
+    'speech-purple',
+    '発言(紫縁)',
+    'speech',
+    '話者ごとに色を分けるときの5人目(コラボ)',
+    'こっちに回復あるよ',
+    2.5,
+    {
+      fontWeight: 800,
+      fontSize: 50,
+      outlineColor: '#4a148c',
       outlineWidth: 7,
       extraStrokes: [{ color: '#ffffff', width: 3 }]
     }
@@ -579,6 +621,45 @@ export const TELOP_TEMPLATES: readonly TelopTemplate[] = [
     outlineWidth: 7,
     animation: 'bounce'
   }),
+  tpl('emo-fear', '恐怖', 'emotion', 'こわい・ホラーの場面', 'ひっ…', 2.5, {
+    position: 'center',
+    customPosition: { x: 0.5, y: 0.4 },
+    fontFamily: 'Shippori Mincho',
+    fontWeight: 800,
+    fontSize: 92,
+    color: '#e1bee7',
+    fillGradient: grad(0, '#ffffff', '#e1bee7', '#b388ff'),
+    outlineColor: '#1a0033',
+    outlineWidth: 7,
+    glow: { color: '#7c4dff', size: 26, opacity: 0.7 },
+    animation: 'fadeIn',
+    loopAnimation: 'wave'
+  }),
+  tpl('emo-moved', '感動', 'emotion', '心を動かされた・泣ける', '(感動…)', 3, {
+    position: 'center',
+    customPosition: { x: 0.5, y: 0.62 },
+    fontFamily: 'Zen Maru Gothic',
+    fontWeight: 700,
+    fontSize: 60,
+    color: '#ffffff',
+    outlineColor: '#4fc3f7',
+    outlineWidth: 5,
+    glow: { color: '#b3e5fc', size: 20, opacity: 0.6 },
+    animation: 'fadeIn',
+    loopAnimation: 'float'
+  }),
+  tpl('emo-despair', '絶望', 'emotion', 'もうだめだ・心が折れた', '絶望', 3, {
+    position: 'center',
+    fontWeight: 900,
+    fontSize: 110,
+    color: '#cfd8dc',
+    fillGradient: grad(0, '#eceff1', '#78909c', '#263238'),
+    outlineColor: '#000000',
+    outlineWidth: 7,
+    vertical: true,
+    animation: 'none',
+    charAnimation: 'drop'
+  }),
   tpl('emo-sad', 'しょんぼり', 'emotion', '悲しい・がっかり', '(しょんぼり…)', 3, {
     position: 'center',
     customPosition: { x: 0.5, y: 0.62 },
@@ -939,6 +1020,49 @@ export const TELOP_TEMPLATES: readonly TelopTemplate[] = [
     backgroundPadding: { x: 34, y: 8 },
     animation: 'slideInUp'
   }),
+  tpl(
+    'people-streamer',
+    '実況者の名前',
+    'people',
+    '実況者・配信者の名前を左上に出し続ける',
+    '実況 **たろう**',
+    10,
+    {
+      customPosition: { x: 0.12, y: 0.07 },
+      position: 'top',
+      fontWeight: 800,
+      fontSize: 30,
+      color: '#ffffff',
+      outline: false,
+      background: true,
+      backgroundShape: 'block',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0.55,
+      backgroundRadius: 30,
+      backgroundPadding: { x: 20, y: 4 },
+      accent: { scale: 1.2, color: '#80d8ff' }
+    }
+  ),
+  tpl(
+    'people-collab',
+    'コラボ参加者',
+    'people',
+    'コラボの参加者を色分けで紹介',
+    '**たろう** × **はなこ** × **じろう**',
+    4,
+    {
+      customPosition: { x: 0.5, y: 0.2 },
+      position: 'top',
+      fontWeight: 900,
+      fontSize: 44,
+      color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 6,
+      accent: { scale: 1.15, color: '#ffeb3b' },
+      animation: 'none',
+      charAnimation: 'pop'
+    }
+  ),
   tpl(
     'people-age',
     '名前(年齢・出身)',
@@ -1423,6 +1547,497 @@ export const TELOP_TEMPLATES: readonly TelopTemplate[] = [
     animation: 'popIn'
   }),
 
+  // ---------------------------------------------------------------- ゲーム実況
+  // ゲーム画面の HUD(体力・ミニマップ)は四隅と下に多いので、常に出す物は上の中ほど・左上に寄せ、
+  // 一瞬の物は画面の真ん中に大きく出す
+  tpl('play-scream', '絶叫', 'play', '実況者の叫び・悲鳴を特大で', 'うわあああ!!', 2, {
+    position: 'center',
+    fontWeight: 900,
+    fontSize: 118,
+    color: '#ffeb3b',
+    fillGradient: grad(0, '#ffffff', '#ffeb3b', '#ff6d00'),
+    outlineColor: '#b71c1c',
+    outlineWidth: 9,
+    extraStrokes: [{ color: '#ffffff', width: 5 }],
+    rotation: -4,
+    animation: 'popIn',
+    loopAnimation: 'shake'
+  }),
+  tpl('play-died', 'やられた', 'play', 'やられた・死んだ瞬間', '死亡', 3, {
+    position: 'center',
+    fontFamily: 'Shippori Mincho',
+    fontWeight: 800,
+    fontSize: 110,
+    color: '#c62828',
+    outline: false,
+    letterSpacing: 24,
+    shadow: true,
+    shadowColor: '#000000',
+    shadowOpacity: 0.85,
+    shadowDistance: 0,
+    shadowBlur: 24,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#000000',
+    backgroundGradient: grad(0, '#00000000', '#000000cc', '#00000000'),
+    backgroundOpacity: 1,
+    backgroundPadding: { x: 500, y: 26 },
+    animation: 'fadeIn',
+    animationSpeed: 0.5
+  }),
+  tpl('play-gameover', 'ゲームオーバー', 'play', '全滅・やり直しの場面', 'GAME OVER', 3, {
+    position: 'center',
+    fontFamily: 'Dela Gothic One',
+    fontSize: 104,
+    color: '#ff1744',
+    outlineColor: '#000000',
+    outlineWidth: 8,
+    letterSpacing: 6,
+    glow: { color: '#ff1744', size: 26, opacity: 0.6 },
+    animation: 'none',
+    charAnimation: 'drop',
+    loopAnimation: 'pulse'
+  }),
+  tpl('play-clear', 'クリア', 'play', 'ステージ・ボスを突破した瞬間', 'STAGE CLEAR!!', 3, {
+    position: 'center',
+    fontFamily: 'Dela Gothic One',
+    fontSize: 100,
+    color: '#ffd54f',
+    fillGradient: GOLD,
+    outlineColor: '#3e2723',
+    outlineWidth: 8,
+    extraStrokes: [{ color: '#ffffff', width: 5 }],
+    glow: { color: '#fff59d', size: 30, opacity: 0.55 },
+    animation: 'none',
+    charAnimation: 'zoom'
+  }),
+  tpl('play-boss', 'ボス戦', 'play', 'ボスの登場・ボス戦の始まり', 'BOSS\n**炎の番人**', 3.5, {
+    position: 'center',
+    fontWeight: 900,
+    fontSize: 54,
+    color: '#ffffff',
+    outline: false,
+    letterSpacing: 10,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#b71c1c',
+    backgroundGradient: grad(90, '#00000000', '#b71c1cee', '#b71c1cee', '#00000000'),
+    backgroundOpacity: 1,
+    backgroundPadding: { x: 260, y: 18 },
+    backgroundSkew: -10,
+    accent: { scale: 1.6, color: '#ffeb3b' },
+    animation: 'slideInUp',
+    exitAnimation: 'fadeOut'
+  }),
+  tpl('play-defeat', '撃破', 'play', 'ボス・強敵を倒した瞬間', '撃破!', 2.5, {
+    position: 'center',
+    fontWeight: 900,
+    fontSize: 120,
+    color: '#ffffff',
+    fillGradient: grad(0, '#ffffff', '#80d8ff', '#0091ea'),
+    outlineColor: '#01579b',
+    outlineWidth: 8,
+    extraStrokes: [{ color: '#ffffff', width: 5 }],
+    rotation: -6,
+    animation: 'popIn',
+    exitAnimation: 'zoomOut'
+  }),
+  tpl('play-win', '勝利', 'play', '対戦に勝った', 'WIN', 3, {
+    position: 'center',
+    fontFamily: 'Dela Gothic One',
+    fontSize: 140,
+    color: '#ffd54f',
+    fillGradient: GOLD,
+    outlineColor: '#000000',
+    outlineWidth: 9,
+    letterSpacing: 12,
+    glow: { color: '#ffecb3', size: 34, opacity: 0.6 },
+    animation: 'none',
+    charAnimation: 'pop'
+  }),
+  tpl('play-lose', '敗北', 'play', '対戦に負けた', 'LOSE...', 3, {
+    position: 'center',
+    fontFamily: 'Dela Gothic One',
+    fontSize: 120,
+    color: '#90a4ae',
+    fillGradient: SILVER,
+    outlineColor: '#263238',
+    outlineWidth: 8,
+    letterSpacing: 8,
+    animation: 'slideInDown',
+    loopAnimation: 'float'
+  }),
+  tpl('play-nice', 'ナイス', 'play', '上手くいった・好プレイ', 'ナイス!!', 2, {
+    position: 'center',
+    fontFamily: 'RocknRoll One',
+    fontSize: 104,
+    color: '#76ff03',
+    fillGradient: grad(0, '#f4ff81', '#76ff03', '#00c853'),
+    outlineColor: '#1b5e20',
+    outlineWidth: 8,
+    extraStrokes: [{ color: '#ffffff', width: 5 }],
+    rotation: -5,
+    animation: 'popIn'
+  }),
+  tpl('play-god', '神プレイ', 'play', '奇跡の操作・ありえない好プレイ', '神プレイ', 3, {
+    position: 'center',
+    fontWeight: 900,
+    fontSize: 116,
+    color: '#ffffff',
+    fillGradient: RAINBOW,
+    outlineColor: '#ffffff',
+    outlineWidth: 7,
+    extraStrokes: [{ color: '#311b92', width: 6 }],
+    glow: { color: '#ffffff', size: 30, opacity: 0.6 },
+    animation: 'none',
+    charAnimation: 'zoom',
+    loopAnimation: 'pulse'
+  }),
+  tpl('play-close', '惜しい', 'play', 'あと少しで届かなかった', '惜しい…!', 2.5, {
+    position: 'center',
+    fontWeight: 900,
+    fontSize: 100,
+    color: '#ffab40',
+    outlineColor: '#4e342e',
+    outlineWidth: 8,
+    extraStrokes: [{ color: '#ffffff', width: 4 }],
+    animation: 'bounce'
+  }),
+  tpl('play-pinch', 'ピンチ', 'play', '体力が少ない・追い詰められた', 'ピンチ!!', 3, {
+    customPosition: { x: 0.5, y: 0.3 },
+    fontWeight: 900,
+    fontSize: 90,
+    color: '#ff1744',
+    outlineColor: '#ffffff',
+    outlineWidth: 7,
+    extraStrokes: [{ color: '#000000', width: 4 }],
+    animation: 'popIn',
+    loopAnimation: 'blink'
+  }),
+  tpl('play-lol', '草', 'play', '笑える場面(配信の「草」)', '草www', 2, {
+    customPosition: { x: 0.78, y: 0.3 },
+    fontFamily: 'M PLUS Rounded 1c',
+    fontWeight: 900,
+    fontSize: 84,
+    color: '#69f0ae',
+    outlineColor: '#1b5e20',
+    outlineWidth: 7,
+    extraStrokes: [{ color: '#ffffff', width: 4 }],
+    rotation: 6,
+    animation: 'popIn',
+    loopAnimation: 'swing'
+  }),
+  tpl('play-replay', 'リプレイ', 'play', '同じ場面をもう一度・スローで見せる', 'REPLAY', 4, {
+    customPosition: { x: 0.12, y: 0.1 },
+    position: 'top',
+    fontWeight: 900,
+    fontSize: 34,
+    color: '#ffffff',
+    outline: false,
+    italic: true,
+    letterSpacing: 4,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#d50000',
+    backgroundOpacity: 0.95,
+    backgroundRadius: 4,
+    backgroundPadding: { x: 18, y: 4 },
+    backgroundSkew: -12,
+    loopAnimation: 'blink'
+  }),
+  tpl('play-skip', '中略', 'play', '作業・移動・稼ぎを飛ばした所', '(中略)\n__30分後__', 2.5, {
+    position: 'center',
+    fontWeight: 800,
+    fontSize: 60,
+    color: '#ffffff',
+    outlineColor: '#000000',
+    outlineWidth: 6,
+    sub: { scale: 0.6, color: '#b0bec5' },
+    animation: 'fadeIn',
+    exitAnimation: 'fadeOut'
+  }),
+  tpl('play-deaths', 'デス数', 'play', 'やられた回数を出し続ける', 'デス **12**', 10, {
+    customPosition: { x: 0.5, y: 0.07 },
+    position: 'top',
+    fontWeight: 800,
+    fontSize: 34,
+    color: '#ffffff',
+    outline: false,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#000000',
+    backgroundOpacity: 0.6,
+    backgroundRadius: 40,
+    backgroundPadding: { x: 26, y: 4 },
+    accent: { scale: 1.5, color: '#ff5252' }
+  }),
+  tpl(
+    'play-progress',
+    '進行状況',
+    'play',
+    '今どこを遊んでいるか(章・ステージ)',
+    'CHAPTER 3\n__忘れられた砦__',
+    6,
+    {
+      customPosition: TOP_LEFT,
+      position: 'top',
+      fontWeight: 900,
+      fontSize: 32,
+      color: '#ffffff',
+      outline: false,
+      align: 'left',
+      letterSpacing: 3,
+      background: true,
+      backgroundShape: 'block',
+      backgroundColor: '#000000',
+      backgroundGradient: grad(90, '#000000cc', '#00000000'),
+      backgroundOpacity: 1,
+      backgroundPadding: { x: 24, y: 8 },
+      sub: { scale: 0.8, color: '#ffd54f' },
+      animation: 'slideInDown'
+    }
+  ),
+  tpl('play-goal', '今日の目標', 'play', '回の始めに目標を出す', '今日の目標\n**ボスを倒す!**', 5, {
+    customPosition: { x: 0.5, y: 0.2 },
+    position: 'top',
+    fontWeight: 800,
+    fontSize: 40,
+    color: '#ffffff',
+    outline: false,
+    lineHeight: 1.3,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#1565c0',
+    backgroundGradient: grad(0, '#1e88e5', '#0d47a1'),
+    backgroundOpacity: 0.95,
+    backgroundRadius: 14,
+    backgroundBorder: { color: '#ffffff', width: 3 },
+    backgroundPadding: { x: 34, y: 14 },
+    accent: { scale: 1.3, color: '#ffeb3b' },
+    animation: 'popIn'
+  }),
+  tpl('play-firsttime', '初見プレイ', 'play', '初めて遊ぶことを出し続ける', '初見プレイ', 10, {
+    customPosition: { x: 0.08, y: 0.06 },
+    position: 'top',
+    fontWeight: 900,
+    fontSize: 28,
+    color: '#ffffff',
+    outline: false,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#ff6d00',
+    backgroundOpacity: 1,
+    backgroundRadius: 30,
+    backgroundPadding: { x: 18, y: 4 }
+  }),
+  tpl('play-control', '操作説明', 'play', 'ボタン・操作のしかた', '**R1** 攻撃 **〇** 回避', 4, {
+    customPosition: { x: 0.5, y: 0.2 },
+    position: 'top',
+    fontWeight: 700,
+    fontSize: 36,
+    color: '#ffffff',
+    outline: false,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#212121',
+    backgroundOpacity: 0.82,
+    backgroundRadius: 10,
+    backgroundPadding: { x: 26, y: 10 },
+    accent: { scale: 1.05, color: '#40c4ff' },
+    animation: 'fadeIn'
+  }),
+  tpl(
+    'play-item',
+    'アイテム入手',
+    'play',
+    '物を手に入れた・宝箱を開けた',
+    '**伝説の剣**を手に入れた!',
+    3,
+    {
+      customPosition: { x: 0.5, y: 0.2 },
+      position: 'top',
+      fontWeight: 700,
+      fontSize: 38,
+      color: '#ffffff',
+      outline: false,
+      background: true,
+      backgroundShape: 'block',
+      backgroundColor: '#0a1a3c',
+      backgroundOpacity: 0.92,
+      backgroundRadius: 8,
+      backgroundBorder: { color: '#ffffff', width: 4 },
+      backgroundPadding: { x: 30, y: 14 },
+      accent: { color: '#ffd54f' },
+      animation: 'typewriter'
+    }
+  ),
+  tpl('play-window', 'RPGの会話窓', 'play', 'ゲーム風の会話・心の声', 'ゆうしゃは にげだした!', 3, {
+    customPosition: { x: 0.5, y: 0.19 },
+    position: 'top',
+    fontFamily: 'Kosugi Maru',
+    fontWeight: 700,
+    fontSize: 40,
+    color: '#ffffff',
+    outline: false,
+    align: 'left',
+    letterSpacing: 2,
+    background: true,
+    backgroundShape: 'block',
+    backgroundColor: '#000000',
+    backgroundOpacity: 0.92,
+    backgroundRadius: 6,
+    backgroundBorder: { color: '#ffffff', width: 5 },
+    backgroundPadding: { x: 40, y: 22 },
+    animation: 'typewriter'
+  }),
+  tpl('play-levelup', 'レベルアップ', 'play', '成長・強くなった', 'LEVEL UP!', 2.5, {
+    customPosition: { x: 0.5, y: 0.3 },
+    fontFamily: 'Dela Gothic One',
+    fontSize: 80,
+    color: '#ffeb3b',
+    fillGradient: grad(0, '#ffffff', '#ffeb3b', '#ff9100'),
+    outlineColor: '#e65100',
+    outlineWidth: 6,
+    extraStrokes: [{ color: '#ffffff', width: 4 }],
+    animation: 'slideInUp',
+    exitAnimation: 'slideOutUp'
+  }),
+  tpl(
+    'play-achievement',
+    '実績解除',
+    'play',
+    '目標・やり込みを達成した',
+    '__実績解除__\n**初めての勝利**',
+    4,
+    {
+      customPosition: TOP_RIGHT,
+      position: 'top',
+      fontWeight: 800,
+      fontSize: 30,
+      color: '#ffffff',
+      outline: false,
+      align: 'left',
+      lineHeight: 1.35,
+      background: true,
+      backgroundShape: 'block',
+      backgroundColor: '#263238',
+      backgroundOpacity: 0.94,
+      backgroundRadius: 12,
+      backgroundBorder: { color: '#ffd54f', width: 3 },
+      backgroundPadding: { x: 24, y: 10 },
+      sub: { scale: 0.75, color: '#ffd54f' },
+      accent: { scale: 1.1 },
+      animation: 'slideInDown',
+      exitAnimation: 'slideOutUp'
+    }
+  ),
+  tpl('play-gacha', 'ガチャ結果', 'play', 'ガチャ・抽選の当たり', '**SSR** 確定!!', 3, {
+    position: 'center',
+    fontWeight: 900,
+    fontSize: 96,
+    color: '#ffffff',
+    outlineColor: '#4a148c',
+    outlineWidth: 8,
+    extraStrokes: [{ color: '#ffffff', width: 4 }],
+    accent: { scale: 1.35, gradient: RAINBOW },
+    glow: { color: '#ea80fc', size: 30, opacity: 0.55 },
+    animation: 'none',
+    charAnimation: 'spin'
+  }),
+  tpl(
+    'play-memo',
+    '攻略メモ',
+    'play',
+    'コツ・攻略の情報を補足',
+    '攻略メモ\n__盾で受けてから反撃__',
+    5,
+    {
+      customPosition: { x: 0.2, y: 0.32 },
+      fontWeight: 800,
+      fontSize: 34,
+      color: '#3e2723',
+      outline: false,
+      align: 'left',
+      lineHeight: 1.35,
+      background: true,
+      backgroundShape: 'block',
+      backgroundColor: '#fff59d',
+      backgroundOpacity: 0.96,
+      backgroundRadius: 4,
+      backgroundPadding: { x: 22, y: 12 },
+      rotation: -2,
+      firstLine: { color: '#d84315' },
+      sub: { scale: 0.85 },
+      animation: 'popIn'
+    }
+  ),
+  tpl(
+    'play-enemy',
+    '敵の名前',
+    'play',
+    '敵・キャラクターの名前と説明',
+    '__第一の刺客__\nスケルトン',
+    3.5,
+    {
+      customPosition: { x: 0.74, y: 0.32 },
+      fontFamily: 'Shippori Mincho',
+      fontWeight: 800,
+      fontSize: 54,
+      color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 6,
+      align: 'right',
+      sub: { scale: 0.5, color: '#ef9a9a' },
+      animation: 'fadeIn',
+      exitAnimation: 'fadeOut'
+    }
+  ),
+  tpl(
+    'play-part',
+    'パート番号',
+    'play',
+    'シリーズの何本目か(回の頭)',
+    '__実況プレイ__\nPart **5**',
+    4,
+    {
+      position: 'center',
+      fontFamily: 'Dela Gothic One',
+      fontSize: 84,
+      color: '#ffffff',
+      outlineColor: '#000000',
+      outlineWidth: 7,
+      sub: { scale: 0.45, color: '#ffd54f' },
+      accent: { scale: 1.35, color: '#ff5252' },
+      animation: 'none',
+      charAnimation: 'rise',
+      exitAnimation: 'fadeOut'
+    }
+  ),
+  tpl(
+    'play-chat',
+    '視聴者のコメント',
+    'play',
+    '配信のコメントを読み上げた所',
+    '__視聴者__ 右の道が近いよ',
+    4,
+    {
+      customPosition: { x: 0.74, y: 0.42 },
+      fontWeight: 700,
+      fontSize: 32,
+      color: '#ffffff',
+      outline: false,
+      align: 'left',
+      background: true,
+      backgroundShape: 'bubble',
+      backgroundColor: '#37474f',
+      backgroundOpacity: 0.9,
+      backgroundRadius: 18,
+      backgroundPadding: { x: 22, y: 10 },
+      bubbleTail: { side: 'bottom', at: 0.2, length: 18 },
+      sub: { scale: 0.75, color: '#80cbc4' },
+      animation: 'slideInUp'
+    }
+  ),
   // ---------------------------------------------------------------- SNS・配信
   tpl(
     'social-youtube',

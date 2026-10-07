@@ -24,6 +24,30 @@ describe('テロップの種類の一覧', () => {
     }
   })
 
+  it('ゲーム実況の種類がそろっている(叫び・やられた・クリア・ボス戦・デス数・コラボの色分けなど)', () => {
+    const play = TELOP_KINDS.filter((k) => k.category === 'play')
+    expect(play.length).toBeGreaterThanOrEqual(25)
+    expect(CATEGORY_LABEL.play).toBe('ゲーム実況')
+    for (const id of [
+      'tpl-play-scream',
+      'tpl-play-died',
+      'tpl-play-clear',
+      'tpl-play-boss',
+      'tpl-play-deaths'
+    ])
+      expect(
+        play.some((k) => k.id === id),
+        id
+      ).toBe(true)
+    // コラボで5人まで話者の色を分けられる
+    expect(
+      TELOP_KINDS.filter(
+        (k) =>
+          k.category === 'speech' && /発言\((黄|青縁|ピンク縁|緑縁|オレンジ縁|紫縁)\)/.test(k.label)
+      ).length
+    ).toBe(6)
+  })
+
   it('絵文字を使わない(PC によって字形が無く、書き出しで豆腐になる)', () => {
     for (const k of TELOP_KINDS) expect(k.sample, k.id).not.toMatch(/\p{Extended_Pictographic}/u)
   })
