@@ -12,7 +12,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -43,144 +43,25 @@ import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
 import type { AsrJob, AsrJobResult } from '@shared/transcript'
+import {
+  DURATION,
+  EXPLOSIONS,
+  HYPE_AT,
+  LAUGH_AT,
+  makeScript,
+  mix,
+  QUIET,
+  renderGame,
+  renderVoice,
+  writeWav,
+  type Line
+} from './gameShoot'
 
 const HAVE_FFMPEG = existsSync(ffmpegPath) && existsSync(ffprobePath)
-const FS = 48000
-const DURATION = 480
 
-function hashNoise(i: number, seed: number): number {
-  let x = (Math.imul(i | 0, 374761393) + Math.imul(seed, 668265263)) | 0
-  x = Math.imul(x ^ (x >>> 13), 1274126177)
-  x ^= x >>> 16
-  return ((x >>> 0) / 4294967296) * 2 - 1
-}
-function rng(seed: number): () => number {
-  let s = seed >>> 0
-  return () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0
-    return s / 4294967296
-  }
-}
-
-// ---------------------------------------------------------------- 正解(台本)
-
-interface Line {
-  text: string
-  start: number
-  end: number
-  /** 叫び(普段より大きい声) */
-  shout: boolean
-}
-
-const CALM = [
-  'ここは右に行こうかな',
-  'アイテムを拾っておきます',
-  'この敵は弱いですね',
-  'ちょっと回復しよう',
-  '次のステージですね',
-  '地図を見てみます'
-]
-const SHOUTS = ['うわああ!', 'やばいやばい!', '死んだ!', 'まじか!', 'きたー!', 'ちょっと待って!']
-
-/** 黙々とプレイする所(声の無い区間) */
-const QUIET: [number, number][] = [
-  [100, 140],
-  [250, 290],
-  [380, 420]
-]
-/** 叫びを入れる時刻(山)。山の前後は普段の話し声 */
-const HYPE_AT = [30, 62, 175, 205, 230, 320, 350, 450]
-/** 声の無い所で鳴る、ゲームの爆発音(大きい。数えてはいけない) */
-const EXPLOSIONS = [110, 125, 265, 400]
-/** 笑い(音声イベントの決まった答え)。山の1つに重ねる */
-const LAUGH_AT = [205]
-
-function makeScript(): Line[] {
-  const r = rng(20261007)
-  const lines: Line[] = []
-  let t = 3
-  while (t < DURATION - 6) {
-    const quiet = QUIET.find(([a, b]) => t >= a - 1 && t < b)
-    if (quiet) {
-      t = quiet[1] + 1
-      continue
-    }
-    const hype = HYPE_AT.find(
-      (h) => Math.abs(h - t) < 2.5 && !lines.some((l) => l.shout && Math.abs(l.start - h) < 3)
-    )
-    if (hype !== undefined) {
-      const len = 1.2 + r() * 0.6
-      lines.push({
-        text: SHOUTS[lines.length % SHOUTS.length],
-        start: hype,
-        end: hype + len,
-        shout: true
-      })
-      t = hype + len + 0.6 + r() * 0.6
-      continue
-    }
-    const len = 1.6 + r() * 1.8
-    const end = Math.min(t + len, ...QUIET.map(([a]) => (a > t ? a - 0.5 : Infinity)))
-    if (end - t >= 0.8)
-      lines.push({ text: CALM[lines.length % CALM.length], start: t, end, shout: false })
-    t = end + 0.5 + r() * 1.2
-  }
-  return lines.sort((a, b) => a.start - b.start)
-}
-
-/** 1本の動画の音: ゲームの環境音 + 爆発音 + 声 */
+/** 1本の動画の音: ゲームの環境音 + 爆発音(声の無い所) + 声 */
 function renderAudio(lines: Line[]): Float32Array {
-  const n = DURATION * FS
-  const out = new Float32Array(n)
-  for (let i = 0; i < n; i++)
-    out[i] = 0.02 * hashNoise(i, 11) + 0.01 * Math.sin((2 * Math.PI * 110 * i) / FS)
-  for (const at of EXPLOSIONS) {
-    const a = at * FS
-    for (let i = 0; i < 1.5 * FS; i++)
-      out[a + i] += 0.6 * hashNoise(a + i, 13) * Math.exp(-i / (0.4 * FS))
-  }
-  for (const l of lines) {
-    const a = Math.floor(l.start * FS)
-    const b = Math.ceil(l.end * FS)
-    const len = l.end - l.start
-    const gain = l.shout ? 0.32 : 0.08 // 叫びは普段の 4 倍(+12dB)
-    const f0 = l.shout ? 260 : 140
-    const formant = 600 + (hashNoise(a, 9) + 1) * 300
-    for (let i = a; i < b; i++) {
-      const tau = (i - a) / FS
-      const env =
-        Math.min(1, tau / 0.03, (len - tau) / 0.05) *
-        (0.65 + 0.35 * Math.cos(2 * Math.PI * 5 * tau))
-      if (env <= 0) continue
-      const ph = 2 * Math.PI * f0 * tau
-      let v = 0
-      for (let k = 1; k <= 10; k++)
-        v += (1 / (1 + ((f0 * k - formant) / 400) ** 2) + 0.3 / k) * Math.sin(k * ph)
-      out[i] += gain * env * v
-    }
-  }
-  for (let i = 0; i < n; i++) out[i] = Math.max(-1, Math.min(1, out[i]))
-  return out
-}
-
-function writeWav(path: string, samples: Float32Array): void {
-  const buf = Buffer.alloc(44 + samples.length * 2)
-  buf.write('RIFF', 0)
-  buf.writeUInt32LE(36 + samples.length * 2, 4)
-  buf.write('WAVE', 8)
-  buf.write('fmt ', 12)
-  buf.writeUInt32LE(16, 16)
-  buf.writeUInt16LE(1, 20)
-  buf.writeUInt16LE(1, 22)
-  buf.writeUInt32LE(FS, 24)
-  buf.writeUInt32LE(FS * 2, 28)
-  buf.writeUInt16LE(2, 32)
-  buf.writeUInt16LE(16, 34)
-  buf.write('data', 36)
-  buf.writeUInt32LE(samples.length * 2, 40)
-  for (let i = 0; i < samples.length; i++)
-    buf.writeInt16LE(Math.round(samples[i] * 32767), 44 + i * 2)
-  writeFileSync(path, buf)
+  return mix(renderGame(EXPLOSIONS), renderVoice(lines, 140))
 }
 
 // ---------------------------------------------------------------- アプリの main 側

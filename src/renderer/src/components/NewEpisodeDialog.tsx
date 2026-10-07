@@ -30,7 +30,36 @@ import {
 const KIND_COLOR: Record<EditableSource['kind'], string> = {
   camera: '#9ea7e0',
   mic: '#7fcf96',
+  audio: '#d7b46a',
   skip: '#666666'
+}
+
+/** 役割の欄の値(種類と、トラック・カメラの役割をまとめて1つの欄で選ぶ) */
+type RoleValue =
+  'camera' | 'camera:screen' | 'camera:face' | 'mic' | 'audio:game' | 'audio:mix' | 'skip'
+
+function roleValue(s: EditableSource, game: boolean): RoleValue {
+  if (s.kind === 'camera')
+    return game ? (s.cameraRole === 'face' ? 'camera:face' : 'camera:screen') : 'camera'
+  if (s.kind === 'audio') return s.trackRole === 'mix' ? 'audio:mix' : 'audio:game'
+  return s.kind
+}
+
+function rolePatch(v: RoleValue): Partial<EditableSource> {
+  switch (v) {
+    case 'camera:screen':
+      return { kind: 'camera', cameraRole: 'screen' }
+    case 'camera:face':
+      return { kind: 'camera', cameraRole: 'face' }
+    case 'audio:game':
+      return { kind: 'audio', trackRole: 'game' }
+    case 'audio:mix':
+      return { kind: 'audio', trackRole: 'mix' }
+    case 'mic':
+      return { kind: 'mic', trackRole: undefined }
+    default:
+      return { kind: v }
+  }
 }
 
 function formatLength(seconds: number): string {
@@ -284,13 +313,21 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                   </span>
                   <select
                     aria-label="役割"
-                    value={s.kind}
-                    onChange={(e) =>
-                      updateSource(s.id, { kind: e.target.value as EditableSource['kind'] })
-                    }
+                    value={roleValue(s, episodeKind === 'game')}
+                    onChange={(e) => updateSource(s.id, rolePatch(e.target.value as RoleValue))}
                   >
-                    <option value="camera">カメラ</option>
-                    <option value="mic">マイク</option>
+                    {s.files.some((f) => f.hasVideo) &&
+                      (episodeKind === 'game' ? (
+                        <>
+                          <option value="camera:screen">ゲーム画面</option>
+                          <option value="camera:face">顔カメラ</option>
+                        </>
+                      ) : (
+                        <option value="camera">カメラ</option>
+                      ))}
+                    <option value="mic">{s.files.some((f) => f.track) ? '声' : 'マイク'}</option>
+                    <option value="audio:game">ゲーム音</option>
+                    {s.files.some((f) => f.track) && <option value="audio:mix">全部入り</option>}
                     <option value="skip">使わない</option>
                   </select>
                   <input
@@ -306,7 +343,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                     disabled={s.kind === 'skip'}
                     onChange={(e) => updateSource(s.id, { name: e.target.value })}
                   />
-                  {s.kind === 'camera' ? (
+                  {s.kind === 'camera' && episodeKind !== 'game' ? (
                     <select
                       aria-label="主に映す人"
                       title="このカメラが主に誰を映しているか。その人が話すとき、このカメラに切り替えます"
@@ -447,7 +484,10 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
             素材はコピーせず、元の場所を参照します
             {sources.length > 0 &&
               ` · 合計 ${formatTimecode(
-                usable.reduce((t, s) => t + sourceDuration(s), 0),
+                // 動画から取り出した音声トラックは元の動画と同じ時間なので数えない
+                usable
+                  .filter((s) => !s.files.some((f) => f.track))
+                  .reduce((t, s) => t + sourceDuration(s), 0),
                 30
               )}`}
           </span>

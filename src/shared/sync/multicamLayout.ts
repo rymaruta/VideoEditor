@@ -22,6 +22,8 @@ export interface LayoutSource {
   id: string
   name: string
   kind: SourceKind
+  /** 基準カメラに選びたいカメラ(ゲーム実況のゲーム画面)。あればその中で一番長いものを基準にする */
+  preferAnchor?: boolean
 }
 
 export interface LayoutPiece {
@@ -45,6 +47,8 @@ export interface MulticamLayout {
   cameras: { sourceId: string; name: string; pieces: LayoutPiece[] }[]
   /** マイク(音声トラックに1本ずつ) */
   mics: { sourceId: string; name: string; pieces: LayoutPiece[] }[]
+  /** 声ではない音(ゲーム音・全部入りのトラック。音声トラックに1本ずつ) */
+  audio: { sourceId: string; name: string; pieces: LayoutPiece[] }[]
   /** 同期できず、並べなかった素材 */
   leftOut: string[]
   /**
@@ -102,7 +106,10 @@ export function buildMulticamLayout(
     if (kindOf.get(f.sourceId) !== 'camera') continue
     coverage.set(f.sourceId, (coverage.get(f.sourceId) ?? 0) + f.duration)
   }
-  const anchorSourceId = [...coverage.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+  const preferred = new Set(sources.filter((s) => s.preferAnchor).map((s) => s.id))
+  const anchorSourceId = [...coverage.entries()].sort(
+    (a, b) => Number(preferred.has(b[0])) - Number(preferred.has(a[0])) || b[1] - a[1]
+  )[0]?.[0]
   if (!anchorSourceId) return null
 
   // 基準カメラの時計を共通の時間軸にする(本編の映像は速度を変えずに済む)。
@@ -201,6 +208,7 @@ export function buildMulticamLayout(
     })),
     cameras: group('camera'),
     mics: group('mic'),
+    audio: group('audio'),
     leftOut,
     placed: synced.map((f) => ({
       fileId: f.id,

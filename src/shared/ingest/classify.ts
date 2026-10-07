@@ -1,3 +1,12 @@
+import {
+  craigSpeakerName,
+  guessCameraRole,
+  TRACK_ROLE_LABEL,
+  type CameraRole,
+  type ExtractedTrack,
+  type TrackRole
+} from './tracks'
+
 /**
  * 収録フォルダの素材を、カメラ・マイクごとに振り分ける(計画書 §5.1)。
  *
@@ -7,7 +16,11 @@
  * ここは「たいてい合う」ことを目指す。
  */
 
-export type SourceKind = 'camera' | 'mic'
+/**
+ * camera = 映像のある素材、mic = 話す人の声(文字起こし・話者に使う)、
+ * audio = 声ではない音(ゲーム音・全部入りのトラック。書き出しには使うが、文字起こし・話者には使わない)
+ */
+export type SourceKind = 'camera' | 'mic' | 'audio'
 
 export interface ProbedFile {
   path: string
@@ -24,6 +37,10 @@ export interface ProbedFile {
   device?: string
   /** ファイルの大きさ(バイト) */
   size: number
+  /** 音声トラックの数(OBS の複数トラックの録画で 2 以上) */
+  audioTracks?: number
+  /** 動画から取り出した音声トラックなら、その元と役割 */
+  track?: ExtractedTrack
 }
 
 export interface FootageSource {
@@ -34,6 +51,10 @@ export interface FootageSource {
   /** 振り分けに使った手がかり(例: フォルダ CAM_A、ファイル名 GX) */
   basis: string
   files: ProbedFile[]
+  /** 取り出した音声トラックの役割(声・ゲーム音・全部入り) */
+  trackRole?: TrackRole
+  /** ゲーム実況のカメラの役割(ゲーム画面・顔カメラ) */
+  cameraRole?: CameraRole
 }
 
 /** ファイル名の頭の「機材を表す部分」。数字の手前まで(区切り記号は落とす) */
@@ -81,7 +102,13 @@ function byRecordingOrder(a: ProbedFile, b: ProbedFile): number {
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
-  const media = files.filter((f) => f.hasVideo || f.hasAudio)
+  const all = files.filter((f) => f.hasVideo || f.hasAudio)
+  // 取り出した音声トラックと Craig の話者別ファイルは、1本ずつが1つの音源(まとめない)
+  const single = all.filter(
+    (f) =>
+      f.track || (!f.hasVideo && craigSpeakerName(f.relativePath.split('/').pop() ?? '') !== null)
+  )
+  const media = all.filter((f) => !single.includes(f))
   const groups = new Map<
     string,
     {
@@ -190,16 +217,53 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
 
   let cam = 0
   let mic = 0
-  return list.map((g) => {
+  const maxWidth = Math.max(0, ...all.filter((f) => f.hasVideo).map((f) => f.width ?? 0))
+  const regular: FootageSource[] = list.map((g) => {
     const name = g.kind === 'camera' ? `カメラ${LETTERS[cam++] ?? cam}` : `マイク${++mic}`
+    const first = g.files[0]
     return {
       id: `${g.kind}:${g.folder}|${g.device ?? ''}|${g.prefix}${g.chain !== undefined ? `#${g.chain}` : ''}`,
       name,
       kind: g.kind,
       basis: g.basis || 'ファイル名',
-      files: g.files
+      files: g.files,
+      ...(g.kind === 'camera'
+        ? {
+            cameraRole: guessCameraRole(
+              first.relativePath,
+              first.width,
+              maxWidth,
+              first.audioTracks ?? 1
+            )
+          }
+        : {})
     }
   })
+  const extra: FootageSource[] = [...single]
+    .sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true }))
+    .map((f) => {
+      if (f.track) {
+        const t = f.track
+        const label = t.title?.trim() || TRACK_ROLE_LABEL[t.role]
+        return {
+          id: `track:${t.parentRelativePath}#${t.index}`,
+          name: `${label}(トラック${t.index + 1})`,
+          kind: t.role === 'voice' ? 'mic' : 'audio',
+          basis: `${t.parentRelativePath.split('/').pop()} の音声トラック ${t.index + 1}`,
+          files: [f],
+          trackRole: t.role
+        }
+      }
+      const fileName = f.relativePath.split('/').pop() ?? ''
+      return {
+        id: `craig:${f.relativePath}`,
+        name: craigSpeakerName(fileName) ?? fileName,
+        kind: 'mic',
+        basis: 'Discord の話者別の録音(Craig)',
+        files: [f]
+      }
+    })
+  return [...regular, ...extra]
 }
 
 /** 素材の合計の長さ(秒) */

@@ -1,3 +1,4 @@
+import type { CameraRole, TrackRole } from '../ingest/tracks'
 import type { SourceKind } from '../ingest/classify'
 
 /**
@@ -12,6 +13,10 @@ export interface MulticamSource {
   kind: SourceKind
   /** カメラが主に映している出演者(マイクの名前と同じ)。全体を映すカメラは undefined */
   subject?: string
+  /** 動画から取り出した音声トラックの役割(声・ゲーム音・全部入り) */
+  trackRole?: TrackRole
+  /** ゲーム実況のカメラの役割(ゲーム画面・顔カメラ)。顔カメラはワイプで常に出す */
+  cameraRole?: CameraRole
 }
 
 export interface MulticamFile {

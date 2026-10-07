@@ -1,3 +1,6 @@
+import { silencedTrack } from '@shared/roughCut/build'
+import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
+import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
 import { isImagePath, STILL_DURATION_SEC } from '@shared/mediaExtensions'
 import type { AudioEventWindow } from '@shared/events/audioEvents'
 import {
@@ -654,12 +657,21 @@ function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
   const r = raw as Record<string, unknown>
   if (typeof r.anchorSourceId !== 'string') return undefined
   const sources = asRecordArray<Record<string, unknown>>(r.sources)
-    .filter((s) => typeof s.id === 'string' && (s.kind === 'camera' || s.kind === 'mic'))
+    .filter(
+      (s) =>
+        typeof s.id === 'string' && (s.kind === 'camera' || s.kind === 'mic' || s.kind === 'audio')
+    )
     .map((s) => ({
       id: s.id as string,
       name: typeof s.name === 'string' ? s.name : '',
-      kind: s.kind as 'camera' | 'mic',
-      subject: typeof s.subject === 'string' && s.subject ? s.subject : undefined
+      kind: s.kind as 'camera' | 'mic' | 'audio',
+      subject: typeof s.subject === 'string' && s.subject ? s.subject : undefined,
+      ...(s.trackRole === 'voice' || s.trackRole === 'game' || s.trackRole === 'mix'
+        ? { trackRole: s.trackRole as TrackRole }
+        : {}),
+      ...(s.cameraRole === 'screen' || s.cameraRole === 'face'
+        ? { cameraRole: s.cameraRole as CameraRole }
+        : {})
     }))
   const files = asRecordArray<Record<string, unknown>>(r.files)
     .filter((f) => typeof f.assetId === 'string' && typeof f.sourceId === 'string')
@@ -1736,13 +1748,16 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         }))
       // ほかのカメラは隠しておく(どのアングルを使うかはアングルの切替で決める。出したままだと
       // 全部が小窓で重なって見える)。隠したトラックの音は書き出しでも鳴らさない
+      // ゲーム実況の顔カメラは切り替えに使わず、ワイプとして常に出す
+      const isFace = (id: string): boolean =>
+        sources?.find((x) => x.id === id)?.cameraRole === 'face'
       const cameras: VideoOverlayTrack[] = layout.cameras.map((c) => ({
         id: uuid(),
         name: c.name,
         multicamSourceId: c.sourceId,
-        hidden: true,
-        position: 'top-right',
-        scale: 0.32,
+        hidden: !isFace(c.sourceId),
+        position: isFace(c.sourceId) ? FACE_PIP_POSITION : 'top-right',
+        scale: isFace(c.sourceId) ? FACE_PIP_SCALE : 0.32,
         clips: c.pieces
           .filter((p) => idOf(p.fileId))
           .map((p) => ({
@@ -1756,14 +1771,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 録音機の時計のずれは速度で補正する(4時間で1秒近くずれることがある)。
       // PiP のクリップは速度を持てないので、区間ごとの頭で合わせ直すだけにする
       // (ずれは区間の中でしか積もらない。20ppm・30分の区間で最大 36ms)
-      const mics: AudioTrack[] = layout.mics.map((m) => ({
+      const mics: AudioTrack[] = [
+        ...layout.mics.map((m) => ({ ...m, voice: true })),
+        ...(layout.audio ?? []).map((m) => ({ ...m, voice: false }))
+      ].map((m) => ({
         id: uuid(),
         name: m.name,
         multicamSourceId: m.sourceId,
-        muted: false,
+        muted: sources ? silencedTrack(sources, m.sourceId) : false,
         volume: 1,
         duckingEnabled: false,
-        voice: true,
+        voice: m.voice,
         clips: m.pieces
           .filter((p) => idOf(p.fileId))
           .map((p) => ({
@@ -2785,7 +2803,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             id: uuid(),
             name: a.name,
             multicamSourceId: a.sourceId,
-            muted: prev?.muted ?? false,
+            muted: prev?.muted ?? a.muted ?? false,
             volume: volumeChanged ? prev!.volume : a.volume,
             autoVolume: a.volume,
             duckingEnabled: prev?.duckingEnabled ?? false,
@@ -2810,8 +2828,26 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ...state.project,
         clips,
         audioTracks,
-        // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す
-        videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
+        // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す。
+        // ワイプで常に出すカメラ(ゲーム実況の顔カメラ)は、本編と同じ区間で並べ直す
+        // (人が変えた置き場所・大きさ・表示は残す)
+        videoOverlayTracks: [
+          ...state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
+          ...(cut.overlays ?? []).map((o) => {
+            const prev = state.project.videoOverlayTracks.find(
+              (t) => t.multicamSourceId === o.sourceId
+            )
+            return {
+              id: uuid(),
+              name: o.name,
+              multicamSourceId: o.sourceId,
+              hidden: prev?.hidden ?? false,
+              position: prev?.position ?? FACE_PIP_POSITION,
+              scale: prev?.scale ?? FACE_PIP_SCALE,
+              clips: o.clips.map((c) => ({ id: uuid(), ...c }))
+            }
+          })
+        ],
         // 作り直すときに今の本編と比べられるよう、組んだ本編を共通の時刻で覚える
         roughCutAuto: state.project.multicam
           ? coverageOfClips(cut.main, state.project.multicam)

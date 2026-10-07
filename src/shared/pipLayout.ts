@@ -18,3 +18,11 @@ export function pipMarginPx(frameWidth: number): number {
   if (!Number.isFinite(frameWidth) || frameWidth <= 0) return 0
   return frameWidth * PIP_MARGIN_RATIO
 }
+
+/**
+ * ゲーム実況の顔カメラのワイプの既定の置き場所と大きさ(画面の幅に対する比)。
+ * 右下は、発言テロップ(下の中央。2行 14 字で幅の 4 割ほど)と重ならず、多くのゲームで
+ * 文字の少ない所(体力・ミニマップは左下・右上に多い)
+ */
+export const FACE_PIP_POSITION = 'bottom-right' as const
+export const FACE_PIP_SCALE = 0.26

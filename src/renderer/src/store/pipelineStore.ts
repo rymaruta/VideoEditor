@@ -1,5 +1,6 @@
 import { speechLook } from '@shared/telop/styles'
 import type { HypeMoment } from '@shared/structure/hype'
+import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
 import { countEvents } from '@shared/events/audioEvents'
 import {
   bubbleProposals,
@@ -115,6 +116,10 @@ export interface EditableSource {
   subject?: string
   basis: string
   files: ProbedFile[]
+  /** 取り出した音声トラックの役割(声・ゲーム音・全部入り) */
+  trackRole?: TrackRole
+  /** ゲーム実況のカメラの役割(ゲーム画面・顔カメラ) */
+  cameraRole?: CameraRole
 }
 
 export const STEPS: { id: StepId; label: string }[] = [
@@ -196,7 +201,7 @@ interface PipelineState {
   scanFolder: (root: string) => Promise<void>
   updateSource: (
     id: string,
-    patch: Partial<Pick<EditableSource, 'name' | 'kind' | 'subject'>>
+    patch: Partial<Pick<EditableSource, 'name' | 'kind' | 'subject' | 'trackRole' | 'cameraRole'>>
   ) => void
   runPipeline: () => Promise<void>
   cancel: () => void
@@ -1127,7 +1132,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           name: remembered[s.id] ?? s.name,
           kind: s.kind,
           basis: s.basis,
-          files: s.files
+          files: s.files,
+          ...(s.trackRole ? { trackRole: s.trackRole } : {}),
+          ...(s.cameraRole ? { cameraRole: s.cameraRole } : {})
         }))
         set({ scan, sources })
         const count = sources.reduce((n, s) => n + s.files.length, 0)
@@ -1187,7 +1194,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
       let report: SyncReport
       try {
-        report = await window.api.syncRun(files)
+        // 動画から取り出した音声トラックは、元の動画と同じ時計・同じ頭なので照らし合わせない
+        // (声だけ・ゲーム音だけのトラックは元の動画の音と似ておらず、照らし合わせると外れることがある)
+        const parentOf = new Map(
+          used
+            .flatMap((s) => s.files)
+            .flatMap((f) => (f.track ? [[f.path, f.track.parentPath]] : []))
+        )
+        const synced = await window.api.syncRun(files.filter((f) => !parentOf.has(f.path)))
+        report = withTrackPlacements(synced, files, parentOf)
       } catch (e) {
         const msg = formatIpcError(e)
         const canceled = msg.includes('SYNC_CANCELED')
@@ -1220,8 +1235,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // --- タイムラインに並べる
       setStep('timeline', { state: 'run', percent: 0, note: '素材を読み込み中' })
       try {
+        const gameKind = useSettingsStore.getState().episodeKind === 'game'
         const layout = buildMulticamLayout(
-          used.map((s) => ({ id: s.id, name: s.name, kind: s.kind as SourceKind })),
+          used.map((s) => ({
+            id: s.id,
+            name: s.name,
+            kind: s.kind as SourceKind,
+            // ゲーム実況は、ゲーム画面を本編(基準カメラ)にする(顔カメラはワイプ)
+            preferAnchor: gameKind && s.kind === 'camera' && s.cameraRole !== 'face'
+          })),
           files.map((f) => ({ id: f.id, sourceId: f.sourceId, duration: f.duration })),
           report.placements
         )
@@ -1270,7 +1292,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             id: u.id,
             name: u.name,
             kind: u.kind as SourceKind,
-            subject: u.subject
+            subject: u.subject,
+            ...(u.trackRole ? { trackRole: u.trackRole } : {}),
+            ...(gameKind && u.kind === 'camera'
+              ? { cameraRole: u.cameraRole === 'face' ? ('face' as const) : ('screen' as const) }
+              : {})
           }))
         )
         // 撮影開始の時刻を企画に覚える(開き直しても時刻スーパーを出せるように)。人の操作ではないので履歴に積まない
@@ -1452,3 +1478,24 @@ usePipelineStore.subscribe((s, prev) => {
       )
   }
 })
+
+/**
+ * 取り出した音声トラックの位置を、元の動画の位置にする(同じ時計・同じ頭)。
+ * 元の動画が同期できなければ、トラックも同期できなかった扱い
+ */
+export function withTrackPlacements(
+  report: SyncReport,
+  files: readonly SyncInputFile[],
+  parentOf: ReadonlyMap<string, string>
+): SyncReport {
+  const byId = new Map(report.placements.map((p) => [p.id, p]))
+  const extra = files
+    .filter((f) => parentOf.has(f.path))
+    .map((f) => {
+      const parent = byId.get(parentOf.get(f.path)!)
+      return parent
+        ? { ...parent, id: f.id }
+        : { id: f.id, start: 0, rate: 1, method: 'none' as const }
+    })
+  return { ...report, placements: [...report.placements, ...extra] }
+}

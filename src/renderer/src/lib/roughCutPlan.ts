@@ -328,19 +328,15 @@ export function planRoughCut(
     estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0)
   }
 
-  const tightened = tightenRanges(
-    kept.flatMap(rangesOf),
-    activity,
-    speech,
-    tighten
-  )
+  const tightened = tightenRanges(kept.flatMap(rangesOf), activity, speech, tighten)
   // 時間の飛ぶ切れ目を、近くのいちばん静かな所へ寄せる(短い音の途中で切らない)。
   // 人が足した・削った区間は人の決めた位置のまま(寄せた後に当てる)
   const level = options.level ?? levelOfActivity.get(activity)
   const snapped = level ? snapCutsToQuiet(tightened, level) : tightened
   const pieces = options.overrides ? applyCutOverrides(snapped, options.overrides) : snapped
   const cameras = info.sources
-    .filter((s) => s.kind === 'camera')
+    // 顔カメラ(ゲーム実況)は切り替えに使わない(ワイプで常に出す)
+    .filter((s) => s.kind === 'camera' && s.cameraRole !== 'face')
     .map((s) => ({
       id: s.id,
       subject: s.subject,

@@ -40,10 +40,28 @@ export interface RoughAudioClip {
  */
 export const CUT_FADE_SEC = 0.02
 
+export interface RoughOverlayClip {
+  assetId: string
+  startTime: number
+  inPoint: number
+  outPoint: number
+}
+
 export interface RoughCut {
   main: RoughMainClip[]
-  /** マイク(と周りの音)ごとの音声トラック */
-  audio: { name: string; sourceId: string; volume: number; clips: RoughAudioClip[] }[]
+  /**
+   * マイク(と周りの音)ごとの音声トラック。`muted` は聞かせないトラック
+   * (OBS の全部入りのトラックを鳴らすときの声のトラック。文字起こし・盛り上がりには使う)
+   */
+  audio: {
+    name: string
+    sourceId: string
+    volume: number
+    muted?: boolean
+    clips: RoughAudioClip[]
+  }[]
+  /** ワイプで常に出すカメラ(ゲーム実況の顔カメラ)。本編と同じ区間を並べる */
+  overlays?: { name: string; sourceId: string; clips: RoughOverlayClip[] }[]
   /** タイムラインの長さ(秒) */
   duration: number
   /** 仮編集のタイムラインの時刻 ↔ 共通の時刻 の対応(テロップを置くのに使う) */
@@ -145,14 +163,18 @@ export function buildRoughCut(
   }
 
   const mics = info.sources.filter((s) => s.kind === 'mic')
-  const audio: RoughCut['audio'] = mics.map((m) => ({
+  const others = info.sources.filter((s) => s.kind === 'audio')
+  const audio: RoughCut['audio'] = [...mics, ...others].map((m) => ({
     name: m.name,
     sourceId: m.id,
     volume: 1,
+    ...(silencedTrack(info.sources, m.id) ? { muted: true } : {}),
     clips: audioFor(m.id)
   }))
   const anchor = info.sources.find((s) => s.id === info.anchorSourceId)
-  if (anchor) {
+  // 取り出したトラックがあれば、基準カメラの音(= 1本目のトラック)は重ねない
+  const tracksExtracted = info.sources.some((s) => s.trackRole !== undefined)
+  if (anchor && !tracksExtracted) {
     audio.push({
       // ピンマイクが無ければ、基準カメラの音が声も兼ねるので小さくしない
       name: mics.length > 0 ? `周りの音(${anchor.name})` : `${anchor.name} の音`,
@@ -161,7 +183,37 @@ export function buildRoughCut(
       clips: audioFor(anchor.id)
     })
   }
-  return { main, audio, duration: timeline, spans }
+  const faces = info.sources.filter((s) => s.kind === 'camera' && s.cameraRole === 'face')
+  const overlays = faces.map((c) => ({
+    name: c.name,
+    sourceId: c.id,
+    clips: audioFor(c.id).map((a) => ({
+      assetId: a.assetId,
+      startTime: a.startTime,
+      inPoint: a.inPoint,
+      outPoint: a.outPoint
+    }))
+  }))
+  return { main, audio, ...(overlays.length ? { overlays } : {}), duration: timeline, spans }
+}
+
+/**
+ * 鳴らさない音声トラックか(OBS の音声トラックを取り出したとき)。
+ * ゲーム音のトラックがあれば「声 + ゲーム音」を鳴らし、全部入りは鳴らさない。
+ * 無くて全部入りがあれば、全部入りだけを鳴らし、取り出した声のトラックは鳴らさない
+ * (同じ声が二重に重なる)。鳴らさないトラックも文字起こし・盛り上がりには使う
+ */
+export function silencedTrack(
+  sources: readonly { id: string; kind: string; trackRole?: string }[],
+  sourceId: string
+): boolean {
+  const s = sources.find((x) => x.id === sourceId)
+  if (!s?.trackRole) return false
+  const hasGame = sources.some((x) => x.kind === 'audio' && x.trackRole === 'game')
+  const hasMix = sources.some((x) => x.kind === 'audio' && x.trackRole === 'mix')
+  if (s.trackRole === 'mix') return hasGame
+  if (s.trackRole === 'voice') return !hasGame && hasMix
+  return false
 }
 
 /** 共通の時刻 → 仮編集のタイムラインの時刻(使っていない時間なら null) */

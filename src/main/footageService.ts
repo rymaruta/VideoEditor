@@ -9,6 +9,7 @@ import { MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
 import { classifyFootage, type FootageScan, type ProbedFile } from '@shared/ingest/classify'
 import { recordedAtFromTags, tagValue as tag } from '@shared/ingest/recordedAt'
 import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
+import { extractAudioTracks, type AudioStreamInfo } from './obsTracks'
 
 /**
  * 収録フォルダの取り込み・整理(計画書 §5.1)と、同期(§5.2)の呼び出し口。
@@ -50,6 +51,7 @@ interface FfprobeJson {
   format?: { duration?: string; tags?: Record<string, string> }
   streams?: {
     codec_type?: string
+    codec_name?: string
     width?: number
     height?: number
     duration?: string
@@ -76,9 +78,21 @@ function ffprobeJson(path: string): Promise<FfprobeJson> {
   })
 }
 
-async function probeFile(root: string, path: string): Promise<ProbedFile> {
+async function probeFile(
+  root: string,
+  path: string
+): Promise<ProbedFile & { audioStreams: AudioStreamInfo[] }> {
   const [info, st] = await Promise.all([ffprobeJson(path), stat(path)])
   const streams = info.streams ?? []
+  const audioStreams: AudioStreamInfo[] = streams
+    .filter((s) => s.codec_type === 'audio')
+    .map((s, index) => ({
+      index,
+      codec: s.codec_name,
+      title: tag(s.tags ?? {}, 'title', 'handler_name')?.trim() || undefined
+    }))
+    // MP4 の handler_name の既定の値(「SoundHandler」など)は名前ではない
+    .map((a) => (a.title && /handler$/i.test(a.title) ? { ...a, title: undefined } : a))
   const video = streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic)
   const audio = streams.find((s) => s.codec_type === 'audio')
   const duration = Number(info.format?.duration ?? video?.duration ?? audio?.duration ?? 0)
@@ -97,7 +111,9 @@ async function probeFile(root: string, path: string): Promise<ProbedFile> {
     height: video?.height,
     recordedAt,
     device: [make, model].filter(Boolean).join(' ') || undefined,
-    size: st.size
+    size: st.size,
+    ...(audioStreams.length >= 2 ? { audioTracks: audioStreams.length } : {}),
+    audioStreams
   }
 }
 
@@ -115,13 +131,36 @@ export async function scanFootage(
     Array.from({ length: Math.min(PROBE_PARALLEL, queue.length) }, async () => {
       for (let p = queue.shift(); p; p = queue.shift()) {
         try {
-          const f = await probeFile(root, p)
+          const { audioStreams, ...f } = await probeFile(root, p)
           const st = await stat(p)
           stats[p] = { size: st.size, mtimeMs: st.mtimeMs }
           if (!f.hasAudio && !f.hasVideo)
             skipped.push({ path: p, reason: '映像も音声もありません' })
           else if (f.duration <= 0) skipped.push({ path: p, reason: '長さが分かりません' })
-          else probed.push(f)
+          else {
+            probed.push(f)
+            // OBS の複数音声トラックの録画は、トラックごとに取り出して別の音源にする
+            if (f.hasVideo && audioStreams.length >= 2) {
+              try {
+                const tracks = await extractAudioTracks(
+                  ffmpegPath,
+                  join(app.getPath('userData'), 'extracted-tracks'),
+                  join(app.getPath('userData'), 'analysis-cache'),
+                  { ...f, mtimeMs: st.mtimeMs },
+                  audioStreams
+                )
+                for (const { mtimeMs, ...t } of tracks) {
+                  stats[t.path] = { size: t.size, mtimeMs }
+                  probed.push(t)
+                }
+              } catch (e) {
+                skipped.push({
+                  path: p,
+                  reason: `音声トラックを取り出せませんでした(1本目だけを使います): ${e instanceof Error ? e.message : String(e)}`
+                })
+              }
+            }
+          }
         } catch {
           skipped.push({ path: p, reason: '読み込めませんでした' })
         }

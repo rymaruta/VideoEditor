@@ -5342,7 +5342,7 @@ h3 {
 }
 .new-episode-source {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) 170px 90px 130px 130px;
+  grid-template-columns: 10px minmax(0, 1fr) 170px 112px 130px 130px;
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
