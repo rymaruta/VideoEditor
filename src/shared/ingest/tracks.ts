@@ -194,3 +194,26 @@ export function mixHasUnaccountedSound(
   }
   return active > 0 && unexplained / active >= minShare
 }
+
+/**
+ * 全部入りから、ほかのトラック(ゲーム音・取り出した声や通話)の音を差し引いた残り(多くは配信者の声だけ)。
+ * OBS のトラックは同じ音源を同じ音量で混ぜたものなので、エネルギーで引けばよい。
+ * 全部入りを録っていない所は NaN のまま
+ */
+export function mixResidual(mix: Float32Array, others: readonly Float32Array[]): Float32Array {
+  const out = new Float32Array(mix.length)
+  for (let i = 0; i < mix.length; i++) {
+    const m = mix[i]
+    if (!Number.isFinite(m)) {
+      out[i] = NaN
+      continue
+    }
+    let e = 0
+    for (const o of others) {
+      const x = o[i]
+      if (Number.isFinite(x)) e += x * x
+    }
+    out[i] = Math.sqrt(Math.max(0, m * m - e))
+  }
+  return out
+}

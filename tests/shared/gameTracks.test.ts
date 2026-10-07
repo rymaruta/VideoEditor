@@ -8,7 +8,11 @@ import {
 import { classifyFootage, type ProbedFile } from '../../src/shared/ingest/classify'
 import { silencedTrack } from '../../src/shared/roughCut/build'
 import { coveredBy, sameVoice } from '../../src/shared/diarize/micTurns'
-import { isSilentEnvelope, mixHasUnaccountedSound } from '../../src/shared/ingest/tracks'
+import {
+  isSilentEnvelope,
+  mixHasUnaccountedSound,
+  mixResidual
+} from '../../src/shared/ingest/tracks'
 
 describe('OBS の音声トラックの役割', () => {
   it('名前があれば名前で、無ければ1本目は全部入り、ほかは静かな時間の割合で', () => {
@@ -230,5 +234,17 @@ describe('通話のトラック・無音のトラック', () => {
       ])
     ).toBeGreaterThan(0.9)
     expect(coveredBy({ id: 'c', envelope: call }, [{ id: 'a', envelope: a }])).toBeLessThan(0.6)
+  })
+
+  it('全部入りからほかのトラックの音を引くと、配信者の声だけが残る', () => {
+    const game = env(() => 0.05)
+    const streamer = env(speaking(300, 0))
+    const friends = env(speaking(300, 1))
+    const mix = env((i) =>
+      i < 100 ? NaN : Math.sqrt(game[i] ** 2 + streamer[i] ** 2 + friends[i] ** 2)
+    )
+    const rest = mixResidual(mix, [game, friends])
+    expect(Number.isNaN(rest[50])).toBe(true)
+    for (const i of [150, 450, 1000, 20_000]) expect(rest[i]).toBeCloseTo(streamer[i], 4)
   })
 })

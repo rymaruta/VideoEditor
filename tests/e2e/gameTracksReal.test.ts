@@ -38,7 +38,7 @@ import { exportProject, ffmpegPath, ffprobePath, probeMedia } from '@main/ffmpeg
 import { saveProjectFile } from '@main/projectFileService'
 import { scanFootage } from '@main/footageService'
 import { cachedEnvelope } from '@main/audioPcm'
-import { usePipelineStore } from '@renderer/store/pipelineStore'
+import { STREAMER_SPEAKER, usePipelineStore } from '@renderer/store/pipelineStore'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
@@ -86,11 +86,16 @@ function installApi(streamer: Line[], friend: Line[], calls: { asrPaths: string[
   const asr = (job: AsrJob): AsrJobResult => {
     calls.asrPaths.push(job.path)
     // ファイルの時刻で答える。実況者の声のトラック(2本目)は OBS と同じ時刻、Craig は 3 秒早く始まっている
-    const [lines, shift] = /_track2\.m4a$/.test(job.path)
-      ? [streamer, 0]
-      : /1-tomo\.flac$/.test(job.path)
-        ? [friend, CRAIG_EARLY]
-        : [[], 0]
+    // 全部入り(1本目)は全員の声が入っている。2本目のトラックの OBS では「22-00-00」の録画のほうは通話(相手の声だけ)
+    const [lines, shift] = /_track1\.m4a$/.test(job.path)
+      ? [[...streamer, ...friend], 0]
+      : /22-00-00_\w+_track2\.m4a$/.test(job.path)
+        ? [friend, 0]
+        : /_track2\.m4a$/.test(job.path)
+          ? [streamer, 0]
+          : /1-tomo\.flac$/.test(job.path)
+            ? [friend, CRAIG_EARLY]
+            : [[], 0]
     const heard = lines.filter(
       (l) => (l.start + l.end) / 2 + shift >= job.start && (l.start + l.end) / 2 + shift < job.end
     )
@@ -333,6 +338,25 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     // 配信者の声は全部入りにしか無いので、全部入りも文字起こしする
     const asked = [...new Set(calls.asrPaths.map((p) => p.split(/[/\\]/).pop()))]
     expect(asked.some((p) => /_track1\.m4a$/.test(p!))).toBe(true)
+    // 全部入りが持つのは配信者の声だけ: 相手の発言は通話のトラックの発言として1回だけ、
+    // 配信者の発言は「配信者」の発言として出る(全部入りのトラックの名前にしない)
+    const transcript = useProjectStore.getState().project.transcript ?? []
+    const friendTexts = new Set(friend.map((l) => l.text))
+    const words = transcript.flatMap((u) =>
+      u.words.map((w) => ({ text: w.text, speaker: u.speaker }))
+    )
+    const friendWords = words.filter((w) => friendTexts.has(w.text))
+    const streamerWords = words.filter((w) => !friendTexts.has(w.text))
+    expect(friendWords.length).toBe(friend.length)
+    expect(friendWords.every((w) => w.speaker === '声(トラック2)')).toBe(true)
+    expect(streamerWords.every((w) => w.speaker === STREAMER_SPEAKER)).toBe(true)
+    expect(streamerWords.length).toBeGreaterThanOrEqual(streamer.length * 0.9)
+    // 盛り上がりは配信者の声(全部入りからゲーム音・通話を引いた残り)で測るので、解説中の爆発音は数えない
+    const hypeLine = usePipelineStore
+      .getState()
+      .log.map((l) => l.text)
+      .find((l) => l.startsWith('声の盛り上がり'))
+    expect(hypeLine).toBe(`声の盛り上がり(叫び・大声): ${HYPE_AT.length} 回`)
   }, 300_000)
 
   it('トラックを分け、役割を推し量り、声だけで盛り上がりを測る。ゲーム音と声を鳴らし、顔カメラはワイプで出す', async () => {

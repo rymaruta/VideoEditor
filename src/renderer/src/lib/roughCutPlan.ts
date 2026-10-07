@@ -52,6 +52,7 @@ import { chooseAngles, type Shot } from '@shared/angles/choose'
 import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
+import { mixResidual } from '@shared/ingest/tracks'
 import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import {
   speechLook,
@@ -133,7 +134,34 @@ export async function loadActivity(project: Project, info: MulticamInfo): Promis
   })
   const mask = activityMask(tracks)
   levelOfActivity.set(mask, mixLevelDb(tracks))
-  sourceLevelsOfActivity.set(mask, new Map(tracks.map((t) => [t.id, mixLevelDb([t])])))
+  const levels = new Map(tracks.map((t) => [t.id, mixLevelDb([t])]))
+  // 全部入りにだけある声(配信者)の発言は、全部入りから同じ録画のほかのトラックを引いた残りで測る
+  // (全部入りのままだと、解説中の爆発音まで声の盛り上がりに数える)
+  const spoken = new Set(
+    (project.transcript ?? []).map((u) => info.files.find((f) => f.assetId === u.assetId)?.sourceId)
+  )
+  for (const mix of info.sources.filter(
+    (s) => s.trackRole === 'mix' && s.trackOf && spoken.has(s.id)
+  )) {
+    const own = info.sources.filter((s) => s.trackOf === mix.trackOf)
+    const ownFiles = info.files.filter(
+      (f) => own.some((s) => s.id === f.sourceId) && pathOf.has(f.assetId)
+    )
+    const env = await window.api.footageEnvelopes(ownFiles.map((f) => pathOf.get(f.assetId)!))
+    const placed = (sourceId: string): Float32Array => {
+      const out = new Float32Array(length).fill(NaN)
+      ownFiles.forEach((f, i) => {
+        if (f.sourceId === sourceId) placeEnvelope(env[i], f.start, f.rate, length, out)
+      })
+      return out
+    }
+    const residual = mixResidual(
+      placed(mix.id),
+      own.filter((s) => s.id !== mix.id && s.trackRole !== 'mix').map((s) => placed(s.id))
+    )
+    levels.set(mix.id, mixLevelDb([{ id: mix.id, envelope: residual }]))
+  }
+  sourceLevelsOfActivity.set(mask, levels)
   return mask
 }
 

@@ -67,9 +67,10 @@ import {
 import { roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mapTimelineRange, timelineMapping } from '@shared/roughCut/follow'
 import { formatIpcError } from '../lib/ipcError'
-import { mixHasUnaccountedSound } from '@shared/ingest/tracks'
+import { mixHasUnaccountedSound, mixResidual } from '@shared/ingest/tracks'
 import { emitMenuCommand } from '../lib/menuCommands'
 import {
+  activityMask,
   detectTurns,
   placeEnvelope,
   coveredBy,
@@ -348,6 +349,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     // 取り出したトラックを話者の判定・文字起こしに使わず、鳴らさない(発言が2回・声が二重になる)。
     // 通話のトラックは、一緒に遊ぶ人みんなの声なので、Craig の何人分かのファイルを合わせたものと比べる
     const duplicates = new Set<string>()
+    // 全部入りの残り(配信者の声)を話者にした音源。発言の話者は「配信者」にする(トラックの名前にしない)
+    const mixSpeakers = new Set<string>()
     const roleOf = (id: string): string | undefined =>
       speakerSources.find((s) => s.id === id)?.trackRole
     const ownMics = tracks.filter((o) => roleOf(o.id) === undefined)
@@ -406,9 +409,27 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       log(
         `「${mixSrc.name}」に、ほかのトラック・マイクに無い声があるため、「${mixSrc.name}」だけを鳴らします(ほかのトラック・マイクは文字起こしにだけ使います)。「${mixSrc.name}」も話者の判定・文字起こしに使います`
       )
-      // その声(多くは配信者の実況)は全部入りにしか無いので、全部入りも話者の判定・文字起こしに使う
-      // (ほかの人の声は、その人のトラック・マイクのほうが大きく入るので、そちらの発言になる)
-      tracks.push({ id: mixSrc.id, envelope: placed(mixSrc.id) })
+      // その声(多くは配信者の実況)は全部入りにしか無いので、全部入りも話者の判定・文字起こしに使う。
+      // 全部入りのままだと、友達の発言・ゲーム音まで全部入りの発言になる(テロップが2回・長くつながる)ので、
+      // 同じ録画のほかのトラック(ゲーム音・声・通話)を差し引いた残りで判定する。
+      // 別に録ったマイク(Craig など)の人の声は音量が揃わず引けないので、その人が話している所は全部入りを使わない
+      const sameRecording = tracks.filter((t) => group.some((g) => g.id === t.id))
+      const residual = mixResidual(placed(mixSrc.id), [
+        ...gameSrcs.map((g) => placed(g.id)),
+        ...sameRecording.map((t) => t.envelope)
+      ])
+      if (!group.some((g) => g.trackRole === 'call')) {
+        const others = tracks.filter((t) => !duplicates.has(t.id) && !sameRecording.includes(t))
+        const busy = activityMask(others)
+        const pad = Math.round(MIX_MASK_PAD_SEC * TURN_RATE)
+        // 声の出だし・終わりの小さい所も含めるよう、前後に少し広げる
+        for (let i = 0; i < busy.length; i++) {
+          if (!busy[i]) continue
+          residual.fill(NaN, Math.max(0, i - pad), Math.min(residual.length, i + pad + 1))
+        }
+      }
+      tracks.push({ id: mixSrc.id, envelope: residual })
+      mixSpeakers.add(mixSrc.id)
       for (const f of ownFiles) if (f.sourceId === mixSrc.id) targetFiles.push(f)
       speakerSources.push(mixSrc)
       const project = useProjectStore.getState().project
@@ -487,7 +508,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       utterances.push({
         id: uuid(),
         assetId,
-        speaker: mics.length > 0 ? nameOf.get(j.turn.micId) : undefined,
+        speaker:
+          mics.length === 0
+            ? undefined
+            : mixSpeakers.has(j.turn.micId)
+              ? STREAMER_SPEAKER
+              : nameOf.get(j.turn.micId),
         sourceStart: j.job.start,
         sourceEnd: j.job.end,
         text: r.text,
@@ -1774,6 +1800,10 @@ function stopIfCanceled(): void {
 }
 /** 通話のトラックの声のうち、1人ずつのマイクに入っている割合がこれ以上なら、同じ声とみなす */
 const SAME_VOICE_COVERAGE = 0.7
+/** 別に録ったマイクの人が話している所の前後、全部入りを話者の判定に使わない幅(秒) */
+const MIX_MASK_PAD_SEC = 0.2
+/** 全部入りにだけある声(配信者の実況)の発言の話者名 */
+export const STREAMER_SPEAKER = '配信者'
 /** 収録フォルダを読むたびに増やす(古い読み込みの結果を捨てるため) */
 let scanToken = 0
 usePipelineStore.subscribe((s, prev) => {
