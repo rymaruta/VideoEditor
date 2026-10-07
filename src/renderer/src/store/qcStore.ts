@@ -5,7 +5,7 @@ import type { QcIssue } from '@shared/qc/types'
 import { parseDictionary } from '@shared/telop/polish'
 import { textCanvasSize } from '@shared/resolution'
 import type { LoudnessTarget } from '@shared/loudness'
-import { useProjectStore } from './projectStore'
+import { onProjectSwitch, useProjectStore } from './projectStore'
 import { useSettingsStore } from './settingsStore'
 import { formatIpcError } from '../lib/ipcError'
 
@@ -40,21 +40,26 @@ function telopCheck(): QcIssue[] {
   })
 }
 
+let qcRunToken = 0
+
 export const useQcStore = create<QcState>((set, get) => ({
   report: null,
   run: async (path, loudness) => {
+    const token = ++qcRunToken
     // 文字の幅を測るので、書き出しと同じ書体が読み込まれてから
     await document.fonts?.ready
+    if (token !== qcRunToken) return
     const telop = telopCheck()
     set({
       report: { path, state: 'run', percent: 0, issues: sortIssues(telop), measurement: null }
     })
     const off = window.api.onQcProgress((percent) => {
       const r = get().report
-      if (r?.path === path && r.state === 'run') set({ report: { ...r, percent } })
+      if (token === qcRunToken && r?.path === path && r.state === 'run') set({ report: { ...r, percent } })
     })
     try {
       const measurement = await window.api.qcMeasure(path)
+      if (token !== qcRunToken) return
       set({
         report: {
           path,
@@ -65,6 +70,7 @@ export const useQcStore = create<QcState>((set, get) => ({
         }
       })
     } catch (e) {
+      if (token !== qcRunToken) return
       const message = formatIpcError(e)
       const r = get().report
       if (r?.path !== path) return
@@ -78,6 +84,14 @@ export const useQcStore = create<QcState>((set, get) => ({
     }
   },
   cancel: () => {
+    qcRunToken++
     void window.api.qcCancel()
+    set({ report: null })
   }
 }))
+
+// A previous project's export QC must not overwrite the new project's report.
+onProjectSwitch(() => {
+  qcRunToken++
+  useQcStore.setState({ report: null })
+})
