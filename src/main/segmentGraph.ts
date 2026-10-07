@@ -376,6 +376,9 @@ export interface SegmentAudioGraph extends SegmentGraph {
  * ダッキングの圧縮器は直前の音量で状態を持つので、区間の頭から鳴らすと
  * 境目ごとに BGM が一瞬だけ戻る。
  */
+/** 速さを変えた音を、区間の終わりより先に読む長さ(秒) */
+const SPEED_TAIL_SEC = 0.5
+
 export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): SegmentAudioGraph {
   const seq = ctx.sequence
   const sec = (frames: number): number => frameToSeconds(seq, frames)
@@ -470,21 +473,33 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       const visEnd = Math.min(item.startFrame + item.durationFrames, renderEnd)
       const skipSec = sec(visStart - item.startFrame)
       const dur = sec(visEnd - visStart)
-      const seek = item.sourceIn + skipSec * speed
+      /**
+       * **速さを変えた音は、どの区間でもアイテムの頭から読む。**
+       * atempo の出力は読み始めの位置で変わる(音を切り貼りして伸び縮みさせるので、どこから
+       * 始めたかで切れ目の位置がずれる)。区間ごとに違う所から読むと、隣の区間と波形がつながらず、
+       * 区間の境目で「プツッ」と鳴る(実測: 1.25 倍の 440Hz で、境目に振幅 0.17 の段差。
+       * 標準の書き出しは頭から読むので段差なし)。頭から読み、速さを掛けた後で要る所だけ切る
+       */
+      const fromHead = Math.abs(speed - 1) > 1e-9
+      const lead = fromHead ? skipSec : 0
+      const seek = item.sourceIn + (skipSec - lead) * speed
+      // 終わりも少し先まで読む(atempo は入力の終わりで出し方が変わり、区間の終わりの直前が乱れる)
+      const want = (dur + lead + (fromHead ? SPEED_TAIL_SEC : 0)) * speed
       inputs.push({
         path: asset.filePath,
         seek,
         // 出点の先は読まない(足りないぶんは下の apad で無音になる)
         duration:
           item.sourceOut !== undefined && item.sourceOut > seek
-            ? Math.min(dur * speed, item.sourceOut - seek)
-            : dur * speed
+            ? Math.min(want, item.sourceOut - seek)
+            : want
       })
       const idx = inputs.length - 1
       const label = newLabel('a')
       const delay = frameToSample(seq, visStart) - frameToSample(seq, renderStart)
       parts.push(
         `[${idx}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+          (lead > 0 ? `atrim=start=${num(lead)},asetpts=PTS-STARTPTS,` : '') +
           `apad,atrim=0:${num(dur)},asetpts=PTS-STARTPTS,` +
           `${audioFormatFor(ctx.audioChannels?.get(asset.filePath))},` +
           `${envelope(item, track.items, audioClipGain(track.volume, item.volume), skipSec)},` +
