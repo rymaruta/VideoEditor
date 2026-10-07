@@ -108,7 +108,13 @@ export function matchFeatures(
   b: Float32Array,
   options: MatchOptions = {}
 ): FeatureMatch | null {
-  const minOverlap = Math.round((options.minOverlapSec ?? 15) * ENVELOPE_RATE)
+  // 重なりの短い位置は偶然の一致が起きやすい(√重なりで割るので、15 秒の重なりにたまたま
+  // 1 つ音が重なっただけで、長い重なりの本当の位置に勝つ。ほとんど無音の録音で起きた)。
+  // 既定は、短いほうの半分か 60 秒の短いほう(短い素材は 15 秒まで)
+  const minOverlapSec =
+    options.minOverlapSec ??
+    Math.max(15, Math.min(60, (0.5 * Math.min(a.length, b.length)) / ENVELOPE_RATE))
+  const minOverlap = Math.round(minOverlapSec * ENVELOPE_RATE)
   if (a.length < minOverlap || b.length < minOverlap) return null
   const c = crossCorrelation(a, b)
   const na = a.length
