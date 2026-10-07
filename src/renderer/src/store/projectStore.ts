@@ -4491,7 +4491,22 @@ function followMainEdit(
   const videoOverlayTracks = next.videoOverlayTracks.map((t) => {
     if (!follows(t)) return t
     const untouched = isUntouchedAuto(t)
-    const clips = t.clips.flatMap((c) => remapClip(c))
+    // 伸ばして新しく見えた所: 収録素材のカメラ(ゲーム実況の顔カメラのワイプ)なら、そのカメラの絵を足す
+    const added =
+      t.multicamSourceId && gaps.length > 0
+        ? gaps.flatMap((g) =>
+            sourcePieces(info, t.multicamSourceId!, g).map((p) => ({
+              id: uuid(),
+              assetId: p.assetId,
+              startTime: p.startTime,
+              inPoint: p.inPoint,
+              outPoint: p.outPoint
+            }))
+          )
+        : []
+    const clips = [...t.clips.flatMap((c) => remapClip(c)), ...added].sort(
+      (a, b) => a.startTime - b.startTime
+    )
     if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
       return t
     }

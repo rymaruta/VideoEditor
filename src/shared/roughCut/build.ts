@@ -236,7 +236,12 @@ export function silencedTrack(
   const siblings = sources.filter((x) => x.trackOf === s.trackOf)
   const hasGame = siblings.some((x) => x.kind === 'audio' && x.trackRole === 'game')
   const hasMix = siblings.some((x) => x.kind === 'audio' && x.trackRole === 'mix')
-  if (s.trackRole === 'mix') return hasGame
+  const hasVoice = siblings.some((x) => x.trackRole === 'voice')
+  // 全部入りは、声とゲーム音の両方を別のトラックで鳴らせるときだけ止める
+  // (声のトラックが無ければ、実況の声は全部入りにしか無い)
+  if (s.trackRole === 'mix') return hasGame && hasVoice
+  // ゲーム音は、全部入りを鳴らすとき(声のトラックが無い)は重ねない
+  if (s.trackRole === 'game') return hasMix && !hasVoice
   if (s.trackRole === 'voice') return !hasGame && hasMix
   return false
 }

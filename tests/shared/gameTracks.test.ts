@@ -157,6 +157,9 @@ describe('鳴らすトラック(silencedTrack)', () => {
       src('vB', 'mic', 'voice', 'B')
     ]
     expect(two.map((s) => silencedTrack(two, s.id))).toEqual([false, true, false, false])
+    // 声のトラックが無い(1本目が全部入り・2本目がゲーム音だけ)なら、全部入りを鳴らし、ゲーム音は重ねない
+    const noVoice = [src('mix', 'audio', 'mix', 'obs'), src('g', 'audio', 'game', 'obs')]
+    expect(noVoice.map((s) => silencedTrack(noVoice, s.id))).toEqual([false, true])
     // 役割だけあって元の録画が分からない(手で役割を付けた)音源は消さない
     const manual = [src('m', 'mic', 'voice'), src('g', 'audio', 'game')]
     expect(manual.map((s) => silencedTrack(manual, s.id))).toEqual([false, false])
