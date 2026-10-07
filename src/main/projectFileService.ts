@@ -201,7 +201,8 @@ export function loadProjectFile(filePath: string): Project {
   }
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    // メモ帳などで手直しすると、頭に BOM が付く(JSON.parse はそれを読めない)
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ''))
   } catch {
     throw new Error(
       'プロジェクトファイルを読み込めませんでした。ファイルが壊れているか、対応していない形式です。'

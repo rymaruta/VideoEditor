@@ -63,10 +63,22 @@ export type ExportLoudness = 'off' | LoudnessTarget
 
 function readChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
-    const v = localStorage.getItem(key)
+    const v = readSetting(key)
     return allowed.includes(v as T) ? (v as T) : fallback
   } catch {
     return fallback
+  }
+}
+
+/**
+ * 設定を読む。読めない(容量オーバー・壊れた保存領域・使えない環境)ときは null。
+ * 読み込みのたびに try を書かないと、1つ読めないだけで画面全体が起動しなくなる
+ */
+function readSetting(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
   }
 }
 
@@ -83,13 +95,13 @@ const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440, 2160]
 // プレビューのテロップは「出力ピクセル」を枠の大きさへ換算して描くため、
 // 書き出しの解像度をプレビュー側からも読める必要がある。
 function readExportResolution(): ResolutionHeight {
-  const n = Number(localStorage.getItem(EXPORT_RESOLUTION_KEY))
+  const n = Number(readSetting(EXPORT_RESOLUTION_KEY))
   return RESOLUTION_HEIGHTS.includes(n as ResolutionHeight) ? (n as ResolutionHeight) : 1080
 }
 
 function readExportEngine(): ExportEngine {
   try {
-    return localStorage.getItem(EXPORT_ENGINE_KEY) === 'segmented' ? 'segmented' : 'standard'
+    return readSetting(EXPORT_ENGINE_KEY) === 'segmented' ? 'segmented' : 'standard'
   } catch {
     return 'standard'
   }
@@ -188,59 +200,64 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  youtubeApiKey: localStorage.getItem(STORAGE_KEY) ?? '',
+  youtubeApiKey: readSetting(STORAGE_KEY) ?? '',
   setYoutubeApiKey: (key) => {
-    localStorage.setItem(STORAGE_KEY, key)
+    writeSetting(STORAGE_KEY, key)
     set((s) => ({
       youtubeApiKey: key,
       envKeySources: { ...s.envKeySources, youtubeApiKey: false }
     }))
   },
-  jamendoClientId: localStorage.getItem(JAMENDO_STORAGE_KEY) ?? '',
+  jamendoClientId: readSetting(JAMENDO_STORAGE_KEY) ?? '',
   setJamendoClientId: (key) => {
-    localStorage.setItem(JAMENDO_STORAGE_KEY, key)
+    writeSetting(JAMENDO_STORAGE_KEY, key)
     set((s) => ({
       jamendoClientId: key,
       envKeySources: { ...s.envKeySources, jamendoClientId: false }
     }))
   },
-  freesoundApiKey: localStorage.getItem(FREESOUND_STORAGE_KEY) ?? '',
+  freesoundApiKey: readSetting(FREESOUND_STORAGE_KEY) ?? '',
   setFreesoundApiKey: (key) => {
-    localStorage.setItem(FREESOUND_STORAGE_KEY, key)
+    writeSetting(FREESOUND_STORAGE_KEY, key)
     set((s) => ({
       freesoundApiKey: key,
       envKeySources: { ...s.envKeySources, freesoundApiKey: false }
     }))
   },
-  geminiApiKey: localStorage.getItem(GEMINI_STORAGE_KEY) ?? '',
+  geminiApiKey: readSetting(GEMINI_STORAGE_KEY) ?? '',
   setGeminiApiKey: (key) => {
-    localStorage.setItem(GEMINI_STORAGE_KEY, key)
+    writeSetting(GEMINI_STORAGE_KEY, key)
     set((s) => ({ geminiApiKey: key, envKeySources: { ...s.envKeySources, geminiApiKey: false } }))
   },
-  keymapScheme: (localStorage.getItem(KEYMAP_STORAGE_KEY) as KeymapScheme) ?? 'default',
+  // 知らない値(壊れた値・"constructor" など)は既定へ
+  keymapScheme: readChoice<KeymapScheme>(
+    KEYMAP_STORAGE_KEY,
+    ['default', 'premiere', 'capcut'],
+    'default'
+  ),
   setKeymapScheme: (scheme) => {
-    localStorage.setItem(KEYMAP_STORAGE_KEY, scheme)
+    writeSetting(KEYMAP_STORAGE_KEY, scheme)
     set({ keymapScheme: scheme })
   },
-  snapEnabled: localStorage.getItem(SNAP_ENABLED_KEY) !== 'false',
+  snapEnabled: readSetting(SNAP_ENABLED_KEY) !== 'false',
   setSnapEnabled: (enabled) => {
-    localStorage.setItem(SNAP_ENABLED_KEY, String(enabled))
+    writeSetting(SNAP_ENABLED_KEY, String(enabled))
     set({ snapEnabled: enabled })
   },
-  shortcutGuideVisible: localStorage.getItem(SHORTCUT_GUIDE_VISIBLE_KEY) === 'true',
+  shortcutGuideVisible: readSetting(SHORTCUT_GUIDE_VISIBLE_KEY) === 'true',
   setShortcutGuideVisible: (visible) => {
-    localStorage.setItem(SHORTCUT_GUIDE_VISIBLE_KEY, String(visible))
+    writeSetting(SHORTCUT_GUIDE_VISIBLE_KEY, String(visible))
     set({ shortcutGuideVisible: visible })
   },
   exportResolutionHeight: readExportResolution(),
   setExportResolutionHeight: (height) => {
-    localStorage.setItem(EXPORT_RESOLUTION_KEY, String(height))
+    writeSetting(EXPORT_RESOLUTION_KEY, String(height))
     set({ exportResolutionHeight: height })
   },
   exportEngine: readExportEngine(),
   setExportEngine: (engine) => {
     try {
-      localStorage.setItem(EXPORT_ENGINE_KEY, engine)
+      writeSetting(EXPORT_ENGINE_KEY, engine)
     } catch {
       // 保存できなくても今回の起動の間は効く
     }
@@ -271,7 +288,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
   telopDictionary: (() => {
     try {
-      return localStorage.getItem(TELOP_DICTIONARY_KEY) ?? ''
+      return readSetting(TELOP_DICTIONARY_KEY) ?? ''
     } catch {
       return ''
     }
@@ -282,7 +299,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
   qcWords: (() => {
     try {
-      return localStorage.getItem(QC_WORDS_KEY) ?? ''
+      return readSetting(QC_WORDS_KEY) ?? ''
     } catch {
       return ''
     }
@@ -293,7 +310,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
   showKitFolder: (() => {
     try {
-      return localStorage.getItem(SHOW_KIT_KEY) ?? ''
+      return readSetting(SHOW_KIT_KEY) ?? ''
     } catch {
       return ''
     }
@@ -304,7 +321,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
   showStyle: (() => {
     try {
-      const raw = JSON.parse(localStorage.getItem(SHOW_STYLE_KEY) ?? 'null') as {
+      const raw = JSON.parse(readSetting(SHOW_STYLE_KEY) ?? 'null') as {
         style?: unknown
         sources?: unknown
       } | null
@@ -330,7 +347,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
   speechTelopLook: (() => {
     try {
-      return localStorage.getItem(SPEECH_TELOP_LOOK_KEY) || DEFAULT_SPEECH_LOOK
+      return readSetting(SPEECH_TELOP_LOOK_KEY) || DEFAULT_SPEECH_LOOK
     } catch {
       return DEFAULT_SPEECH_LOOK
     }
@@ -357,7 +374,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
   favoriteColors: (() => {
     try {
-      return normalizeFavoriteColors(JSON.parse(localStorage.getItem(FAVORITE_COLORS_KEY) ?? '[]'))
+      return normalizeFavoriteColors(JSON.parse(readSetting(FAVORITE_COLORS_KEY) ?? '[]'))
     } catch {
       return []
     }
@@ -376,7 +393,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     }),
   recentColors: (() => {
     try {
-      return normalizeRecentColors(JSON.parse(localStorage.getItem(RECENT_COLORS_KEY) ?? '[]'))
+      return normalizeRecentColors(JSON.parse(readSetting(RECENT_COLORS_KEY) ?? '[]'))
     } catch {
       return []
     }
@@ -390,9 +407,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     }),
   favoriteGradients: (() => {
     try {
-      return normalizeFavoriteGradients(
-        JSON.parse(localStorage.getItem(FAVORITE_GRADIENTS_KEY) ?? '[]')
-      )
+      return normalizeFavoriteGradients(JSON.parse(readSetting(FAVORITE_GRADIENTS_KEY) ?? '[]'))
     } catch {
       return []
     }
@@ -425,7 +440,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   sectionPresets: (() => {
     try {
       return normalizeSectionPresets(
-        JSON.parse(localStorage.getItem(SECTION_PRESETS_KEY) ?? '{}'),
+        JSON.parse(readSetting(SECTION_PRESETS_KEY) ?? '{}'),
         (section) => (Object.hasOwn(SECTION_KEYS, section) ? SECTION_KEYS[section] : undefined)
       )
     } catch {
@@ -470,9 +485,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       writeSetting(SECTION_PRESETS_KEY, JSON.stringify(sectionPresets))
       return { sectionPresets }
     }),
-  shortNote: localStorage.getItem(SHORT_NOTE_KEY) ?? '',
+  shortNote: readSetting(SHORT_NOTE_KEY) ?? '',
   setShortNote: (note) => {
-    localStorage.setItem(SHORT_NOTE_KEY, note)
+    writeSetting(SHORT_NOTE_KEY, note)
     set({ shortNote: note })
   },
   envKeySources: {

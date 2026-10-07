@@ -574,9 +574,14 @@ function normalizeLoadedProjectFields(project: Project): Project {
     .map(normalizeAsset)
     .filter((a): a is MediaAsset => a !== null)
   // 壊れた尺を埋めるのに使う。素材を先に整えてから、それを見てクリップを整える。
-  const durationById = new Map(assets.map((a) => [a.id, a.duration]))
+  // 同じ ID の素材が2つあれば、ID を持ち続けるのは先の方(`dedupeLoadedIds` が後の方に新しい ID を
+  // 付ける)。後の方の尺で縮めると、先の素材を指すクリップが黙って短くなる
+  const durationById = new Map<string, number>()
+  for (const a of assets) if (!durationById.has(a.id)) durationById.set(a.id, a.duration)
   const durationOf = (assetId: string): number => durationById.get(assetId) ?? 0
   return {
+    // 知らない項目(新しい版で足した項目)も残す。消すと、古い版で保存したときに新しい版のデータが消える
+    ...(raw as Partial<Project>),
     id: asNonEmptyString(raw.id, uuid()),
     name: asNonEmptyString(raw.name, '無題のプロジェクト'),
     // 知っている2つ以外は既定へ。画面の切り替えもこの値を見る。
@@ -1216,6 +1221,25 @@ function keepBackgroundResults(restored: Project, current: Project): Project {
   return { ...restored, assets, ...(events ? { audioEvents: current.audioEvents } : {}) }
 }
 
+/** 裏の結果(プロキシ・検出結果)だけを書き込んだプロジェクト → 書き込む前のプロジェクト */
+const backgroundBase = new WeakMap<Project, Project>()
+
+/** 裏の結果だけの書き込み。未保存の判定(`markSaved`)で編集と数えないよう、元を覚えておく */
+function backgroundUpdate(base: Project, next: Project): Project {
+  backgroundBase.set(next, base)
+  return next
+}
+
+/**
+ * 今のプロジェクトが、保存したもの(か、それに裏の結果だけを書き込んだもの)か。
+ * 保存の途中で変換が終わってプロキシが入っても、未保存にしない
+ */
+function savedOrBackgroundOnly(current: Project, saved: Project): boolean {
+  let p: Project | undefined = current
+  while (p && p !== saved) p = backgroundBase.get(p)
+  return p === saved
+}
+
 /** 戻したプロジェクトにまだある文字テロップなら選んだまま、無ければ選びを外す */
 function overlayStillThere(project: Project, id: string | null): string | null {
   return id && project.textOverlays.some((o) => o.id === id) ? id : null
@@ -1654,7 +1678,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                   // The proxy was transcoded from the file we just replaced. Keeping it
                   // made the preview play the OLD footage while the export used the new
                   // file — the one place the two must never disagree.
-                  proxyPath: undefined
+                  proxyPath: undefined,
+                  // 差し替えた先は人が選んだファイル。ノイズを除いた音声の印を残すと、
+                  // 「ノイズ除去を外す」で前の(見つからない)録音へ戻っていた
+                  denoisedFrom: undefined,
+                  proxyBeforeDenoise: undefined
                 }
               : a
           ),
@@ -1739,7 +1767,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       //  画面は ABCD・`isDirty=false`・警告なしなのに、ファイルの中身は **ABC** だった)
       // 編集があれば `project` は必ず別のオブジェクトに差し替わる(どの操作も
       // `{...state.project}` を作る)ので、参照が同じかどうかで判定できる。
-      isDirty: state.project !== savedProject,
+      isDirty: !savedOrBackgroundOnly(state.project, savedProject),
       saveError: null
     })),
 
@@ -1902,10 +1930,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const target = state.project.assets.find((a) => a.id === assetId)
       if (!target || target.proxyPath === proxyPath) return state
       return {
-        project: {
+        project: backgroundUpdate(state.project, {
           ...state.project,
           assets: state.project.assets.map((a) => (a.id === assetId ? { ...a, proxyPath } : a))
-        }
+        })
       }
     }),
 
@@ -3121,7 +3149,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   setAudioEvents: (events) =>
-    set((state) => ({ project: { ...state.project, audioEvents: events } })),
+    set((state) => ({
+      project: backgroundUpdate(state.project, { ...state.project, audioEvents: events })
+    })),
 
   setAssetsDenoised: (changes, options) =>
     set((state) => {
@@ -3154,7 +3184,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       })
       if (!changed) return state
       return {
-        ...(options?.history === false ? {} : pushHistory(state)),
+        // 開いたときの自動の戻しは取り消しの履歴に積まないが、書き出しに使うファイルが変わるので
+        // 未保存にする(保存しないと、開くたびに同じ戻しが起き、閉じるときの警告も出なかった)
+        ...(options?.history === false ? { isDirty: true } : pushHistory(state)),
         project: { ...state.project, assets }
       }
     }),

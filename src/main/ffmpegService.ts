@@ -160,7 +160,11 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
       // 生の失敗文は版数とビルド設定の羅列で、本当の原因は末尾の1行だけ。
       // ここで短い日本語に直す(呼び出し元ごとに try/catch を足さない)。
       if (err) return reject(describeFfmpegError(err))
-      const videoStream = data.streams.find((s) => s.codec_type === 'video')
+      // 音声ファイルのジャケット画像(attached_pic)は映像ではない(映像として扱うと、BGM に
+      // プレビュー用の変換が走り、90000fps のコマ送りになり、本編・ワイプにも置けてしまう)
+      const videoStream = data.streams.find(
+        (s) => s.codec_type === 'video' && !s.disposition?.attached_pic
+      )
       const audioStream = data.streams.find((s) => s.codec_type === 'audio')
       if (!videoStream && !audioStream) {
         return reject(new Error('動画・音声トラックが見つかりませんでした'))

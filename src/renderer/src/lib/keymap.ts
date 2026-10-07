@@ -77,7 +77,8 @@ export const KEYMAP_SCHEME_LABELS: Record<KeymapScheme, string> = {
 }
 
 export function getKeymap(scheme: KeymapScheme): Record<ShortcutAction, KeyBinding> {
-  return KEYMAPS[scheme] ?? KEYMAPS.default
+  // 持っている型だけ(`KEYMAPS["constructor"]` は Object を返し、キー操作のたびに落ちていた)
+  return Object.hasOwn(KEYMAPS, scheme) ? KEYMAPS[scheme] : KEYMAPS.default
 }
 
 export function getActionLabel(action: ShortcutAction): string {

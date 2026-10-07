@@ -59,3 +59,11 @@ describe('projectFileService', () => {
     expect(() => loadProjectFile(path)).toThrow('ファイルが壊れているか')
   })
 })
+
+describe('手直しした企画ファイル', () => {
+  it('頭に BOM が付いた(メモ帳で保存した)ファイルも開ける', () => {
+    const path = join(dir, 'bom.veproj')
+    writeFileSync(path, '﻿' + JSON.stringify(project('BOM付き')), 'utf-8')
+    expect(loadProjectFile(path).name).toBe('BOM付き')
+  })
+})

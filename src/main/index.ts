@@ -126,6 +126,11 @@ let quitWhileBusy = false
 let autosavePath = ''
 /** このセッションで自動保存を1回でも書いたか(前回のぶんを退避するのは最初の1回だけ) */
 let autosaveOverwrittenThisSession = false
+/**
+ * このセッションで、前回の作業(「あとで決める」で見送った自動保存)を退避先へ移したか。
+ * 移したなら、退避先に居るのは前回の作業。終了時に今回のぶんで上書きしない
+ */
+let previousDraftSetAside = false
 let windowStatePath = ''
 /** 画面のプロセスが落ちたら読み込み直す(続けて落ちるときは止める) */
 const rendererCrashGuard = new RendererCrashGuard()
@@ -246,7 +251,7 @@ function createWindow(): void {
       // ここでファイルが残っているのは、前回の復元確認を「あとで決める」で見送った
       // ぶんだけ(保存・開く・新規では clearAutosave が消している)。消してしまうと
       // 見送っただけのつもりが、閉じた瞬間に確認もなく永久に失われる。退避に留める。
-      if (autosavePath) discardAutosaveFile(autosavePath)
+      settleAutosaveOnClose()
       return
     }
     e.preventDefault()
@@ -372,7 +377,24 @@ function releaseAutosave(): boolean {
     rmSync(autosavePath, { force: true })
     return false
   }
-  return discardAutosaveFile(autosavePath)
+  const setAside = discardAutosaveFile(autosavePath)
+  if (setAside) previousDraftSetAside = true
+  return setAside
+}
+
+/**
+ * 終了時の自動保存の後始末。ふつうは今回の作業を退避先へ移す(次回の起動で戻せる)。
+ * ただし退避先に前回の作業(見送ったぶん)が居て、今回のぶんが自動保存にあるなら、
+ * 今回のぶん(利用者が「保存せずに終了」で捨てると答えた、または保存済みのぶん)は消す。
+ * 移すと、見送っただけの前回の作業が、捨てると答えた今回の作業で上書きされて消えていた
+ */
+function settleAutosaveOnClose(): void {
+  if (!autosavePath || !existsSync(autosavePath)) return
+  if (previousDraftSetAside && autosaveOverwrittenThisSession) {
+    rmSync(autosavePath, { force: true })
+    return
+  }
+  discardAutosaveFile(autosavePath)
 }
 
 function registerWindowScopedIpcHandlers(): void {
@@ -764,6 +786,7 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.autosaveProject, (_e, project: Project) => {
     const setAside = writeAutosaveFile(autosavePath, project, !autosaveOverwrittenThisSession)
     autosaveOverwrittenThisSession = true
+    if (setAside) previousDraftSetAside = true
     return setAside
   })
   /**

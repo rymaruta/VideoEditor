@@ -5,7 +5,7 @@ import type { QcIssue } from '@shared/qc/types'
 import { parseDictionary } from '@shared/telop/polish'
 import { textCanvasSize } from '@shared/resolution'
 import type { LoudnessTarget } from '@shared/loudness'
-import { useProjectStore } from './projectStore'
+import { onProjectSwitch, useProjectStore } from './projectStore'
 import { useSettingsStore } from './settingsStore'
 import { formatIpcError } from '../lib/ipcError'
 
@@ -40,11 +40,16 @@ function telopCheck(): QcIssue[] {
   })
 }
 
+/** プロジェクトを替えるたびに増やす(前のプロジェクトの確認結果を、替えた後に書かない) */
+let runToken = 0
+
 export const useQcStore = create<QcState>((set, get) => ({
   report: null,
   run: async (path, loudness) => {
+    const token = runToken
     // 文字の幅を測るので、書き出しと同じ書体が読み込まれてから
     await document.fonts?.ready
+    if (token !== runToken) return
     const telop = telopCheck()
     set({
       report: { path, state: 'run', percent: 0, issues: sortIssues(telop), measurement: null }
@@ -55,6 +60,8 @@ export const useQcStore = create<QcState>((set, get) => ({
     })
     try {
       const measurement = await window.api.qcMeasure(path)
+      // 測っている間に別のプロジェクトを開いたなら、前のプロジェクトの結果を書かない
+      if (token !== runToken) return
       set({
         report: {
           path,
@@ -67,7 +74,7 @@ export const useQcStore = create<QcState>((set, get) => ({
     } catch (e) {
       const message = formatIpcError(e)
       const r = get().report
-      if (r?.path !== path) return
+      if (token !== runToken || r?.path !== path) return
       set({
         report: message.includes('QC_CANCELED')
           ? null
@@ -81,3 +88,11 @@ export const useQcStore = create<QcState>((set, get) => ({
     void window.api.qcCancel()
   }
 }))
+
+// 確認の結果はそのプロジェクトの書き出しのもの。別のプロジェクトを開いたら捨てる
+// (残すと、書き出しの画面に前のプロジェクトの指摘が出て、押すと今のプロジェクトの別の時刻へ飛んでいた)
+onProjectSwitch(() => {
+  runToken++
+  if (useQcStore.getState().report?.state === 'run') void window.api.qcCancel()
+  useQcStore.setState({ report: null })
+})
