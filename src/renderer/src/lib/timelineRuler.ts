@@ -31,14 +31,30 @@ export function rulerTicks(from: number, to: number, step: number, max = 400): n
   return out
 }
 
-/** `時:分:秒:フレーム`。負や数でない値は 0 として扱う */
+/**
+ * `時:分:秒:フレーム`。負や数でない値は 0 として扱う。
+ * `fps` は本当のフレームレート(29.97 なら 30000/1001)。29.97 / 59.94 はドロップフレーム
+ * (`時:分:秒;フレーム`。毎分の頭の 2 / 4 コマの番号を飛ばし、10 分ごとには飛ばさない)で数え、
+ * 時刻表示が実時間とずれないようにする。整数に丸めて数えると、29.97 で約 1000 コマごとに
+ * フレームの番号が1つ飛び、10 分の所が 00:10:00 にならなかった
+ */
 export function formatTimecode(seconds: number, fps: number): string {
-  const rate = Number.isFinite(fps) && fps > 0 ? Math.round(fps) : 30
+  const real = Number.isFinite(fps) && fps > 0 ? fps : 30
+  const nominal = Math.round(real)
   // 99時間で頭打ちにする(壊れた値で表示が Infinity にならないように)
   const safe = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 99 * 3600) : 0
-  const total = Math.round(safe * rate)
-  const f = total % rate
-  const s = Math.floor(total / rate)
+  let frame = Math.round(safe * real)
   const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}:${pad(f)}`
+  const dropFrame = Math.abs(real - nominal) > 1e-3 && (nominal === 30 || nominal === 60)
+  if (dropFrame) {
+    const drop = nominal === 30 ? 2 : 4
+    const per10 = nominal * 600 - drop * 9
+    const perMin = nominal * 60 - drop
+    const d = Math.floor(frame / per10)
+    const m = frame % per10
+    frame += drop * 9 * d + (m > drop ? drop * Math.floor((m - drop) / perMin) : 0)
+  }
+  const f = frame % nominal
+  const s = Math.floor(frame / nominal)
+  return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}${dropFrame ? ';' : ':'}${pad(f)}`
 }

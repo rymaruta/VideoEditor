@@ -13,9 +13,7 @@ import { frameSeconds } from '@shared/frameRate'
 export function ExportQcPanel({ onJump }: { onJump: () => void }): React.JSX.Element | null {
   const report = useQcStore((s) => s.report)
   const cancel = useQcStore((s) => s.cancel)
-  const fps = useProjectStore((s) =>
-    Math.round(1 / frameSeconds(s.project.clips, s.project.assets))
-  )
+  const fps = useProjectStore((s) => 1 / frameSeconds(s.project.clips, s.project.assets))
   const qcWords = useSettingsStore((s) => s.qcWords)
   const setQcWords = useSettingsStore((s) => s.setQcWords)
   const [editingWords, setEditingWords] = useState(false)

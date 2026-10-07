@@ -1173,6 +1173,11 @@ const EDGES: Case = {
     { src: 'A30', in: 3.01, out: 5.0 }
   ],
   pip: [{ src: 'D60pip', start: 0.5, in: 3.012, out: 4.5 }],
+  // 頭が丸めの残り(5.55e-17)・クリップより長い消える長さ(以前は標準の書き出しが ffmpeg の
+  // 読めない値を書いて失敗した)
+  audio: [
+    { volume: 1, clips: [{ src: 'Fsfx', start: 1, in: 0.1 + 0.2 - 0.3, out: 0.45, fadeOut: 3 }] }
+  ],
   telops: [{ start: 0.2, end: 1.0 }]
 }
 

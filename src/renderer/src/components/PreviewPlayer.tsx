@@ -1300,7 +1300,7 @@ export function PreviewPlayer(): React.JSX.Element {
   }, [isExpanded])
 
   // 時間の表示はタイムラインと同じ `時:分:秒:フレーム`(Premiere と同じ)
-  const timecodeFps = Math.round(1 / frameSeconds(project.clips, project.assets))
+  const timecodeFps = 1 / frameSeconds(project.clips, project.assets)
   // 回の全部のテロップの書体を、手が空いたときに先に読み込んでおく。読み込まれていない文字の
   // 範囲は、テロップが初めて出た瞬間に文字の幅を測るところで書体の解決を待たされ、再生が止まる
   // (実測: 同梱フォントのテロップが出た瞬間に 1.2〜2.4 秒止まった)。確かめ済みの文字は

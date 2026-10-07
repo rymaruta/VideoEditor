@@ -139,6 +139,26 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
     expect((cg.items[0] as MediaItem).placement).toEqual({ kind: 'frame', fit: 'contain' })
   })
 
+  it('ワイプの音のアイテムにも出点を渡す(フレームに丸めて伸びたぶん、出点の先の音を読まない)', () => {
+    const p = projectV1ToV2(
+      emptyProject({
+        clips: crossfadeClips(),
+        videoOverlayTracks: [
+          {
+            id: 'w',
+            name: 'ワイプ',
+            hidden: false,
+            position: 'bottom-right',
+            scale: 0.3,
+            clips: [{ id: 'p1', assetId: 'a', startTime: 1, inPoint: 3.012, outPoint: 4.5 }]
+          }
+        ]
+      })
+    )
+    const audio = p.sequence.audioTracks.flatMap((t) => t.items).find((it) => it.id === 'p1:audio')
+    expect(audio?.sourceOut).toBe(4.5)
+  })
+
   it('PiP は本編の尺で頭打ち。v1 の同じトラックで重なっていれば段を分ける', () => {
     const p = projectV1ToV2(
       emptyProject({

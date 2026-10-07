@@ -52,7 +52,7 @@ export function TextOverlayPanel(): React.JSX.Element {
       [...project.textOverlays].sort((a, b) => a.startTime - b.startTime || a.endTime - b.endTime),
     [project.textOverlays]
   )
-  const fps = Math.round(1 / frameSeconds(project.clips, project.assets))
+  const fps = 1 / frameSeconds(project.clips, project.assets)
   const selected = sorted.find((o) => o.id === selectedOverlayId) ?? null
   const effectiveMulti =
     selected && multiIds.has(selected.id) && multiIds.size > 1 ? multiIds : null

@@ -121,6 +121,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
 
   // --- PiP: 1本の v1 トラックの中で重なっていれば、v2 では段を分ける ---
   const pipAudioTracks: SequenceAudioTrack[] = []
+  /** ワイプのクリップの出点(素材の秒)。音のアイテムに渡す */
+  const pipSourceOut = new Map<string, number>()
   for (const track of project.videoOverlayTracks) {
     const items: MediaItem[] = []
     for (const oc of track.clips) {
@@ -129,6 +131,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
       if (!(dur > 0)) continue
       const range = toFrameRange(oc.startTime, oc.startTime + dur)
       if (!range) continue
+      pipSourceOut.set(oc.id, oc.outPoint)
       items.push({
         kind: 'media',
         id: oc.id,
@@ -166,6 +169,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
           startFrame: it.startFrame,
           durationFrames: it.durationFrames,
           sourceIn: it.sourceIn,
+          // 出点の先の音は読まない(フレームに丸めて伸びたぶんは無音。本編・音声トラックと同じ)
+          sourceOut: pipSourceOut.get(it.id),
           speed: 1,
           origin: 'manual',
           linkedItemId: it.id

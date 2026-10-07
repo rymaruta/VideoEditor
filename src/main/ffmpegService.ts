@@ -243,7 +243,7 @@ export async function generateThumbnailDataUrl(
   // 組み立ては下の `generateFrameDataUrl` と同じ形にそろえる。
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
-      .inputOptions([`-ss ${seekSeconds}`])
+      .inputOptions([`-ss ${ffSeconds(seekSeconds)}`])
       .complexFilter([`[0:v]${thumbnailScaleFilter()}[v]`])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)
@@ -281,7 +281,7 @@ export async function generateFrameDataUrl(
   const h = Math.round(height)
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
-      .inputOptions([`-ss ${seekSeconds}`])
+      .inputOptions([`-ss ${ffSeconds(seekSeconds)}`])
       .complexFilter([
         `[0:v]${scaleToFrameFilter(w, h, fillCrop, cropCenter, blurBackground)},setsar=1[v]`
       ])
@@ -318,7 +318,7 @@ export function generateWaveformDataUrl(
   const safeHeight = Math.max(10, Math.round(height))
   return new Promise((resolve, reject) => {
     ffmpeg(filePath)
-      .inputOptions([`-ss ${start}`, `-t ${Math.max(0.05, end - start)}`])
+      .inputOptions([`-ss ${ffSeconds(start)}`, `-t ${ffSeconds(Math.max(0.05, end - start))}`])
       .complexFilter([
         `[0:a]aformat=channel_layouts=mono,showwavespic=s=${safeWidth}x${safeHeight}:colors=0x9c8cf6[v]`
       ])
@@ -375,7 +375,7 @@ function detectMaxVolumeDb(
   return new Promise((resolve) => {
     let maxDb: number | null = null
     ffmpeg(filePath)
-      .inputOptions([`-ss ${rangeStart}`, `-t ${duration}`])
+      .inputOptions([`-ss ${ffSeconds(rangeStart)}`, `-t ${ffSeconds(duration)}`])
       .outputOptions(['-vn', '-af volumedetect', '-f null'])
       .output('-')
       .on('stderr', (line: string) => {
@@ -412,7 +412,7 @@ export async function detectSilence(
     let pendingStart: number | null = null
 
     ffmpeg(filePath)
-      .inputOptions([`-ss ${rangeStart}`, `-t ${duration}`])
+      .inputOptions([`-ss ${ffSeconds(rangeStart)}`, `-t ${ffSeconds(duration)}`])
       // **映像をデコードさせない。** 1パス目(`detectMaxVolumeDb`)には最初から
       // 指定があるのに、本命のこちらには無く、**同じ関数の2つのパスで片方だけ**
       // 映像を全フレームデコード＆再エンコードしていた。
@@ -908,7 +908,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         if (includeVideo) {
           filterParts.push(
             `[${myIndex}:v]setpts=PTS/${speed}${preOut > 0 ? `-${preOut}/TB` : ''},${colorPart}${scalePadFilter},setsar=1,` +
-              `tpad=stop_duration=${outputDuration}:stop_mode=clone,` +
+              `tpad=stop_duration=${ffSeconds(outputDuration)}:stop_mode=clone,` +
               `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)},` +
               `settb=${frameTb},setpts=N,fps=${fpsArg}[v${i}]`
           )
@@ -932,12 +932,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // ここでも**片方にだけ揃える処理が育っていた**。
           filterParts.push(
             `[${audioIndex}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
-              `apad,atrim=0:${outputDuration},asetpts=PTS-STARTPTS,` +
+              `apad,atrim=0:${ffSeconds(outputDuration)},asetpts=PTS-STARTPTS,` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )
         } else {
           filterParts.push(
-            `anullsrc=channel_layout=${OUTPUT_CHANNEL_LAYOUT}:sample_rate=${OUTPUT_SAMPLE_RATE}:duration=${outputDuration},${AUDIO_FORMAT}[a${i}]`
+            `anullsrc=channel_layout=${OUTPUT_CHANNEL_LAYOUT}:sample_rate=${OUTPUT_SAMPLE_RATE}:duration=${ffSeconds(outputDuration)},${AUDIO_FORMAT}[a${i}]`
           )
         }
       })
@@ -982,10 +982,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           const outA = `axf${i}`
           if (includeVideo) {
             filterParts.push(
-              `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${t}:offset=${offset},settb=${frameTb}[${outV}]`
+              `[${curV}][v${i}]xfade=transition=${xfadeName(transition.type)}:duration=${ffSeconds(t)}:offset=${ffSeconds(offset)},settb=${frameTb}[${outV}]`
             )
           }
-          filterParts.push(`[${curA}][a${i}]acrossfade=d=${t}[${outA}]`)
+          filterParts.push(`[${curA}][a${i}]acrossfade=d=${ffSeconds(t)}[${outA}]`)
           curV = outV
           curA = outA
         }
@@ -1133,7 +1133,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             const PIP_TRIM_EPSILON = 1e-6
             const pipTrim =
               pipAudibleDur < pipVisibleDuration - PIP_TRIM_EPSILON
-                ? `atrim=0:${pipAudibleDur},`
+                ? `atrim=0:${ffSeconds(pipAudibleDur)},`
                 : ''
             filterParts.push(
               `[${pipAudioIndex}:a]asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
@@ -1219,7 +1219,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           if (!asset) return
           const dur = trackClip.outPoint - trackClip.inPoint
           if (dur <= 0) return
-          command.input(asset.filePath).inputOptions([`-ss ${trackClip.inPoint}`, `-t ${dur}`])
+          command
+            .input(asset.filePath)
+            .inputOptions([`-ss ${ffSeconds(trackClip.inPoint)}`, `-t ${ffSeconds(dur)}`])
           const myIndex = inputIndex++
           const label = `atrk${trackIdx}_${clipIdx}`
           const clipStartExport = toExportTime(trackClip.startTime)
@@ -1258,16 +1260,18 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // 音として存在しないので、繋ぎをまたがない今までの書き出しは1バイトも変わらない。
           const TRIM_EPSILON = 1e-6
           const audibleDur = exportDur < timelineDur - TRIM_EPSILON ? exportDur : timelineDur
-          const trimChain = audibleDur < timelineDur ? `atrim=0:${audibleDur},` : ''
+          const trimChain = audibleDur < timelineDur ? `atrim=0:${ffSeconds(audibleDur)},` : ''
           const { fadeIn, fadeOut } = normalizeFades(
             trackClip.fadeIn,
             trackClip.fadeOut,
             audibleDur
           )
           const fadeParts: string[] = []
-          if (fadeIn > 0) fadeParts.push(`afade=t=in:st=0:d=${fadeIn}`)
+          if (fadeIn > 0) fadeParts.push(`afade=t=in:st=0:d=${ffSeconds(fadeIn)}`)
           if (fadeOut > 0) {
-            fadeParts.push(`afade=t=out:st=${Math.max(0, audibleDur - fadeOut)}:d=${fadeOut}`)
+            fadeParts.push(
+              `afade=t=out:st=${ffSeconds(audibleDur - fadeOut)}:d=${ffSeconds(fadeOut)}`
+            )
           }
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(

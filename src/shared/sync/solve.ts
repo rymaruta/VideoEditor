@@ -13,6 +13,8 @@ export interface SyncFile {
   duration: number
   /** 録画を始めた時刻(機材の時計、秒)。分からなければ undefined */
   recordedAt?: number
+  /** カメラの素材か(基準のまとまりは、カメラを含むものから選ぶ) */
+  camera?: boolean
 }
 
 export interface SyncEdge {
@@ -210,7 +212,11 @@ export function solvePlacements(
   // いちばん長く録れているまとまりを基準にし、ほかは「同期できず」として後ろへ並べる
   const durationOf = new Map(files.map((f) => [f.id, f.duration]))
   const span = (g: string[]): number => g.reduce((s, id) => s + (durationOf.get(id) ?? 0), 0)
-  groups.sort((x, y) => span(y) - span(x))
+  // 基準はカメラを含むまとまりから選ぶ(どこにも合わない長いマイクのファイルが基準になると、
+  // カメラが全部「合わせられなかった」になり、カメラ1台の回が先へ進めなかった)
+  const isCamera = new Map(files.map((f) => [f.id, f.camera === true]))
+  const hasCamera = (g: string[]): number => (g.some((id) => isCamera.get(id)) ? 1 : 0)
+  groups.sort((x, y) => hasCamera(y) - hasCamera(x) || span(y) - span(x))
   const issues: SyncIssue[] = []
   const main = groups[0] ?? []
   const shiftGroup = (g: string[], by: number): void =>

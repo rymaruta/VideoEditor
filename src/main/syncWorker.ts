@@ -243,7 +243,8 @@ async function run(): Promise<void> {
       id: f.id,
       sourceId: f.sourceId,
       duration: f.duration,
-      recordedAt: f.recordedAt
+      recordedAt: f.recordedAt,
+      camera: f.sourceKind === 'camera'
     })),
     results
       .filter((r) => r.reliable)

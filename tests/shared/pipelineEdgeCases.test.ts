@@ -100,3 +100,17 @@ describe('取り込み〜仮編集の境目', () => {
     expect(kept).toHaveLength(4000)
   })
 })
+
+describe('同期の再監査で見つかった所', () => {
+  it('カメラ1台と、それより長いどこにも合わないマイクでも、カメラを基準にして進める', () => {
+    const report = solvePlacements(
+      [
+        { id: 'c1', sourceId: 'C', duration: 1800, camera: true },
+        { id: 'm1', sourceId: 'M', duration: 7200 }
+      ],
+      []
+    )
+    const c1 = report.placements.find((p) => p.id === 'c1')!
+    expect(c1.method).toBe('reference')
+  })
+})

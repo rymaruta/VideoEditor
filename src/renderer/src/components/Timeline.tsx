@@ -1379,7 +1379,7 @@ export function Timeline(): React.JSX.Element {
   const total = totalTimelineDuration(timedClips)
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   // 時間目盛りの刻み(フレームレートはプロジェクトの素材から。書き出しと同じ数え方)
-  const rulerFps = Math.round(1 / frameSeconds(project.clips, project.assets))
+  const rulerFps = 1 / frameSeconds(project.clips, project.assets)
   const rulerStepSeconds = rulerStep(pixelsPerSecond, rulerFps)
   const pinned = pinnedIds([
     selectedClipId,
