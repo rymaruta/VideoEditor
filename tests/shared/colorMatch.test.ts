@@ -78,10 +78,10 @@ describe('fitColorMatch', () => {
 })
 
 describe('colorMatchFilter', () => {
-  it('ffmpeg の lutrgb の式(8bit の値に倍率と足し込み)', () => {
+  it('ffmpeg の lutrgb の式(倍率と足し込み。値の範囲はビット深度によらず minval〜maxval)', () => {
     const f = colorMatchFilter({ gain: [1.1, 1, 0.9], offset: [0, 0.02, -0.01] })
     expect(f).toBe(
-      "lutrgb=r='clip(val*1.1+0\\,0\\,255)':g='clip(val*1+5.1\\,0\\,255)':b='clip(val*0.9+-2.55\\,0\\,255)'"
+      "lutrgb=r='clip(val*1.1+0*maxval\\,minval\\,maxval)':g='clip(val*1+0.02*maxval\\,minval\\,maxval)':b='clip(val*0.9+-0.01*maxval\\,minval\\,maxval)'"
     )
   })
 })

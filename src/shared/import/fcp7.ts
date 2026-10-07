@@ -238,7 +238,7 @@ function readTrack(track: XmlElement, fps: number, ctx: ReadContext, depth = 0):
   const transitionBefore = transitionStarts(track)
   let lastEnd = 0
   for (const item of children(track, 'clipitem')) {
-    if (child(item, 'enabled')?.textContent?.trim().toUpperCase() === 'FALSE') continue
+    if (disabled(item)) continue
     const itemFps = rateOf(item, fps)
     const inF = num(child(item, 'in'))
     const outF = num(child(item, 'out'))
@@ -318,11 +318,24 @@ function levelOf(item: XmlElement): number | undefined {
   return undefined
 }
 
+/** 無効にした(`<enabled>FALSE</enabled>` を直下に持つ)クリップ・文字・トラック */
+function disabled(el: XmlElement): boolean {
+  return child(el, 'enabled')?.textContent?.trim().toUpperCase() === 'FALSE'
+}
+
+/** ステレオを左右に分けたトラックの2本目以降 */
+function explodedCopy(track: XmlElement): boolean {
+  const i = track.getAttribute('currentExplodedTrackIndex')
+  return i !== null && i !== undefined && i !== '' && Number(i) > 0
+}
+
 function readTexts(track: XmlElement, fps: number): Fcp7Sequence['texts'] {
   const out: Fcp7Sequence['texts'] = []
   const transitionBefore = transitionStarts(track)
   let lastEnd = 0
   for (const g of children(track, 'generatoritem')) {
+    // 使わないことにした(無効にした)文字は読まない。没にした文字で番組の癖を学ばない
+    if (disabled(g)) continue
     // 溶けて出る(つなぎの付いた)文字は start / end が -1。クリップと同じく補う
     const inF = num(child(g, 'in'))
     const outF = num(child(g, 'out'))
@@ -367,11 +380,16 @@ export function readFcp7(root: XmlElement): Fcp7Sequence | null {
   const audio: Fcp7Clip[][] = []
   const texts: Fcp7Sequence['texts'] = []
   for (const track of children(child(media, 'video') ?? seq, 'track')) {
+    if (disabled(track)) continue
     video.push(readTrack(track, fps, ctx))
     texts.push(...readTexts(track, fps))
   }
-  for (const track of children(child(media, 'audio') ?? seq, 'track'))
+  for (const track of children(child(media, 'audio') ?? seq, 'track')) {
+    // Premiere はステレオのトラックを左右2本(currentExplodedTrackIndex 0・1)に分けて書き、
+    // どちらにも同じクリップが入る。2本目以降は読まない(数えると SE が2倍になる)
+    if (disabled(track) || explodedCopy(track)) continue
     audio.push(readTrack(track, fps, ctx))
+  }
   return {
     name: child(seq, 'name')?.textContent?.trim() ?? '',
     fps,

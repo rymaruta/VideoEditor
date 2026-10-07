@@ -143,9 +143,14 @@ function round4(x: number): number {
   return Math.round(x * 10000) / 10000
 }
 
-/** 書き出しの ffmpeg フィルタ(8bit の値 val に掛ける) */
+/**
+ * 書き出しの ffmpeg フィルタ。値の範囲は素材のビット深度で変わる(10bit の素材は 0〜1023 のまま
+ * lutrgb に入る)ので、`maxval`・`minval` で書く。255 と決めて書くと、10bit の素材は
+ * 25% より明るい所がすべて潰れて、ほぼ黒になっていた
+ */
 export function colorMatchFilter(m: ColorMatch): string {
-  const ch = (i: number): string => `clip(val*${m.gain[i]}+${round4(m.offset[i] * 255)}\\,0\\,255)`
+  const ch = (i: number): string =>
+    `clip(val*${m.gain[i]}+${round4(m.offset[i])}*maxval\\,minval\\,maxval)`
   return `lutrgb=r='${ch(0)}':g='${ch(1)}':b='${ch(2)}'`
 }
 

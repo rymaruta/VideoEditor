@@ -2,7 +2,12 @@ import { v4 as uuid } from 'uuid'
 import type { Project, TextStyle } from '@shared/types'
 import type { MulticamInfo } from '@shared/sync/multicam'
 import type { HypeMoment } from '@shared/structure/hype'
-import { pickShortWindows, type ShortCandidate, type ShortOptions } from '@shared/structure/shorts'
+import {
+  pickShortWindows,
+  SHORT_MIN_SEC,
+  type ShortCandidate,
+  type ShortOptions
+} from '@shared/structure/shorts'
 import { CHEER_THRESHOLD, LAUGH_THRESHOLD } from '@shared/events/audioEvents'
 import type { TelopStyleDef } from '@shared/telop/styles'
 import { carriesVoice } from '@shared/roughCut/build'
@@ -44,6 +49,9 @@ export interface ShortPlanInput {
   overrides?: CutOverrides
 }
 
+/** 長さが足りないときに広げる区間の長さの上限(秒) */
+const SHORT_MAX_WINDOW_SEC = 120
+
 /** ショートにする区間(強い順) */
 export function shortWindowsFor(
   input: Pick<ShortPlanInput, 'project' | 'info' | 'hype'>,
@@ -67,6 +75,36 @@ export function buildShortProject(
   window: ShortCandidate,
   index: number
 ): Project {
+  const { info } = input
+  // 間を詰めると、選んだ区間より短くなる(黙っている所を落とすので)。下限に届かなければ、
+  // 足りない分だけ区間を前後に広げて組み直す(数回まで。素材の端より先へは広げない)
+  const range = cameraRange(info)
+  let win = window
+  let plan = planShort(input, win, window)
+  for (let i = 0; i < 5 && plan.cut.duration < SHORT_MIN_SEC; i++) {
+    // 詰めた後に残る割合から、下限に届く区間の長さを見込む(少し多めに)
+    const len = win.end - win.start
+    const want = (len * SHORT_MIN_SEC) / Math.max(1, plan.cut.duration) + 2
+    const extra = Math.max(2, Math.min(want, SHORT_MAX_WINDOW_SEC) - len) / 2
+    const next = {
+      ...win,
+      start: Math.max(range.start, win.start - extra),
+      end: Math.min(range.end, win.end + extra)
+    }
+    if (next.start === win.start && next.end === win.end) break
+    if (next.end - next.start > SHORT_MAX_WINDOW_SEC) break
+    win = next
+    plan = planShort(input, win, window)
+  }
+  return shortProjectFromPlan(input, plan, index)
+}
+
+/** 区間1つの仮編集(縦型・軽く詰める) */
+function planShort(
+  input: ShortPlanInput,
+  window: ShortCandidate,
+  chosen: ShortCandidate
+): ReturnType<typeof planRoughCut> {
   const { project, info } = input
   const lines = timedLines(project, info).filter(
     (l) => l.start < window.end && l.end > window.start
@@ -78,7 +116,7 @@ export function buildShortProject(
     lines,
     speech: lines.reduce((t, l) => t + (l.end - l.start), 0)
   }
-  const plan = planRoughCut(
+  return planRoughCut(
     project,
     info,
     [scene],
@@ -95,16 +133,25 @@ export function buildShortProject(
       aspectRatio: '9:16',
       overrides: input.overrides && {
         ...input.overrides,
-        // 足した区間は、このショートの区間の中だけ
+        // 足した区間は、選んだショートの区間の中だけ(長さが足りずに広げた分には入れない)
         added: input.overrides.added
           .map((r) => ({
-            start: Math.max(r.start, window.start),
-            end: Math.min(r.end, window.end)
+            start: Math.max(r.start, chosen.start),
+            end: Math.min(r.end, chosen.end)
           }))
           .filter((r) => r.end > r.start)
       }
     }
   )
+}
+
+/** 仮編集から縦型の企画を作る */
+function shortProjectFromPlan(
+  input: ShortPlanInput,
+  plan: ReturnType<typeof planRoughCut>,
+  index: number
+): Project {
+  const { project, info } = input
   const cut = plan.cut
   const used = new Set([
     ...cut.main.map((m) => m.assetId),

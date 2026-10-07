@@ -15,7 +15,7 @@ export async function measureExport(
 ): Promise<QcMeasurement> {
   if (running) throw new Error('自動確認はすでに実行中です')
   const info = await probeMedia(filePath)
-  const filter = qcFilter(info.hasVideo, info.hasAudio)
+  const filter = qcFilter(info.hasVideo, info.hasAudio, info.duration)
   const maps = [info.hasVideo ? ['-map', '[qv]'] : [], info.hasAudio ? ['-map', '[qa]'] : []].flat()
   const child = spawn(
     ffmpegPath,

@@ -37,18 +37,27 @@ export const QC_THRESHOLDS = {
   truePeakTolerance: 0.5
 } as const
 
-/** 映像が無い・音声が無い書き出しもあるので、映像と音声の枝はそれぞれ付け外しする */
-export function qcFilter(hasVideo: boolean, hasAudio: boolean): string {
+/**
+ * 映像が無い・音声が無い書き出しもあるので、映像と音声の枝はそれぞれ付け外しする。
+ *
+ * `duration`(ファイル全体の長さ)を渡すと、先に尽きた映像・音声を全体の長さまで延ばしてから測る。
+ * 映像だけ・音声だけが途中で終わった書き出しは、無い所に測るものが無いので素通りしていた
+ * (プレイヤーは最後の1枚のまま止まる・音が途切れる)。映像は最後の1枚を写して延ばす(フリーズになる)、
+ * 音声は無音で延ばす(無音になる)
+ */
+export function qcFilter(hasVideo: boolean, hasAudio: boolean, duration?: number): string {
   const t = QC_THRESHOLDS
   const parts: string[] = []
+  const d = duration !== undefined && duration > 0 ? duration.toFixed(3) : null
   if (hasVideo)
     parts.push(
-      `[0:v]scale=320:-2,blackdetect=d=${t.blackMinSec}:pix_th=${t.blackPixel},` +
+      `[0:v]${d ? `tpad=stop_mode=clone:stop_duration=${d},trim=end=${d},` : ''}` +
+        `scale=320:-2,blackdetect=d=${t.blackMinSec}:pix_th=${t.blackPixel},` +
         `freezedetect=n=${t.freezeNoise}:d=${t.freezeMinSec}[qv]`
     )
   if (hasAudio)
     parts.push(
-      `[0:a]ebur128=peak=true:framelog=quiet,` +
+      `[0:a]${d ? `apad=whole_dur=${d},` : ''}ebur128=peak=true:framelog=quiet,` +
         `silencedetect=noise=${t.silenceDb}dB:d=${t.silenceMinSec}[qa]`
     )
   return parts.join(';')

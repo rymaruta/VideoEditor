@@ -139,3 +139,46 @@ describe('縦長の企画に横長の録画を置いたとき、HUD・顔は画�
     expect(face.y).toBeCloseTo(0.342 + 0.8 * 0.316, 2)
   })
 })
+
+describe('ショートの長さの下限', () => {
+  it('間を詰めて 15 秒に届かなければ、区間を広げて 15 秒以上にする', () => {
+    const lines = Array.from({ length: 12 }, (_, k) =>
+      utt(`u${k}`, 'MA', k * 10 + 2, k * 10 + 5, `発言${k}`)
+    )
+    const act = new Uint8Array(120 * TURN_RATE)
+    for (let k = 0; k < 12; k++) act.fill(1, (k * 10 + 2) * TURN_RATE, (k * 10 + 5) * TURN_RATE)
+    const long: MulticamInfo = {
+      ...info,
+      files: info.files.map((f) => ({ ...f, duration: 120 }))
+    }
+    const p = {
+      id: 'p',
+      name: '本編',
+      aspectRatio: '16:9',
+      assets: [asset('C', true), asset('MA', false), asset('MB', false)].map((a) => ({
+        ...(a as object),
+        duration: 120
+      })),
+      clips: [],
+      audioTracks: [],
+      videoOverlayTracks: [],
+      textOverlays: [],
+      transcript: lines,
+      multicam: long
+    } as unknown as Project
+    const short = buildShortProject(
+      {
+        project: p,
+        info: long,
+        hype: [],
+        activity: act,
+        styles: [],
+        speechLook: { style: defaultTextStyle() }
+      },
+      { start: 0, end: 17, strength: 10, peaks: 1 },
+      0
+    )
+    const total = short.clips.reduce((t, c) => t + (c.outPoint - c.inPoint) / c.speed, 0)
+    expect(total).toBeGreaterThanOrEqual(15)
+  })
+})

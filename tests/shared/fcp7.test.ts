@@ -401,3 +401,42 @@ describe('完成版のクリップの素材を、同じ名前のファイルと�
     expect(humanCoverage(seq(), project, info).unmatched).toEqual(['C0001.MP4'])
   })
 })
+
+describe('Premiere の書き出しの細部', () => {
+  const read = (body: string): ReturnType<typeof readFcp7> =>
+    readFcp7(
+      new DOMParser().parseFromString(
+        `<?xml version="1.0" encoding="UTF-8"?><xmeml version="4"><sequence><name>s</name><duration>1800</duration>
+        <rate><timebase>30</timebase></rate><media>${body}</media></sequence></xmeml>`,
+        'text/xml'
+      ).documentElement as unknown as XmlElement
+    )
+  const se = (id: string, start: number): string =>
+    `<clipitem id="${id}"><name>se.wav</name><start>${start}</start><end>${start + 30}</end><in>0</in><out>30</out>
+      <file id="file-se"><name>se.wav</name><rate><timebase>30</timebase></rate><duration>30</duration></file></clipitem>`
+
+  it('ステレオを左右2本に分けたトラックは1本として読む(SE を2倍に数えない)', () => {
+    const clips = [0, 300, 600].map((t, i) => se(`s${i}`, t)).join('')
+    const seq = read(
+      `<audio>
+        <track currentExplodedTrackIndex="0" totalExplodedTrackCount="2" premiereTrackType="Stereo">${clips}</track>
+        <track currentExplodedTrackIndex="1" totalExplodedTrackCount="2" premiereTrackType="Stereo">${clips}</track>
+      </audio>`
+    )!
+    expect(seq.audio).toHaveLength(1)
+    expect(seq.audio[0]).toHaveLength(3)
+  })
+
+  it('無効にした文字・無効にしたトラックの文字は読まない', () => {
+    const title = (text: string, enabled = true): string =>
+      `<generatoritem><name>t</name>${enabled ? '' : '<enabled>FALSE</enabled>'}<start>30</start><end>90</end>
+        <effect><parameter><parameterid>str</parameterid><value>${text}</value></parameter></effect></generatoritem>`
+    const seq = read(
+      `<video>
+        <track>${title('ボツ', false)}${title('使う')}</track>
+        <track><enabled>FALSE</enabled>${title('隠したトラック')}</track>
+      </video>`
+    )!
+    expect(seq.texts.map((t) => t.text)).toEqual(['使う'])
+  })
+})

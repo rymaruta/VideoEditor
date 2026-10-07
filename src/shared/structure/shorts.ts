@@ -28,6 +28,9 @@ export interface ShortOptions {
   tailSec?: number
 }
 
+/** ショート1本の長さの下限(秒)の既定 */
+export const SHORT_MIN_SEC = 15
+
 /** 終わりを詰めるときも残す、いちばん強い山の頭からの長さ(秒) */
 const PEAK_KEEP_SEC = 3
 
@@ -42,7 +45,7 @@ export function pickShortWindows(
   options: ShortOptions = {}
 ): ShortCandidate[] {
   const count = options.count ?? 5
-  const minSec = options.minSec ?? 15
+  const minSec = options.minSec ?? SHORT_MIN_SEC
   const maxSec = options.maxSec ?? 60
   const lead = options.leadSec ?? 10
   const tail = options.tailSec ?? 6
