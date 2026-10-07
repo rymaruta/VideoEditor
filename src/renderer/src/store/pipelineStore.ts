@@ -701,7 +701,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const scenes = scenesFor(project, info, { kind, hype })
     const range = cameraRange(info)
     const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
-    const { judgements, source, failure, model, device } = await judgeScenes(
+    const { judgements, source, failure, rejected, model, device } = await judgeScenes(
       scenes,
       range.end - range.start,
       {
@@ -725,9 +725,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     log(
       source === 'ai'
         ? `構成: AI(${model ?? ''}${device ? `・${device === 'cpu' ? 'CPU' : `GPU ${device.toUpperCase()}`}` : ''})で ${scenes.length} 場面を判定しました`
-        : failure
-          ? `構成: AI に頼めなかったため簡易の点数で判定しました(${failure})`
-          : '構成: AI を使わない設定のため、簡易の点数(発話の密度・掛け合い・盛り上がり)で判定しました'
+        : rejected
+          ? `構成: ${rejected}、見分けになっていないと判断し、声の盛り上がり・笑い・発話の密度の点数で判定しました`
+          : failure
+            ? `構成: AI に頼めなかったため簡易の点数で判定しました(${failure})`
+            : '構成: AI を使わない設定のため、簡易の点数(発話の密度・掛け合い・盛り上がり)で判定しました'
     )
     await buildAndApply()
   }
@@ -1377,13 +1379,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         // (声だけ・ゲーム音だけのトラックは元の動画の音と似ておらず、照らし合わせると外れることがある)
         // 元の動画を「使わない」にしたトラックは、ほかの素材と同じく照らし合わせる
         const inSync = new Set(files.map((f) => f.path))
-        const parentOf = new Map(
-          used
-            .flatMap((s) => s.files)
-            .flatMap((f) =>
-              f.track && inSync.has(f.track.parentPath) ? [[f.path, f.track.parentPath]] : []
-            )
-        )
+        const parentOf = trackParentMap(used, inSync)
         const synced = await window.api.syncRun(files.filter((f) => !parentOf.has(f.path)))
         report = withTrackPlacements(synced, files, parentOf)
       } catch (e) {
@@ -1670,6 +1666,34 @@ usePipelineStore.subscribe((s, prev) => {
  * 取り出した音声トラックの位置を、元の動画の位置にする(同じ時計・同じ頭)。
  * 元の動画が同期できなければ、トラックも同期できなかった扱い
  */
+/**
+ * 取り出した音声トラック → 置き場所を借りる素材(同じ動画の時計を持つもの)。
+ * 元の動画を同期するなら元の動画から。元の動画を「使わない」にしたなら、同じ動画のトラックのうち
+ * 1本(声 → 全部入り → ゲーム音の順)だけを照らし合わせ、残りはそれに揃える
+ * (ゲーム音だけのトラックは声の素材と似ておらず、1本ずつ照らし合わせると外れたり、ずれたりする)
+ */
+export function trackParentMap(
+  sources: readonly Pick<EditableSource, 'files' | 'trackRole'>[],
+  inSync: ReadonlySet<string>
+): Map<string, string> {
+  const parentOf = new Map<string, string>()
+  const orphans = new Map<string, { path: string; role?: string }[]>()
+  for (const s of sources)
+    for (const f of s.files) {
+      if (!f.track) continue
+      const parent = f.track.parentPath
+      if (inSync.has(parent)) parentOf.set(f.path, parent)
+      else
+        orphans.set(parent, [...(orphans.get(parent) ?? []), { path: f.path, role: s.trackRole }])
+    }
+  const rank = (r?: string): number => (r === 'voice' ? 0 : r === 'mix' ? 1 : 2)
+  for (const group of orphans.values()) {
+    const lead = [...group].sort((a, b) => rank(a.role) - rank(b.role))[0]
+    for (const g of group) if (g !== lead) parentOf.set(g.path, lead.path)
+  }
+  return parentOf
+}
+
 export function withTrackPlacements(
   report: SyncReport,
   files: readonly SyncInputFile[],

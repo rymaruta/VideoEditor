@@ -1,5 +1,6 @@
 import type { TextOverlay, TextStyle } from '../types'
 import { TELOP_TEMPLATES } from './templates'
+import { stackSimultaneousTelops, stackedBottomTelops } from './stack'
 
 /**
  * テロップスタイル(名前の付いた見た目)と、それを使うテロップのつながり。
@@ -147,29 +148,47 @@ export function restyleSpeechTelops(
   overlays: readonly TextOverlay[],
   prev: { style: TextStyle; styleId?: string },
   next: { style: TextStyle; styleId?: string },
-  styles: readonly TelopStyleDef[]
+  styles: readonly TelopStyleDef[],
+  /** 画面(テロップのキャンバス)の高さ。渡すと、声の重なった発言テロップを積み直す */
+  canvasH?: number
 ): TextOverlay[] {
   const prevKey = lookKey(prev.style)
-  return overlays.map((o) => {
+  const from = speechTelopStyle(prev.style).customPosition
+  const to = speechTelopStyle(next.style).customPosition
+  // 段に積んだ(重なりを避けて自動で1段上げた)枚も、見た目の既定の置き場所にある枚と同じに扱う
+  const stacked = canvasH ? stackedBottomTelops(overlays, canvasH) : overlays.map(() => false)
+  const restyled = new Set<number>()
+  const out = overlays.map((o, i) => {
     if (!isAutoSpeech(o)) return o
     if (styleForSpeaker(styles, o.speaker)) return o
     const following = prev.styleId
       ? o.styleId === prev.styleId
       : !o.styleId && lookKey(o.style) === prevKey
     if (!following) return o
-    // 前の見た目の置き場所のままの枚(縦書きの右端など)は、新しい見た目の置き場所へ。
-    // 顔・HUD・重なりを避けて動かした枚は、その置き場所を残す
-    const from = speechTelopStyle(prev.style).customPosition
-    const to = speechTelopStyle(next.style).customPosition
+    // 前の見た目の置き場所のままの枚(縦書きの右端・段に積んだ枚)は、新しい見た目の置き場所へ。
+    // 顔・HUD を避けて動かした枚・手で動かした枚は、その置き場所を残す
     const own = o.style.customPosition
     const samePlace =
+      stacked[i] ||
       own === from ||
       (own !== undefined && from !== undefined && own.x === from.x && own.y === from.y)
     const style = applyLook(o.style, next.style, { keepPlacement: true })
     if (samePlace) {
-      if (to) style.customPosition = to
+      if (to) style.customPosition = { ...to }
       else delete style.customPosition
+      restyled.add(i)
     }
     return { ...o, style, styleId: next.styleId }
   })
+  if (!canvasH || to || restyled.size === 0) return out
+  // 既定の置き場所(下)へ戻した枚を、声の重なりで積み直す(作り直したときと同じ並びにする)
+  const idx = [...restyled]
+  const again = stackSimultaneousTelops(
+    idx.map((i) => out[i]),
+    canvasH
+  )
+  idx.forEach((i, k) => {
+    out[i] = again[k]
+  })
+  return out
 }

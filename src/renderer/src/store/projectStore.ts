@@ -49,6 +49,7 @@ import { dropOrphanClips, orphanCleanupMessage } from '../lib/orphanClips'
 import { clampBpm } from '../lib/beatGrid'
 import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
 import { normalizeTextStyle } from '@shared/textStyle'
+import { textCanvasSize } from '@shared/resolution'
 import type {
   AspectRatio,
   AudioTrack,
@@ -3164,7 +3165,13 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   restyleSpeechTelops: (prev, next, styles) => {
     const state = get()
-    const updated = restyleSpeechTelops(state.project.textOverlays, prev, next, styles)
+    const updated = restyleSpeechTelops(
+      state.project.textOverlays,
+      prev,
+      next,
+      styles,
+      textCanvasSize(state.project.aspectRatio).h
+    )
     const changed = updated.filter((o, i) => o !== state.project.textOverlays[i]).length
     if (changed > 0)
       set({ ...pushHistory(state), project: { ...state.project, textOverlays: updated } })

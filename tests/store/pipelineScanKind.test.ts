@@ -119,3 +119,27 @@ describe('収録フォルダの読み込みと番組の種類', () => {
     expect(st.root).toBeNull()
   })
 })
+
+describe('取り出した音声トラックの同期(元の動画を使わないとき)', () => {
+  it('元の動画を同期するなら元の動画に、使わないなら同じ動画の声のトラック1本に揃える', async () => {
+    const { trackParentMap } = await import('@renderer/store/pipelineStore')
+    const t = (path: string, parentPath: string): Record<string, unknown> => ({
+      path,
+      track: { parentPath, index: 1 }
+    })
+    const sources = [
+      { trackRole: 'game' as const, files: [t('/r/a.t3.m4a', '/r/a.mkv')] },
+      { trackRole: 'voice' as const, files: [t('/r/a.t2.m4a', '/r/a.mkv')] },
+      { trackRole: 'mix' as const, files: [t('/r/a.t1.m4a', '/r/a.mkv')] },
+      { trackRole: 'voice' as const, files: [t('/r/b.t2.m4a', '/r/b.mkv')] }
+    ] as unknown as Parameters<typeof trackParentMap>[0]
+    const m = trackParentMap(
+      sources,
+      new Set(['/r/b.mkv', '/r/a.t1.m4a', '/r/a.t2.m4a', '/r/a.t3.m4a'])
+    )
+    expect(m.get('/r/b.t2.m4a')).toBe('/r/b.mkv')
+    expect(m.has('/r/a.t2.m4a')).toBe(false)
+    expect(m.get('/r/a.t1.m4a')).toBe('/r/a.t2.m4a')
+    expect(m.get('/r/a.t3.m4a')).toBe('/r/a.t2.m4a')
+  })
+})

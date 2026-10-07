@@ -248,3 +248,26 @@ describe('発言テロップの自由配置は、縦書きの見た目のとき�
     expect(m.style.customPosition).toEqual({ x: 0.5, y: 0.7 })
   })
 })
+
+describe('縦書きから横書きへ選び直すと、声の重なった発言テロップを積み直す', () => {
+  const vertical = speechLook('tpl-speech-vertical', [])
+  const standard = speechLook('tpl-speech-standard', [])
+  const at = (id: string, start: number, end: number): TextOverlay => ({
+    id,
+    text: 'あいう',
+    startTime: start,
+    endTime: end,
+    style: speechTelopStyle(vertical.style),
+    source: 'auto',
+    utteranceId: id
+  })
+  it('重なった2枚は、1枚目が下・2枚目がその上の段', () => {
+    const out = restyleSpeechTelops([at('a', 0, 3), at('b', 1, 4)], vertical, standard, [], 1080)
+    expect(out[0].style.customPosition).toBeUndefined()
+    expect(out[1].style.customPosition?.x).toBe(0.5)
+    expect(out[1].style.customPosition!.y).toBeLessThan(0.9)
+    // 横書きから縦書きへ戻すと、積んだ枚も右端の置き場所へ
+    const back = restyleSpeechTelops(out, standard, vertical, [], 1080)
+    expect(back[1].style.customPosition).toEqual(vertical.style.customPosition)
+  })
+})

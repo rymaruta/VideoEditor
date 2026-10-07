@@ -198,6 +198,8 @@ export async function judgeScenes(
   judgements: SceneJudgement[]
   source: 'ai' | 'heuristic'
   failure?: string
+  /** AI は答えたが、見分けになっていなかったので使わなかった理由 */
+  rejected?: string
   model?: string
   device?: string
 }> {
@@ -236,6 +238,18 @@ export async function judgeScenes(
   }
   if (got.size === 0)
     return { judgements: fallback, source: 'heuristic', failure: 'AI が答えませんでした' }
+  // ほとんどの場面を「見どころ」にした答えは、見分けになっていない(小さなモデル・聞き取れない言葉の
+  // 文字起こしで起きる)。そのまま使うと「面白い所だけ」でも全部が残るので、声の盛り上がり・笑い・
+  // 発話の密度の点数で判定する
+  const highlights = [...got.values()].filter((j) => j.kind === 'highlight').length
+  if (got.size >= MIN_SCENES_TO_CHECK && highlights > got.size * MAX_HIGHLIGHT_RATIO)
+    return {
+      judgements: fallback,
+      source: 'heuristic',
+      rejected: `AI が ${got.size} 場面中 ${highlights} 場面を見どころにしたため`,
+      model,
+      device
+    }
   return {
     judgements: scenes.map((s) => got.get(s.id) ?? fallback.find((f) => f.sceneId === s.id)!),
     source: 'ai',
@@ -243,6 +257,10 @@ export async function judgeScenes(
     device
   }
 }
+
+/** AI の「見どころ」が多すぎないかを確かめる、場面の数の下限と、見どころの割合の上限 */
+const MIN_SCENES_TO_CHECK = 6
+const MAX_HIGHLIGHT_RATIO = 0.5
 
 export interface RoughCutPlan {
   selection: Selection

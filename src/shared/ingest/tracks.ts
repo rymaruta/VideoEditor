@@ -82,7 +82,26 @@ export function craigSpeakerName(fileName: string): string | null {
 }
 
 /** はっきり顔カメラと分かる名前(フォルダ・ファイル名のどこかに入る) */
-const FACE_NAME_STRONG = /(^|[^a-z])face(cam)?\d*([^a-z]|$)|webcam|顔|ウェブカメ/i
+const FACE_NAME_STRONG = /webcam|顔|ウェブカメ/i
+
+/**
+ * 名前の中の単語「face」(face・faces・facecam・FaceCamera・faceRec など)。
+ * 別の言葉の一部(Surface・faceit・Facepunch・facebook・FACEIT)は数えない。
+ * 続く文字が小文字なら cam・camera・s(複数形)だけを許し、大文字なら単語の切れ目(キャメルケース)とみなす
+ */
+function hasFaceWord(name: string): boolean {
+  for (const m of name.matchAll(/face/gi)) {
+    const at = m.index ?? 0
+    if (at > 0 && /[a-z]/i.test(name[at - 1])) continue
+    const rest = name.slice(at + 4)
+    if (rest === '' || /^[^a-z]/i.test(rest)) return true
+    if (/^(cams?|cameras?|s)([^a-z]|$)/i.test(rest) || /^(cams?|cameras?|s)[A-Z]/.test(rest))
+      return true
+    // キャメルケース(faceRec・FaceOnly)。全部大文字の FACEIT は単語の続き
+    if (/^[A-Z]/.test(rest) && /[a-z]/.test(m[0])) return true
+  }
+  return false
+}
 /**
  * 顔カメラかもしれない名前。「cam」「camera」は単語として入るときだけ
  * (`campaign`・`Camp` のような言葉の一部は数えない)
@@ -109,7 +128,7 @@ export function guessCameraRole(
 ): CameraRole {
   const parts = relativePath.normalize('NFKC').split(/[/\\]/)
   // はっきりした名前を先に見る(顔カメラにも空間オーディオなどで音声を2本持つ機種がある)
-  if (parts.some((p) => FACE_NAME_STRONG.test(p))) return 'face'
+  if (parts.some((p) => FACE_NAME_STRONG.test(p) || hasFaceWord(p))) return 'face'
   if (audioTracks >= 2) return 'screen'
   if (parts.some((p) => FACE_NAME_WEAK.test(p))) return 'face'
   if (width && maxWidth && width < maxWidth * 0.75) return 'face'

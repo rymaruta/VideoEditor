@@ -53,6 +53,24 @@ describe('OBS の音声トラックの役割', () => {
     expect(guessCameraRole('Facepunch Rust/rec.mkv', 1920, 1920, 3)).toBe('screen')
     expect(guessCameraRole('rec/face_2.mp4', 1920, 1920, 3)).toBe('face')
     expect(guessCameraRole('FaceCam.mov', 1920, 1920, 2)).toBe('face')
+    for (const face of [
+      'FaceCamera.mp4',
+      'facecamera/rec.mp4',
+      'FaceCams/rec.mp4',
+      'faceRec.mp4',
+      'FaceOnly.mp4',
+      'faces.mp4',
+      'face-cam.mp4',
+      'Face Camera.mp4'
+    ])
+      expect(guessCameraRole(face, 1920, 1920, 2), face).toBe('face')
+    for (const screen of [
+      'FACEIT/rec.mkv',
+      'facebook live.mp4',
+      'Interface.mkv',
+      'Preface/rec.mkv'
+    ])
+      expect(guessCameraRole(screen, 1920, 1920, 2), screen).toBe('screen')
     expect(guessCameraRole('rec/Camera2.mp4', 1920, 1920, 1)).toBe('face')
     expect(guessCameraRole('rec\\顔.mp4', 1920, 1920, 1)).toBe('face')
   })
