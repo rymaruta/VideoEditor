@@ -82,7 +82,10 @@ export function pickShortWindows(
       start = mid - maxSec / 2
       end = mid + maxSec / 2
     }
-    const [a, b] = widen(start, end)
+    // 長さを直して端が動いたときだけ、新しい端を発話の切れ目へ(動いていない端は広げ直さない。
+    // 広げた先からさらに広げると、続く掛け合いで区間が伸び続ける)
+    const a = start !== c.start ? widen(start, start)[0] : start
+    const b = end !== c.end ? widen(end, end)[1] : end
     return { ...c, start: a, end: Math.min(b, a + maxSec + 3) }
   })
 

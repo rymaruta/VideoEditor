@@ -234,7 +234,11 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
                     ? '叫び・大声・笑いのある所を残し、黙々とプレイしている所を落とします'
                     : '掛け合い・笑い・企画の要点を残し、移動・待機を落とします'
               }))}
-              onChange={(k) => useSettingsStore.getState().setEpisodeKind(k)}
+              onChange={(k) => {
+                useSettingsStore.getState().setEpisodeKind(k)
+                // 音声トラックを分けるか(ゲーム実況だけ)が変わるので、選んだフォルダを読み直す
+                if (root && !scanning) void scanFolder(root)
+              }}
             />
           </div>
 

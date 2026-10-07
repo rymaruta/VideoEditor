@@ -119,7 +119,12 @@ async function probeFile(
 
 export async function scanFootage(
   root: string,
-  onProgress: (done: number, total: number) => void
+  onProgress: (done: number, total: number) => void,
+  /**
+   * `tracks`: 複数の音声トラックを持つ録画を、トラックごとの音源に分ける(ゲーム実況だけ。
+   * ロケのカメラにも2本の音声を持つ機種があり、分けると本編の音の扱いが変わってしまう)
+   */
+  options: { tracks?: boolean } = {}
 ): Promise<FootageScan> {
   const paths = await listMediaFiles(root)
   const probed: ProbedFile[] = []
@@ -140,7 +145,7 @@ export async function scanFootage(
           else {
             probed.push(f)
             // OBS の複数音声トラックの録画は、トラックごとに取り出して別の音源にする
-            if (f.hasVideo && audioStreams.length >= 2) {
+            if (options.tracks && f.hasVideo && audioStreams.length >= 2) {
               try {
                 const tracks = await extractAudioTracks(
                   ffmpegPath,

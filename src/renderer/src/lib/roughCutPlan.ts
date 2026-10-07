@@ -25,6 +25,7 @@ import {
   applyCutOverrides,
   type CutOverrides
 } from '@shared/roughCut/overrides'
+import type { AspectRatio } from '@shared/types'
 import type { ShowStyle } from '@shared/style/showStyle'
 import type { Project, TextOverlay, TextStyle } from '@shared/types'
 import { toCommon, type MulticamInfo } from '@shared/sync/multicam'
@@ -274,6 +275,8 @@ export function planRoughCut(
     peaks?: readonly PeakSpan[]
     /** 本編の人の修正(削った・足した区間、替えたカメラ)。作り直しても当て直す */
     overrides?: CutOverrides
+    /** テロップを置く画面の縦横比(縦型のショートなど、元の企画と違うとき)。無ければ企画の縦横比 */
+    aspectRatio?: AspectRatio
     /** 全マイクを足した音の大きさ(dB、100Hz)。無ければ `loadActivity` で読んだもの */
     level?: Float32Array
   }
@@ -325,7 +328,8 @@ export function planRoughCut(
         sceneId: s.id,
         why: judgements.find((j) => j.sceneId === s.id)?.kind === 'unneeded' ? 'unneeded' : 'length'
       })),
-    estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0)
+    estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0),
+    ...(auto.relaxed ? { relaxed: true } : {})
   }
 
   const tightened = tightenRanges(kept.flatMap(rangesOf), activity, speech, tighten)
@@ -402,7 +406,10 @@ export function planRoughCut(
     cut.duration
   ])
   // 声が重なった所は、後から出たテロップを1段上へ
-  const stacked = stackSimultaneousTelops(settled, textCanvasSize(project.aspectRatio).h)
+  const stacked = stackSimultaneousTelops(
+    settled,
+    textCanvasSize(options.aspectRatio ?? project.aspectRatio).h
+  )
   return { selection, pieces, shots, cut, telops: stacked }
 }
 

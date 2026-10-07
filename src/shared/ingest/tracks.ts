@@ -102,8 +102,9 @@ export function guessCameraRole(
   maxWidth: number,
   audioTracks: number
 ): CameraRole {
-  if (audioTracks >= 2) return 'screen'
+  // 名前を先に見る(顔カメラにも空間オーディオなどで音声を2本持つ機種がある)
   if (FACE_NAME.test(relativePath.normalize('NFKC'))) return 'face'
+  if (audioTracks >= 2) return 'screen'
   if (width && maxWidth && width < maxWidth * 0.75) return 'face'
   return 'screen'
 }

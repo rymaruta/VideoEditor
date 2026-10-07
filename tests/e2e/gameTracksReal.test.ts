@@ -102,7 +102,8 @@ function installApi(streamer: Line[], friend: Line[], calls: { asrPaths: string[
   }
   const noop = (): (() => void) => () => {}
   const api: Record<string, unknown> = {
-    footageScan: (root: string) => scanFootage(root, () => {}),
+    footageScan: (root: string, options?: { tracks?: boolean }) =>
+      scanFootage(root, () => {}, options),
     onFootageScanProgress: noop,
     syncRun: (files: SyncInputFile[]) => syncInProcess(files),
     onSyncProgress: noop,
@@ -281,6 +282,12 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
       episodeKind: 'game',
       editPolicy: 'highlights'
     })
+    // ロケの回として読むと、音声トラックは分けない(ロケのカメラにも音声2本の機種がある)
+    useSettingsStore.setState({ episodeKind: 'location' })
+    await usePipelineStore.getState().scanFolder(join(dir, 'tracks'))
+    const asLocation = usePipelineStore.getState().sources
+    expect(asLocation.some((s) => s.kind === 'audio' || s.trackRole)).toBe(false)
+    useSettingsStore.setState({ episodeKind: 'game' })
     await usePipelineStore.getState().scanFolder(join(dir, 'tracks'))
     const sources = usePipelineStore.getState().sources
     const summary = sources.map((s) => ({
@@ -412,7 +419,7 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     expect(sp.clips.every((c) => c.fillCrop)).toBe(true)
     expect(sp.videoOverlayTracks[0]).toMatchObject({
       position: 'top-left',
-      scale: 1,
+      scale: 0.92,
       hidden: false,
       audioMuted: true
     })

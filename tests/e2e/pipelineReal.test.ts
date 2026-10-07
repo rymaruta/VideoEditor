@@ -546,7 +546,8 @@ function installApi(shoot: Shoot, calls: Calls): void {
   }
   const noop = (): (() => void) => () => {}
   const api: Record<string, unknown> = {
-    footageScan: (root: string) => scanFootage(root, () => {}),
+    footageScan: (root: string, options?: { tracks?: boolean }) =>
+      scanFootage(root, () => {}, options),
     onFootageScanProgress: noop,
     syncRun: (files: SyncInputFile[]) => syncInProcess(files),
     onSyncProgress: noop,

@@ -204,6 +204,15 @@ export function buildRoughCut(
  * 無くて全部入りがあれば、全部入りだけを鳴らし、取り出した声のトラックは鳴らさない
  * (同じ声が二重に重なる)。鳴らさないトラックも文字起こし・盛り上がりには使う
  */
+/**
+ * 人の声が入っている音源か(BGM を声の下で下げる・ダッキングの合図に使う)。
+ * マイクと、OBS の「全部入り」のトラック(声もゲーム音も入っている)。
+ * 全部入りを鳴らし、取り出した声のトラックを鳴らさない録画でも、BGM が声の下で下がる
+ */
+export function carriesVoice(source: { kind: string; trackRole?: string } | undefined): boolean {
+  return source?.kind === 'mic' || source?.trackRole === 'mix'
+}
+
 export function silencedTrack(
   sources: readonly { id: string; kind: string; trackRole?: string; trackOf?: string }[],
   sourceId: string

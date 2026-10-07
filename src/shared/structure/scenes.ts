@@ -277,7 +277,15 @@ export interface Selection {
   dropped: { sceneId: string; why: 'unneeded' | 'length' }[]
   /** 残した場面の、詰めた後の見込みの長さ(秒) */
   estimated: number
+  /**
+   * 点数の下限(`minScore`)を越える場面が1つも無く、点数の上位の場面を残した
+   * (静かな回で「面白い所だけ」が空の仮編集にならないように)
+   */
+  relaxed?: boolean
 }
+
+/** 点数の下限を越える場面が無いとき、残す上位の割合 */
+const RELAXED_KEEP_RATIO = 0.25
 
 /**
  * 仕上がりの長さに収まるよう、残す場面を選ぶ。
@@ -296,6 +304,20 @@ export function selectScenes(
   dropUnneeded = true
 ): Selection {
   const judge = new Map(judgements.map((j) => [j.sceneId, j]))
+  // 点数の下限を越える場面が1つも無い(声の山も笑いも無い静かな回)なら、下限を
+  // 点数の上位(4分の1)の所まで下げる。空の仮編集を作ると、本編が丸ごと消えてしまう
+  let relaxed = false
+  if (Number.isFinite(minScore)) {
+    const usable = scenes
+      .map((s) => judge.get(s.id))
+      .filter((j) => !(dropUnneeded && j?.kind === 'unneeded'))
+    const passes = usable.some((j) => !j || j.kind === 'highlight' || j.score >= minScore)
+    if (!passes && usable.length > 0) {
+      const scores = usable.map((j) => j!.score).sort((a, b) => b - a)
+      minScore = scores[Math.max(0, Math.ceil(scores.length * RELAXED_KEEP_RATIO) - 1)]
+      relaxed = true
+    }
+  }
   const dropped: Selection['dropped'] = []
   const candidates = scenes.filter((s) => {
     const j = judge.get(s.id)
@@ -334,6 +356,7 @@ export function selectScenes(
   return {
     kept: scenes.filter((s) => keep.has(s.id)).map((s) => s.id),
     dropped,
-    estimated: total
+    estimated: total,
+    ...(relaxed ? { relaxed } : {})
   }
 }

@@ -137,9 +137,14 @@ export const HYPE_TAIL_SEC = 8
  * 区間の端が発話の途中に掛かるなら、その発話を丸ごと入れる(言葉の途中から始めない)。
  * 近い区間(2 秒未満の切れ目)はつなぐ
  */
+/** 区間の端を発話の切れ目へ広げる上限(秒)。これより長い発話は、端で切る */
+export const WIDEN_MAX_SEC = 15
+
 /**
- * 区間の端が発話の途中なら、発話を丸ごと入れる。広げた先がまた別の発話の途中になることがある
- * (重なる掛け合い)ので、動かなくなるまで繰り返す
+ * 区間の端が発話の途中なら、発話を丸ごと入れる。
+ * 見るのは**元の端にまたがる発話だけ**(広げた先からさらに広げない)。掛け合いで発話が切れ目なく
+ * 重なり続けると、広げた先がまた次の発話の途中になり、区間が会話の端から端まで広がってしまう。
+ * またがる発話のうち一番外まで広げる(並び順によらない)。上限(`WIDEN_MAX_SEC`)を超えるなら広げない
  */
 export function widenToLines(
   start: number,
@@ -148,18 +153,10 @@ export function widenToLines(
 ): [number, number] {
   let a = start
   let b = end
-  for (let changed = true; changed;) {
-    changed = false
-    for (const l of lines) {
-      if (l.start < a && l.end > a) {
-        a = l.start
-        changed = true
-      }
-      if (l.start < b && l.end > b) {
-        b = l.end
-        changed = true
-      }
-    }
+  for (const l of lines) {
+    if (l.start < start && l.end > start && start - l.start <= WIDEN_MAX_SEC)
+      a = Math.min(a, l.start)
+    if (l.start < end && l.end > end && l.end - end <= WIDEN_MAX_SEC) b = Math.max(b, l.end)
   }
   return [a, b]
 }

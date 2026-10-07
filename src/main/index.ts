@@ -826,9 +826,11 @@ app.whenReady().then(() => {
     })
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
-  ipcMain.handle(IPC.footageScan, (event, root: string) =>
-    scanFootage(root, (done, total) =>
-      notifySender(event, IPC.footageScanProgress, { done, total })
+  ipcMain.handle(IPC.footageScan, (event, root: string, options?: { tracks?: boolean }) =>
+    scanFootage(
+      root,
+      (done, total) => notifySender(event, IPC.footageScanProgress, { done, total }),
+      options
     )
   )
   ipcMain.handle(IPC.syncRun, (event, files: SyncInputFile[]) =>

@@ -1,4 +1,4 @@
-import { silencedTrack } from '@shared/roughCut/build'
+import { carriesVoice, silencedTrack } from '@shared/roughCut/build'
 import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
 import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
 import { isImagePath, STILL_DURATION_SEC } from '@shared/mediaExtensions'
@@ -1741,6 +1741,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           }
         : state.project
       const idOf = (fileId: string): string | undefined => assetIdOf[fileId]
+      // 基準カメラの録画から音声トラックを取り出したなら、本編の音は鳴らさない
+      // (全部入りのトラックと同じ音が重なり、二重に・大きく聞こえる)
+      const anchorTracked = Boolean(sources?.some((x) => x.trackOf === layout.anchorSourceId))
       const main: Clip[] = layout.main
         .filter((m) => idOf(m.fileId))
         .map((m) => ({
@@ -1748,7 +1751,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           assetId: idOf(m.fileId)!,
           inPoint: m.inPoint,
           outPoint: m.outPoint,
-          speed: m.speed
+          speed: m.speed,
+          ...(anchorTracked ? { audioDetached: true } : {})
         }))
       // ほかのカメラは隠しておく(どのアングルを使うかはアングルの切替で決める。出したままだと
       // 全部が小窓で重なって見える)。隠したトラックの音は書き出しでも鳴らさない
@@ -1779,7 +1783,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // (ずれは区間の中でしか積もらない。20ppm・30分の区間で最大 36ms)
       const mics: AudioTrack[] = [
         ...layout.mics.map((m) => ({ ...m, voice: true })),
-        ...(layout.audio ?? []).map((m) => ({ ...m, voice: false }))
+        ...(layout.audio ?? []).map((m) => ({
+          ...m,
+          voice: carriesVoice(sources?.find((x) => x.id === m.sourceId))
+        }))
       ].map((m) => ({
         id: uuid(),
         name: m.name,
@@ -2813,7 +2820,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             volume: volumeChanged ? prev!.volume : a.volume,
             autoVolume: a.volume,
             duckingEnabled: prev?.duckingEnabled ?? false,
-            voice: state.project.multicam?.sources.find((x) => x.id === a.sourceId)?.kind === 'mic',
+            voice: carriesVoice(state.project.multicam?.sources.find((x) => x.id === a.sourceId)),
             clips: a.clips.map((c) => ({
               id: uuid(),
               assetId: c.assetId,

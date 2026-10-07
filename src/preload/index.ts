@@ -257,7 +257,8 @@ const api = {
     return () => ipcRenderer.removeListener(IPC.libraryChanged, listener)
   },
   footageSelectFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.footageSelectFolder),
-  footageScan: (root: string): Promise<FootageScan> => ipcRenderer.invoke(IPC.footageScan, root),
+  footageScan: (root: string, options?: { tracks?: boolean }): Promise<FootageScan> =>
+    ipcRenderer.invoke(IPC.footageScan, root, options),
   onFootageScanProgress: (callback: (p: { done: number; total: number }) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, p: { done: number; total: number }): void =>
       callback(p)

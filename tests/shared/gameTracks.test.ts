@@ -40,6 +40,8 @@ describe('OBS の音声トラックの役割', () => {
     expect(guessCameraRole('OBS/2026-10-07.mp4', 1920, 1920, 3)).toBe('screen')
     expect(guessCameraRole('rec/b.mp4', 640, 1920, 1)).toBe('face')
     expect(guessCameraRole('rec/a.mp4', 1920, 1920, 1)).toBe('screen')
+    // 音声を2本持つ顔カメラ(空間オーディオなど)も、名前で顔カメラにする
+    expect(guessCameraRole('webcam/face.mov', 1920, 1920, 2)).toBe('face')
   })
 })
 

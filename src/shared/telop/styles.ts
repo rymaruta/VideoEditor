@@ -19,10 +19,25 @@ export interface TelopStyleDef {
   speakers?: string[]
 }
 
-/** スタイルの見た目を、テロップの置き場所を残したまま当てる */
-export function applyLook(overlayStyle: TextStyle, look: TextStyle): TextStyle {
-  return { ...look, customPosition: overlayStyle.customPosition }
+/**
+ * スタイルの見た目を、テロップの置き場所を残したまま当てる。
+ * `keepPosition` では上・下・中央の別も残す(顔を避けて上へ移した発言テロップを、見た目を替えても下へ戻さない)
+ */
+export function applyLook(
+  overlayStyle: TextStyle,
+  look: TextStyle,
+  options: { keepPosition?: boolean } = {}
+): TextStyle {
+  return {
+    ...look,
+    ...(options.keepPosition ? { position: overlayStyle.position } : {}),
+    customPosition: overlayStyle.customPosition
+  }
 }
+
+/** 自動で入れた発言テロップ(置き場所は顔・HUD・重なりを避けて自動で決めたもの) */
+const isAutoSpeech = (o: Pick<TextOverlay, 'source' | 'utteranceId'>): boolean =>
+  o.source === 'auto' && o.utteranceId !== undefined
 
 /** 自動で入れる発言テロップの見た目の既定(テロップの型の「発言(白・黒縁)」) */
 export const DEFAULT_SPEECH_LOOK = 'tpl-speech-standard'
@@ -87,16 +102,22 @@ export function restyleOverlays(
     if (o.styleId) {
       const def = byId.get(o.styleId)
       if (!def) return { ...o, styleId: undefined }
-      const style = applyLook(o.style, def.style)
+      const style = applyLook(o.style, def.style, { keepPosition: isAutoSpeech(o) })
       return JSON.stringify(style) === JSON.stringify(o.style) ? o : { ...o, style }
     }
     const auto = styleForSpeaker(styles, o.speaker)
     if (!auto) return o
-    return { ...o, styleId: auto.id, style: applyLook(o.style, auto.style) }
+    return {
+      ...o,
+      styleId: auto.id,
+      style: applyLook(o.style, auto.style, { keepPosition: isAutoSpeech(o) })
+    }
   })
 }
 
-const lookKey = (s: TextStyle): string => JSON.stringify({ ...s, customPosition: undefined })
+/** 見た目だけの鍵(置き場所は自動で動かすので比べない) */
+const lookKey = (s: TextStyle): string =>
+  JSON.stringify({ ...s, position: undefined, customPosition: undefined })
 
 /**
  * 自動で入れた発言テロップの見た目を、選び直した `next` に替える。
@@ -111,12 +132,16 @@ export function restyleSpeechTelops(
 ): TextOverlay[] {
   const prevKey = lookKey(prev.style)
   return overlays.map((o) => {
-    if (o.source !== 'auto' || o.utteranceId === undefined) return o
+    if (!isAutoSpeech(o)) return o
     if (styleForSpeaker(styles, o.speaker)) return o
     const following = prev.styleId
       ? o.styleId === prev.styleId
       : !o.styleId && lookKey(o.style) === prevKey
     if (!following) return o
-    return { ...o, style: applyLook(o.style, next.style), styleId: next.styleId }
+    return {
+      ...o,
+      style: applyLook(o.style, next.style, { keepPosition: true }),
+      styleId: next.styleId
+    }
   })
 }

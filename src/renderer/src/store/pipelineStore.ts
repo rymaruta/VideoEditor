@@ -763,6 +763,19 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       policy: useSettingsStore.getState().editPolicy,
       peaks: peakSpans(get().hype, project.audioEvents)
     })
+    // 残す区間が無い仮編集は当てない(当てると、並べた本編が丸ごと消える)
+    if (plan.cut.main.length === 0) {
+      setStep('cut', {
+        state: 'error',
+        note: '残す場面がありません(構成で残す場面を選ぶか、「大事にすること」を替えてください)'
+      })
+      log('残す場面が無いため、仮編集を作りませんでした(タイムラインはそのままです)')
+      for (const id of ['angles', 'placement', 'effects', 'sound'] as StepId[])
+        setStep(id, { state: 'skipped', note: '仮編集がありません' })
+      return
+    }
+    if (plan.selection.relaxed)
+      log('声の山・笑いのはっきりした場面が無かったため、点数の上位の場面を残しました(静かな回)')
     const raw = plan.selection.kept.reduce((t, id) => {
       const sc = get().scenes.find((x) => x.id === id)
       return t + (sc ? sc.end - sc.start : 0)
@@ -1243,7 +1256,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         setStep('ingest', { percent: (done / Math.max(1, total)) * 100, note: `${done}/${total}` })
       )
       try {
-        const scan = await window.api.footageScan(root)
+        // 音声トラックを分けるのはゲーム実況だけ(OBS の録画)
+        const scan = await window.api.footageScan(root, {
+          tracks: useSettingsStore.getState().episodeKind === 'game'
+        })
         const remembered = readSourceNames()
         const sources: EditableSource[] = scan.sources.map((s: FootageSource) => ({
           id: s.id,

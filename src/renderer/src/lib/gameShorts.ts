@@ -5,6 +5,8 @@ import type { HypeMoment } from '@shared/structure/hype'
 import { pickShortWindows, type ShortCandidate, type ShortOptions } from '@shared/structure/shorts'
 import { CHEER_THRESHOLD, LAUGH_THRESHOLD } from '@shared/events/audioEvents'
 import type { TelopStyleDef } from '@shared/telop/styles'
+import { carriesVoice } from '@shared/roughCut/build'
+import { PIP_MARGIN_RATIO } from '@shared/pipLayout'
 import type { DictionaryEntry } from '@shared/telop/polish'
 import { cameraRange, planRoughCut, timedLines } from './roughCutPlan'
 
@@ -18,9 +20,12 @@ import { cameraRange, planRoughCut, timedLines } from './roughCutPlan'
  * - 区間の中の長い無言(3 秒を超える)だけを詰める(山の前後の流れは切らない)
  */
 
-/** 顔カメラのワイプ(上・横幅いっぱい) */
+/**
+ * 顔カメラのワイプ(上・横幅いっぱい)。ワイプは隅から余白(`PIP_MARGIN_RATIO`)を空けて置くので、
+ * 幅は左右の余白を引いた分にする(幅 1 だと右へ余白ぶんはみ出して切れる)。左右の余白が揃い、真ん中に来る
+ */
 export const SHORT_FACE_POSITION = 'top-left' as const
-export const SHORT_FACE_SCALE = 1
+export const SHORT_FACE_SCALE = 1 - 2 * PIP_MARGIN_RATIO
 
 export interface ShortPlanInput {
   project: Project
@@ -79,7 +84,8 @@ export function buildShortProject(
       speechLook: input.speechLook,
       dictionary: input.dictionary,
       kind: 'game',
-      policy: 'light'
+      policy: 'light',
+      aspectRatio: '9:16'
     }
   )
   const cut = plan.cut
@@ -88,7 +94,7 @@ export function buildShortProject(
     ...cut.audio.flatMap((a) => a.clips.map((c) => c.assetId)),
     ...(cut.overlays ?? []).flatMap((o) => o.clips.map((c) => c.assetId))
   ])
-  const voice = new Set(info.sources.filter((s) => s.kind === 'mic').map((s) => s.id))
+  const voice = new Set(info.sources.filter((s) => carriesVoice(s)).map((s) => s.id))
   return {
     id: uuid(),
     name: `${project.name} ショート${index + 1}`,
