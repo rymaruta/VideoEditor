@@ -41,3 +41,17 @@ describe('ショートにする区間(pickShortWindows)', () => {
     expect(w[0].end).toBe(25)
   })
 })
+
+describe('ショートの終わりは発話の切れ目', () => {
+  it('長すぎて終わりを詰めるときも、発話の途中で切らない', () => {
+    // 途切れない実況(10 秒ごとに 9.5 秒の発話)
+    const lines = Array.from({ length: 60 }, (_, k) => ({ start: k * 10 + 3, end: k * 10 + 12.5 }))
+    const [w] = pickShortWindows([{ start: 100, end: 180, riseDb: 10 }], [], lines, {
+      start: 0,
+      end: 600
+    })
+    expect(w.end - w.start).toBeLessThanOrEqual(63)
+    expect(lines.some((l) => l.start < w.end - 1e-6 && l.end > w.end + 1e-6)).toBe(false)
+    expect(lines.some((l) => l.start < w.start - 1e-6 && l.end > w.start + 1e-6)).toBe(false)
+  })
+})

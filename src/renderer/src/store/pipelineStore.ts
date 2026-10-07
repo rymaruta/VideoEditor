@@ -660,7 +660,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const style = useSettingsStore.getState().showStyle?.style
       const duration = spans.reduce((t, x) => Math.max(t, x.timeline + (x.end - x.start)), 0)
       const se = planSoundEffects(
-        effects,
+        // 本編の終わりより後(人が演出テロップを動かした など)に SE は置かない
+        effects.filter((e) => e.time < duration),
         scenes.map((x) => x.start),
         kit,
         style ? { perMinute: style.sePerMinute, durationSec: duration } : undefined

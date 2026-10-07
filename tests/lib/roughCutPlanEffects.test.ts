@@ -145,3 +145,44 @@ describe('effectOverlays — 削った場面の頭に当たった章', () => {
     ])
   })
 })
+
+describe('effectOverlays — 本編の終わり・カットを越えない', () => {
+  const tsukkomi = (id: string, afterLineId: string): EffectProposal => ({
+    id,
+    afterLineId,
+    kind: 'tsukkomi',
+    text: 'なんでやねん',
+    confidence: 1,
+    reason: ''
+  })
+  const project = {
+    transcript: [line('u1', 1, 3), line('u2', 3.2, 4)]
+  } as unknown as Project
+  const short = [{ timeline: 0, start: 0, end: 4 }]
+
+  it('本編の終わり(4 秒)を越えて出さない。始まりが終わりの後になるものは出さない', () => {
+    const out = effectOverlays(
+      [tsukkomi('e1', 'u1'), tsukkomi('e2', 'u2')],
+      new Set(['e1', 'e2']),
+      project,
+      info,
+      short,
+      []
+    )
+    expect(out.length).toBeGreaterThan(0)
+    for (const o of out) {
+      expect(o.startTime).toBeLessThan(4)
+      expect(o.endTime).toBeLessThanOrEqual(4 + 1e-9)
+    }
+  })
+
+  it('時間の飛ぶカットの手前で終える(読める長さが残るとき)', () => {
+    const cut = [
+      { timeline: 0, start: 0, end: 5 },
+      { timeline: 5, start: 50, end: 80 }
+    ]
+    const [o] = effectOverlays([tsukkomi('e1', 'u1')], new Set(['e1']), project, info, cut, [])
+    expect(o.startTime).toBeCloseTo(2.95, 6)
+    expect(o.endTime).toBeLessThanOrEqual(5 + 1e-9)
+  })
+})

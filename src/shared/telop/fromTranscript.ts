@@ -107,7 +107,8 @@ export function utteranceToTelopChunks(
   for (const p of pieces) {
     // 言いよどみを除く・辞書で直すと長さが変わるので、整えた文で改行し直す
     const polished = polish(chars.slice(p.from, p.to).join(''))
-    const text = wrapTelopLines(polished, maxLine).join('\n')
+    const lines = wrapTelopLines(polished, maxLine)
+    const text = lines.join('\n')
     if (!text) continue
     // 頭の、整えると消える文字(言いよどみ・句読点・空白)は時刻に入れない
     // (「えーと、」と言っているあいだから次の言葉を出さない)
@@ -126,11 +127,19 @@ export function utteranceToTelopChunks(
     if (from === 0 && timed.length > 0 && u.sourceStart < start)
       start = Math.max(u.sourceStart, Math.min(start, u.sourceStart + FIRST_TELOP_DELAY_SEC))
     const end = timed.length > 0 ? timed[to - 1].end : timeAt(to)
-    chunks.push({
-      text,
-      sourceStart: start,
-      sourceEnd: Math.max(end, start + minDur)
-    })
+    // 辞書で長い言葉に直すと、区切ったときより文字が増えて行数を超えることがある。
+    // 行数に収まる枚に分け、時間は文字数で割り振る
+    const sheets: string[][] = []
+    for (let k = 0; k < lines.length; k += maxLines) sheets.push(lines.slice(k, k + maxLines))
+    const total = lines.reduce((t, l) => t + [...l].length, 0)
+    let done = 0
+    for (const sheet of sheets) {
+      const len = sheet.reduce((t, l) => t + [...l].length, 0)
+      const a = start + ((end - start) * done) / Math.max(1, total)
+      done += len
+      const b = start + ((end - start) * done) / Math.max(1, total)
+      chunks.push({ text: sheet.join('\n'), sourceStart: a, sourceEnd: Math.max(b, a + minDur) })
+    }
   }
   // 次のテロップに重ならないように(最低表示時間で伸ばした分を詰める)
   for (let k = 0; k < chunks.length - 1; k++) {

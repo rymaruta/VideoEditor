@@ -51,6 +51,20 @@ export function pickShortWindows(
     return [clamp(a), clamp(b)]
   }
 
+  /**
+   * 長すぎる区間の終わりを cap までに収める。発話の途中で切らないよう、cap より前で
+   * どの発話にも掛からない時刻(発話の終わり)へ戻す。そういう時刻が無いときだけ cap で切る
+   */
+  const capAtLineBreak = (a: number, cap: number): number => {
+    const inside = (t: number): boolean => lines.some((l) => l.start < t - 1e-6 && l.end > t + 1e-6)
+    if (!inside(cap)) return cap
+    const ends = lines
+      .map((l) => l.end)
+      .filter((t) => t > a + minSec && t <= cap && !inside(t))
+      .sort((x, y) => y - x)
+    return ends[0] ?? cap
+  }
+
   const peaks = [
     ...hype.map((h) => ({ start: h.start, end: h.end, strength: Math.max(1, h.riseDb) })),
     ...laughs.map((l) => ({ start: l.start, end: l.end, strength: LAUGH_STRENGTH }))
@@ -86,7 +100,7 @@ export function pickShortWindows(
     // 広げた先からさらに広げると、続く掛け合いで区間が伸び続ける)
     const a = start !== c.start ? widen(start, start)[0] : start
     const b = end !== c.end ? widen(end, end)[1] : end
-    return { ...c, start: a, end: Math.min(b, a + maxSec + 3) }
+    return { ...c, start: a, end: b > a + maxSec + 3 ? capAtLineBreak(a, a + maxSec + 3) : b }
   })
 
   const chosen: ShortCandidate[] = []

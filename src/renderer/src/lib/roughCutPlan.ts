@@ -418,6 +418,9 @@ export function planRoughCut(
   // 発言テロップ: 話者に割り当てたテロップスタイルで、仮編集の時刻に置く
   const look = options.speechLook ?? speechLook(undefined, options.styles)
   const telops: Omit<TextOverlay, 'id'>[] = []
+  // テロップごとの、その発話の声の終わり(タイムラインの秒)。最低表示時間で延ばした分が次の発言に
+  // 重なっただけなのか、声そのものが重なったのかを見分ける
+  const voiceEnds = new Map<Omit<TextOverlay, 'id'>, number>()
   const fileOfAsset = new Map(info.files.map((f) => [f.assetId, f]))
   for (const u of project.transcript ?? []) {
     const f = fileOfAsset.get(u.assetId)
@@ -439,7 +442,8 @@ export function planRoughCut(
       )!
       const end = span.timeline + (Math.min(commonEnd, span.end) - span.start)
       if (end - start < 0.3) continue
-      telops.push({
+      const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
+      const telop: Omit<TextOverlay, 'id'> = {
         text: chunk.text,
         startTime: start,
         endTime: end,
@@ -449,8 +453,20 @@ export function planRoughCut(
         source: 'auto',
         utteranceId: u.id,
         utteranceChunk: ci
-      })
+      }
+      telops.push(telop)
+      voiceEnds.set(telop, voiceEnd)
     }
+  }
+  // 短い発言(「はい」)は最低表示時間まで延ばすので、すぐ後の発言のテロップに重なることがある。
+  // 声は重なっていないのに重なったテロップは、後の発言を1段上へ積んでしまうので、次の頭で終える
+  // (声が重なった所はそのまま。積んで両方見せる)
+  const byStart = [...telops].sort((a, b) => a.startTime - b.startTime)
+  for (let i = 0; i < byStart.length - 1; i++) {
+    const t = byStart[i]
+    const next = byStart[i + 1]
+    if (next.startTime >= t.endTime - 1e-6) continue
+    if (next.startTime >= (voiceEnds.get(t) ?? Infinity) - 1e-6) t.endTime = next.startTime
   }
   // 短い切れ目をつなぎ、読み切れない枚を延ばす(時間の飛ぶカットの切れ目と、本編の終わりは越えない)
   const settled = settleTelopTimes(telops, [
@@ -548,6 +564,9 @@ export async function proposeEffects(
 /** 時刻で決まる演出テロップを、削った所の直後へ寄せてよい長さ(秒) */
 export const TIMED_EFFECT_SNAP_SEC = 20
 
+/** 演出テロップを出す最短の長さ(秒)。本編の終わりまでにこれだけ残らなければ出さない */
+const EFFECT_MIN_SHOW_SEC = 0.8
+
 /** 選んだ提案を、仮編集のタイムラインに置く(発言の終わりから。前の演出テロップとは重ねない) */
 export function effectOverlays(
   proposals: readonly EffectProposal[],
@@ -594,6 +613,13 @@ export function effectOverlays(
     })
     .filter((x): x is { p: EffectProposal; t: number; lineSec: number | null } => x.t !== null)
     .sort((a, b) => a.t - b.t)
+  // 演出テロップは本編の終わりを越えない。時間の飛ぶカットも、読める長さが残るなら越えない
+  // (発言テロップと同じ。越えると、落とした話の後の場面にツッコミが残る)
+  const total = spans.reduce((m, sp) => Math.max(m, sp.timeline + (sp.end - sp.start)), 0)
+  const spanEndAt = (t: number): number =>
+    spans
+      .map((sp) => sp.timeline + (sp.end - sp.start))
+      .find((e, i) => spans[i].timeline <= t + 1e-6 && t < e - 1e-6) ?? total
   let lastName: Omit<TextOverlay, 'id'> | null = null
   for (const { p, t, lineSec } of placed) {
     const lane = effectLane(p.kind)
@@ -605,7 +631,11 @@ export function effectOverlays(
           ? Math.max(t, lastName.startTime + 0.5)
           : t
         : Math.max(t, (laneEnd.get(lane) ?? -Infinity) + 0.2)
-    const duration = lineSec ?? effectDuration(p.kind)
+    const wanted = lineSec ?? effectDuration(p.kind)
+    let end = Math.min(start + wanted, spanEndAt(start))
+    if (end - start < EFFECT_MIN_SHOW_SEC) end = Math.min(start + wanted, total)
+    if (end - start < EFFECT_MIN_SHOW_SEC) continue
+    const duration = end - start
     // 次の人の名前が出るときは、前の人の名前を下げる(同じ場所に重ねない)
     if (p.kind === 'name' && lastName && lastName.endTime > start) lastName.endTime = start
     // 「演出・ツッコミ」のように名前の付いたテロップスタイルがあれば、そちらを使う

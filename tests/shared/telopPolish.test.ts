@@ -109,3 +109,22 @@ describe('utteranceToTelopChunks と整え', () => {
     expect(c.text).toBe('停戦会談は終了しました')
   })
 })
+
+describe('辞書で長くなった発言テロップ', () => {
+  it('辞書で文字が増えても、1枚は2行まで(収まらない分は次の枚にし、時間を割り振る)', () => {
+    const text = 'AIがAIでAIをAIにしてAIとAIのAIだよね'
+    const chunks = utteranceToTelopChunks(
+      { text, words: [{ text, start: 0, end: 5 }], sourceStart: 0, sourceEnd: 5 },
+      { dictionary: [{ from: 'AI', to: '人工知能' }] }
+    )
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const c of chunks) expect(c.text.split('\n').length, c.text).toBeLessThanOrEqual(2)
+    expect(chunks.map((c) => c.text.replace(/\n/g, '')).join('')).toBe(
+      text.replace(/AI/g, '人工知能')
+    )
+    for (let k = 0; k + 1 < chunks.length; k++)
+      expect(chunks[k].sourceEnd).toBeLessThanOrEqual(chunks[k + 1].sourceStart + 1e-9)
+    expect(chunks[0].sourceStart).toBeGreaterThanOrEqual(0)
+    expect(chunks.at(-1)!.sourceEnd).toBeLessThanOrEqual(5 + 1e-9)
+  })
+})

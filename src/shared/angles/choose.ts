@@ -117,7 +117,7 @@ export function chooseAngles(
   let prevEnd = -Infinity
   let prevScene: string | undefined
 
-  for (const piece of pieces) {
+  for (const [pieceIndex, piece] of pieces.entries()) {
     const jump = piece.start > prevEnd + 0.05 && shots.length > 0
     const sceneStart =
       piece.sceneId !== undefined &&
@@ -180,12 +180,17 @@ export function chooseAngles(
         reason: shots.at(-1)?.reason ?? 'default'
       })
     }
+    // 次の区間が時間を飛ばす(またはこれが最後の区間)なら、ショットはこの区間の終わりで切れる
+    const following = pieces[pieceIndex + 1]
+    const endsHere = !following || following.start > piece.end + 0.05
     // 区間の中の話し始めで切り替える
     for (const ev of events) {
       if (!current) break
       const at = timeline + (ev.start - piece.start)
       const held = at - shotStart
       if (held < minShot) continue
+      // 切り替えた先のショットが短すぎる(区間の終わりのすぐ手前の話し始め)なら切り替えない
+      if (endsHere && piece.end - ev.start < minShot) continue
       const target = subjectCam(ev.speaker)
       let next: AngleCamera | undefined
       let reason: Shot['reason'] = 'speaker'

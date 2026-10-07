@@ -217,4 +217,26 @@ describe('カメラが止まっていた間に始まる区間', () => {
       .reduce((t, s) => t + (s.end - s.start), 0)
     expect(used).toBeCloseTo(10, 6)
   })
+
+  it('カットの直前に話し始めた人へ、2秒に満たないショットで切り替えない', () => {
+    const three: AngleCamera[] = [
+      { id: 'wide', coverage: [{ start: 0, end: 100 }] },
+      { id: 'A', subject: 'A', coverage: [{ start: 0, end: 100 }] },
+      { id: 'B', subject: 'B', coverage: [{ start: 0, end: 100 }] }
+    ]
+    const shots = chooseAngles(
+      [
+        { start: 0, end: 10, sceneId: 's1' },
+        { start: 20, end: 30, sceneId: 's1' }
+      ],
+      three,
+      'wide',
+      [
+        { speaker: 'A', start: 0.5, end: 9.8 },
+        { speaker: 'B', start: 9.9, end: 12 },
+        { speaker: 'A', start: 20, end: 29 }
+      ]
+    )
+    for (const s of shots) expect(s.end - s.start, JSON.stringify(s)).toBeGreaterThanOrEqual(2)
+  })
 })

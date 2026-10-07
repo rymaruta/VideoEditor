@@ -110,3 +110,41 @@ describe('planRoughCut — カット点とテロップの時刻', () => {
     for (const t of plan2.telops) expect(t.styleId).toBe('a')
   })
 })
+
+describe('planRoughCut — 短い発言のテロップ', () => {
+  const n = 30 * TURN_RATE
+  const activity = new Uint8Array(n)
+  activity.fill(1, 100, 400)
+  const scenes: Scene[] = [{ id: 's1', start: 0, end: 30, lines: [], speech: 6 }]
+  const judgements: SceneJudgement[] = [{ sceneId: 's1', score: 80, kind: 'normal', reason: '' }]
+  const plan = (transcript: unknown[]): ReturnType<typeof planRoughCut> =>
+    planRoughCut(
+      { aspectRatio: '16:9', transcript } as unknown as Project,
+      info,
+      scenes,
+      judgements,
+      activity,
+      { targetSec: 0, styles: [] }
+    )
+
+  it('最低表示時間で延ばした「はい」が次の発言に重なっても、次の発言を1段上へ積まない', () => {
+    const p = plan([utt('u1', 1, 1.3, 'はい'), utt('u2', 1.7, 4, 'じゃあ次に行きましょう')])
+    const [a, b] = [...p.telops].sort((x, y) => x.startTime - y.startTime)
+    expect(a.endTime).toBeLessThanOrEqual(b.startTime + 1e-6)
+    expect(b.style.customPosition).toBeUndefined()
+  })
+
+  it('声が本当に重なった所は、これまでどおり積んで両方見せる', () => {
+    const p = plan([
+      utt('u1', 1, 3, 'それはちょっと違うと思う'),
+      {
+        ...(utt('u2', 2, 4, 'いやいやそんなことない') as object),
+        speaker: '出演者B',
+        overlap: true
+      }
+    ])
+    const [a, b] = [...p.telops].sort((x, y) => x.startTime - y.startTime)
+    expect(a.endTime).toBeGreaterThan(b.startTime)
+    expect(b.style.customPosition).toBeDefined()
+  })
+})
