@@ -7350,3 +7350,22 @@ select.telop-kind-add {
 .new-episode-dialog .form-stack > .seg-group {
   align-self: flex-start;
 }
+
+/* 見どころから縦型のショートを作る欄 */
+.shorts-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+}
+.shorts-panel label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.shorts-title {
+  font-weight: 600;
+}

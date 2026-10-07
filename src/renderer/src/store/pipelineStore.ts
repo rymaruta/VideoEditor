@@ -1,5 +1,9 @@
 import { speechLook } from '@shared/telop/styles'
 import type { HypeMoment } from '@shared/structure/hype'
+import type { ShortOptions } from '@shared/structure/shorts'
+import { buildShortProject, shortWindowsFor } from '../lib/gameShorts'
+import { prepareTelopLayerForExport } from '../lib/telopRaster'
+import { safeFileBaseName } from '@shared/fileName'
 import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
 import { countEvents } from '@shared/events/audioEvents'
 import {
@@ -196,6 +200,13 @@ interface PipelineState {
   setKeep: (sceneId: string, keep: boolean | undefined) => void
   /** 構成の判定はそのままに、カット・アングル・仮編集を作り直す(残す/落とす・長さを変えたとき) */
   rebuildRoughCut: () => Promise<void>
+  /** ショート(縦型)づくりの進み具合 */
+  shorts: ShortsProgress
+  /**
+   * 見どころの山から縦型のショートを作り、`folder` に企画(.veproj)と動画(.mp4)を1本ずつ書く。
+   * 書いた動画のパスを返す(区間が無ければ空)
+   */
+  makeShorts: (folder: string, options: ShortOptions) => Promise<string[]>
 
   setScreenOpen: (open: boolean) => void
   scanFolder: (root: string) => Promise<void>
@@ -1045,6 +1056,93 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         else next[sceneId] = keep
         return { keep: next }
       }),
+    shorts: { state: 'idle', done: 0, total: 0, files: [] },
+    makeShorts: async (folder, options) => {
+      const project = useProjectStore.getState().project
+      const info = project.multicam
+      if (!info || get().shorts.state === 'run') return []
+      set({
+        shorts: { state: 'run', done: 0, total: 0, files: [], note: '見どころを探しています' }
+      })
+      const files: string[] = []
+      try {
+        const activity = await activityOf(project, info)
+        // 声の盛り上がりは、構成の判定で測ったもの。測っていなければ(ロケとして作った回)ここで測る
+        const hype = get().hype.length > 0 ? get().hype : hypeMomentsFor(project, info, activity)
+        const windows = shortWindowsFor({ project, info, hype }, options)
+        if (windows.length === 0) {
+          set({
+            shorts: {
+              state: 'done',
+              done: 0,
+              total: 0,
+              files,
+              note: '盛り上がった所が見つかりませんでした'
+            }
+          })
+          return files
+        }
+        const settings = useSettingsStore.getState()
+        const styles = usePresetStore.getState().captionPresets
+        for (let i = 0; i < windows.length; i++) {
+          set({
+            shorts: {
+              state: 'run',
+              done: i,
+              total: windows.length,
+              files: [...files],
+              note: `${i + 1}/${windows.length} 本目を書き出し中`
+            }
+          })
+          const short = buildShortProject(
+            {
+              project,
+              info,
+              hype,
+              activity,
+              styles,
+              speechLook: speechLook(settings.speechTelopLook, styles),
+              dictionary: parseDictionary(settings.telopDictionary)
+            },
+            windows[i],
+            i
+          )
+          const base = `${folder}/${safeFileBaseName(short.name)}`
+          await window.api.saveProject(`${base}.veproj`, short)
+          const telopLayer = await prepareTelopLayerForExport(short, '9:16', 1080)
+          try {
+            await window.api.exportProject({
+              project: short,
+              aspectRatio: '9:16',
+              resolutionHeight: 1080,
+              quality: settings.exportQuality,
+              outputPath: `${base}.mp4`,
+              loudnessNormalization: settings.exportLoudness !== 'off',
+              loudnessTarget:
+                settings.exportLoudness === 'off' ? undefined : settings.exportLoudness,
+              engine: settings.exportEngine,
+              telopLayer
+            })
+          } finally {
+            if (telopLayer?.stagedId)
+              void window.api.telopLayer.release(telopLayer.stagedId).catch(() => {})
+          }
+          files.push(`${base}.mp4`)
+          log(
+            `ショート ${i + 1}: ${clockText(windows[i].start)}〜${clockText(windows[i].end)}(山 ${windows[i].peaks} 回)→ ${base}.mp4`
+          )
+        }
+        set({ shorts: { state: 'done', done: files.length, total: files.length, files } })
+        return files
+      } catch (e) {
+        const msg = formatIpcError(e)
+        log(`ショートを作れませんでした: ${msg}`)
+        set({
+          shorts: { state: 'error', done: files.length, total: files.length, files, note: msg }
+        })
+        return files
+      }
+    },
     rebuildRoughCut: async () => {
       if (get().running || get().scenes.length === 0) return
       set({ running: true })
@@ -1095,6 +1193,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 
     reset: () =>
       set({
+        shorts: { state: 'idle', done: 0, total: 0, files: [] },
         root: null,
         scan: null,
         sources: [],
@@ -1498,4 +1597,18 @@ export function withTrackPlacements(
         : { id: f.id, start: 0, rate: 1, method: 'none' as const }
     })
   return { ...report, placements: [...report.placements, ...extra] }
+}
+
+export interface ShortsProgress {
+  state: 'idle' | 'run' | 'done' | 'error'
+  done: number
+  total: number
+  /** 書いた動画のパス */
+  files: string[]
+  note?: string
+}
+
+function clockText(sec: number): string {
+  const t = Math.max(0, Math.round(sec))
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
 }

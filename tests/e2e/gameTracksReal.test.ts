@@ -10,7 +10,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -31,8 +31,11 @@ vi.mock('electron', () => ({
   app: { getPath: () => state.cacheDir, isPackaged: false, getAppPath: () => process.cwd() }
 }))
 vi.mock('@main/syncWorker?modulePath', () => ({ default: '' }))
+// テロップの層は画面の描画(canvas)で作るので、このテストでは作らない(テロップの描画は別の受け入れテストで確かめている)
+vi.mock('@renderer/lib/telopRaster', () => ({ prepareTelopLayerForExport: async () => null }))
 
-import { ffmpegPath, ffprobePath, probeMedia } from '@main/ffmpegService'
+import { exportProject, ffmpegPath, ffprobePath, probeMedia } from '@main/ffmpegService'
+import { saveProjectFile } from '@main/projectFileService'
 import { scanFootage } from '@main/footageService'
 import { cachedEnvelope } from '@main/audioPcm'
 import { usePipelineStore } from '@renderer/store/pipelineStore'
@@ -40,6 +43,7 @@ import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
 import type { AsrJob, AsrJobResult } from '@shared/transcript'
+import type { Project } from '@shared/types'
 import { detectHype } from '@shared/structure/hype'
 import {
   DURATION,
@@ -131,6 +135,10 @@ function installApi(streamer: Line[], friend: Line[], calls: { asrPaths: string[
     onLlmProgress: noop,
     llmRun: async () => [],
     showKitScan: async () => ({ se: [], bgm: [], cg: [] }),
+    saveProject: async (path: string, project: unknown) =>
+      saveProjectFile(path, project as Parameters<typeof saveProjectFile>[1]),
+    exportProject: (payload: Parameters<typeof exportProject>[0]) =>
+      exportProject({ ...payload, onProgress: () => {} }),
     getEnvApiKeys: async () => ({}),
     onMenuCommand: noop,
     updateMenu: async () => {},
@@ -365,5 +373,55 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
       info.files.filter((f) => f.sourceId === info.anchorSourceId).map((f) => f.assetId)
     )
     expect(project.clips.every((c) => screenAsset.has(c.assetId))).toBe(true)
+
+    // ショート: 山の強い順に 3 本、45 秒まで。縦 1080×1920、顔カメラは上に横幅いっぱい
+    const outDir = join(dir, 'shorts')
+    rmSync(outDir, { recursive: true, force: true })
+    mkdirSync(outDir, { recursive: true })
+    const files = await usePipelineStore.getState().makeShorts(outDir, { count: 3, maxSec: 45 })
+    expect(usePipelineStore.getState().shorts.state).toBe('done')
+    expect(files).toHaveLength(3)
+    for (const f of files) {
+      const probe = JSON.parse(
+        execFileSync(ffprobePath, [
+          '-v',
+          'error',
+          '-print_format',
+          'json',
+          '-show_format',
+          '-show_streams',
+          f
+        ]).toString()
+      ) as {
+        format: { duration: string }
+        streams: { codec_type: string; width?: number; height?: number }[]
+      }
+      const v = probe.streams.find((x) => x.codec_type === 'video')!
+      expect([v.width, v.height]).toEqual([1080, 1920])
+      expect(probe.streams.some((x) => x.codec_type === 'audio')).toBe(true)
+      const len = Number(probe.format.duration)
+      expect(len).toBeGreaterThanOrEqual(14)
+      expect(len).toBeLessThanOrEqual(49)
+      expect(existsSync(f.replace(/\.mp4$/, '.veproj'))).toBe(true)
+    }
+    const short = JSON.parse(readFileSync(files[0].replace(/\.mp4$/, '.veproj'), 'utf8'))
+    const sp = (short.project ?? short) as Project
+    expect(sp.aspectRatio).toBe('9:16')
+    expect(sp.clips.every((c) => c.fillCrop)).toBe(true)
+    expect(sp.videoOverlayTracks[0]).toMatchObject({
+      position: 'top-left',
+      scale: 1,
+      hidden: false
+    })
+    expect(sp.textOverlays.length).toBeGreaterThan(0)
+    // どのショートにも叫びの山が入っている
+    const shortsInfo = usePipelineStore.getState().log.filter((l) => l.text.startsWith('ショート '))
+    expect(shortsInfo).toHaveLength(3)
+    const sec = (t: string): number => Number(t.split(':')[0]) * 60 + Number(t.split(':')[1])
+    for (const l of shortsInfo) {
+      const m = /: (\d+:\d+)〜(\d+:\d+)/.exec(l.text)!
+      const [a, b] = [sec(m[1]), sec(m[2])]
+      expect(HYPE_AT.some((h) => h >= a && h <= b)).toBe(true)
+    }
   }, 300_000)
 })

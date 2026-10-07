@@ -26,6 +26,7 @@ import {
   type EditPolicy
 } from '@shared/structure/kind'
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
+import { ShortsPanel } from './ShortsPanel'
 
 /**
  * 自動編集の画面(自動編集 > 自動編集の画面)。デザイン案の「AutoEdit」。
@@ -613,6 +614,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                   人の完成版と比べる…
                 </button>
               </div>
+              <ShortsPanel disabled={running || scenes.length === 0} />
               {comparison && (
                 <div className="structure-compare" aria-label="人の完成版との比較">
                   {'error' in comparison ? (
