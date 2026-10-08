@@ -3499,7 +3499,23 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               placed.add(o.sourceId)
               return [rebuild(o), ...hand]
             })
-            return [...ordered, ...overlays.filter((o) => !placed.has(o.sourceId)).map(rebuild)]
+            const all = [
+              ...ordered,
+              ...overlays.filter((o) => !placed.has(o.sourceId)).map(rebuild)
+            ]
+            // 前の版で、移した画のトラックがカメラより下に置かれた企画: カメラのすぐ上へ戻す
+            for (let c = 0; c < all.length; c++) {
+              const cam = all[c]
+              if (!cam.multicamSourceId) continue
+              const h = all.findIndex(
+                (t, k) => k < c && !t.multicamSourceId && t.name === `${cam.name}(手で置いた画)`
+              )
+              if (h < 0) continue
+              const [hand] = all.splice(h, 1)
+              all.splice(c, 0, hand)
+              c--
+            }
+            return all
           })(),
           state.project.videoOverlayTracks
         ),
@@ -3647,7 +3663,18 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           assets,
           track && !k.some((t) => t.autoRole === 'cg') ? [track] : []
         )
-        return { ...p, assets: adopted.assets, videoOverlayTracks: [...k, ...adopted.tracks] }
+        // 入れ替える自動の CG があった段に置く(一番上へ足すと、後から置いたロゴの上に CG が重なっていた)
+        const at = p.videoOverlayTracks.findIndex((t) => t.autoRole === 'cg' && isUntouchedAuto(t))
+        // 入れ替える CG より下にある、残すトラックの数(残すトラックは作り直した物なので、元の並びで数える)
+        const below =
+          at < 0
+            ? k.length
+            : p.videoOverlayTracks.slice(0, at).filter((t) => !isUntouchedAuto(t)).length
+        return {
+          ...p,
+          assets: adopted.assets,
+          videoOverlayTracks: [...k.slice(0, below), ...adopted.tracks, ...k.slice(below)]
+        }
       }
       // 履歴には積まないが、未保存にする(保存の途中に届いた CG が、保存済みと扱われて残らなかった)
       return {

@@ -1946,3 +1946,76 @@ describe('第44回: 収録の音のトラックから移した音のトラック
     expect(hand[0].clips.map((c) => c.id).sort()).toEqual(['n1', 'n2'])
   })
 })
+
+describe('第46回: 重なりの順の小さな2件', () => {
+  it('前の版でカメラより下に置かれた「(手で置いた画)」は、作り直すとカメラのすぐ上へ戻る', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, { ...asset('logo', 5), filePath: '/rec/logo.png' }],
+        videoOverlayTracks: [
+          {
+            id: 'handT',
+            name: '顔(手で置いた画)',
+            hidden: false,
+            position: 'top-right',
+            scale: 0.3,
+            clips: [{ id: 'logoC', assetId: 'logo', startTime: 12, inPoint: 0, outPoint: 2 }]
+          },
+          {
+            id: 'faceT',
+            name: '顔',
+            multicamSourceId: 'A',
+            hidden: false,
+            position: 'top-right',
+            scale: 0.3,
+            clips: [{ id: 'f1', assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 }]
+          }
+        ]
+      } as unknown as Project
+    })
+    st().applyRoughCut(
+      {
+        main: [{ assetId: 'camA', inPoint: 0, outPoint: 10, speed: 1 }],
+        audio: [],
+        overlays: [
+          {
+            name: '顔',
+            sourceId: 'A',
+            clips: [{ assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 }]
+          }
+        ],
+        duration: 10,
+        spans: []
+      } as never,
+      []
+    )
+    const names = st().project.videoOverlayTracks.map((t) => t.name)
+    expect(names.indexOf('顔(手で置いた画)')).toBeGreaterThan(names.indexOf('顔'))
+  })
+
+  it('自動の CG を置き直しても、後から足したトラックとの重なりの順は元のまま', () => {
+    setup([[0, 10]])
+    const cg = (t: number): never =>
+      [{ path: '/kit/cg.png', startTime: t, inPoint: 0, outPoint: 2 }] as never
+    const cgAsset = { ...asset('cg', 3600), filePath: '/kit/cg.png', still: true }
+    st().setAutoCg(cg(1), [cgAsset])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        videoOverlayTracks: [
+          ...p.videoOverlayTracks,
+          { id: 'logoT', name: 'ロゴ', hidden: false, position: 'top-left', scale: 0.2, clips: [] }
+        ]
+      } as unknown as Project
+    })
+    st().setAutoCg(cg(3), [cgAsset])
+    expect(st().project.videoOverlayTracks.map((t) => t.name)).toEqual(['CG(自動)', 'ロゴ'])
+  })
+})
