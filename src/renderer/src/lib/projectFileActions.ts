@@ -34,7 +34,10 @@ function remember(filePath: string): void {
 }
 
 export async function checkMissingAssets(): Promise<void> {
-  const { project, setMissingAssetPaths } = useProjectStore.getState()
+  const { project, setMissingAssetPaths, projectSession } = useProjectStore.getState()
+  // 調べている間に別の企画を開いていたら、結果を書かない(前の企画の結果で、開いた企画の
+  // 「見つからない」印を消していた)
+  const switched = (): boolean => !stillSameProject(projectSession)
   if (project.assets.length === 0) {
     setMissingAssetPaths([])
     return
@@ -42,10 +45,12 @@ export async function checkMissingAssets(): Promise<void> {
   // 見つからなかった**パス**をそのまま渡す。ID への変換はストア側でそのつど行う
   // (IDで覚えると、取り消しでパスが戻っても印が戻らない)。
   const missing = await window.api.checkFilesExist(project.assets.map((a) => a.filePath))
+  if (switched()) return
   // ノイズを除いた音声(このPCのキャッシュ)が無ければ、元の録音へ戻す(別のPCで開いた・キャッシュを消した)
   const fallback = project.assets.filter((a) => a.denoisedFrom && missing.includes(a.filePath))
   if (fallback.length > 0) {
     const originalsMissing = await window.api.checkFilesExist(fallback.map((a) => a.denoisedFrom!))
+    if (switched()) return
     const revert = fallback.filter((a) => !originalsMissing.includes(a.denoisedFrom!))
     if (revert.length > 0) {
       useProjectStore

@@ -204,8 +204,8 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
     )
       return
     const store = useProjectStore.getState()
-    store.newProject()
-    store.setProjectName(name.trim())
+    // 名前ごと新しい企画にする(名前を後から変えると取り消しの1件目になり、取り消すと既定の名前に戻った)
+    store.newProject(name.trim())
     setOpen(false)
     const pipeline = usePipelineStore.getState()
     pipeline.setScreenOpen(true)

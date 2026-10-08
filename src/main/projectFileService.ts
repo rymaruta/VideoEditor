@@ -125,7 +125,15 @@ function realTarget(filePath: string): string {
         return p
       }
       if (!link) return p
-      p = resolve(dirname(p), readlinkSync(p))
+      // `..` は、リンクの置かれた**本当の**フォルダから数える(フォルダのリンクの中にあるリンクで、
+      // 文字のまま解くと別の場所を指していた)
+      let dir = dirname(p)
+      try {
+        dir = realpathSync(dir)
+      } catch {
+        /* フォルダも無ければ、文字のまま解く */
+      }
+      p = resolve(dir, readlinkSync(p))
     }
     return p
   }

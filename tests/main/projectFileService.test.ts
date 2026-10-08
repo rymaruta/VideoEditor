@@ -99,4 +99,15 @@ describe('シンボリックリンクの企画ファイル', () => {
     expect(existsSync(real)).toBe(true)
     expect(loadProjectFile(real).name).toBe('戻った')
   })
+
+  it('フォルダのリンクの中の、`..` を含むリンク先が無いリンクは、本当のフォルダから数える', () => {
+    mkdirSync(join(dir, 'mnt', 'projects', 'A'), { recursive: true })
+    mkdirSync(join(dir, 'mnt', 'projects', 'shared'))
+    mkdirSync(join(dir, 'home'))
+    symlinkSync(join(dir, 'mnt', 'projects', 'A'), join(dir, 'home', 'proj'))
+    symlinkSync('../shared/x.veproj', join(dir, 'mnt', 'projects', 'A', 'x.veproj'))
+    saveProjectFile(join(dir, 'home', 'proj', 'x.veproj'), project('共有'))
+    expect(loadProjectFile(join(dir, 'mnt', 'projects', 'shared', 'x.veproj')).name).toBe('共有')
+    expect(lstatSync(join(dir, 'mnt', 'projects', 'A', 'x.veproj')).isSymbolicLink()).toBe(true)
+  })
 })

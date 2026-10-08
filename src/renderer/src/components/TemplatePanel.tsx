@@ -39,6 +39,8 @@ export function TemplatePanel(): React.JSX.Element {
     if (!confirmDiscard(true)) return
     setError(null)
     setAutoCutting(templateId)
+    // 検出を待つ間に別の企画を開いたら当てない(開いた企画の本編・テロップ・縦横比を置き換えていた)
+    const session = useProjectStore.getState().projectSession
     try {
       const allPicks: { assetId: string; start: number; end: number; score: number }[] = []
       for (const asset of videoAssets) {
@@ -60,6 +62,7 @@ export function TemplatePanel(): React.JSX.Element {
           (a, b) =>
             (assetOrder.get(a.assetId) ?? 0) - (assetOrder.get(b.assetId) ?? 0) || a.start - b.start
         )
+      if (useProjectStore.getState().projectSession !== session) return
       autoCutFromCandidates(chosen, template)
     } catch (e) {
       setError(formatIpcError(e))

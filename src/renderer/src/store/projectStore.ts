@@ -1041,7 +1041,8 @@ interface ProjectState {
   setSourceOut: (t: number | null) => void
 
   setSaveError: (message: string | null) => void
-  newProject: () => void
+  /** 新しい企画にする。名前を渡せば、その名前で始める(取り消しで既定の名前へ戻らないように) */
+  newProject: (name?: string) => void
   loadProject: (project: Project, filePath: string) => void
   restoreAutosave: (project: Project) => void
   /**
@@ -1349,6 +1350,15 @@ interface ProjectState {
   applyAutoEditPattern: (pattern: AutoEditPattern) => void
 }
 
+/**
+ * 解析の結果から置くクリップのうち、今の企画にある素材のものだけ。解析を待つ間に別の企画を
+ * 開いていると、前の企画の素材を指す(見えないのに書き出しで失敗する)クリップが入っていた
+ */
+function knownAssetPicks<P extends { assetId: string }>(project: Project, picks: P[]): P[] {
+  const ids = new Set(project.assets.map((a) => a.id))
+  return picks.filter((p) => ids.has(p.assetId))
+}
+
 function totalDuration(project: Project): number {
   return project.clips.reduce((sum, c) => sum + (c.outPoint - c.inPoint) / (c.speed || 1), 0)
 }
@@ -1454,6 +1464,19 @@ export function beginHistoryGesture(key: string): void {
 }
 export function endHistoryGesture(): void {
   gestureKey = null
+}
+
+/**
+ * 1回の操作(タイムラインのドラッグを離した など)を、必ず1件の履歴にして書き込む。
+ * 同じクリップの操作を 0.7 秒以内に続けても、前の操作とまとめない(数値の欄の打ち直しとは違う)
+ */
+export function commitAsOwnStep(key: string, write: () => void): void {
+  beginHistoryGesture(key)
+  try {
+    write()
+  } finally {
+    endHistoryGesture()
+  }
 }
 
 /**
@@ -1649,7 +1672,12 @@ function buildInsertedClips(
       kept.push({ ...c, inPoint, transitionIn: undefined })
     }
   }
-  return { clips: [...before, newClip, ...kept], split, removedClipIds }
+  return {
+    clips: [...before, newClip, ...kept],
+    split,
+    removedClipIds,
+    untrimmed: [...before, newClip, ...after]
+  }
 }
 
 /**
@@ -1664,6 +1692,8 @@ interface InsertedClips {
   split: { original: Clip; parts: Clip[] } | null
   /** 上書きで丸ごと消えたクリップのID */
   removedClipIds: string[]
+  /** 上書きで後ろを詰める前の並び(本編に紐づくテロップの位置を、詰めた分だけ直すのに使う) */
+  untrimmed?: Clip[]
 }
 
 /**
@@ -1673,8 +1703,11 @@ interface InsertedClips {
  * (経路ごとに書くと、片方だけ直したときに黙ってズレる)。
  */
 function applyInsertedClips(project: Project, built: InsertedClips): Project {
-  let next: Project = { ...project, clips: built.clips }
+  let next: Project = { ...project, clips: built.untrimmed ?? built.clips }
   if (built.split) next = relinkForReplacedClip(next, built.split.original, built.split.parts)
+  // 上書きは、詰めたクリップの頭を削る。本編に紐づくテロップは、トリムと同じく素材の同じ所に残す
+  // (直さないと、削った分だけテロップが後ろへずれていた。上書きは後ろの位置を動かさない)
+  if (built.untrimmed) next = reanchorLinkedOverlays(next, { ...next, clips: built.clips })
   if (built.removedClipIds.length > 0) {
     next = {
       ...next,
@@ -2086,13 +2119,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  newProject: () => {
+  newProject: (name) => {
     resetHistoryCoalescing()
     resetTransientFollowState()
     projectSwitchListeners.forEach((l) => l())
+    const blank = createBlankProject()
     set({
       ...projectSwitchReset(),
-      project: createBlankProject(),
+      project: name?.trim() ? { ...blank, name: name.trim() } : blank,
       currentFilePath: null,
       isDirty: false
     })
@@ -4747,8 +4781,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return { ...pushHistory(state), project: { ...project, textOverlays: overlays } }
     }),
 
-  autoCutFromCandidates: (picks, template) =>
+  autoCutFromCandidates: (rawPicks, template) =>
     set((state) => {
+      const picks = knownAssetPicks(state.project, rawPicks)
+      if (picks.length === 0) return state
       const clips: Clip[] = picks.map((p) => ({
         id: uuid(),
         assetId: p.assetId,
@@ -4794,8 +4830,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  addRoughCutClips: (picks) =>
+  addRoughCutClips: (rawPicks) =>
     set((state) => {
+      const picks = knownAssetPicks(state.project, rawPicks)
+      if (picks.length === 0) return state
       const newClips: Clip[] = picks.map((p) => ({
         id: uuid(),
         assetId: p.assetId,
@@ -4812,8 +4850,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // Adding the cut and its hook caption is one user action ("apply this plan"), so it
   // must be one undo step — otherwise undoing leaves the clips behind with the caption
   // gone, which is a state the user never asked for.
-  applyShortPlan: (picks, overlays) =>
+  applyShortPlan: (rawPicks, overlays) =>
     set((state) => {
+      const picks = knownAssetPicks(state.project, rawPicks)
       if (picks.length === 0) return state
       const newClips: Clip[] = picks.map((p, i) => ({
         id: uuid(),

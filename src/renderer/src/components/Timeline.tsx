@@ -8,6 +8,7 @@ import { frameSeconds } from '@shared/frameRate'
 import { v4 as uuid } from 'uuid'
 import {
   beginHistoryGesture,
+  commitAsOwnStep,
   endHistoryGesture,
   MIN_CLIP_SOURCE_DURATION,
   useProjectStore
@@ -958,10 +959,13 @@ export function Timeline(): React.JSX.Element {
         trimDragSnapshot.liveInPoint !== trimDragSnapshot.originalInPoint ||
         trimDragSnapshot.liveOutPoint !== trimDragSnapshot.originalOutPoint
       ) {
-        updateClipTrim(
-          trimDragSnapshot.clipId,
-          trimDragSnapshot.liveInPoint,
-          trimDragSnapshot.liveOutPoint
+        // 1回のドラッグは1件の履歴。直前のトリム(0.7 秒以内)とまとめない(取り消し1回で2回ぶん戻っていた)
+        commitAsOwnStep(`trim-drop:${trimDragSnapshot.clipId}`, () =>
+          updateClipTrim(
+            trimDragSnapshot.clipId,
+            trimDragSnapshot.liveInPoint,
+            trimDragSnapshot.liveOutPoint
+          )
         )
       }
       setTrimDrag(null)
@@ -1089,10 +1093,12 @@ export function Timeline(): React.JSX.Element {
         // 実測: 分離した音声を1回クリックしてから映像を20秒→10秒に縮めると、
         // 音声だけ20秒のまま残った(触らなければ一緒に10秒になる)。
       } else if (audioDragSnapshot.liveStartTime !== audioDragSnapshot.originalStartTime) {
-        updateAudioClipStart(
-          audioDragSnapshot.trackId,
-          audioDragSnapshot.clipId,
-          audioDragSnapshot.liveStartTime
+        commitAsOwnStep(`audio-drop:${audioDragSnapshot.clipId}`, () =>
+          updateAudioClipStart(
+            audioDragSnapshot.trackId,
+            audioDragSnapshot.clipId,
+            audioDragSnapshot.liveStartTime
+          )
         )
       }
       setAudioDrag(null)
@@ -1342,10 +1348,12 @@ export function Timeline(): React.JSX.Element {
         overlayDragSnapshot.liveStartTime !== overlayDragSnapshot.originalStartTime ||
         overlayDragSnapshot.liveEndTime !== overlayDragSnapshot.originalEndTime
       ) {
-        updateTextOverlay(overlayDragSnapshot.overlayId, {
-          startTime: overlayDragSnapshot.liveStartTime,
-          endTime: overlayDragSnapshot.liveEndTime
-        })
+        commitAsOwnStep(`overlay-drop:${overlayDragSnapshot.overlayId}`, () =>
+          updateTextOverlay(overlayDragSnapshot.overlayId, {
+            startTime: overlayDragSnapshot.liveStartTime,
+            endTime: overlayDragSnapshot.liveEndTime
+          })
+        )
       }
       setOverlayDrag(null)
     }

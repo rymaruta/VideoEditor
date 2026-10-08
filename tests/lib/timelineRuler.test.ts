@@ -59,3 +59,16 @@ describe('formatTimecode — NTSC 以外の半端なレート', () => {
     expect(formatTimecode(60, 90000 / 3001)).toBe('00:01:00:00')
   })
 })
+
+describe('formatTimecode — 23.976fps', () => {
+  it('コマの番号を飛ばさない(本当のコマを 24 進で数える)', () => {
+    const fps = 24000 / 1001
+    const label = (n: number): number => {
+      const t = formatTimecode((n * 1001) / 24000, fps)
+      const [h, m, s, f] = t.split(':').map(Number)
+      return ((h * 60 + m) * 60 + s) * 24 + f
+    }
+    for (let n = 495; n < 505; n++) expect(label(n + 1) - label(n)).toBe(1)
+    expect(formatTimecode((86400 * 1001) / 24000, fps)).toBe('01:00:00:00')
+  })
+})
