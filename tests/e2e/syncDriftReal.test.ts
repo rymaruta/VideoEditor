@@ -243,4 +243,47 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     // 30fps の1フレームの半分より小さく
     for (const e of errs) expect(Math.abs(e)).toBeLessThan(0.017)
   }, 600_000)
+  it('音声が映像より遅れて始まるカメラも、映像の時刻で置く(遅れの分ずらさない)', async () => {
+    const T = 120
+    const w = world(T, 0, 11)
+    const micPath = join(dir, 'late_mic.wav')
+    writeWav(micPath, record(w, 0, T, 1, 21))
+    // カメラの音は 0.35 秒から(映像は 0 秒から)
+    const audioWav = join(dir, 'late_cam_audio.wav')
+    writeWav(audioWav, record(w, 0.35, T - 0.35, 1, 22))
+    const camPath = join(dir, 'late_cam.mp4')
+    execFileSync(ffmpegPath, [
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      `testsrc2=s=160x90:r=30:d=${T}`,
+      '-itsoffset',
+      '0.35',
+      '-i',
+      audioWav,
+      '-map',
+      '0:v',
+      '-map',
+      '1:a',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      camPath
+    ])
+    const report = await syncInProcess([
+      input('mic', micPath, 'mic', T),
+      input('cam', camPath, 'camera', T)
+    ])
+    const m = report.placements.find((p) => p.id === 'mic')!
+    const c = report.placements.find((p) => p.id === 'cam')!
+    expect(Math.abs(c.start - m.start), JSON.stringify(report.placements)).toBeLessThan(1 / 30)
+  }, 300_000)
 })

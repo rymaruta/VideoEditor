@@ -117,7 +117,11 @@ function statsOf(track: MicTrack): MicStats | null {
   // 静かな所と大きな所の間の 4 割の高さを「声がある」とする(最低でも静かな所より 8dB 上)
   const threshold = floor + Math.max(8, (loud - floor) * 0.4)
   const speechFrames = valid.filter((v) => v >= threshold)
-  const speech = speechFrames.length > 0 ? percentile(speechFrames, 0.5) : loud
+  // 話しているときの普段の大きさ。声のある時刻にはかぶり(ほかの人の声。15〜25dB 小さい)も
+  // 混ざり、2人の会話では半分近くがかぶりなので、真ん中の値はかぶりの大きさに引きずられていた
+  // (本人の声 -12dB に対し -32dB と見て、止まったマイクの人の声を本人の声と取り違えた)。
+  // 上のほう(4分の3の所)で見る
+  const speech = speechFrames.length > 0 ? percentile(speechFrames, 0.75) : loud
   return { id: track.id, db, floor, speech, threshold, maskedFrames: track.maskedFrames }
 }
 

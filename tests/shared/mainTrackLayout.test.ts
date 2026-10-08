@@ -34,13 +34,17 @@ describe('computeMainTrackLayout — 本編の書き出し位置', () => {
     expect(l.totalExportDuration).toBe(4)
   })
 
-  it('【レグレッション】尺はフレームに丸めるので、2.345秒×10本は 700フレームちょうど', () => {
-    // 書き出し側のコメントの実測(映像 23.334秒=700フレーム)と同じ数
+  it('尺はフレームに丸めるが、丸めの差は積み上げない(2.345秒×10本 = 23.45秒 → 704フレーム)', () => {
+    // 1本ずつ丸めると 70×10 = 700 フレーム(タイムラインより 0.116 秒短い)になっていた
     const l = computeMainTrackLayout(
       Array.from({ length: 10 }, () => clip(2.345)),
       30
     )
-    expect(round(l.totalExportDuration * 30)).toBe(700)
+    expect(round(l.totalExportDuration * 30)).toBe(704)
+    // どの境目もタイムラインから半フレーム以内
+    l.exportStarts.forEach((s, i) =>
+      expect(Math.abs(s - l.timelineStarts[i])).toBeLessThanOrEqual(0.5 / 30 + 1e-9)
+    )
     // 位置もフレームの整数倍に乗る
     for (const s of l.exportStarts) expect(Number.isInteger(round(s * 30))).toBe(true)
   })

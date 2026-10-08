@@ -326,8 +326,12 @@ function expectedFor(c: Case): Expect {
   // アプリと同じ決め方(29.97 などの素材は 30000/1001 のまま)
   const fps = targetFrameRate(fpsList)
   let acc = 0
+  // 本編の各クリップの尺はフレームに丸めるが、丸めの差は積み上げない(タイムラインの終わりの
+  // 時刻を丸め、その差をフレーム数にする)
+  let tlEnd = 0
   const clips = c.main.map((m) => {
-    const frames = Math.round(((m.out - m.in) / (m.speed ?? 1)) * fps)
+    tlEnd += (m.out - m.in) / (m.speed ?? 1)
+    const frames = Math.round(tlEnd * fps) - acc
     const r = {
       start: acc,
       frames,

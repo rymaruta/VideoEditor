@@ -50,10 +50,21 @@ export function readPcm(
   })
 }
 
+/**
+ * 音声の頭を素材の時刻 0 にそろえる(書き出しの `ALIGN_AUDIO_START` と同じ)。音声が映像より遅れて
+ * 始まる素材(start_time が 0 でない)は、そのまま読むと遅れの分が詰まり、同期・文字起こしが
+ * 書き出し・プレビューと遅れの分だけずれていた(330ms 遅れたカメラが 330ms ずれて置かれ、
+ * 時計のずれも測れなかった)。`-ss` で頭から読んでも、始まる前の分を無音で埋める
+ */
+export const PCM_ALIGN_FILTER = 'aresample=async=1:first_pts=0'
+
+/** 包絡線のキャッシュの形が変わったら上げる(古い形のキャッシュを使わない) */
+const ENVELOPE_CACHE_VERSION = 2
+
 function envelopeCachePath(cacheDir: string, f: AudioFileRef): string {
   const key = createHash('sha1')
     .update(
-      `${f.path}|${f.size}|${f.mtimeMs}|${contentFingerprint(f.path)}|${ENVELOPE_SAMPLE_RATE}|${ENVELOPE_RATE}`
+      `${f.path}|${f.size}|${f.mtimeMs}|${contentFingerprint(f.path)}|${ENVELOPE_SAMPLE_RATE}|${ENVELOPE_RATE}|v${ENVELOPE_CACHE_VERSION}`
     )
     .digest('hex')
   return join(cacheDir, `${key}.env`)
@@ -90,7 +101,20 @@ export async function cachedEnvelope(
   const builder = new EnvelopeBuilder(ENVELOPE_SAMPLE_RATE)
   await readPcm(
     ffmpegPath,
-    ['-i', f.path, '-vn', '-ac', '1', '-ar', String(ENVELOPE_SAMPLE_RATE), '-f', 'f32le', 'pipe:1'],
+    [
+      '-i',
+      f.path,
+      '-vn',
+      '-af',
+      PCM_ALIGN_FILTER,
+      '-ac',
+      '1',
+      '-ar',
+      String(ENVELOPE_SAMPLE_RATE),
+      '-f',
+      'f32le',
+      'pipe:1'
+    ],
     (s) => builder.push(s)
   )
   const env = builder.finish()
@@ -133,6 +157,8 @@ export async function readWindow(
       '-i',
       path,
       '-vn',
+      '-af',
+      PCM_ALIGN_FILTER,
       '-ac',
       '1',
       '-ar',

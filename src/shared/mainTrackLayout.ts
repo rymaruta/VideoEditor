@@ -44,9 +44,21 @@ export function computeMainTrackLayout(
   outputFps: number
 ): MainTrackLayout {
   const timelineDurations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
-  const exportDurations = timelineDurations.map(
-    (d) => frameCountForDuration(d, outputFps) / outputFps
-  )
+  // 1本ずつ尺をフレームに丸めると、丸めの差が本数ぶん積み上がり、書き出しがタイムラインより
+  // 短く・長くなっていた(1.016 秒 × 20 本で 10 フレーム、自動編集の 88 本で 116ms 短く、終わりほど
+  // 絵と音がタイムラインの位置より早く出た)。タイムラインでの終わりの時刻を丸め、その差を尺にする
+  // (どの境目もタイムラインから半フレーム以内に収まる)
+  const exportDurations: number[] = []
+  {
+    let acc = 0
+    let prevFrames = 0
+    for (const d of timelineDurations) {
+      acc += Number.isFinite(d) && d > 0 ? d : 0
+      const frames = frameCountForDuration(acc, outputFps)
+      exportDurations.push(Math.max(0, frames - prevFrames) / outputFps)
+      prevFrames = Math.max(prevFrames, frames)
+    }
+  }
   const timelineStarts: number[] = []
   {
     let acc = 0

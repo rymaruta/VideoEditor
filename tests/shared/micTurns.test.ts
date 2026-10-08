@@ -167,3 +167,29 @@ describe('detectTurns: 伏せた時刻と、録っていない時刻', () => {
     expect(late.every((t) => t.uncertain)).toBe(true)
   })
 })
+
+describe('detectTurns: ふつうの会話のあとで止まったマイク', () => {
+  it('かぶりの多い会話でも、止まったマイクの人の声を残ったマイクの人の発言と決めない', () => {
+    const a = env(50, -60, [
+      [1, 4, -10],
+      [10, 14, -30],
+      [16, 20, -30],
+      [21, 24, -10],
+      [30, 34, -10],
+      [36, 42, -30],
+      [45, 49, -10]
+    ])
+    const b = env(50, -55, [
+      [10, 14, -12],
+      [16, 20, -12]
+    ])
+    for (let i = 25 * TURN_RATE; i < b.length; i++) b[i] = NaN
+    const turns = detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b }
+    ])
+    const late = turns.filter((t) => t.micId === 'A' && t.start > 35 && t.end < 44)
+    expect(late.length).toBeGreaterThan(0)
+    expect(late.every((t) => t.uncertain)).toBe(true)
+  })
+})

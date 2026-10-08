@@ -10,6 +10,7 @@ import type { TranscriptSegment, TranscriptWord } from '@shared/types'
 import { retryableSingleton } from './retryableSingleton'
 import { describeFfmpegExit } from './ffmpegError'
 import { ffSeconds } from './ffArgs'
+import { PCM_ALIGN_FILTER } from './audioPcm'
 
 const execFileAsyncRaw = promisify(execFile)
 /** 外部の処理を始め、アプリを閉じるときに止める一覧に入れる */
@@ -82,6 +83,9 @@ async function extractPcm16k(filePath: string, start: number, end: number): Prom
         ffSeconds(end - start),
         '-i',
         filePath,
+        // 音声の頭を素材の時刻にそろえる(同期・書き出しと同じ時刻で文字起こしする)
+        '-af',
+        PCM_ALIGN_FILTER,
         '-ar',
         '16000',
         '-ac',
