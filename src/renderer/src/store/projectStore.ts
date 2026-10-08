@@ -220,6 +220,29 @@ function withAssets(assets: MediaAsset[], add: MediaAsset[]): MediaAsset[] {
 }
 
 /**
+ * 置くクリップが指す素材を、その状態の素材の一覧に足す(id で見る)。履歴の状態は、置くときの一覧と違う
+ * (用意している間に同じファイルを人が読み込んでいた など)ので、ファイルの道で見ると、置いたクリップが
+ * その状態に無い素材を指し、取り消すと黙って鳴らなくなっていた
+ */
+function withReferencedAssets(
+  assets: MediaAsset[],
+  all: MediaAsset[],
+  ids: Iterable<string>
+): MediaAsset[] {
+  const have = new Set(assets.map((a) => a.id))
+  const out = [...assets]
+  for (const id of ids) {
+    if (have.has(id)) continue
+    const a = all.find((x) => x.id === id)
+    if (a) {
+      out.push(a)
+      have.add(id)
+    }
+  }
+  return out
+}
+
+/**
  * 裏で用意して置いたもの(自動の SE・BGM・CG)を、仮編集を入れた後の履歴(本編が `afterCut` のまま)にも置く。
  * 置くまでの間に別の所を直していると、その直しを取り消したときに、置いたものまで消えていた
  */
@@ -1824,10 +1847,19 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
                 return { ...t, clips: t.clips.map((c) => linkedNow.get(c.id) ?? c) }
               }),
               videoOverlayTracks: origin.videoOverlayTracks,
-              textOverlays: [
-                ...origin.textOverlays.filter((o) => !o.linkedClipId),
-                ...edited.textOverlays.filter((o) => o.linkedClipId)
-              ]
+              // 並び順(重なりの上下)は始まりのまま。紐づくテロップだけ今の値に差し替える
+              textOverlays: (() => {
+                const now = new Map(edited.textOverlays.map((o) => [o.id, o]))
+                const had = new Set(origin.textOverlays.map((o) => o.id))
+                return [
+                  ...origin.textOverlays.flatMap((o) => {
+                    if (!o.linkedClipId) return [o]
+                    const e = now.get(o.id)
+                    return e?.linkedClipId ? [e] : []
+                  }),
+                  ...edited.textOverlays.filter((o) => o.linkedClipId && !had.has(o.id))
+                ]
+              })()
             })
           }
         } else if (patch.project && patch.project.clips !== state.project.clips)
@@ -3520,7 +3552,15 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const place = (p: Project): Project => {
         const k = keptOf(p)
         const add = track && !k.some((t) => t.autoRole === 'cg') ? [track] : []
-        return { ...p, assets: withAssets(p.assets, newAssets), videoOverlayTracks: [...k, ...add] }
+        return {
+          ...p,
+          assets: withReferencedAssets(
+            p.assets,
+            assets,
+            add.flatMap((t) => t.clips.map((c) => c.assetId))
+          ),
+          videoOverlayTracks: [...k, ...add]
+        }
       }
       // 履歴には積まないが、未保存にする(保存の途中に届いた CG が、保存済みと扱われて残らなかった)
       return {
@@ -3568,10 +3608,15 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           .filter((t) => !isUntouchedAuto(t))
           .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
         const editedRoles = new Set(kept.filter((t) => t.autoRole).map((t) => t.autoRole))
+        const add = tracks.filter((t) => !editedRoles.has(t.autoRole))
         return {
           ...p,
-          assets: withAssets(p.assets, newAssets),
-          audioTracks: [...kept, ...tracks.filter((t) => !editedRoles.has(t.autoRole))]
+          assets: withReferencedAssets(
+            withAssets(p.assets, newAssets),
+            assets,
+            add.flatMap((t) => t.clips.map((c) => c.assetId))
+          ),
+          audioTracks: [...kept, ...add]
         }
       }
       // 履歴には積まないが、未保存にする(保存の途中に届いた SE・BGM が、保存済みと扱われて残らなかった)

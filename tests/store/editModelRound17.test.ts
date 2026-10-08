@@ -1536,3 +1536,73 @@ describe('第32回: 裏で置いた自動の音と取り消し', () => {
     expect(st().project.audioTracks.filter((t) => t.autoRole === 'bgm')).toHaveLength(1)
   })
 })
+
+describe('第33回: 第32回修正の見直し', () => {
+  it('トリムをまとめて書き込んでも、テロップの並び順(重なりの上下)は変わらない', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const [c0, c1] = st().project.clips
+    const base = { style: st().project.textOverlays[0]?.style } as Record<string, unknown>
+    S.setState({
+      project: {
+        ...st().project,
+        textOverlays: [
+          {
+            ...base,
+            id: 'linkedT',
+            text: 'a',
+            startTime: 12,
+            endTime: 13,
+            linkedClipId: c1.id,
+            linkOffset: 2
+          },
+          { ...base, id: 'manualT', text: 'b', startTime: 12, endTime: 13 }
+        ] as never
+      }
+    })
+    st().updateClipTrim(c0.id, 0, 9)
+    const first = st().project.textOverlays.map((o) => o.id)
+    st().updateClipTrim(c0.id, 0, 8)
+    expect([first, st().project.textOverlays.map((o) => o.id)]).toEqual([
+      ['linkedT', 'manualT'],
+      ['linkedT', 'manualT']
+    ])
+  })
+
+  it('用意している間に同じ曲を人が読み込んでいても、取り消した後の BGM は一覧にある素材を指す', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    S.setState({
+      project: {
+        ...st().project,
+        audioTracks: st().project.audioTracks.filter((t) => !t.autoRole)
+      }
+    })
+    const afterCut = st().project.clips
+    st().addAsset({ ...asset('userBgm', 60, false), filePath: '/kit/bgm.mp3' })
+    st().setAutoSounds(
+      [
+        {
+          role: 'bgm',
+          clips: [{ path: '/kit/bgm.mp3', startTime: 0, inPoint: 0, outPoint: 20, volume: 0.3 }]
+        }
+      ] as never,
+      [{ ...asset('pipelineBgm', 60, false), filePath: '/kit/bgm.mp3' }],
+      afterCut
+    )
+    const dangling = (): string[] => {
+      const ids = new Set(st().project.assets.map((a) => a.id))
+      return st()
+        .project.audioTracks.flatMap((t) => t.clips.map((c) => c.assetId))
+        .filter((id) => !ids.has(id))
+    }
+    expect(dangling()).toEqual([])
+    st().undo()
+    expect(st().project.audioTracks.some((t) => t.autoRole === 'bgm')).toBe(true)
+    expect(dangling()).toEqual([])
+  })
+})
