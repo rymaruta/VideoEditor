@@ -88,6 +88,8 @@ const MAX_HISTORY = 50
  * 左端を掴むと**掴んだ向きと逆へ 0.1秒飛んで伸びていた**(実測: in 2.000 → 1.900)。
  */
 export const MIN_CLIP_SOURCE_DURATION = 0.1
+/** 言葉の効果音を置く段の数(SE・SE 2・SE 3) */
+const KEYWORD_SE_LANES = 3
 
 function assetDurationOf(project: Project, assetId: string): number | undefined {
   return project.assets.find((a) => a.id === assetId)?.duration
@@ -4006,48 +4008,70 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   addKeywordSeClips: (placements, newAssets) =>
     set((state) => {
-      const existingTrack = state.project.audioTracks.find((t) => t.name === 'SE')
-      const trackId = existingTrack?.id ?? uuid()
-      // **ワンクリックで足す経路は重ねて置かない。** 同じ規則が
-      // `addAudioClipWithAsset`(効果音ライブラリの「追加」)にだけ育っており、
-      // ここは素の `startTime` で置いていた。完全に覆われたクリップは画面では
-      // 手前の1本と見分けが付かないのに、書き出しでは**そのまま足し算される**。
-      // (実測: テロップ5件のスキャンを2回。クリップは 5本 → **10本**に増えるのに
-      //  画面のクリップの位置は **5箇所のまま**。書き出しの SE 区間は
-      //  **-27.1dB → -21.1dB(ちょうど +6.0dB = 2本ぶん)**、
-      //  1回のスキャンの中でも 0.4秒差の2件が重なって **-21.1dB**、
-      //  2回目の後はそこが **-15.1dB(+12.0dB = 4本ぶん)**になった。
-      //  SEの無い区間は前後とも -61.1dB で変わらない=全体の音量が変わったのではない)
-      // 一括で置くので、**この回に置いたぶんも積み上げながら**空きを探す
-      // (でないと同じスキャンの中の近接した2件が重なる)。
-      const placed = existingTrack ? [...existingTrack.clips] : []
-      const newClips: AudioTrackClip[] = placements.map((p) => {
+      // **ワンクリックで足す経路は重ねて置かない。** 完全に覆われたクリップは画面では手前の1本と
+      // 見分けが付かないのに、書き出しでは**そのまま足し算される**
+      // (実測: 同じスキャンを2回で SE の区間が +6.0dB、近い2件の重なりでも +6.0dB)。
+      // ただし後ろへずらすと言葉から何秒も離れて鳴る(「すごい拍手」の拍手の SE が 2 秒遅れて、
+      // テロップが消えた後に鳴っていた)。ずらさず、空いている SE の段(SE・SE 2・SE 3)に置く。
+      // 同じ素材が同じ時刻にすでにあれば置かない(スキャンを2回しても増えない)。
+      // 段が足りなければ、従来どおり最初の段で後ろの空きへ
+      const laneName = (i: number): string => (i === 0 ? 'SE' : `SE ${i + 1}`)
+      const lanes: { id: string; name: string; existing: boolean; clips: AudioTrackClip[] }[] = []
+      for (let i = 0; i < KEYWORD_SE_LANES; i++) {
+        const t = state.project.audioTracks.find((x) => x.name === laneName(i))
+        if (t) lanes.push({ id: t.id, name: t.name, existing: true, clips: [...t.clips] })
+      }
+      const added = new Map<string, AudioTrackClip[]>()
+      const free = (clips: readonly AudioTrackClip[], start: number, len: number): boolean =>
+        clips.every(
+          (c) =>
+            start + len <= c.startTime + 1e-6 || start >= c.startTime + audioClipDuration(c) - 1e-6
+        )
+      for (const p of placements) {
+        // 数でない時刻・長さ(壊れた値)は置かない
+        if (!Number.isFinite(p.startTime) || !(Number.isFinite(p.outPoint) && p.outPoint > 0))
+          continue
+        const start = Math.max(0, p.startTime)
+        if (
+          lanes.some((l) =>
+            l.clips.some((c) => c.assetId === p.assetId && Math.abs(c.startTime - start) < 0.05)
+          )
+        )
+          continue
+        let lane = lanes.find((l) => free(l.clips, start, p.outPoint))
+        if (!lane && lanes.length < KEYWORD_SE_LANES) {
+          lane = { id: uuid(), name: laneName(lanes.length), existing: false, clips: [] }
+          lanes.push(lane)
+        }
         const clip: AudioTrackClip = {
           id: uuid(),
           assetId: p.assetId,
-          startTime: findFreeAudioStart(placed, Math.max(0, p.startTime), p.outPoint),
+          startTime: lane ? start : findFreeAudioStart(lanes[0].clips, start, p.outPoint),
           inPoint: 0,
           outPoint: p.outPoint,
           volume: p.volume
         }
-        placed.push(clip)
-        return clip
-      })
-      const audioTracks = existingTrack
-        ? state.project.audioTracks.map((t) =>
-            t.id === trackId ? { ...t, clips: [...t.clips, ...newClips] } : t
-          )
-        : [
-            ...state.project.audioTracks,
-            {
-              id: trackId,
-              name: 'SE',
-              muted: false,
-              volume: 1,
-              duckingEnabled: false,
-              clips: newClips
-            }
-          ]
+        const target = lane ?? lanes[0]
+        target.clips.push(clip)
+        added.set(target.id, [...(added.get(target.id) ?? []), clip])
+      }
+      if (added.size === 0 && !newAssets?.length) return state
+      const audioTracks = [
+        ...state.project.audioTracks.map((t) => {
+          const more = added.get(t.id)
+          return more ? { ...t, clips: [...t.clips, ...more] } : t
+        }),
+        ...lanes
+          .filter((l) => !l.existing && added.has(l.id))
+          .map((l) => ({
+            id: l.id,
+            name: l.name,
+            muted: false,
+            volume: 1,
+            duckingEnabled: false,
+            clips: added.get(l.id)!
+          }))
+      ]
       return {
         ...pushHistory(state),
         project: {

@@ -2085,4 +2085,21 @@ describe('タイムライン編集(第4回の調査)', () => {
     st().undo()
     expect(st().project.audioEvents?.[0].start).toBe(10)
   })
+
+  it('言葉の効果音: 近い2つの言葉の SE は言葉の時刻のまま別の段に置き、同じスキャンを2回しても増やさない', () => {
+    const se = (
+      startTime: number
+    ): { assetId: string; startTime: number; outPoint: number; volume: number } => ({
+      assetId: 'M',
+      startTime,
+      outPoint: 2.5,
+      volume: 1
+    })
+    st().addKeywordSeClips([se(10), se(10.5)])
+    st().addKeywordSeClips([se(10), se(10.5)])
+    const lanes = st().project.audioTracks.filter((t) => /^SE( \d)?$/.test(t.name))
+    const clips = lanes.flatMap((t) => t.clips)
+    expect(clips.map((c) => c.startTime).sort()).toEqual([10, 10.5])
+    expect(lanes).toHaveLength(2)
+  })
 })

@@ -61,3 +61,16 @@ export function fadeGainAt(
   }
   return 1
 }
+
+/**
+ * 音声クリップが実際に鳴る長さ。本編の終わりより先に続く音(BGM など)は本編の終わりで切れるので、
+ * フェードアウトもそこに掛ける(書き出しと同じ)。本編が無い・本編より後に始まる音は切らない
+ */
+export function audibleClipDuration(
+  clipStart: number,
+  clipDuration: number,
+  timelineEnd: number
+): number {
+  if (!(timelineEnd > clipStart)) return clipDuration
+  return Math.min(clipDuration, timelineEnd - clipStart)
+}

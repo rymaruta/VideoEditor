@@ -1,6 +1,12 @@
 import { trackProcess, trackUntilDone } from './liveProcesses'
 import { colorMatchFilter } from '@shared/color/match'
-import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
+import {
+  loudnormApplyFilter,
+  loudnormMeasureFilter,
+  needsLimitedGain,
+  planLimitedGain,
+  type LoudnessTarget
+} from '@shared/loudness'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
@@ -567,6 +573,14 @@ export function atempoChain(speed: number): string {
 export const RESAMPLE_SPEED_LIMIT = 0.002
 const RESAMPLE_GRID_RATE = 960000
 
+/**
+ * 音の頭を素材の頭(読み始めの位置)にそろえる。音が映像より遅れて始まる素材(録画機・書き出し直した物)は
+ * 最初の音の時刻が 0 より後ろにあり、そのまま `asetpts=PTS-STARTPTS` で 0 へ寄せると隙間が消えて
+ * 音が早く鳴っていた(実測: 0.48 秒遅れて始まる素材で、書き出しの音が 0.48 秒早い。プレビューは正しい)。
+ * 隙間を無音で埋める。速さを変える前に掛ける(atempo は始まりの時刻を伸び縮みさせない)
+ */
+export const ALIGN_AUDIO_START = 'aresample=async=1:first_pts=0'
+
 export function audioSpeedChain(speed: number): string {
   // 等倍なら何も掛けない。atempo=1 でも素通しにはならず、同じく切ってつなぎ直すので
   // 音が 19〜26ms 遅れて揺れていた(実測: 30fps の映像に対して口の動きより音が遅れる)
@@ -620,7 +634,7 @@ export function audioFormatFor(channels: number | undefined): string {
   // 3ch 以上は、出力を `fltp` で固定しているせいで畳み込みの正規化が外れている。
   // 明示して戻す(理由は `@shared/audioUpmix` の `multiChannelDownmixFilter`)。
   if (isMultiChannelCount(channels)) {
-    return `${multiChannelDownmixFilter(OUTPUT_SAMPLE_RATE)},${AUDIO_FORMAT}`
+    return `${multiChannelDownmixFilter(OUTPUT_SAMPLE_RATE, channels)},${AUDIO_FORMAT}`
   }
   return AUDIO_FORMAT
 }
@@ -938,7 +952,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // 最初から `anullsrc` に `duration` を渡して尺ちょうどにしており、
           // ここでも**片方にだけ揃える処理が育っていた**。
           filterParts.push(
-            `[${audioIndex}:a]${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+            `[${audioIndex}:a]${ALIGN_AUDIO_START},${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
               `apad,atrim=0:${ffSeconds(outputDuration)},asetpts=PTS-STARTPTS,` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )
@@ -1143,7 +1157,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                 ? `atrim=0:${ffSeconds(pipAudibleDur)},`
                 : ''
             filterParts.push(
-              `[${pipAudioIndex}:a]asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
+              `[${pipAudioIndex}:a]${ALIGN_AUDIO_START},asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
                 `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })
@@ -1291,7 +1305,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           }
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
-            `[${myIndex}:a]${audioSpeedChain(clipSpeed)},asetpts=PTS-STARTPTS,${trimChain}${fadeChain}` +
+            `[${myIndex}:a]${ALIGN_AUDIO_START},${audioSpeedChain(clipSpeed)},asetpts=PTS-STARTPTS,${trimChain}${fadeChain}` +
               `volume=${clipVolume},${adelayFilter(delayMs)},` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
           )
@@ -1398,8 +1412,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   // linear(一定ゲイン)で掛ける。測定に失敗したとき(解析不能・全編無音の -inf など)は
   // 従来の1パスへ落とす——正規化の精度のために書き出し自体を失敗させない。
   let measured: LoudnessMeasurement | null = null
-  if (loudnessNormalization) {
-    measured = await new Promise<LoudnessMeasurement | null>((resolveMeasure) => {
+  /** 書き出しと同じ音声グラフに `extra` を掛けた後の大きさを測る(映像は作らない) */
+  const measurePass = (extra: string): Promise<LoudnessMeasurement | null> =>
+    new Promise<LoudnessMeasurement | null>((resolveMeasure) => {
       let graphDir: string | null = null
       const cleanup = (): void => {
         if (graphDir) rmSync(graphDir, { recursive: true, force: true })
@@ -1408,7 +1423,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         const command = ffmpeg()
         const built = buildGraph(command, false)
         built.filterParts.push(
-          `${built.audioLabel}${loudnormMeasureFilter(options.loudnessTarget)}[aloud]`
+          `${built.audioLabel}${extra ? `${extra},` : ''}${loudnormMeasureFilter(options.loudnessTarget)}[aloud]`
         )
         graphDir = mkdtempSync(join(tmpdir(), 've-graph-'))
         const graphPath = join(graphDir, 'filtergraph.txt')
@@ -1448,6 +1463,16 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         resolveMeasure(null)
       }
     })
+  /** 一定のゲイン + リミッタで合わせるときの掛け方(まばらに鋭い山がある素材)。使わなければ null */
+  let limitedGain: string | null = null
+  if (loudnessNormalization) {
+    measured = await measurePass('')
+    const target = options.loudnessTarget ?? 'web'
+    if (!exportCancelRequested && measured && needsLimitedGain(target, measured)) {
+      limitedGain = await planLimitedGain(target, measured, (f) =>
+        exportCancelRequested ? Promise.resolve(null) : measurePass(f)
+      )
+    }
     currentExportCommand = null
     if (exportCancelRequested) {
       exportInProgress = false
@@ -1506,7 +1531,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 増幅量には効かない。素材の LRA が 11 を超えていると黙って dynamic に
         // 戻ってしまう(実測: LRA 18.5 の素材で 2パス目も -14.57/LRA 14.4 のまま)ので、
         // 測った LRA を下回らない値を渡して linear を守る(上限 50 は loudnorm の定義域)
-        const loudnormArgs = loudnormApplyFilter(options.loudnessTarget, measured)
+        const loudnormArgs = limitedGain ?? loudnormApplyFilter(options.loudnessTarget, measured)
         filterParts.push(`${audioLabel}${loudnormArgs},${AUDIO_FORMAT}[aloud]`)
         audioLabel = '[aloud]'
       }

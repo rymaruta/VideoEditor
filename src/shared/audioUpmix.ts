@@ -64,8 +64,27 @@ export function isMonoChannelCount(channels: unknown): boolean {
  * **2ch の素材に通しても畳み込み自体が起きない**ので値は変わらない(実測 -18.1 dB のまま)が、
  * モノラルの `rematrix_volume` と混ざらないよう、3ch 以上と分かっている素材にだけ通す。
  */
-export function multiChannelDownmixFilter(sampleRate?: number): string {
+export function multiChannelDownmixFilter(sampleRate?: number, channels?: number): string {
+  // 4ch・6ch(5.1)は、プレビュー(Chromium の Web Audio の決まり)と同じ畳み方にする。
+  // 正規化した畳み方だと、同じ素材が書き出しだけ 7.7 dB(5.1)小さかった。和が 0dBFS を越える所だけ
+  // 頭を抑える(割れさせない。越えない所の音は変えない)
+  const spec = SPEAKER_DOWNMIX[channels ?? 0]
+  if (spec)
+    return (
+      `pan=stereo|c0=${spec[0]}|c1=${spec[1]},` +
+      `aresample=${ratePart(sampleRate)}osf=fltp,` +
+      `alimiter=limit=1:level=disabled:attack=1:release=50`
+    )
   return `aresample=${ratePart(sampleRate)}osf=fltp:ochl=stereo:rematrix_maxval=1.0`
+}
+
+/**
+ * Web Audio の決まり(speakers の畳み方)。4ch は L・R・SL・SR、6ch は L・R・C・LFE・SL・SR
+ * (LFE は使わない)。ほかの数は Chromium が先頭の2本だけを鳴らす(声が消える)ので、まねない
+ */
+const SPEAKER_DOWNMIX: Record<number, [string, string]> = {
+  4: ['0.5*c0+0.5*c2', '0.5*c1+0.5*c3'],
+  6: ['c0+0.7071*c2+0.7071*c4', 'c1+0.7071*c2+0.7071*c5']
 }
 
 /** ffprobe の `channels` が 3ch 以上を指しているか。整数以外・欠落はすべて「不明」＝false。 */

@@ -1,5 +1,11 @@
 import { trackProcess } from './liveProcesses'
-import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
+import {
+  loudnormApplyFilter,
+  loudnormMeasureFilter,
+  needsLimitedGain,
+  planLimitedGain,
+  type LoudnessTarget
+} from '@shared/loudness'
 import { spawn } from 'child_process'
 import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { cpus, tmpdir } from 'os'
@@ -21,6 +27,7 @@ import {
   AUDIO_FORMAT,
   OUTPUT_SAMPLE_RATE,
   RESAMPLE_SPEED_LIMIT,
+  ALIGN_AUDIO_START,
   audioSpeedChain,
   crfForQuality,
   ffmpegPath,
@@ -397,7 +404,7 @@ export async function exportSequenceSegmented(
             asset.filePath,
             '-vn',
             '-af',
-            audioSpeedChain(speed),
+            `${ALIGN_AUDIO_START},${audioSpeedChain(speed)}`,
             '-c:a',
             'pcm_f32le',
             '-ar',
@@ -493,8 +500,8 @@ export async function exportSequenceSegmented(
     )
 
     let measured: LoudnessMeasurement | null = null
-    if (options.loudnessNormalization) {
-      onProgress(93, '音量を測定中')
+    /** 音全体に `filter` を掛けた後の大きさを測る */
+    const measureWith = async (filter: string): Promise<LoudnessMeasurement | null> => {
       const { stderr } = await runFfmpeg(
         [
           '-v',
@@ -502,19 +509,28 @@ export async function exportSequenceSegmented(
           '-i',
           fullWav,
           '-af',
-          loudnormMeasureFilter(options.loudnessTarget),
+          `${filter ? `${filter},` : ''}${loudnormMeasureFilter(options.loudnessTarget)}`,
           '-f',
           'null',
           '-'
         ],
         signal
       )
-      measured = parseLoudnormMeasurement(stderr)
+      return parseLoudnormMeasurement(stderr)
+    }
+    if (options.loudnessNormalization) {
+      onProgress(93, '音量を測定中')
+      measured = await measureWith('')
     }
     const audioFilter: string[] = []
     if (options.loudnessNormalization) {
       // 2パス目の掛け方は v1 の書き出しと同じ(理由もそちらのコメント)
-      const loudnorm = loudnormApplyFilter(options.loudnessTarget, measured)
+      const target = options.loudnessTarget ?? 'web'
+      const limited =
+        measured && needsLimitedGain(target, measured)
+          ? await planLimitedGain(target, measured, measureWith)
+          : null
+      const loudnorm = limited ?? loudnormApplyFilter(options.loudnessTarget, measured)
       audioFilter.push('-af', `${loudnorm},${AUDIO_FORMAT}`)
     }
 

@@ -223,7 +223,7 @@ export function ensurePreviewProxy(
                 // **430サンプルが 0dBFS に張り付く**。この一段を足すと -18.6 dB・-5.6 dB。
                 // ここを通るのは AC-3 / DTS のように**そのまま再生できない音声**で、
                 // それはまさに 5.1 を運んでいる形式でもある。
-                command.audioFilters(multiChannelDownmixFilter())
+                command.audioFilters(multiChannelDownmixFilter(undefined, audioChannels))
               }
             }
             command

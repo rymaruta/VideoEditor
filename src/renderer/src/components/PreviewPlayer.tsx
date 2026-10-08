@@ -14,7 +14,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { frameSeconds } from '@shared/frameRate'
 import { formatTimecode } from '../lib/timelineRuler'
-import { fadeGainAt } from '@shared/audioFade'
+import { audibleClipDuration, fadeGainAt } from '@shared/audioFade'
 import {
   audioClipGain,
   MEDIA_ELEMENT_MAX_VOLUME,
@@ -602,7 +602,8 @@ function AudioTrackClipLayer({
   isPlaying,
   masterVolume,
   masterMuted,
-  seekToken
+  seekToken,
+  timelineEnd
 }: {
   clip: AudioTrackClip
   asset: MediaAsset
@@ -617,6 +618,8 @@ function AudioTrackClipLayer({
   masterMuted: boolean
   /** 明示的なシークの合図(`seekRequest.token`)。変わったら位置をぴったり入れ直す */
   seekToken: number
+  /** 本編の終わり(タイムラインの秒) */
+  timelineEnd: number
 }): React.JSX.Element {
   const ref = useRef<HTMLAudioElement>(null)
   const audioSrc = previewSourceUrl(asset)
@@ -653,9 +656,10 @@ function AudioTrackClipLayer({
 
   // 書き出しの afade と同じ規則(共通モジュール)でゲインを掛ける。
   // ここで別式にすると、画面で聞いた音と出来上がりが黙って食い違う。
+  // 本編の終わりより先へ続く音は、書き出しと同じく本編の終わりでフェードアウトする
   const fadeGain = fadeGainAt(
     playheadTime - clip.startTime,
-    audioClipDuration(clip),
+    audibleClipDuration(clip.startTime, audioClipDuration(clip), timelineEnd),
     clip.fadeIn,
     clip.fadeOut
   )
@@ -1482,6 +1486,7 @@ export function PreviewPlayer(): React.JSX.Element {
                       masterVolume={volume}
                       masterMuted={muted}
                       seekToken={seekToken}
+                      timelineEnd={total}
                     />
                   )
                 })

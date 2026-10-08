@@ -11,6 +11,7 @@ import {
   AUDIO_FORMAT,
   OUTPUT_SAMPLE_RATE,
   VIDEO_FORMAT,
+  ALIGN_AUDIO_START,
   audioSpeedChain,
   audioFormatFor,
   escapeFilterPath,
@@ -526,7 +527,7 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       const label = newLabel('a')
       const delay = frameToSample(seq, visStart) - frameToSample(seq, renderStart)
       parts.push(
-        `[${idx}:a]${audioSpeedChain(readSpeed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+        `[${idx}:a]${ALIGN_AUDIO_START},${audioSpeedChain(readSpeed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
           `apad,atrim=0:${num(dur)},asetpts=PTS-STARTPTS,` +
           `${audioFormatFor(ctx.audioChannels?.get(stretchedPath ?? asset.filePath))},` +
           `${envelope(item, ordered, audioClipGain(track.volume, item.volume), skipSec)},` +
