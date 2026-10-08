@@ -306,3 +306,48 @@ describe('splitByWeakness — 短すぎる区間を作らない', () => {
     ])
   })
 })
+
+describe('detectTurns: 止まったマイクのあとの持ち主の声', () => {
+  // A の持ち主は -10dB。B が録っている間の、B の持ち主の声の A へのかぶりは -30dB。B は 25 秒で止まる
+  const make = (extra: [number, number, number][]): ReturnType<typeof detectTurns> => {
+    const a = env(60, -60, [
+      [1, 4, -10],
+      [5, 9, -30],
+      [10, 14, -30],
+      [15, 18, -10],
+      [19, 24, -10],
+      ...extra
+    ])
+    const b = env(60, -55, [
+      [5, 9, -12],
+      [10, 14, -12]
+    ])
+    for (let i = 25 * TURN_RATE; i < b.length; i++) b[i] = NaN
+    return detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b }
+    ])
+  }
+
+  it('持ち主の短い小声の発話は、かぶりより十分大きければ「分からない」にしない', () => {
+    const turns = make([
+      [40, 43, -10],
+      [45, 46, -22]
+    ])
+    const short = turns.filter((t) => t.micId === 'A' && t.start > 44 && t.end < 47)
+    expect(short).toHaveLength(1)
+    expect(short[0].uncertain).toBeUndefined()
+  })
+
+  it('かぶりの大きさの声のすぐ後に持ち主が話しても(切れ目が無くても)、持ち主の発話を分ける', () => {
+    const turns = make([
+      [30, 32, -30],
+      [32, 35, -10]
+    ])
+    const around = turns
+      .filter((t) => t.micId === 'A' && t.end > 30 && t.start < 35.5)
+      .sort((x, y) => x.start - y.start)
+    expect(around.map((t) => t.uncertain ?? false)).toEqual([true, false])
+    expect(around[1].start).toBeCloseTo(32, 0)
+  })
+})

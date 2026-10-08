@@ -43,6 +43,11 @@ export interface SpeechTurn {
  */
 const ABSENT_PEER_MIN_REL_DB = -12
 
+/** かぶりの大きさを測る所: ほかのマイクの持ち主が、このマイクより普段の声に比べてこれ以上大きい時刻 */
+const BLEED_LEAD_DB = 10
+/** かぶりの大きさからこの範囲(dB)に入る小さな音だけを「持ち主の声か分からない」とする */
+const BLEED_NEAR_DB = 6
+
 export interface TurnOptions {
   /** 持ち主とみなす差(dB)。これより近ければ重なり */
   marginDb?: number
@@ -154,6 +159,36 @@ export function activityMask(tracks: readonly MicTrack[]): Uint8Array {
   return out
 }
 
+/**
+ * マイクごとの、ほかの人の声のかぶりの大きさ(dB)。全部のマイクが録っていて、ほかのマイクの持ち主が
+ * はっきり話している時刻の、このマイクの音の真ん中の値。測れなければ NaN
+ */
+function bleedLevels(stats: readonly MicStats[], n: number): number[] {
+  return stats.map((st, m) => {
+    const vals: number[] = []
+    for (let t = 0; t < n; t++) {
+      const v = st.db[t]
+      if (v === undefined || Number.isNaN(v) || v < st.threshold) continue
+      let all = true
+      let other = false
+      for (let o = 0; o < stats.length; o++) {
+        if (o === m) continue
+        const w = stats[o].db[t]
+        if (w === undefined || Number.isNaN(w)) {
+          all = false
+          break
+        }
+        if (w >= stats[o].threshold && w - stats[o].speech > v - st.speech + BLEED_LEAD_DB)
+          other = true
+      }
+      if (all && other) vals.push(v)
+    }
+    if (vals.length < TURN_RATE) return NaN
+    vals.sort((x, y) => x - y)
+    return vals[Math.floor(vals.length / 2)]
+  })
+}
+
 /** 各時刻の持ち主(複数なら重なり)を決め、マイクごとの発話区間にする */
 export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = {}): SpeechTurn[] {
   const margin = options.marginDb ?? 6
@@ -170,6 +205,7 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
   const owned = stats.map(() => new Uint8Array(n))
   const overlapped = stats.map(() => new Uint8Array(n))
   const weak = stats.map(() => new Uint8Array(n))
+  const bleed = bleedLevels(stats, n)
   for (let t = 0; t < n; t++) {
     let best = -1
     let bestRel = -Infinity
@@ -193,6 +229,9 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
     owned[best][t] = 1
     if (
       stats[best].db[t] - stats[best].ownLevel < ABSENT_PEER_MIN_REL_DB &&
+      // かぶりの大きさが分かるなら、それに近い音だけ(短い発話の語の頭・終わりや小声の語は、持ち主の
+      // 声の上のほうより 12dB 以上小さくなり、持ち主の短い発話まで「分からない」になっていた)
+      (Number.isNaN(bleed[best]) || stats[best].db[t] <= bleed[best] + BLEED_NEAR_DB) &&
       stats.some(
         (st) => !st.maskedFrames?.[t] && (st.db[t] === undefined || Number.isNaN(st.db[t]))
       )
@@ -296,9 +335,11 @@ export function splitByWeakness(
       while (k < b && !heard[k]) k++
       if (k >= b) break
       const s = k
-      let w = 0
-      while (k < b && heard[k]) w += weak[k++]
-      blocks.push({ a: s, b: k, weak: w * 2 > k - s, len: k - s })
+      // 声が途切れなくても、分からない/持ち主の声が替わる所で分ける(止まったマイクの人の声のすぐ
+      // 後に持ち主が話すと切れ目が無く、持ち主の発話に混ざっていた。短いちらつきは下でまとめる)
+      const label = weak[k]
+      while (k < b && heard[k] && weak[k] === label) k++
+      blocks.push({ a: s, b: k, weak: label === 1, len: k - s })
     }
     if (blocks.length <= 1) {
       out.push([a, b])
