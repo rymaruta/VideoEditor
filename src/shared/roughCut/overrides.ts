@@ -249,7 +249,7 @@ function anglePieces(
 ): AngleClip[] {
   const out: AngleClip[] = []
   let t = start
-  /** 頭の短い隙間(前のファイルが無いので、次のファイルを後ろへ延ばして長さを保つ) */
+  /** 録っていない短い隙間の合計(ファイルに余りのあるクリップを延ばして長さを保つ) */
   let leadGap = 0
   while (t < end - 1e-6) {
     const g = fileAt(info, sourceId, t)
@@ -260,9 +260,9 @@ function anglePieces(
         .reduce((m, x) => Math.min(m, x.start), Infinity)
       const to = Math.min(end, nextStart)
       if (!Number.isFinite(to)) return []
-      const last = out[out.length - 1]
-      if (last) last.outPoint += (to - t) * last.speed
-      else leadGap += to - t
+      // 隙間の分は、あとでファイルに余りのあるクリップを延ばして埋める(前のファイルを延ばすと、
+      // ファイルの終わりより先を指していた)
+      leadGap += to - t
       t = to
       continue
     }
@@ -276,15 +276,19 @@ function anglePieces(
     })
     t = to
   }
-  // 頭の隙間の分は、ファイルに余りのあるクリップを延ばして長さを保つ(無ければ最後のクリップ)
-  if (leadGap > 0 && out.length > 0) {
-    const room = out.find((p) => {
-      const g = info.files.find((x) => x.assetId === p.assetId)
-      return g !== undefined && p.outPoint + leadGap * p.speed <= g.duration + 1e-9
-    })
-    const target = room ?? out[out.length - 1]
-    target.outPoint += leadGap * target.speed
+  // 隙間の分は、ファイルに余りのあるクリップを延ばして長さを保つ(後ろから)。どのファイルにも余りが
+  // 無ければ、そのカメラには替えない(ファイルの外を指すクリップを作らない)
+  let rest = leadGap
+  for (let i = out.length - 1; i >= 0 && rest > 1e-9; i--) {
+    const p = out[i]
+    const g = info.files.find((x) => x.assetId === p.assetId)
+    if (!g) continue
+    const room = Math.max(0, (g.duration - p.outPoint) / p.speed)
+    const take = Math.min(room, rest)
+    p.outPoint += take * p.speed
+    rest -= take
   }
+  if (rest > 1e-6) return []
   // 最後の切れ端が丸めの残りだけなら前に含める
   return out.filter((p, i) => i === 0 || (p.outPoint - p.inPoint) / p.speed > 1e-3)
 }

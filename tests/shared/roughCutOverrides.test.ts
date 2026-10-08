@@ -251,6 +251,27 @@ describe('angleAlternatives — 頭の隙間を埋めてもファイルの外を
   })
 })
 
+describe('angleAlternatives — ファイルの間の短い隙間', () => {
+  it('前のファイルの終わりより先を指さず、長さは保つ', () => {
+    const gap: MulticamInfo = {
+      ...info,
+      files: [
+        { assetId: 'a1', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+        { assetId: 'b1', sourceId: 'B', start: 0.03, rate: 1, duration: 30 },
+        { assetId: 'b2', sourceId: 'B', start: 30.06, rate: 1, duration: 70 }
+      ]
+    }
+    const clips = angleAlternatives({ assetId: 'a1', inPoint: 20, outPoint: 40 }, gap).find(
+      (a) => a.sourceId === 'B'
+    )!.clips!
+    for (const c of clips) {
+      const f = gap.files.find((x) => x.assetId === c.assetId)!
+      expect(c.outPoint).toBeLessThanOrEqual(f.duration + 1e-9)
+    }
+    expect(clips.reduce((x, c) => x + c.outPoint - c.inPoint, 0)).toBeCloseTo(20, 6)
+  })
+})
+
 describe('releaseOverridesForScenes', () => {
   it('残すと決めた場面の中の削った区間は戻し、落とすと決めた場面の中の足した区間は外す', () => {
     const o = {

@@ -615,3 +615,61 @@ describe('第21回: 壊れたループのつなぎ目の覚え', () => {
     expect(track('bgmT').length).toBeLessThan(10)
   })
 })
+
+describe('第22回: 速さを変えて戻したときの SE・BGM(乱数の通し調査から)', () => {
+  const setTrack = (id: string, clips: Project['audioTracks'][number]['clips'], song = 8): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', song, false), asset('sfx2', 2, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === id ? { ...t, clips } : t))
+      }
+    })
+  }
+
+  it('SE は速さを変えて戻すと、元の位置・長さに戻る', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    setTrack('seT', [{ id: 's', assetId: 'sfx2', startTime: 3, inPoint: 0, outPoint: 1 }])
+    const c0 = st().project.clips[0].id
+    st().updateClipSpeed(c0, 16)
+    st().updateClipSpeed(c0, 1)
+    expect(track('seT').map((c) => [c.startTime, c.inPoint, c.outPoint])).toEqual([[3, 0, 1]])
+  })
+
+  it('切った BGM も、速さを変えて戻すと穴が開かず元に戻る', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const start: Project['audioTracks'][number]['clips'] = [
+      { id: 'b1', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 8 },
+      { id: 'b2', assetId: 'loop', startTime: 6.5, inPoint: 0, outPoint: 2.5 },
+      { id: 'b3', assetId: 'loop', startTime: 9, inPoint: 3.5, outPoint: 8 },
+      { id: 'b4', assetId: 'loop', startTime: 12, inPoint: 0, outPoint: 7 }
+    ]
+    setTrack('bgmT', start)
+    const c0 = st().project.clips[0].id
+    const gaps = (): number => {
+      const cs = [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+      let gap = 0
+      for (let i = 1; i < cs.length; i++)
+        gap = Math.max(
+          gap,
+          cs[i].startTime - (cs[i - 1].startTime + cs[i - 1].outPoint - cs[i - 1].inPoint)
+        )
+      return gap
+    }
+    st().updateClipSpeed(c0, 0.5)
+    expect(gaps()).toBeLessThanOrEqual(1e-6)
+    st().updateClipSpeed(c0, 1)
+    expect(gaps()).toBeLessThanOrEqual(1e-6)
+    const back = [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+    expect(back.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])).toEqual(
+      start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])
+    )
+  })
+})
