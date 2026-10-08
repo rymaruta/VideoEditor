@@ -190,6 +190,26 @@ describe('angleAlternatives', () => {
   })
 })
 
+describe('angleAlternatives — ファイルが分かれて録られたカメラ', () => {
+  it('境目をまたぐ時間も替えられる(ファイルごとに分けた値を返す)', () => {
+    const split: MulticamInfo = {
+      ...info,
+      files: [
+        { assetId: 'a1', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+        { assetId: 'b1', sourceId: 'B', start: 0, rate: 1, duration: 50 },
+        { assetId: 'b2', sourceId: 'B', start: 50, rate: 1, duration: 50 }
+      ]
+    }
+    const b = angleAlternatives({ assetId: 'a1', inPoint: 40, outPoint: 60 }, split).find(
+      (a) => a.sourceId === 'B'
+    )
+    expect(b?.clips).toEqual([
+      { assetId: 'b1', inPoint: 40, outPoint: 50, speed: 1 },
+      { assetId: 'b2', inPoint: 0, outPoint: 10, speed: 1 }
+    ])
+  })
+})
+
 describe('releaseOverridesForScenes', () => {
   it('残すと決めた場面の中の削った区間は戻し、落とすと決めた場面の中の足した区間は外す', () => {
     const o = {

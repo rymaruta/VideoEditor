@@ -136,3 +136,64 @@ describe('Gemini の問い合わせの中止', () => {
     vi.unstubAllGlobals()
   })
 })
+
+describe('仮編集の作り直しの最中に本編を直したとき', () => {
+  it('直したものを作り直しで消さない(当てずに、作り直しをもう一度と伝える)', async () => {
+    const { useProjectStore } = await import('@renderer/store/projectStore')
+    const stub = (): Promise<void> => Promise.resolve()
+    const edited = [{ id: 'mine', assetId: 'C', inPoint: 3, outPoint: 4, speed: 1 }]
+    ;(globalThis as unknown as { window: unknown }).window = {
+      api: {
+        syncCancel: stub,
+        asrCancel: stub,
+        eventsCancel: stub,
+        llmCancel: stub,
+        denoiseCancel: stub,
+        setBusyState: () => {},
+        notifyDone: () => {},
+        // 音の大きさを読んでいる間に、編集画面で本編を直す
+        footageEnvelopes: async () => {
+          const p = useProjectStore.getState().project
+          useProjectStore.setState({ project: { ...p, clips: edited } })
+          return [new Float32Array(3000).fill(0.1)]
+        }
+      }
+    }
+    useProjectStore.getState().newProject()
+    useProjectStore.setState({
+      project: {
+        ...useProjectStore.getState().project,
+        assets: [
+          {
+            id: 'C',
+            filePath: '/c.mp4',
+            fileName: 'c.mp4',
+            duration: 30,
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            hasAudio: true,
+            hasVideo: true
+          }
+        ],
+        clips: [{ id: 'auto', assetId: 'C', inPoint: 0, outPoint: 30, speed: 1 }],
+        multicam: {
+          anchorSourceId: 'cam',
+          sources: [{ id: 'cam', name: 'カメラA', kind: 'camera' }],
+          files: [{ assetId: 'C', sourceId: 'cam', start: 0, rate: 1, duration: 30 }]
+        }
+      }
+    })
+    const steps = usePipelineStore.getState().steps
+    usePipelineStore.setState({
+      scenes: [{ id: 's2', start: 0, end: 30, lines: [], speech: 0 }],
+      keep: { s2: true },
+      steps: { ...steps, angles: { state: 'done', percent: 100 } }
+    })
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(useProjectStore.getState().project.clips.map((c) => c.id)).toEqual(['mine'])
+    console.log('NOTE', JSON.stringify(usePipelineStore.getState().steps.cut))
+    expect(usePipelineStore.getState().steps.cut).toMatchObject({ state: 'error' })
+    expect(usePipelineStore.getState().steps.cut.note).toContain('本編が直された')
+  })
+})

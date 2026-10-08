@@ -10,6 +10,7 @@ import {
   SoundEffectInfo
 } from '../lib/audioLibrary'
 import { formatIpcError } from '../lib/ipcError'
+import { toFileUrl } from '../lib/previewSource'
 import { openExternalLink } from '../lib/openExternalLink'
 import { usePausePreviewWhenHidden } from '../lib/pausePreviewWhenHidden'
 import {
@@ -87,7 +88,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
     try {
       const { filePath } = await window.api.downloadAudioAsset(url, `preview-${id}`)
       if (audioRef.current) {
-        audioRef.current.src = `file://${filePath}`
+        audioRef.current.src = toFileUrl(filePath)
         await audioRef.current.play()
       }
     } catch (e) {
@@ -100,6 +101,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
   async function handleAdd(id: string, url: string, name: string): Promise<void> {
     setBusyId(`add-${id}`)
     setError(null)
+    const projectId = useProjectStore.getState().project.id
     try {
       const { filePath, duration } = await window.api.downloadAudioAsset(url, name)
       // Asset + track + clip as one undoable step, so a single undo doesn't leave
@@ -116,7 +118,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
           hasAudio: true,
           hasVideo: false
         },
-        { trackName }
+        { trackName, projectId }
       )
     } catch (e) {
       setError(formatIpcError(e))

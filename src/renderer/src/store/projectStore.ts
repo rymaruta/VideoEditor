@@ -960,7 +960,16 @@ interface ProjectState {
   addAudioClipWithAsset: (
     asset: MediaAsset,
     /** `startTime` を渡すとその位置(空いていなければ直後)へ、省略するとトラック末尾へ置く */
-    target: { trackId?: string; trackName: string; startTime?: number }
+    target: {
+      trackId?: string
+      trackName: string
+      startTime?: number
+      /**
+       * 音を用意し始めたときのプロジェクト。別のプロジェクトに替わっていたら置かない(合成・ダウンロード・
+       * 読み込みを待つ間に別のプロジェクトを開くと、そちらに入っていた)
+       */
+      projectId?: string
+    }
   ) => void
   /** `index` を渡すとその位置へ挿入する(省略時は末尾に足す) */
   addClipToTimeline: (assetId: string, index?: number) => void
@@ -2206,6 +2215,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // track and an unused asset behind.
   addAudioClipWithAsset: (asset, target) =>
     set((state) => {
+      if (target.projectId !== undefined && target.projectId !== state.project.id) return state
       const existing =
         state.project.audioTracks.find((t) => t.id === target.trackId) ??
         state.project.audioTracks.find((t) => t.name === target.trackName)
@@ -3075,6 +3085,25 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 本編のクリップは作り直すと ID が変わるので、本編に紐づけた手置きのテロップ・分離音声を、
       // 同じ共通の時刻を映す新しいクリップへ紐づけ直す(しないと紐づきが外れ、元の時刻に取り残される)
       const relink = relinkToRebuiltClips(state.project.clips, clips, state.project.multicam)
+      // 人が本編のクリップに付けた見た目(切り抜き・ぼかし・色ラベル)は、同じ時刻を映す新しいクリップへ
+      // 引き継ぐ(作り直すと消えていた)
+      const looks = new Map<string, Partial<Clip>>()
+      for (const pc of state.project.clips) {
+        const look: Partial<Clip> = {
+          ...(pc.fillCrop !== undefined ? { fillCrop: pc.fillCrop } : {}),
+          ...(pc.cropCenter ? { cropCenter: pc.cropCenter } : {}),
+          ...(pc.blurBackground !== undefined ? { blurBackground: pc.blurBackground } : {}),
+          ...(pc.colorLabel ? { colorLabel: pc.colorLabel } : {})
+        }
+        if (Object.keys(look).length === 0) continue
+        const to = relink(pc.id, 0, pc.assetId)
+        if (to && !looks.has(to.id)) looks.set(to.id, look)
+      }
+      const lookedClips =
+        looks.size > 0
+          ? clips.map((c) => (looks.has(c.id) ? { ...c, ...looks.get(c.id) } : c))
+          : clips
+      const recorded = new Set((state.project.multicam?.files ?? []).map((f) => f.assetId))
       const previousTracks = new Map(
         state.project.audioTracks
           .filter((t) => t.multicamSourceId)
@@ -3109,25 +3138,52 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             autoVolume: a.volume,
             duckingEnabled: prev?.duckingEnabled ?? false,
             voice: carriesVoice(state.project.multicam?.sources.find((x) => x.id === a.sourceId)),
-            clips: a.clips.map((c) => ({
-              id: uuid(),
-              assetId: c.assetId,
-              startTime: c.startTime,
-              inPoint: c.inPoint,
-              outPoint: c.outPoint,
-              ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {}),
-              // 時間の飛ぶ切れ目の短いフェード(プツッという音を消す)
-              ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
-              ...(c.fadeOut ? { fadeOut: c.fadeOut } : {})
-            }))
+            clips: a.clips.map((c) => {
+              const volume = carriedClipVolume(prev, c)
+              return {
+                id: uuid(),
+                assetId: c.assetId,
+                startTime: c.startTime,
+                inPoint: c.inPoint,
+                outPoint: c.outPoint,
+                ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {}),
+                // 時間の飛ぶ切れ目の短いフェード(プツッという音を消す)
+                ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
+                ...(c.fadeOut ? { fadeOut: c.fadeOut } : {}),
+                // 人がクリップごとに変えた音量は、同じ素材の同じ所を鳴らすクリップへ引き継ぐ
+                ...(volume !== undefined ? { volume } : {})
+              }
+            })
           }
+        }),
+        // 人が収録のトラックに置いた収録素材以外の音(ナレーション・効果音)は消さずに、別のトラックへ移す
+        // (作り直した声と重なるので、同じトラックには戻せない)
+        ...[...previousTracks.values()].flatMap((t): AudioTrack[] => {
+          const extras = t.clips
+            .filter((c) => !recorded.has(c.assetId))
+            .map((c) => {
+              if (!c.linkedClipId) return c
+              const to = relink(c.linkedClipId, 0, c.assetId)
+              return to ? { ...c, linkedClipId: to.id } : { ...c, linkedClipId: undefined }
+            })
+          if (extras.length === 0) return []
+          return [
+            {
+              id: uuid(),
+              name: `${t.name}(手で置いた音)`,
+              muted: t.muted,
+              volume: t.volume,
+              duckingEnabled: false,
+              clips: extras
+            }
+          ]
         })
       ]
       // 本編に残した差し込みの画(静止画・タイトルなど)の分だけ、後ろの声とテロップを後ろへずらす。
       // 仮編集の声・テロップの時刻は差し込みの無いタイムラインのものなので、そのままだと差し込みの長さだけずれる
       const fresh: Project = {
         ...state.project,
-        clips,
+        clips: lookedClips,
         audioTracks,
         // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す。
         // ワイプで常に出すカメラ(ゲーム実況の顔カメラ)は、本編と同じ区間で並べ直す
@@ -3397,15 +3453,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const info = state.project.multicam
       const clip = state.project.clips.find((c) => c.id === clipId)
       if (!info || !clip) return state
-      const found = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clip
-      if (!found) return state
+      const found = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clips
+      if (!found || found.length === 0) return state
       // 人が変えた速さ(素材の速さとの比)を保つ。素材の速さに戻すと長さが変わり、後ろが全部ずれる
       const currentRate = info.files.find((f) => f.assetId === clip.assetId)?.rate || 1
-      const alt = { ...found, speed: found.speed * ((clip.speed || 1) / currentRate) }
+      const ratio = (clip.speed || 1) / currentRate
+      // 替えた先のカメラがファイルの境目をまたぐなら、境目でクリップを分ける(頭のクリップが元の id)
+      const pieces = found.map((p, i) => ({
+        ...p,
+        speed: p.speed * ratio,
+        id: i === 0 ? clipId : splitId(clipId)
+      }))
       // 分離した音声(このクリップに紐づく音声クリップ)も同じカメラへ替える。
       // 替えないと、映像は新しいカメラ・音は前のカメラのまま、前のカメラの素材に新しいカメラの
       // in/out が写され、カメラ間の時刻のずれの分だけ音がずれる(実測: 3秒)
-      const altAsset = state.project.assets.find((a) => a.id === alt.assetId)
+      const altAsset = state.project.assets.find((a) => a.id === pieces[0].assetId)
       const altHasAudio = altAsset?.hasAudio !== false
       const linked = state.project.audioTracks.some((t) =>
         t.clips.some((c) => c.linkedClipId === clipId)
@@ -3416,16 +3478,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             .map((t) => {
               if (!t.clips.some((c) => c.linkedClipId === clipId)) return t
               const clips = altHasAudio
-                ? t.clips.map((c) =>
+                ? t.clips.flatMap((c) =>
                     c.linkedClipId === clipId
-                      ? {
+                      ? pieces.map((p, i) => ({
                           ...c,
-                          assetId: alt.assetId,
-                          inPoint: alt.inPoint,
-                          outPoint: alt.outPoint,
-                          speed: alt.speed
-                        }
-                      : c
+                          id: i === 0 ? c.id : uuid(),
+                          assetId: p.assetId,
+                          inPoint: p.inPoint,
+                          outPoint: p.outPoint,
+                          speed: p.speed,
+                          linkedClipId: p.id,
+                          // 位置は紐づけの追従で決まる。フェードは端のものだけ残す
+                          fadeIn: i === 0 ? c.fadeIn : undefined,
+                          fadeOut: i === pieces.length - 1 ? c.fadeOut : undefined
+                        }))
+                      : [c]
                   )
                 : t.clips.filter((c) => c.linkedClipId !== clipId)
               return { ...t, clips }
@@ -3436,13 +3503,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ...pushHistory(state),
         project: {
           ...state.project,
-          clips: state.project.clips.map((c) =>
+          clips: state.project.clips.flatMap((c) =>
             c.id !== clipId
-              ? c
-              : // 新しいカメラに音が無いので、分離した音声ごと外した。分離の印も戻す
-                linked && !altHasAudio
-                ? { ...c, ...alt, audioDetached: false }
-                : { ...c, ...alt }
+              ? [c]
+              : pieces.map((p, i) => ({
+                  ...c,
+                  ...p,
+                  // 繋ぎは頭のクリップだけ
+                  ...(i > 0 ? { transitionIn: undefined } : {}),
+                  // 新しいカメラに音が無いので、分離した音声ごと外した。分離の印も戻す
+                  ...(linked && !altHasAudio ? { audioDetached: false } : {})
+                }))
           ),
           audioTracks
         }
@@ -4796,6 +4867,9 @@ function followMainEdit(
 ): Project {
   const info = next.multicam
   if (!info || prev.multicam !== info) return next
+  // 速さだけを変えたなら、自動の BGM・SE・CG はここで比例で動かし、下の追従では動かさない
+  const warped = onlyRebuilt ? null : followSpeedChanges(prev, next)
+  if (warped) next = warped
   const before = followSpans(prev.clips, info)
   // 本編が空だった(初めて並べる)ときは追従しない。収録素材が無くても、速さを変えたクリップ・
   // 差し込みの画があれば続ける(速さを戻して収録素材に戻ったとき、声を入れ直すため)
@@ -4862,7 +4936,7 @@ function followMainEdit(
       }))
   }
   const follows = (t: { multicamSourceId?: string; autoRole?: string }): boolean =>
-    Boolean(t.multicamSourceId || (!onlyRebuilt && t.autoRole))
+    Boolean(t.multicamSourceId || (!onlyRebuilt && !warped && t.autoRole))
   // 新しく見えた所に足す声は、収録素材のクリップの所だけ(差し込んだ素材・速さを変えたクリップには足さない)
   const gaps = uncoveredSpans(
     after.filter((x) => x.real),
@@ -4954,6 +5028,118 @@ function followMainEdit(
       ? { editedTelops: rememberEditedTelops(droppedEdited, next.editedTelops) }
       : {})
   }
+}
+
+/**
+ * 本編のクリップの速さを変えたとき、その下の自動の BGM・SE・CG を、クリップの新しい長さに合わせて
+ * 比例で動かす(声・自動テロップは追従の規則どおり外す)。
+ *
+ * 速さを変えたクリップは仮の時刻に置かれるので、前後で対応が取れず、その下の自動の SE・CG が消え、
+ * BGM には穴が開いていた(速さを戻しても戻らなかった)。速さだけを変えた編集なら、ここで動かした
+ * 結果を返す(自動のトラックは、そのあとの追従では動かさない)。それ以外の編集なら null
+ */
+function followSpeedChanges(prev: Project, next: Project): Project | null {
+  // 速さだけを変えた編集(並び・範囲は同じ)のときだけ
+  if (prev.clips.length !== next.clips.length) return null
+  const changed = new Map<string, number>()
+  for (let i = 0; i < prev.clips.length; i++) {
+    const c = prev.clips[i]
+    const n = next.clips[i]
+    if (
+      n.id !== c.id ||
+      n.assetId !== c.assetId ||
+      n.inPoint !== c.inPoint ||
+      n.outPoint !== c.outPoint
+    )
+      return null
+    if ((n.speed || 1) !== (c.speed || 1)) changed.set(c.id, n.speed || 1)
+  }
+  if (changed.size === 0) return null
+  // 前のタイムラインの各クリップの [始まり, 終わり) と、速さを変えたあとの始まり・倍率
+  const segs: { from: number; to: number; at: number; scale: number }[] = []
+  let oldCursor = 0
+  let newCursor = 0
+  for (const c of prev.clips) {
+    const src = Math.max(0, c.outPoint - c.inPoint)
+    const oldLen = src / (c.speed || 1)
+    const newLen = src / (changed.get(c.id) ?? (c.speed || 1))
+    segs.push({
+      from: oldCursor,
+      to: oldCursor + oldLen,
+      at: newCursor,
+      scale: oldLen > 0 ? newLen / oldLen : 1
+    })
+    oldCursor += oldLen
+    newCursor += newLen
+  }
+  const segAt = (t: number): number => {
+    for (let i = 0; i < segs.length; i++) if (t < segs[i].to) return i
+    return -1
+  }
+  const warp = (t: number): number => {
+    const i = segAt(t)
+    if (i < 0) return t - oldCursor + newCursor
+    const g = segs[i]
+    return g.at + (Math.max(t, g.from) - g.from) * g.scale
+  }
+  const durationOf = new Map(next.assets.map((a) => [a.id, a.duration]))
+  const moveClip = <
+    C extends {
+      assetId: string
+      startTime: number
+      inPoint: number
+      outPoint: number
+      speed?: number
+    }
+  >(
+    c: C
+  ): C => {
+    const speed = c.speed || 1
+    const dur = (c.outPoint - c.inPoint) / speed
+    const end = c.startTime + dur
+    const i = segAt(c.startTime)
+    const startTime = warp(c.startTime)
+    // 1本のクリップの中に収まる SE・CG は長さを保つ。またがる BGM は、写した長さまで(後ろを詰める)
+    const inside = i >= 0 && end <= segs[i].to + 1e-9
+    const newDur = inside ? dur : Math.max(0, warp(end) - startTime)
+    if (Math.abs(startTime - c.startTime) <= 1e-9 && Math.abs(newDur - dur) <= 1e-9) return c
+    // 伸ばしても素材の終わりまで
+    const limit = durationOf.get(c.assetId) ?? Infinity
+    return { ...c, startTime, outPoint: Math.min(limit, c.inPoint + newDur * speed) }
+  }
+  const moveTrack = <T extends AudioTrack | VideoOverlayTrack>(t: T): T => {
+    if (!t.autoRole || t.multicamSourceId) return t
+    const untouched = isUntouchedAuto(t)
+    const clips = (t.clips as T['clips']).map((c) =>
+      'linkedClipId' in c && c.linkedClipId ? c : moveClip(c)
+    ) as T['clips']
+    if (sameItems(clips, t.clips)) return t
+    const track = { ...t, clips }
+    return untouched ? withAutoSignature(track) : track
+  }
+  return {
+    ...next,
+    audioTracks: next.audioTracks.map(moveTrack),
+    videoOverlayTracks: next.videoOverlayTracks.map(moveTrack)
+  }
+}
+
+/**
+ * 作り直したマイクのクリップに引き継ぐ、人が変えた音量。前のトラックで同じ素材の同じ所(半分以上
+ * 重なる)を鳴らしていたクリップの音量。無ければ undefined
+ */
+function carriedClipVolume(
+  prev: AudioTrack | undefined,
+  c: { assetId: string; inPoint: number; outPoint: number }
+): number | undefined {
+  if (!prev) return undefined
+  const len = c.outPoint - c.inPoint
+  for (const p of prev.clips) {
+    if (p.volume === undefined || p.assetId !== c.assetId) continue
+    const overlap = Math.min(p.outPoint, c.outPoint) - Math.max(p.inPoint, c.inPoint)
+    if (len > 0 && overlap >= len / 2) return p.volume
+  }
+  return undefined
 }
 
 /** 本編のクリップが、共通の時刻に 1:1 で写る収録素材のクリップか(速さが素材の速さと同じ) */

@@ -132,6 +132,7 @@ export function PresetPanel(): React.JSX.Element {
     setBusyId(preset.id)
     setError(null)
     try {
+      const projectId = project.id
       const known = project.assets.find((a) => a.filePath === preset.filePath)
       const duration = known?.duration ?? (await window.api.probeMedia(preset.filePath)).duration
       // Asset + track + clip as one undoable step (the store reuses the asset when
@@ -149,7 +150,7 @@ export function PresetPanel(): React.JSX.Element {
           hasVideo: false
         },
         // テロップのプリセットと同じく再生位置へ置く。そこが埋まっていれば直後へずれる。
-        { trackName: 'SE', startTime: useProjectStore.getState().playheadTime }
+        { trackName: 'SE', startTime: useProjectStore.getState().playheadTime, projectId }
       )
     } catch (e) {
       setError(formatIpcError(e))

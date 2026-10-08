@@ -949,6 +949,21 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       policy: useSettingsStore.getState().editPolicy,
       peaks: peakSpans(get().hype, project.audioEvents)
     })
+    // 作っている間(音の読み込み・AI の提案を待つ間など)に編集画面で本編を直したなら当てない。
+    // 当てると直したものが作り直しで消え、直したことも次の作り直しに伝わらなかった(取り消しでしか
+    // 戻せなかった)
+    const editedMeanwhile = (): boolean => {
+      if (useProjectStore.getState().project.clips === project.clips) return false
+      setStep('cut', {
+        state: 'error',
+        note: '作っている間に本編が直されたため、当てませんでした。もう一度作り直してください'
+      })
+      log(
+        '作っている間に編集画面で本編が直されたため、仮編集を当てませんでした(直したものはそのままです)'
+      )
+      return true
+    }
+    if (editedMeanwhile()) return
     // 残す区間が無い仮編集は当てない(当てると、並べた本編が丸ごと消える)
     if (plan.cut.main.length === 0) {
       setStep('cut', {
@@ -1149,6 +1164,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         }
       }
     }
+    if (editedMeanwhile()) return
     const effectTelops = effectOverlays(
       get().effects,
       new Set(get().effectChosen),

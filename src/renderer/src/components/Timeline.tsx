@@ -695,8 +695,8 @@ export function Timeline(): React.JSX.Element {
       for (const alt of angleAlternatives(clip, project.multicam)) {
         if (alt.current) continue
         items.push({
-          label: `アングルを ${alt.name} に替える${alt.clip ? '' : '(この時間は録っていません)'}`,
-          disabled: !alt.clip,
+          label: `アングルを ${alt.name} に替える${alt.clips ? '' : '(この時間は録っていません)'}`,
+          disabled: !alt.clips,
           onSelect: () => useProjectStore.getState().switchClipAngle(clipId, alt.sourceId)
         })
       }
@@ -1545,7 +1545,7 @@ export function Timeline(): React.JSX.Element {
           hasAudio: true,
           hasVideo: false
         },
-        { trackId, trackName, startTime }
+        { trackId, trackName, startTime, projectId: project.id }
       )
     } catch (e) {
       setSfxDropError(`${payload.fileName}: ${formatIpcError(e)}`)

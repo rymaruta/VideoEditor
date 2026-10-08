@@ -198,6 +198,13 @@ export function applyAngleOverrides(
  * 本編の1クリップを、同じ時間の別のカメラに替えるときの候補。
  * そのカメラがクリップの時間を全部録っていれば `clip` に置き換え後の値を入れる。
  */
+export interface AngleClip {
+  assetId: string
+  inPoint: number
+  outPoint: number
+  speed: number
+}
+
 export function angleAlternatives(
   clip: { assetId: string; inPoint: number; outPoint: number },
   info: MulticamInfo
@@ -205,7 +212,14 @@ export function angleAlternatives(
   sourceId: string
   name: string
   current: boolean
-  clip?: { assetId: string; inPoint: number; outPoint: number; speed: number }
+  /** 1つのファイルで録っているときの替えた値 */
+  clip?: AngleClip
+  /**
+   * 替えた値(ファイルの境目で分かれる)。録っていなければ無い。
+   * 1つのファイルで見ていたので、ファイルが分かれて録られたカメラ(長回しの分割)は
+   * 「この時間は録っていません」になっていた
+   */
+  clips?: AngleClip[]
 }[] {
   const f = info.files.find((x) => x.assetId === clip.assetId)
   if (!f) return []
@@ -215,25 +229,52 @@ export function angleAlternatives(
     .filter((s) => s.kind === 'camera')
     .map((s) => {
       if (s.id === f.sourceId) return { sourceId: s.id, name: s.name, current: true }
-      const g = fileAt(info, s.id, start)
-      const covers = g && g.start + g.duration / g.rate >= end - 1e-3
+      const clips = coversRange(info, s.id, start, end) ? anglePieces(info, s.id, start, end) : []
       return {
         sourceId: s.id,
         name: s.name,
         current: false,
-        ...(g && covers
-          ? {
-              clip: {
-                assetId: g.assetId,
-                // 素材の頭の丸めの残り(-5e-7 など)で、素材の外を指さないように
-                inPoint: Math.max(0, (start - g.start) * g.rate),
-                outPoint: (end - g.start) * g.rate,
-                speed: g.rate
-              }
-            }
-          : {})
+        ...(clips.length > 0 ? { clips } : {}),
+        ...(clips.length === 1 ? { clip: clips[0] } : {})
       }
     })
+}
+
+/** 共通の時刻 [start, end) を、そのカメラのファイルごとに分けた素材の時刻(短い隙間は前のファイルを延ばす) */
+function anglePieces(
+  info: MulticamInfo,
+  sourceId: string,
+  start: number,
+  end: number
+): AngleClip[] {
+  const out: AngleClip[] = []
+  let t = start
+  while (t < end - 1e-6) {
+    const g = fileAt(info, sourceId, t)
+    if (!g) {
+      // 録っていない短い隙間(`coversRange` が許す分)は、前のファイルを延ばして埋める
+      const nextStart = info.files
+        .filter((x) => x.sourceId === sourceId && x.start > t)
+        .reduce((m, x) => Math.min(m, x.start), Infinity)
+      const to = Math.min(end, nextStart)
+      const last = out[out.length - 1]
+      if (!last || !Number.isFinite(to)) return []
+      last.outPoint += (to - t) * last.speed
+      t = to
+      continue
+    }
+    const to = Math.min(end, g.start + g.duration / g.rate)
+    out.push({
+      assetId: g.assetId,
+      // 素材の頭の丸めの残り(-5e-7 など)で、素材の外を指さないように
+      inPoint: Math.max(0, (t - g.start) * g.rate),
+      outPoint: (to - g.start) * g.rate,
+      speed: g.rate
+    })
+    t = to
+  }
+  // 最後の切れ端が丸めの残りだけなら前に含める
+  return out.filter((p, i) => i === 0 || (p.outPoint - p.inPoint) / p.speed > 1e-3)
 }
 
 /**
