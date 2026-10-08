@@ -166,3 +166,87 @@ describe('normalizeShowStyle', () => {
     expect(describeShowStyle(s)).toContain('BGM 50%')
   })
 })
+
+describe('番組スタイルの学習(第7回の調査)', () => {
+  const base = episode(4, 0.5, 8, 0.25)
+  it('環境音は基準カメラの音だけ。ゲーム音・通話・消したトラック・ピンマイクの無い回は数えない', () => {
+    const tracks = (extra: object[]): Project['audioTracks'] =>
+      [
+        {
+          id: 'amb',
+          name: 'カメラ',
+          multicamSourceId: 'camA',
+          muted: false,
+          volume: 0.35,
+          duckingEnabled: false,
+          clips: []
+        },
+        {
+          id: 'game',
+          name: 'ゲーム音',
+          multicamSourceId: 'game',
+          muted: false,
+          volume: 1,
+          duckingEnabled: false,
+          clips: []
+        },
+        {
+          id: 'mic',
+          name: 'マイク',
+          multicamSourceId: 'mic1',
+          voice: true,
+          muted: false,
+          volume: 1,
+          duckingEnabled: false,
+          clips: []
+        },
+        ...extra
+      ] as Project['audioTracks']
+    const info = {
+      anchorSourceId: 'camA',
+      sources: [
+        { id: 'camA', name: 'カメラA', kind: 'camera' },
+        { id: 'game', name: 'ゲーム音', kind: 'audio', trackRole: 'game' },
+        { id: 'mic1', name: 'マイク', kind: 'mic' }
+      ],
+      files: []
+    } as unknown as Project['multicam']
+    expect(
+      measureProject({ ...base, multicam: info, audioTracks: tracks([]) }).ambienceVolume
+    ).toBeCloseTo(0.35)
+    const noMic = {
+      ...base,
+      multicam: { ...info!, sources: info!.sources.filter((s) => s.kind !== 'mic') },
+      audioTracks: tracks([]).filter((t) => !t.voice)
+    }
+    expect(measureProject(noMic).ambienceVolume).toBeUndefined()
+    const muted = tracks([]).map((t) => (t.id === 'amb' ? { ...t, muted: true } : t))
+    expect(
+      measureProject({ ...base, multicam: info, audioTracks: muted }).ambienceVolume
+    ).toBeUndefined()
+  })
+
+  it('長いテロップが出ている間の短いテロップの切れ目は、間として数えない', () => {
+    const long = { id: 'long', text: 'ずっと出ている', startTime: 0, endTime: 20, style }
+    const shorts = Array.from({ length: 8 }, (_, i) => ({
+      id: `s${i}`,
+      text: `短い${i}`,
+      startTime: 1 + 2 * i,
+      endTime: 2 + 2 * i,
+      style
+    }))
+    const m = measureProject({ ...base, textOverlays: [long, ...shorts] })
+    expect(m.keepPauseSec).toBeUndefined()
+  })
+
+  it('1行の文字数は、書式の記号を数えない', () => {
+    const t = Array.from({ length: 12 }, (_, i) => ({
+      id: `m${i}`,
+      text: '**すごい**値段__税込__です',
+      startTime: i * 3,
+      endTime: i * 3 + 2,
+      style
+    }))
+    expect(measureProject({ ...base, textOverlays: t }).telopLineChars).toBe(9)
+  })
+})

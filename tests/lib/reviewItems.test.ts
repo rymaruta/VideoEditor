@@ -107,3 +107,25 @@ describe('buildReviewItems', () => {
     expect(run([])).toBe(run(['e1']))
   })
 })
+
+describe('ノイズ除去の項目の鍵', () => {
+  it('同じ名前の録音が2本(別の録音機)あっても、項目は別々の鍵', () => {
+    const items = buildReviewItems({
+      project,
+      syncIssues: [],
+      fileLabel: (id: string) => id,
+      placedStart: () => undefined,
+      telopReviews: [],
+      colorIssues: [],
+      denoiseFailures: [
+        { assetId: 'a1', fileName: 'ZOOM0001.WAV', error: '' },
+        { assetId: 'a2', fileName: 'ZOOM0001.WAV', error: '' }
+      ],
+      effects: [],
+      effectChosen: [],
+      qc: null
+    } as never)
+    const keys = items.filter((i) => i.area === 'audio').map((i) => i.key)
+    expect(new Set(keys).size).toBe(2)
+  })
+})

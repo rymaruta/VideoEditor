@@ -78,3 +78,20 @@ describe('テロップスタイルのファイル', () => {
     expect(out.map((x) => x.name)).toEqual(['発言 (3)', '発言 (4)', '章'])
   })
 })
+
+describe('縦書きのスタイルのファイル', () => {
+  it('書き出して読み直しても、縦書きの右端の置き場所は残る(横書きの自由配置は外す)', () => {
+    const vertical = defaultTextStyle({ vertical: true, customPosition: { x: 0.9, y: 0.45 } })
+    const horizontal = defaultTextStyle({ customPosition: { x: 0.2, y: 0.1 } })
+    const r = parseStyleFile(
+      buildStyleFile([
+        { name: '縦', style: vertical },
+        { name: '横', style: horizontal }
+      ])
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.styles[0].style.customPosition).toEqual({ x: 0.9, y: 0.45 })
+    expect(r.styles[1].style.customPosition).toBeUndefined()
+  })
+})

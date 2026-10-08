@@ -17,14 +17,21 @@ export interface NamedStyle {
   style: TextStyle
 }
 
-/** 書き出す JSON(置き場所はテロップごとのものなので、自由配置は外す) */
+/**
+ * 自由配置を外すか。置き場所はテロップごとのものなので外す。ただし縦書きの見た目は、右端に置く
+ * 置き場所も見た目の一部(外すと縦の文字が下の真ん中に出た)なので残す
+ */
+const dropPlacement = (style: TextStyle): TextStyle =>
+  style.vertical ? style : { ...style, customPosition: undefined }
+
+/** 書き出す JSON(置き場所はテロップごとのものなので、自由配置は外す。縦書きは残す) */
 export function buildStyleFile(styles: readonly NamedStyle[]): string {
   return `${JSON.stringify(
     {
       version: TELOP_STYLE_FILE_VERSION,
       styles: styles.map((s) => ({
         name: s.name,
-        style: { ...s.style, customPosition: undefined }
+        style: dropPlacement(s.style)
       }))
     },
     null,
@@ -73,7 +80,7 @@ export function parseStyleFile(text: string): ParseStyleFileResult {
       typeof item.name === 'string' && item.name.trim()
         ? item.name.trim().slice(0, 80)
         : `読み込んだスタイル ${i + 1}`
-    styles.push({ name, style: { ...normalizeTextStyle(item.style), customPosition: undefined } })
+    styles.push({ name, style: dropPlacement(normalizeTextStyle(item.style)) })
   })
   if (styles.length === 0) return { ok: false, error: 'テロップスタイルが入っていないファイルです' }
   return { ok: true, styles, skipped }

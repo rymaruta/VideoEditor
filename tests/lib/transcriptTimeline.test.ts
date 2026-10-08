@@ -77,3 +77,31 @@ describe('telopsFromTranscript — 時刻の整え', () => {
     ])
   })
 })
+
+describe('telopsFromTranscript — 枚ごとの番号', () => {
+  it('長い発言を何枚かに分けたら、枚ごとに別の番号(直した文字・消した枚が別の枚に付かない)', () => {
+    const text =
+      'ここが中華街の入り口で今日はここから歩いていきます。まずは名物の肉まんを食べてみましょう'
+    const project = {
+      aspectRatio: '16:9',
+      assets: [asset('A')],
+      clips: [clip('A', 0, 30)],
+      audioTracks: [],
+      videoOverlayTracks: [],
+      transcript: [
+        {
+          id: 'u1',
+          assetId: 'A',
+          sourceStart: 1,
+          sourceEnd: 12,
+          text,
+          words: [{ text, start: 1, end: 12 }],
+          overlap: false
+        }
+      ]
+    } as unknown as Project
+    const out = telopsFromTranscript(project, [])
+    expect(out.length).toBeGreaterThan(1)
+    expect(out.map((o) => o.utteranceChunk)).toEqual(out.map((_, i) => i))
+  })
+})

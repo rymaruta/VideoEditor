@@ -1,4 +1,5 @@
 import type { Project } from '../types'
+import { stripTelopMarkup } from '../telop/render'
 
 /**
  * 番組スタイル(計画書 §7「学習」)。人が仕上げた過去回のプロジェクトから番組の癖を集計し、
@@ -104,9 +105,13 @@ export function measureProject(project: Project): Partial<ShowStyle> {
     .filter((o) => !o.effectId && o.text.trim())
     .sort((a, b) => a.startTime - b.startTime)
   const gaps: number[] = []
+  // 間は「それまでに出ていたどのテロップも消えた後」から数える(長いテロップが出ている間に
+  // 短いテロップが続いても、黙っている間ではない)
+  let lastEnd = speech[0]?.endTime ?? 0
   for (let i = 1; i < speech.length; i++) {
-    const g = speech[i].startTime - speech[i - 1].endTime
+    const g = speech[i].startTime - lastEnd
     if (g > 0.02 && g < 5) gaps.push(g)
+    lastEnd = Math.max(lastEnd, speech[i].endTime)
   }
   if (gaps.length >= 5) {
     out.keepPauseSec = median(gaps)
@@ -117,7 +122,8 @@ export function measureProject(project: Project): Partial<ShowStyle> {
   // 最短の表示時間: 表示時間の下の方(1割)。10枚以上あるときだけ
   if (speech.length >= 10) {
     const lines = speech.flatMap((o) =>
-      o.text
+      // 強調などの書式の記号は画面に出ないので数えない
+      stripTelopMarkup(o.text)
         .split(/\r\n|\r|\n/)
         .map((l) => [...l.replace(/\s+/g, '')].length)
         .filter((n) => n > 0)
@@ -129,9 +135,18 @@ export function measureProject(project: Project): Partial<ShowStyle> {
     )
   }
 
-  const tracks = project.audioTracks ?? []
+  // 消した(鳴らしていない)トラックの音量は学ばない
+  const tracks = (project.audioTracks ?? []).filter((t) => !t.muted)
+  // 現場の音(環境音)は、ピンマイクがある回の基準カメラの音だけ。ピンマイクが無い回のカメラの音は
+  // 声そのものなので等倍のまま、ゲーム音・通話の音は環境音ではない(数えると 1 を学んでいた)
+  // (収録の情報が無い企画は、声のトラックがあるときの声でないトラック)
+  const info = project.multicam
+  const hasMics = info ? info.sources.some((s) => s.kind === 'mic') : tracks.some((t) => t.voice)
   const isAmbience = (t: (typeof tracks)[number]): boolean =>
-    Boolean(t.multicamSourceId) && !t.voice
+    hasMics &&
+    Boolean(t.multicamSourceId) &&
+    !t.voice &&
+    (!info || t.multicamSourceId === info.anchorSourceId)
   const loose = tracks.filter((t) => !t.multicamSourceId && !t.voice)
   // SE: 自動の SE のトラック、または短い音(3秒未満)ばかりのトラック
   const seClips = loose

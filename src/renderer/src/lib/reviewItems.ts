@@ -41,7 +41,7 @@ export interface ReviewSources {
   placedStart: (fileId: string) => number | undefined
   telopReviews: readonly { startTime: number; text: string; key?: string | null }[]
   colorIssues: readonly { name: string; verdict: keyof typeof COLOR_VERDICT_TEXT }[]
-  denoiseFailures: readonly { fileName: string; error: string }[]
+  denoiseFailures: readonly { assetId?: string; fileName: string; error: string }[]
   effects: readonly { id: string; text: string; confidence: number }[]
   effectChosen: readonly string[]
   qc: QcReport | null
@@ -129,7 +129,8 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
 
   for (const d of s.denoiseFailures)
     items.push({
-      key: `denoise:${d.fileName}`,
+      // 素材の ID で見分ける(ZOOM0001.WAV のように、別の録音機に同じ名前の録音がある)
+      key: `denoise:${d.assetId ?? d.fileName}`,
       area: 'audio',
       kind: 'ノイズ除去',
       text: `${d.fileName} はノイズ除去ができず、元の録音のままです${d.error ? `(${d.error})` : ''}`

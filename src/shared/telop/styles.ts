@@ -125,6 +125,8 @@ export function restyleOverlays(
       const style = applyLook(o.style, def.style, { keepPlacement: true })
       return JSON.stringify(style) === JSON.stringify(o.style) ? o : { ...o, style }
     }
+    // 人が見た目を変えてつながりを外したテロップは、話者のスタイルでつなぎ直さない
+    if (o.styleUnlinked) return o
     const auto = styleForSpeaker(styles, o.speaker)
     if (!auto) return o
     return {

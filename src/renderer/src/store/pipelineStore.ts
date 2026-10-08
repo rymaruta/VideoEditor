@@ -202,7 +202,8 @@ interface PipelineState {
   /** 色を合わせられなかったカメラ(要確認に出す) */
   colorIssues: { name: string; verdict: Exclude<ColorMatchVerdict, 'matched' | 'same'> }[]
   /** ノイズ除去ができなかったピンマイク(要確認に出す) */
-  denoiseFailures: { fileName: string; error: string }[]
+  /** ノイズ除去ができなかった素材(同じ名前の録音が別の録音機にあるので、素材の ID で見分ける) */
+  denoiseFailures: { assetId?: string; fileName: string; error: string }[]
   /** 今の仮編集の要約 */
   roughCut: {
     keptIds: string[]
@@ -608,7 +609,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         denoiseFailures: results
           .map((r, i) => ({ r, a: assets[i] }))
           .filter((x) => !x.r.cleaned)
-          .map((x) => ({ fileName: x.a.fileName, error: x.r.error ?? '' }))
+          .map((x) => ({ assetId: x.a.id, fileName: x.a.fileName, error: x.r.error ?? '' }))
       })
       results.forEach((r, i) => {
         if (r.cleaned) changes[assets[i].id] = r.cleaned

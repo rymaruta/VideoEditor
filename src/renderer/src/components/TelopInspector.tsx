@@ -53,21 +53,29 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
 
   // 見た目を手で変えたら、スタイルとのつながりは外す(スタイルを直しても上書きされないように)
   const patch = (p: Partial<TextStyle>): void =>
-    updateTextOverlay(o.id, { style: { ...o.style, ...p }, styleId: undefined })
+    updateTextOverlay(o.id, {
+      style: { ...o.style, ...p },
+      styleId: undefined,
+      ...(o.styleId ? { styleUnlinked: true } : {})
+    })
   // 置き場所はテロップごとのもの。スタイルとのつながりは保つ
   const place = (p: Partial<TextStyle>): void =>
     updateTextOverlay(o.id, { style: { ...o.style, ...p } })
 
   function setSpeaker(value: string): void {
     const speaker = value || undefined
-    // スタイルの付いていないテロップは、話者に割り当てたスタイルを自動で使う
-    const auto = o.styleId ? null : styleForSpeaker(presets, speaker)
+    // スタイルの付いていないテロップ・前の話者のスタイルのままのテロップは、新しい話者に割り当てた
+    // スタイルを自動で使う(前の話者のスタイルのままだと、話者を替えても見た目が前の人のまま)
+    const prevAuto = styleForSpeaker(presets, o.speaker)
+    const followsSpeaker = !o.styleId || (prevAuto !== null && prevAuto?.id === o.styleId)
+    const auto = followsSpeaker ? styleForSpeaker(presets, speaker) : null
     updateTextOverlay(
       o.id,
       auto
         ? {
             speaker,
             styleId: auto.id,
+            styleUnlinked: undefined,
             // 話者のスタイルが伝わるだけなので、置き場所(顔を避けて上へ移した・傾けた)は残す
             style: applyLook(o.style, auto.style, { keepPlacement: true })
           }
@@ -79,7 +87,12 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
   function pickLook(item: LookItem): void {
     const style = applyLook(o.style, item.style)
     // 保存したスタイルならつなぐ(直せばこのテロップにも反映される)。種類の見た目は個別の設定
-    updateTextOverlay(o.id, { style, styleId: item.savedId })
+    updateTextOverlay(o.id, {
+      style,
+      styleId: item.savedId,
+      // 保存したスタイルを選んだらつなぐ。種類の見た目を選んだら、つながりを外したまま
+      styleUnlinked: item.savedId ? undefined : o.styleId || o.styleUnlinked ? true : undefined
+    })
     setPicked({ key: item.key, style })
   }
   const activeLook = linked

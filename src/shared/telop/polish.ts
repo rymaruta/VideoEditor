@@ -29,12 +29,24 @@ export interface DictionaryEntry {
   to: string
 }
 
-/** 登録された置き換えを、長いものから順に当てる(短いものが長いものの一部を先に壊さないように) */
+/**
+ * 登録された置き換えを当てる。前から1回だけ読み、その位置で一番長く合うものを当てる
+ * (短いものが長いものの一部を先に壊さないように)。
+ *
+ * 置き換えた後の文字は読み直さない。1件ずつ全体に当てると、前の置き換えの結果を後の置き換えが
+ * また書き換えていた(「きむら → 木村」「木 → 樹」で「樹村」、「ジョウド → ジョウドガハマ」で
+ * すでに正しい「ジョウドガハマ」が「ジョウドガハマガハマ」に伸びた)。
+ * 正しい書き方(置き換え先)がそのまま出てきたら、そこは触らない
+ */
 export function applyDictionary(text: string, entries: readonly DictionaryEntry[]): string {
-  const sorted = [...entries].filter((e) => e.from).sort((a, b) => b.from.length - a.from.length)
-  let out = text
-  for (const e of sorted) out = out.split(e.from).join(e.to)
-  return out
+  const replace = new Map<string, string>()
+  for (const e of entries) if (e.from && !replace.has(e.from)) replace.set(e.from, e.to)
+  if (replace.size === 0) return text
+  const keep = new Set(entries.map((e) => e.to).filter((t) => t && !replace.has(t)))
+  const candidates = [...replace.keys(), ...keep].sort((a, b) => b.length - a.length)
+  const escape = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(candidates.map(escape).join('|'), 'gu')
+  return text.replace(pattern, (m) => replace.get(m) ?? m)
 }
 
 /** 「誤 → 正」の行を読み込む(→ / => / タブ区切り。空行・# の行は飛ばす) */
@@ -151,7 +163,12 @@ export function findBreak(chars: readonly string[], from: number, max: number): 
  * 残りを何行で書くかを先に決め、その平均の長さの近くで良い区切りを探す。
  * 各行は `maxLine` 以内(区切れる所が無いときの禁則のぶら下げで、1文字だけ超えうる)。
  */
-export function balancedLineEnds(chars: readonly string[], maxLine: number): number[] {
+export function balancedLineEnds(
+  chars: readonly string[],
+  maxLine: number,
+  /** 切ってはいけない位置(辞書で直す言葉の途中など) */
+  noCut?: (index: number) => boolean
+): number[] {
   const ends: number[] = []
   const max = Math.max(1, Math.floor(maxLine))
   let from = 0
@@ -171,6 +188,7 @@ export function balancedLineEnds(chars: readonly string[], maxLine: number): num
     let bestValue = -Infinity
     let bestDist = Infinity
     for (let len = Math.min(max, target + slack); len >= lo; len--) {
+      if (noCut?.(from + len)) continue
       const sc = breakScore(chars, from + len)
       if (sc === -Infinity) continue
       const dist = Math.abs(len - target)
@@ -187,4 +205,25 @@ export function balancedLineEnds(chars: readonly string[], maxLine: number): num
     from = cut
   }
   return ends
+}
+
+/**
+ * 辞書で直す言葉(置き換え前)の途中の位置。テロップを枚に分けるとき、ここで切ると言葉が2枚に分かれ、
+ * どちらの枚でも辞書に当たらずに直らなかった(書き出しの確認も1枚ずつ見るので見逃していた)
+ */
+export function dictionaryNoCut(
+  chars: readonly string[],
+  entries: readonly DictionaryEntry[] | undefined
+): (index: number) => boolean {
+  const inside = new Set<number>()
+  for (const e of entries ?? []) {
+    const word = [...e.from]
+    if (word.length < 2) continue
+    for (let i = 0; i + word.length <= chars.length; i++) {
+      let hit = true
+      for (let k = 0; k < word.length && hit; k++) hit = chars[i + k] === word[k]
+      if (hit) for (let k = 1; k < word.length; k++) inside.add(i + k)
+    }
+  }
+  return (index) => inside.has(index)
 }

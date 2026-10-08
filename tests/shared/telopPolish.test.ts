@@ -128,3 +128,35 @@ describe('辞書で長くなった発言テロップ', () => {
     expect(chunks.at(-1)!.sourceEnd).toBeLessThanOrEqual(5 + 1e-9)
   })
 })
+
+describe('辞書の置き換えは1回だけ', () => {
+  const d = (...pairs: [string, string][]): { from: string; to: string }[] =>
+    pairs.map(([from, to]) => ({ from, to }))
+  it('置き換えた結果を、後の置き換えでまた書き換えない', () => {
+    expect(applyDictionary('AB', d(['A', 'B'], ['B', 'A']))).toBe('BA')
+    expect(applyDictionary('きむらさん', d(['きむら', '木村'], ['木', '樹']))).toBe('木村さん')
+    expect(applyDictionary('ジョウドガハマに来た', d(['ジョウド', 'ジョウドガハマ']))).toBe(
+      'ジョウドガハマに来た'
+    )
+    expect(applyDictionary('ジョウドに来た', d(['ジョウド', 'ジョウドガハマ']))).toBe(
+      'ジョウドガハマに来た'
+    )
+    expect(applyDictionary('abc', d(['abc', 'abc'], ['b', 'X']))).toBe('abc')
+    expect(applyDictionary('a.b(c)', d(['.', '・'], ['(c)', '[c]']))).toBe('a・b[c]')
+  })
+})
+
+describe('辞書で直す言葉をテロップの枚の境目で切らない', () => {
+  it('長い発言でも、辞書の言葉は1枚の中に入って直る', () => {
+    const chunks = utteranceToTelopChunks(
+      {
+        text: '今日は朝から天気が良かったので家族みんなでよこはまこくだいに来ています。すごくきれいなところです',
+        words: [],
+        sourceStart: 0,
+        sourceEnd: 20
+      },
+      { dictionary: [{ from: 'よこはまこくだい', to: '横浜国大' }] }
+    )
+    expect(chunks.map((c) => c.text.replace(/\n/g, '')).join('')).toContain('横浜国大')
+  })
+})

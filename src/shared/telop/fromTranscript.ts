@@ -1,5 +1,11 @@
 import type { AsrWord, TranscriptUtterance } from '../transcript'
-import { applyDictionary, balancedLineEnds, removeFillers, type DictionaryEntry } from './polish'
+import {
+  applyDictionary,
+  balancedLineEnds,
+  dictionaryNoCut,
+  removeFillers,
+  type DictionaryEntry
+} from './polish'
 import { MIN_DISPLAY_SEC, READ_CHARS_PER_SEC } from '../qc/telop'
 
 /**
@@ -90,7 +96,7 @@ export function utteranceToTelopChunks(
   // 数文字だけになり(「ある」だけが 1.8秒出る)、詰めた1枚は禁則の位置しだいで3行になる。
   // 1枚の上限は 行数×1行 より少し短くし、改行の位置を選ぶ余地を残す(余地が無いと3行になる)
   const sheetMax = Math.max(maxLine, maxLine * maxLines - Math.ceil(maxLine / 8))
-  const ends = balancedLineEnds(chars, sheetMax)
+  const ends = balancedLineEnds(chars, sheetMax, dictionaryNoCut(chars, options.dictionary))
   const pieces = ends.map((end, i) => ({ from: i === 0 ? 0 : ends[i - 1], to: end }))
 
   const polish = (text: string): string => {

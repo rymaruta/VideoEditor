@@ -108,7 +108,7 @@ export function telopsFromTranscript(
       maxLineChars: telop?.lineChars,
       minDurationSec: telop?.minSec
     })
-    for (const chunk of chunks) {
+    for (const [ci, chunk] of chunks.entries()) {
       const r = utteranceTimelineRange(
         { assetId: u.assetId, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd },
         clips
@@ -122,7 +122,10 @@ export function telopsFromTranscript(
         styleId: def ? def.id : look.styleId,
         speaker: u.speaker,
         source: 'auto',
-        utteranceId: u.id
+        utteranceId: u.id,
+        // 枚ごとの番号(仮編集と同じ)。無いと1つの発言の枚がみな同じ印になり、直した文字・消した枚が
+        // 作り直しで別の枚に付いていた
+        utteranceChunk: ci
       })
     }
   }
