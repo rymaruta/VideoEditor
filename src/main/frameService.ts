@@ -1,3 +1,4 @@
+import { trackUntilDone } from './liveProcesses'
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
 
@@ -30,6 +31,7 @@ function frameRgb(path: string, time: number, w: number, h: number): Promise<Uin
       ],
       { windowsHide: true }
     )
+    trackUntilDone(child)
     const chunks: Buffer[] = []
     child.stdout.on('data', (c: Buffer) => chunks.push(c))
     child.on('error', () => resolve(null))

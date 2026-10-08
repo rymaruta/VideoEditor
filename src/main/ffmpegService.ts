@@ -1,4 +1,4 @@
-import { trackProcess } from './liveProcesses'
+import { trackProcess, trackUntilDone } from './liveProcesses'
 import { colorMatchFilter } from '@shared/color/match'
 import { loudnormApplyFilter, loudnormMeasureFilter, type LoudnessTarget } from '@shared/loudness'
 import ffmpeg from 'fluent-ffmpeg'
@@ -71,12 +71,22 @@ ffmpeg.setFfprobePath(ffprobePath)
  */
 function measureDurationByScan(filePath: string): Promise<number | null> {
   return new Promise((resolve) => {
-    execFile(
-      ffprobePath,
-      ['-v', 'error', '-show_entries', 'packet=pts_time,duration_time', '-of', 'csv=p=0', filePath],
-      // 3時間の30fpsで約324,000行(8MB程度)。既定の1MBだと途中で切れる。
-      { maxBuffer: 256 * 1024 * 1024 },
-      (err, stdout) => resolve(err ? null : durationFromPacketCsv(stdout))
+    trackUntilDone(
+      execFile(
+        ffprobePath,
+        [
+          '-v',
+          'error',
+          '-show_entries',
+          'packet=pts_time,duration_time',
+          '-of',
+          'csv=p=0',
+          filePath
+        ],
+        // 3時間の30fpsで約324,000行(8MB程度)。既定の1MBだと途中で切れる。
+        { maxBuffer: 256 * 1024 * 1024 },
+        (err, stdout) => resolve(err ? null : durationFromPacketCsv(stdout))
+      )
     )
   })
 }
@@ -247,7 +257,7 @@ export async function generateThumbnailDataUrl(
   // 出すので、画素が正方形でない素材だけ縦横比が変わる(理由と実測は thumbnailScaleFilter)。
   // 組み立ては下の `generateFrameDataUrl` と同じ形にそろえる。
   return new Promise((resolve, reject) => {
-    ffmpeg(filePath)
+    trackUntilDone(ffmpeg(filePath), ['end', 'error'])
       .inputOptions([`-ss ${ffSeconds(seekSeconds)}`])
       .complexFilter([`[0:v]${thumbnailScaleFilter()}[v]`])
       .outputOptions(['-map [v]', '-frames:v 1'])
@@ -285,7 +295,7 @@ export async function generateFrameDataUrl(
   const w = Math.round(width)
   const h = Math.round(height)
   return new Promise((resolve, reject) => {
-    ffmpeg(filePath)
+    trackUntilDone(ffmpeg(filePath), ['end', 'error'])
       .inputOptions([`-ss ${ffSeconds(seekSeconds)}`])
       .complexFilter([
         `[0:v]${scaleToFrameFilter(w, h, fillCrop, cropCenter, blurBackground)},setsar=1[v]`
@@ -322,7 +332,7 @@ export function generateWaveformDataUrl(
   const safeWidth = Math.max(20, Math.round(width))
   const safeHeight = Math.max(10, Math.round(height))
   return new Promise((resolve, reject) => {
-    ffmpeg(filePath)
+    trackUntilDone(ffmpeg(filePath), ['end', 'error'])
       .inputOptions([`-ss ${ffSeconds(start)}`, `-t ${ffSeconds(Math.max(0.05, end - start))}`])
       .complexFilter([
         `[0:a]aformat=channel_layouts=mono,showwavespic=s=${safeWidth}x${safeHeight}:colors=0x9c8cf6[v]`
@@ -379,7 +389,7 @@ function detectMaxVolumeDb(
 ): Promise<number | null> {
   return new Promise((resolve) => {
     let maxDb: number | null = null
-    ffmpeg(filePath)
+    trackUntilDone(ffmpeg(filePath), ['end', 'error'])
       .inputOptions([`-ss ${ffSeconds(rangeStart)}`, `-t ${ffSeconds(duration)}`])
       .outputOptions(['-vn', '-af volumedetect', '-f null'])
       .output('-')
@@ -416,7 +426,7 @@ export async function detectSilence(
     const ranges: SilenceRange[] = []
     let pendingStart: number | null = null
 
-    ffmpeg(filePath)
+    trackUntilDone(ffmpeg(filePath), ['end', 'error'])
       .inputOptions([`-ss ${ffSeconds(rangeStart)}`, `-t ${ffSeconds(duration)}`])
       // **映像をデコードさせない。** 1パス目(`detectMaxVolumeDb`)には最初から
       // 指定があるのに、本命のこちらには無く、**同じ関数の2つのパスで片方だけ**

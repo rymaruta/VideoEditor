@@ -1,3 +1,4 @@
+import { trackUntilDone } from './liveProcesses'
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
 import { ffSeconds } from './ffArgs'
@@ -11,7 +12,7 @@ import { DEFAULT_HIGHLIGHT_SENSITIVITY, highlightThreshold, loudnessStats } from
 
 function runFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, args)
+    const proc = trackUntilDone(spawn(ffmpegPath, args))
     let stdout = ''
     let stderr = ''
     proc.stdout.on('data', (chunk) => (stdout += chunk.toString()))

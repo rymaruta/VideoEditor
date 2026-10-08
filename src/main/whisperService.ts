@@ -1,3 +1,4 @@
+import { trackUntilDone } from './liveProcesses'
 import { app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -10,7 +11,16 @@ import { retryableSingleton } from './retryableSingleton'
 import { describeFfmpegExit } from './ffmpegError'
 import { ffSeconds } from './ffArgs'
 
-const execFileAsync = promisify(execFile)
+const execFileAsyncRaw = promisify(execFile)
+/** 外部の処理を始め、アプリを閉じるときに止める一覧に入れる */
+const execFileAsync = (
+  file: string,
+  args: string[]
+): Promise<{ stdout: string; stderr: string }> => {
+  const p = execFileAsyncRaw(file, args)
+  trackUntilDone(p.child)
+  return p
+}
 
 const ffmpegPath = (ffmpegStatic as unknown as string).replace('app.asar', 'app.asar.unpacked')
 

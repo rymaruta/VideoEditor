@@ -571,7 +571,11 @@ const STALE_TEMP_PREFIXES = [
   've-thumb-',
   've-frame-',
   've-graph-',
-  've-subs-'
+  've-subs-',
+  // 文字起こしの音声(f32 の PCM で大きい)・自動の切り出し・書体の測り
+  've-whisper-',
+  've-crop-',
+  've-fontprobe-'
 ]
 
 /**

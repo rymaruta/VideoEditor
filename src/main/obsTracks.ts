@@ -3,6 +3,8 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
 import { basename, join } from 'path'
 import { cachedEnvelope } from './audioPcm'
+import { trackUntilDone } from './liveProcesses'
+import { contentFingerprint } from './fileFingerprint'
 import {
   guessTrackRole,
   isSilentEnvelope,
@@ -29,15 +31,19 @@ export interface AudioStreamInfo {
 }
 
 function run(ffmpegPath: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) =>
-    execFile(
-      ffmpegPath,
-      args,
-      { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-      (err, _o, stderr) =>
-        err ? reject(new Error(String(stderr).trim().split('\n').pop() || err.message)) : resolve()
+  return new Promise((resolve, reject) => {
+    trackUntilDone(
+      execFile(
+        ffmpegPath,
+        args,
+        { windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+        (err, _o, stderr) =>
+          err
+            ? reject(new Error(String(stderr).trim().split('\n').pop() || err.message))
+            : resolve()
+      )
     )
-  )
+  })
 }
 
 /** 取り出したトラックの置き場所(元の録画のパス・大きさ・更新時刻ごとに決まる) */
@@ -48,7 +54,10 @@ export function trackPath(
   mtimeMs: number,
   index: number
 ): string {
-  const key = createHash('sha1').update(`${video}|${size}|${mtimeMs}`).digest('hex').slice(0, 16)
+  const key = createHash('sha1')
+    .update(`${video}|${size}|${mtimeMs}|${contentFingerprint(video)}`)
+    .digest('hex')
+    .slice(0, 16)
   const stem = basename(video).replace(/\.[^.]+$/, '')
   return join(outDir, `${stem}_${key}_track${index + 1}.m4a`)
 }

@@ -1,3 +1,4 @@
+import { trackUntilDone } from './liveProcesses'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
@@ -7,7 +8,16 @@ import { bestWindowCenter } from '@shared/cropWindow'
 import { ffmpegPath } from './ffmpegService'
 import { ffSeconds } from './ffArgs'
 
-const execFileAsync = promisify(execFile)
+const execFileAsyncRaw = promisify(execFile)
+/** 外部の処理を始め、アプリを閉じるときに止める一覧に入れる */
+const execFileAsync = (
+  file: string,
+  args: string[]
+): Promise<{ stdout: string; stderr: string }> => {
+  const p = execFileAsyncRaw(file, args)
+  trackUntilDone(p.child)
+  return p
+}
 
 const SAMPLE_COUNT = 6
 const SAMPLE_WIDTH = 160

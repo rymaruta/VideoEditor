@@ -1,7 +1,8 @@
 import { spawn } from 'child_process'
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import { contentFingerprint } from './fileFingerprint'
 import { ENVELOPE_RATE, EnvelopeBuilder } from '@shared/sync/correlate'
 
 /**
@@ -51,9 +52,28 @@ export function readPcm(
 
 function envelopeCachePath(cacheDir: string, f: AudioFileRef): string {
   const key = createHash('sha1')
-    .update(`${f.path}|${f.size}|${f.mtimeMs}|${ENVELOPE_SAMPLE_RATE}|${ENVELOPE_RATE}`)
+    .update(
+      `${f.path}|${f.size}|${f.mtimeMs}|${contentFingerprint(f.path)}|${ENVELOPE_SAMPLE_RATE}|${ENVELOPE_RATE}`
+    )
     .digest('hex')
   return join(cacheDir, `${key}.env`)
+}
+
+/**
+ * キャッシュの包絡線を読む。壊れている(4 バイトの倍数でない・空)なら消して null
+ * (途中で落ちた書き込みの残りを、そのまま使い続けて同期が毎回失敗していた)
+ */
+function readCachedEnvelope(cached: string): Float32Array | null {
+  try {
+    const buf = readFileSync(cached)
+    if (buf.byteLength === 0 || buf.byteLength % 4 !== 0) {
+      rmSync(cached, { force: true })
+      return null
+    }
+    return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))
+  } catch {
+    return null
+  }
 }
 
 /** 10ms ごとの音の大きさ(包絡線)。一度作ったものはキャッシュから読む */
@@ -64,8 +84,8 @@ export async function cachedEnvelope(
 ): Promise<Float32Array> {
   const cached = envelopeCachePath(cacheDir, f)
   if (existsSync(cached)) {
-    const buf = readFileSync(cached)
-    return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength))
+    const env = readCachedEnvelope(cached)
+    if (env) return env
   }
   const builder = new EnvelopeBuilder(ENVELOPE_SAMPLE_RATE)
   await readPcm(
@@ -76,7 +96,14 @@ export async function cachedEnvelope(
   const env = builder.finish()
   try {
     mkdirSync(cacheDir, { recursive: true })
-    writeFileSync(cached, Buffer.from(env.buffer, env.byteOffset, env.byteLength))
+    // 別の名前に書いてから名前を替える(書いている途中の物を、別のスレッドが読まないように)
+    const tmp = `${cached}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`
+    writeFileSync(tmp, Buffer.from(env.buffer, env.byteOffset, env.byteLength))
+    try {
+      renameSync(tmp, cached)
+    } catch {
+      rmSync(tmp, { force: true })
+    }
   } catch {
     // キャッシュに書けなくても続けられる
   }

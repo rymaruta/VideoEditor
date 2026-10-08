@@ -112,7 +112,8 @@ const stillImages = new MediaJobQueue<string>(2, Number.POSITIVE_INFINITY)
 function fileStamp(filePath: string): string {
   try {
     const st = statSync(filePath)
-    return `${st.size}:${st.mtimeMs}`
+    // 変更時刻(ctime)も入れる。同じ大きさ・同じ更新時刻のファイルへ差し替えても、書き込めば変わる
+    return `${st.size}:${st.mtimeMs}:${st.ctimeMs}`
   } catch {
     return 'missing'
   }
@@ -174,7 +175,8 @@ function loadWindowState(): WindowState | null {
 }
 
 function saveWindowState(mainWindow: BrowserWindow): void {
-  if (!windowStatePath) return
+  // 閉じた後に遅れて呼ばれたら何もしない(壊れた窓に触ると main が落ちる)
+  if (!windowStatePath || mainWindow.isDestroyed()) return
   const isMaximized = mainWindow.isMaximized()
   const bounds = isMaximized ? mainWindow.getNormalBounds() : mainWindow.getBounds()
   const state: WindowState = { ...bounds, isMaximized }
@@ -229,6 +231,9 @@ function createWindow(): void {
   })
 
   mainWindow.on('close', (e) => {
+    // 動かした直後に閉じたとき、遅れて走る保存を止める(閉じた窓に触って main が落ちていた。macOS)
+    if (saveStateTimer) clearTimeout(saveStateTimer)
+    saveStateTimer = null
     saveWindowState(mainWindow)
     // 長い処理の最中なら、まず確かめる(閉じると途中までの処理が失われる)
     const running = currentBusy()

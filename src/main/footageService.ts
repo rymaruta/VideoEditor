@@ -1,3 +1,4 @@
+import { trackUntilDone } from './liveProcesses'
 import { app } from 'electron'
 import { execFile } from 'child_process'
 import { readdir, stat } from 'fs/promises'
@@ -62,18 +63,20 @@ interface FfprobeJson {
 
 function ffprobeJson(path: string): Promise<FfprobeJson> {
   return new Promise((resolve, reject) => {
-    execFile(
-      ffprobePath,
-      ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path],
-      { maxBuffer: 16 * 1024 * 1024, windowsHide: true },
-      (err, stdout) => {
-        if (err) return reject(err)
-        try {
-          resolve(JSON.parse(stdout) as FfprobeJson)
-        } catch (e) {
-          reject(e)
+    trackUntilDone(
+      execFile(
+        ffprobePath,
+        ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path],
+        { maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+        (err, stdout) => {
+          if (err) return reject(err)
+          try {
+            resolve(JSON.parse(stdout) as FfprobeJson)
+          } catch (e) {
+            reject(e)
+          }
         }
-      }
+      )
     )
   })
 }

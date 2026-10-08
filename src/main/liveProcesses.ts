@@ -16,8 +16,16 @@ export function isShuttingDown(): boolean {
   return shuttingDown
 }
 
-/** 登録し、終わったら外す関数を返す */
+/** 登録し、終わったら外す関数を返す。閉じている最中に始まったものは、すぐ止める */
 export function trackProcess(p: Killable): () => void {
+  if (shuttingDown) {
+    try {
+      p.kill('SIGKILL')
+    } catch {
+      // すでに終わっている
+    }
+    return () => {}
+  }
   live.add(p)
   return () => {
     live.delete(p)
@@ -34,4 +42,20 @@ export function killLiveProcesses(): void {
     }
   }
   live.clear()
+}
+
+interface Watchable extends Killable {
+  once(event: string, listener: (...args: unknown[]) => void): unknown
+}
+
+/**
+ * 登録し、終わったら(`events` のどれかが来たら)自動で外す。始めたその場で包む:
+ * `trackUntilDone(spawn(...))`・`trackUntilDone(ffmpeg(path), ['end', 'error'])`。
+ * 包んでいない ffmpeg(サムネイル・無音の検出・文字起こしの音声の取り出し など)は、
+ * アプリを閉じても動き続けていた(3時間の素材の無音検出が、閉じた後も CPU を使い続けた)
+ */
+export function trackUntilDone<T extends Watchable>(p: T, events = ['close', 'error']): T {
+  const untrack = trackProcess(p)
+  for (const e of events) p.once(e, untrack)
+  return p
 }

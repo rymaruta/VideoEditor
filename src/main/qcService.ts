@@ -8,13 +8,35 @@ import { QcLogParser, qcFilter, type QcMeasurement } from '@shared/qc/media'
  * 判定は `@shared/qc/media` の `mediaIssues`(画面側)。ここは測るだけ。
  */
 let running: ChildProcess | null = null
+/**
+ * 実行中か(ファイルを調べている間も含む)と、その間に押された中止。
+ * ffmpeg を立ち上げる前(ファイルを調べている間)は `running` がまだ無いので、印が無いと
+ * その間の中止は効かず、2回目の実行も通っていた
+ */
+let busy = false
+let cancelRequested = false
 
 export async function measureExport(
   filePath: string,
   onProgress: (percent: number) => void
 ): Promise<QcMeasurement> {
-  if (running) throw new Error('自動確認はすでに実行中です')
+  if (busy) throw new Error('自動確認はすでに実行中です')
+  busy = true
+  cancelRequested = false
+  try {
+    return await measure(filePath, onProgress)
+  } finally {
+    busy = false
+    cancelRequested = false
+  }
+}
+
+async function measure(
+  filePath: string,
+  onProgress: (percent: number) => void
+): Promise<QcMeasurement> {
   const info = await probeMedia(filePath)
+  if (cancelRequested) throw new Error('QC_CANCELED')
   const filter = qcFilter(info.hasVideo, info.hasAudio, info.duration)
   const maps = [info.hasVideo ? ['-map', '[qv]'] : [], info.hasAudio ? ['-map', '[qa]'] : []].flat()
   const child = spawn(
@@ -65,5 +87,6 @@ export async function measureExport(
 }
 
 export function cancelMeasureExport(): void {
+  if (busy) cancelRequested = true
   running?.kill()
 }

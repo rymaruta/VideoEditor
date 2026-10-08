@@ -1,3 +1,4 @@
+import { trackUntilDone } from './liveProcesses'
 import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
 import { ffSeconds } from './ffArgs'
@@ -57,7 +58,7 @@ function decodePcm(filePath: string, start: number, duration: number): Promise<I
       String(SAMPLE_RATE),
       '-'
     ]
-    const proc = spawn(ffmpegPath, args)
+    const proc = trackUntilDone(spawn(ffmpegPath, args))
     const chunks: Buffer[] = []
     let stderr = ''
     proc.stdout.on('data', (chunk) => chunks.push(chunk))

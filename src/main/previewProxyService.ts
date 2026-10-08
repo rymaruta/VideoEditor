@@ -6,6 +6,7 @@ import { join } from 'path'
 import { describeFfmpegError } from './ffmpegError'
 import { isShuttingDown, trackProcess } from './liveProcesses'
 import { detectVideoEncoder } from './segmentRenderer'
+import { contentFingerprint } from './fileFingerprint'
 import {
   isMonoChannelCount,
   isMultiChannelCount,
@@ -80,7 +81,8 @@ function proxyPathFor(filePath: string, ext: 'mp4' | 'webm' = 'mp4'): string {
   let stamp = ''
   try {
     const st = statSync(filePath)
-    stamp = `${st.size}:${st.mtimeMs}`
+    // 同じ大きさ・同じ更新時刻のファイルへ差し替えても前の変換を使わないよう、中身の目印も足す
+    stamp = `${st.size}:${st.mtimeMs}:${contentFingerprint(filePath)}`
   } catch {
     stamp = ''
   }
