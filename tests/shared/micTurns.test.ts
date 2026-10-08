@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { detectTurns, placeEnvelope, TURN_RATE } from '../../src/shared/diarize/micTurns'
+import {
+  detectTurns,
+  placeEnvelope,
+  splitByWeakness,
+  TURN_RATE
+} from '../../src/shared/diarize/micTurns'
 
 /** 区間ごとの大きさ(dB)を与えて 100Hz の包絡線を作る。指定の無い所は floorDb */
 function env(seconds: number, floorDb: number, parts: [number, number, number][]): Float32Array {
@@ -264,5 +269,40 @@ describe('detectTurns: 文の終わりの小声', () => {
     const mine = turns.filter((t) => t.micId === 'A').sort((x, y) => x.start - y.start)
     for (let i = 1; i < mine.length; i++)
       expect(mine[i].start).toBeGreaterThanOrEqual(mine[i - 1].end - 1e-9)
+  })
+})
+
+describe('splitByWeakness — 短すぎる区間を作らない', () => {
+  const frames = (n: number, spans: [number, number][]): Uint8Array => {
+    const a = new Uint8Array(n)
+    for (const [s, e] of spans) a.fill(1, s, e)
+    return a
+  }
+  it('分けた結果が発話の最短より短くなるなら、隣とまとめる(持ち主の声を捨てない)', () => {
+    // 分からない声 [0,200) のあと、切れ目をはさんで持ち主の短い声 [230,245)
+    const heard = frames(245, [
+      [0, 200],
+      [230, 245]
+    ])
+    const weak = frames(245, [[0, 200]])
+    expect(splitByWeakness([[0, 245]], heard, weak, 25)).toEqual([[0, 245]])
+    // 先頭の短い持ち主の声 [0,15) のあと、分からない声 [20,220)
+    const heard2 = frames(220, [
+      [0, 15],
+      [20, 220]
+    ])
+    const weak2 = frames(220, [[20, 220]])
+    expect(splitByWeakness([[0, 220]], heard2, weak2, 25)).toEqual([[0, 220]])
+  })
+  it('どちらも十分長ければ分ける', () => {
+    const heard = frames(400, [
+      [0, 200],
+      [230, 400]
+    ])
+    const weak = frames(400, [[0, 200]])
+    expect(splitByWeakness([[0, 400]], heard, weak, 25)).toEqual([
+      [0, 230],
+      [230, 400]
+    ])
   })
 })

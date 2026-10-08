@@ -56,7 +56,16 @@ export type LoadedPreviewPlan =
   /** 元ファイルで再生できるが、保存されていたプロキシの実体が無い。プロキシの指定を外す */
   | { kind: 'clearProxy' }
   /** プロキシを作る(作るかどうかの最終判断は取り込みと同じ `ensurePreviewable`) */
-  | { kind: 'build'; codecSaysUnplayable: boolean; audioNeedsFold: boolean }
+  | {
+      kind: 'build'
+      codecSaysUnplayable: boolean
+      audioNeedsFold: boolean
+      /**
+       * 先にプロキシの指定を外す(元ファイルで再生できるのに、実体の無いプロキシが残っている。
+       * 外さないと、変換している間・変換に失敗したあともプレビューが再生できなかった)
+       */
+      clearStaleProxy?: boolean
+    }
   /** 再生できず、素材を調べることもできない(移動・削除された) */
   | { kind: 'probeFailed' }
 
@@ -94,7 +103,13 @@ export async function planLoadedAssetPreview(
         // 再生はできているので、調べられなくても元ファイルで聞かせる
       }
     }
-    if (audioNeedsFold) return { kind: 'build', codecSaysUnplayable: false, audioNeedsFold }
+    if (audioNeedsFold)
+      return {
+        kind: 'build',
+        codecSaysUnplayable: false,
+        audioNeedsFold,
+        ...(asset.proxyPath ? { clearStaleProxy: true } : {})
+      }
     return asset.proxyPath ? { kind: 'clearProxy' } : { kind: 'ok' }
   }
   try {

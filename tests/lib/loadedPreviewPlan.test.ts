@@ -52,6 +52,20 @@ describe('planLoadedAssetPreview — 開いたプロジェクトの素材のプ�
     expect(plan).toEqual({ kind: 'build', codecSaysUnplayable: false, audioNeedsFold: true })
   })
 
+  it('4.0 の試聴用の素材を作るとき、実体の無いプロキシは先に外す(変換中・失敗後も元ファイルで再生できるように)', async () => {
+    const plan = await planLoadedAssetPreview(
+      asset({ proxyPath: '/cache/gone.mp4' }),
+      playable('/media/a.mp4'),
+      probeOf({ needsPreviewProxy: false, previewAudioNeedsFold: true })
+    )
+    expect(plan).toEqual({
+      kind: 'build',
+      codecSaysUnplayable: false,
+      audioNeedsFold: true,
+      clearStaleProxy: true
+    })
+  })
+
   it('音の無い素材・ステレオは、再生できれば何もしない(調べられなくても)', async () => {
     expect(
       await planLoadedAssetPreview(

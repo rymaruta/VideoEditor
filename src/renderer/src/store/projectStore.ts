@@ -161,6 +161,7 @@ function copiedAudioDetached(project: Project, clip: Clip): boolean {
 function reanchorLinkedOverlays(before: Project, after: Project): Project {
   if (!after.textOverlays.some((o) => o.linkedClipId)) return after
   const oldById = new Map(before.clips.map((c) => [c.id, c]))
+  const beforeOverlays = new Map(before.textOverlays.map((o) => [o.id, o]))
   const newById = new Map(after.clips.map((c) => [c.id, c]))
   let changed = false
   const textOverlays = after.textOverlays.map((o) => {
@@ -168,14 +169,17 @@ function reanchorLinkedOverlays(before: Project, after: Project): Project {
     const old = oldById.get(o.linkedClipId)
     const nw = newById.get(o.linkedClipId)
     if (!old || !nw) return o
+    // `before` がドラッグの始まりなら、テロップもその時点のものから計算し直す
+    const origin = beforeOverlays.get(o.id)
+    const offset =
+      origin?.linkedClipId === o.linkedClipId ? (origin.linkOffset ?? 0) : (o.linkOffset ?? 0)
     const oldSpeed = old.speed || 1
     const newSpeed = nw.speed || 1
     if (old.inPoint === nw.inPoint && old.outPoint === nw.outPoint && oldSpeed === newSpeed)
-      return o
+      return offset === o.linkOffset || o.linkOffset === undefined ? o : withOffset(o, offset)
     // 追従は外さず、範囲でも丸めない(ロールのドラッグは動かすたびに呼ばれるので、行って戻ったときに
     // 元の位置へ戻れるよう、素材の時刻からそのまま計算し直す。クリップの頭より前・後ろに
     // ずらして置いたテロップ(負の・長い linkOffset)もそのまま)
-    const offset = o.linkOffset ?? 0
     const source = old.inPoint + offset * oldSpeed
     // クリップの頭より前・終わりより後ろに置いたもの(素材の時刻が新しい範囲にも無い)は、
     // 範囲の置き換え(`remapOverlayLinks`)と同じく、頭・終わりからの距離を保つ(トリムでは素材の
@@ -187,10 +191,25 @@ function reanchorLinkedOverlays(before: Project, after: Project): Project {
           ? (nw.outPoint - nw.inPoint) / newSpeed + (source - old.outPoint) / oldSpeed
           : (source - nw.inPoint) / newSpeed
     if (!Number.isFinite(linkOffset) || linkOffset === o.linkOffset) return o
-    changed = true
-    return { ...o, linkOffset }
+    return withOffset(o, linkOffset)
   })
   return changed ? { ...after, textOverlays } : after
+
+  function withOffset(o: TextOverlay, linkOffset: number): TextOverlay {
+    changed = true
+    return { ...o, linkOffset }
+  }
+}
+
+/**
+ * まとめて1件の履歴にする操作(トリム・ロールのドラッグ)の、始まりの状態。
+ * ドラッグは動かすたびに呼ばれるので、1つ前の状態から積み上げて計算すると、クリップの外に
+ * ずらしたテロップの位置がマウスの速さ(1回に動いた量)で変わっていた。始まりから計算し直す
+ */
+function gestureOrigin(state: ProjectState, history: Pick<ProjectState, 'past'>): Project {
+  return history.past === state.past && state.past.length > 0
+    ? state.past[state.past.length - 1]
+    : state.project
 }
 
 function createBlankProject(): Project {
@@ -1298,13 +1317,14 @@ function restoreHistoryCoalescing(mark: { key: string | null; at: number }): voi
  * 前の状態へ戻すと消えてしまう(プロキシが消えると、HEVC などの素材はプレビューできなくなる)
  */
 function keepBackgroundResults(restored: Project, current: Project): Project {
-  const proxyOf = new Map(
-    current.assets.filter((a) => a.proxyPath).map((a) => [`${a.id}|${a.filePath}`, a.proxyPath])
-  )
+  // 外したプロキシ(実体が消えていたもの)も引き継ぐ(戻すと、無いプロキシをまた読みにいっていた)
+  const proxyOf = new Map(current.assets.map((a) => [`${a.id}|${a.filePath}`, a.proxyPath]))
   let changed = false
   const assets = restored.assets.map((a) => {
-    const proxy = proxyOf.get(`${a.id}|${a.filePath}`)
-    if (!proxy || a.proxyPath === proxy) return a
+    const key = `${a.id}|${a.filePath}`
+    if (!proxyOf.has(key)) return a
+    const proxy = proxyOf.get(key)
+    if (a.proxyPath === proxy) return a
     changed = true
     return { ...a, proxyPath: proxy }
   })
@@ -2295,17 +2315,20 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   updateClipTrim: (clipId, inPoint, outPoint) =>
-    set((state) => ({
-      ...pushHistory(state, `clipTrim:${clipId}`),
-      project: reanchorLinkedOverlays(state.project, {
-        ...state.project,
-        clips: state.project.clips.map((c) =>
-          c.id === clipId
-            ? clampSourceRange(c, inPoint, outPoint, assetDurationOf(state.project, c.assetId))
-            : c
-        )
-      })
-    })),
+    set((state) => {
+      const history = pushHistory(state, `clipTrim:${clipId}`)
+      return {
+        ...history,
+        project: reanchorLinkedOverlays(gestureOrigin(state, history), {
+          ...state.project,
+          clips: state.project.clips.map((c) =>
+            c.id === clipId
+              ? clampSourceRange(c, inPoint, outPoint, assetDurationOf(state.project, c.assetId))
+              : c
+          )
+        })
+      }
+    }),
 
   // Roll trim: moves the boundary between two neighbours without changing the total
   // length. The left clip gives up (or gains) exactly what the right clip gains (or
@@ -2344,9 +2367,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const delta = Math.max(-maxBackward, Math.min(maxForward, deltaSeconds))
       if (Math.abs(delta) < 1e-6) return state
 
+      const history = pushHistory(state, `roll:${leftClipId}:${rightClipId}`)
       return {
-        ...pushHistory(state, `roll:${leftClipId}:${rightClipId}`),
-        project: reanchorLinkedOverlays(state.project, {
+        ...history,
+        project: reanchorLinkedOverlays(gestureOrigin(state, history), {
           ...state.project,
           clips: state.project.clips.map((c) => {
             // 端まで動かしたときの丸めの残り(-2.8e-17 など)で、素材の外を指さないように

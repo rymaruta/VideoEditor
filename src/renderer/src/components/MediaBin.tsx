@@ -155,14 +155,18 @@ export function MediaBin(): React.JSX.Element {
       // 結果を今の画面に書かない**(実測: 消えた素材を調べている最中に別のプロジェクトを
       // 開くと、開いたあとの画面に前のプロジェクトのメッセージが出た)。
       if (!stillCurrent()) return
-      const plan = await planLoadedAssetPreview(asset, canPreviewFile, window.api.probeMedia)
+      const plan = await planLoadedAssetPreview(asset, canPreviewFile, (path) =>
+        // 尺は使わない(尺の無い素材を開くたびに全体を読まない)
+        window.api.probeMedia(path, { skipDurationScan: true })
+      )
       if (!stillCurrent()) return
       if (plan.kind === 'clearProxy') setAssetProxyPath(asset.id, undefined)
       else if (plan.kind === 'probeFailed')
         setError(
           `${asset.fileName}: プレビューで読み込めませんでした。ファイルが移動・削除されていないか確認してください。`
         )
-      else if (plan.kind === 'build')
+      else if (plan.kind === 'build') {
+        if (plan.clearStaleProxy) setAssetProxyPath(asset.id, undefined)
         await ensurePreviewable(
           asset.id,
           asset.filePath,
@@ -170,6 +174,7 @@ export function MediaBin(): React.JSX.Element {
           asset.hasVideo,
           plan.audioNeedsFold
         )
+      }
     }
   }
 
@@ -445,9 +450,14 @@ export function MediaBin(): React.JSX.Element {
   // メニューバー(ファイル・表示・自動編集)から来る操作
   useMenuCommand((id) => {
     // 自動編集で収録素材をまとめて入れたあと(再生できない形式ならプレビュー用に変換する)
-    if (id === 'assets.checkPreview')
-      void ensureLoadedAssetsPreviewable(useProjectStore.getState().project.assets, () => true)
-    else if (id === 'file.importVideo') void handleImportVideo()
+    if (id === 'assets.checkPreview') {
+      // 調べている間に別のプロジェクトを開かれたら止める(前のプロジェクトのメッセージを出さない)
+      const { id: checkingId, assets: checking } = useProjectStore.getState().project
+      void ensureLoadedAssetsPreviewable(
+        checking,
+        () => useProjectStore.getState().project.id === checkingId
+      )
+    } else if (id === 'file.importVideo') void handleImportVideo()
     else if (id === 'file.importAudio') void handleImportAudio()
     else if (id === 'view.library') setView('library')
     else if (id === 'file.addLibraryFolder') {

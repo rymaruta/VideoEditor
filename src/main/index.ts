@@ -626,7 +626,11 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle(IPC.probeMedia, async (_e, filePath: string) => probeMedia(filePath))
+  ipcMain.handle(
+    IPC.probeMedia,
+    async (_e, filePath: string, options?: { skipDurationScan?: boolean }) =>
+      probeMedia(filePath, { skipDurationScan: options?.skipDurationScan === true })
+  )
   ipcMain.handle(
     IPC.scanLongFormWindows,
     async (_e, filePath: string, duration: number, maxWindows: number, visualWeight: number) =>

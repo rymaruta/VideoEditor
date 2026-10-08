@@ -171,7 +171,14 @@ function displayDimensions(stream: Record<string, unknown> | undefined): {
   return degrees === 90 ? { width: height, height: width } : { width, height }
 }
 
-export function probeMedia(filePath: string): Promise<MediaProbeResult> {
+export function probeMedia(
+  filePath: string,
+  /**
+   * 尺の分からない素材でも、パケットを全部読んで尺を測ることはしない(尺は 0 のまま)。
+   * プロジェクトを開くたびに、音の畳み方を知るためだけに全体を読んでいた
+   */
+  options: { skipDurationScan?: boolean } = {}
+): Promise<MediaProbeResult> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, async (err, data) => {
       // 生の失敗文は版数とビルド設定の羅列で、本当の原因は末尾の1行だけ。
@@ -199,7 +206,8 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
         finiteSeconds(data.format.duration) ??
         finiteSeconds(videoStream?.duration) ??
         finiteSeconds(audioStream?.duration)
-      const duration = declared ?? (await measureDurationByScan(filePath)) ?? 0
+      const duration =
+        declared ?? (options.skipDurationScan ? null : await measureDurationByScan(filePath)) ?? 0
       const display = displayDimensions(videoStream as Record<string, unknown> | undefined)
       resolve({
         duration,

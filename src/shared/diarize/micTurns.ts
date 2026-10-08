@@ -244,7 +244,7 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
         s = cut
       }
       pieces.push([s, end])
-      const parts = splitByWeakness(pieces, heard, weak[m])
+      const parts = splitByWeakness(pieces, heard, weak[m], minTurn)
       for (let pi = 0; pi < parts.length; pi++) {
         const [a, b] = parts[pi]
         if (b - a < minTurn) continue
@@ -280,10 +280,12 @@ const MIN_UNCERTAIN_FRAMES = 50
  * 分けるのは**声の無い切れ目**の所だけで、分からない側が 0.5 秒以上あるときだけ(文の終わりの
  * 小声・文の中の小さな落ち込みでは分けない)
  */
-function splitByWeakness(
+export function splitByWeakness(
   pieces: readonly [number, number][],
   heard: Uint8Array,
-  weak: Uint8Array
+  weak: Uint8Array,
+  /** これより短く分けた区間は隣へまとめる(短い区間は発話にしないので、持ち主の声ごと消えていた) */
+  minTurn = 0
 ): [number, number][] {
   const out: [number, number][] = []
   for (const [a, b] of pieces) {
@@ -327,7 +329,13 @@ function splitByWeakness(
     kept[0].a = a
     for (let i = 1; i < kept.length; i++) kept[i - 1].b = kept[i].a
     kept[kept.length - 1].b = b
-    for (const r of kept) out.push([r.a, r.b])
+    const merged: [number, number][] = []
+    for (const r of kept) {
+      const last = merged[merged.length - 1]
+      if (last && (r.b - r.a < minTurn || last[1] - last[0] < minTurn)) last[1] = r.b
+      else merged.push([r.a, r.b])
+    }
+    out.push(...merged)
   }
   return out
 }
