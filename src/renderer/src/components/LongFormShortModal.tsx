@@ -125,6 +125,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
     setError(null)
     // 追加指示があるときだけ、前回の構成案を土台としてAIへ渡す。
     const previousPlan = plan
+    const previousCuts = cuts
     setPlan(null)
     setCuts([])
     try {
@@ -229,7 +230,12 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
       setStage('done')
     } catch (e) {
       setError(formatIpcError(e))
-      setStage('idle')
+      // 作り直しに失敗したら、直していた構成案に戻す(捨てると、次は作り直しではなく一から作っていた)
+      if (previousPlan) {
+        setPlan(previousPlan)
+        setCuts(previousCuts)
+        setStage('done')
+      } else setStage('idle')
     }
   }
 

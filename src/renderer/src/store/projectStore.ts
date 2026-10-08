@@ -3046,6 +3046,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                   style: { ...o.style, ...patch },
                   // 見た目を変えたらスタイルとのつながりを外す(置き場所だけなら保つ)
                   styleId: placementOnly ? o.styleId : undefined,
+                  // 1件ずつ直すとき(TelopInspector)と同じく、外した印を付ける。付けないと、スタイルの
+                  // 管理で OK を押したときに話者のスタイルへ付け直され、まとめて変えた見た目が戻っていた
+                  ...(!placementOnly && o.styleId ? { styleUnlinked: true } : {}),
                   ...(autoTelopKey(o) ? { edited: true } : {})
                 }
               : o

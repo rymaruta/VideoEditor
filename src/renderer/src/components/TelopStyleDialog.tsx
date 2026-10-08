@@ -169,7 +169,11 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     const { width: w, height: h } = canvas
     // 見本は置き場所の設定に関係なく、枠の中ほどに出す(どの位置のスタイルでも見えるように)
     const style: TextStyle = { ...selected.style, customPosition: undefined, position: 'center' }
-    const video = document.querySelector<HTMLVideoElement>('.preview-frame video')
+    // 映している方の本編の <video>(2つを入れ替えて使うので、先頭の要素は前・次のクリップのことがある)
+    const video =
+      document.querySelector<HTMLVideoElement>(
+        '.preview-frame video.preview-main-video[data-active="true"]'
+      ) ?? document.querySelector<HTMLVideoElement>('.preview-frame video.preview-main-video')
     const paint = (time: number, endTime: number): void => {
       ctx.clearRect(0, 0, w, h)
       if (background === 'frame' && video && video.readyState >= 2) {

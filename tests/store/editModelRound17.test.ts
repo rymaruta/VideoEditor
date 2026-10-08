@@ -536,3 +536,28 @@ describe('第20回: 第19回修正の見直し', () => {
     expect(back[1].fadeIn).toBe(2)
   })
 })
+
+describe('第20回: まとめて変えたテロップの見た目', () => {
+  it('スタイルの管理で OK を押しても、話者のスタイルへ戻らない', () => {
+    setup([[0, 10]])
+    const telop = (id: string): Project['textOverlays'][number] =>
+      ({
+        id,
+        text: id,
+        startTime: 1,
+        endTime: 2,
+        speaker: '田中',
+        styleId: 'S',
+        style: { color: '#00ff00' },
+        source: 'manual'
+      }) as unknown as Project['textOverlays'][number]
+    S.setState({ project: { ...st().project, textOverlays: [telop('a'), telop('b')] } })
+    st().updateTextOverlaysStyle(['a', 'b'], { color: '#ff0000' })
+    st().restyleTextOverlays([
+      { id: 'S', name: '田中', style: { color: '#00ff00' } as never, speakers: ['田中'] }
+    ])
+    const after = st().project.textOverlays
+    expect(after.map((o) => o.style.color)).toEqual(['#ff0000', '#ff0000'])
+    expect(after.every((o) => o.styleUnlinked === true)).toBe(true)
+  })
+})

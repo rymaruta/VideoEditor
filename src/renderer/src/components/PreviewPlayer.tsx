@@ -1,3 +1,4 @@
+import { playheadFromElement } from '../lib/previewPlayhead'
 import { ColorMatchFilters } from './ColorMatchFilters'
 import { colorMatchCss } from '../lib/colorMatchCss'
 import {
@@ -1184,7 +1185,13 @@ export function PreviewPlayer(): React.JSX.Element {
     } else if (videoRef.current) {
       // 同じ素材なら読み込み直しは起きないので、その場で入れてよい(控えは捨てる)。
       pendingLoadRef.current = null
-      videoRef.current.currentTime = localTime
+      // 同じファイルを続けて切った所(分割した続き)を再生で越えるときは、位置を入れ直さない
+      // (入れ直すとカットのたびに 0.02 秒ほど先へ飛び、止まって見えていた)
+      const continuous =
+        resumePlaying &&
+        Math.abs(videoRef.current.currentTime - localTime) < 0.05 &&
+        Math.abs(videoRef.current.playbackRate - toPlaybackRate(speed)) < 1e-6
+      if (!continuous) videoRef.current.currentTime = localTime
       videoRef.current.playbackRate = toPlaybackRate(speed)
       if (resumePlaying) videoRef.current.play().catch(() => {})
     }
@@ -1270,9 +1277,15 @@ export function PreviewPlayer(): React.JSX.Element {
     function tick(): void {
       const tc = activeTimedClipRef.current
       const video = videoRef.current
-      if (tc && video) {
-        const speed = tc.clip.speed || 1
-        const globalTime = tc.start + (video.currentTime - tc.clip.inPoint) / speed
+      const globalTime =
+        tc && video
+          ? playheadFromElement(
+              { start: tc.start, inPoint: tc.clip.inPoint, speed: tc.clip.speed },
+              video.currentTime,
+              pendingLoadRef.current !== null
+            )
+          : null
+      if (tc && video && globalTime !== null) {
         setPlayheadTime(globalTime)
         prepareStandby(tc, globalTime)
 
@@ -1383,6 +1396,8 @@ export function PreviewPlayer(): React.JSX.Element {
                   key={slot}
                   ref={slot === 0 ? attachSlot0 : attachSlot1}
                   className="preview-main-video"
+                  // いま映している方の印(テロップのスタイル管理が「現在のフレーム」を取る)
+                  data-active={slot === activeSlot ? 'true' : undefined}
                   src={slotSrc[slot] ?? undefined}
                   // 控えの要素は見せない(音は用意するときに止める。入れ替えはその場で切り替える)
                   style={{
