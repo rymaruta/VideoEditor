@@ -221,3 +221,23 @@ export function speedSelectChoices(
   if (near !== undefined) return { value: near, options: [...options] }
   return { value: s, options: [...options, s].sort((a, b) => a - b) }
 }
+
+/**
+ * 「タイムライン全体を表示」のためだけに許す、倍率の下限。
+ * 0.01(40px/秒で 0.4px/秒)では、1時間ほどより長い回がレーンに入らなかった
+ * (3時間 = 4,320px。1,400px のレーンで 2,900px ほどが画面の外に残った)。
+ * 0.0005 = 0.02px/秒 で、10時間でも 720px に収まる
+ */
+export const MIN_FIT_ZOOM = 0.0005
+
+/** 総尺 `total` 秒を幅 `width` px に収める倍率(1 = `basePxPerSecond` px/秒)。上限・下限で止める */
+export function fitZoomFor(
+  total: number,
+  width: number,
+  basePxPerSecond: number,
+  maxZoom: number
+): number {
+  const zoom = width / (total * basePxPerSecond)
+  if (!Number.isFinite(zoom) || zoom <= 0) return MIN_FIT_ZOOM
+  return Math.min(maxZoom, Math.max(MIN_FIT_ZOOM, zoom))
+}

@@ -1673,11 +1673,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         for (let i = 0; i < files.length; i++) {
           const f = files[i]
           const meta = await window.api.probeMedia(f.path)
+          // 中止した・別のプロジェクトを開いたなら、そこで止める(止めないと、開いたプロジェクトに
+          // 前の回の素材を並べていた)
+          stopIfCanceled()
           let thumbnailDataUrl: string | undefined
           if (meta.hasVideo) {
             thumbnailDataUrl = await window.api
               .generateThumbnail(f.path, Math.min(1, meta.duration / 2))
               .catch(() => undefined)
+            stopIfCanceled()
           }
           const id = uuid()
           assetIdOf[f.id] = id
@@ -1783,6 +1787,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             state: canceled ? 'wait' : 'error',
             note: canceled ? '中止しました' : msg
           })
+        else if (canceled) {
+          // 工程の合間に中止したときも、次の工程に「中止しました」を出す(出さないと、終わったと
+          // 知らせていた)
+          const next = STEPS.find((st) => get().steps[st.id].state === 'wait')
+          if (next) setStep(next.id, { note: '中止しました' })
+        }
         log(canceled ? '自動編集を中止しました' : `止まりました: ${msg}`)
       } finally {
         set({ running: false })

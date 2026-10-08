@@ -19,7 +19,8 @@ import {
   totalTimelineDuration,
   findTimedClipAt,
   rollDragStep,
-  speedSelectChoices
+  speedSelectChoices,
+  fitZoomFor
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
 // テロップの最短の長さは**追加のときと同じ数字**を使う。ここに別の数字を書いていたころ、
@@ -156,17 +157,6 @@ const BASE_PIXELS_PER_SECOND = 40
  * (`SNAP_PIXELS`)が実質きつくなるので、通常の操作ではここで止める。
  */
 const MIN_ZOOM = 0.25
-/**
- * 「タイムライン全体を表示」のためだけに許す、さらに下の下限。
- *
- * `MIN_ZOOM` で頭打ちにしていたため、**ボタンの名前どおりの結果にならなかった**
- * (実測・レーンの表示幅 542px: 総尺60秒で中身 608px = **66px はみ出し**、
- *  200秒で 2008px = **1466px**、600秒で 6008px = **5466px** が画面の外に残る。
- *  しかも下限で止まったことは画面のどこにも出ない)。
- * 全体を見るのが目的の操作なので、**入るところまで縮められる**ようにする。
- * 0.01 = 0.4px/秒 で、1時間の素材(3600秒)でも 1440px に収まる。
- */
-const MIN_FIT_ZOOM = 0.01
 /** 全体表示のときレーンの右端に残す余白(px)。下限の計算と同じ数字を使う */
 const LANE_FIT_MARGIN_PX = 16
 const MAX_ZOOM = 4
@@ -1578,9 +1568,8 @@ export function Timeline(): React.JSX.Element {
     const container = trackLanesColRef.current
     const availableWidth = (container?.clientWidth ?? 0) - LANE_FIT_MARGIN_PX
     if (total <= 0 || availableWidth <= 0) return MIN_ZOOM
-    const fitZoom = availableWidth / (total * BASE_PIXELS_PER_SECOND)
-    if (!Number.isFinite(fitZoom) || fitZoom <= 0) return MIN_ZOOM
-    return Math.max(MIN_FIT_ZOOM, Math.min(MIN_ZOOM, fitZoom))
+    // 全体が入る倍率までは必ず下げられる(`MIN_ZOOM` で頭打ちにすると、全体表示が名前どおりに働かない)
+    return Math.min(MIN_ZOOM, fitZoomFor(total, availableWidth, BASE_PIXELS_PER_SECOND, MAX_ZOOM))
   }
 
   function handleWheelZoom(e: WheelEvent): void {
@@ -1607,8 +1596,7 @@ export function Timeline(): React.JSX.Element {
     const container = trackLanesColRef.current
     if (!container || total <= 0) return
     const availableWidth = container.clientWidth - LANE_FIT_MARGIN_PX
-    const fitZoom = availableWidth / (total * BASE_PIXELS_PER_SECOND)
-    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_FIT_ZOOM, fitZoom)))
+    setZoom(fitZoomFor(total, availableWidth, BASE_PIXELS_PER_SECOND, MAX_ZOOM))
   }
 
   // メニューバー(表示・テロップ・ヘルプ)から来る操作

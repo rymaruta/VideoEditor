@@ -655,7 +655,11 @@ function dedupeLoadedIds(p: Project): Project {
   }
 }
 
-function normalizeLoadedProject(project: Project): Project {
+/**
+ * 読み込んだプロジェクトのファイルを、使える形に整える(壊れた項目を直す・捨てる)。
+ * 開く経路のほか、過去回から番組の傾向を学ぶときにも通す(通さずに集計すると、壊れた1回で全部落ちていた)
+ */
+export function normalizeLoadedProject(project: Project): Project {
   return dedupeLoadedIds(normalizeLoadedProjectFields(project))
 }
 
@@ -3000,7 +3004,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             if (autoTelopKey(o) && isManualEdit(safePatch)) next.edited = true
             // 位置を動かす更新なら単語も連れていく。`patch.words` を明示的に渡された
             // ときはそちらが正なので触らない(自動テロップの作り直しなど)。
-            if (safePatch.startTime !== undefined && safePatch.words === undefined) {
+            // 頭・終わりを詰める(長さが変わる)ときは、言葉の時刻はそのまま(連れていくと、カラオケの色と
+            // キーワードの SE が詰めた分だけ遅れ、最後の言葉がテロップの外に出ていた)
+            const moved =
+              safePatch.endTime === undefined ||
+              Math.abs(safePatch.endTime - nextStart - (o.endTime - o.startTime)) <= 1e-6
+            if (safePatch.startTime !== undefined && safePatch.words === undefined && moved) {
               next.words = shiftOverlayWords(o.words, safePatch.startTime - o.startTime)
             }
             if (timedById && next.linkedClipId && safePatch.startTime !== undefined) {

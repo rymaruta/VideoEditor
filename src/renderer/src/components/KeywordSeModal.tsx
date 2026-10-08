@@ -52,13 +52,21 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
       // register a duplicate asset for the same wav.
       const createdByPath = new Map(project.assets.map((a) => [a.filePath, a]))
       const newAssets: typeof project.assets = []
+      const missing = new Set<string>()
       for (const match of chosen) {
         let asset = createdByPath.get(match.entry.filePath)
         if (!asset) {
+          if (missing.has(match.entry.fileName)) continue
           let duration = durationCache.get(match.entry.filePath)
           if (duration === undefined) {
-            const meta = await window.api.probeMedia(match.entry.filePath)
-            duration = meta.duration
+            // 読めない(移動・削除された)効果音のファイルは飛ばし、ほかの一致は置く
+            // (1つ読めないだけで、全部置かれずに終わっていた)
+            try {
+              duration = (await window.api.probeMedia(match.entry.filePath)).duration
+            } catch {
+              missing.add(match.entry.fileName)
+              continue
+            }
             durationCache.set(match.entry.filePath, duration)
           }
           asset = {
@@ -84,7 +92,13 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
       }
       // One scan = one undo step: the newly used SE files are registered together
       // with the clips instead of one history entry per file.
-      addKeywordSeClips(placements, newAssets)
+      if (placements.length > 0) addKeywordSeClips(placements, newAssets)
+      if (missing.size > 0) {
+        setError(
+          `効果音のファイルを読めなかったため、次の分は置きませんでした(移動・削除されていないか確認してください): ${[...missing].join('、')}`
+        )
+        return
+      }
       onClose()
     } catch (e) {
       setError(formatIpcError(e))

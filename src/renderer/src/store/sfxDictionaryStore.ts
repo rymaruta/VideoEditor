@@ -42,24 +42,36 @@ interface SfxDictionaryState {
   removeEntry: (id: string) => void
 }
 
+/**
+ * 辞書を保存する。保存できなくても(容量が一杯・使えない)画面の変更は残す
+ * (保存の失敗で投げると、変更そのものが消えていた)
+ */
+function persist(entries: SfxDictionaryEntry[]): void {
+  try {
+    localStorage.setItem(SFX_DICTIONARY_KEY, JSON.stringify(entries))
+  } catch {
+    // 次に保存できたときに書かれる
+  }
+}
+
 export const useSfxDictionaryStore = create<SfxDictionaryState>((set, get) => ({
   entries: loadEntries(SFX_DICTIONARY_KEY),
 
   addEntry: (keyword, filePath, fileName) => {
     const next = [...get().entries, { id: uuid(), keyword, filePath, fileName, volume: 1 }]
-    localStorage.setItem(SFX_DICTIONARY_KEY, JSON.stringify(next))
+    persist(next)
     set({ entries: next })
   },
 
   updateEntry: (id, patch) => {
     const next = get().entries.map((e) => (e.id === id ? { ...e, ...patch } : e))
-    localStorage.setItem(SFX_DICTIONARY_KEY, JSON.stringify(next))
+    persist(next)
     set({ entries: next })
   },
 
   removeEntry: (id) => {
     const next = get().entries.filter((e) => e.id !== id)
-    localStorage.setItem(SFX_DICTIONARY_KEY, JSON.stringify(next))
+    persist(next)
     set({ entries: next })
   }
 }))

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useProjectStore } from '../store/projectStore'
+import { normalizeLoadedProject, useProjectStore } from '../store/projectStore'
 import { usePipelineStore, type EditableSource } from '../store/pipelineStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { useSettingsStore } from '../store/settingsStore'
 import type { Project } from '@shared/types'
 import { fcp7ToProject } from '@shared/import/fcp7'
 import { loadEditXml } from '../lib/editXml'
+import { formatIpcError } from '../lib/ipcError'
 import { DEFAULT_SHOW_STYLE, describeShowStyle, learnShowStyle } from '@shared/style/showStyle'
 import { formatTimecode } from '../lib/timelineRuler'
 import { sourceDuration } from '@shared/ingest/classify'
@@ -160,7 +161,8 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
           projects.push(
             /\.xml$/i.test(p)
               ? fcp7ToProject(await loadEditXml(p))
-              : await window.api.loadProject(p)
+              : // 開くときと同じく整えてから集計する(壊れた項目のある1回で、全部の集計が落ちていた)
+                normalizeLoadedProject(await window.api.loadProject(p))
           )
           names.push(p.split(/[/\\]/).pop() ?? p)
         } catch {
@@ -177,6 +179,9 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
         return
       }
       setShowStyle({ style: learned.style, sources: names })
+    } catch (e) {
+      // 失敗は画面に出す(出さないと、押しても何も起きなかった)
+      setStyleError(`番組の傾向を集計できませんでした: ${formatIpcError(e)}`)
     } finally {
       setLearning(false)
     }

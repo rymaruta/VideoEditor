@@ -416,3 +416,45 @@ describe('第19回: 速さを変えたときの BGM・SE の並べ直しの見�
     expect(st().project.clips[0].fillCrop).toBe(true)
   })
 })
+
+describe('第19回: テロップの頭を詰めても言葉の時刻はそのまま', () => {
+  it('頭を詰めると言葉は動かず、動かすと一緒に動く', () => {
+    setup([[0, 10]])
+    S.setState({
+      project: {
+        ...st().project,
+        textOverlays: [
+          {
+            id: 'k',
+            text: 'えっと 拍手',
+            startTime: 2,
+            endTime: 5,
+            style: {},
+            source: 'manual',
+            words: [
+              { text: 'えっと', start: 2, end: 3 },
+              { text: '拍手', start: 3.5, end: 4.5 }
+            ]
+          }
+        ] as unknown as Project['textOverlays']
+      }
+    })
+    st().updateTextOverlay('k', { startTime: 3, endTime: 5 })
+    expect(st().project.textOverlays[0].words?.map((w) => w.start)).toEqual([2, 3.5])
+    st().updateTextOverlay('k', { startTime: 4, endTime: 6 })
+    expect(st().project.textOverlays[0].words?.map((w) => w.start)).toEqual([3, 4.5])
+  })
+})
+
+describe('第19回: 壊れた過去回も、整えてから番組の傾向を集計する', () => {
+  it('壊れた項目のある回が混ざっても落ちない', async () => {
+    const { normalizeLoadedProject } = await import('@renderer/store/projectStore')
+    const { learnShowStyle } = await import('@shared/style/showStyle')
+    const bad = [
+      { textOverlays: [{ startTime: 0, endTime: 1 }] },
+      { audioTracks: [{ volume: 1 }] },
+      { multicam: { anchorSourceId: 'a' } }
+    ] as unknown as Project[]
+    expect(() => learnShowStyle(bad.map(normalizeLoadedProject))).not.toThrow()
+  })
+})
