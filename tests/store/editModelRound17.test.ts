@@ -954,3 +954,71 @@ describe('第26回: 足したループの手前', () => {
     )
   })
 })
+
+describe('第27回: BGM のループを足すとき', () => {
+  it('その位置に人が短くした曲の頭のクリップがあれば、足さずにそれを延ばす', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', 8, false)],
+        audioTracks: p.audioTracks.map((t) =>
+          t.id === 'bgmT'
+            ? {
+                ...t,
+                clips: [
+                  {
+                    id: 'A',
+                    assetId: 'loop',
+                    startTime: 14,
+                    inPoint: 0,
+                    outPoint: 8,
+                    loopCross: { overlap: 1.5 }
+                  },
+                  { id: 'B', assetId: 'loop', startTime: 20.5, inPoint: 0, outPoint: 0.9 }
+                ]
+              }
+            : t
+        )
+      }
+    })
+    st().updateClipSpeed(st().project.clips[2].id, 0.8)
+    const heads = track('bgmT').filter(
+      (c) => c.inPoint === 0 && Math.abs(c.startTime - 20.5) < 1e-6
+    )
+    expect(heads).toHaveLength(1)
+  })
+
+  it('足すループの id は、別のトラックへ移したクリップとも重ならない', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', 8, false)],
+        audioTracks: p.audioTracks.map((t) =>
+          t.id === 'bgmT'
+            ? { ...t, clips: [{ id: 'X', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 8 }] }
+            : t.id === 'seT'
+              ? {
+                  ...t,
+                  clips: [{ id: 'X~1', assetId: 'loop', startTime: 40, inPoint: 0, outPoint: 1 }]
+                }
+              : t
+        )
+      }
+    })
+    st().updateClipSpeed(st().project.clips[0].id, 0.25)
+    const ids = st().project.audioTracks.flatMap((t) => t.clips.map((c) => c.id))
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})

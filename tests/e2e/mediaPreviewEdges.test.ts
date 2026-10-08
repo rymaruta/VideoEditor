@@ -67,6 +67,37 @@ describe.skipIf(!existsSync(ffmpegPath))('サムネイル・波形の端の扱�
     }
   }, 120_000)
 
+  it('Matroska で映像が遅れて始まる素材も、映像の終わりより後ろは最後の1枚', async () => {
+    for (const [name, vcodec, acodec] of [
+      ['late-video.mkv', 'libx264', 'libvorbis'],
+      ['late-video.webm', 'libvpx', 'libopus']
+    ] as const) {
+      const src = join(work, name)
+      ff([
+        '-itsoffset',
+        '1',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=s=160x90:r=30:d=2',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=f=440:d=8',
+        '-c:v',
+        vcodec,
+        ...(vcodec === 'libx264' ? ['-pix_fmt', 'yuv420p'] : []),
+        '-c:a',
+        acodec,
+        src
+      ])
+      for (const t of [3.5, 5, 7.9])
+        await expect(generateThumbnailDataUrl(src, t), `${name} ${t}`).resolves.toMatch(
+          /^data:image\/jpeg/
+        )
+    }
+  }, 120_000)
+
   it('音声が遅れて始まる素材の波形は、鳴った時刻の所に描く', async () => {
     const src = join(work, 'late.mp4')
     ff([

@@ -162,21 +162,42 @@ export async function transcribeRange(
   )
 }
 
-/** ほぼ無音とみなす大きさ(RMS。-50dBFS ほど) */
-const QUIET_RMS = 0.003
+/** 声があるかを見る細かさ(16kHz で 20ms) */
+const FRAME = 320
+/** 1つの区切りで見る長さの上限(秒)。終わりが分からない・長い区切りで、無音に薄められないように */
+const QUIET_WINDOW_SEC = 3
 
 /**
- * 読んだ音(16kHz)で、素材の時刻 [start, end) がほぼ無音かを返す関数。決まり文句の作り話を、
- * 無音の所に出たものだけ捨てるのに使う
+ * 読んだ音(16kHz)で、素材の時刻 [start, end) に声が無いかを返す関数。決まり文句の作り話を、
+ * 声の無い所に出たものだけ捨てるのに使う。
+ *
+ * 1つの大きさ(全体の RMS)で決めると、ふつうの部屋の雑音の上の作り話を残し、終わりの分からない
+ * 区切りで本当に言った締めの言葉を無音に薄めて捨てていた。20ms ごとの大きさを、その音の静かな所
+ * (下から1割)より 12dB 以上大きい所を声として数え、見る長さ(頭から3秒まで)の4割以上が声なら声あり
  */
 function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: number) => boolean {
-  return (start, end) => {
-    const a = Math.max(0, Math.floor((start - rangeStart) * 16000))
-    const b = Math.min(audio.length, Math.ceil((end - rangeStart) * 16000))
-    if (b <= a) return true
+  const frames = Math.floor(audio.length / FRAME)
+  const rms = new Float32Array(frames)
+  for (let f = 0; f < frames; f++) {
     let sum = 0
-    for (let i = a; i < b; i++) sum += audio[i] * audio[i]
-    return Math.sqrt(sum / (b - a)) < QUIET_RMS
+    for (let i = f * FRAME; i < (f + 1) * FRAME; i++) sum += audio[i] * audio[i]
+    rms[f] = Math.sqrt(sum / FRAME)
+  }
+  const sorted = Float32Array.from(rms).sort()
+  const floor = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.1)] : 0
+  // 声とみなす大きさ。静かな所の 4 倍(12dB)。ただし -34dBFS(0.02)を超えれば声とみなす(全体が同じ
+  // 大きさで鳴り続ける音では、静かな所の見積もりがその大きさになり、声をすべて無音と取っていた)
+  const voiced = Math.max(0.002, Math.min(floor * 4, 0.02))
+  return (start, end) => {
+    // 長さの無い区切り(言葉の時刻が1点)は、その頭の少しを見る
+    const s = start - rangeStart
+    const e = Math.min(end - rangeStart, s + QUIET_WINDOW_SEC)
+    const from = Math.max(0, Math.floor((s * 16000) / FRAME))
+    const to = Math.min(frames, Math.ceil((Math.max(e, s + 0.3) * 16000) / FRAME))
+    if (to <= from) return true
+    let loud = 0
+    for (let f = from; f < to; f++) if (rms[f] > voiced) loud++
+    return loud < (to - from) * 0.4
   }
 }
 

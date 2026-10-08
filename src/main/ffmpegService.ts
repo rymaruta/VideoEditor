@@ -269,12 +269,16 @@ function clampSeekSeconds(filePath: string, atSeconds: number): Promise<number> 
           ? tagged.split(':').reduce((acc, part) => acc * 60 + Number(part), 0)
           : NaN
       const direct = num(video?.duration)
-      const videoDuration = Number.isFinite(direct) && direct > 0 ? direct : fromTag
       const offset = num(video?.start_time) - num(data.format?.start_time)
+      const formatStart = num(data.format?.start_time)
+      // tags.DURATION は長さではなく、ストリームの終わりの時刻(映像が遅れて始まる素材で、頭の遅れを
+      // 2回足して終わりの先を指していた)
       const videoEnd =
-        Number.isFinite(videoDuration) && videoDuration > 0
-          ? videoDuration + (Number.isFinite(offset) ? offset : 0)
-          : Infinity
+        Number.isFinite(direct) && direct > 0
+          ? direct + (Number.isFinite(offset) ? offset : 0)
+          : Number.isFinite(fromTag) && fromTag > 0
+            ? fromTag - (Number.isFinite(formatStart) ? formatStart : 0)
+            : Infinity
       const end = Math.min(duration, videoEnd)
       resolve(Math.min(atSeconds, Math.max(0, end - SEEK_END_MARGIN)))
     })

@@ -5298,6 +5298,15 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       const at = tailEnd - Math.min(loopOverlap, lenOf(tail))
       if (end - at <= 1e-3) break
       out[ti] = { ...tail, fadeOut: loopCross?.fadeOut ?? tail.fadeOut }
+      // その位置に曲の頭から始めるクリップがもうあれば(人が短くしたループ)、足さずにそれを延ばす
+      // (足すと、曲の頭が二重に鳴っていた)
+      const existing = out.findIndex(
+        (c, k) => k !== ti && c.inPoint <= 1e-6 && Math.abs(c.startTime - at) <= 1e-6
+      )
+      if (existing >= 0) {
+        ti = existing
+        continue
+      }
       out.push({
         ...last,
         id: freshId(i),
@@ -5318,7 +5327,14 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
   const moveBgmClips = (clips: AudioTrackClip[]): AudioTrackClip[] => {
     const sorted = [...clips].sort((a, b) => a.startTime - b.startTime)
     const out: AudioTrackClip[] = []
-    const usedIds = new Set(clips.map((c) => c.id))
+    // 足すループの id は、プロジェクトのどのクリップ・テロップとも重ならないように
+    // (別のトラックへ移したループと同じ id を、また作っていた)
+    const usedIds = new Set([
+      ...next.audioTracks.flatMap((t) => t.clips.map((c) => c.id)),
+      ...next.videoOverlayTracks.flatMap((t) => t.clips.map((c) => c.id)),
+      ...next.textOverlays.map((o) => o.id),
+      ...next.clips.map((c) => c.id)
+    ])
     let chain: AudioTrackClip[] = []
     const flush = (): void => {
       if (chain.length > 0) out.push(...retileBgm(chain, usedIds))
