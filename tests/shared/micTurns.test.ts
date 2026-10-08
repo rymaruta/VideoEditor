@@ -430,3 +430,47 @@ describe('splitByWeakness — 途切れずにつながる短い持ち主の声',
     expect(splitByWeakness([[0, 300]], heard, weak, 25)).toEqual([[0, 300]])
   })
 })
+
+describe('第17回: 話者の判定の見直し', () => {
+  it('「分からない」声のすぐ後の持ち主の声が、小さな落ち込みで細切れでも、持ち主の発話として分ける', () => {
+    const heard = new Uint8Array(240).fill(1)
+    const weak = new Uint8Array(240)
+    weak.fill(1, 0, 100)
+    weak.fill(1, 140, 150)
+    weak.fill(1, 190, 200)
+    expect(splitByWeakness([[0, 240]], heard, weak, 25)).toEqual([
+      [0, 100],
+      [100, 240]
+    ])
+  })
+
+  it('3人以上で、止まったマイクの人のかぶりを測れていなくても、持ち主の短い小声を「分からない」にしない', () => {
+    const a = env(60, -60, [
+      [1, 4, -10],
+      [5, 9, -30],
+      [10, 14, -30],
+      [15, 18, -10],
+      [19, 24, -10],
+      [40, 43, -10],
+      [45, 46, -22]
+    ])
+    const b = env(60, -55, [
+      [5, 9, -12],
+      [10, 14, -12]
+    ])
+    // C は録っている間ほとんど話さない(かぶりを測れない)まま止まる
+    const c = env(60, -55, [[20, 20.5, -12]])
+    for (let i = 25 * TURN_RATE; i < b.length; i++) {
+      b[i] = NaN
+      c[i] = NaN
+    }
+    const turns = detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b },
+      { id: 'C', envelope: c }
+    ])
+    const short = turns.filter((t) => t.micId === 'A' && t.start > 44 && t.end < 47)
+    expect(short).toHaveLength(1)
+    expect(short[0].uncertain).toBeUndefined()
+  })
+})

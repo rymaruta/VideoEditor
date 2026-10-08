@@ -214,8 +214,14 @@ function absentPeerBleed(
     if (o === m || stats[o].maskedFrames?.[t]) continue
     const w = stats[o].db[t]
     if (w !== undefined && !Number.isNaN(w)) continue
-    const b = bleed[m][o]
-    if (Number.isNaN(b)) return NaN
+    // その人のかぶりを測れていなければ、測れたほかの人のかぶりで一番大きいもの(相手ごとに分ける前と
+    // 同じ扱い。止まったマイクの人がほとんど話していないと測れず、持ち主の小声がまた「分からない」に
+    // なっていた)。何も測れていなければ NaN(大きさでは絞らない)
+    let b = bleed[m][o]
+    if (Number.isNaN(b)) {
+      b = Math.max(...bleed[m].filter((v, i) => i !== m && !Number.isNaN(v)))
+      if (b === -Infinity) return NaN
+    }
     level = Math.max(level, b)
   }
   return level
@@ -390,30 +396,40 @@ export function splitByWeakness(
         last.len += blk.len
       } else runs.push({ ...blk })
     }
-    // 短い「分からない」区間は分けない(隣とまとめる。どちらにするかは呼び出し側の多数決)
-    const kept: { a: number; b: number; weak: boolean }[] = []
+    // 短い「分からない」区間は分けない(隣とまとめる。どちらにするかは呼び出し側の多数決)。
+    // 先にこれを済ませ、持ち主の声の中のちらつきで持ち主の側が細切れにならないようにする
+    type Run = { a: number; b: number; weak: boolean; len: number; touch: boolean }
+    const steady: Run[] = []
     for (const r of runs) {
+      const last = steady[steady.length - 1]
+      const tooShort = r.weak && r.len < MIN_UNCERTAIN_FRAMES
+      if (last && (tooShort || last.weak === r.weak)) {
+        last.b = r.b
+        last.len += r.len
+      } else steady.push({ ...r, weak: r.weak && !tooShort })
+    }
+    // 途切れずに「分からない」声とつながる短い持ち主の声も分けない(止まったマイクの人の笑い・
+    // 大きな声の一瞬が、持ち主の発話として切り出されていた)
+    const kept: Run[] = []
+    for (const r of steady) {
       const last = kept[kept.length - 1]
-      // 途切れずに「分からない」声とつながる短い持ち主の声も分けない(止まったマイクの人の笑い・
-      // 大きな声の一瞬が、持ち主の発話として切り出されていた)
       if (last && r.touch && r.weak !== last.weak) {
         if (!r.weak && r.len < MIN_UNCERTAIN_FRAMES) {
           last.b = r.b
+          last.len += r.len
           continue
         }
-        if (r.weak && r.len >= MIN_UNCERTAIN_FRAMES && last.b - last.a < MIN_UNCERTAIN_FRAMES) {
+        if (r.weak && last.len < MIN_UNCERTAIN_FRAMES) {
           last.b = r.b
+          last.len += r.len
           last.weak = true
           continue
         }
       }
-      const tooShort = r.weak && r.len < MIN_UNCERTAIN_FRAMES
-      if (
-        last &&
-        (tooShort || (last.weak && last.b - last.a < MIN_UNCERTAIN_FRAMES) || last.weak === r.weak)
-      )
+      if (last && last.weak === r.weak) {
         last.b = r.b
-      else kept.push({ a: r.a, b: r.b, weak: r.weak && !tooShort })
+        last.len += r.len
+      } else kept.push({ ...r })
     }
     // 切れ目(声の無い所)は前の区間に含め、区間の頭・終わりは元の区間の頭・終わりにそろえる
     kept[0].a = a
