@@ -4,6 +4,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { formatTimecode } from '../lib/timelineRuler'
 import { QC_KIND_LABEL } from '@shared/qc/types'
+import { formatDb } from '@shared/qc/media'
 import { frameSeconds } from '@shared/frameRate'
 
 /**
@@ -62,9 +63,9 @@ export function ExportQcPanel({ onJump }: { onJump: () => void }): React.JSX.Ele
       {report.error && <p className="error-text">{report.error}</p>}
       {report.measurement?.loudness && (
         <p className="form-note export-qc-loudness">
-          ラウドネス {report.measurement.loudness.integrated.toFixed(1)} LUFS · ピーク{' '}
-          {report.measurement.loudness.truePeak.toFixed(1)} dBTP · LRA{' '}
-          {report.measurement.loudness.lra.toFixed(1)} LU
+          ラウドネス {formatDb(report.measurement.loudness.integrated)} LUFS · ピーク{' '}
+          {formatDb(report.measurement.loudness.truePeak)} dBTP · LRA{' '}
+          {formatDb(report.measurement.loudness.lra)} LU
         </p>
       )}
       {report.issues.length > 0 && (

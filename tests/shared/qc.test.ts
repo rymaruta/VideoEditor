@@ -202,3 +202,17 @@ describe('sortIssues', () => {
     ).toEqual(['b', 'c', 'a'])
   })
 })
+
+describe('mediaIssues — 測れる音が無い書き出し', () => {
+  const m = (integrated: number, truePeak: number): Parameters<typeof mediaIssues>[0] => ({
+    black: [],
+    freeze: [],
+    silence: [],
+    loudness: { integrated, lra: 0, truePeak },
+    duration: 5
+  })
+  it('無音・0.4 秒より短い書き出し(-70 LUFS)には、直しようのない音量の指摘を出さない', () => {
+    expect(mediaIssues(m(-70, -Infinity), 'web').some((i) => i.kind === 'loudness')).toBe(false)
+    expect(mediaIssues(m(-30, -10), 'web').some((i) => i.kind === 'loudness')).toBe(true)
+  })
+})

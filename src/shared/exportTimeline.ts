@@ -94,3 +94,25 @@ export function createExportTimeMap(
 
   return { toExportTime, toExportEndTime }
 }
+
+/**
+ * 書き出したファイルの秒を、タイムラインの秒へ直す(`createExportTimeMap` の逆向き)。
+ *
+ * 書き出しの自動確認(黒味・フリーズ・無音)はファイルの秒で返る。繋ぎのぶんファイルは
+ * タイムラインより短いので、そのまま移ると繋ぎの数だけ手前へずれていた(実測: 4秒+4秒に1秒の
+ * クロスフェードで、ファイルの 3.9 秒からの黒味へ移ると、1本目の 3.9 秒に着いた)。
+ * 繋ぎで2本が重なる所は、後ろのクリップ(入ってくる側)の時刻にする
+ */
+export function exportToTimelineTime(
+  fileTime: number,
+  timelineStarts: readonly number[],
+  exportStarts: readonly number[]
+): number {
+  if (timelineStarts.length === 0 || !Number.isFinite(fileTime)) return fileTime
+  let idx = 0
+  for (let i = 0; i < exportStarts.length; i++) {
+    if (exportStarts[i] <= fileTime) idx = i
+    else break
+  }
+  return Math.max(0, timelineStarts[idx] + (fileTime - exportStarts[idx]))
+}

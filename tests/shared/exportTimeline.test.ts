@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createExportTimeMap } from '@shared/exportTimeline'
+import { createExportTimeMap, exportToTimelineTime } from '@shared/exportTimeline'
 import { NASTY_NUMBERS, round, seeded } from '../helpers/boundary'
 
 /** 5秒2本を 1.0秒のつなぎでつないだ企画。書き出しの並びは [0,5] と [4,9]、総尺 9。 */
@@ -108,5 +108,13 @@ describe('【レグレッション】繋ぎをまたぐ PiP は絵も音も同�
   it('尺0・負の尺でも負を返さない', () => {
     expect(pipEnd(2, 0, 9)).toBe(0)
     expect(pipEnd(2, -3, 9)).toBe(0)
+  })
+})
+
+describe('exportToTimelineTime — ファイルの秒からタイムラインの秒へ', () => {
+  it('4秒+4秒に1秒のクロスフェード: ファイルの 3.9 秒は2本目の 0.9 秒(タイムラインの 4.9 秒)', () => {
+    expect(exportToTimelineTime(3.9, [0, 4], [0, 3])).toBeCloseTo(4.9, 9)
+    expect(exportToTimelineTime(2, [0, 4], [0, 3])).toBeCloseTo(2, 9)
+    expect(exportToTimelineTime(7, [0, 4], [0, 3])).toBeCloseTo(8, 9)
   })
 })

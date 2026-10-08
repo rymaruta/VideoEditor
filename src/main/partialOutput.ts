@@ -15,6 +15,15 @@ export function partialPathFor(outputPath: string): string {
   return join(dirname(outputPath), `${stem}.partial-${randomBytes(4).toString('hex')}${ext}`)
 }
 
+/**
+ * 書き出し先の名前を `.mp4` で終わらせる。Linux の保存ダイアログは拡張子を足さないので、
+ * 「clip」と打つと拡張子の無い一時ファイルになり、ffmpeg が入れ物を決められず、
+ * 全部書き終えた最後に英語のエラーで失敗していた
+ */
+export function withMp4Extension(outputPath: string): string {
+  return extname(outputPath).toLowerCase() === '.mp4' ? outputPath : `${outputPath}.mp4`
+}
+
 export async function writeViaPartial<T>(
   outputPath: string,
   write: (path: string) => Promise<T>

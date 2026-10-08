@@ -178,6 +178,14 @@ export function subtract(a: Span, cuts: readonly Span[]): Span[] {
   return pieces
 }
 
+/** ebur128 が音として数える下限(これ以下は「測れる音が無い」) */
+const LOUDNESS_GATE_LUFS = -70
+
+/** dB の値を見せる形に(-Infinity は −∞) */
+export function formatDb(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(1) : value < 0 ? '−∞' : '—'
+}
+
 function fmt(sec: number): string {
   return `${sec.toFixed(1)}秒`
 }
@@ -223,14 +231,19 @@ export function mediaIssues(m: QcMeasurement, target: LoudnessTarget | 'off'): Q
   if (m.loudness && target !== 'off') {
     const t = LOUDNESS_TARGETS[normalizeLoudnessTarget(target)]
     const { integrated, truePeak } = m.loudness
-    if (!(Math.abs(integrated - t.integrated) <= QC_THRESHOLDS.loudnessTolerance))
+    // 測れるほどの音が無い(無音・0.4 秒より短い)なら、全体の音量は知らせない。音の無い書き出しにも
+    // 音声は必ず入るので、直しようのない「要修正」が毎回出ていた(無音は無音として知らせる)
+    if (
+      integrated > LOUDNESS_GATE_LUFS &&
+      !(Math.abs(integrated - t.integrated) <= QC_THRESHOLDS.loudnessTolerance)
+    )
       issues.push({
         id: 'loudness',
         kind: 'loudness',
         severity: 'error',
         start: 0,
         end: m.duration,
-        message: `全体の音量が ${Number.isFinite(integrated) ? integrated.toFixed(1) : '−∞'} LUFS です(基準 ${t.label})`
+        message: `全体の音量が ${formatDb(integrated)} LUFS です(基準 ${t.label})`
       })
     if (truePeak > t.truePeak + QC_THRESHOLDS.truePeakTolerance)
       issues.push({

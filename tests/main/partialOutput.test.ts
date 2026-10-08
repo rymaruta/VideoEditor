@@ -10,7 +10,7 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, extname, join } from 'path'
-import { partialPathFor, writeViaPartial } from '../../src/main/partialOutput'
+import { partialPathFor, withMp4Extension, writeViaPartial } from '../../src/main/partialOutput'
 
 const dirs: string[] = []
 const work = (): string => {
@@ -83,4 +83,12 @@ describe('置き換えられないとき', () => {
     expect((err as Error).message).toContain(left[0])
     expect(readFileSync(join(d, left[0]), 'utf8')).toBe('done')
   }, 10_000)
+})
+
+describe('withMp4Extension', () => {
+  it('拡張子の無い名前(Linux の保存ダイアログ)には .mp4 を足し、.mp4 はそのまま', () => {
+    expect(withMp4Extension('/out/clip')).toBe('/out/clip.mp4')
+    expect(withMp4Extension('/out/clip.MP4')).toBe('/out/clip.MP4')
+    expect(withMp4Extension('/out/v1.2')).toBe('/out/v1.2.mp4')
+  })
 })

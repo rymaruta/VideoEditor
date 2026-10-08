@@ -16,8 +16,8 @@ import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
-import { writeViaPartial } from './partialOutput'
-import { join } from 'path'
+import { withMp4Extension, writeViaPartial } from './partialOutput'
+import { basename, join } from 'path'
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
 import {
@@ -455,7 +455,24 @@ function registerWindowScopedIpcHandlers(): void {
       filters: [{ name: 'MP4動画', extensions: ['mp4'] }]
     })
     if (result.canceled || !result.filePath) return null
-    return result.filePath
+    const outputPath = withMp4Extension(result.filePath)
+    // 拡張子を足した名前は、保存ダイアログの上書きの確認を通っていない。あれば確かめる
+    if (outputPath !== result.filePath && existsSync(outputPath)) {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options: Electron.MessageBoxOptions = {
+        type: 'warning',
+        buttons: ['上書きする', 'キャンセル'],
+        defaultId: 1,
+        cancelId: 1,
+        message: `「${basename(outputPath)}」はすでにあります`,
+        detail: '上書きしますか?'
+      }
+      const { response } = win
+        ? await dialog.showMessageBox(win, options)
+        : await dialog.showMessageBox(options)
+      if (response !== 0) return null
+    }
+    return outputPath
   })
 
   ipcMain.handle(IPC.selectExportFolder, async (event) => {

@@ -260,7 +260,7 @@ export function ExportDialog(): React.JSX.Element | null {
       setDonePath(outputPath)
       window.api.notifyDone('書き出しが終わりました', outputPath)
       // 書き出した動画をそのまま確認する(黒味・フリーズ・無音・ラウドネス・テロップ)
-      void useQcStore.getState().run(outputPath, loudness)
+      void useQcStore.getState().run(outputPath, loudness, project)
       if (openFolderAfter) await window.api.showItemInFolder(outputPath).catch(() => {})
     } catch (e) {
       const message = formatIpcError(e)

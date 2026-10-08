@@ -5,6 +5,10 @@ import type { QcIssue } from '@shared/qc/types'
 import { parseDictionary } from '@shared/telop/polish'
 import { textCanvasSize } from '@shared/resolution'
 import type { LoudnessTarget } from '@shared/loudness'
+import { exportToTimelineTime } from '@shared/exportTimeline'
+import { computeMainTrackLayout } from '@shared/mainTrackLayout'
+import { projectFrameRate } from '@shared/frameRate'
+import type { Project } from '@shared/types'
 import { onProjectSwitch, useProjectStore } from './projectStore'
 import { useSettingsStore } from './settingsStore'
 import { formatIpcError } from '../lib/ipcError'
@@ -25,12 +29,12 @@ export interface QcReport {
 
 interface QcState {
   report: QcReport | null
-  run: (path: string, loudness: LoudnessTarget | 'off') => Promise<void>
+  /** `project`: 書き出したときのプロジェクト(書き出しの最中に直したテロップで確認しない) */
+  run: (path: string, loudness: LoudnessTarget | 'off', project?: Project) => Promise<void>
   cancel: () => void
 }
 
-function telopCheck(): QcIssue[] {
-  const project = useProjectStore.getState().project
+function telopCheck(project: Project): QcIssue[] {
   const settings = useSettingsStore.getState()
   const ctx = document.createElement('canvas').getContext('2d')
   if (!ctx) return []
@@ -42,39 +46,82 @@ function telopCheck(): QcIssue[] {
 
 /** プロジェクトを替えるたびに増やす(前のプロジェクトの確認結果を、替えた後に書かない) */
 let runToken = 0
+/** 確認を始めるたびに増やす(前の確認の結果を、後から始めた確認の上に書かない) */
+let runCall = 0
+/** 測っている最中の確認(次の確認は、これを止めて終わるのを待ってから始める) */
+let measuring: Promise<unknown> | null = null
+
+/**
+ * ファイルの秒で返る映像・音声の指摘を、タイムラインの秒へ直す(テロップの指摘・移る先と同じ秒)。
+ * 繋ぎのぶんファイルが短いので、直さないと押したときに手前へずれていた
+ */
+function toTimelineIssues(issues: QcIssue[], project: Project): QcIssue[] {
+  const assets = new Map(project.assets.map((a) => [a.id, a]))
+  const clips = project.clips.filter((c) => assets.has(c.assetId))
+  if (clips.length === 0) return issues
+  const layout = computeMainTrackLayout(
+    clips,
+    projectFrameRate(
+      clips,
+      clips.map((c) => assets.get(c.assetId)!)
+    )
+  )
+  const map = (t: number): number =>
+    exportToTimelineTime(t, layout.timelineStarts, layout.exportStarts)
+  return issues.map((i) => ({ ...i, start: map(i.start), end: Math.max(map(i.start), map(i.end)) }))
+}
 
 export const useQcStore = create<QcState>((set, get) => ({
   report: null,
-  run: async (path, loudness) => {
+  run: async (path, loudness, exported) => {
     const token = runToken
+    const call = ++runCall
+    const project = exported ?? useProjectStore.getState().project
+    // 前の書き出しの確認がまだ測っているなら止めて、終わるのを待つ(main は1つずつしか測らないので、
+    // 新しい確認は「実行中です」で失敗し、あとから前のファイルの結果で上書きされていた)
+    if (measuring) {
+      void window.api.qcCancel()
+      await measuring.catch(() => {})
+    }
     // 文字の幅を測るので、書き出しと同じ書体が読み込まれてから
     await document.fonts?.ready
-    if (token !== runToken) return
-    const telop = telopCheck()
+    if (token !== runToken || call !== runCall) return
+    const telop = telopCheck(project)
     set({
       report: { path, state: 'run', percent: 0, issues: sortIssues(telop), measurement: null }
     })
     const off = window.api.onQcProgress((percent) => {
+      if (call !== runCall) return
       const r = get().report
       if (r?.path === path && r.state === 'run') set({ report: { ...r, percent } })
     })
     try {
-      const measurement = await window.api.qcMeasure(path)
-      // 測っている間に別のプロジェクトを開いたなら、前のプロジェクトの結果を書かない
-      if (token !== runToken) return
+      const pending = window.api.qcMeasure(path)
+      measuring = pending
+      let measurement: QcMeasurement
+      try {
+        measurement = await pending
+      } finally {
+        if (measuring === pending) measuring = null
+      }
+      // 測っている間に別のプロジェクトを開いた・次の確認が始まったなら、前の結果を書かない
+      if (token !== runToken || call !== runCall) return
       set({
         report: {
           path,
           state: 'done',
           percent: 100,
-          issues: sortIssues([...mediaIssues(measurement, loudness), ...telop]),
+          issues: sortIssues([
+            ...toTimelineIssues(mediaIssues(measurement, loudness), project),
+            ...telop
+          ]),
           measurement
         }
       })
     } catch (e) {
       const message = formatIpcError(e)
       const r = get().report
-      if (token !== runToken || r?.path !== path) return
+      if (token !== runToken || call !== runCall || r?.path !== path) return
       set({
         report: message.includes('QC_CANCELED')
           ? null
