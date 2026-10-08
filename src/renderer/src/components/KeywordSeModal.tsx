@@ -52,11 +52,12 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
       // register a duplicate asset for the same wav.
       const createdByPath = new Map(project.assets.map((a) => [a.filePath, a]))
       const newAssets: typeof project.assets = []
+      /** 読めなかった効果音のファイル(パス。同じ名前の別のファイルと取り違えない) */
       const missing = new Set<string>()
       for (const match of chosen) {
         let asset = createdByPath.get(match.entry.filePath)
         if (!asset) {
-          if (missing.has(match.entry.fileName)) continue
+          if (missing.has(match.entry.filePath)) continue
           let duration = durationCache.get(match.entry.filePath)
           if (duration === undefined) {
             // 読めない(移動・削除された)効果音のファイルは飛ばし、ほかの一致は置く
@@ -64,7 +65,7 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
             try {
               duration = (await window.api.probeMedia(match.entry.filePath)).duration
             } catch {
-              missing.add(match.entry.fileName)
+              missing.add(match.entry.filePath)
               continue
             }
             durationCache.set(match.entry.filePath, duration)
@@ -95,7 +96,7 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
       if (placements.length > 0) addKeywordSeClips(placements, newAssets)
       if (missing.size > 0) {
         setError(
-          `効果音のファイルを読めなかったため、次の分は置きませんでした(移動・削除されていないか確認してください): ${[...missing].join('、')}`
+          `効果音のファイルを読めなかったため、次の分は置きませんでした(移動・削除されていないか確認してください): ${[...missing].map((p) => p.split(/[/\\]/).pop() ?? p).join('、')}`
         )
         return
       }

@@ -1446,6 +1446,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 
     resetResults: () => {
       activityCache = null
+      runGeneration++
       set((s) => ({
         // 取り込み(フォルダの読み取り)の結果は残す。それより後の工程の結果だけ捨てる
         steps: { ...initialSteps(), ingest: s.steps.ingest },
@@ -1604,6 +1605,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // やり直すときは、前の回の結果(構成・提案・要確認・音の有無の目印)を捨ててから始める。
       // 残すと「提案は済んだ」と飛ばされ、前の発話に付いた提案は新しい発話に結び付かずに全部消える
       get().resetResults()
+      const generation = runGeneration
       runCanceled = false
       set({ running: true, report: null, syncedFiles: files })
 
@@ -1787,7 +1789,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             state: canceled ? 'wait' : 'error',
             note: canceled ? '中止しました' : msg
           })
-        else if (canceled) {
+        // 別のプロジェクトを開いて結果を捨てた後なら、そのプロジェクトの工程には書かない
+        else if (canceled && generation === runGeneration) {
           // 工程の合間に中止したときも、次の工程に「中止しました」を出す(出さないと、終わったと
           // 知らせていた)
           const next = STEPS.find((st) => get().steps[st.id].state === 'wait')
@@ -1907,6 +1910,8 @@ onProjectSwitch(() => {
 let stepsAtStart: Record<StepId, StepStatus> | null = null
 /** 自動編集の「中止」を押したか(工程の間で確かめて、先の工程へ進まない) */
 let runCanceled = false
+/** 工程の結果を捨てるたびに増やす(捨てた後に、前の実行の印を書かない) */
+let runGeneration = 0
 function stopIfCanceled(): void {
   if (runCanceled) throw new Error('PIPELINE_CANCELED')
 }
@@ -1943,7 +1948,7 @@ usePipelineStore.subscribe((s, prev) => {
     stepsAtStart = null
     // 人が中止したときは知らせない(「終わりました」と出すと誤解する)
     const changed = STEPS.filter((st) => s.steps[st.id] !== before?.[st.id])
-    if (changed.some((st) => s.steps[st.id].note === '中止しました')) return
+    if (runCanceled || changed.some((st) => s.steps[st.id].note === '中止しました')) return
     const failed = changed.filter((st) => s.steps[st.id].state === 'error')
     if (failed.length > 0)
       window.api.notifyDone(

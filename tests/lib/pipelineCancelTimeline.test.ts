@@ -110,4 +110,25 @@ describe('自動編集の「タイムラインに並べる」の途中', () => {
     await flush()
     expect(api.notified).not.toContain('自動編集が終わりました')
   })
+
+  it('別のプロジェクトを開いたら、そのプロジェクトの工程に前の実行の「中止しました」を書かない', async () => {
+    const api = stubApi()
+    prepare()
+    usePipelineStore.setState({
+      steps: {
+        ...usePipelineStore.getState().steps,
+        ingest: { state: 'done', percent: 100 }
+      }
+    } as never)
+    const run = usePipelineStore.getState().runPipeline()
+    await flush()
+    await flush()
+    useProjectStore.getState().newProject()
+    usePipelineStore.getState().cancel()
+    usePipelineStore.getState().resetResults()
+    api.release()
+    await run
+    const steps = usePipelineStore.getState().steps
+    expect(Object.values(steps).some((s) => s.note === '中止しました')).toBe(false)
+  })
 })

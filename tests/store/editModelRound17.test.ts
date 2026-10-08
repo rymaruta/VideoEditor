@@ -458,3 +458,81 @@ describe('第19回: 壊れた過去回も、整えてから番組の傾向を集
     expect(() => learnShowStyle(bad.map(normalizeLoadedProject))).not.toThrow()
   })
 })
+
+describe('第20回: 第19回修正の見直し', () => {
+  const setTrack = (
+    id: string,
+    clips: Project['audioTracks'][number]['clips'],
+    song = 20
+  ): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', song, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === id ? { ...t, clips } : t))
+      }
+    })
+  }
+
+  it('インスペクタで開始だけを直しても(頭を詰める)、言葉の時刻は動かさない', () => {
+    setup([[0, 20]])
+    S.setState({
+      project: {
+        ...st().project,
+        textOverlays: [
+          {
+            id: 'o1',
+            text: 'あ い',
+            startTime: 10,
+            endTime: 14,
+            style: {},
+            source: 'manual',
+            words: [
+              { text: 'あ', start: 11, end: 12 },
+              { text: 'い', start: 12.5, end: 13.5 }
+            ]
+          }
+        ] as unknown as Project['textOverlays']
+      }
+    })
+    st().updateTextOverlay('o1', { startTime: 10.8 })
+    expect(st().project.textOverlays[0].words?.[1]).toMatchObject({ start: 12.5, end: 13.5 })
+  })
+
+  it('足したループの id は、トラックのほかのクリップと重ならない', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    setTrack(
+      'bgmT',
+      [
+        { id: 'A', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 5 },
+        { id: 'B', assetId: 'loop', startTime: 4, inPoint: 0, outPoint: 5 },
+        { id: 'A~3', assetId: 'loop', startTime: 12, inPoint: 0, outPoint: 5 }
+      ],
+      5
+    )
+    st().updateClipSpeed(st().project.clips[0].id, 0.25)
+    const ids = track('bgmT').map((c) => c.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('1本に縮んだループの BGM も、伸ばし直すとつなぎ目の重なり・クロスフェードが戻る', () => {
+    setup([[0, 30]])
+    setTrack('bgmT', [
+      { id: 'b1', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 20, fadeOut: 2 },
+      { id: 'b2', assetId: 'loop', startTime: 18, inPoint: 0, outPoint: 12, fadeIn: 2 }
+    ])
+    const id = st().project.clips[0].id
+    st().updateClipSpeed(id, 2)
+    st().updateClipSpeed(id, 1)
+    const back = [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+    expect(back).toHaveLength(2)
+    expect(back[1].startTime).toBeCloseTo(18, 6)
+    expect(back[0].fadeOut).toBe(2)
+    expect(back[1].fadeIn).toBe(2)
+  })
+})

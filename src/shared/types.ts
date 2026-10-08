@@ -275,6 +275,11 @@ export interface AudioTrackClip {
   fadeIn?: number
   /** フェードアウトの秒数(タイムライン上の秒)。未設定・0 はフェードなし */
   fadeOut?: number
+  /**
+   * 繰り返す BGM の頭のクリップに覚える、ループのつなぎ目の重なり・クロスフェード(秒)。
+   * 本編を縮めて1本になっても、伸ばし直したときに同じつなぎ目で戻せるように
+   */
+  loopCross?: { overlap: number; fadeIn?: number; fadeOut?: number }
 }
 
 export interface AudioTrack {

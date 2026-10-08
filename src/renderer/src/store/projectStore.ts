@@ -3006,9 +3006,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             // ときはそちらが正なので触らない(自動テロップの作り直しなど)。
             // 頭・終わりを詰める(長さが変わる)ときは、言葉の時刻はそのまま(連れていくと、カラオケの色と
             // キーワードの SE が詰めた分だけ遅れ、最後の言葉がテロップの外に出ていた)
+            // 長さは更新したあとの値で見る(開始だけの更新=インスペクタの「開始」は、終わりが動かない
+            // ので頭を詰める操作)
             const moved =
-              safePatch.endTime === undefined ||
-              Math.abs(safePatch.endTime - nextStart - (o.endTime - o.startTime)) <= 1e-6
+              Math.abs((safePatch.endTime ?? o.endTime) - nextStart - (o.endTime - o.startTime)) <=
+              1e-6
             if (safePatch.startTime !== undefined && safePatch.words === undefined && moved) {
               next.words = shiftOverlayWords(o.words, safePatch.startTime - o.startTime)
             }
@@ -5147,7 +5149,7 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
    * 縮めた分が戻らなかった。並べ直しは写した範囲だけで決まるので、行って戻れば元の並びに戻る。
    * ループの間のクロスフェードは残す。足すループの id は決まった形(作り直すたびに変わらない)
    */
-  const retileLoop = (chain: AudioTrackClip[]): AudioTrackClip[] => {
+  const retileLoop = (chain: AudioTrackClip[], usedIds: Set<string>): AudioTrackClip[] => {
     const first = chain[0]
     const last = chain[chain.length - 1]
     const lenOf = (c: AudioTrackClip): number => (c.outPoint - c.inPoint) / (c.speed || 1)
@@ -5156,16 +5158,35 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const overlaps = chain
       .slice(1)
       .map((c, i) => chain[i].startTime + lenOf(chain[i]) - c.startTime)
-    const loopOverlap = Math.max(0, overlaps[overlaps.length - 1] ?? 0)
-    const crossOut = chain.length > 1 ? chain[0].fadeOut : undefined
-    const crossIn = chain.length > 1 ? chain[1].fadeIn : undefined
+    // つなぎ目の重なり・クロスフェード。1本に縮んだあとは、頭のクリップに覚えたものを使う
+    // (使わないと、伸ばし直したときにつなぎ目がクロスフェードの無い切れ目になっていた)
+    const remembered =
+      first.loopCross && Number.isFinite(first.loopCross.overlap) ? first.loopCross : undefined
+    const loopCross =
+      chain.length > 1
+        ? {
+            overlap: Math.max(0, overlaps[overlaps.length - 1]),
+            ...(chain[1].fadeIn !== undefined ? { fadeIn: chain[1].fadeIn } : {}),
+            ...(chain[0].fadeOut !== undefined ? { fadeOut: chain[0].fadeOut } : {})
+          }
+        : remembered
+    const loopOverlap = Math.max(0, loopCross?.overlap ?? 0)
+    const crossOut = loopCross?.fadeOut
+    const crossIn = loopCross?.fadeIn
+    /** 足すループの id(トラックのほかのクリップと重ならないように) */
+    const freshId = (i: number): string => {
+      let id = `${first.id}~${i}`
+      while (usedIds.has(id)) id += '~'
+      usedIds.add(id)
+      return id
+    }
     const limit = durationOf.get(first.assetId) ?? Infinity
     const out: AudioTrackClip[] = []
     let at = startTime
     // 足すループは多くても 1,000 本(重なりが曲の長さに近い壊れた並びで、際限なく増やさない)
     for (let i = 0; at < end - 1e-6 && i < chain.length + 1000; i++) {
       const own = chain[i]
-      const base = own ?? { ...last, id: `${first.id}~${i}`, inPoint: 0 }
+      const base = own ?? { ...last, id: freshId(i), inPoint: 0, loopCross: undefined }
       const speed = base.speed || 1
       const len = Math.max(0, Math.min((limit - base.inPoint) / speed, end - at))
       if (len <= 1e-6) break
@@ -5183,6 +5204,7 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       at += len - overlap
     }
     if (out.length > 0) out[out.length - 1] = { ...out[out.length - 1], fadeOut: last.fadeOut }
+    if (out.length > 0 && loopCross) out[0] = { ...out[0], loopCross }
     return out
   }
   /** BGM の、同じ曲を頭から重ねて繰り返す並び(2本目から曲の頭・最後以外は曲の終わりまで)か */
@@ -5200,8 +5222,9 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const sorted = [...clips].sort((a, b) => a.startTime - b.startTime)
     const out: AudioTrackClip[] = []
     let chain: AudioTrackClip[] = []
+    const usedIds = new Set(clips.map((c) => c.id))
     const flush = (): void => {
-      if (chain.length > 0 && isLoopChain(chain)) out.push(...retileLoop(chain))
+      if (chain.length > 0 && isLoopChain(chain)) out.push(...retileLoop(chain, usedIds))
       else out.push(...chain.map((c) => (c.linkedClipId ? c : moveClip(c))))
       chain = []
     }
