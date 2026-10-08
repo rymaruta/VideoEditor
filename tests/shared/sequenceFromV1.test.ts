@@ -228,6 +228,30 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
     expect(byId.has('silent:audio')).toBe(false)
   })
 
+  it('同じトラックで重なるワイプは、並びで後のものを手前の段に置く(プレビュー・標準の書き出しと同じ)', () => {
+    const p = projectV1ToV2(
+      emptyProject({
+        clips: [{ id: 'c1', assetId: 'a', inPoint: 0, outPoint: 9, speed: 1 }],
+        videoOverlayTracks: [
+          {
+            id: 'pip',
+            name: 'PiP',
+            hidden: false,
+            position: 'top-left',
+            scale: 0.4,
+            clips: [
+              { id: 'red', assetId: 'a', startTime: 3, inPoint: 0, outPoint: 3 },
+              { id: 'blue', assetId: 'b', startTime: 0, inPoint: 0, outPoint: 5 }
+            ]
+          }
+        ]
+      })
+    )
+    const laneOf = (id: string): number =>
+      p.sequence.videoTracks.findIndex((t) => t.items.some((i) => i.id === id))
+    expect(laneOf('blue')).toBeGreaterThan(laneOf('red'))
+  })
+
   it('テロップは書き出しの秒へ換算し、単語の時刻はアイテムの頭からの秒にする', () => {
     const p = projectV1ToV2(
       emptyProject({

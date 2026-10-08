@@ -128,6 +128,33 @@ describe('標準と区間ごとの書き出しの、音の消え方', () => {
     }
   }, 180_000)
 
+  it('音の無いクリップからの繋ぎで、音のある側は直線で出てくる(区間ごとの書き出しで二重に掛けない)', async () => {
+    const a = await asset('a2', 'none', 6)
+    const b = await asset('b2', 'tone', 6)
+    const project = {
+      ...base([a, b]),
+      clips: [
+        { id: 'c1', assetId: 'a2', inPoint: 0, outPoint: 4, speed: 1 },
+        {
+          id: 'c2',
+          assetId: 'b2',
+          inPoint: 0,
+          outPoint: 4,
+          speed: 1,
+          transitionIn: { type: 'crossfade', duration: 1 }
+        }
+      ]
+    } as unknown as Project
+    const [std, seg] = await both(project, 'xfadein')
+    const full = rms(std, 5, 6)
+    for (const out of [std, seg]) {
+      // 繋ぎは 3〜4 秒。真ん中(3.4〜3.6 秒)は満ちた大きさの半分ほど
+      const mid = rms(out, 3.4, 3.6) / full
+      expect(mid, out).toBeGreaterThan(0.4)
+      expect(mid, out).toBeLessThan(0.6)
+    }
+  }, 180_000)
+
   it('前の短いクリップより長い繋ぎでも、区間ごとの書き出しの音量は標準と同じ', async () => {
     const t = await asset('t', 'tone', 30)
     // 4 秒・0.3 秒(繋ぎより短い)・6 秒(1 秒のクロスフェード)。同じ音を続けるので、どこも同じ大きさのはず
@@ -207,4 +234,42 @@ describe('標準と区間ごとの書き出しの、音の消え方', () => {
       expect(rms(out, 4.6, 4.95), out).toBeLessThan(rms(out, 1, 2) * 0.4)
     }
   }, 180_000)
+})
+
+describe('標準の書き出しの、とても短いクリップ', () => {
+  it('途中に 20ms の遅くしたクリップがあっても書き出せる(音と映像の長さも合う)', async () => {
+    const a = await asset('short', 'tone', 8)
+    const project = {
+      ...base([a]),
+      clips: [
+        { id: 'c1', assetId: 'short', inPoint: 1, outPoint: 3, speed: 1 },
+        { id: 'c2', assetId: 'short', inPoint: 4, outPoint: 4.02, speed: 0.5 },
+        { id: 'c3', assetId: 'short', inPoint: 5, outPoint: 6, speed: 1 }
+      ]
+    } as unknown as Project
+    const [std, seg] = await both(project, 'tiny')
+    for (const out of [std, seg]) {
+      const p = await probeMedia(out)
+      expect(Math.abs(p.duration - 3.033), out).toBeLessThan(0.05)
+    }
+  }, 180_000)
+
+  it('どのクリップも半コマより短ければ、空のファイルを作らずに止める', async () => {
+    const a = await asset('tiny2', 'tone', 2)
+    const project = {
+      ...base([a]),
+      clips: [{ id: 'c1', assetId: 'tiny2', inPoint: 0, outPoint: 0.01, speed: 1 }]
+    } as unknown as Project
+    await expect(
+      exportProject({
+        project,
+        aspectRatio: '16:9',
+        resolutionHeight: 720,
+        quality: 'standard',
+        outputPath: join(work, 'empty.mp4'),
+        telopLayer: null,
+        onProgress: () => {}
+      })
+    ).rejects.toThrow('タイムラインにクリップがありません')
+  }, 60_000)
 })

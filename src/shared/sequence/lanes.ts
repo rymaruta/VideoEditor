@@ -29,3 +29,27 @@ export function assignLanes<T extends { startFrame: number; durationFrames: numb
   }
   return lanes
 }
+
+/**
+ * 重なる物を段に分ける。並びで後の物ほど上の段(手前)に置く(プレビュー・標準の書き出しは
+ * 並びの順に描くので、後の物が手前)。`assignLanes` は始まりの順に詰めるので、後から始まる物が
+ * 手前になり、区間ごとの書き出しだけワイプの重なり順が逆になっていた
+ */
+export function assignStackedLanes<T extends { startFrame: number; durationFrames: number }>(
+  items: readonly T[]
+): T[][] {
+  const lanes: T[][] = []
+  const overlaps = (a: T, b: T): boolean =>
+    a.startFrame < b.startFrame + b.durationFrames && b.startFrame < a.startFrame + a.durationFrames
+  for (const item of items) {
+    let min = 0
+    lanes.forEach((lane, li) => {
+      if (lane.some((o) => overlaps(o, item))) min = li + 1
+    })
+    let lane = min
+    while (lane < lanes.length && lanes[lane].some((o) => overlaps(o, item))) lane++
+    if (lane === lanes.length) lanes.push([])
+    lanes[lane].push(item)
+  }
+  return lanes.map((l) => [...l].sort((a, b) => a.startFrame - b.startFrame))
+}

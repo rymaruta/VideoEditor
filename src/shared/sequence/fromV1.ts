@@ -4,7 +4,7 @@ import { projectRate, rateValue } from '../frameRate'
 import { computeMainTrackLayout } from '../mainTrackLayout'
 import { PIP_MARGIN_RATIO } from '../pipLayout'
 import { targetResolution } from '../resolution'
-import { assignLanes } from './lanes'
+import { assignLanes, assignStackedLanes } from './lanes'
 import type {
   AudioItem,
   MediaItem,
@@ -68,7 +68,6 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
   const mainAudioItems: AudioItem[] = []
   let prevEndFrame = 0
   let prevClipId: string | undefined
-  let pendingFadeIn = 0
   mainClips.forEach((clip, i) => {
     // 両端を**別々に**丸める。始まりを丸めてから尺のフレーム数を足すと、繋ぎの秒数が
     // フレームに乗っていないときに終わりが1フレームずれ、繋ぎの無い次のクリップと重なる。
@@ -107,11 +106,9 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
       const prevAudio = mainAudioItems[mainAudioItems.length - 1]
       const prevHadAudio = prevAudio !== undefined && prevAudio.linkedItemId === prevClipId
       if (prevHadAudio && !hasMainAudio) prevAudio.fadeOutFrames = overlapFrames
-      // 前の前のクリップの音がまだ繋ぎの区間に掛かっている(繋ぎが音の無い短いクリップより長い)なら、
-      // その音との重なり(区間ごとの書き出しのクロスフェード)で出していく。ここでも出すと二重に掛かる
-      const earlierOverlaps =
-        prevAudio !== undefined && prevAudio.startFrame + prevAudio.durationFrames > startFrame
-      if (!prevHadAudio && hasMainAudio && !earlierOverlaps) pendingFadeIn = overlapFrames
+      // 音の無いクリップからの繋ぎで出ていく側は、区間ごとの書き出しが本編の映像の並び
+      // (音の無いクリップも含めて畳む)で繋ぎの区間に直線で出す。ここでもフェードインを付けると
+      // 二重に掛かり、繋ぎの真ん中で 6dB 小さくなっていた
     }
     // 本編の音は映像と同じ位置で鳴る(分離したクリップは音声トラック側に居るので除く)
     if (hasMainAudio) {
@@ -125,11 +122,9 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         sourceOut: clip.outPoint,
         speed: clip.speed || 1,
         origin: 'manual',
-        linkedItemId: clip.id,
-        ...(pendingFadeIn > 0 ? { fadeInFrames: pendingFadeIn } : {})
+        linkedItemId: clip.id
       })
     }
-    pendingFadeIn = 0
     prevClipId = clip.id
     prevEndFrame = startFrame + durationFrames
   })
@@ -170,7 +165,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
               }
       })
     }
-    assignLanes(items).forEach((lane, li) => {
+    // 同じトラックで重なるワイプは、並びで後のものが手前(プレビュー・標準の書き出しと同じ)
+    assignStackedLanes(items).forEach((lane, li) => {
       videoTracks.push({
         id: li === 0 ? track.id : `${track.id}:${li + 1}`,
         name: li === 0 ? track.name : `${track.name} (${li + 1})`,

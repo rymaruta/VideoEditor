@@ -769,6 +769,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   /** タイムライン(画面)の上での1本の長さ。テロップ・BGM の位置はこの秒で来る。 */
   // 位置と尺の数え方は `computeMainTrackLayout` に1つだけ置く(v2 への移行も同じ関数を使う)。
   const mainLayout = computeMainTrackLayout(clips, outputFps)
+  // どのクリップも半コマより短いと、書き出す長さが 0 コマになる。中身の無いファイルを
+  // 「書き出せた」として返していた(区間ごとの書き出しは同じ所で止める)
+  if (!(Math.round(mainLayout.totalExportDuration * outputFps) > 0)) {
+    exportInProgress = false
+    return Promise.reject(new Error('タイムラインにクリップがありません'))
+  }
   const clipOutputDurations = mainLayout.timelineDurations
   /**
    * **書き出しの中での1本の長さ。フレーム数から作り直す。**
@@ -951,8 +957,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // **どちらの向きのズレも同じ1本で塞ぐ**。音声を持たないクリップは
           // 最初から `anullsrc` に `duration` を渡して尺ちょうどにしており、
           // ここでも**片方にだけ揃える処理が育っていた**。
+          // 速さを変える前に少し無音を足す。20ms ほどの短い断片では atempo が1サンプルも出さず、
+          // 後の apad が時刻の無い音を作って、書き出しが丸ごと失敗していた(長さは後の atrim で切る)
           filterParts.push(
-            `[${audioIndex}:a]${ALIGN_AUDIO_START},${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+            `[${audioIndex}:a]${ALIGN_AUDIO_START},apad=pad_dur=0.2,${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
               `apad,atrim=0:${ffSeconds(outputDuration)},asetpts=PTS-STARTPTS,` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )
