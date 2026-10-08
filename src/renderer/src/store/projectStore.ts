@@ -4629,9 +4629,24 @@ function remapOverlayLinks(
         linkOffset: (sourceTime - inside.inPoint) / (inside.speed || 1)
       }
     }
+    if (newClips.length === 0) return { ...o, linkedClipId: undefined, linkOffset: undefined }
+    // クリップの頭より前・終わりより後ろにずらして置いたテロップ(負の・長い linkOffset)は、
+    // 一番近い断片に、同じ位置のまま付ける(頭へ寄せると、分割しただけでテロップが動いていた)
+    const first = newClips[0]
+    const last = newClips[newClips.length - 1]
+    if (sourceTime < first.inPoint)
+      return {
+        ...o,
+        linkedClipId: first.id,
+        linkOffset: (sourceTime - first.inPoint) / (first.speed || 1)
+      }
     const after = newClips.find((s) => s.inPoint >= sourceTime)
     if (after) return { ...o, linkedClipId: after.id, linkOffset: 0 }
-    return { ...o, linkedClipId: undefined, linkOffset: undefined }
+    return {
+      ...o,
+      linkedClipId: last.id,
+      linkOffset: (sourceTime - last.inPoint) / (last.speed || 1)
+    }
   })
 }
 

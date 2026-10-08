@@ -40,3 +40,27 @@ describe('stackSimultaneousTelops', () => {
     expect(out[2]).toBe(top)
   })
 })
+
+describe('stackedBottomTelops: 吹き出しの尻尾を段の高さに入れる前に積んだ段', () => {
+  it('尻尾を数えずに積んで保存した吹き出しの段も、段のテロップと見分ける', async () => {
+    const { stackedBottomTelops } = await import('../../src/shared/telop/stack')
+    const bubble = {
+      ...base,
+      background: true,
+      backgroundShape: 'bubble' as const,
+      bubbleTail: { side: 'bottom' as const, at: 0.5, length: 24 }
+    }
+    const telops = [
+      { text: 'ヒント', startTime: 0, endTime: 3, style: bubble },
+      { text: 'もう一つ', startTime: 1, endTime: 4, style: bubble }
+    ]
+    // 以前の積み方 = 尻尾の無い同じ吹き出しとして積んだ位置
+    const noTail = telops.map((t) => ({ ...t, style: { ...t.style, bubbleTail: undefined } }))
+    const saved = stackSimultaneousTelops(noTail, 1080).map((t, i) => ({
+      ...t,
+      style: { ...t.style, bubbleTail: telops[i].style.bubbleTail }
+    }))
+    expect(saved[1].style.customPosition).toBeDefined()
+    expect(stackedBottomTelops(saved, 1080)).toEqual([true, true])
+  })
+})

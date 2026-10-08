@@ -55,3 +55,17 @@ describe('writeAutosaveFile', () => {
     expect(readFileSync(join(dir, kept[0]), 'utf8')).toBe('PREVIOUS')
   })
 })
+
+describe('setAsideAutosaveFile', () => {
+  it('破棄・開く・終了の経路でも、前に退避した前回の作業を日時付きの名前で残せる', async () => {
+    const { setAsideAutosaveFile } = await import('../../src/main/autosaveFiles')
+    const path = setup()
+    writeFileSync(discardedPathFor(path), 'PREVIOUS')
+    writeFileSync(path, 'CRASHED')
+    expect(setAsideAutosaveFile(path, true)).toBe(true)
+    expect(readFileSync(discardedPathFor(path), 'utf8')).toBe('CRASHED')
+    const dir = join(path, '..')
+    const kept = readdirSync(dir).filter((f) => /^autosave-discarded-.+\.veproj$/.test(f))
+    expect(kept.map((f) => readFileSync(join(dir, f), 'utf8'))).toEqual(['PREVIOUS'])
+  })
+})

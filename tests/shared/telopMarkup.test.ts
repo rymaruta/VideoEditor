@@ -56,3 +56,20 @@ describe('ルビの記号と、組み合わせた文字', () => {
     expect(parseTelopMarkup('**a**\r\nb').map((g) => g.ch)).toEqual(['a', '\r', '\n', 'b'])
   })
 })
+
+describe('wrapGlyphs: 禁則とルビ・和文の記号', () => {
+  const text = (lines: { ch: string }[][]): string[] =>
+    lines.map((l) => l.map((x) => x.ch).join(''))
+  it('禁則で送るときも、ルビの親文字の途中では折らない', () => {
+    const lines = wrapGlyphs(parseTelopMarkup('あいう東京《とうきょう》。'), 5, () => 1)
+    expect(text(lines)).toEqual(['あいう', '東京。'])
+    expect(lines[1][0].ruby).toBe('とうきょう')
+  })
+  it('長音「ー」・中黒「・」は和文として文字のあいだで折る(手前の空白まで戻らない)', () => {
+    const g = (s: string): { ch: string; word: number }[] => [...s].map((ch) => ({ ch, word: -1 }))
+    expect(text(wrapGlyphs(g('今日は 新しいゲームを買った'), 8, () => 1))).toEqual([
+      '今日は 新しい',
+      'ゲームを買った'
+    ])
+  })
+})

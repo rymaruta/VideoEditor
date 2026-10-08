@@ -1,6 +1,6 @@
 import type { TextOverlay } from '../types'
 import { TEXT_MARGIN_V_RATIO } from '../textStyle'
-import { TELOP_LINE_HEIGHT_EM, telopHitBounds, type TelopContext } from './render'
+import { bubbleTailReach, TELOP_LINE_HEIGHT_EM, telopHitBounds, type TelopContext } from './render'
 
 /**
  * 同時に出ている下のテロップを、段に積んで重ならないようにする(計画書 §5.8 の「テロップ同士の重なりを避ける」)。
@@ -55,10 +55,10 @@ function blockHeightRatio(
   o: Pick<TextOverlay, 'text' | 'style'>,
   canvasH: number,
   canvasW: number,
-  legacy = false
+  legacy: boolean | 'noTail' = false
 ): number {
   // 以前の数え方(改行の数 × 文字の大きさ × 行の高さ)。前に積んで保存した段を見分けるのに使う
-  if (legacy)
+  if (legacy === true)
     return (
       (Math.max(1, o.text.split('\n').length) * o.style.fontSize * TELOP_LINE_HEIGHT_EM) / canvasH
     )
@@ -68,6 +68,11 @@ function blockHeightRatio(
     { w: canvasW, h: canvasH }
   )
   const lines = Math.max(1, o.text.split('\n').length)
+  // 吹き出しの尻尾を段の高さに入れる前に積んだ段を見分けるときは、尻尾を除く
+  if (legacy === 'noTail') {
+    const tail = bubbleTailReach(o.style)
+    bounds.h -= tail.top + tail.bottom
+  }
   // 見積もりが壊れた値なら、従来の数え方
   const h =
     Number.isFinite(bounds.h) && bounds.h > 0
@@ -81,7 +86,7 @@ export function stackSimultaneousTelops<
 >(
   telops: readonly T[],
   canvasH: number,
-  options: { baseCenter?: number; canvasW?: number; legacyHeights?: boolean } = {}
+  options: { baseCenter?: number; canvasW?: number; legacyHeights?: boolean | 'noTail' } = {}
 ): T[] {
   const canvasW = options.canvasW ?? canvasWidthFor(canvasH)
   const order = telops
@@ -136,12 +141,20 @@ export function stackedBottomTelops<
   })
   const same = (a: { x: number; y: number } | undefined, own: { x: number; y: number }): boolean =>
     Boolean(a) && Math.abs(a!.x - own.x) < 1e-9 && Math.abs(a!.y - own.y) < 1e-9
+  // 吹き出しの尻尾を段の高さに入れる前に積んだ段も見分ける
+  const noTail = telops.some((t) => t.style.backgroundShape === 'bubble' && t.style.bubbleTail)
+    ? stackSimultaneousTelops(telops.map(strip), canvasH, { ...options, legacyHeights: 'noTail' })
+    : restacked
   return telops.map((t, i) => {
     if (t.style.position !== 'bottom') return false
     const own = t.style.customPosition
     if (!own) return options.baseCenter === undefined
     if (own.x !== 0.5) return false
-    return same(restacked[i].style.customPosition, own) || same(legacy[i].style.customPosition, own)
+    return (
+      same(restacked[i].style.customPosition, own) ||
+      same(legacy[i].style.customPosition, own) ||
+      same(noTail[i].style.customPosition, own)
+    )
   })
 }
 

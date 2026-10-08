@@ -1392,9 +1392,13 @@ export function Timeline(): React.JSX.Element {
   const timedClips = buildTimedClips(previewProject)
   const total = totalTimelineDuration(timedClips)
   /** 繋ぎの吹き出しを開いているクリップ */
-  const popTc = transitionPopoverClipId
-    ? timedClips.find((tc) => tc.clip.id === transitionPopoverClipId)
-    : undefined
+  // 先頭のクリップには繋ぎが無い(境目の印も出ない)。消えた・先頭になったクリップの吹き出しは閉じる
+  const popIndex = transitionPopoverClipId
+    ? timedClips.findIndex((tc) => tc.clip.id === transitionPopoverClipId)
+    : -1
+  const popTc = popIndex > 0 ? timedClips[popIndex] : undefined
+  // (描く途中で直す。吹き出しを開くのは繋ぎのある境目からなので、閉じた後にまた開き直すことはない)
+  if (transitionPopoverClipId && !popTc) setTransitionPopoverClipId(null)
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   // 時間目盛りの刻み(フレームレートはプロジェクトの素材から。書き出しと同じ数え方)
   const rulerFps = 1 / frameSeconds(project.clips, project.assets)

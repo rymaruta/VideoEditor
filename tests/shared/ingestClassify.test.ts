@@ -218,13 +218,20 @@ describe('classifyFootage', () => {
       file('CamB/C0001.MP4', { device: 'Sony FX3', recordedAt: 700, duration: 600 })
     ])
     expect(sources).toHaveLength(2)
-    // DCIM の続きのフォルダ(100CANON → 101CANON)は1台
-    expect(
-      classifyFootage([
-        file('DCIM/100CANON/MVI_0001.MP4', { device: 'X', recordedAt: 0, duration: 600 }),
-        file('DCIM/101CANON/MVI_0001.MP4', { device: 'X', recordedAt: 700, duration: 600 })
-      ])
-    ).toHaveLength(1)
+    // カメラが作る続きのフォルダ(100CANON → 101CANON・DJI_001 → DJI_002・Camera01 → Camera02・日付)は1台
+    for (const [a, b] of [
+      ['DCIM/100CANON', 'DCIM/101CANON'],
+      ['DCIM/DJI_001', 'DCIM/DJI_002'],
+      ['DCIM/Camera01', 'DCIM/Camera02'],
+      ['2024-05-01', '2024-05-02']
+    ])
+      expect(
+        classifyFootage([
+          file(`${a}/MVI_0001.MP4`, { device: 'X', recordedAt: 0, duration: 600 }),
+          file(`${b}/MVI_0001.MP4`, { device: 'X', recordedAt: 700, duration: 600 })
+        ]),
+        `${a} ${b}`
+      ).toHaveLength(1)
   })
 
   it('同じ機種でも同じ時間に撮っていれば・時刻が分からなければ別のカメラのまま', () => {

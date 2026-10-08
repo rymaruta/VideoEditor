@@ -56,9 +56,9 @@ import { listSpeakers, synthesizeSpeech } from './voicevoxService'
 import { saveProjectFile, loadProjectFile } from './projectFileService'
 import {
   autosaveStatus,
-  discardAutosaveFile,
   discardedPathFor,
-  writeAutosaveFile
+  writeAutosaveFile,
+  setAsideAutosaveFile
 } from './autosaveFiles'
 import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
@@ -387,9 +387,16 @@ function releaseAutosave(): boolean {
     rmSync(autosavePath, { force: true })
     return false
   }
-  const setAside = discardAutosaveFile(autosavePath)
+  const setAside = setAsideAutosaveFile(autosavePath, takeKeepDiscarded())
   if (setAside) previousDraftSetAside = true
   return setAside
+}
+
+/** 次の退避で、前に退避したもの(前回の作業)を残すか(1回だけ。画面が落ちて読み込み直したとき) */
+function takeKeepDiscarded(): boolean {
+  const keep = keepDiscardedOnNextSetAside
+  keepDiscardedOnNextSetAside = false
+  return keep
 }
 
 /**
@@ -404,7 +411,7 @@ function settleAutosaveOnClose(): void {
     rmSync(autosavePath, { force: true })
     return
   }
-  discardAutosaveFile(autosavePath)
+  setAsideAutosaveFile(autosavePath, takeKeepDiscarded())
 }
 
 function registerWindowScopedIpcHandlers(): void {
@@ -798,8 +805,7 @@ app.whenReady().then(() => {
     // 書き込みの前に「このセッションは書いた」にする。書き込みが失敗しても、次の自動保存が
     // もう一度退避して、退避した前回の作業を上書きしないように
     autosaveOverwrittenThisSession = true
-    const keepPreviousDiscarded = keepDiscardedOnNextSetAside
-    keepDiscardedOnNextSetAside = false
+    const keepPreviousDiscarded = first ? takeKeepDiscarded() : false
     return writeAutosaveFile(autosavePath, project, first, {
       onSetAside: () => {
         previousDraftSetAside = true

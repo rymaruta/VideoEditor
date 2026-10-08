@@ -76,16 +76,30 @@ export function writeAutosaveFile(
     keepPreviousDiscarded?: boolean
   } = {}
 ): boolean {
-  let setAside = false
-  if (setAsideExisting && existsSync(autosavePath)) {
-    const discarded = discardedPathFor(autosavePath)
-    if (options.keepPreviousDiscarded && existsSync(discarded)) {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-      renameSync(discarded, discarded.replace(/(\.veproj)?$/, `-${stamp}$1`))
-    }
-    setAside = discardAutosaveFile(autosavePath)
-    if (setAside) options.onSetAside?.()
-  }
+  const setAside = setAsideExisting
+    ? setAsideAutosaveFile(autosavePath, options.keepPreviousDiscarded ?? false)
+    : false
+  if (setAside) options.onSetAside?.()
   saveProjectFile(autosavePath, project)
   return setAside
+}
+
+/**
+ * 自動保存を退避先へ移す(`discardAutosaveFile`)。`keepPreviousDiscarded` なら、退避先に前から
+ * 居るもの(前回のセッションの作業)を日時付きの名前で残してから移す。自動保存・破棄・開く・新規・
+ * 終了のどの経路で退避しても同じ扱いにする(自動保存の経路でしか残していなかった)
+ *
+ * @returns 退避したら true
+ */
+export function setAsideAutosaveFile(
+  autosavePath: string,
+  keepPreviousDiscarded: boolean
+): boolean {
+  if (!existsSync(autosavePath)) return false
+  const discarded = discardedPathFor(autosavePath)
+  if (keepPreviousDiscarded && existsSync(discarded)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    renameSync(discarded, discarded.replace(/(\.veproj)?$/, `-${stamp}$1`))
+  }
+  return discardAutosaveFile(autosavePath)
 }

@@ -155,7 +155,13 @@ export interface Glyph {
 
 /** 単語の途中で折らない文字(空白で区切って書く文字。和文の漢字・かな・全角の記号は文字のあいだで折る) */
 function isSpacedWordChar(ch: string): boolean {
-  if (/[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\u3000-\u303f\uff00-\uffef]/u.test(ch)) return false
+  // 長音「ー」・中黒「・」・濁点の記号は文字の種類が「共通」なので、かなと同じく和文として見る
+  if (
+    /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\u3000-\u303f\uff00-\uffef\u30fc\u30fb\u309b\u309c]/u.test(
+      ch
+    )
+  )
+    return false
   return /[\p{L}\p{N}\p{P}\p{S}\p{M}]/u.test(ch)
 }
 
@@ -203,7 +209,17 @@ export function wrapGlyphs(
         for (let n = 0; n < 3 && cut > 1; n++) {
           const head = cut < line.length ? line[cut].ch : g.ch
           if (!NO_LINE_START.test(head) && !NO_LINE_END.test(line[cut - 1].ch)) break
-          cut--
+          // ルビの掛かった親文字の途中では折らない(親文字ごと次の行へ送る。送れなければ禁則をあきらめる)
+          let next = cut - 1
+          for (let k = next - 1; k >= 0; k--) {
+            const len = line[k].rubyLen ?? 0
+            if (line[k].ruby && k + len > next) {
+              next = k
+              break
+            }
+          }
+          if (next < 1) break
+          cut = next
         }
         const rest = cut > 0 ? line.slice(cut) : []
         lines.push(cut > 0 ? line.slice(0, cut) : line)
@@ -857,7 +873,7 @@ export function telopStrokeRings(
 
 /** 背景の余白(px) */
 /** 吹き出しの尻尾が箱の外へ出る長さ(向きごと、キャンバス px) */
-function bubbleTailReach(style: TextStyle): {
+export function bubbleTailReach(style: TextStyle): {
   left: number
   right: number
   top: number

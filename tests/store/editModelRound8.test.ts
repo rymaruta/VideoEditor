@@ -276,6 +276,36 @@ describe('第8回: 編集モデル', () => {
     for (const c of micClips()) expect(c.outPoint).toBeLessThanOrEqual(30 + 1e-9)
   })
 
+  it('クリップの頭より前・終わりより後ろにずらした追従テロップは、分割しても動かない', () => {
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [
+          { id: 'c1', assetId: 'A', inPoint: 0, outPoint: 10, speed: 1 },
+          { id: 'c2', assetId: 'B', inPoint: 0, outPoint: 10, speed: 1 }
+        ],
+        textOverlays: [
+          {
+            id: 'o1',
+            text: 'あ',
+            startTime: 11,
+            endTime: 12,
+            style: {},
+            source: 'manual',
+            linkedClipId: 'c2',
+            linkOffset: 1
+          }
+        ]
+      } as unknown as Project
+    })
+    st().updateClipTrim('c2', 3, 10)
+    const before = st().project.textOverlays[0].startTime
+    expect(before).toBeCloseTo(8, 9)
+    st().splitClipAtTime('c2', 13)
+    expect(st().project.textOverlays[0].startTime).toBeCloseTo(before, 9)
+    expect(st().project.textOverlays[0].linkedClipId).toBeDefined()
+  })
+
   it('差し込みの画を短いファイルへ差し替えても、マイクの音は本編に付いていく', () => {
     roughCut([
       [0, 10],

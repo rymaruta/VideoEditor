@@ -110,8 +110,11 @@ function sameCameraCards(a: string, b: string): boolean {
   return isCard(ra) && isCard(rb)
 }
 
-/** カメラが作るフォルダの名前(DCIM の 100CANON・101MSDCF・100GOPRO など) */
-const DCIM_FOLDER = /^\d{3}[a-z0-9_]{5}$/i
+/**
+ * カメラが作るフォルダの名前。DCIM の 100CANON・101MSDCF・100GOPRO・100MEDIA、新しい DJI の
+ * DJI_001、Insta360 の Camera01、日付のフォルダ(2024-05-01・20240501)
+ */
+const DCIM_FOLDER = /^(?:\d{3}[a-z0-9_]{5}|DJI_\d{3,4}|Camera\d{2}|\d{4}[-_.]?\d{2}[-_.]?\d{2})$/i
 
 /**
  * 同じ親フォルダの2つのフォルダが、1台のカメラのカードを替えた続きらしいか(名前がカード・DCIM の
