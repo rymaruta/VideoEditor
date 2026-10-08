@@ -1941,10 +1941,31 @@ describe('壊れたファイルを開く・素材をつなぎ直す', () => {
   it('静止画へつなぎ直すと静止画の長さのまま、動画へつなぎ直すと静止画の印を外す', () => {
     st().loadProject(baseProject(), '/x/p.json')
     const probe = { width: 1, height: 1, fps: 30, hasAudio: false, hasVideo: true }
+    // 本編で使っている素材は静止画へつなぎ直せない(本編へは静止画を置けない)
+    st().relinkAsset('B', '/y/b.png', 'b.png', { ...probe, duration: 0.04 }, undefined)
+    expect(st().project.assets.find((x) => x.id === 'B')!.still).toBeUndefined()
+    // ワイプだけで使っている素材なら、静止画へつなぎ直せる
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        clips: p.clips.filter((c) => c.assetId !== 'B'),
+        videoOverlayTracks: [
+          {
+            id: 'w',
+            name: 'ワイプ',
+            hidden: false,
+            position: 'bottom-right',
+            scale: 0.3,
+            clips: [{ id: 'o', assetId: 'B', startTime: 0, inPoint: 0, outPoint: 5 }]
+          }
+        ]
+      }
+    })
     st().relinkAsset('B', '/y/b.png', 'b.png', { ...probe, duration: 0.04 }, undefined)
     const b = st().project.assets.find((x) => x.id === 'B')!
     expect([b.still, b.duration]).toEqual([true, 3600])
-    expect(st().project.clips.find((c) => c.id === 'c2')!.outPoint).toBe(5)
+    expect(st().project.videoOverlayTracks[0].clips[0].outPoint).toBe(5)
     st().relinkAsset('B', '/y/b.mp4', 'b.mp4', { ...probe, duration: 30 }, undefined)
     expect(st().project.assets.find((x) => x.id === 'B')!.still).toBeUndefined()
   })

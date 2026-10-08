@@ -12,6 +12,7 @@ import { canPreviewFile, planLoadedAssetPreview } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
 import { isImagePath, isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
 import { stillAssetFrom } from '../lib/stillAsset'
+import { relinkRefusal } from '../lib/relinkCheck'
 import { ASSET_DRAG_TYPE } from '../lib/assetDrag'
 import type { MediaAsset } from '@shared/types'
 import { HighlightModal } from './HighlightModal'
@@ -238,7 +239,23 @@ export function MediaBin(): React.JSX.Element {
     try {
       const filePath = await window.api.selectRelinkFile()
       if (!filePath) return
+      // 静止画は静止画として読む(動画として読むと、サムネイルが取れず、要らない変換が走っていた)
+      if (isImagePath(filePath)) {
+        const still = await stillAssetFrom(filePath)
+        const refusal = relinkRefusal(useProjectStore.getState().project, assetId, filePath, still)
+        if (refusal) {
+          setError(refusal)
+          return
+        }
+        relinkAsset(assetId, filePath, fileNameFromPath(filePath), still, still.thumbnailDataUrl)
+        return
+      }
       const meta = await window.api.probeMedia(filePath)
+      const refusal = relinkRefusal(useProjectStore.getState().project, assetId, filePath, meta)
+      if (refusal) {
+        setError(refusal)
+        return
+      }
       let thumbnailDataUrl: string | undefined
       if (meta.hasVideo) {
         try {
@@ -271,7 +288,11 @@ export function MediaBin(): React.JSX.Element {
       return
     }
     // メニュー(Ctrl+I)からも来るので、ここで二重に始めない
-    if (importingRef.current) return
+    // 取り込みの途中に来たものは、黙って捨てずに知らせる(落としたファイルが入らないまま気づけなかった)
+    if (importingRef.current) {
+      setError('取り込み中です。終わってから、もう一度入れてください')
+      return
+    }
     importingRef.current = true
     // 読み込みの途中で別のプロジェクトを開いたら、読んだ素材を後のプロジェクトに入れない
     const generation = projectGeneration.current
@@ -489,7 +510,10 @@ export function MediaBin(): React.JSX.Element {
   // ドロップされたものの取り込み。取り込み経路はダイアログと同じ importFiles に集約する
   // (プロキシ生成・履歴1件・失敗の集約が経路ごとにばらけないようにするため)。
   async function importDroppedFiles(files: File[]): Promise<void> {
-    if (importing) return
+    if (importing || importingRef.current) {
+      setError('取り込み中です。終わってから、もう一度入れてください')
+      return
+    }
     setError(null)
     const paths: string[] = []
     const unsupported: string[] = []

@@ -10,7 +10,7 @@ import { spawn } from 'child_process'
 import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { cpus, tmpdir } from 'os'
 import { join } from 'path'
-import type { QualityPreset, TextOverlay } from '@shared/types'
+import type { MediaAsset, QualityPreset, TextOverlay } from '@shared/types'
 import type { ProjectV2, Sequence } from '@shared/sequence/types'
 import {
   defaultSegmentOptions,
@@ -28,6 +28,8 @@ import {
   OUTPUT_SAMPLE_RATE,
   RESAMPLE_SPEED_LIMIT,
   ALIGN_AUDIO_START,
+  assertReadableStills,
+  probeAlphaDecoders,
   audioSpeedChain,
   crfForQuality,
   ffmpegPath,
@@ -152,6 +154,19 @@ function runFfmpeg(args: string[], signal?: AbortSignal): Promise<RunResult> {
  */
 const DECODER_THREADS = 1
 
+/** 透過付きの素材の入力に、透過を読めるデコーダを付ける */
+function withDecoders(graph: SegmentGraph, decoders: ReadonlyMap<string, string>): SegmentGraph {
+  if (decoders.size === 0) return graph
+  return {
+    ...graph,
+    inputs: graph.inputs.map((input) =>
+      !input.still && input.concatList === undefined && decoders.has(input.path)
+        ? { ...input, decoder: decoders.get(input.path) }
+        : input
+    )
+  }
+}
+
 /** 入力ごとの `-ss / -t / -i` と、グラフをファイルで渡す引数 */
 function graphArgs(graph: SegmentGraph, graphPath: string): string[] {
   writeFileSync(graphPath, graph.filter, 'utf-8')
@@ -177,6 +192,7 @@ function graphArgs(graph: SegmentGraph, graphPath: string): string[] {
       )
       return
     }
+    if (input.decoder) args.push('-c:v', input.decoder)
     // 丸めの残り(5.55e-17)を指数で書くと ffmpeg が読めないので、小数6桁で書く
     args.push('-ss', ffSeconds(input.seek), '-t', ffSeconds(Math.max(0.001, input.duration)))
     args.push('-i', input.path)
@@ -327,6 +343,12 @@ export async function exportSequenceSegmented(
     options.segmentOptions ?? defaultSegmentOptions(seq.fps.num / seq.fps.den)
   )
   if (segments.length === 0) throw new Error('タイムラインにクリップがありません')
+  assertReadableStills(
+    project.assets,
+    seq.videoTracks
+      .filter((t) => !t.hidden)
+      .flatMap((t) => t.items.map((i) => ('assetId' in i ? i.assetId : '')))
+  )
   const totalFrames = segments[segments.length - 1].endFrame
 
   const encoder =
@@ -351,6 +373,17 @@ export async function exportSequenceSegmented(
         const ch = await probeAudioChannels(p)
         if (ch !== undefined) audioChannels.set(p, ch)
       })
+    )
+
+    // ワイプ・全面(CG)の透過付き WebM は、透過を読めるデコーダで読む(1本目の映像トラックは本編)
+    const alphaDecoders = await probeAlphaDecoders(
+      seq.videoTracks
+        .slice(1)
+        .filter((t) => !t.hidden)
+        .flatMap((t) => t.items)
+        .map((i) => ('assetId' in i ? assetsById.get(i.assetId) : undefined))
+        .filter((a): a is MediaAsset => !!a && a.hasVideo && !a.still)
+        .map((a) => a.filePath)
     )
 
     // テロップ: 画面のプロセスが描いた層があればそれを使う(画面と同じ絵になる)。
@@ -450,7 +483,7 @@ export async function exportSequenceSegmented(
             [
               '-v',
               'error',
-              ...graphArgs(graph, name(s, 'v.txt')),
+              ...graphArgs(withDecoders(graph, alphaDecoders), name(s, 'v.txt')),
               '-an',
               ...encodeArgs,
               ...(threadsPerJob > 0 ? ['-threads', String(threadsPerJob)] : []),

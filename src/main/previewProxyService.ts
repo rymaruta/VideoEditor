@@ -167,7 +167,7 @@ export function ensurePreviewProxy(
             const command = ffmpeg(filePath)
               .videoCodec('libvpx-vp9')
               .outputOptions([
-                '-vf scale=-2:min(540\\,ih)',
+                '-vf scale=-2:min(540\\,trunc(ih/2)*2)',
                 '-pix_fmt yuva420p',
                 '-b:v 0',
                 '-crf 34',
@@ -222,7 +222,7 @@ export function ensurePreviewProxy(
             command.outputOptions([
               // 540p is plenty for a preview and roughly halves both the encode time and
               // the file size versus 720p. Export is unaffected — it reads the original.
-              '-vf scale=-2:min(540\\,ih)',
+              '-vf scale=-2:min(540\\,trunc(ih/2)*2)',
               '-pix_fmt yuv420p',
               '-movflags +faststart'
             ])

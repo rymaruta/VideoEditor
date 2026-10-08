@@ -42,6 +42,8 @@ export interface GraphInput {
   /** 静止画。同じ画を `duration` 秒ぶん、シーケンスのフレームレート(`framerate`)で流す(`-loop 1`) */
   still?: boolean
   framerate?: string
+  /** 読むときのデコーダ(透過付きの VP8/VP9 は libvpx で読む。既定のデコーダは透過を捨てる) */
+  decoder?: string
 }
 
 export interface SegmentGraph {

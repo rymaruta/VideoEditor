@@ -16,6 +16,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import type {
   AspectRatio,
+  MediaAsset,
   MediaProbeResult,
   Project,
   QualityPreset,
@@ -171,6 +172,31 @@ function displayDimensions(stream: Record<string, unknown> | undefined): {
   return degrees === 90 ? { width: height, height: width } : { width, height }
 }
 
+/**
+ * ffprobe が向きを読めない入れ物(Matroska の display matrix・JPEG の EXIF の向き)。同梱の ffprobe は
+ * ffmpeg より古く、これらの回転を見ない。ffmpeg(書き出し・サムネイル)と Chromium は回して映すので、
+ * アプリが持つ縦横だけが回す前のまま(縦の写真が横として扱われ、切り抜き位置・縦横比の印がずれる)だった
+ */
+const ROTATION_BLIND_EXTENSIONS = new Set(['mkv', 'webm', 'jpg', 'jpeg'])
+
+/** ffmpeg が実際に読んで出す絵の縦横(回転を当てた後)。読めなければ null */
+function decodedDimensions(filePath: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      ffmpegPath,
+      ['-hide_banner', '-i', filePath, '-map', '0:V:0', '-frames:v', '1', '-f', 'null', '-'],
+      { timeout: 20_000 },
+      (_err, _stdout, stderr) => {
+        const out = String(stderr ?? '')
+        const tail = out.slice(out.indexOf('Output #0'))
+        const m = out.includes('Output #0') ? /Video: [^\n]*?(\d{2,5})x(\d{2,5})/.exec(tail) : null
+        resolve(m ? { width: Number(m[1]), height: Number(m[2]) } : null)
+      }
+    )
+    trackUntilDone(child)
+  })
+}
+
 export function probeMedia(
   filePath: string,
   /**
@@ -208,7 +234,17 @@ export function probeMedia(
         finiteSeconds(audioStream?.duration)
       const duration =
         declared ?? (options.skipDurationScan ? null : await measureDurationByScan(filePath)) ?? 0
-      const display = displayDimensions(videoStream as Record<string, unknown> | undefined)
+      let display = displayDimensions(videoStream as Record<string, unknown> | undefined)
+      // 向きを読めない入れ物は、ffmpeg が読んだ絵と縦横の向きが違えば入れ替える
+      const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+      if (videoStream && ROTATION_BLIND_EXTENSIONS.has(ext) && display.width !== display.height) {
+        const decoded = await decodedDimensions(filePath)
+        if (decoded && decoded.width !== decoded.height) {
+          const portrait = (d: { width: number; height: number }): boolean => d.height > d.width
+          if (portrait(decoded) !== portrait(display))
+            display = { width: display.height, height: display.width }
+        }
+      }
       resolve({
         duration,
         width: display.width,
@@ -738,6 +774,40 @@ export function probeAudioChannels(filePath: string): Promise<number | undefined
   })
 }
 
+/**
+ * 透過付きの VP8/VP9(WebM)を読むデコーダ。透過は別の層に入っていて、ffmpeg 標準の `vp9`/`vp8` は
+ * それを捨てる(プレビューの Chromium は透過のまま映す)ので、書き出しだけ透過が黒になっていた。
+ * libvpx で読めば透過が残る。透過が無い素材・VP8/VP9 でない素材は undefined(既定のデコーダ)
+ */
+export function probeAlphaDecoder(filePath: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err || !data) return resolve(undefined)
+      const video = data.streams.find((s) => s.codec_type === 'video')
+      const tags = (video?.tags ?? {}) as Record<string, unknown>
+      const alpha = Object.entries(tags).some(
+        ([k, v]) => k.toLowerCase() === 'alpha_mode' && String(v) === '1'
+      )
+      if (!alpha) return resolve(undefined)
+      if (video?.codec_name === 'vp9') return resolve('libvpx-vp9')
+      if (video?.codec_name === 'vp8') return resolve('libvpx')
+      resolve(undefined)
+    })
+  })
+}
+
+/** 映像として使う素材のうち、透過付きの VP8/VP9 のパス → デコーダ */
+export async function probeAlphaDecoders(paths: Iterable<string>): Promise<Map<string, string>> {
+  const list = [...new Set(paths)]
+  const found = await Promise.all(list.map((p) => probeAlphaDecoder(p)))
+  const map = new Map<string, string>()
+  list.forEach((p, i) => {
+    const d = found[i]
+    if (d) map.set(p, d)
+  })
+  return map
+}
+
 /** タイムラインが実際に使う音声素材だけを、パス単位で1回ずつ調べる。 */
 async function probeUsedAudioChannels(project: Project): Promise<Map<string, number>> {
   const used = new Set<string>()
@@ -796,6 +866,22 @@ export function cancelExport(): void {
   currentExportCommand?.kill('SIGKILL')
 }
 
+/**
+ * 書き出しに使う静止画が読めるか。大きさの分からない静止画(動く WebP・途中で切れた画像)は、
+ * ffmpeg が画を探し続けて**止まらなくなる**(中止も効かなかった)ので、始める前に断る
+ */
+export function assertReadableStills(
+  assets: readonly MediaAsset[],
+  usedIds: Iterable<string>
+): void {
+  const used = new Set(usedIds)
+  const bad = assets.filter((a) => a.still && used.has(a.id) && !(a.width > 0 && a.height > 0))
+  if (bad.length > 0)
+    throw new Error(
+      `静止画として読めない素材があります(動く画像・壊れた画像は使えません): ${bad.map((a) => a.fileName).join('、')}`
+    )
+}
+
 export async function exportProject(options: ExportOptions): Promise<void> {
   const { project, aspectRatio, resolutionHeight, quality, outputPath, onProgress } = options
   const loudnessNormalization = options.loudnessNormalization ?? false
@@ -805,6 +891,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   if (clips.length === 0) {
     return Promise.reject(new Error('タイムラインにクリップがありません'))
   }
+  assertReadableStills(project.assets, [
+    ...clips.map((c) => c.assetId),
+    ...project.videoOverlayTracks
+      .filter((t) => !t.hidden)
+      .flatMap((t) => t.clips.map((c) => c.assetId))
+  ])
   // The cancel handle and progress channel are singletons; a second concurrent
   // encode would overwrite currentExportCommand and leave the first job
   // uncancelable, with both jobs fighting over the one progress bar. The flag is
@@ -872,6 +964,15 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   // (この await より前に立てておくのが条件)。調べるのは使う素材だけで、失敗しても
   // 例外にしない——書き出しがチャンネル数のせいで落ちるのは本末転倒。
   const audioChannelsByPath = await probeUsedAudioChannels(project)
+  // ワイプ・全面(CG)の透過付き WebM は、透過を読めるデコーダで読む
+  const alphaDecoderByPath = await probeAlphaDecoders(
+    project.videoOverlayTracks
+      .filter((t) => !t.hidden)
+      .flatMap((t) => t.clips)
+      .map((c) => assetById.get(c.assetId))
+      .filter((a): a is MediaAsset => !!a && a.hasVideo && !a.still)
+      .map((a) => a.filePath)
+  )
   // テロップの折り返し幅は**見積もりではなく実測**で決める。libass に1度描かせて
   // 全角の送り幅を測る(結果はフォントごとに使い回すので、2回目以降は測らない)。
   // 上の probe と同じで、測れなくても例外にしない——折り返しが少し広いだけの話で、
@@ -1155,6 +1256,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             asset.still
               ? ['-loop 1', `-framerate ${fpsArg}`, `-t ${ffSeconds(pipReadDur)}`]
               : [
+                  ...(alphaDecoderByPath.has(asset.filePath)
+                    ? [`-c:v ${alphaDecoderByPath.get(asset.filePath)}`]
+                    : []),
                   `-ss ${ffSeconds(overlayClip.inPoint - pipPre)}`,
                   `-t ${ffSeconds(pipReadDur + pipPre)}`
                 ]

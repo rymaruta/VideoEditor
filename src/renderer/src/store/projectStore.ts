@@ -1,3 +1,4 @@
+import { relinkRefusal } from '../lib/relinkCheck'
 import { carriesVoice, silencedTrack, tracksReplaceAnchorAudio } from '@shared/roughCut/build'
 import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
 import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
@@ -212,34 +213,44 @@ function gestureOrigin(state: ProjectState, history: Pick<ProjectState, 'past'>)
     : state.project
 }
 
-/** 素材の一覧に、まだ無い素材(同じファイルが無いもの)を足す */
-function withAssets(assets: MediaAsset[], add: MediaAsset[]): MediaAsset[] {
-  const out = [...assets]
-  for (const a of add) if (!out.some((x) => x.filePath === a.filePath)) out.push(a)
-  return out
-}
-
 /**
- * 置くクリップが指す素材を、その状態の素材の一覧に足す(id で見る)。履歴の状態は、置くときの一覧と違う
- * (用意している間に同じファイルを人が読み込んでいた など)ので、ファイルの道で見ると、置いたクリップが
- * その状態に無い素材を指し、取り消すと黙って鳴らなくなっていた
+ * 置くトラックを、ある状態(履歴の1つ)の素材の一覧に合わせる。クリップが指す素材は**ファイルで**探し、
+ * その状態に同じファイルの素材があればそれを指し直す。無ければ素材を足す(同じ id が別のファイルを
+ * 指していれば、新しい id で足す)。
+ * 履歴の状態は置くときの一覧と違う(用意している間に同じファイルを読み込んだ・つなぎ直した など)ので、
+ * id のまま入れると、取り消した後のクリップが無い素材・古いファイルを指して黙って鳴らず、
+ * 同じファイルの素材を足すと一覧に同じ曲が2つ並んでいた
  */
-function withReferencedAssets(
+function adoptPlacedTracks<T extends { clips: { assetId: string }[] }>(
   assets: MediaAsset[],
-  all: MediaAsset[],
-  ids: Iterable<string>
-): MediaAsset[] {
-  const have = new Set(assets.map((a) => a.id))
+  current: readonly MediaAsset[],
+  tracks: T[]
+): { assets: MediaAsset[]; tracks: T[] } {
   const out = [...assets]
-  for (const id of ids) {
-    if (have.has(id)) continue
-    const a = all.find((x) => x.id === id)
-    if (a) {
-      out.push(a)
-      have.add(id)
+  const idMap = new Map<string, string>()
+  for (const id of new Set(tracks.flatMap((t) => t.clips.map((c) => c.assetId)))) {
+    const cur = current.find((a) => a.id === id)
+    if (!cur) continue
+    const same = out.find((a) => a.filePath === cur.filePath)
+    if (same) {
+      idMap.set(id, same.id)
+      continue
     }
+    const taken = out.some((a) => a.id === cur.id)
+    const added = taken ? { ...cur, id: uuid() } : cur
+    out.push(added)
+    idMap.set(id, added.id)
   }
-  return out
+  const changed = [...idMap].some(([a, b]) => a !== b)
+  return {
+    assets: out,
+    tracks: !changed
+      ? tracks
+      : tracks.map((t) => ({
+          ...t,
+          clips: t.clips.map((c) => ({ ...c, assetId: idMap.get(c.assetId) ?? c.assetId }))
+        }))
+  }
 }
 
 /**
@@ -1959,6 +1970,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // timeline while ffmpeg only produced 15s, so every telop, BGM clip and PiP after
       // it burned in 5s out of place. Clamp everything that indexes into this asset.
       const target = state.project.assets.find((a) => a.id === assetId)
+      // つなぎ直せない組み合わせ(映像で使っている素材を音声だけのファイルへ など)は変えない
+      if (relinkRefusal(state.project, assetId, filePath, probe)) return state
       // 静止画は長さを持たない(置いたクリップで決める)。静止画へつなぎ直すなら、静止画の長さのまま
       const still = isImagePath(filePath)
       const clampRange = <T extends { inPoint: number; outPoint: number }>(clip: T): T => {
@@ -2019,9 +2032,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                   still: still ? true : undefined,
                   width: probe.width,
                   height: probe.height,
-                  fps: probe.fps,
-                  hasAudio: probe.hasAudio,
-                  hasVideo: probe.hasVideo,
+                  // 静止画は取り込んだときと同じ扱い(書き出しのフレームレートで流す・音なし)
+                  fps: still ? 30 : probe.fps,
+                  hasAudio: still ? false : probe.hasAudio,
+                  hasVideo: still ? true : probe.hasVideo,
                   thumbnailDataUrl,
                   // The proxy was transcoded from the file we just replaced. Keeping it
                   // made the preview play the OLD footage while the export used the new
@@ -3551,16 +3565,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 手で直した CG のトラックがあれば、新しくは置かない(二重にしない)
       const place = (p: Project): Project => {
         const k = keptOf(p)
-        const add = track && !k.some((t) => t.autoRole === 'cg') ? [track] : []
-        return {
-          ...p,
-          assets: withReferencedAssets(
-            p.assets,
-            assets,
-            add.flatMap((t) => t.clips.map((c) => c.assetId))
-          ),
-          videoOverlayTracks: [...k, ...add]
-        }
+        const adopted = adoptPlacedTracks(
+          p.assets,
+          assets,
+          track && !k.some((t) => t.autoRole === 'cg') ? [track] : []
+        )
+        return { ...p, assets: adopted.assets, videoOverlayTracks: [...k, ...adopted.tracks] }
       }
       // 履歴には積まないが、未保存にする(保存の途中に届いた CG が、保存済みと扱われて残らなかった)
       return {
@@ -3608,16 +3618,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           .filter((t) => !isUntouchedAuto(t))
           .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
         const editedRoles = new Set(kept.filter((t) => t.autoRole).map((t) => t.autoRole))
-        const add = tracks.filter((t) => !editedRoles.has(t.autoRole))
-        return {
-          ...p,
-          assets: withReferencedAssets(
-            withAssets(p.assets, newAssets),
-            assets,
-            add.flatMap((t) => t.clips.map((c) => c.assetId))
-          ),
-          audioTracks: [...kept, ...add]
-        }
+        const adopted = adoptPlacedTracks(
+          p.assets,
+          assets,
+          tracks.filter((t) => !editedRoles.has(t.autoRole))
+        )
+        return { ...p, assets: adopted.assets, audioTracks: [...kept, ...adopted.tracks] }
       }
       // 履歴には積まないが、未保存にする(保存の途中に届いた SE・BGM が、保存済みと扱われて残らなかった)
       return {

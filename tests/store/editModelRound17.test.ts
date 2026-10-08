@@ -1604,5 +1604,52 @@ describe('第33回: 第32回修正の見直し', () => {
     st().undo()
     expect(st().project.audioTracks.some((t) => t.autoRole === 'bgm')).toBe(true)
     expect(dangling()).toEqual([])
+    // 同じ曲を一覧に2つ並べない
+    expect(
+      st()
+        .project.assets.filter((a) => a.filePath === '/kit/bgm.mp3')
+        .map((a) => a.id)
+    ).toEqual(['userBgm'])
+  })
+
+  it('用意している間につなぎ直していても、取り消した後の BGM はつなぎ直した先のファイルを指す', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    S.setState({
+      project: {
+        ...st().project,
+        assets: [...st().project.assets, { ...asset('U', 60, false), filePath: '/old/bgm.mp3' }],
+        audioTracks: st().project.audioTracks.filter((t) => !t.autoRole)
+      }
+    })
+    const afterCut = st().project.clips
+    st().relinkAsset(
+      'U',
+      '/kit/bgm.mp3',
+      'bgm.mp3',
+      { duration: 60, width: 0, height: 0, fps: 0, hasAudio: true, hasVideo: false },
+      undefined
+    )
+    st().setAutoSounds(
+      [
+        {
+          role: 'bgm',
+          clips: [{ path: '/kit/bgm.mp3', startTime: 0, inPoint: 0, outPoint: 20, volume: 0.3 }]
+        }
+      ] as never,
+      [{ ...asset('pipelineBgm', 60, false), filePath: '/kit/bgm.mp3' }],
+      afterCut
+    )
+    st().undo()
+    const p = st().project
+    const bgm = p.audioTracks.find((t) => t.autoRole === 'bgm')!
+    expect(bgm.clips.map((c) => p.assets.find((a) => a.id === c.assetId)?.filePath)).toEqual([
+      '/kit/bgm.mp3'
+    ])
+    // id は重ならない
+    const ids = p.assets.map((a) => a.id)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })

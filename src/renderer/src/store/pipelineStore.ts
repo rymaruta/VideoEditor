@@ -740,7 +740,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const assets: MediaAsset[] = []
       for (const path of paths) {
         if (isImagePath(path)) {
-          assets.push(await stillAssetFrom(path))
+          // 読めない画像(動く画像・壊れた画像)は置かない
+          const still = await stillAssetFrom(path).catch(() => null)
+          if (still) assets.push(still)
           continue
         }
         const meta = await window.api.probeMedia(path).catch(() => null)
