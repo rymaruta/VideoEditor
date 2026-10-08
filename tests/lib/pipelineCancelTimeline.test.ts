@@ -131,4 +131,24 @@ describe('自動編集の「タイムラインに並べる」の途中', () => {
     const steps = usePipelineStore.getState().steps
     expect(Object.values(steps).some((s) => s.note === '中止しました')).toBe(false)
   })
+
+  it('同期の途中で別のプロジェクトを開いても、そのプロジェクトの同期の工程に「中止しました」を書かない', async () => {
+    stubApi()
+    let reject: (e: Error) => void = () => {}
+    const api = (globalThis as unknown as { window: { api: Record<string, unknown> } }).window.api
+    ;(api as Record<string, unknown>).syncRun = (): Promise<never> =>
+      new Promise((_, rej) => {
+        reject = rej
+      })
+    prepare()
+    const run = usePipelineStore.getState().runPipeline()
+    await flush()
+    await flush()
+    useProjectStore.getState().newProject()
+    usePipelineStore.getState().cancel()
+    usePipelineStore.getState().resetResults()
+    reject(new Error('SYNC_CANCELED'))
+    await run
+    expect(usePipelineStore.getState().steps.sync.note).not.toBe('中止しました')
+  })
 })

@@ -561,3 +561,57 @@ describe('第20回: まとめて変えたテロップの見た目', () => {
     expect(after.every((o) => o.styleUnlinked === true)).toBe(true)
   })
 })
+
+describe('第21回: 壊れたループのつなぎ目の覚え', () => {
+  it('読み込みで壊れた値は捨て、曲とほぼ同じ長さの重なりでもループを積み上げない', async () => {
+    const { normalizeLoadedProject } = await import('@renderer/store/projectStore')
+    const loaded = normalizeLoadedProject({
+      assets: [asset('loop', 20, false)],
+      audioTracks: [
+        {
+          id: 't',
+          name: 'BGM',
+          clips: [
+            {
+              id: 'x',
+              assetId: 'loop',
+              startTime: 0,
+              inPoint: 0,
+              outPoint: 5,
+              loopCross: { overlap: 'x' }
+            }
+          ]
+        }
+      ]
+    } as unknown as Project)
+    expect(loaded.audioTracks[0].clips[0].loopCross).toBeUndefined()
+
+    setup([[0, 30]])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', 20, false)],
+        audioTracks: p.audioTracks.map((t) =>
+          t.id === 'bgmT'
+            ? {
+                ...t,
+                clips: [
+                  {
+                    id: 'b1',
+                    assetId: 'loop',
+                    startTime: 0,
+                    inPoint: 0,
+                    outPoint: 20,
+                    loopCross: { overlap: 19.99 }
+                  }
+                ]
+              }
+            : t
+        )
+      }
+    })
+    st().updateClipSpeed(st().project.clips[0].id, 0.25)
+    expect(track('bgmT').length).toBeLessThan(10)
+  })
+})

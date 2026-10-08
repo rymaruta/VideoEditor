@@ -464,7 +464,24 @@ function normalizeAudioClip(
     speed: raw.speed === undefined ? undefined : speed > 0 ? speed : 1,
     fadeIn: raw.fadeIn === undefined ? undefined : asNonNegative(raw.fadeIn, 0),
     fadeOut: raw.fadeOut === undefined ? undefined : asNonNegative(raw.fadeOut, 0),
-    linkedClipId: typeof raw.linkedClipId === 'string' ? raw.linkedClipId : undefined
+    linkedClipId: typeof raw.linkedClipId === 'string' ? raw.linkedClipId : undefined,
+    loopCross: normalizeLoopCross(raw.loopCross)
+  }
+}
+
+/** ループのつなぎ目の覚え。重なりが 0 以上の数でなければ捨てる(壊れた値で BGM を並べ直さない) */
+function normalizeLoopCross(raw: unknown): AudioTrackClip['loopCross'] {
+  if (!isRecord(raw)) return undefined
+  const overlap = raw.overlap
+  if (typeof overlap !== 'number' || !Number.isFinite(overlap) || overlap < 0) return undefined
+  const fade = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined
+  const fadeIn = fade(raw.fadeIn)
+  const fadeOut = fade(raw.fadeOut)
+  return {
+    overlap,
+    ...(fadeIn !== undefined ? { fadeIn } : {}),
+    ...(fadeOut !== undefined ? { fadeOut } : {})
   }
 }
 
@@ -5173,7 +5190,10 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
             ...(chain[0].fadeOut !== undefined ? { fadeOut: chain[0].fadeOut } : {})
           }
         : remembered
-    const loopOverlap = Math.max(0, loopCross?.overlap ?? 0)
+    const limit = durationOf.get(first.assetId) ?? Infinity
+    // 重なりは曲の長さの半分まで(曲とほぼ同じ長さの重なりで、ほとんど進まないループを何百本も積まない)
+    const songLen = Number.isFinite(limit) ? limit / (first.speed || 1) : Infinity
+    const loopOverlap = Math.min(Math.max(0, loopCross?.overlap ?? 0), songLen / 2)
     const crossOut = loopCross?.fadeOut
     const crossIn = loopCross?.fadeIn
     /** 足すループの id(トラックのほかのクリップと重ならないように) */
@@ -5183,7 +5203,6 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       usedIds.add(id)
       return id
     }
-    const limit = durationOf.get(first.assetId) ?? Infinity
     const out: AudioTrackClip[] = []
     let at = startTime
     // 足すループは多くても 1,000 本(重なりが曲の長さに近い壊れた並びで、際限なく増やさない)

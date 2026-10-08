@@ -1628,10 +1628,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       } catch (e) {
         const msg = formatIpcError(e)
         const canceled = msg.includes('SYNC_CANCELED')
-        setStep('sync', {
-          state: canceled ? 'wait' : 'error',
-          note: canceled ? '中止しました' : msg
-        })
+        // 別のプロジェクトを開いて結果を捨てた後なら、そのプロジェクトの工程には書かない
+        if (generation === runGeneration)
+          setStep('sync', {
+            state: canceled ? 'wait' : 'error',
+            note: canceled ? '中止しました' : msg
+          })
         log(canceled ? '同期を中止しました' : `同期に失敗: ${msg}`)
         set({ running: false })
         return
@@ -1784,7 +1786,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           ] as StepId[]
         ).find((id) => get().steps[id].state === 'run')
         const canceled = isCanceled(msg)
-        if (current)
+        if (current && generation === runGeneration)
           setStep(current, {
             state: canceled ? 'wait' : 'error',
             note: canceled ? '中止しました' : msg
