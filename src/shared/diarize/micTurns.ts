@@ -103,6 +103,8 @@ interface MicStats {
   floor: number
   /** 話しているときの普段の大きさ */
   speech: number
+  /** 持ち主の声の大きさ(声のある時刻の上のほう)。持ち主の声か分からない時刻を見分ける */
+  ownLevel: number
   /** 声があると判断する大きさ */
   threshold: number
   maskedFrames?: Uint8Array
@@ -117,12 +119,22 @@ function statsOf(track: MicTrack): MicStats | null {
   // 静かな所と大きな所の間の 4 割の高さを「声がある」とする(最低でも静かな所より 8dB 上)
   const threshold = floor + Math.max(8, (loud - floor) * 0.4)
   const speechFrames = valid.filter((v) => v >= threshold)
-  // 話しているときの普段の大きさ。声のある時刻にはかぶり(ほかの人の声。15〜25dB 小さい)も
-  // 混ざり、2人の会話では半分近くがかぶりなので、真ん中の値はかぶりの大きさに引きずられていた
-  // (本人の声 -12dB に対し -32dB と見て、止まったマイクの人の声を本人の声と取り違えた)。
-  // 上のほう(4分の3の所)で見る
-  const speech = speechFrames.length > 0 ? percentile(speechFrames, 0.75) : loud
-  return { id: track.id, db, floor, speech, threshold, maskedFrames: track.maskedFrames }
+  const speech = speechFrames.length > 0 ? percentile(speechFrames, 0.5) : loud
+  // 「持ち主の声か分からない」(止まったマイクの人の声の回り込み)を見分けるときの、持ち主の声の大きさ。
+  // 声のある時刻にはかぶりも混ざり、2人の会話では半分近くがかぶりなので、真ん中の値はかぶりの
+  // 大きさに引きずられていた(本人の声 -12dB に対し -32dB と見て、止まったマイクの人の声を
+  // 本人の声と取り違えた)。上のほう(4分の3の所)で見る。重なりの判定(`speech`)は真ん中のまま
+  // (上のほうで見ると、短い掛け合いの重なりを見落としていた)
+  const ownLevel = speechFrames.length > 0 ? percentile(speechFrames, 0.75) : loud
+  return {
+    id: track.id,
+    db,
+    floor,
+    speech,
+    ownLevel,
+    threshold,
+    maskedFrames: track.maskedFrames
+  }
 }
 
 /**
@@ -180,7 +192,7 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
     if (best < 0) continue
     owned[best][t] = 1
     if (
-      bestRel < ABSENT_PEER_MIN_REL_DB &&
+      stats[best].db[t] - stats[best].ownLevel < ABSENT_PEER_MIN_REL_DB &&
       stats.some(
         (st) => !st.maskedFrames?.[t] && (st.db[t] === undefined || Number.isNaN(st.db[t]))
       )
@@ -232,7 +244,7 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
         s = cut
       }
       pieces.push([s, end])
-      for (const [a, b] of pieces) {
+      for (const [a, b] of splitByWeakness(pieces, heard, weak[m], minTurn)) {
         if (b - a < minTurn) continue
         let ov = 0
         let wk = 0
@@ -254,6 +266,51 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
     }
   }
   return turns.sort((x, y) => x.start - y.start || x.micId.localeCompare(y.micId))
+}
+
+/**
+ * 区間を「持ち主の声か分からない」時刻と、持ち主の声の時刻の切り替わりで分ける
+ * (止まったマイクの人の声のすぐ後に持ち主が話すと、短い切れ目でつながって1つの発話になり、
+ * 持ち主の発言まで話者の名前が付かなかった)。短すぎる切れ端は前の区間に含める
+ */
+function splitByWeakness(
+  pieces: readonly [number, number][],
+  heard: Uint8Array,
+  weak: Uint8Array,
+  minTurn: number
+): [number, number][] {
+  const out: [number, number][] = []
+  for (const [a, b] of pieces) {
+    const runs: { a: number; b: number; weak: boolean }[] = []
+    let label: boolean | null = null
+    for (let k = a; k < b; k++) {
+      // 声の無い切れ目は、直前の区間に含める
+      const w = heard[k] ? weak[k] === 1 : label
+      if (w === null) continue
+      const last = runs[runs.length - 1]
+      if (last && last.weak === w) last.b = k + 1
+      else runs.push({ a: last ? last.b : a, b: k + 1, weak: w })
+      label = w
+    }
+    if (runs.length === 0) {
+      out.push([a, b])
+      continue
+    }
+    runs[runs.length - 1].b = b
+    // 短い切れ端は前(無ければ後ろ)の区間に含める
+    const merged: { a: number; b: number; weak: boolean }[] = []
+    for (const r of runs) {
+      const prev = merged[merged.length - 1]
+      if (prev && (r.b - r.a < minTurn || prev.weak === r.weak)) prev.b = r.b
+      else merged.push({ ...r })
+    }
+    if (merged.length > 1 && merged[0].b - merged[0].a < minTurn) {
+      merged[1].a = merged[0].a
+      merged.shift()
+    }
+    for (const r of merged) out.push([r.a, r.b])
+  }
+  return out
 }
 
 /**

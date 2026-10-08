@@ -193,3 +193,50 @@ describe('detectTurns: ふつうの会話のあとで止まったマイク', () 
     expect(late.every((t) => t.uncertain)).toBe(true)
   })
 })
+
+describe('detectTurns: 回り込みと持ち主の声がつながった発話・重なり', () => {
+  it('止まったマイクの人の声のすぐ後に持ち主が話しても、持ち主の発言は持ち主の発言のまま', () => {
+    const a = env(60, -60, [
+      [1, 4, -10],
+      [10, 14, -30],
+      [21, 24, -10],
+      [30, 34, -10],
+      // 回り込み(36〜40 秒)のすぐ後(0.2 秒の切れ目)に、持ち主が話す
+      [36, 40, -30],
+      [40.2, 44, -10],
+      [50, 54, -10]
+    ])
+    const b = env(60, -55, [[10, 14, -12]])
+    for (let i = 25 * TURN_RATE; i < b.length; i++) b[i] = NaN
+    const turns = detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b }
+    ])
+    const own = turns.filter((t) => t.micId === 'A' && t.end > 41 && t.start < 44)
+    expect(own.length).toBeGreaterThan(0)
+    expect(own.some((t) => !t.uncertain && t.end > 43)).toBe(true)
+    const bleed = turns.filter((t) => t.micId === 'A' && t.start < 37 && t.end > 37)
+    expect(bleed.every((t) => t.uncertain)).toBe(true)
+  })
+
+  it('短い掛け合いの重なりを見落とさない(普段の声の大きさに、かぶりの少ない人の声も使う)', () => {
+    // 2人とも本人の声 -10dB・かぶり -30dB。10〜10.5 秒だけ両者が同時に話す
+    const a = env(30, -60, [
+      [1, 6, -10],
+      [10, 10.5, -10],
+      [12, 17, -30],
+      [20, 25, -10]
+    ])
+    const b = env(30, -60, [
+      [1, 6, -30],
+      [7, 10.5, -10],
+      [12, 17, -10],
+      [20, 25, -30]
+    ])
+    const turns = detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b }
+    ])
+    expect(turns.some((t) => t.overlap)).toBe(true)
+  })
+})
