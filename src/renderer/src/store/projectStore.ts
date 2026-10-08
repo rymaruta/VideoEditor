@@ -146,15 +146,17 @@ function clampSourceRange<T extends { inPoint: number; outPoint: number }>(
 function copiedAudioDetached(project: Project, clip: Clip): boolean {
   return (
     clip.audioDetached === true &&
-    (project.multicam?.files.some((f) => f.assetId === clip.assetId) ?? false)
+    (project.multicam?.files.some((f) => f.assetId === clip.assetId) ?? false) &&
+    // 手で「音声を分離」したマルチカムのクリップ(分離した音が付いている)は、複製に音が付かないので
+    // 自分の音を鳴らす(消したままだと無音のクリップになっていた)
+    !project.audioTracks.some((t) => t.clips.some((c) => c.linkedClipId === clip.id))
   )
 }
 
 /**
  * 本編のクリップの入点・速さを変えたとき、そのクリップに追従するテロップの `linkOffset` を、
  * 同じ中身(素材の同じ時刻)を指すように直す。直さないと、頭を詰めた・速くしたクリップの上で
- * テロップが元の秒数の所に残り、別の中身(次のクリップ)の上に出ていた。
- * 指していた中身がクリップから外れたら、追従を外す(その時点の位置で固定)
+ * テロップが元の秒数の所に残り、別の中身(次のクリップ)の上に出ていた
  */
 function reanchorLinkedOverlays(before: Project, after: Project): Project {
   if (!after.textOverlays.some((o) => o.linkedClipId)) return after
@@ -170,13 +172,12 @@ function reanchorLinkedOverlays(before: Project, after: Project): Project {
     const newSpeed = nw.speed || 1
     if (old.inPoint === nw.inPoint && old.outPoint === nw.outPoint && oldSpeed === newSpeed)
       return o
+    // 追従は外さず、範囲でも丸めない(ロールのドラッグは動かすたびに呼ばれるので、行って戻ったときに
+    // 元の位置へ戻れるよう、素材の時刻からそのまま計算し直す。クリップの頭より前・後ろに
+    // ずらして置いたテロップ(負の・長い linkOffset)もそのまま)
     const source = old.inPoint + (o.linkOffset ?? 0) * oldSpeed
-    if (source < nw.inPoint - 1e-6 || source >= nw.outPoint) {
-      changed = true
-      return { ...o, linkedClipId: undefined, linkOffset: undefined }
-    }
-    const linkOffset = Math.max(0, (source - nw.inPoint) / newSpeed)
-    if (linkOffset === o.linkOffset) return o
+    const linkOffset = (source - nw.inPoint) / newSpeed
+    if (!Number.isFinite(linkOffset) || linkOffset === o.linkOffset) return o
     changed = true
     return { ...o, linkOffset }
   })
@@ -1770,8 +1771,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const forAsset = <T extends { assetId: string; inPoint: number; outPoint: number }>(
         clip: T
       ): T => (clip.assetId === assetId ? clampRange(clip) : clip)
+      // マルチカムの収録の長さも新しいファイルに合わせる(古い長さのまま、後の編集で
+      // マイクの音を素材の終わりの先まで作っていた)。その収録のファイルで、長さが変わるときだけ
+      // 作り直す(作り直すと、本編に付いていく処理が「別の収録を入れた」とみなして追従を止める)
+      const info = state.project.multicam
+      const newMulticam =
+        info &&
+        !still &&
+        probe.duration > 0 &&
+        info.files.some((f) => f.assetId === assetId && f.duration !== probe.duration)
+          ? {
+              ...info,
+              files: info.files.map((f) =>
+                f.assetId === assetId ? { ...f, duration: probe.duration } : f
+              )
+            }
+          : undefined
 
-      return {
+      const relinked = {
         // 再リンクは利用者の操作なので履歴を積む。積まないと `past` が伸びないまま
         // `project` だけ進むので、**取り消し1回で2つ前まで戻ってしまう**。
         // (実測: クリップを置く → 速度を2倍 → 再リンク、と進めて取り消しを1回押すと、
@@ -1820,21 +1837,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             ...t,
             clips: t.clips.map(forAsset)
           })),
-          // マルチカムの収録の長さも新しいファイルに合わせる(古い長さのまま、後の編集で
-          // マイクの音を素材の終わりの先まで作っていた)
-          ...(state.project.multicam && !still && probe.duration > 0
-            ? {
-                multicam: {
-                  ...state.project.multicam,
-                  files: state.project.multicam.files.map((f) =>
-                    f.assetId === assetId ? { ...f, duration: probe.duration } : f
-                  )
-                }
-              }
-            : {})
+          ...(newMulticam ? { multicam: newMulticam } : {})
         },
         isDirty: true,
         missingAssetIds: state.missingAssetIds.filter((id) => id !== assetId)
+      }
+      if (!newMulticam) return relinked
+      // 収録の長さを直したときは、本編(詰めたクリップ)に声・自動テロップを新しい長さで付いていかせる
+      return {
+        ...relinked,
+        project: followMainEdit({ ...state.project, multicam: newMulticam }, relinked.project),
+        __noFollow: true as const
       }
     }),
 

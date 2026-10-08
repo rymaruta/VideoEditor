@@ -426,6 +426,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         ...gameSrcs.map((g) => placed(g.id)),
         ...sameRecording.map((t) => t.envelope)
       ])
+      // 伏せた所(NaN)は「録っていない」ではない。止まったマイクとして扱わせないよう、伏せた時刻を覚える
+      // (全部入りを録っていない時刻は、今までどおり止まったマイク)
+      const maskedFrames = new Uint8Array(residual.length)
       if (!group.some((g) => g.trackRole === 'call')) {
         const others = tracks.filter((t) => !duplicates.has(t.id) && !sameRecording.includes(t))
         const busy = activityMask(others)
@@ -433,11 +436,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         // 声の出だし・終わりの小さい所も含めるよう、前後に少し広げる
         for (let i = 0; i < busy.length; i++) {
           if (!busy[i]) continue
-          residual.fill(NaN, Math.max(0, i - pad), Math.min(residual.length, i + pad + 1))
+          const a = Math.max(0, i - pad)
+          const b = Math.min(residual.length, i + pad + 1)
+          for (let k = a; k < b; k++) if (Number.isFinite(residual[k])) maskedFrames[k] = 1
+          residual.fill(NaN, a, b)
         }
       }
-      // 伏せた所(NaN)は「録っていない」ではない。止まったマイクとして扱わせない
-      tracks.push({ id: mixSrc.id, envelope: residual, masked: true })
+      tracks.push({ id: mixSrc.id, envelope: residual, maskedFrames })
       mixSpeakers.add(mixSrc.id)
       for (const f of ownFiles) if (f.sourceId === mixSrc.id) targetFiles.push(f)
       speakerSources.push(mixSrc)

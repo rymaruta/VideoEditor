@@ -16,10 +16,10 @@ export interface MicTrack {
   /** 共通の時間軸の 10ms ごとの音の大きさ(RMS)。録っていない所は NaN */
   envelope: Float32Array
   /**
-   * NaN が「録っていない」ではなく「ほかの人が話している所を伏せた」(全部入りの残り)。
-   * 伏せた所は、止まったマイクとして扱わない
+   * NaN のうち「録っていない」ではなく「ほかの人が話している所を伏せた」時刻(1 = 伏せた。全部入りの残り)。
+   * 伏せた時刻は、止まったマイクとして扱わない(録っていない時刻は今までどおり止まったマイク)
    */
-  masked?: boolean
+  maskedFrames?: Uint8Array
 }
 
 export interface SpeechTurn {
@@ -105,7 +105,7 @@ interface MicStats {
   speech: number
   /** 声があると判断する大きさ */
   threshold: number
-  masked: boolean
+  maskedFrames?: Uint8Array
 }
 
 function statsOf(track: MicTrack): MicStats | null {
@@ -118,7 +118,7 @@ function statsOf(track: MicTrack): MicStats | null {
   const threshold = floor + Math.max(8, (loud - floor) * 0.4)
   const speechFrames = valid.filter((v) => v >= threshold)
   const speech = speechFrames.length > 0 ? percentile(speechFrames, 0.5) : loud
-  return { id: track.id, db, floor, speech, threshold, masked: Boolean(track.masked) }
+  return { id: track.id, db, floor, speech, threshold, maskedFrames: track.maskedFrames }
 }
 
 /**
@@ -177,7 +177,9 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
     owned[best][t] = 1
     if (
       bestRel < ABSENT_PEER_MIN_REL_DB &&
-      stats.some((st) => !st.masked && (st.db[t] === undefined || Number.isNaN(st.db[t])))
+      stats.some(
+        (st) => !st.maskedFrames?.[t] && (st.db[t] === undefined || Number.isNaN(st.db[t]))
+      )
     )
       weak[best][t] = 1
     // 2番目も「その人が話しているときの普段の大きさ」に近ければ、2人とも話している

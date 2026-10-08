@@ -121,22 +121,49 @@ describe('detectTurns: 伏せた全部入りの残り', () => {
     [6, 9, -12],
     [50, 55, -12]
   ])
+  const maskedFrames = new Uint8Array(residual.length)
   for (const [a, b] of [
     [0.8, 5.2],
     [9.8, 15.2],
     [19.8, 24.2],
     [29.8, 33.2],
     [39.8, 45.2]
-  ])
+  ]) {
     residual.fill(NaN, a * TURN_RATE, b * TURN_RATE)
+    maskedFrames.fill(1, a * TURN_RATE, b * TURN_RATE)
+  }
 
   it('伏せた所を「止まったマイク」とみなさず、友達の小さい声も友達の発言にする', () => {
     const turns = detectTurns([
       { id: 'friend', envelope: friend },
-      { id: 'mix', envelope: residual, masked: true }
+      { id: 'mix', envelope: residual, maskedFrames }
     ])
     const soft = turns.filter((t) => t.micId === 'friend' && t.start > 29 && t.end < 34)
     expect(soft).toHaveLength(1)
     expect(soft[0].uncertain).toBeUndefined()
+  })
+})
+
+describe('detectTurns: 伏せた時刻と、録っていない時刻', () => {
+  it('伏せた時刻のある残りでも、録っていない時刻はこれまでどおり止まったマイクとみなす', () => {
+    const a = env(50, -60, [
+      [1, 4, -10],
+      [21, 24, -10],
+      [30, 34, -10],
+      [36, 42, -30],
+      [45, 49, -10]
+    ])
+    const b = env(50, -55, [[16, 20, -12]])
+    for (let i = 25 * TURN_RATE; i < b.length; i++) b[i] = NaN
+    // 伏せた時刻は別(1〜4 秒)。25 秒からは録っていない
+    const maskedFrames = new Uint8Array(b.length)
+    maskedFrames.fill(1, 1 * TURN_RATE, 4 * TURN_RATE)
+    const turns = detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b, maskedFrames }
+    ])
+    const late = turns.filter((t) => t.micId === 'A' && t.start > 35 && t.end < 44)
+    expect(late.length).toBeGreaterThan(0)
+    expect(late.every((t) => t.uncertain)).toBe(true)
   })
 })

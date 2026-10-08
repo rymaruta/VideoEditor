@@ -20,7 +20,9 @@ export function isTypingTarget(el: EventTarget | null, key?: string): boolean {
     const type = (el as HTMLInputElement).type
     if (type === 'range') return key !== undefined && /^(Arrow|Home$|End$|Page)/.test(key)
     // チェックボックス・ラジオの Space(切り替え)は欄に任せる(再生にすると切り替えられなかった)
-    if (type === 'checkbox' || type === 'radio') return key === ' ' || key === 'Enter'
+    if (type === 'checkbox') return key === ' ' || key === 'Enter'
+    // ラジオは矢印キーで選び直す(再生位置を動かすと、選び直せなかった)
+    if (type === 'radio') return key === ' ' || key === 'Enter' || /^Arrow/.test(key ?? '')
     if (type === 'button') return false
     return true
   }

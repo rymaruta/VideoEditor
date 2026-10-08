@@ -214,26 +214,45 @@ describe('第8回: 編集モデル', () => {
     expect(st().project.textOverlays[0].startTime).toBeCloseTo(8, 9)
   })
 
-  it('追従するテロップの中身をトリムで切り落としたら、追従を外す', () => {
+  it('追従するテロップは、ロールで行って戻っても・クリップの外へずらしてあっても追従を外さない', () => {
     S.setState({
       project: {
         ...st().project,
+        clips: [
+          { id: 'c1', assetId: 'A', inPoint: 0, outPoint: 10, speed: 1 },
+          { id: 'c2', assetId: 'B', inPoint: 3, outPoint: 13, speed: 1 }
+        ],
         textOverlays: [
           {
             id: 'o1',
             text: 'あ',
-            startTime: 8,
-            endTime: 9,
+            startTime: 11,
+            endTime: 12,
             style: {},
             source: 'manual',
-            linkedClipId: 'c1',
-            linkOffset: 8
+            linkedClipId: 'c2',
+            linkOffset: 1
+          },
+          {
+            id: 'o2',
+            text: 'い',
+            startTime: 9.5,
+            endTime: 10,
+            style: {},
+            source: 'manual',
+            linkedClipId: 'c2',
+            linkOffset: -0.5
           }
         ]
       } as unknown as Project
     })
-    st().updateClipTrim('c1', 0, 5)
-    expect(st().project.textOverlays[0].linkedClipId).toBeUndefined()
+    st().rollTrim('c1', 'c2', 2)
+    st().rollTrim('c1', 'c2', -2)
+    const o1 = st().project.textOverlays.find((o) => o.id === 'o1')!
+    expect(o1.linkedClipId).toBe('c2')
+    expect(o1.startTime).toBeCloseTo(11, 9)
+    st().updateClipSpeed('c2', 1.25)
+    expect(st().project.textOverlays.find((o) => o.id === 'o2')!.linkedClipId).toBe('c2')
   })
 
   it('マルチカムの素材を短いファイルへ差し替えたら、後の編集でマイクの音を素材の先まで作らない', () => {
@@ -255,6 +274,69 @@ describe('第8回: 編集モデル', () => {
     const main = st().project.clips[0].id
     st().updateClipTrim(main, 0, 60)
     for (const c of micClips()) expect(c.outPoint).toBeLessThanOrEqual(30 + 1e-9)
+  })
+
+  it('差し込みの画を短いファイルへ差し替えても、マイクの音は本編に付いていく', () => {
+    roughCut([
+      [0, 10],
+      [10, 20]
+    ])
+    S.setState({
+      project: {
+        ...st().project,
+        assets: [...st().project.assets, asset('X', 10)]
+      }
+    })
+    const clips = st().project.clips
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [clips[0], { id: 'x', assetId: 'X', inPoint: 0, outPoint: 10, speed: 1 }, clips[1]]
+      }
+    })
+    // 差し込みの分だけ、2本目の声は 20 秒から
+    S.setState({
+      project: {
+        ...st().project,
+        audioTracks: st().project.audioTracks.map((t) =>
+          t.multicamSourceId === 'M'
+            ? { ...t, clips: t.clips.map((c, i) => (i === 1 ? { ...c, startTime: 20 } : c)) }
+            : t
+        )
+      }
+    })
+    st().relinkAsset(
+      'X',
+      '/rec/x2.mp4',
+      'x2.mp4',
+      {
+        duration: 4,
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        hasAudio: true,
+        hasVideo: true
+      } as Parameters<ReturnType<typeof S.getState>['relinkAsset']>[3],
+      ''
+    )
+    expect(micClips()[1].startTime).toBeCloseTo(14, 6)
+  })
+
+  it('手で音声を分離したマルチカムのクリップの複製は、自分の音を鳴らす(無音にしない)', () => {
+    S.setState({
+      project: {
+        ...st().project,
+        multicam: {
+          anchorSourceId: 'A',
+          sources: [{ id: 'A', name: 'カメラA', kind: 'camera' }],
+          files: [{ assetId: 'A', sourceId: 'A', start: 0, rate: 1, duration: 20 }]
+        }
+      } as unknown as Project
+    })
+    st().detachClipAudio('c1')
+    st().duplicateClips(['c1'])
+    const copy = st().project.clips.find((c) => c.id !== 'c1' && c.assetId === 'A')!
+    expect(copy.audioDetached).toBe(false)
   })
 
   it('置き換えで消えたクリップ・テロップを選んだままにしない', () => {

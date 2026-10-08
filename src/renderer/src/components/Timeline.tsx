@@ -1391,6 +1391,10 @@ export function Timeline(): React.JSX.Element {
     : project
   const timedClips = buildTimedClips(previewProject)
   const total = totalTimelineDuration(timedClips)
+  /** 繋ぎの吹き出しを開いているクリップ */
+  const popTc = transitionPopoverClipId
+    ? timedClips.find((tc) => tc.clip.id === transitionPopoverClipId)
+    : undefined
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   // 時間目盛りの刻み(フレームレートはプロジェクトの素材から。書き出しと同じ数え方)
   const rulerFps = 1 / frameSeconds(project.clips, project.assets)
@@ -2202,6 +2206,69 @@ export function Timeline(): React.JSX.Element {
           )}
         </div>
 
+        {/* 繋ぎの吹き出し。document.body に出す(トラックの枠の overflow で切れて、見えも押せもしなかった)。
+            クリップの外に置く(中に置くと、吹き出しの余白のクリックがクリップ・境目の印へ伝わり、閉じていた) */}
+        {popTc && (
+          <Popover
+            anchorRef={transitionAnchorRef}
+            label="トランジション"
+            onClose={() => setTransitionPopoverClipId(null)}
+          >
+            <div
+              className="transition-popover-body"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onDragStart={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+              }}
+            >
+              <select
+                value={popTc.clip.transitionIn?.type ?? 'none'}
+                onChange={(e) =>
+                  updateClipTransition(
+                    popTc.clip.id,
+                    e.target.value === 'none'
+                      ? undefined
+                      : {
+                          type: e.target.value as TransitionType,
+                          duration: popTc.clip.transitionIn?.duration ?? 0.5
+                        }
+                  )
+                }
+              >
+                <option value="none">カット</option>
+                <option value="crossfade">クロスフェード</option>
+                <option value="fade">フェード</option>
+                <option value="wipe">ワイプ</option>
+              </select>
+              {popTc.clip.transitionIn && (
+                <>
+                  <input
+                    className="transition-duration"
+                    type="number"
+                    min={0.1}
+                    max={2}
+                    step={0.1}
+                    value={popTc.clip.transitionIn.duration}
+                    onChange={(e) =>
+                      updateClipTransition(popTc.clip.id, {
+                        type: popTc.clip.transitionIn?.type ?? 'crossfade',
+                        duration: Number(e.target.value)
+                      })
+                    }
+                    title={transitionDurationTitle(project.clips, popTc.clip.id)}
+                  />
+                  {trimmedTransitionOf(project.clips, popTc.clip.id) && (
+                    <span className="hint-text transition-trimmed">
+                      実際 {trimmedTransitionOf(project.clips, popTc.clip.id)!.toFixed(2)}秒
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          </Popover>
+        )}
         <div className="track-lanes-col" ref={trackLanesColRef}>
           {/* 時間目盛り。押した位置へ再生位置を移す(見えている範囲の目盛りだけ描く) */}
           <div
@@ -2429,71 +2496,7 @@ export function Timeline(): React.JSX.Element {
                           prev === tc.clip.id ? null : tc.clip.id
                         )
                       }}
-                    >
-                      {/* 吹き出しは document.body に出す(トラックの枠の overflow で切れて、見えも押せもしなかった) */}
-                      {transitionPopoverClipId === tc.clip.id && (
-                        <Popover
-                          anchorRef={transitionAnchorRef}
-                          label="トランジション"
-                          onClose={() => setTransitionPopoverClipId(null)}
-                        >
-                          <div
-                            className="transition-popover-body"
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onDragStart={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                            }}
-                          >
-                            <select
-                              value={tc.clip.transitionIn?.type ?? 'none'}
-                              onChange={(e) =>
-                                updateClipTransition(
-                                  tc.clip.id,
-                                  e.target.value === 'none'
-                                    ? undefined
-                                    : {
-                                        type: e.target.value as TransitionType,
-                                        duration: tc.clip.transitionIn?.duration ?? 0.5
-                                      }
-                                )
-                              }
-                            >
-                              <option value="none">カット</option>
-                              <option value="crossfade">クロスフェード</option>
-                              <option value="fade">フェード</option>
-                              <option value="wipe">ワイプ</option>
-                            </select>
-                            {tc.clip.transitionIn && (
-                              <>
-                                <input
-                                  className="transition-duration"
-                                  type="number"
-                                  min={0.1}
-                                  max={2}
-                                  step={0.1}
-                                  value={tc.clip.transitionIn.duration}
-                                  onChange={(e) =>
-                                    updateClipTransition(tc.clip.id, {
-                                      type: tc.clip.transitionIn?.type ?? 'crossfade',
-                                      duration: Number(e.target.value)
-                                    })
-                                  }
-                                  title={transitionDurationTitle(project.clips, tc.clip.id)}
-                                />
-                                {trimmedTransitionOf(project.clips, tc.clip.id) && (
-                                  <span className="hint-text transition-trimmed">
-                                    実際{' '}
-                                    {trimmedTransitionOf(project.clips, tc.clip.id)!.toFixed(2)}秒
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </Popover>
-                      )}
-                    </div>
+                    ></div>
                   )}
                   {clipColorOf(tc.clip.colorLabel) && (
                     <span
