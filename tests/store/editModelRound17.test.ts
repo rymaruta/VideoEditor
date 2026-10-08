@@ -821,3 +821,17 @@ describe('第24回: BGM のつなぎ目と、延ばして戻したときの切�
     expect(last.startTime + last.outPoint - last.inPoint).toBeCloseTo(40, 6)
   })
 })
+
+describe('第25回: 待つ間に素材を差し替えたときの裏の結果', () => {
+  it('前のファイルから作ったプロキシ・ノイズ除去の結果は当てない', () => {
+    setup([[0, 10]])
+    const p = st().project
+    S.setState({
+      project: { ...p, assets: [...p.assets, { ...asset('X', 10), filePath: '/rec/Y.mp4' }] }
+    })
+    st().setAssetProxyPath('X', '/proxies/old.mp4', '/rec/X.mp4')
+    expect(st().project.assets.find((a) => a.id === 'X')!.proxyPath).toBeUndefined()
+    st().setAssetsDenoised({ X: '/clean/old.flac' }, { expectFilePath: { X: '/rec/X.mp4' } })
+    expect(st().project.assets.find((a) => a.id === 'X')!.filePath).toBe('/rec/Y.mp4')
+  })
+})

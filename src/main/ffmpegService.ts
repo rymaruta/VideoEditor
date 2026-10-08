@@ -256,7 +256,20 @@ function clampSeekSeconds(filePath: string, atSeconds: number): Promise<number> 
       if (err || typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
         return resolve(atSeconds)
       }
-      resolve(Math.min(atSeconds, Math.max(0, duration - SEEK_END_MARGIN)))
+      // 映像がファイルより先に終わる(音声の方が長い)素材は、映像の終わりで止める。ファイルの長さで
+      // 止めると、映像の終わりより後ろを指して「フレームを取得できませんでした」になっていた
+      const video = data.streams?.find(
+        (st) => st.codec_type === 'video' && !st.disposition?.attached_pic
+      )
+      const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v))
+      const videoDuration = num(video?.duration)
+      const offset = num(video?.start_time) - num(data.format?.start_time)
+      const videoEnd =
+        Number.isFinite(videoDuration) && videoDuration > 0
+          ? videoDuration + (Number.isFinite(offset) ? offset : 0)
+          : Infinity
+      const end = Math.min(duration, videoEnd)
+      resolve(Math.min(atSeconds, Math.max(0, end - SEEK_END_MARGIN)))
     })
   })
 }
@@ -358,7 +371,10 @@ export function generateWaveformDataUrl(
     trackUntilDone(ffmpeg(filePath), ['end', 'error'])
       .inputOptions([`-ss ${ffSeconds(start)}`, `-t ${ffSeconds(Math.max(0.05, end - start))}`])
       .complexFilter([
-        `[0:a]aformat=channel_layouts=mono,showwavespic=s=${safeWidth}x${safeHeight}:colors=0x9c8cf6[v]`
+        // 音声の頭を時刻 0 にそろえ、区間の長さまで無音で埋めてから描く(音声が遅れて始まる素材・
+        // 区間の途中で終わる素材で、波形が横に引き伸ばされ、ずれていた。ほかの音の読み取りと同じ扱い)
+        `[0:a]${ALIGN_AUDIO_START},apad=whole_dur=${ffSeconds(Math.max(0.05, end - start))},` +
+          `aformat=channel_layouts=mono,showwavespic=s=${safeWidth}x${safeHeight}:colors=0x9c8cf6[v]`
       ])
       .outputOptions(['-map [v]', '-frames:v 1'])
       .output(outFile)

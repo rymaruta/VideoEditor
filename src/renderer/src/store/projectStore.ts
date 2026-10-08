@@ -976,7 +976,11 @@ interface ProjectState {
     /** 機材の名前・役割(企画に残す。仮編集の作り直しに使う) */
     sources?: MulticamSource[]
   ) => void
-  setAssetProxyPath: (assetId: string, proxyPath: string | undefined) => void
+  /**
+   * `forFilePath`: プロキシを作った元のファイル。いまの素材のファイルと違えば(変換を待つ間に差し替えた)
+   * 当てない(当てると、プレビューだけ前の映像が映っていた)
+   */
+  setAssetProxyPath: (assetId: string, proxyPath: string | undefined, forFilePath?: string) => void
   removeAsset: (assetId: string) => void
   addAudioClipWithAsset: (
     asset: MediaAsset,
@@ -1088,7 +1092,13 @@ interface ProjectState {
    */
   setAssetsDenoised: (
     changes: Record<string, string | null>,
-    options?: { history?: boolean }
+    options?: {
+      history?: boolean
+      /**
+       * 頼んだときの素材のファイル(素材の id → パス)。いまのファイルと違えば(待つ間に差し替えた)当てない
+       */
+      expectFilePath?: Record<string, string>
+    }
   ) => void
   /**
    * 仮編集(構成・カット・アングル)を入れる。本編・同期で作ったトラック・発言テロップを入れ替え、
@@ -2134,10 +2144,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // it must not create an undo entry (undoing an import would otherwise leave a
   // half-state) and must not mark the project dirty, since the proxy is a rebuildable
   // cache rather than edited content.
-  setAssetProxyPath: (assetId, proxyPath) =>
+  setAssetProxyPath: (assetId, proxyPath, forFilePath) =>
     set((state) => {
       const target = state.project.assets.find((a) => a.id === assetId)
       if (!target || target.proxyPath === proxyPath) return state
+      if (forFilePath !== undefined && target.filePath !== forFilePath) return state
       return {
         project: backgroundUpdate(state.project, {
           ...state.project,
@@ -3471,6 +3482,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       let changed = false
       const assets = state.project.assets.map((a) => {
         if (!(a.id in changes)) return a
+        // 待つ間に素材を差し替えていたら、前のファイルから作った結果は当てない
+        const expected = options?.expectFilePath?.[a.id]
+        if (expected !== undefined && expected !== a.filePath) return a
         const cleaned = changes[a.id]
         if (cleaned) {
           if (a.filePath === cleaned) return a

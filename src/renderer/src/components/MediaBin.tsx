@@ -112,7 +112,7 @@ export function MediaBin(): React.JSX.Element {
     setProxyProgress((prev) => ({ ...prev, [assetId]: 0 }))
     try {
       const proxyPath = await window.api.ensurePreviewProxy(filePath, assetId)
-      setAssetProxyPath(assetId, proxyPath)
+      setAssetProxyPath(assetId, proxyPath, filePath)
     } catch (e) {
       // The asset stays usable — it just can't be previewed. Surfacing this beats
       // leaving the user with a black preview and no explanation.
@@ -372,7 +372,13 @@ export function MediaBin(): React.JSX.Element {
     setError(null)
     try {
       const [r] = await window.api.denoiseRun([asset.filePath])
-      if (r?.cleaned) useProjectStore.getState().setAssetsDenoised({ [asset.id]: r.cleaned })
+      if (r?.cleaned)
+        useProjectStore
+          .getState()
+          .setAssetsDenoised(
+            { [asset.id]: r.cleaned },
+            { expectFilePath: { [asset.id]: asset.filePath } }
+          )
       else setError(r?.error ?? 'ノイズ除去ができませんでした')
     } catch (e) {
       setError(formatIpcError(e))

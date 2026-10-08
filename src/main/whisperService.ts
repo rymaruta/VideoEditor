@@ -11,6 +11,7 @@ import { retryableSingleton } from './retryableSingleton'
 import { describeFfmpegExit } from './ffmpegError'
 import { ffSeconds } from './ffArgs'
 import { PCM_ALIGN_FILTER } from './audioPcm'
+import { fitSegmentsToRange } from '@shared/transcript'
 
 const execFileAsyncRaw = promisify(execFile)
 /** 外部の処理を始め、アプリを閉じるときに止める一覧に入れる */
@@ -116,6 +117,8 @@ export async function transcribeRange(
   language: string = 'japanese'
 ): Promise<TranscriptSegment[]> {
   const audio = await extractPcm16k(filePath, rangeStart, rangeEnd)
+  // 音の無い区間(音声が映像より短い素材の終わりの先)は、認識に渡すと作り話を返すので渡さない
+  if (audio.length === 0) return []
   let transcriber: Transcriber
   try {
     transcriber = await getTranscriber()
@@ -137,16 +140,20 @@ export async function transcribeRange(
   if (!result.chunks || result.chunks.length === 0) {
     const text = result.text?.trim()
     if (!text) return []
-    return [{ start: rangeStart, end: rangeEnd, text }]
+    return fitSegmentsToRange([{ start: rangeStart, end: rangeEnd, text }], rangeStart, rangeEnd)
   }
 
-  return result.chunks
-    .map((chunk) => ({
-      start: rangeStart + chunk.timestamp[0],
-      end: rangeStart + (chunk.timestamp[1] ?? rangeEnd - rangeStart),
-      text: chunk.text.trim()
-    }))
-    .filter((seg) => seg.text.length > 0)
+  return fitSegmentsToRange(
+    result.chunks
+      .map((chunk) => ({
+        start: rangeStart + chunk.timestamp[0],
+        end: rangeStart + (chunk.timestamp[1] ?? rangeEnd - rangeStart),
+        text: chunk.text.trim()
+      }))
+      .filter((seg) => seg.text.length > 0),
+    rangeStart,
+    rangeEnd
+  )
 }
 
 function buildWordSegment(words: { raw: string; start: number; end: number }[]): TranscriptSegment {
@@ -172,6 +179,8 @@ export async function transcribeWordsRange(
   maxGapSeconds = 0.6
 ): Promise<TranscriptSegment[]> {
   const audio = await extractPcm16k(filePath, rangeStart, rangeEnd)
+  // 音の無い区間(音声が映像より短い素材の終わりの先)は、認識に渡すと作り話を返すので渡さない
+  if (audio.length === 0) return []
   let transcriber: Transcriber
   try {
     transcriber = await getTranscriber()
@@ -213,5 +222,5 @@ export async function transcribeWordsRange(
     current.push(w)
   }
   if (current.length > 0) segments.push(buildWordSegment(current))
-  return segments
+  return fitSegmentsToRange(segments, rangeStart, rangeEnd)
 }

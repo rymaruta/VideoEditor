@@ -120,3 +120,41 @@ export function utteranceTimelineRange(
   }
   return null
 }
+
+/**
+ * 区間を指定して文字起こしした結果を、その区間に収める。
+ * - 認識の作り話(無音・雑音で出る「ご視聴ありがとうございました」・同じ言葉の繰り返し)は捨てる
+ * - 区間の終わりより後ろで始まる言葉は捨て、時刻は区間の中に収める
+ * (自動のテロップ・カラオケが、無音の所に出たり、クリップの終わりより 20 秒以上後ろに置かれたりしていた)
+ */
+export function fitSegmentsToRange<
+  S extends {
+    start: number
+    end: number
+    text: string
+    words?: { start: number; end: number; text: string }[]
+  }
+>(segments: readonly S[], rangeStart: number, rangeEnd: number): S[] {
+  const clamp = (t: number): number => Math.min(rangeEnd, Math.max(rangeStart, t))
+  const out: S[] = []
+  for (const seg of segments) {
+    if (isLikelyHallucination(seg.text)) continue
+    if (!seg.words) {
+      if (seg.start >= rangeEnd) continue
+      out.push({ ...seg, start: clamp(seg.start), end: Math.max(clamp(seg.start), clamp(seg.end)) })
+      continue
+    }
+    const words = seg.words
+      .filter((w) => w.start < rangeEnd)
+      .map((w) => ({ ...w, start: clamp(w.start), end: Math.max(clamp(w.start), clamp(w.end)) }))
+    if (words.length === 0) continue
+    out.push({
+      ...seg,
+      words,
+      start: words[0].start,
+      end: words[words.length - 1].end,
+      text: words.map((w) => w.text).join('')
+    })
+  }
+  return out
+}

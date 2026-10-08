@@ -662,7 +662,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             `ノイズ除去: ${assets[i].fileName} はできませんでした(元の録音のまま): ${r.error ?? ''}`
           )
       })
-      useProjectStore.getState().setAssetsDenoised(changes)
+      useProjectStore.getState().setAssetsDenoised(changes, {
+        expectFilePath: Object.fromEntries(assets.map((a) => [a.id, a.filePath]))
+      })
       if (runCanceled) {
         setStep('denoise', { state: 'wait', note: '中止しました' })
         return
