@@ -10,20 +10,31 @@ import { LOUDNESS_TARGETS, type LoudnessTarget } from '@shared/loudness'
 import type { MediaAsset, Project } from '@shared/types'
 
 /**
- * 書き出しの音量(ラウドネス)を、まばらに鋭い山がある素材でも基準の ±1 LU に入れる。
+ * 書き出しの音量(ラウドネス)を、まばらに鋭い山がある素材でも基準の ±1 LU に入れ、トゥルーピークの上限も越えない。
  * 一定のゲインで上げると山が上限を越える素材では、loudnorm が黙って dynamic に戻り、基準に届かなかった
  */
 const work = mkdtempSync(join(tmpdir(), 've-loud-'))
 afterAll(() => rmSync(work, { recursive: true, force: true }))
 
-function integratedLufs(path: string): number {
+function loudness(path: string): { i: number; tp: number } {
   const r = spawnSync(
     ffmpegPath,
-    ['-hide_banner', '-i', path, '-vn', '-af', 'ebur128=framelog=quiet', '-f', 'null', '-'],
+    [
+      '-hide_banner',
+      '-i',
+      path,
+      '-vn',
+      '-af',
+      'ebur128=framelog=quiet:peak=true',
+      '-f',
+      'null',
+      '-'
+    ],
     { encoding: 'utf8' }
   )
-  const m = /Integrated loudness:\s*\n\s*I:\s*(-?[\d.]+) LUFS/.exec(r.stderr)
-  return m ? Number(m[1]) : NaN
+  const i = /Integrated loudness:\s*\n\s*I:\s*(-?[\d.]+) LUFS/.exec(r.stderr)
+  const tp = /True peak:\s*\n\s*Peak:\s*(-?[\d.]+|-inf) dBFS/.exec(r.stderr)
+  return { i: i ? Number(i[1]) : NaN, tp: tp ? Number(tp[1]) : NaN }
 }
 
 async function source(name: string, audio: string): Promise<MediaAsset> {
@@ -112,11 +123,11 @@ describe.skipIf(!existsSync(ffmpegPath))('書き出しのラウドネス', () =>
           loudnessTarget: target
         })
         for (const out of [std, seg]) {
-          const i = integratedLufs(out)
-          expect(
-            Math.abs(i - LOUDNESS_TARGETS[target].integrated),
-            `${a.id} ${target} ${out} ${i}`
-          ).toBeLessThanOrEqual(1)
+          const { i, tp } = loudness(out)
+          const label = `${a.id} ${target} ${out} I=${i} TP=${tp}`
+          expect(Math.abs(i - LOUDNESS_TARGETS[target].integrated), label).toBeLessThanOrEqual(1)
+          // トゥルーピークの上限も越えない(AAC にした後で)
+          expect(tp, label).toBeLessThanOrEqual(LOUDNESS_TARGETS[target].truePeak + 0.2)
         }
       }
     }

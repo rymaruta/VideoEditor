@@ -2102,4 +2102,50 @@ describe('タイムライン編集(第4回の調査)', () => {
     expect(clips.map((c) => c.startTime).sort()).toEqual([10, 10.5])
     expect(lanes).toHaveLength(2)
   })
+
+  it('言葉の効果音: 段が全部埋まって後ろへずらした SE も、スキャンし直して増やさない', () => {
+    const se = (
+      startTime: number
+    ): { assetId: string; startTime: number; outPoint: number; volume: number } => ({
+      assetId: 'M',
+      startTime,
+      outPoint: 2.5,
+      volume: 1
+    })
+    const scan = [se(10), se(10.3), se(10.6), se(10.9)]
+    st().addKeywordSeClips(scan)
+    const count = (): number =>
+      st()
+        .project.audioTracks.filter((t) => /^SE( \d)?$/.test(t.name))
+        .flatMap((t) => t.clips).length
+    expect(count()).toBe(4)
+    st().addKeywordSeClips(scan)
+    st().addKeywordSeClips(scan)
+    expect(count()).toBe(4)
+  })
+
+  it('言葉の効果音: 間の段を消した後に足す段は、残っている段と同じ名前にしない', () => {
+    const se = (
+      startTime: number
+    ): { assetId: string; startTime: number; outPoint: number; volume: number } => ({
+      assetId: 'M',
+      startTime,
+      outPoint: 2.5,
+      volume: 1
+    })
+    st().addKeywordSeClips([se(10), se(10.3), se(10.6)])
+    const se2 = st().project.audioTracks.find((t) => t.name === 'SE 2')!
+    S.setState({
+      project: {
+        ...st().project,
+        audioTracks: st().project.audioTracks.filter((t) => t.id !== se2.id)
+      }
+    })
+    st().addKeywordSeClips([se(10.15)])
+    const names = st()
+      .project.audioTracks.map((t) => t.name)
+      .filter((n) => /^SE( \d)?$/.test(n))
+    expect(new Set(names).size).toBe(names.length)
+    expect(names.sort()).toEqual(['SE', 'SE 2', 'SE 3'])
+  })
 })

@@ -57,5 +57,15 @@ interface Watchable extends Killable {
 export function trackUntilDone<T extends Watchable>(p: T, events = ['close', 'error']): T {
   const untrack = trackProcess(p)
   for (const e of events) p.once(e, untrack)
+  // fluent-ffmpeg は `.run()` の後に遅れて ffmpeg を起こし、起こす前の kill は何もしない。
+  // 起きた時点で閉じている最中なら、そこで止める(閉じた後に3時間ぶんの無音検出が走り続けていた)
+  p.once('start', () => {
+    if (!shuttingDown) return
+    try {
+      p.kill('SIGKILL')
+    } catch {
+      // すでに終わっている
+    }
+  })
   return p
 }

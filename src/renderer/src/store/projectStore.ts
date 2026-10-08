@@ -4021,6 +4021,15 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         const t = state.project.audioTracks.find((x) => x.name === laneName(i))
         if (t) lanes.push({ id: t.id, name: t.name, existing: true, clips: [...t.clips] })
       }
+      // スキャンの前からあったクリップ(段が埋まって後ろへずらしたものを、次のスキャンで見分ける)
+      const before = new Set(lanes.flatMap((l) => l.clips.map((c) => c.id)))
+      // 新しい段の名前は、まだ使っていない一番若い名前(SE 2 を消して SE・SE 3 が残っているとき、
+      // 段の数から名前を付けると SE 3 が2本になっていた)
+      const unusedLaneName = (): string | undefined => {
+        for (let i = 0; i < KEYWORD_SE_LANES; i++)
+          if (!lanes.some((l) => l.name === laneName(i))) return laneName(i)
+        return undefined
+      }
       const added = new Map<string, AudioTrackClip[]>()
       const free = (clips: readonly AudioTrackClip[], start: number, len: number): boolean =>
         clips.every(
@@ -4039,9 +4048,26 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         )
           continue
         let lane = lanes.find((l) => free(l.clips, start, p.outPoint))
-        if (!lane && lanes.length < KEYWORD_SE_LANES) {
-          lane = { id: uuid(), name: laneName(lanes.length), existing: false, clips: [] }
+        const name = lane ? undefined : unusedLaneName()
+        if (!lane && name !== undefined) {
+          lane = { id: uuid(), name, existing: false, clips: [] }
           lanes.push(lane)
+        }
+        // 段が全部埋まっていて後ろへずらす場合: 前のスキャンで同じ言葉からずらして置いた同じ素材
+        // (言葉の時刻から、今ずらすと置く位置までの間にある)があれば置かない
+        // (スキャンし直すたびに、同じ SE がさらに後ろへ1本ずつ増えていた)
+        if (!lane) {
+          const at = findFreeAudioStart(lanes[0].clips, start, p.outPoint)
+          if (
+            lanes[0].clips.some(
+              (c) =>
+                before.has(c.id) &&
+                c.assetId === p.assetId &&
+                c.startTime >= start - 0.05 &&
+                c.startTime <= at + 0.05
+            )
+          )
+            continue
         }
         const clip: AudioTrackClip = {
           id: uuid(),

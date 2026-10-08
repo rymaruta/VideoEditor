@@ -73,7 +73,8 @@ export function multiChannelDownmixFilter(sampleRate?: number, channels?: number
     return (
       `pan=stereo|c0=${spec[0]}|c1=${spec[1]},` +
       `aresample=${ratePart(sampleRate)}osf=fltp,` +
-      `alimiter=limit=1:level=disabled:attack=1:release=50`
+      // 先読みの分の遅れを戻す(latency=1。戻さないと 5.1 の音だけ約 1ms 遅れた)
+      `alimiter=limit=1:level=disabled:attack=1:release=50:latency=1`
     )
   return `aresample=${ratePart(sampleRate)}osf=fltp:ochl=stereo:rematrix_maxval=1.0`
 }

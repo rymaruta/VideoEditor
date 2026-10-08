@@ -58,8 +58,13 @@ export function loudnormApplyFilter(
   )
 }
 
-/** サンプルの山で抑えるときの、トゥルーピークの上限からの余裕(dB) */
+/** リミッタで抑える高さの、トゥルーピークの上限からの余裕(dB)の始めの値 */
 const TRUE_PEAK_MARGIN_DB = 0.5
+/**
+ * 書き出しの前(浮動小数)で測ったトゥルーピークに残す、AAC にしたときの持ち上がり分(dB)。
+ * 実測: 書き出しの前で -0.9 dBTP の音が、AAC にすると -0.1 dBTP になった
+ */
+const AAC_TRUE_PEAK_HEADROOM_DB = 1
 /** 一定のゲイン + リミッタで合わせるときに、これより近ければ合ったとする(LU) */
 export const LIMITED_GAIN_TOLERANCE_LU = 0.3
 
@@ -67,7 +72,7 @@ export const LIMITED_GAIN_TOLERANCE_LU = 0.3
  * 一定のゲインで基準まで上げるとトゥルーピークの上限を越えるか(まばらに鋭い山がある素材)。
  * そういう素材では loudnorm が黙って dynamic に戻り、リミッタで全体が下がって基準に届かない
  * (実測: 配信で -15.2、放送で -26.2 LUFS)。この場合は自分で一定のゲインを掛けて越える山だけを抑え、
- * 抑えた後の大きさを測り直してゲインを直す(`limitedGainFilter`)
+ * 抑えた後の大きさを測り直してゲインを直す(`planLimitedGain`)
  */
 export function needsLimitedGain(
   target: LoudnessTarget,
@@ -83,18 +88,24 @@ export function needsLimitedGain(
   )
 }
 
-/** 一定のゲイン(dB)を掛け、上限を越える山だけを抑える */
-export function limitedGainFilter(target: LoudnessTarget, gainDb: number): string {
-  const t = LOUDNESS_TARGETS[normalizeLoudnessTarget(target)]
-  // サンプルの山で抑えるので、トゥルーピーク(山の間の値)の分だけ少し低めに抑える
-  const limit = Math.pow(10, (t.truePeak - TRUE_PEAK_MARGIN_DB) / 20)
-  return `volume=${gainDb.toFixed(2)}dB,alimiter=limit=${limit.toFixed(4)}:level=disabled:attack=1:release=50`
+/**
+ * 一定のゲイン(dB)を掛け、`ceilingDb` を越える山だけを抑える。リミッタは先読みの分だけ音を遅らせるので、
+ * 遅れを戻す(`latency=1`。戻さないと映像より約 1ms 遅れた)
+ */
+export function limitedGainFilter(gainDb: number, ceilingDb: number): string {
+  const limit = Math.min(1, Math.max(0.0625, Math.pow(10, ceilingDb / 20)))
+  // 4 倍の細かさで抑える(サンプルの間の山 = トゥルーピークも抑えるため)。後で元の細かさに戻す
+  return (
+    `volume=${gainDb.toFixed(2)}dB,aresample=192000,` +
+    `alimiter=limit=${limit.toFixed(4)}:level=disabled:attack=1:release=50:latency=1,aresample=48000`
+  )
 }
 
 /**
  * 一定のゲイン + リミッタの掛け方を決める。`measure(フィルタ)` はそのフィルタを掛けた後の大きさを測る。
- * 抑えた山の分だけ大きさが下がるので、測り直してゲインを足す(数回で基準に寄る)。
- * 測れなければ null(呼び出し側は loudnorm に任せる)
+ * 抑えた山の分だけ大きさが下がるので、測り直してゲインを足す。リミッタはサンプルの山しか抑えないので、
+ * 測ったトゥルーピークが上限(AAC にしたときの持ち上がり分を残す)を越えていれば、抑える高さを下げて
+ * 測り直す。測れなければ null(呼び出し側は loudnorm に任せる)
  */
 export async function planLimitedGain(
   target: LoudnessTarget,
@@ -102,14 +113,18 @@ export async function planLimitedGain(
   measure: (filter: string) => Promise<LoudnessMeasurementValues | null>
 ): Promise<string | null> {
   const t = LOUDNESS_TARGETS[normalizeLoudnessTarget(target)]
+  const peakCeiling = t.truePeak - AAC_TRUE_PEAK_HEADROOM_DB
   let gain = t.integrated - measured.inputI
-  for (let i = 0; i < 4; i++) {
-    const filter = limitedGainFilter(target, gain)
+  let ceiling = t.truePeak - TRUE_PEAK_MARGIN_DB
+  for (let i = 0; i < 6; i++) {
+    const filter = limitedGainFilter(gain, ceiling)
     const r = await measure(filter)
     if (!r || !Number.isFinite(r.inputI)) return i === 0 ? null : filter
     const miss = t.integrated - r.inputI
-    if (Math.abs(miss) <= LIMITED_GAIN_TOLERANCE_LU) return filter
+    const over = Number.isFinite(r.inputTP) ? r.inputTP - peakCeiling : 0
+    if (Math.abs(miss) <= LIMITED_GAIN_TOLERANCE_LU && over <= 0) return filter
     gain += miss
+    if (over > 0) ceiling -= over + 0.1
   }
-  return limitedGainFilter(target, gain)
+  return limitedGainFilter(gain, ceiling)
 }

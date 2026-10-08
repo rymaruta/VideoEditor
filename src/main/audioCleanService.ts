@@ -32,7 +32,7 @@ let cancelGeneration = 0
 /** 中止で止めた ffmpeg(終わったときに「中止」として返す) */
 const canceledChildren = new WeakSet<ChildProcess>()
 /** 作っている途中の出力。同じ素材を同時に頼まれたら(自動編集と右クリックの「ノイズ除去」など)1回にまとめる */
-const inFlight = new Map<string, Promise<void>>()
+const inFlight = new Map<string, { task: Promise<void>; generation: number }>()
 
 function cacheDir(): string {
   const dir = join(app.getPath('userData'), 'clean-audio')
@@ -56,13 +56,20 @@ export function denoiseFilter(modelPath: string): string {
   )
 }
 
-function runOne(source: string, out: string, onPercent: (p: number) => void): Promise<void> {
+async function runOne(source: string, out: string, onPercent: (p: number) => void): Promise<void> {
   const shared = inFlight.get(out)
-  if (shared) return shared
-  const task = runOneUnshared(source, out, onPercent, cancelGeneration).finally(() =>
-    inFlight.delete(out)
-  )
-  inFlight.set(out, task)
+  if (shared) {
+    if (shared.generation === cancelGeneration) return shared.task
+    // 中止した実行の作りかけ(いずれ「中止」で終わる)は共有せず、終わるのを待って作り直す
+    // (中止の直後に同じ素材をもう一度頼むと、その実行まで「中止」の失敗になっていた)
+    await shared.task.catch(() => {})
+    return runOne(source, out, onPercent)
+  }
+  const generation = cancelGeneration
+  const task = runOneUnshared(source, out, onPercent, generation).finally(() => {
+    if (inFlight.get(out)?.task === task) inFlight.delete(out)
+  })
+  inFlight.set(out, { task, generation })
   return task
 }
 
