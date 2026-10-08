@@ -137,6 +137,8 @@ export function SourceViewer(): React.JSX.Element | null {
       if (!rootRef.current || (pane && !pane.classList.contains('active'))) return
       if (isTypingTarget(e.target, e.key) || e.ctrlKey || e.metaKey || e.altKey) return
       const key = e.key.toLowerCase()
+      // 押しっぱなしの繰り返しで、`f` がクリップを繰り返しの数だけ足していた(j/l の早送りは繰り返してよい)
+      if (e.repeat && key !== 'j' && key !== 'l') return
       if (key === 'j') {
         e.preventDefault()
         shuttle(-1)

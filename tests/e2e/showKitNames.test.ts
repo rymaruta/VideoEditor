@@ -53,3 +53,11 @@ describe.skipIf(!existsSync(ffmpegPath))('素材キットのフォルダ名', ()
     expect(keys(k.cg).map((x) => x.normalize('NFC'))).toEqual(['テスト'])
   }, 60_000)
 })
+
+describe('素材キットのフォルダが無いとき', () => {
+  it('空として読まずに知らせる(自動の SE・BGM を黙って外さない)', async () => {
+    await expect(scanShowKit(join(work, 'not-here'))).rejects.toThrow(
+      '番組素材フォルダが見つかりません'
+    )
+  })
+})

@@ -1,4 +1,4 @@
-import { readdir } from 'fs/promises'
+import { readdir, stat } from 'fs/promises'
 import { extname, join } from 'path'
 import { probeMedia } from './ffmpegService'
 import {
@@ -74,6 +74,10 @@ async function readGroup(
 }
 
 export async function scanShowKit(root: string): Promise<ShowKit> {
+  // フォルダそのものが無い(外付けを外した・消した)なら知らせる。空として読むと、自動の SE・BGM が
+  // 黙って外され、「SE 0・BGM 0 本」で終わっていた
+  const found = await stat(root).catch(() => null)
+  if (!found?.isDirectory()) throw new Error(`番組素材フォルダが見つかりません: ${root}`)
   const [se, bgm, cg] = await Promise.all([
     findTop(root, ['se', '効果音']),
     findTop(root, ['bgm', '音楽']),

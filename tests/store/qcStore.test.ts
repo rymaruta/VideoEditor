@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { useQcStore } from '@renderer/store/qcStore'
+import { useProjectStore } from '@renderer/store/projectStore'
 import type { QcMeasurement } from '@shared/qc/media'
 import type { Project } from '@shared/types'
 
@@ -82,6 +83,7 @@ describe('書き出し後の自動確認', () => {
   it('前の確認の途中で次の書き出しが終わったら、前を止めて次のファイルを確認する', async () => {
     const api = stubApi({ '/a.mp4': measurement(), '/b.mp4': measurement() })
     useQcStore.setState({ report: null })
+    useProjectStore.setState({ project })
     const first = useQcStore.getState().run('/a.mp4', 'off', project)
     await tick()
     const second = useQcStore.getState().run('/b.mp4', 'off', project)
@@ -97,6 +99,7 @@ describe('書き出し後の自動確認', () => {
   it('黒味などの時刻は、繋ぎのぶん短いファイルの秒ではなく、タイムラインの秒で出す', async () => {
     const api = stubApi({ '/a.mp4': measurement([{ start: 3.9, end: 7 }]) })
     useQcStore.setState({ report: null })
+    useProjectStore.setState({ project })
     const done = useQcStore.getState().run('/a.mp4', 'off', project)
     await tick()
     api.resolve('/a.mp4')
@@ -104,5 +107,14 @@ describe('書き出し後の自動確認', () => {
     const black = useQcStore.getState().report?.issues.find((i) => i.kind === 'black')
     expect(black?.start).toBeCloseTo(4.9, 6)
     expect(black?.end).toBeCloseTo(8, 6)
+  })
+})
+
+describe('書き出している間に別のプロジェクトを開いたとき', () => {
+  it('前のプロジェクトの書き出しを確かめない(今のプロジェクトに結果を出さない)', async () => {
+    stubApi({ '/a.mp4': measurement([{ start: 1, end: 3 }]) })
+    useQcStore.setState({ report: null })
+    await useQcStore.getState().run('/a.mp4', 'off', { ...project, id: 'old-project' })
+    expect(useQcStore.getState().report).toBeNull()
   })
 })

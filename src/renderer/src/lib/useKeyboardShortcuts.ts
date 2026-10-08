@@ -89,6 +89,9 @@ export function useKeyboardShortcuts(): void {
         store.redo()
         return
       }
+      // ここから先は、押しっぱなしの繰り返し(オートリピート)を1回とみなす(矢印キーの移動を除く)。
+      // 通すと、スペースで再生・停止が 30ms ごとに切り替わり、複製・貼り付けが繰り返しの数だけ積まれていた
+      if (e.repeat && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
       // ここから先はタイムラインを変える操作。自動編集の画面で隠れている間は通さない
       if (isTimelineCovered()) return
       if (matchesBinding(e, keymap.copy)) {

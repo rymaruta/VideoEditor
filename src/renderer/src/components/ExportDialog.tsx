@@ -257,10 +257,13 @@ export function ExportDialog(): React.JSX.Element | null {
     setRunning(true)
     try {
       await runOne(project.aspectRatio, resolutionHeight, quality, outputPath)
-      setDonePath(outputPath)
+      // 書き出している間に別のプロジェクトを開いたなら、結果・確認はそのプロジェクトに出さない
+      // (前のプロジェクトのファイルを出し、確認の項目を押すと今のプロジェクトの別の時刻へ飛んでいた)
+      const sameProject = useProjectStore.getState().project.id === project.id
+      if (sameProject) setDonePath(outputPath)
       window.api.notifyDone('書き出しが終わりました', outputPath)
       // 書き出した動画をそのまま確認する(黒味・フリーズ・無音・ラウドネス・テロップ)
-      void useQcStore.getState().run(outputPath, loudness, project)
+      if (sameProject) void useQcStore.getState().run(outputPath, loudness, project)
       if (openFolderAfter) await window.api.showItemInFolder(outputPath).catch(() => {})
     } catch (e) {
       const message = formatIpcError(e)
@@ -294,8 +297,11 @@ export function ExportDialog(): React.JSX.Element | null {
     for (const [index, job] of queue.entries()) {
       setQueueStatus((prev) => ({ ...prev, [job.id]: 'running' }))
       try {
-        lastPath = `${folder}/${jobFileName(project.name, job)}`
-        await runOne(job.aspectRatio, job.resolutionHeight, job.quality, lastPath)
+        const path = `${folder}/${jobFileName(project.name, job)}`
+        await runOne(job.aspectRatio, job.resolutionHeight, job.quality, path)
+        // 書き出せたものだけ覚える(最後の1件が失敗・中止だと、無いファイルを開こうとして
+        // フォルダが開かなかった)
+        lastPath = path
         setQueueStatus((prev) => ({ ...prev, [job.id]: 'done' }))
         doneCount++
       } catch (e) {

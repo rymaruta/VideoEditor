@@ -5,6 +5,7 @@ import { getTotalDuration, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { getKeymap, SHORTCUT_ACTIONS, type ShortcutAction } from './keymap'
 import { newOverlayRange } from './textOverlayPlacement'
+import { isModalOpen, isTypingTarget } from './useKeyboardShortcuts'
 
 /**
  * メニューバーで押された項目を、**既存の操作**へつなぐ。
@@ -85,8 +86,16 @@ export function useAppMenu(windows: readonly { id: string; label: string }[]): v
     () =>
       window.api.onMenuCommand((id) => {
         const store = useProjectStore.getState()
-        if (id === 'edit.undo') return store.undo()
-        if (id === 'edit.redo') return store.redo()
+        if (id === 'edit.undo' || id === 'edit.redo') {
+          // キーの取り消しと同じ扱い: 文字を打っている欄なら欄の取り消し、ダイアログの上なら何もしない
+          // (メニューからだと、入力中・トリム画面の裏でプロジェクトを取り消していた)
+          if (isTypingTarget(document.activeElement)) {
+            document.execCommand(id === 'edit.undo' ? 'undo' : 'redo')
+            return
+          }
+          if (isModalOpen()) return
+          return id === 'edit.undo' ? store.undo() : store.redo()
+        }
         const action = KEY_ACTIONS[id]
         if (action) return pressShortcut(action)
         if (id === 'telop.add') {

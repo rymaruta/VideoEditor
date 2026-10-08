@@ -803,7 +803,13 @@ app.whenReady().then(() => {
     notifyDone(BrowserWindow.fromWebContents(e.sender), String(title), String(body))
   )
   ipcMain.handle(IPC.checkAutosave, () => autosaveStatus(autosavePath))
-  ipcMain.handle(IPC.loadAutosave, () => loadProjectFile(autosavePath))
+  ipcMain.handle(IPC.loadAutosave, () => {
+    const project = loadProjectFile(autosavePath)
+    // 復元したら、この自動保存はこのセッションのもの(中身はもう画面にある)。最初の自動保存で
+    // これを退避すると、退避先に残っていた前の破棄したデータが、この控えの写しで上書きされて消えていた
+    autosaveOverwrittenThisSession = true
+    return project
+  })
   /**
    * 60秒ごとの自動保存。**このセッションが初めて書くときだけ、居座っている自動保存を
    * 退避してから上書きする。**

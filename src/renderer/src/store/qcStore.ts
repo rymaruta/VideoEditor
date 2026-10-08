@@ -74,6 +74,9 @@ function toTimelineIssues(issues: QcIssue[], project: Project): QcIssue[] {
 export const useQcStore = create<QcState>((set, get) => ({
   report: null,
   run: async (path, loudness, exported) => {
+    // 書き出したプロジェクトが、もう開いているプロジェクトでなければ確かめない(前のプロジェクトの
+    // 結果を今のプロジェクトに出さない)
+    if (exported && exported.id !== useProjectStore.getState().project.id) return
     const token = runToken
     const call = ++runCall
     const project = exported ?? useProjectStore.getState().project

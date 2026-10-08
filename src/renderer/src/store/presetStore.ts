@@ -120,6 +120,18 @@ interface PresetState {
   removeExportPreset: (id: string) => void
 }
 
+/**
+ * 保存する。保存できなくても(容量が一杯・使えない)画面の変更は残す(保存の失敗で投げると、
+ * 足したプリセット・スタイルの管理の OK が消えていた)
+ */
+function persist(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // 次に保存できたときに書かれる
+  }
+}
+
 export const usePresetStore = create<PresetState>((set, get) => ({
   captionPresets: loadArray(CAPTION_PRESETS_KEY, isCaptionPreset, repairCaptionPreset),
   sePresets: loadArray(SE_PRESETS_KEY, isSePreset),
@@ -129,31 +141,31 @@ export const usePresetStore = create<PresetState>((set, get) => ({
     // 書き込むときも同じ規則を通す。歯抜けの style がここから入ると、
     // 次に開いたときに直る(＝症状が消える)ぶん、原因が追えなくなる。
     const next = [...get().captionPresets, { id: uuid(), name, style: normalizeTextStyle(style) }]
-    localStorage.setItem(CAPTION_PRESETS_KEY, JSON.stringify(next))
+    persist(CAPTION_PRESETS_KEY, next)
     set({ captionPresets: next })
   },
 
   replaceCaptionPresets: (presets) => {
     const next = presets.map(repairCaptionPreset)
-    localStorage.setItem(CAPTION_PRESETS_KEY, JSON.stringify(next))
+    persist(CAPTION_PRESETS_KEY, next)
     set({ captionPresets: next })
   },
 
   removeCaptionPreset: (id) => {
     const next = get().captionPresets.filter((p) => p.id !== id)
-    localStorage.setItem(CAPTION_PRESETS_KEY, JSON.stringify(next))
+    persist(CAPTION_PRESETS_KEY, next)
     set({ captionPresets: next })
   },
 
   addSePreset: (name, filePath, fileName) => {
     const next = [...get().sePresets, { id: uuid(), name, filePath, fileName }]
-    localStorage.setItem(SE_PRESETS_KEY, JSON.stringify(next))
+    persist(SE_PRESETS_KEY, next)
     set({ sePresets: next })
   },
 
   removeSePreset: (id) => {
     const next = get().sePresets.filter((p) => p.id !== id)
-    localStorage.setItem(SE_PRESETS_KEY, JSON.stringify(next))
+    persist(SE_PRESETS_KEY, next)
     set({ sePresets: next })
   },
 
@@ -162,14 +174,14 @@ export const usePresetStore = create<PresetState>((set, get) => ({
     if (!trimmed) return false
     if (get().exportPresets.some((p) => p.name === trimmed)) return false
     const next = [...get().exportPresets, { id: uuid(), name: trimmed, ...settings }]
-    localStorage.setItem(EXPORT_PRESETS_KEY, JSON.stringify(next))
+    persist(EXPORT_PRESETS_KEY, next)
     set({ exportPresets: next })
     return true
   },
 
   removeExportPreset: (id) => {
     const next = get().exportPresets.filter((p) => p.id !== id)
-    localStorage.setItem(EXPORT_PRESETS_KEY, JSON.stringify(next))
+    persist(EXPORT_PRESETS_KEY, next)
     set({ exportPresets: next })
   }
 }))
