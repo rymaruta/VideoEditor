@@ -724,3 +724,100 @@ describe('第23回: 第22回修正の見直し', () => {
     ])
   })
 })
+
+describe('第24回: BGM のつなぎ目と、延ばして戻したときの切れ端', () => {
+  type BgmClip = Project['audioTracks'][number]['clips'][number]
+  const setBgm = (clips: BgmClip[], song = 8): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', song, false), asset('long', 120, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === 'bgmT' ? { ...t, clips } : t))
+      }
+    })
+  }
+  const sorted = (): BgmClip[] => [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+  beforeEach(() =>
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+  )
+
+  it('延ばして戻しても、足したループの切れ端を残さない', () => {
+    const start: BgmClip[] = [
+      {
+        id: 'A',
+        assetId: 'loop',
+        startTime: 0,
+        inPoint: 0,
+        outPoint: 8,
+        fadeIn: 1.5,
+        fadeOut: 1.5
+      },
+      {
+        id: 'B',
+        assetId: 'loop',
+        startTime: 6.5,
+        inPoint: 0,
+        outPoint: 8,
+        fadeIn: 1.5,
+        fadeOut: 1.5
+      }
+    ]
+    setBgm(start)
+    const c0 = st().project.clips[0].id
+    st().updateClipSpeed(c0, 0.5)
+    st().updateClipSpeed(c0, 1)
+    expect(sorted().map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])).toEqual(
+      start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])
+    )
+  })
+
+  it('重ねた短いクリップとの重なりを、ループのつなぎ目とみなさない', () => {
+    setBgm(
+      [
+        { id: 'A', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 20 },
+        { id: 'N', assetId: 'loop', startTime: 5, inPoint: 10, outPoint: 12, volume: 0.2 }
+      ],
+      20
+    )
+    st().updateClipSpeed(st().project.clips[0].id, 0.5)
+    const added = sorted().filter((c) => c.id.includes('~'))
+    expect(added[0].startTime).toBeCloseTo(20, 6)
+  })
+
+  it('ループのつなぎ目は、曲の頭から始め直すクリップとその手前の組から取る', () => {
+    setBgm([
+      { id: 'A', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 8 },
+      { id: 'L', assetId: 'loop', startTime: 7, inPoint: 0, outPoint: 8 },
+      { id: 'N', assetId: 'loop', startTime: 9, inPoint: 5, outPoint: 6 }
+    ])
+    st().updateClipSpeed(st().project.clips[0].id, 0.5)
+    const cs = sorted().filter((c) => c.id === 'L' || c.id.includes('~'))
+    for (let i = 1; i < cs.length; i++) {
+      const prevEnd = cs[i - 1].startTime + cs[i - 1].outPoint - cs[i - 1].inPoint
+      expect(prevEnd - cs[i].startTime).toBeCloseTo(1, 6)
+    }
+  })
+
+  it('縮めても、終わりをまたぐ人が置いたクリップは詰めて残す', () => {
+    setBgm([
+      { id: 'A', assetId: 'long', startTime: 0, inPoint: 0, outPoint: 30, fadeOut: 2 },
+      { id: 'N', assetId: 'long', startTime: 22, inPoint: 60, outPoint: 66, volume: 0.2 }
+    ])
+    st().updateClipSpeed(st().project.clips[2].id, 2)
+    const n = track('bgmT').find((c) => c.id === 'N')
+    expect(n).toBeDefined()
+    expect(n!.startTime + n!.outPoint - n!.inPoint).toBeCloseTo(25, 6)
+  })
+
+  it('曲の長さが 0(分からない)でも、本編の終わりまで延ばす', () => {
+    setBgm([{ id: 'A', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 30 }], 0)
+    st().updateClipSpeed(st().project.clips[0].id, 0.5)
+    const last = sorted()[sorted().length - 1]
+    expect(last.startTime + last.outPoint - last.inPoint).toBeCloseTo(40, 6)
+  })
+})

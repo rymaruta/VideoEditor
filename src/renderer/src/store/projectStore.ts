@@ -5172,21 +5172,32 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       return chain.map((c) =>
         Math.abs(shift) <= 1e-9 ? c : { ...c, startTime: c.startTime + shift }
       )
-    const overlaps = chain
-      .slice(1)
-      .map((c, i) => chain[i].startTime + lenOf(chain[i]) - c.startTime)
-    // つなぎ目の重なり・クロスフェード。1本に縮んだあとは、頭のクリップに覚えたものを使う
+    // 曲の長さ(分からない・0 なら限りなし。0 のまま使うと延ばせず、空のループを千本作っていた)
+    const known = durationOf.get(first.assetId)
+    const limit = known !== undefined && known > 0 ? known : Infinity
+    // つなぎ目の重なり・クロスフェードは、曲の頭から始め直すクリップと、その手前で曲の終わりまで鳴る
+    // クリップの組から取る(並びの最後の2本から取ると、重ねた短いクリップ・動かしたクリップとの重なりを
+    // つなぎ目とみなし、曲の2か所を長く重ねて鳴らしていた)。組が無ければ頭のクリップに覚えたもの
+    let join: AudioTrackClip['loopCross']
+    for (const r of chain) {
+      if (r === first || r.inPoint > 1e-6) continue
+      let best: AudioTrackClip | undefined
+      for (const p of chain) {
+        if (p === r || !Number.isFinite(limit) || Math.abs(p.outPoint - limit) > 1e-3) continue
+        const pe = p.startTime + lenOf(p)
+        if (p.startTime >= r.startTime || pe < r.startTime - 1e-6) continue
+        if (!best || pe < best.startTime + lenOf(best)) best = p
+      }
+      if (best)
+        join = {
+          overlap: Math.max(0, best.startTime + lenOf(best) - r.startTime),
+          ...(r.fadeIn !== undefined ? { fadeIn: r.fadeIn } : {}),
+          ...(best.fadeOut !== undefined ? { fadeOut: best.fadeOut } : {})
+        }
+    }
     const remembered =
       first.loopCross && Number.isFinite(first.loopCross.overlap) ? first.loopCross : undefined
-    const loopCross =
-      chain.length > 1
-        ? {
-            overlap: Math.max(0, overlaps[overlaps.length - 1]),
-            ...(chain[1].fadeIn !== undefined ? { fadeIn: chain[1].fadeIn } : {}),
-            ...(chain[0].fadeOut !== undefined ? { fadeOut: chain[0].fadeOut } : {})
-          }
-        : remembered
-    const limit = durationOf.get(first.assetId) ?? Infinity
+    const loopCross = join ?? remembered
     // 重なりは曲の長さの半分まで(曲とほぼ同じ長さの重なりで、ほとんど進まないループを何百本も積まない)
     const songLen = Number.isFinite(limit) ? limit / (first.speed || 1) : Infinity
     const loopOverlap = Math.min(Math.max(0, loopCross?.overlap ?? 0), songLen / 2)
@@ -5203,17 +5214,18 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const tailIndex = (): number =>
       out.reduce((best, c, i) => (endOf(c) >= endOf(out[best]) - 1e-9 ? i : best), 0)
     // 頭をずらした並び。写した終わりより後ろで始まるクリップは落とし、またぐクリップは詰める。
-    // 1本を終わりで切ったら、そのあとは終わりまでに収まるもの(長いクリップに重ねた短いクリップ)だけ残す
     // (重ねて始まる次のループの切れ端を残さない)
+    // 終わりまで届いたクリップがあれば、そのあと終わりをまたぐ「ここで足したループ」は落とす
+    // (延ばしたときに足したループが、戻したときに切れ端で残っていた)。人が置いたクリップは詰めて残す
     let reached = false
     for (const c of chain) {
       const at = c.startTime + shift
       if (at >= end - 1e-6) continue
       const natural = at + lenOf(c)
-      if (reached && natural > end + 1e-6) continue
+      if (reached && natural > end + 1e-6 && c.id.includes('~')) continue
       const len = Math.min(lenOf(c), end - at)
       out.push({ ...c, startTime: at, outPoint: c.inPoint + len * (c.speed || 1) })
-      if (natural > end + 1e-6) reached = true
+      if (natural >= end - 1e-6) reached = true
     }
     if (out.length === 0) return []
     // 足りなければ、一番後ろのクリップを曲の終わりまで延ばし、そこからループを足す(多くても 1,000 本)
