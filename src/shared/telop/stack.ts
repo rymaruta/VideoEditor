@@ -1,6 +1,6 @@
 import type { TextOverlay } from '../types'
 import { TEXT_MARGIN_V_RATIO } from '../textStyle'
-import { TELOP_LINE_HEIGHT_EM } from './render'
+import { TELOP_LINE_HEIGHT_EM, telopHitBounds, type TelopContext } from './render'
 
 /**
  * 同時に出ている下のテロップを、段に積んで重ならないようにする(計画書 §5.8 の「テロップ同士の重なりを避ける」)。
@@ -17,14 +17,56 @@ import { TELOP_LINE_HEIGHT_EM } from './render'
 
 const GAP_RATIO = 0.015
 
-function blockHeightRatio(o: Pick<TextOverlay, 'text' | 'style'>, canvasH: number): number {
+/**
+ * 文字の幅の見積もり(画面の無い所でも段の高さを測れるように)。全角は1文字ぶん、半角は約半分。
+ * 折り返しの行数・行の高さ・ルビ・背景の余白は、描くときと同じ配置(`telopHitBounds`)で数える
+ */
+const estimateCtx: Pick<TelopContext, 'measureText' | 'font'> = {
+  font: '',
+  measureText(ch: string) {
+    const size = Number(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? 40)
+    return { width: /[\x20-\x7e]/.test(ch) ? size * 0.55 : size } as TextMetrics
+  }
+}
+
+/** キャンバスの幅(縦長なら 9:16、横長なら 16:9。テロップのキャンバスはこの2つ) */
+function canvasWidthFor(canvasH: number): number {
+  return canvasH > TELOP_LINE_HEIGHT_EM * 1000
+    ? Math.round((canvasH * 9) / 16)
+    : Math.round((canvasH * 16) / 9)
+}
+
+/**
+ * 段の高さ(キャンバスの高さに対する比)。行数を改行の数で数えると、長い発言が自動で折り返して
+ * 2行になったときに低く見積もり、上の段が下の段の1行目に重なっていた
+ */
+function blockHeightRatio(
+  o: Pick<TextOverlay, 'text' | 'style'>,
+  canvasH: number,
+  canvasW: number
+): number {
+  const bounds = telopHitBounds(
+    estimateCtx,
+    { text: o.text, style: o.style, startTime: 0, endTime: 1 },
+    { w: canvasW, h: canvasH }
+  )
   const lines = Math.max(1, o.text.split('\n').length)
-  return (lines * o.style.fontSize * TELOP_LINE_HEIGHT_EM) / canvasH
+  // 見積もりが壊れた値なら、従来の数え方
+  const h =
+    Number.isFinite(bounds.h) && bounds.h > 0
+      ? bounds.h
+      : lines * o.style.fontSize * TELOP_LINE_HEIGHT_EM
+  return h / canvasH
 }
 
 export function stackSimultaneousTelops<
   T extends Pick<TextOverlay, 'text' | 'style' | 'startTime' | 'endTime'>
->(telops: readonly T[], canvasH: number, options: { baseCenter?: number } = {}): T[] {
+>(
+  telops: readonly T[],
+  canvasH: number,
+  options: { baseCenter?: number; canvasW?: number } = {}
+): T[] {
+  const canvasW = options.canvasW ?? canvasWidthFor(canvasH)
   const order = telops
     .map((t, i) => ({ t, i }))
     .sort((a, b) => a.t.startTime - b.t.startTime || a.i - b.i)
@@ -36,7 +78,7 @@ export function stackSimultaneousTelops<
     // 終わったものを外す
     for (let k = active.length - 1; k >= 0; k--)
       if (active[k].end <= t.startTime + 1e-6) active.splice(k, 1)
-    const h = blockHeightRatio(t, canvasH)
+    const h = blockHeightRatio(t, canvasH, canvasW)
     if (active.length === 0) {
       const base = options.baseCenter
       if (base === undefined) {

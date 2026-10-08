@@ -57,6 +57,15 @@ export function TelopCanvasLayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontKey])
 
+  // ブラウザが別の所で書体を読み終えたとき(代わりの書体で描いた後に本来の書体が届いたとき)も描き直す。
+  // 止めているプレビューが、代わりの書体のまま残っていた
+  useEffect(() => {
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined
+    const onDone = (): void => setFontsReady((n) => n + 1)
+    fonts?.addEventListener?.('loadingdone', onDone)
+    return () => fonts?.removeEventListener?.('loadingdone', onDone)
+  }, [])
+
   /** 最後に描いた絵の中身(同じなら描き直さない) */
   const drawn = useRef<{ overlays: TextOverlay[]; keys: string[]; frame: string } | null>(null)
 

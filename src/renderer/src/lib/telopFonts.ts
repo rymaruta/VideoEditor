@@ -22,13 +22,20 @@ export async function loadTelopFonts(
   // 書体と太さの組ごとに、使う文字をまとめる
   const chars = new Map<string, Set<string>>()
   for (const t of telops) {
-    const family = TELOP_FONT_STACKS[t.style.fontFamily]?.split(',')[0]
-    if (!family || !family.startsWith('"')) continue // PC の標準書体は読み込み不要
-    const key = `${t.style.italic ? 'italic ' : ''}${telopFontWeight(t.style)} 40px ${family}`
-    const set = chars.get(key) ?? new Set<string>()
-    // ルビの文字も読み込む(読み込まないと、ルビだけ代わりの書体で焼かれる)
-    for (const ch of telopDrawnChars(t.text)) set.add(ch)
-    chars.set(key, set)
+    // 書体の並び(stack)の同梱フォントを全部読む。1つ目の書体に無い文字(𠮷・㎏ など)は
+    // 2つ目以降の書体で描かれるので、それも先に読んでおかないと、書き出しでは
+    // 代わりの書体や「豆腐」(空の四角)のまま焼かれていた
+    const families = (TELOP_FONT_STACKS[t.style.fontFamily] ?? '')
+      .split(',')
+      .map((f) => f.trim())
+      .filter((f) => f.startsWith('"')) // PC の標準書体は読み込み不要
+    for (const family of families) {
+      const key = `${t.style.italic ? 'italic ' : ''}${telopFontWeight(t.style)} 40px ${family}`
+      const set = chars.get(key) ?? new Set<string>()
+      // ルビの文字も読み込む(読み込まないと、ルビだけ代わりの書体で焼かれる)
+      for (const ch of telopDrawnChars(t.text)) set.add(ch)
+      chars.set(key, set)
+    }
   }
   let loaded = false
   await Promise.all(

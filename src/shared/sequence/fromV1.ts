@@ -207,9 +207,9 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
     })
   }
 
-  // --- テロップ: 重なるものは段を分け、後から始まるものほど上に置く ---
+  // --- テロップ: 重なるものは段を分ける。重なりの上下はプレビューと同じ並び順(z) ---
   const telops: TelopItem[] = []
-  for (const o of project.textOverlays) {
+  for (const [z, o] of project.textOverlays.entries()) {
     const range = toFrameRange(o.startTime, o.endTime)
     if (!range) continue
     const itemStartSec = range.startFrame / fpsNum
@@ -220,6 +220,7 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
       text: o.text,
       style: { ...o.style },
       origin: o.source === 'auto' ? 'auto' : 'manual',
+      z,
       ...(o.words
         ? {
             words: o.words.map((word) => ({

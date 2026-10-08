@@ -166,7 +166,8 @@ export function planTelopRuns(seq: Sequence, canvasHeight: number): TelopRun[] {
   // タイプライターの切り替わりを取りこぼさないため)。出ているものだけを持ち歩くので、
   // テロップの数が増えても1フレームあたりの手間は「その瞬間に出ている数」で済む。
   const byStart = [...telops].sort((a, b) => a.startFrame - b.startFrame)
-  const order = new Map(telops.map((t, i) => [t.id, i]))
+  // 重なったときの上下は、v1 の並び順(z。プレビューの描く順)。無ければ段の順
+  const order = new Map(telops.map((t, i) => [t.id, t.z ?? i]))
   const runs: TelopRun[] = []
   let active: TelopItem[] = []
   let next = 0

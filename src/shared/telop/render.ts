@@ -746,6 +746,17 @@ function measureLayout(
       y: finite(style.customPosition.y, 0.5) * canvas.h
     }
     topFromAnchor = -blockHeight / 2
+    // 左上・右下などに置く型(16:9 で決めた位置)は、縦長の画面では幅が足りず枠の外へはみ出していた。
+    // 背景・縁取りを含めた絵が枠に収まるところまで寄せる(収まらない幅なら真ん中)
+    const pad = style.background
+      ? telopBackgroundPadding(style, fontSize)
+      : { x: telopStrokeRings(style)[0]?.reach ?? 0, y: telopStrokeRings(style)[0]?.reach ?? 0 }
+    const halfW = blockWidth / 2 + pad.x
+    const halfH = blockHeight / 2 + pad.y
+    anchor.x =
+      halfW * 2 >= canvas.w ? canvas.w / 2 : Math.min(canvas.w - halfW, Math.max(halfW, anchor.x))
+    anchor.y =
+      halfH * 2 >= canvas.h ? canvas.h / 2 : Math.min(canvas.h - halfH, Math.max(halfH, anchor.y))
   } else if (style.position === 'top') {
     anchor = { x: canvas.w / 2, y: marginV }
     topFromAnchor = 0

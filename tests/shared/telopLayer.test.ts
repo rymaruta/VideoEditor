@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { defaultTextStyle } from '@shared/textStyle'
 import { planTelopRuns, telopConcatList, telopItemSource } from '@shared/telop/layer'
 import type { Sequence, TelopItem } from '@shared/sequence/types'
-import type { TextStyle } from '@shared/types'
+import type { Project, TextStyle } from '@shared/types'
+import { projectV1ToV2 } from '@shared/sequence/fromV1'
 
 const telop = (
   id: string,
@@ -205,5 +206,55 @@ describe('telopConcatList — 区間ぶんの画像の一覧', () => {
       frame++
     }
     expect(Math.abs(us - 500 * 1e6)).toBeLessThanOrEqual(1)
+  })
+})
+
+describe('重なったテロップの上下は、プレビュー(企画の並び順)と同じ', () => {
+  const overlay = (id: string, startTime: number, endTime: number): unknown => ({
+    id,
+    text: id,
+    startTime,
+    endTime,
+    style: defaultTextStyle(),
+    source: 'manual'
+  })
+  const runsAt = (overlays: unknown[], frame: number): string[] => {
+    const v2 = projectV1ToV2(
+      {
+        id: 'p',
+        name: 'p',
+        aspectRatio: '16:9',
+        assets: [
+          {
+            id: 'v',
+            filePath: '/v.mp4',
+            fileName: 'v.mp4',
+            duration: 20,
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            hasAudio: false,
+            hasVideo: true
+          }
+        ],
+        clips: [{ id: 'c', assetId: 'v', inPoint: 0, outPoint: 12, speed: 1 }],
+        audioTracks: [],
+        videoOverlayTracks: [],
+        textOverlays: overlays
+      } as unknown as Project,
+      { resolution: 1080 }
+    )
+    return planTelopRuns(v2.sequence, 1080).find(
+      (r) => r.startFrame <= frame && frame < r.endFrame
+    )!.itemIds
+  }
+
+  it('先に作ったテロップが後から始まっても、後に作ったテロップが上', () => {
+    expect(runsAt([overlay('A', 2, 6), overlay('B', 1, 8)], 90)).toEqual(['A', 'B'])
+  })
+
+  it('空いた段を使い回しても、並び順で重ねる', () => {
+    const o = [overlay('A', 0, 10), overlay('B', 1, 3), overlay('C', 2, 9), overlay('D', 4, 6)]
+    expect(runsAt(o, 150)).toEqual(['A', 'C', 'D'])
   })
 })

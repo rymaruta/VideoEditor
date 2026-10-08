@@ -106,6 +106,11 @@ export interface TelopItem extends ItemBase {
   style: TextStyle
   /** 単語ごとの時刻。**アイテムの開始からの秒** */
   words?: TranscriptWord[]
+  /**
+   * 重なったときの描く順(小さいほど下)。v1 のテロップの並び順で、プレビューと同じ。
+   * 段(トラック)は空いた段を使い回すので、段の順では重なりの上下がプレビューと食い違う
+   */
+  z?: number
 }
 
 export type VideoItem = MediaItem | TelopItem
