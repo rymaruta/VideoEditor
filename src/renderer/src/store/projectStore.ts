@@ -5200,6 +5200,8 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
         if (p === r || !Number.isFinite(limit) || Math.abs(p.outPoint - limit) > 1e-3) continue
         const pe = p.startTime + lenOf(p)
         if (p.startTime >= r.startTime || pe < r.startTime - 1e-6) continue
+        // 手前のクリップの中で終わる(重ねただけの)クリップは、つなぎ目ではない
+        if (r.startTime + lenOf(r) <= pe + 1e-6) continue
         if (!best || pe < best.startTime + lenOf(best)) best = p
       }
       if (best)
@@ -5229,14 +5231,34 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       out.reduce((best, c, i) => (endOf(c) >= endOf(out[best]) - 1e-9 ? i : best), 0)
     // 頭をずらした並び。写した終わりより後ろで始まるクリップは落とし、またぐクリップは詰める。
     // (重ねて始まる次のループの切れ端を残さない)
-    // 終わりまで届いたクリップがあれば、そのあと終わりをまたぐ「ここで足したループ」は落とす
-    // (延ばしたときに足したループが、戻したときに切れ端で残っていた)。人が置いたクリップは詰めて残す
+    // 終わりをまたぐ「ここで足したループ」(id に ~)は、その手前で曲の終わりまで鳴るクリップが終わりまで
+    // 届いているなら落とす(延ばして戻したときに曲の頭の切れ端が重なって鳴っていた)。手前が無ければ、
+    // 終わりまで届いたクリップがあるときだけ落とす。自動で並べた・人が置いたクリップは詰めて残す
+    // (落とすと、延ばして戻したときに元の並びに戻らなかった)
+    const predecessorOf = (r: AudioTrackClip): AudioTrackClip | undefined => {
+      let best: AudioTrackClip | undefined
+      for (const p of chain) {
+        if (p === r || !Number.isFinite(limit) || Math.abs(p.outPoint - limit) > 1e-3) continue
+        const pe = p.startTime + lenOf(p)
+        if (p.startTime >= r.startTime || pe < r.startTime - 1e-6) continue
+        if (r.startTime + lenOf(r) <= pe + 1e-6) continue
+        // 足したループは、その時の一番後ろで終わるクリップに続けて足している
+        if (!best || pe > best.startTime + lenOf(best)) best = p
+      }
+      return best
+    }
     let reached = false
     for (const c of chain) {
       const at = c.startTime + shift
       if (at >= end - 1e-6) continue
       const natural = at + lenOf(c)
-      if (reached && natural > end + 1e-6 && c.id.includes('~')) continue
+      if (natural > end + 1e-6 && c !== first && c.inPoint <= 1e-6 && c.id.includes('~')) {
+        const pred = predecessorOf(c)
+        const drop = pred
+          ? pred.startTime + shift + lenOf(pred) >= end - 1e-6
+          : reached && c.id.includes('~')
+        if (drop) continue
+      }
       const len = Math.min(lenOf(c), end - at)
       out.push({ ...c, startTime: at, outPoint: c.inPoint + len * (c.speed || 1) })
       if (natural >= end - 1e-6) reached = true

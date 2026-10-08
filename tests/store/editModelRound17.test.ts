@@ -835,3 +835,74 @@ describe('第25回: 待つ間に素材を差し替えたときの裏の結果', 
     expect(st().project.assets.find((a) => a.id === 'X')!.filePath).toBe('/rec/Y.mp4')
   })
 })
+
+describe('第25回: ループの始め直しの扱い', () => {
+  type BgmClip = Project['audioTracks'][number]['clips'][number]
+  const setBgm = (clips: BgmClip[], song = 8): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', song, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === 'bgmT' ? { ...t, clips } : t))
+      }
+    })
+  }
+  const sorted = (): BgmClip[] => [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+  beforeEach(() =>
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+  )
+
+  it('延ばしたときに足したループは、手前のクリップが終わりまで届かなければ戻しても残る(穴を開けない)', () => {
+    setBgm([
+      { id: 'A', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 8 },
+      { id: 'B', assetId: 'loop', startTime: 7, inPoint: 0, outPoint: 8 },
+      { id: 'C', assetId: 'loop', startTime: 14, inPoint: 0, outPoint: 8 },
+      { id: 'D', assetId: 'loop', startTime: 21, inPoint: 0, outPoint: 8 },
+      { id: 'E', assetId: 'loop', startTime: 28, inPoint: 0, outPoint: 2 }
+    ])
+    st().updateClipSpeed(st().project.clips[0].id, 0.5)
+    const grown = track('bgmT')
+    S.setState({
+      project: {
+        ...st().project,
+        audioTracks: st().project.audioTracks.map((t) =>
+          t.id === 'bgmT'
+            ? {
+                ...t,
+                clips: [
+                  ...grown,
+                  { id: 'N', assetId: 'loop', startTime: 34, inPoint: 2, outPoint: 7, volume: 0.2 }
+                ]
+              }
+            : t
+        )
+      }
+    })
+    st().updateClipSpeed(st().project.clips[2].id, 1.25)
+    // 本編は 38 秒。曲の本筋(音量そのまま)が終わりまで鳴る
+    const main = sorted().filter((c) => c.id !== 'N')
+    const last = main.reduce((a, c) =>
+      c.startTime + c.outPoint - c.inPoint > a.startTime + a.outPoint - a.inPoint ? c : a
+    )
+    expect(last.startTime + last.outPoint - last.inPoint).toBeCloseTo(38, 6)
+  })
+
+  it('手前のクリップの中で終わる、曲の頭から取った短いクリップをつなぎ目とみなさない', () => {
+    setBgm(
+      [
+        { id: 'A', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 20 },
+        { id: 'N', assetId: 'loop', startTime: 5, inPoint: 0, outPoint: 2, volume: 0.2 }
+      ],
+      20
+    )
+    st().updateClipSpeed(st().project.clips[0].id, 0.5)
+    const added = sorted().filter((c) => c.id.includes('~'))
+    expect(added[0].startTime).toBeCloseTo(20, 6)
+    expect(track('bgmT').find((c) => c.id === 'A')!.loopCross).toBeUndefined()
+  })
+})
