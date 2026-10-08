@@ -232,6 +232,23 @@ function ColorPopover({
     if (!Number.isFinite(v)) return
     onChange(rgbToHex({ ...rgb, [key]: v }))
   }
+  // 外を押して閉じたときも、打ちかけの16進を確定する(閉じるのは押した瞬間で、欄の blur より先に
+  // 吹き出しが消えるので、打った色が捨てられていた)
+  const pending = useRef<{ draft: string | null; onChange: (hex: string) => void }>({
+    draft: null,
+    onChange
+  })
+  useLayoutEffect(() => {
+    pending.current = { draft: hexDraft, onChange }
+  })
+  useEffect(
+    () => () => {
+      const { draft, onChange: change } = pending.current
+      const next = draft === null ? null : normalizeHex(draft)
+      if (next) change(next)
+    },
+    []
+  )
   const commitHex = (): void => {
     if (hexDraft === null) return
     const next = normalizeHex(hexDraft)

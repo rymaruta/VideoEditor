@@ -25,6 +25,7 @@ import { useProjectStore } from './store/projectStore'
 import { useAutosaveStore } from './store/autosaveStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
+import { installModalFocusTrap } from './lib/modalFocus'
 import {
   SparklesIcon,
   TypeIcon,
@@ -205,6 +206,9 @@ function App(): React.JSX.Element {
 
   // メニューバー(ファイル / 編集 / … / ウィンドウ)。ウィンドウの欄には上段左のパネルを並べる
   useAppMenu(MENU_WINDOWS)
+
+  // ダイアログを開いている間、Tab・フォーカスをダイアログの中に閉じ込める(裏のボタンを押せていた)
+  useEffect(() => installModalFocusTrap(), [])
 
   // ウィンドウのタイトルにプロジェクト名と未保存の印を出す(Windows のソフトの決まり)
   useEffect(() => {

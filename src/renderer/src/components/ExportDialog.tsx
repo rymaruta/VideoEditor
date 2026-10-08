@@ -150,7 +150,10 @@ export function ExportDialog(): React.JSX.Element | null {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      // 下にある画面(自動編集の画面・大きく表示したプレビュー)まで一緒に閉じない
+      e.stopImmediatePropagation()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

@@ -11,10 +11,18 @@ import { frameSeconds } from '@shared/frameRate'
  * 各リスナが自前で書き写すと、あとから足した門(下の `isModalOpen`)が
  * 書き写した側に届かない——実際そうなっていた(理由は `SourceViewer` の keydown)。
  */
-export function isTypingTarget(el: EventTarget | null): boolean {
+export function isTypingTarget(el: EventTarget | null, key?: string): boolean {
   if (!(el instanceof HTMLElement)) return false
   const tag = el.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+  if (tag === 'INPUT') {
+    // スライダー・チェックボックスは文字を打つ欄ではない。触った後に Space・S・Delete が
+    // 効かなくなっていた。スライダーの矢印キー(値を動かす)だけは欄に任せる
+    const type = (el as HTMLInputElement).type
+    if (type === 'range') return key !== undefined && /^(Arrow|Home$|End$|Page)/.test(key)
+    if (type === 'checkbox' || type === 'radio' || type === 'button') return false
+    return true
+  }
+  return tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
 }
 
 // While any modal dialog is open, timeline-wide shortcuts must not reach the
@@ -47,7 +55,18 @@ export function useKeyboardShortcuts(): void {
     const keymap = getKeymap(keymapScheme)
 
     function handleKeyDown(e: KeyboardEvent): void {
-      if (isTypingTarget(e.target)) return
+      // 保存は文字を打っている最中・ダイアログの上でも効かせる(メニューの Ctrl+S はここが受け持つので、
+      // 欄に入っている間は何も起きなかった)
+      if (matchesBinding(e, keymap.save)) {
+        e.preventDefault()
+        // Surface failures in the same spot as the toolbar save button — a silently
+        // swallowed Ctrl+S error looks like a successful save and invites data loss.
+        saveProject().catch((err) => {
+          useProjectStore.getState().setSaveError(formatIpcError(err))
+        })
+        return
+      }
+      if (isTypingTarget(e.target, e.key)) return
       if (isModalOpen()) return
       const store = useProjectStore.getState()
 
@@ -64,15 +83,6 @@ export function useKeyboardShortcuts(): void {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'y') {
         e.preventDefault()
         store.redo()
-        return
-      }
-      if (matchesBinding(e, keymap.save)) {
-        e.preventDefault()
-        // Surface failures in the same spot as the toolbar save button — a silently
-        // swallowed Ctrl+S error looks like a successful save and invites data loss.
-        saveProject().catch((err) => {
-          useProjectStore.getState().setSaveError(formatIpcError(err))
-        })
         return
       }
       // ここから先はタイムラインを変える操作。自動編集の画面で隠れている間は通さない

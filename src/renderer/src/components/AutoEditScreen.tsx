@@ -27,6 +27,7 @@ import {
 } from '@shared/structure/kind'
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 import { ShortsPanel } from './ShortsPanel'
+import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
 
 /**
  * 自動編集の画面(自動編集 > 自動編集の画面)。デザイン案の「AutoEdit」。
@@ -135,7 +136,11 @@ export function AutoEditScreen(): React.JSX.Element | null {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key !== 'Escape') return
+      // 上にダイアログが開いていればそちらだけを閉じる。文字を打っている欄の Esc でも閉じない
+      // (1回の Esc で、書き出しのダイアログと一緒にこの画面まで閉じていた)
+      if (isModalOpen() || isTypingTarget(e.target)) return
+      setOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

@@ -11,6 +11,7 @@ import { NumberSlider, StyleSection } from './AppearanceControls'
 import { TelopLookPicker, type LookItem } from './TelopLookGallery'
 import { LookTransfer } from './LookTransfer'
 import { applyLook, styleForSpeaker } from '@shared/telop/styles'
+import { DraftNumber } from './DraftNumber'
 
 /**
  * 選んだテロップ1本の設定。並びは
@@ -232,36 +233,28 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
                 {o.style.customPosition && <option value="custom">自由配置</option>}
               </select>
               <span className="prop-unit">X</span>
-              <input
-                type="number"
-                aria-label="横位置(%)"
+              <DraftNumber
+                ariaLabel="横位置(%)"
                 className="prop-num"
                 min={0}
                 max={100}
                 value={Math.round(pos.x * 100)}
-                onChange={(e) =>
+                onCommit={(v) =>
                   place({
-                    customPosition: {
-                      x: Math.min(100, Math.max(0, Number(e.target.value))) / 100,
-                      y: pos.y
-                    }
+                    customPosition: { x: Math.min(100, Math.max(0, v)) / 100, y: pos.y }
                   })
                 }
               />
               <span className="prop-unit">Y</span>
-              <input
-                type="number"
-                aria-label="縦位置(%)"
+              <DraftNumber
+                ariaLabel="縦位置(%)"
                 className="prop-num"
                 min={0}
                 max={100}
                 value={Math.round(pos.y * 100)}
-                onChange={(e) =>
+                onCommit={(v) =>
                   place({
-                    customPosition: {
-                      x: pos.x,
-                      y: Math.min(100, Math.max(0, Number(e.target.value))) / 100
-                    }
+                    customPosition: { x: pos.x, y: Math.min(100, Math.max(0, v)) / 100 }
                   })
                 }
               />
@@ -284,34 +277,28 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
 
       <StyleSection id="timing" title="表示時間" defaultOpen>
         <PropRow label="表示時間">
-          <input
-            type="number"
-            aria-label="開始(秒)"
+          <DraftNumber
+            ariaLabel="開始(秒)"
             className="prop-num wide"
             step={0.1}
             min={0}
             value={o.startTime}
-            onChange={(e) => {
-              const v = Number(e.target.value)
-              if (!Number.isFinite(v)) return
+            onCommit={(v) =>
               updateTextOverlay(o.id, {
                 startTime: Math.min(Math.max(0, v), Math.max(0, o.endTime - MIN_OVERLAY_DURATION))
               })
-            }}
+            }
           />
           <span className="prop-unit">〜</span>
-          <input
-            type="number"
-            aria-label="終了(秒)"
+          <DraftNumber
+            ariaLabel="終了(秒)"
             className="prop-num wide"
             step={0.1}
             min={o.startTime + MIN_OVERLAY_DURATION}
             value={o.endTime}
-            onChange={(e) => {
-              const v = Number(e.target.value)
-              if (!Number.isFinite(v)) return
+            onCommit={(v) =>
               updateTextOverlay(o.id, { endTime: Math.max(v, o.startTime + MIN_OVERLAY_DURATION) })
-            }}
+            }
           />
           <span className="prop-unit">秒</span>
         </PropRow>

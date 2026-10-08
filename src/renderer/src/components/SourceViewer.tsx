@@ -50,6 +50,7 @@ export function SourceViewer(): React.JSX.Element | null {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const [time, setTime] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [rate, setRate] = useState(1)
@@ -130,7 +131,11 @@ export function SourceViewer(): React.JSX.Element | null {
       //  同じ場面の Delete は `isTimelineCovered` に守られて何も起きない)
       // 判定は**共有の関数を呼ぶ**。ここに書き写すと、次に門が増えたときも同じ取り残しが起きる。
       if (isTimelineCovered()) return
-      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
+      // ほかのタブを開いている(ソースビューアが見えていない)間は受けない。隠れたまま `f` で
+      // クリップを足し、`l` で見えない映像を音付きで再生し始めていた
+      const pane = rootRef.current?.closest('.tab-pane')
+      if (!rootRef.current || (pane && !pane.classList.contains('active'))) return
+      if (isTypingTarget(e.target, e.key) || e.ctrlKey || e.metaKey || e.altKey) return
       const key = e.key.toLowerCase()
       if (key === 'j') {
         e.preventDefault()
@@ -212,7 +217,7 @@ export function SourceViewer(): React.JSX.Element | null {
   }
 
   return (
-    <div className="panel source-viewer">
+    <div className="panel source-viewer" ref={rootRef}>
       <div className="source-viewer-header">
         <h3>
           <ClapperboardIcon width={13} height={13} />

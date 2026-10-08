@@ -1,5 +1,5 @@
 import { angleAlternatives } from '@shared/roughCut/overrides'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
 import { useMenuCommand } from '../lib/menuCommands'
 import { formatTimecode, rulerStep, rulerTicks } from '../lib/timelineRuler'
@@ -119,6 +119,8 @@ import {
   MusicIcon
 } from './icons'
 import { stripTelopMarkup } from '@shared/telop/render'
+import { DraftNumber } from './DraftNumber'
+import { Popover } from './Popover'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -845,14 +847,8 @@ export function Timeline(): React.JSX.Element {
     [snapEnabled, snapCandidatesWithBeat]
   )
 
-  useEffect(() => {
-    if (!transitionPopoverClipId) return
-    function handleOutsideClick(): void {
-      setTransitionPopoverClipId(null)
-    }
-    window.addEventListener('click', handleOutsideClick)
-    return () => window.removeEventListener('click', handleOutsideClick)
-  }, [transitionPopoverClipId])
+  /** 開いている繋ぎの吹き出しの基準(境目の印) */
+  const transitionAnchorRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     function handleDeleteKey(e: KeyboardEvent): void {
@@ -994,7 +990,7 @@ export function Timeline(): React.JSX.Element {
       // 判定は**共有の関数を呼ぶ**。ここに書き写したせいで、あとから足された
       // `isTimelineCovered` の門が届かなかった(理由は useKeyboardShortcuts)。
       if (isTimelineCovered()) return
-      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
+      if (isTypingTarget(e.target, e.key) || e.ctrlKey || e.metaKey || e.altKey) return
       const key = e.key.toLowerCase()
       if (key === 'a') setEditTool('select')
       else if (key === 't') setEditTool('trim')
@@ -1583,12 +1579,25 @@ export function Timeline(): React.JSX.Element {
     return Math.max(MIN_FIT_ZOOM, Math.min(MIN_ZOOM, fitZoom))
   }
 
-  function handleWheelZoom(e: React.WheelEvent<HTMLDivElement>): void {
+  function handleWheelZoom(e: WheelEvent): void {
     if (!e.ctrlKey && !e.metaKey) return
     e.preventDefault()
     const floor = currentMinZoom()
     setZoom((z) => Math.min(MAX_ZOOM, Math.max(floor, z * (e.deltaY < 0 ? 1.1 : 0.9))))
   }
+  // React の onWheel は passive で、preventDefault が効かずに毎回コンソールへエラーが出ていた。
+  // 自前で passive: false の listener を付ける(処理は最新の関数を呼ぶ)
+  const wheelZoomRef = useRef(handleWheelZoom)
+  useLayoutEffect(() => {
+    wheelZoomRef.current = handleWheelZoom
+  })
+  useEffect(() => {
+    const el = trackLanesColRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent): void => wheelZoomRef.current(e)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   function handleZoomToFit(): void {
     const container = trackLanesColRef.current
@@ -2198,7 +2207,7 @@ export function Timeline(): React.JSX.Element {
           )}
         </div>
 
-        <div className="track-lanes-col" ref={trackLanesColRef} onWheel={handleWheelZoom}>
+        <div className="track-lanes-col" ref={trackLanesColRef}>
           {/* 時間目盛り。押した位置へ再生位置を移す(見えている範囲の目盛りだけ描く) */}
           <div
             className="timeline-ruler"
@@ -2412,6 +2421,7 @@ export function Timeline(): React.JSX.Element {
                   />
                   {i > 0 && (
                     <div
+                      ref={transitionPopoverClipId === tc.clip.id ? transitionAnchorRef : undefined}
                       className={`transition-marker ${tc.clip.transitionIn ? 'has-transition' : ''}`}
                       title={
                         tc.clip.transitionIn
@@ -2425,53 +2435,68 @@ export function Timeline(): React.JSX.Element {
                         )
                       }}
                     >
+                      {/* 吹き出しは document.body に出す(トラックの枠の overflow で切れて、見えも押せもしなかった) */}
                       {transitionPopoverClipId === tc.clip.id && (
-                        <div className="transition-popover" onClick={(e) => e.stopPropagation()}>
-                          <select
-                            value={tc.clip.transitionIn?.type ?? 'none'}
-                            onChange={(e) =>
-                              updateClipTransition(
-                                tc.clip.id,
-                                e.target.value === 'none'
-                                  ? undefined
-                                  : {
-                                      type: e.target.value as TransitionType,
-                                      duration: tc.clip.transitionIn?.duration ?? 0.5
-                                    }
-                              )
-                            }
+                        <Popover
+                          anchorRef={transitionAnchorRef}
+                          label="トランジション"
+                          onClose={() => setTransitionPopoverClipId(null)}
+                        >
+                          <div
+                            className="transition-popover-body"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onDragStart={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                            }}
                           >
-                            <option value="none">カット</option>
-                            <option value="crossfade">クロスフェード</option>
-                            <option value="fade">フェード</option>
-                            <option value="wipe">ワイプ</option>
-                          </select>
-                          {tc.clip.transitionIn && (
-                            <>
-                              <input
-                                className="transition-duration"
-                                type="number"
-                                min={0.1}
-                                max={2}
-                                step={0.1}
-                                value={tc.clip.transitionIn.duration}
-                                onChange={(e) =>
-                                  updateClipTransition(tc.clip.id, {
-                                    type: tc.clip.transitionIn?.type ?? 'crossfade',
-                                    duration: Number(e.target.value)
-                                  })
-                                }
-                                title={transitionDurationTitle(project.clips, tc.clip.id)}
-                              />
-                              {trimmedTransitionOf(project.clips, tc.clip.id) && (
-                                <span className="hint-text transition-trimmed">
-                                  実際 {trimmedTransitionOf(project.clips, tc.clip.id)!.toFixed(2)}
-                                  秒
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </div>
+                            <select
+                              value={tc.clip.transitionIn?.type ?? 'none'}
+                              onChange={(e) =>
+                                updateClipTransition(
+                                  tc.clip.id,
+                                  e.target.value === 'none'
+                                    ? undefined
+                                    : {
+                                        type: e.target.value as TransitionType,
+                                        duration: tc.clip.transitionIn?.duration ?? 0.5
+                                      }
+                                )
+                              }
+                            >
+                              <option value="none">カット</option>
+                              <option value="crossfade">クロスフェード</option>
+                              <option value="fade">フェード</option>
+                              <option value="wipe">ワイプ</option>
+                            </select>
+                            {tc.clip.transitionIn && (
+                              <>
+                                <input
+                                  className="transition-duration"
+                                  type="number"
+                                  min={0.1}
+                                  max={2}
+                                  step={0.1}
+                                  value={tc.clip.transitionIn.duration}
+                                  onChange={(e) =>
+                                    updateClipTransition(tc.clip.id, {
+                                      type: tc.clip.transitionIn?.type ?? 'crossfade',
+                                      duration: Number(e.target.value)
+                                    })
+                                  }
+                                  title={transitionDurationTitle(project.clips, tc.clip.id)}
+                                />
+                                {trimmedTransitionOf(project.clips, tc.clip.id) && (
+                                  <span className="hint-text transition-trimmed">
+                                    実際{' '}
+                                    {trimmedTransitionOf(project.clips, tc.clip.id)!.toFixed(2)}秒
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </Popover>
                       )}
                     </div>
                   )}
@@ -3031,17 +3056,12 @@ export function Timeline(): React.JSX.Element {
           )}
           <label>
             開始位置(秒)
-            <input
-              type="number"
+            <DraftNumber
               step={0.1}
               min={0}
               value={selectedAudioClipData.startTime}
-              onChange={(e) =>
-                updateAudioClipStart(
-                  selectedAudioClip.trackId,
-                  selectedAudioClip.clipId,
-                  Number(e.target.value)
-                )
+              onCommit={(v) =>
+                updateAudioClipStart(selectedAudioClip.trackId, selectedAudioClip.clipId, v)
               }
             />
           </label>
@@ -3049,17 +3069,16 @@ export function Timeline(): React.JSX.Element {
             <>
               <label>
                 イン点(秒)
-                <input
-                  type="number"
+                <DraftNumber
                   step={0.1}
                   min={0}
                   max={selectedAudioClipAsset.duration}
                   value={selectedAudioClipData.inPoint}
-                  onChange={(e) =>
+                  onCommit={(v) =>
                     updateAudioClipTrim(
                       selectedAudioClip.trackId,
                       selectedAudioClip.clipId,
-                      Math.min(Number(e.target.value), selectedAudioClipData.outPoint - 0.1),
+                      Math.min(v, selectedAudioClipData.outPoint - 0.1),
                       selectedAudioClipData.outPoint
                     )
                   }
@@ -3067,18 +3086,17 @@ export function Timeline(): React.JSX.Element {
               </label>
               <label>
                 アウト点(秒)
-                <input
-                  type="number"
+                <DraftNumber
                   step={0.1}
                   min={0}
                   max={selectedAudioClipAsset.duration}
                   value={selectedAudioClipData.outPoint}
-                  onChange={(e) =>
+                  onCommit={(v) =>
                     updateAudioClipTrim(
                       selectedAudioClip.trackId,
                       selectedAudioClip.clipId,
                       selectedAudioClipData.inPoint,
-                      Math.max(Number(e.target.value), selectedAudioClipData.inPoint + 0.1)
+                      Math.max(v, selectedAudioClipData.inPoint + 0.1)
                     )
                   }
                 />
@@ -3195,33 +3213,31 @@ export function Timeline(): React.JSX.Element {
         <div className="audio-clip-inspector">
           <label>
             開始位置(秒)
-            <input
-              type="number"
+            <DraftNumber
               step={0.1}
               min={0}
               value={selectedVideoOverlayClipData.startTime}
-              onChange={(e) =>
+              onCommit={(v) =>
                 updateVideoOverlayClipStart(
                   selectedVideoOverlayClip.trackId,
                   selectedVideoOverlayClip.clipId,
-                  Number(e.target.value)
+                  v
                 )
               }
             />
           </label>
           <label>
             イン点(秒)
-            <input
-              type="number"
+            <DraftNumber
               step={0.1}
               min={0}
               max={selectedVideoOverlayAsset.duration}
               value={selectedVideoOverlayClipData.inPoint}
-              onChange={(e) =>
+              onCommit={(v) =>
                 updateVideoOverlayClipTrim(
                   selectedVideoOverlayClip.trackId,
                   selectedVideoOverlayClip.clipId,
-                  Math.min(Number(e.target.value), selectedVideoOverlayClipData.outPoint - 0.1),
+                  Math.min(v, selectedVideoOverlayClipData.outPoint - 0.1),
                   selectedVideoOverlayClipData.outPoint
                 )
               }
@@ -3229,18 +3245,17 @@ export function Timeline(): React.JSX.Element {
           </label>
           <label>
             アウト点(秒)
-            <input
-              type="number"
+            <DraftNumber
               step={0.1}
               min={0}
               max={selectedVideoOverlayAsset.duration}
               value={selectedVideoOverlayClipData.outPoint}
-              onChange={(e) =>
+              onCommit={(v) =>
                 updateVideoOverlayClipTrim(
                   selectedVideoOverlayClip.trackId,
                   selectedVideoOverlayClip.clipId,
                   selectedVideoOverlayClipData.inPoint,
-                  Math.max(Number(e.target.value), selectedVideoOverlayClipData.inPoint + 0.1)
+                  Math.max(v, selectedVideoOverlayClipData.inPoint + 0.1)
                 )
               }
             />

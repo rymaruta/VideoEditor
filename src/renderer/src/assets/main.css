@@ -2449,21 +2449,10 @@ h3 {
   opacity: 1;
 }
 
-.transition-popover {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: 6px;
+.transition-popover-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: var(--bg-elevated-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  z-index: 10;
   cursor: default;
   white-space: nowrap;
 }

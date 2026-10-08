@@ -84,6 +84,7 @@ import {
   type PendingPreviewLoad
 } from '../lib/pendingPreviewLoad'
 import { canSwapToStandby, standbyTargetFor, type StandbyTarget } from '../lib/previewStandby'
+import { isModalOpen } from '../lib/useKeyboardShortcuts'
 
 /** テロップの当たり判定を測るための Canvas(描かない。文字の幅を測るだけ) */
 let measureContext: CanvasRenderingContext2D | null = null
@@ -121,9 +122,20 @@ function telopHitBoxStyle(
 
 interface OverlayDragState {
   id: string
+  /** テロップの中心(自由配置の位置) */
   x: number
   y: number
+  /** つかんだ所からテロップの中心までの差(つかんだ所がテロップの中心へ飛ばないように) */
+  dx: number
+  dy: number
+  /** 押した位置(画面の px)。少し動かすまではドラッグにしない */
+  startX: number
+  startY: number
+  moved: boolean
 }
+
+/** これより動かさなければクリック(テロップを動かさない) */
+const OVERLAY_DRAG_THRESHOLD_PX = 3
 
 const VOLUME_KEY = 've-preview-volume'
 const MUTED_KEY = 've-preview-muted'
@@ -763,6 +775,7 @@ export function PreviewPlayer(): React.JSX.Element {
   const seekToken = seekRequest?.token ?? 0
   const seekTo = useProjectStore((s) => s.seekTo)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
+  const selectOverlay = useProjectStore((s) => s.selectOverlay)
   const exportResolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
 
   // いま映している方の再生要素(2つのうちどちらか。理由は previewStandby)
@@ -867,13 +880,27 @@ export function PreviewPlayer(): React.JSX.Element {
   useEffect(() => {
     if (!overlayDrag) return
     function handleMouseMove(e: MouseEvent): void {
-      setOverlayDrag((prev) =>
-        prev ? { ...prev, ...clientToNormalized(e.clientX, e.clientY) } : prev
-      )
+      setOverlayDrag((prev) => {
+        if (!prev) return prev
+        if (
+          !prev.moved &&
+          Math.hypot(e.clientX - prev.startX, e.clientY - prev.startY) < OVERLAY_DRAG_THRESHOLD_PX
+        )
+          return prev
+        const p = clientToNormalized(e.clientX, e.clientY)
+        return {
+          ...prev,
+          moved: true,
+          x: Math.min(1, Math.max(0, p.x + prev.dx)),
+          y: Math.min(1, Math.max(0, p.y + prev.dy))
+        }
+      })
     }
     function handleMouseUp(): void {
       const overlay = project.textOverlays.find((o) => o.id === overlayDrag?.id)
-      if (overlay && overlayDrag) {
+      // 動かしていなければ(クリックだけ)位置を変えない。クリックで自由配置になり、
+      // 押した所へテロップが飛んで、取り消しの履歴まで積まれていた
+      if (overlay && overlayDrag?.moved) {
         updateTextOverlay(overlayDrag.id, {
           style: { ...overlay.style, customPosition: { x: overlayDrag.x, y: overlayDrag.y } }
         })
@@ -1303,7 +1330,8 @@ export function PreviewPlayer(): React.JSX.Element {
   useEffect(() => {
     if (!isExpanded) return
     function handleKeyDown(e: KeyboardEvent): void {
-      if (e.key === 'Escape') setIsExpanded(false)
+      // 上にダイアログが開いていればそちらだけを閉じる(1回の Esc で両方閉じていた)
+      if (e.key === 'Escape' && !isModalOpen()) setIsExpanded(false)
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
@@ -1416,7 +1444,7 @@ export function PreviewPlayer(): React.JSX.Element {
             {/* テロップは書き出しと同じ共通レンダラで描く(どの書き出し方式でも、見えたとおりに出る) */}
             <TelopCanvasLayer
               overlays={activeOverlays.map((o) =>
-                overlayDrag?.id === o.id
+                overlayDrag?.id === o.id && overlayDrag.moved
                   ? {
                       ...o,
                       style: {
@@ -1433,7 +1461,8 @@ export function PreviewPlayer(): React.JSX.Element {
             />
             {activeOverlays.map((o) => {
               // DOM の箱は、つかんで動かすための当たり判定だけ(絵は上の Canvas が描く)
-              const livePos = overlayDrag?.id === o.id ? overlayDrag : o.style.customPosition
+              const livePos =
+                overlayDrag?.id === o.id && overlayDrag.moved ? overlayDrag : o.style.customPosition
               const hitStyle = telopHitBoxStyle(
                 livePos ? { ...o, style: { ...o.style, customPosition: livePos } } : o,
                 textCanvas,
@@ -1448,7 +1477,23 @@ export function PreviewPlayer(): React.JSX.Element {
                   onMouseDown={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
-                    setOverlayDrag({ id: o.id, ...clientToNormalized(e.clientX, e.clientY) })
+                    selectOverlay(o.id)
+                    // 中心は自由配置ならその位置、そうでなければ当たり判定の箱の中心
+                    const r = e.currentTarget.getBoundingClientRect()
+                    const center =
+                      o.style.customPosition ??
+                      clientToNormalized(r.left + r.width / 2, r.top + r.height / 2)
+                    const p = clientToNormalized(e.clientX, e.clientY)
+                    setOverlayDrag({
+                      id: o.id,
+                      x: center.x,
+                      y: center.y,
+                      dx: center.x - p.x,
+                      dy: center.y - p.y,
+                      startX: e.clientX,
+                      startY: e.clientY,
+                      moved: false
+                    })
                   }}
                 />
               )

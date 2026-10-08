@@ -7,6 +7,7 @@ import { CLIP_COLORS } from '../lib/clipColors'
 import { transitionSecondsForClip } from '@shared/transition'
 import type { ClipColorLabel, TransitionType } from '@shared/types'
 import { GaugeIcon, LayersIcon, MusicIcon, ScissorsIcon, TagIcon, TargetIcon } from './icons'
+import { DraftNumber } from './DraftNumber'
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
 
@@ -48,48 +49,6 @@ function ClipColorPicker({
         />
       ))}
     </div>
-  )
-}
-
-/**
- * 打っている途中の値は欄の中だけに置き、確定(Enter・欄を離れる)したときだけ反映する数値の欄。
- * 1 文字ごとに反映すると、打ちかけの値(「28」を打つ途中の「2」)でクリップが一度縮み、本編に付いて動く
- * 自動のテロップ・効果音が縮んだ区間の外として消えていた(伸ばし直しても戻らない)
- */
-function DraftNumber({
-  value,
-  min,
-  max,
-  step,
-  onCommit
-}: {
-  value: number
-  min: number
-  max: number
-  step: number
-  onCommit: (v: number) => void
-}): React.JSX.Element {
-  const [draft, setDraft] = useState<string | null>(null)
-  const commit = (): void => {
-    if (draft === null) return
-    const v = Number(draft)
-    setDraft(null)
-    if (draft.trim() !== '' && Number.isFinite(v)) onCommit(v)
-  }
-  return (
-    <input
-      type="number"
-      min={min}
-      max={max}
-      step={step}
-      value={draft ?? String(Number(value.toFixed(2)))}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') commit()
-        else if (e.key === 'Escape') setDraft(null)
-      }}
-    />
   )
 }
 
