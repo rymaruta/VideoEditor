@@ -300,6 +300,15 @@ export interface AudioTrack {
   autoSignature?: string
   /** 仮編集が決めた音量(収録素材のトラック)。今の音量と違えば手で変えたとみなし、作り直しでも残す */
   autoVolume?: number
+  /**
+   * 自動の BGM: 本編の速さを変える前の並び(速さを変えるたびに、ここから作り直す。速さを戻せば元に戻る)。
+   * `output` は最後に作った並び。今の並びと違えば人が直したとみなし、今の並びを新しい元にする
+   */
+  speedBase?: {
+    clips: AudioTrackClip[]
+    program: { id: string; inPoint: number; outPoint: number; speed: number }[]
+    output: AudioTrackClip[]
+  }
   clips: AudioTrackClip[]
 }
 

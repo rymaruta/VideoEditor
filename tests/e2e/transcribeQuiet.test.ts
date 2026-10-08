@@ -111,6 +111,25 @@ describe.skipIf(!existsSync(ffmpegPath))('区間の文字起こしの決まり�
     expect((await transcribeRange(src, 0, 10)).map((x) => x.text)).toEqual([STOCK])
   }, 60_000)
 
+  it('ノイズゲートが言葉の間を 0.3〜1 秒閉じるマイクでも、小さく言った締めの言葉を残す', async () => {
+    for (const gap of [0.4, 0.6, 0.9]) {
+      const src = join(work, `gated-${gap}.wav`)
+      // 声(-37dBFS ほど)と、ゲートが閉じた 0 の間が 2 秒ごとに繰り返す
+      ff([
+        '-f',
+        'lavfi',
+        '-i',
+        `aevalsrc='0.02*sin(2*PI*180*t)*gt(mod(t\\,2)\\,${gap})':d=10:s=48000`,
+        src
+      ])
+      fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [8, null] }] }
+      expect(
+        (await transcribeRange(src, 0, 10)).map((x) => x.text),
+        `gap ${gap}`
+      ).toEqual([STOCK])
+    }
+  }, 60_000)
+
   it('頭・終わり・途中の短い無音(1秒未満)の隣でも、部屋の雑音の上の決まり文句は捨てる', async () => {
     const lead = join(work, 'shortlead.wav')
     ff([

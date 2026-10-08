@@ -326,6 +326,71 @@ describe('標準の書き出しの、とても短いクリップ', () => {
     }
   }, 180_000)
 
+  it('PiP の音は、絵と同じフレームで終わる(格子に乗らない始まり・本編の終わり・繋ぎ)', async () => {
+    const face = await asset('pipface2', 'tone', 8)
+    const pcmBounds = (out: string): [number, number] => {
+      const raw = execFileSync(
+        ffmpegPath,
+        ['-v', 'error', '-i', out, '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', '-'],
+        { maxBuffer: 1 << 28 }
+      )
+      const x = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4)
+      let last = -1
+      for (let i = x.length - 1; i >= 0; i--)
+        if (Math.abs(x[i]) > 0.01) {
+          last = i
+          break
+        }
+      return [x.findIndex((v) => Math.abs(v) > 0.01) / 48000, (last + 1) / 48000]
+    }
+    const pip = (startTime: number, inPoint: number, outPoint: number): unknown => ({
+      id: 'face',
+      name: '顔',
+      hidden: false,
+      position: 'bottom-right',
+      scale: 0.26,
+      clips: [{ id: 'fc', assetId: 'pipface2', startTime, inPoint, outPoint }]
+    })
+    const main = await asset('pipmain2', 'none', 6)
+    const cases: [string, Project, number][] = [
+      [
+        'past-end',
+        {
+          ...base([main, face]),
+          clips: [{ id: 'c1', assetId: 'pipmain2', inPoint: 0, outPoint: 5, speed: 1 }],
+          videoOverlayTracks: [pip(3.983, 0.7, 3.7)]
+        } as unknown as Project,
+        5
+      ],
+      [
+        'xfade',
+        {
+          ...base([main, face]),
+          clips: [
+            { id: 'c1', assetId: 'pipmain2', inPoint: 0, outPoint: 3, speed: 1 },
+            {
+              id: 'c2',
+              assetId: 'pipmain2',
+              inPoint: 0,
+              outPoint: 3,
+              speed: 1,
+              transitionIn: { type: 'crossfade', duration: 0.77 }
+            }
+          ],
+          videoOverlayTracks: [pip(1.21, 0.4, 2.9)]
+        } as unknown as Project,
+        3
+      ]
+    ]
+    for (const [name, project, end] of cases) {
+      const [std, seg] = await both(project, `pipend-${name}`)
+      const a = pcmBounds(std)
+      const b = pcmBounds(seg)
+      expect(Math.abs(a[1] - b[1]), `${name} ${a} vs ${b}`).toBeLessThan(0.003)
+      expect(Math.abs(a[1] - end), `${name} std ${a}`).toBeLessThan(0.003)
+    }
+  }, 300_000)
+
   it('どのクリップも半コマより短ければ、空のファイルを作らずに止める', async () => {
     const a = await asset('tiny2', 'tone', 2)
     const project = {

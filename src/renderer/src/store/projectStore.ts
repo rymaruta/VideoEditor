@@ -212,6 +212,39 @@ function gestureOrigin(state: ProjectState, history: Pick<ProjectState, 'past'>)
     : state.project
 }
 
+/** 素材の一覧に、まだ無い素材(同じファイルが無いもの)を足す */
+function withAssets(assets: MediaAsset[], add: MediaAsset[]): MediaAsset[] {
+  const out = [...assets]
+  for (const a of add) if (!out.some((x) => x.filePath === a.filePath)) out.push(a)
+  return out
+}
+
+/**
+ * 裏で用意して置いたもの(自動の SE・BGM・CG)を、仮編集を入れた後の履歴(本編が `afterCut` のまま)にも置く。
+ * 置くまでの間に別の所を直していると、その直しを取り消したときに、置いたものまで消えていた
+ */
+function placeInHistory(
+  state: Pick<ProjectState, 'past' | 'future'>,
+  afterCut: Project['clips'] | undefined,
+  place: (p: Project) => Project
+): Partial<Pick<ProjectState, 'past' | 'future'>> {
+  if (!afterCut) return {}
+  const fix = (list: Project[]): Project[] =>
+    list.some((p) => p.clips === afterCut)
+      ? list.map((p) => (p.clips === afterCut ? place(p) : p))
+      : list
+  return { past: fix(state.past), future: fix(state.future) }
+}
+
+/** ドラッグの続きなら、本編に付いていかせる処理をドラッグの始まりから計算させる印 */
+function followFromOrigin(
+  state: ProjectState,
+  history: Pick<ProjectState, 'past'>
+): { __followFrom?: Project } {
+  const origin = gestureOrigin(state, history)
+  return origin !== state.project ? { __followFrom: origin } : {}
+}
+
 function createBlankProject(): Project {
   return {
     id: uuid(),
@@ -550,10 +583,45 @@ function normalizeAudioTrack(
         ? raw.autoVolume
         : undefined,
     volume: asNonNegative(raw.volume, 1),
+    speedBase: normalizeSpeedBase(raw.speedBase, durationOf),
     clips: asRecordArray<Record<string, unknown>>(raw.clips)
       .map((c) => normalizeAudioClip(c, durationOf))
       .filter((c): c is AudioTrackClip => c !== null)
   }
+}
+
+/** BGM の速さの元。形が壊れていれば捨てる(捨てても、次に速さを変えたときの並びが元になるだけ) */
+function normalizeSpeedBase(
+  raw: unknown,
+  durationOf: (id: string) => number
+): AudioTrack['speedBase'] {
+  if (!isRecord(raw) || !Array.isArray(raw.clips) || !Array.isArray(raw.output)) return undefined
+  if (!Array.isArray(raw.program)) return undefined
+  const clipsOf = (list: unknown[]): AudioTrackClip[] | null => {
+    const out = asRecordArray<Record<string, unknown>>(list).map((c) =>
+      normalizeAudioClip(c, durationOf)
+    )
+    return out.length === list.length && out.every((c) => c !== null)
+      ? (out as AudioTrackClip[])
+      : null
+  }
+  const clips = clipsOf(raw.clips)
+  const output = clipsOf(raw.output)
+  const program = raw.program.map((p) =>
+    isRecord(p) &&
+    typeof p.id === 'string' &&
+    [p.inPoint, p.outPoint, p.speed].every((v) => typeof v === 'number' && Number.isFinite(v)) &&
+    (p.speed as number) > 0
+      ? {
+          id: p.id,
+          inPoint: p.inPoint as number,
+          outPoint: p.outPoint as number,
+          speed: p.speed as number
+        }
+      : null
+  )
+  if (!clips || !output || program.some((p) => p === null)) return undefined
+  return { clips, output, program: program as NonNullable<AudioTrack['speedBase']>['program'] }
 }
 
 function normalizeVideoOverlayTrack(
@@ -888,6 +956,12 @@ interface ProjectState {
    * 同時に新しい位置で入るので、本編に付いていかせる処理(`followMainEdit`)を通さない
    */
   __noFollow?: true
+  /**
+   * まとめて1件の履歴にするドラッグ(トリム・ロール)の続きの書き込みの印。本編に付いていかせる処理を、
+   * 1つ前の書き込みではなく、ドラッグの始まりの状態から計算し直す(1回の動きで外へ出た自動の SE・
+   * テロップが、戻しても消えたままになっていた)
+   */
+  __followFrom?: Project
   currentFilePath: string | null
   isDirty: boolean
   selectedClipId: string | null
@@ -1126,10 +1200,15 @@ interface ProjectState {
    */
   setAutoSounds: (
     sounds: { role: 'se' | 'bgm'; clips: PlacedSound[] }[],
-    assets: MediaAsset[]
+    assets: MediaAsset[],
+    /**
+     * 仮編集を入れた直後の本編。置くまでの間に、本編はそのままで別の所を直していたなら、その履歴にも
+     * 同じものを置く(直した所だけを取り消したときに、置いた音まで消えないように)
+     */
+    afterCut?: Project['clips']
   ) => void
   /** 自動の版面CG のトラックを入れ替える(`setAutoSounds` と同じく履歴は積まない) */
-  setAutoCg: (clips: PlacedCg[], assets: MediaAsset[]) => void
+  setAutoCg: (clips: PlacedCg[], assets: MediaAsset[], afterCut?: Project['clips']) => void
   /** 文字起こしの結果を入れ替える(取り消し1回で戻る) */
   setTranscript: (transcript: TranscriptUtterance[]) => void
   /** 笑い・歓声の検出結果を入れ替える(解析の結果なので履歴は積まない) */
@@ -1725,8 +1804,33 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         let patch = (typeof partial === 'function' ? partial(state) : partial) as
           Partial<ProjectState> | undefined
         if (!patch || patch.__historyPush !== true) return patch as Partial<ProjectState>
+        const origin = patch.__followFrom
+        if (origin) patch = omitKeys(patch, ['__followFrom'])
         if (patch.__noFollow) patch = omitKeys(patch, ['__noFollow'])
-        else if (patch.project && patch.project.clips !== state.project.clips)
+        else if (origin && patch.project) {
+          // ドラッグの始まりから: 本編と、本編に紐づくテロップは今の値、それ以外は始まりの値から追従させる
+          const edited = patch.project
+          patch = {
+            ...patch,
+            project: followMainEdit(origin, {
+              ...edited,
+              audioTracks: origin.audioTracks.map((t) => {
+                const e = edited.audioTracks.find((x) => x.id === t.id)
+                if (!e) return t
+                const linkedNow = new Map(
+                  e.clips.filter((c) => c.linkedClipId).map((c) => [c.id, c])
+                )
+                if (linkedNow.size === 0) return t
+                return { ...t, clips: t.clips.map((c) => linkedNow.get(c.id) ?? c) }
+              }),
+              videoOverlayTracks: origin.videoOverlayTracks,
+              textOverlays: [
+                ...origin.textOverlays.filter((o) => !o.linkedClipId),
+                ...edited.textOverlays.filter((o) => o.linkedClipId)
+              ]
+            })
+          }
+        } else if (patch.project && patch.project.clips !== state.project.clips)
           patch = { ...patch, project: followMainEdit(state.project, patch.project) }
         if (!patch.project || !sameProjectContent(patch.project, state.project)) {
           return pruneSelection(state, omitKeys(patch, ['__historyPush']))
@@ -1743,6 +1847,7 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         const others = omitKeys(patch, [
           '__historyPush',
           '__noFollow',
+          '__followFrom',
           'project',
           'past',
           'future',
@@ -2361,6 +2466,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const history = pushHistory(state, `clipTrim:${clipId}`)
       return {
         ...history,
+        ...followFromOrigin(state, history),
         project: reanchorLinkedOverlays(gestureOrigin(state, history), {
           ...state.project,
           clips: state.project.clips.map((c) =>
@@ -2412,6 +2518,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const history = pushHistory(state, `roll:${leftClipId}:${rightClipId}`)
       return {
         ...history,
+        ...followFromOrigin(state, history),
         project: reanchorLinkedOverlays(gestureOrigin(state, history), {
           ...state.project,
           clips: state.project.clips.map((c) => {
@@ -3381,19 +3488,18 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  setAutoCg: (clips, newAssets) =>
+  setAutoCg: (clips, newAssets, afterCut) =>
     set((state) => {
       const assets = [...state.project.assets]
       for (const a of newAssets) if (!assets.some((x) => x.filePath === a.filePath)) assets.push(a)
       const idOf = new Map(assets.map((a) => [a.filePath, a.id]))
       const placed = clips.filter((c) => idOf.has(c.path))
-      const kept = state.project.videoOverlayTracks
-        .filter((t) => !isUntouchedAuto(t))
-        .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
-      // 手で直した CG のトラックがあれば、新しくは置かない(二重にしない)
-      const cgEdited = kept.some((t) => t.autoRole === 'cg')
+      const keptOf = (p: Project): VideoOverlayTrack[] =>
+        p.videoOverlayTracks
+          .filter((t) => !isUntouchedAuto(t))
+          .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
       const track: VideoOverlayTrack | null =
-        placed.length > 0 && !cgEdited
+        placed.length > 0
           ? withAutoSignature({
               id: uuid(),
               name: 'CG(自動)',
@@ -3410,18 +3516,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               }))
             })
           : null
+      // 手で直した CG のトラックがあれば、新しくは置かない(二重にしない)
+      const place = (p: Project): Project => {
+        const k = keptOf(p)
+        const add = track && !k.some((t) => t.autoRole === 'cg') ? [track] : []
+        return { ...p, assets: withAssets(p.assets, newAssets), videoOverlayTracks: [...k, ...add] }
+      }
       // 履歴には積まないが、未保存にする(保存の途中に届いた CG が、保存済みと扱われて残らなかった)
       return {
         isDirty: true,
-        project: {
-          ...state.project,
-          assets,
-          videoOverlayTracks: track ? [...kept, track] : kept
-        }
+        project: { ...place(state.project), assets },
+        ...placeInHistory(state, afterCut, place)
       }
     }),
 
-  setAutoSounds: (sounds, newAssets) =>
+  setAutoSounds: (sounds, newAssets, afterCut) =>
     set((state) => {
       const assets = [...state.project.assets]
       for (const a of newAssets) if (!assets.some((x) => x.filePath === a.filePath)) assets.push(a)
@@ -3454,18 +3563,22 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         )
       // 手で直した自動のトラックは消さずに残す(種類の印は残し、要約を外して「手で直した」にする)。
       // その種類は新しく置かない(置くと SE が二重に鳴り、BGM が2曲同時に流れる)
-      const kept = state.project.audioTracks
-        .filter((t) => !isUntouchedAuto(t))
-        .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
-      const editedRoles = new Set(kept.filter((t) => t.autoRole).map((t) => t.autoRole))
+      const place = (p: Project): Project => {
+        const kept = p.audioTracks
+          .filter((t) => !isUntouchedAuto(t))
+          .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
+        const editedRoles = new Set(kept.filter((t) => t.autoRole).map((t) => t.autoRole))
+        return {
+          ...p,
+          assets: withAssets(p.assets, newAssets),
+          audioTracks: [...kept, ...tracks.filter((t) => !editedRoles.has(t.autoRole))]
+        }
+      }
       // 履歴には積まないが、未保存にする(保存の途中に届いた SE・BGM が、保存済みと扱われて残らなかった)
       return {
         isDirty: true,
-        project: {
-          ...state.project,
-          assets,
-          audioTracks: [...kept, ...tracks.filter((t) => !editedRoles.has(t.autoRole))]
-        }
+        project: { ...place(state.project), assets },
+        ...placeInHistory(state, afterCut, place)
       }
     }),
 
@@ -3569,8 +3682,16 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             })
             // 外して空になったトラックだけ消す(人が用意した空のトラックは残す)
             .filter((t, i) => t.clips.length > 0 || state.project.audioTracks[i].clips.length === 0)
+      // 長さが変わらない(替えた先が同じ範囲を全部映している)なら、自動の音・テロップは動かさない。
+      // 追従に任せると、速さを変えたクリップはカメラごとに仮の時刻を持つので前後が結べず、その下の
+      // 自動の BGM に穴が開き、SE・テロップが消えていた
+      const lenOf = (c: { inPoint: number; outPoint: number; speed?: number }): number =>
+        (c.outPoint - c.inPoint) / (c.speed || 1)
+      const sameLength =
+        Math.abs(pieces.reduce((sum, p) => sum + lenOf(p), 0) - lenOf(clip)) <= 1e-6
       return {
         ...pushHistory(state),
+        ...(sameLength ? { __noFollow: true as const } : {}),
         project: {
           ...state.project,
           clips: state.project.clips.flatMap((c) =>
@@ -5105,6 +5226,291 @@ function followMainEdit(
   }
 }
 
+/** 本編の速さの並び(BGM の作り直しの元にしたときの本編) */
+type ProgramShape = NonNullable<AudioTrack['speedBase']>['program']
+
+function programShapeOf(clips: readonly Clip[]): ProgramShape {
+  return clips.map((c) => ({
+    id: c.id,
+    inPoint: c.inPoint,
+    outPoint: c.outPoint,
+    speed: c.speed || 1
+  }))
+}
+
+/**
+ * 本編の速さを `from` から `to` へ変えたときの、タイムラインの時刻の写し方
+ * (クリップごとに比例。最後のクリップより後ろは、ずれた分だけ動かす)
+ */
+function speedWarp(from: ProgramShape, toSpeeds: readonly number[]): (t: number) => number {
+  const segs: { from: number; to: number; at: number; scale: number }[] = []
+  let oldCursor = 0
+  let newCursor = 0
+  from.forEach((c, i) => {
+    const src = Math.max(0, c.outPoint - c.inPoint)
+    const oldLen = src / c.speed
+    const newLen = src / (toSpeeds[i] || 1)
+    segs.push({
+      from: oldCursor,
+      to: oldCursor + oldLen,
+      at: newCursor,
+      scale: oldLen > 0 ? newLen / oldLen : 1
+    })
+    oldCursor += oldLen
+    newCursor += newLen
+  })
+  return (t) => {
+    const g = segs.find((x) => t < x.to)
+    if (!g) return t - oldCursor + newCursor
+    return g.at + (Math.max(t, g.from) - g.from) * g.scale
+  }
+}
+
+const bgmLen = (c: AudioTrackClip): number => (c.outPoint - c.inPoint) / (c.speed || 1)
+const bgmEnd = (c: AudioTrackClip): number => c.startTime + bgmLen(c)
+
+/** BGM のクリップが(聞こえ方として)同じか */
+function sameBgmClip(a: AudioTrackClip, b: AudioTrackClip): boolean {
+  const num = (x: number | undefined, y: number | undefined): boolean =>
+    x === y || (x !== undefined && y !== undefined && Math.abs(x - y) <= 1e-9)
+  return (
+    a.id === b.id &&
+    a.assetId === b.assetId &&
+    num(a.startTime, b.startTime) &&
+    num(a.inPoint, b.inPoint) &&
+    num(a.outPoint, b.outPoint) &&
+    num(a.speed || 1, b.speed || 1) &&
+    num(a.volume, b.volume) &&
+    num(a.fadeIn, b.fadeIn) &&
+    num(a.fadeOut, b.fadeOut) &&
+    a.linkedClipId === b.linkedClipId
+  )
+}
+
+/**
+ * 同じ曲が途切れずに続く並び(重ねて繰り返すループ・切った続き)ごとに分ける。
+ * 並びの中で一番後ろの終わりと比べる(長いクリップの途中に重ねた短いクリップの後ろも、つながりのうち)
+ */
+function bgmChains(clips: readonly AudioTrackClip[]): AudioTrackClip[][] {
+  const chains: AudioTrackClip[][] = []
+  let chain: AudioTrackClip[] = []
+  let chainEnd = -Infinity
+  for (const c of [...clips].sort((a, b) => a.startTime - b.startTime)) {
+    const head = chain[0]
+    if (!(head && c.assetId === head.assetId && c.startTime <= chainEnd + 1e-3)) {
+      if (chain.length > 0) chains.push(chain)
+      chain = []
+      chainEnd = -Infinity
+    }
+    chain.push(c)
+    chainEnd = Math.max(chainEnd, bgmEnd(c))
+  }
+  if (chain.length > 0) chains.push(chain)
+  return chains
+}
+
+/**
+ * ループのつなぎ目(重なり・クロスフェード)。曲の頭から始め直すクリップと、その手前で曲の終わりまで
+ * 鳴るクリップの組から取る。組が無ければ頭のクリップに覚えたもの
+ */
+function bgmJoinOf(chain: readonly AudioTrackClip[], limit: number): AudioTrackClip['loopCross'] {
+  const first = chain[0]
+  for (const r of chain) {
+    if (r === first || r.inPoint > 1e-6 || !Number.isFinite(limit)) continue
+    let best: AudioTrackClip | undefined
+    for (const p of chain) {
+      if (p === r || Math.abs(p.outPoint - limit) > 1e-3) continue
+      const pe = bgmEnd(p)
+      if (p.startTime >= r.startTime || pe < r.startTime - 1e-6) continue
+      // 手前のクリップの中で終わる(重ねただけの)クリップは、つなぎ目ではない
+      if (bgmEnd(r) <= pe + 1e-6) continue
+      if (!best || pe < bgmEnd(best)) best = p
+    }
+    if (best)
+      return {
+        overlap: Math.max(0, bgmEnd(best) - r.startTime),
+        ...(r.fadeIn !== undefined ? { fadeIn: r.fadeIn } : {}),
+        ...(best.fadeOut !== undefined ? { fadeOut: best.fadeOut } : {})
+      }
+  }
+  return first.loopCross && Number.isFinite(first.loopCross.overlap) ? first.loopCross : undefined
+}
+
+/**
+ * 1つながりの BGM を、写した位置へ置き直す(元の並びから毎回作る)。
+ * 頭を写した位置へずらし、終わりを写した位置に合わせる。短くなれば後ろを切り、長くなれば一番後ろで
+ * 終わるクリップを曲の終わりまで延ばして、そこから曲の頭からのループを重ねて足す
+ */
+function fitBgmChain(
+  chain: readonly AudioTrackClip[],
+  warp: (t: number) => number,
+  limit: number,
+  freshId: () => string
+): AudioTrackClip[] {
+  const first = chain[0]
+  // 終わりは一番後ろで終わるクリップ(同じ時刻なら後ろから始まる方)。終わりのフェードもそのクリップのもの
+  const last = chain.reduce((a, c) => (bgmEnd(c) >= bgmEnd(a) - 1e-9 ? c : a))
+  const shift = warp(first.startTime) - first.startTime
+  const origEnd = bgmEnd(last) + shift
+  const end = warp(bgmEnd(last))
+  const moved = chain.map((c) =>
+    Math.abs(shift) <= 1e-9 ? c : { ...c, startTime: c.startTime + shift }
+  )
+  if (Math.abs(end - origEnd) <= 1e-6) return moved
+  if (end < origEnd) {
+    // 短くなった: 終わりより後ろで始まるものは落とし、またぐものは終わりで切る(終わりのフェードを付ける)
+    const out: AudioTrackClip[] = []
+    for (const c of moved) {
+      if (c.startTime >= end - 1e-6) continue
+      if (bgmEnd(c) <= end + 1e-6) out.push(c)
+      else
+        out.push({
+          ...c,
+          outPoint: c.inPoint + (end - c.startTime) * (c.speed || 1),
+          fadeOut: last.fadeOut
+        })
+    }
+    return out
+  }
+  // 長くなった
+  const out = [...moved]
+  let ti = chain.indexOf(last)
+  const speed = last.speed || 1
+  const join = bgmJoinOf(chain, limit)
+  const tail = out[ti]
+  const grow = Math.min((limit - tail.outPoint) / speed, end - bgmEnd(tail))
+  if (grow > 1e-9) out[ti] = { ...tail, outPoint: tail.outPoint + grow * speed }
+  const songLen = limit / speed
+  // 曲の長さが分からなければ、上で終わりまで延びている。長さ 0 に近い曲で止まらなくならないよう回数でも止める
+  for (let guard = 0; bgmEnd(out[ti]) < end - 1e-6 && songLen > 1e-3 && guard < 1000; guard++) {
+    // 重なりは曲の長さの半分・手前のクリップの半分まで(必ず前へ進む)
+    const overlap = Math.min(Math.max(0, join?.overlap ?? 0), songLen / 2, bgmLen(out[ti]) / 2)
+    const at = bgmEnd(out[ti]) - overlap
+    out[ti] = { ...out[ti], fadeOut: join?.fadeOut }
+    // その位置に曲の頭から始めるクリップがもうあれば(人が短くしたループ)、新しく足さずにその続きを足す
+    // (足すと、曲の頭が二重に鳴る)。重なりを短くした位置のほか、本来の重なりの位置(最後のループを
+    // 人が分けた)も見る。もう続きが鳴っているもの(人が分けた手前の半分)からは続けない
+    const tailEnd = bgmEnd(out[ti])
+    const restart = out.find(
+      (c, k) =>
+        k !== ti &&
+        c.inPoint <= 1e-6 &&
+        c.outPoint < limit - 1e-6 &&
+        [at, tailEnd - Math.max(0, join?.overlap ?? 0)].some(
+          (p) => Math.abs(c.startTime - p) <= 1e-6
+        ) &&
+        !out.some(
+          (o) =>
+            Math.abs(o.startTime - bgmEnd(c)) <= 1e-6 && Math.abs(o.inPoint - c.outPoint) <= 1e-6
+        )
+    )
+    if (restart) {
+      const rs = restart.speed || 1
+      const len = Math.min((limit - restart.outPoint) / rs, end - bgmEnd(restart))
+      if (len > 1e-9) {
+        out.push({
+          ...restart,
+          id: freshId(),
+          startTime: bgmEnd(restart),
+          inPoint: restart.outPoint,
+          outPoint: restart.outPoint + len * rs,
+          fadeIn: undefined,
+          fadeOut: undefined,
+          loopCross: undefined,
+          linkedClipId: undefined
+        })
+        ti = out.length - 1
+        continue
+      }
+    }
+    const len = Math.min(songLen, end - at)
+    out.push({
+      ...last,
+      id: freshId(),
+      startTime: at,
+      inPoint: 0,
+      outPoint: len * speed,
+      fadeIn: join?.fadeIn,
+      fadeOut: undefined,
+      loopCross: undefined,
+      linkedClipId: undefined
+    })
+    ti = out.length - 1
+  }
+  // ループを足したなら、終わりのフェードは一番後ろのループへ
+  if (ti !== chain.indexOf(last)) out[ti] = { ...out[ti], fadeOut: last.fadeOut }
+  return out.filter((c) => c.outPoint - c.inPoint > 1e-9)
+}
+
+/**
+ * 本編の速さを変えたときの、自動の BGM のトラック。
+ *
+ * **元の並び(`speedBase`)から毎回作り直す。** 今の並びを少しずつ直す作りでは、延ばして縮める・縮めて
+ * 延ばすの往復で元に戻らず、曲が二重に鳴る・穴が開くといった食い違いが、直すたびに別の形で出ていた。
+ * 元の並びと、そのときの本編の速さを覚えておき、今の速さへ写して作る。速さが元に戻れば元の並びそのもの。
+ * 今の並びが最後に作った並びと違えば(人が手で直した・ほかの編集で動いた)、今の並びを新しい元にする
+ */
+function followBgmSpeed(
+  track: AudioTrack,
+  prev: Project,
+  next: Project,
+  usedIds: Set<string>
+): AudioTrack {
+  const own = track.clips.filter((c) => !c.linkedClipId)
+  const linked = track.clips.filter((c) => c.linkedClipId)
+  const shape = programShapeOf(prev.clips)
+  const saved = track.speedBase
+  const valid =
+    saved !== undefined &&
+    saved.program.length === shape.length &&
+    saved.program.every(
+      (p, i) =>
+        p.id === shape[i].id &&
+        Math.abs(p.inPoint - shape[i].inPoint) <= 1e-9 &&
+        Math.abs(p.outPoint - shape[i].outPoint) <= 1e-9
+    ) &&
+    saved.output.length === own.length &&
+    saved.output.every((c, i) => sameBgmClip(c, own[i]))
+  const base = valid ? saved : { clips: own, program: shape, output: own }
+  const toSpeeds = next.clips.map((c) => c.speed || 1)
+  // 元の速さに戻った: 元の並びそのもの
+  if (base.program.every((p, i) => Math.abs(p.speed - toSpeeds[i]) <= 1e-9)) {
+    const clips = [...base.clips, ...linked]
+    if (track.speedBase === undefined && sameItems(clips, track.clips)) return track
+    const { speedBase: _drop, ...rest } = track
+    void _drop
+    return { ...rest, clips }
+  }
+  const warp = speedWarp(base.program, toSpeeds)
+  // 元の並びのクリップの id も使えない(縮めて今の並びから外れていても、作る並びには戻ってくる)
+  for (const c of base.clips) usedIds.add(c.id)
+  // 足すループの id。前に作ったループの id は使い直す(同じ速さなら同じ並びになるように)
+  const reusable = new Set(
+    own.map((c) => c.id).filter((id) => !base.clips.some((b) => b.id === id))
+  )
+  const output: AudioTrackClip[] = []
+  for (const chain of bgmChains(base.clips)) {
+    const first = chain[0]
+    const known = next.assets.find((a) => a.id === first.assetId)?.duration
+    // 曲の長さ(分からない・0 なら限りなし)
+    const limit = known !== undefined && known > 0 ? known : Infinity
+    let k = 0
+    const freshId = (): string => {
+      let id = `${first.id}~${++k}`
+      while (usedIds.has(id) && !reusable.has(id)) id += '~'
+      usedIds.add(id)
+      reusable.delete(id)
+      return id
+    }
+    output.push(...fitBgmChain(chain, warp, limit, freshId))
+  }
+  return {
+    ...track,
+    clips: [...output, ...linked],
+    speedBase: { clips: base.clips, program: base.program, output }
+  }
+}
+
 /**
  * 本編のクリップの速さを変えたとき、その下の自動の BGM・SE・CG を、クリップの新しい長さに合わせて
  * 比例で動かす(声・自動テロップは追従の規則どおり外す)。
@@ -5157,271 +5563,28 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const g = segs[i]
     return g.at + (Math.max(t, g.from) - g.from) * g.scale
   }
-  const durationOf = new Map(next.assets.map((a) => [a.id, a.duration]))
   /** SE・CG(1回鳴らす・出すもの)は、長さを保って頭だけ動かす(行って戻れば元の位置・長さ) */
   const moveClip = <C extends { startTime: number }>(c: C): C => {
     const startTime = warp(c.startTime)
     return Math.abs(startTime - c.startTime) <= 1e-9 ? c : { ...c, startTime }
   }
-  const lenOf = (c: AudioTrackClip): number => (c.outPoint - c.inPoint) / (c.speed || 1)
-  /**
-   * BGM は、同じ曲が途切れずに続く並び(重ねて繰り返すループ・切った続き)をひとつながりとして、
-   * 頭を写した位置へずらし、各クリップの長さはそのままに、終わりだけを写した位置に合わせる
-   * (足りなければ最後のクリップを曲の終わりまで延ばし、さらに曲の頭からループを足す。余れば後ろから詰める)。
-   * 1本ずつ伸ばす・比例で並べ直すと、曲の終わりより先へ伸ばせずに穴が開き、速さを戻すと元に
-   * 戻らなかった。伸ばしてから縮めれば元の並びに戻る。ループのつなぎ目の重なり・クロスフェードは残す
-   */
-  const retileBgm = (chain: AudioTrackClip[], usedIds: Set<string>): AudioTrackClip[] => {
-    const first = chain[0]
-    // 終わりは一番後ろで終わるクリップ(並びの最後とは限らない。終わりのフェードもそのクリップのもの)
-    // 同じ時刻に終わるクリップがあれば、後ろから始まる方(重ねて繰り返した次のループ)
-    const last = chain.reduce((a, c) =>
-      c.startTime + lenOf(c) >= a.startTime + lenOf(a) - 1e-9 ? c : a
-    )
-    const shift = warp(first.startTime) - first.startTime
-    const origEnd = last.startTime + lenOf(last)
-    const end = warp(origEnd)
-    // ずらすだけ(長さが変わらない)なら、どのクリップもそのまま動かす(フェード・重ねたクリップを落とさない)
-    if (Math.abs(end - (origEnd + shift)) <= 1e-6)
-      return chain.map((c) =>
-        Math.abs(shift) <= 1e-9 ? c : { ...c, startTime: c.startTime + shift }
-      )
-    // 曲の長さ(分からない・0 なら限りなし。0 のまま使うと延ばせず、空のループを千本作っていた)
-    const known = durationOf.get(first.assetId)
-    const limit = known !== undefined && known > 0 ? known : Infinity
-    // つなぎ目の重なり・クロスフェードは、曲の頭から始め直すクリップと、その手前で曲の終わりまで鳴る
-    // クリップの組から取る(並びの最後の2本から取ると、重ねた短いクリップ・動かしたクリップとの重なりを
-    // つなぎ目とみなし、曲の2か所を長く重ねて鳴らしていた)。組が無ければ頭のクリップに覚えたもの
-    let join: AudioTrackClip['loopCross']
-    for (const r of chain) {
-      if (r === first || r.inPoint > 1e-6) continue
-      let best: AudioTrackClip | undefined
-      for (const p of chain) {
-        if (p === r || !Number.isFinite(limit) || Math.abs(p.outPoint - limit) > 1e-3) continue
-        const pe = p.startTime + lenOf(p)
-        if (p.startTime >= r.startTime || pe < r.startTime - 1e-6) continue
-        // 手前のクリップの中で終わる(重ねただけの)クリップは、つなぎ目ではない
-        if (r.startTime + lenOf(r) <= pe + 1e-6) continue
-        if (!best || pe < best.startTime + lenOf(best)) best = p
-      }
-      if (best)
-        join = {
-          overlap: Math.max(0, best.startTime + lenOf(best) - r.startTime),
-          ...(r.fadeIn !== undefined ? { fadeIn: r.fadeIn } : {}),
-          ...(best.fadeOut !== undefined ? { fadeOut: best.fadeOut } : {})
-        }
-    }
-    const remembered =
-      first.loopCross && Number.isFinite(first.loopCross.overlap) ? first.loopCross : undefined
-    const loopCross = join ?? remembered
-    // 重なりは曲の長さの半分まで(曲とほぼ同じ長さの重なりで、ほとんど進まないループを何百本も積まない)
-    const songLen = Number.isFinite(limit) ? limit / (first.speed || 1) : Infinity
-    const loopOverlap = Math.min(Math.max(0, loopCross?.overlap ?? 0), songLen / 2)
-    /** 足すループの id(トラックのほかのクリップと重ならないように) */
-    const freshId = (i: number): string => {
-      let id = `${first.id}~${i}`
-      while (usedIds.has(id)) id += '~'
-      usedIds.add(id)
-      return id
-    }
-    const out: AudioTrackClip[] = []
-    const endOf = (c: AudioTrackClip): number => c.startTime + lenOf(c)
-    /** 一番後ろで終わるクリップの位置 */
-    // 延ばすのは曲の本筋。ほかのクリップの中に収まる(重ねただけの)短いクリップは延ばさない
-    // (延ばすと、その上にループを積み、曲が3〜4重に鳴っていた)
-    // (曲の頭から始め直すクリップは、重なりの中に収まっていても本筋のループ)
-    const mainLine = (c: AudioTrackClip): boolean =>
-      c.inPoint <= 1e-6 ||
-      !out.some(
-        (o) =>
-          o !== c &&
-          o.startTime <= c.startTime + 1e-6 &&
-          endOf(o) >= endOf(c) - 1e-6 &&
-          lenOf(o) > lenOf(c) + 1e-6
-      )
-    const tailIndex = (): number => {
-      const pool = out.some(mainLine) ? out.filter(mainLine) : out
-      const best = pool.reduce((a, c) => (endOf(c) >= endOf(a) - 1e-9 ? c : a))
-      return out.indexOf(best)
-    }
-    // 頭をずらした並び。写した終わりより後ろで始まるクリップは落とし、またぐクリップは詰める。
-    // (重ねて始まる次のループの切れ端を残さない)
-    // 終わりをまたぐ「ここで足したループ」(id に ~)は、その手前で曲の終わりまで鳴るクリップが終わりまで
-    // 届いているなら落とす(延ばして戻したときに曲の頭の切れ端が重なって鳴っていた)。手前が無ければ、
-    // 終わりまで届いたクリップがあるときだけ落とす。自動で並べた・人が置いたクリップは詰めて残す
-    // (落とすと、延ばして戻したときに元の並びに戻らなかった)
-    const predecessorOf = (r: AudioTrackClip): AudioTrackClip | undefined => {
-      let best: AudioTrackClip | undefined
-      for (const p of chain) {
-        if (p === r || !Number.isFinite(limit) || Math.abs(p.outPoint - limit) > 1e-3) continue
-        const pe = p.startTime + lenOf(p)
-        // 同じ時刻に始まるもの(手前が重なりより短く、足したループが同じ所から始まった)も手前に数える
-        if (p.startTime > r.startTime + 1e-6 || pe < r.startTime - 1e-6) continue
-        if (r.startTime + lenOf(r) <= pe + 1e-6) continue
-        // 足したループは、その時の一番後ろで終わるクリップに続けて足している
-        if (!best || pe > best.startTime + lenOf(best)) best = p
-      }
-      return best
-    }
-    /** 足した続き(曲の途中から始まる ~)を除いたクリップだけで、ずらした後の [from, end] が切れ目なく埋まるか */
-    const coveredWithout = (from: number): boolean => {
-      const spans = chain
-        .filter((p) => !(p.id.includes('~') && p.inPoint > 1e-6))
-        .map((p) => [p.startTime + shift, p.startTime + shift + lenOf(p)])
-        .sort((a, b) => a[0] - b[0])
-      let cur = from
-      for (const [s0, e0] of spans) {
-        if (s0 > cur + 1e-6) break
-        cur = Math.max(cur, e0)
-      }
-      return cur >= end - 1e-6
-    }
-    let reached = false
-    for (const c of chain) {
-      const at = c.startTime + shift
-      if (at >= end - 1e-6) continue
-      const natural = at + lenOf(c)
-      // 足した続き(曲の途中から始まる ~)は、終わりをまたがなくても、ほかのクリップが終わりまで届いていれば
-      // 落とす(速さの違うクリップの続きが元の終わりの手前で終わり、延ばして戻しても残っていた)
-      if ((natural > end + 1e-6 || c.inPoint > 1e-6) && c !== first && c.id.includes('~')) {
-        // 曲の頭から始め直すループは手前のクリップで、続き(人が短くしたクリップの後ろに足したもの)は
-        // ほかのクリップが終わりまで届いているかで決める
-        const pred = c.inPoint <= 1e-6 ? predecessorOf(c) : undefined
-        // 手前が無くても、終わりをまたぐ続きは、ほかのクリップで終わりまで埋まっていれば落とす(人が最後の
-        // ループを分けた所が、短くした頭からの続きより後ろにあると、延ばして戻したときに続きが残っていた)。
-        // 曲の頭から始め直すループはそれ自身で埋めてしまうので数えない(人が短くした手前を延ばし直していた)
-        const drop = pred
-          ? pred.startTime + shift + lenOf(pred) >= end - 1e-6
-          : reached || (c.inPoint > 1e-6 && natural > end + 1e-6 && coveredWithout(at))
-        if (drop) continue
-      }
-      const len = Math.min(lenOf(c), end - at)
-      out.push({ ...c, startTime: at, outPoint: c.inPoint + len * (c.speed || 1) })
-      if (natural >= end - 1e-6) reached = true
-    }
-    if (out.length === 0) return []
-    // 足りなければ、一番後ろのクリップを曲の終わりまで延ばし、そこからループを足す(多くても 1,000 本)
-    // 足したループは長さ 0 から延ばすので、一番後ろのクリップはここで追いかける
-    let ti = tailIndex()
-    /** 人が置いた(延ばさない)クリップ。そこから先は、続きを足して鳴らす */
-    const frozen = new Set<number>()
-    // 回数でも止める(どの手も進まない並びで、止まらなくなっていた)
-    for (
-      let i = chain.length, guard = 0;
-      out.length < chain.length + 1000 && guard < 4000;
-      i++, guard++
-    ) {
-      const tail = out[ti]
-      const speed = tail.speed || 1
-      const tailEnd = endOf(tail)
-      if (tailEnd >= end - 1e-6) break
-      const room = (limit - tail.outPoint) / speed
-      if (room > 1e-6) {
-        if (frozen.has(ti)) {
-          // 人が短くしたクリップは延ばさず、その続きを足す(縮めて戻すと、足した続きは落ちる)
-          out.push({
-            ...tail,
-            id: freshId(i),
-            startTime: tailEnd,
-            inPoint: tail.outPoint,
-            outPoint: tail.outPoint,
-            fadeIn: undefined,
-            fadeOut: undefined,
-            loopCross: undefined
-          })
-          ti = out.length - 1
-          continue
-        }
-        const grow = Math.min(room, end - tailEnd)
-        out[ti] = { ...tail, outPoint: tail.outPoint + grow * speed }
-        continue
-      }
-      // 曲の終わりまで来た: 重ねて頭から繰り返す(重なりは長さの半分まで。必ず前へ進む)
-      const at = tailEnd - Math.min(loopOverlap, lenOf(tail) / 2)
-      if (end - at <= 1e-3) break
-      out[ti] = { ...tail, fadeOut: loopCross?.fadeOut ?? tail.fadeOut }
-      // その位置に曲の頭から始めるクリップがもうあれば(人が短くしたループ)、新しく足さずにそこから続ける
-      // (足すと、曲の頭が二重に鳴っていた)
-      const existing = out.findIndex(
-        (c, k) =>
-          k !== ti &&
-          !frozen.has(k) &&
-          c.inPoint <= 1e-6 &&
-          // 重なりを短くした位置のほか、本来の重なりの位置にあるもの(最後のループを人が分けた)も探す
-          (Math.abs(c.startTime - at) <= 1e-6 ||
-            Math.abs(c.startTime - (tailEnd - loopOverlap)) <= 1e-6) &&
-          // もう続きが鳴っているもの(人が分けた手前の半分)からは続けない(続きと同じ音が二重に鳴っていた)
-          !out.some(
-            (o, m) =>
-              m !== k &&
-              Math.abs(o.startTime - endOf(c)) <= 1e-6 &&
-              Math.abs(o.inPoint - c.outPoint) <= 1e-6
-          )
-      )
-      if (existing >= 0) {
-        frozen.add(existing)
-        ti = existing
-        continue
-      }
-      out.push({
-        ...last,
-        id: freshId(i),
-        startTime: at,
-        inPoint: 0,
-        outPoint: 0,
-        fadeIn: loopCross?.fadeIn,
-        fadeOut: undefined,
-        loopCross: undefined
-      })
-      ti = out.length - 1
-    }
-    // 終わりのフェードは一番後ろで終わるクリップに。つなぎ目の覚えは頭のクリップに
-    if (out[ti].id !== last.id) out[ti] = { ...out[ti], fadeOut: last.fadeOut }
-    if (loopCross) out[0] = { ...out[0], loopCross }
-    return out.filter((c) => c.outPoint - c.inPoint > 1e-9)
-  }
-  const moveBgmClips = (clips: AudioTrackClip[]): AudioTrackClip[] => {
-    const sorted = [...clips].sort((a, b) => a.startTime - b.startTime)
-    const out: AudioTrackClip[] = []
-    // 足すループの id は、プロジェクトのどのクリップ・テロップとも重ならないように
-    // (別のトラックへ移したループと同じ id を、また作っていた)
-    const usedIds = new Set([
-      ...next.audioTracks.flatMap((t) => t.clips.map((c) => c.id)),
-      ...next.videoOverlayTracks.flatMap((t) => t.clips.map((c) => c.id)),
-      ...next.textOverlays.map((o) => o.id),
-      ...next.clips.map((c) => c.id)
-    ])
-    let chain: AudioTrackClip[] = []
-    const flush = (): void => {
-      if (chain.length > 0) out.push(...retileBgm(chain, usedIds))
-      chain = []
-    }
-    for (const c of sorted) {
-      if (c.linkedClipId) {
-        flush()
-        out.push(c)
-        continue
-      }
-      const prev = chain[chain.length - 1]
-      // 並びの中で一番後ろの終わりと比べる(長いクリップの途中に重ねた短いクリップの後ろも、つながりのうち)
-      const chainEnd = Math.max(-Infinity, ...chain.map((x) => x.startTime + lenOf(x)))
-      const touches =
-        prev !== undefined && c.assetId === prev.assetId && c.startTime <= chainEnd + 1e-3
-      if (!touches) flush()
-      chain.push(c)
-    }
-    flush()
-    return out
-  }
+  // 足すループの id は、プロジェクトのどのクリップ・テロップとも重ならないように
+  const usedIds = new Set([
+    ...next.audioTracks.flatMap((t) => t.clips.map((c) => c.id)),
+    ...next.videoOverlayTracks.flatMap((t) => t.clips.map((c) => c.id)),
+    ...next.textOverlays.map((o) => o.id),
+    ...next.clips.map((c) => c.id)
+  ])
   const moveTrack = <T extends AudioTrack | VideoOverlayTrack>(t: T): T => {
     if (!t.autoRole || t.multicamSourceId) return t
     const untouched = isUntouchedAuto(t)
-    const clips = (
-      t.autoRole === 'bgm' && 'duckingEnabled' in t
-        ? moveBgmClips(t.clips as AudioTrackClip[])
-        : (t.clips as T['clips']).map((c) =>
-            'linkedClipId' in c && c.linkedClipId ? c : moveClip(c)
-          )
+    if (t.autoRole === 'bgm' && 'duckingEnabled' in t) {
+      const moved = followBgmSpeed(t as AudioTrack, prev, next, usedIds)
+      if (moved === (t as unknown as AudioTrack)) return t
+      return (untouched ? withAutoSignature(moved) : moved) as unknown as T
+    }
+    const clips = (t.clips as T['clips']).map((c) =>
+      'linkedClipId' in c && c.linkedClipId ? c : moveClip(c)
     ) as T['clips']
     if (sameItems(clips, t.clips)) return t
     const track = { ...t, clips }

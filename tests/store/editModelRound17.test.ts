@@ -1275,3 +1275,264 @@ describe('第30回: BGM のループの続きの見直し', () => {
     }
   })
 })
+
+describe('第32回: BGM は元の並びから作り直す', () => {
+  type BgmClip = Project['audioTracks'][number]['clips'][number]
+  /** 本編 m1(0〜10)・m2(10〜progEnd)と、BGM の並び */
+  const setupBgm = (clips: BgmClip[], progEnd: number): void => {
+    S.setState({
+      project: {
+        id: 'p',
+        name: 'x',
+        aspectRatio: '16:9',
+        multicam: {
+          anchorSourceId: 'A',
+          sources: [{ id: 'A', name: 'A', kind: 'camera' }],
+          files: [{ assetId: 'camA', sourceId: 'A', start: 0, rate: 1, duration: 100 }]
+        },
+        assets: [asset('camA', 100), asset('loop10', 10, false)],
+        clips: [
+          { id: 'm1', assetId: 'camA', inPoint: 0, outPoint: 10, speed: 1 },
+          { id: 'm2', assetId: 'camA', inPoint: 20, outPoint: 20 + progEnd - 10, speed: 1 }
+        ],
+        audioTracks: [
+          {
+            id: 'bgmT',
+            name: 'BGM',
+            volume: 1,
+            muted: false,
+            duckingEnabled: true,
+            autoRole: 'bgm',
+            clips
+          }
+        ],
+        videoOverlayTracks: [],
+        textOverlays: [],
+        beatGrid: null
+      } as unknown as Project,
+      past: [],
+      future: []
+    })
+  }
+  const shape = (): (string | number)[][] =>
+    [...st().project.audioTracks[0].clips]
+      .sort((a, b) => a.startTime - b.startTime)
+      .map((c) => [c.id, +c.startTime.toFixed(6), +c.inPoint.toFixed(6), +c.outPoint.toFixed(6)])
+
+  const start = (): BgmClip[] => [
+    {
+      id: 'A',
+      assetId: 'loop10',
+      startTime: 0,
+      inPoint: 0,
+      outPoint: 10,
+      loopCross: { overlap: 2, fadeIn: 1, fadeOut: 1 }
+    },
+    { id: 'A~1', assetId: 'loop10', startTime: 8, inPoint: 0, outPoint: 10, fadeIn: 1, fadeOut: 1 },
+    { id: 'A~2', assetId: 'loop10', startTime: 16, inPoint: 0, outPoint: 2, fadeIn: 1, fadeOut: 2 }
+  ]
+  const asStart = (): (string | number)[][] =>
+    start().map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])
+
+  it('縮めて外れたクリップの id を、延ばしたときに作るループに使わない', () => {
+    setupBgm(start(), 18)
+    st().updateClipSpeed('m1', 4)
+    st().updateClipSpeed('m1', 0.25)
+    const ids = st().project.audioTracks[0].clips.map((c) => c.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('どんな速さを何回変えても、元の速さに戻せば元の並びそのものに戻る', () => {
+    for (const steps of [
+      [
+        ['m1', 4],
+        ['m2', 0.3],
+        ['m1', 1],
+        ['m2', 1]
+      ],
+      [
+        ['m2', 0.5],
+        ['m2', 2],
+        ['m2', 1]
+      ],
+      [
+        ['m1', 0.25],
+        ['m2', 3],
+        ['m2', 1],
+        ['m1', 1]
+      ],
+      [
+        ['m2', 1.5],
+        ['m1', 0.8],
+        ['m2', 0.4],
+        ['m1', 1],
+        ['m2', 1]
+      ]
+    ] as [string, number][][]) {
+      setupBgm(start(), 18)
+      for (const [id, sp] of steps) st().updateClipSpeed(id, sp)
+      expect(shape(), JSON.stringify(steps)).toEqual(asStart())
+      expect(st().project.audioTracks[0].speedBase).toBeUndefined()
+    }
+  })
+
+  it('速さを変えた途中でも、曲が二重に鳴らず、終わりまで隙間なく鳴る', () => {
+    for (const sp of [0.2, 0.5, 0.8, 1.25, 2, 4]) {
+      setupBgm(start(), 18)
+      st().updateClipSpeed('m2', sp)
+      const clips = [...st().project.audioTracks[0].clips].sort((a, b) => a.startTime - b.startTime)
+      const end = 10 + 8 / sp
+      const ends = clips.map((c) => c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1))
+      expect(Math.max(...ends), `x${sp}`).toBeCloseTo(end, 6)
+      // 隙間なし
+      let cur = 0
+      for (let k = 0; k < clips.length; k++) {
+        expect(clips[k].startTime, `x${sp} gap`).toBeLessThanOrEqual(cur + 1e-6)
+        cur = Math.max(cur, ends[k])
+      }
+      // 同じ時刻に曲の同じ所を2本で鳴らさない
+      for (let a = 0; a < clips.length; a++)
+        for (let b = a + 1; b < clips.length; b++) {
+          const ov = Math.min(ends[a], ends[b]) - Math.max(clips[a].startTime, clips[b].startTime)
+          if (ov <= 1e-6) continue
+          const srcA = clips[a].inPoint - clips[a].startTime
+          const srcB = clips[b].inPoint - clips[b].startTime
+          expect(Math.abs(srcA - srcB), `x${sp} twice`).toBeGreaterThan(1e-6)
+        }
+    }
+  })
+
+  it('人が BGM を直したら、その並びを新しい元にする(直したものを戻さない)', () => {
+    setupBgm(start(), 18)
+    st().updateClipSpeed('m2', 0.5)
+    const clips = st().project.audioTracks[0].clips
+    st().updateAudioClipTrim('bgmT', clips[0].id, 0, 6)
+    const edited = st().project.audioTracks[0].clips.find((c) => c.id === clips[0].id)!
+    expect(edited.outPoint).toBe(6)
+    st().updateClipSpeed('m2', 1)
+    expect(st().project.audioTracks[0].clips.find((c) => c.id === 'A')?.outPoint).toBe(6)
+  })
+
+  it('保存して読み直しても、速さを戻せば元の並びに戻る', async () => {
+    setupBgm(start(), 18)
+    st().updateClipSpeed('m2', 0.5)
+    const { normalizeLoadedProject } = await import('@renderer/store/projectStore')
+    const loaded = normalizeLoadedProject(JSON.parse(JSON.stringify(st().project)))
+    S.setState({ project: loaded })
+    st().updateClipSpeed('m2', 1)
+    expect(shape()).toEqual(asStart())
+  })
+})
+
+describe('第32回: 履歴とアングル', () => {
+  const track = (id: string): Project['audioTracks'][number]['clips'] =>
+    st().project.audioTracks.find((t) => t.id === id)?.clips ?? []
+  const micClips = (): number[][] =>
+    st()
+      .project.audioTracks.filter((t) => t.multicamSourceId === 'M')
+      .flatMap((t) => t.clips.map((c) => [c.startTime, c.inPoint, c.outPoint]))
+
+  it('ロールのドラッグを行って戻しても、自動の SE とマイクの声は元のまま', async () => {
+    const { beginHistoryGesture, endHistoryGesture } = await import('@renderer/store/projectStore')
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const mic = micClips()
+    const [l, r] = st().project.clips
+    beginHistoryGesture(`roll:${l.id}:${r.id}`)
+    st().rollTrim(l.id, r.id, 4)
+    st().rollTrim(l.id, r.id, -4)
+    endHistoryGesture()
+    expect(track('seT').map((c) => c.startTime)).toEqual([13])
+    expect(micClips()).toEqual(mic)
+  })
+
+  it('ロールで途中まで行って少し戻した結果は、1回で同じ所まで動かしたのと同じ', async () => {
+    const { beginHistoryGesture, endHistoryGesture } = await import('@renderer/store/projectStore')
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const [l, r] = st().project.clips
+    st().rollTrim(l.id, r.id, 1)
+    const once = { se: track('seT').map((c) => c.startTime), mic: micClips() }
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const [l2, r2] = st().project.clips
+    beginHistoryGesture(`roll:${l2.id}:${r2.id}`)
+    st().rollTrim(l2.id, r2.id, 4)
+    st().rollTrim(l2.id, r2.id, -3)
+    endHistoryGesture()
+    expect({ se: track('seT').map((c) => c.startTime), mic: micClips() }).toEqual(once)
+  })
+
+  it('速さを変えたクリップのアングルを替えても、自動の BGM・SE は動かない', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        multicam: {
+          ...p.multicam!,
+          sources: [...p.multicam!.sources, { id: 'B', name: 'カメラB', kind: 'camera' }],
+          files: [
+            ...p.multicam!.files,
+            { assetId: 'camB', sourceId: 'B', start: 2, rate: 1, duration: 100 }
+          ]
+        },
+        assets: [...p.assets, asset('camB', 100)]
+      }
+    })
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 1.25)
+    const before = st().project.audioTracks.filter((t) => t.autoRole)
+    st().switchClipAngle(id, 'B')
+    expect(st().project.clips[1].assetId).toBe('camB')
+    expect(st().project.audioTracks.filter((t) => t.autoRole)).toEqual(before)
+  })
+})
+
+describe('第32回: 裏で置いた自動の音と取り消し', () => {
+  it('置くまでの間に別の所を直していても、その直しを取り消して置いた BGM は消えない', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    // setup が足した自動のトラックは外し、仮編集を入れた直後の状態から始める
+    S.setState({
+      project: {
+        ...st().project,
+        audioTracks: st().project.audioTracks.filter((t) => !t.autoRole)
+      }
+    })
+    const afterCut = st().project.clips
+    st().setAspectRatio('9:16')
+    st().setAutoSounds(
+      [
+        {
+          role: 'bgm',
+          clips: [{ path: '/kit/bgm.mp3', startTime: 0, inPoint: 0, outPoint: 20, volume: 0.3 }]
+        }
+      ] as never,
+      [{ ...asset('bgmA', 60, false), filePath: '/kit/bgm.mp3' }],
+      afterCut
+    )
+    st().undo()
+    expect(st().project.aspectRatio).toBe('16:9')
+    expect(st().project.audioTracks.some((t) => t.autoRole === 'bgm')).toBe(true)
+    expect(st().project.assets.some((a) => a.filePath === '/kit/bgm.mp3')).toBe(true)
+    st().redo()
+    expect(st().project.aspectRatio).toBe('9:16')
+    expect(st().project.audioTracks.filter((t) => t.autoRole === 'bgm')).toHaveLength(1)
+  })
+})

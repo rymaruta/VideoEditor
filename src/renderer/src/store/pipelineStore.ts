@@ -703,6 +703,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       return
     }
     setStep('sound', { state: 'run', percent: 0, note: '番組素材フォルダを読み込み中' })
+    // 仮編集を入れた直後の本編(置くときに、これから直されていないかを見る)
+    const afterCut = useProjectStore.getState().project.clips
     try {
       const kit = await window.api.showKitScan(folder)
       // 曲の雰囲気の決めかねは、場面を選ぶのに使った判定(見どころを置き換えた後)の印で
@@ -755,14 +757,26 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           hasVideo: meta.hasVideo
         })
       }
+      // 用意している間に本編が直されたなら置かない(置く時刻は、仮編集を入れたときの本編で決めてある)
+      if (useProjectStore.getState().project.clips !== afterCut) {
+        setStep('sound', {
+          state: 'error',
+          note: '用意している間に本編が直されたため、置きませんでした。もう一度作り直してください'
+        })
+        log(
+          'SE・BGM・CG を用意している間に本編が直されたため、置きませんでした(直したものはそのままです)'
+        )
+        return
+      }
       useProjectStore.getState().setAutoSounds(
         [
           { role: 'se', clips: se },
           { role: 'bgm', clips: bgm }
         ],
-        assets
+        assets,
+        afterCut
       )
-      useProjectStore.getState().setAutoCg(cg, assets)
+      useProjectStore.getState().setAutoCg(cg, assets, afterCut)
       // 手で直した自動のトラックは残し、その種類は置き直していない。本編を作り直していれば時刻がずれうるので知らせる
       {
         const p = useProjectStore.getState().project

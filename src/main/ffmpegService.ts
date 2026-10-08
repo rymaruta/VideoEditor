@@ -1134,7 +1134,18 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             toExportEndTime(overlayClip.startTime, overlayClip.startTime + dur),
             totalDuration
           )
-          const pipAudibleDur = Math.max(0, Math.min(pipVisibleDuration, pipEndExport - pipStart))
+          // 絵の出入りはフレームの格子に揃える(長尺向けの書き出しと同じ)。音もこの格子で始まり、終わる
+          // (秒のままの長さで鳴らすと、頭を格子に揃えたぶん終わりがずれ、絵より1フレーム長く鳴る・
+          //  本編の終わりより手前で切れることがあった)
+          const pipFirstFrame = Math.round(pipStart * outputFps)
+          const pipEndFrame = Math.round(pipEndExport * outputFps)
+          const pipFrameStart = pipFirstFrame / outputFps
+          const pipAudibleDur = Math.min(
+            dur,
+            Math.max(0, (pipEndFrame - pipFirstFrame) / outputFps)
+          )
+          // 読む長さは、絵と音のどちらにも足りるように(音は格子に揃えると半フレーム長くなることがある)
+          const pipReadDur = Math.max(pipVisibleDuration, pipAudibleDur)
           // 動画は本編と同じく少し手前から読み、頭の1コマも正しい絵にする(音は別の入力で頭から)
           const pipPre = asset.still
             ? 0
@@ -1142,10 +1153,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           command.input(asset.filePath).inputOptions(
             // 静止画は同じ画を、書き出しのフレームレートで必要な秒数ぶん流す
             asset.still
-              ? ['-loop 1', `-framerate ${fpsArg}`, `-t ${ffSeconds(pipVisibleDuration)}`]
+              ? ['-loop 1', `-framerate ${fpsArg}`, `-t ${ffSeconds(pipReadDur)}`]
               : [
                   `-ss ${ffSeconds(overlayClip.inPoint - pipPre)}`,
-                  `-t ${ffSeconds(pipVisibleDuration + pipPre)}`
+                  `-t ${ffSeconds(pipReadDur + pipPre)}`
                 ]
           )
           const myIndex = inputIndex++
@@ -1155,16 +1166,13 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               .input(asset.filePath)
               .inputOptions([
                 `-ss ${ffSeconds(overlayClip.inPoint)}`,
-                `-t ${ffSeconds(pipVisibleDuration)}`
+                `-t ${ffSeconds(pipReadDur)}`
               ])
             pipAudioIndex = inputIndex++
           }
           // 絵の出入りはフレームの格子に揃え、窓は半フレームずらして取る(長尺向けの書き出しと同じ)。
           // `between` は終わりの時刻を含むので、そのままだと終わりの1枚に PiP が残り、
           // 格子に乗らない頭では1枚遅れて出て、絵も最大1フレーム遅れていた
-          const pipFirstFrame = Math.round(pipStart * outputFps)
-          const pipEndFrame = Math.round(pipEndExport * outputFps)
-          const pipFrameStart = pipFirstFrame / outputFps
           if (includeVideo && pipEndFrame > pipFirstFrame) {
             const pipLabel = `pip${pipCounter}`
             const scaledWidth = Math.max(2, Math.round((w * track.scale) / 2) * 2)
@@ -1203,7 +1211,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             )
             curV = outV
           }
-          if (asset.hasAudio && !track.audioMuted) {
+          if (asset.hasAudio && !track.audioMuted && pipAudibleDur > 0) {
             // 音も絵と同じフレームの格子から始める(丸める前の秒で遅らせると、最大半フレーム絵より遅れて鳴り、
             // 長尺向けの書き出しとも食い違っていた)
             const delayMs = Math.max(0, Math.round(pipFrameStart * 1000))
@@ -1223,11 +1231,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
              * 入力は `-t pipVisibleDuration` で切ってあるが、AAC はフレーム境界
              * (約23ms)でしか切れないので、秒ちょうどに揃えるのはここで行う。
              */
-            const PIP_TRIM_EPSILON = 1e-6
-            const pipTrim =
-              pipAudibleDur < pipVisibleDuration - PIP_TRIM_EPSILON
-                ? `atrim=0:${ffSeconds(pipAudibleDur)},`
-                : ''
+            const pipTrim = `atrim=0:${ffSeconds(pipAudibleDur)},`
             filterParts.push(
               `[${pipAudioIndex}:a]${ALIGN_AUDIO_START},asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
                 `${audioFormatFor(audioChannelsByPath.get(asset.filePath), audioLayoutOf(asset.filePath))}[${audioLabel}]`

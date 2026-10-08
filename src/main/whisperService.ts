@@ -168,11 +168,17 @@ const FRAME = 320
 const QUIET_WINDOW_SEC = 2
 /** 静かな所を見積もる範囲(前後の秒)。区間の頭に無音があると、全体で見積もって 0 になっていた */
 const FLOOR_SPAN_SEC = 5
+/** 録音の無い所と必ずみなす、デジタルの無音の続く長さ(フレーム数。1 秒) */
+const DIGITAL_SILENCE_FRAMES = 50
 /**
- * 録音の無い所とみなす、デジタルの無音の続く長さ(フレーム数。0.3 秒)。ノイズゲートが言葉の間を 0 にする
- * のは数フレームなので数えず、切った所の短い無音(0.5 秒ほど)は数える
+ * これより短い無音(0.3 秒未満)は、ノイズゲートが音節・言葉の間を閉じたものとみなし、録音の無い所に数えない
  */
-const DIGITAL_SILENCE_FRAMES = 15
+const SHORT_SILENCE_FRAMES = 15
+/**
+ * 0.3〜1 秒の無音の両隣の大きさがこれ(-40dBFS)以上なら、声の間をゲートが閉じたもの。下なら、部屋の
+ * 雑音の中を切った所(録音の無い所)。ゲートは声で開くので、閉じた所の隣は声の大きさになる
+ */
+const GATE_EDGE_LEVEL = 0.01
 
 /**
  * 読んだ音(16kHz)で、素材の時刻 [start, end) に声が無いかを返す関数。決まり文句の作り話を、
@@ -190,9 +196,9 @@ function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: 
     for (let i = f * FRAME; i < (f + 1) * FRAME; i++) sum += audio[i] * audio[i]
     rms[f] = Math.sqrt(sum / FRAME)
   }
-  // 録音の無い所(デジタルの無音)。0.3 秒以上続くものと、頭・終わりに付いたものだけ数える(切った所など)。
-  // ノイズゲートのマイクは音節・言葉の間を短く 0 にするので、そこまで除くと静かな所を声だけで
-  // 見積もり、小さな声で本当に言った言葉を無音と取って捨てていた
+  // 録音の無い所(デジタルの無音)。1 秒以上続くもの、頭・終わりに付いたもの、部屋の雑音の中を切った
+  // 短いものを数える。ノイズゲートのマイクが声の間を閉じた所まで除くと、静かな所を声だけで見積もり、
+  // 小さな声で本当に言った言葉を無音と取って捨てていた
   const digital = new Uint8Array(frames)
   for (let f = 0; f < frames;) {
     if (rms[f] > 1e-4) {
@@ -203,6 +209,14 @@ function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: 
     while (g < frames && rms[g] <= 1e-4) g++
     // 頭・終わりに付いた無音は短くても録音の無い所(読み込んだ範囲の外にはみ出した所)
     if (f === 0 || g === frames || g - f >= DIGITAL_SILENCE_FRAMES) digital.fill(1, f, g)
+    else if (g - f >= SHORT_SILENCE_FRAMES) {
+      // 両隣(5 フレームずつ)の大きさの真ん中で、ゲートが閉じた所か、切った所かを見分ける
+      const edges = [...rms.subarray(Math.max(0, f - 5), f), ...rms.subarray(g, g + 5)]
+        .filter((v) => v > 1e-4)
+        .sort((a, b) => a - b)
+      const edge = edges.length > 0 ? edges[Math.floor(edges.length / 2)] : 0
+      if (edge < GATE_EDGE_LEVEL) digital.fill(1, f, g)
+    }
     f = g
   }
   const span = Math.round((FLOOR_SPAN_SEC * 16000) / FRAME)
