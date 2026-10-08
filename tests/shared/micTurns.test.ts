@@ -351,3 +351,82 @@ describe('detectTurns: 止まったマイクのあとの持ち主の声', () => 
     expect(around[1].start).toBeCloseTo(32, 0)
   })
 })
+
+describe('detectTurns: かぶりの大きさの測り方', () => {
+  const quietAfterStop = (withMix: boolean): ReturnType<typeof detectTurns> => {
+    const a = env(60, -60, [
+      [1, 4, -10],
+      [5, 9, -30],
+      [10, 14, -30],
+      [15, 18, -10],
+      [19, 24, -10],
+      [40, 43, -10],
+      [45, 46, -22]
+    ])
+    const b = env(60, -55, [
+      [5, 9, -12],
+      [10, 14, -12]
+    ])
+    for (let i = 25 * TURN_RATE; i < b.length; i++) b[i] = NaN
+    const tracks = [
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b }
+    ]
+    if (!withMix) return detectTurns(tracks)
+    // 混ぜた音の残り: 個別のマイクが鳴っている所(前後 0.2 秒)は消して(NaN)、消した印を付ける
+    const mix = env(60, -58, [])
+    const masked = new Uint8Array(mix.length)
+    for (const [s, e] of [
+      [1, 4],
+      [5, 9],
+      [10, 14],
+      [15, 18],
+      [19, 24],
+      [40, 43],
+      [45, 46]
+    ])
+      for (let i = s * TURN_RATE - 20; i < e * TURN_RATE + 20; i++) {
+        mix[i] = NaN
+        masked[i] = 1
+      }
+    return detectTurns([...tracks, { id: 'MIX', envelope: mix, maskedFrames: masked }])
+  }
+
+  it('混ぜた音の残り(消音した所のあるマイク)があっても、かぶりの大きさを測れる', () => {
+    const pick = (turns: ReturnType<typeof detectTurns>): (boolean | undefined)[] =>
+      turns.filter((t) => t.micId === 'A' && t.start > 44 && t.end < 47).map((t) => t.uncertain)
+    expect(pick(quietAfterStop(true))).toEqual(pick(quietAfterStop(false)))
+    expect(pick(quietAfterStop(true))).toEqual([undefined])
+  })
+
+  it('3人以上では、止まったマイクの人のかぶりの大きさで見る(よく話す人のかぶりで見ない)', () => {
+    const a = env(60, -60, [
+      [1, 15, -36],
+      [16, 24, -10],
+      [25, 27, -26],
+      [31, 34, -26],
+      [36, 39, -10],
+      [45, 60, -10]
+    ])
+    const b = env(60, -55, [[1, 15, -12]])
+    const c = env(60, -55, [[25, 27, -12]])
+    for (let i = 30 * TURN_RATE; i < c.length; i++) c[i] = NaN
+    const turns = detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b },
+      { id: 'C', envelope: c }
+    ])
+    const leak = turns.filter((t) => t.micId === 'A' && t.start > 30 && t.end < 35)
+    expect(leak).toHaveLength(1)
+    expect(leak[0].uncertain).toBe(true)
+  })
+})
+
+describe('splitByWeakness — 途切れずにつながる短い持ち主の声', () => {
+  it('「分からない」声の中の一瞬の大きな声は、持ち主の発話として切り出さない', () => {
+    const heard = new Uint8Array(300).fill(1)
+    const weak = new Uint8Array(300).fill(1)
+    weak.fill(0, 100, 130)
+    expect(splitByWeakness([[0, 300]], heard, weak, 25)).toEqual([[0, 300]])
+  })
+})

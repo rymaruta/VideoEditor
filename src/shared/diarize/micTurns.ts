@@ -160,33 +160,65 @@ export function activityMask(tracks: readonly MicTrack[]): Uint8Array {
 }
 
 /**
- * マイクごとの、ほかの人の声のかぶりの大きさ(dB)。全部のマイクが録っていて、ほかのマイクの持ち主が
- * はっきり話している時刻の、このマイクの音の真ん中の値。測れなければ NaN
+ * マイクごと・ほかのマイクの持ち主ごとの、かぶりの大きさ(dB)。`[m][o]` は o の持ち主の声が
+ * m のマイクに入る大きさ。録っているマイクがそろっていて、o の持ち主がはっきり話している時刻の、
+ * m のマイクの音の真ん中の値。測れなければ NaN。
+ *
+ * 相手ごとに分けるのは、3人以上だと、よく話す人のかぶりの大きさで、止まったマイクの人(近くに
+ * 座っている・声が大きい)のかぶりまで見ていたから。消音したマイク(`maskedFrames`)は録っている
+ * 扱い(止まったマイクではない。止まったとみなすと、混ぜた音の残りを使う収録では測れなかった)
  */
-function bleedLevels(stats: readonly MicStats[], n: number): number[] {
+function bleedLevels(stats: readonly MicStats[], n: number): number[][] {
   return stats.map((st, m) => {
-    const vals: number[] = []
+    const vals: number[][] = stats.map(() => [])
     for (let t = 0; t < n; t++) {
       const v = st.db[t]
       if (v === undefined || Number.isNaN(v) || v < st.threshold) continue
-      let all = true
-      let other = false
+      let stopped = false
+      let lead = -1
+      let leadRel = -Infinity
       for (let o = 0; o < stats.length; o++) {
-        if (o === m) continue
+        if (o === m || stats[o].maskedFrames?.[t]) continue
         const w = stats[o].db[t]
         if (w === undefined || Number.isNaN(w)) {
-          all = false
+          stopped = true
           break
         }
-        if (w >= stats[o].threshold && w - stats[o].speech > v - st.speech + BLEED_LEAD_DB)
-          other = true
+        if (w >= stats[o].threshold && w - stats[o].speech > leadRel) {
+          leadRel = w - stats[o].speech
+          lead = o
+        }
       }
-      if (all && other) vals.push(v)
+      if (!stopped && lead >= 0 && leadRel > v - st.speech + BLEED_LEAD_DB) vals[lead].push(v)
     }
-    if (vals.length < TURN_RATE) return NaN
-    vals.sort((x, y) => x - y)
-    return vals[Math.floor(vals.length / 2)]
+    return vals.map((list) => {
+      if (list.length < TURN_RATE) return NaN
+      list.sort((x, y) => x - y)
+      return list[Math.floor(list.length / 2)]
+    })
   })
+}
+
+/**
+ * 時刻 t に止まっているマイクの持ち主の声が、マイク m に入る大きさ。止まっているマイクが無ければ
+ * -Infinity、どれかの大きさが測れていなければ NaN(大きさでは絞らない)
+ */
+function absentPeerBleed(
+  stats: readonly MicStats[],
+  bleed: readonly number[][],
+  m: number,
+  t: number
+): number {
+  let level = -Infinity
+  for (let o = 0; o < stats.length; o++) {
+    if (o === m || stats[o].maskedFrames?.[t]) continue
+    const w = stats[o].db[t]
+    if (w !== undefined && !Number.isNaN(w)) continue
+    const b = bleed[m][o]
+    if (Number.isNaN(b)) return NaN
+    level = Math.max(level, b)
+  }
+  return level
 }
 
 /** 各時刻の持ち主(複数なら重なり)を決め、マイクごとの発話区間にする */
@@ -227,16 +259,17 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
     }
     if (best < 0) continue
     owned[best][t] = 1
-    if (
-      stats[best].db[t] - stats[best].ownLevel < ABSENT_PEER_MIN_REL_DB &&
-      // かぶりの大きさが分かるなら、それに近い音だけ(短い発話の語の頭・終わりや小声の語は、持ち主の
-      // 声の上のほうより 12dB 以上小さくなり、持ち主の短い発話まで「分からない」になっていた)
-      (Number.isNaN(bleed[best]) || stats[best].db[t] <= bleed[best] + BLEED_NEAR_DB) &&
-      stats.some(
-        (st) => !st.maskedFrames?.[t] && (st.db[t] === undefined || Number.isNaN(st.db[t]))
+    if (stats[best].db[t] - stats[best].ownLevel < ABSENT_PEER_MIN_REL_DB) {
+      const absent = absentPeerBleed(stats, bleed, best, t)
+      // 止まったマイクがあるときだけ。かぶりの大きさが分かるなら、それに近い音だけ(短い発話の語の
+      // 頭・終わりや小声の語は、持ち主の声の上のほうより 12dB 以上小さくなり、持ち主の短い発話まで
+      // 「分からない」になっていた)
+      if (
+        absent !== -Infinity &&
+        (Number.isNaN(absent) || stats[best].db[t] <= absent + BLEED_NEAR_DB)
       )
-    )
-      weak[best][t] = 1
+        weak[best][t] = 1
+    }
     // 2番目も「その人が話しているときの普段の大きさ」に近ければ、2人とも話している
     if (second >= 0 && bestRel - secondRel < margin && secondRel > -margin) {
       owned[second][t] = 1
@@ -316,8 +349,8 @@ const MIN_UNCERTAIN_FRAMES = 50
 /**
  * 区間を「持ち主の声か分からない」所と、持ち主の声の所で分ける(止まったマイクの人の声のすぐ後に
  * 持ち主が話すと、短い切れ目でつながって1つの発話になり、持ち主の発言まで話者の名前が付かなかった)。
- * 分けるのは**声の無い切れ目**の所だけで、分からない側が 0.5 秒以上あるときだけ(文の終わりの
- * 小声・文の中の小さな落ち込みでは分けない)
+ * 分けるのは分からない側が 0.5 秒以上あるときだけ(文の終わりの小声・文の中の小さな落ち込みでは
+ * 分けない)。声が途切れずにつながる所では、持ち主の側も 0.5 秒以上あるときだけ分ける
  */
 export function splitByWeakness(
   pieces: readonly [number, number][],
@@ -329,24 +362,27 @@ export function splitByWeakness(
   const out: [number, number][] = []
   for (const [a, b] of pieces) {
     // 声の続く塊ごとに、分からない側が多いかを決める
-    const blocks: { a: number; b: number; weak: boolean; len: number }[] = []
+    // `touch`: 前の塊と声が途切れずにつながっている
+    const blocks: { a: number; b: number; weak: boolean; len: number; touch: boolean }[] = []
     let k = a
     while (k < b) {
+      const gapFrom = k
       while (k < b && !heard[k]) k++
       if (k >= b) break
       const s = k
+      const touch = blocks.length > 0 && s === gapFrom
       // 声が途切れなくても、分からない/持ち主の声が替わる所で分ける(止まったマイクの人の声のすぐ
       // 後に持ち主が話すと切れ目が無く、持ち主の発話に混ざっていた。短いちらつきは下でまとめる)
       const label = weak[k]
       while (k < b && heard[k] && weak[k] === label) k++
-      blocks.push({ a: s, b: k, weak: label === 1, len: k - s })
+      blocks.push({ a: s, b: k, weak: label === 1, len: k - s, touch })
     }
     if (blocks.length <= 1) {
       out.push([a, b])
       continue
     }
     // 同じ種類の隣どうしをまとめる
-    const runs: { a: number; b: number; weak: boolean; len: number }[] = []
+    const runs: { a: number; b: number; weak: boolean; len: number; touch: boolean }[] = []
     for (const blk of blocks) {
       const last = runs[runs.length - 1]
       if (last && last.weak === blk.weak) {
@@ -358,6 +394,19 @@ export function splitByWeakness(
     const kept: { a: number; b: number; weak: boolean }[] = []
     for (const r of runs) {
       const last = kept[kept.length - 1]
+      // 途切れずに「分からない」声とつながる短い持ち主の声も分けない(止まったマイクの人の笑い・
+      // 大きな声の一瞬が、持ち主の発話として切り出されていた)
+      if (last && r.touch && r.weak !== last.weak) {
+        if (!r.weak && r.len < MIN_UNCERTAIN_FRAMES) {
+          last.b = r.b
+          continue
+        }
+        if (r.weak && r.len >= MIN_UNCERTAIN_FRAMES && last.b - last.a < MIN_UNCERTAIN_FRAMES) {
+          last.b = r.b
+          last.weak = true
+          continue
+        }
+      }
       const tooShort = r.weak && r.len < MIN_UNCERTAIN_FRAMES
       if (
         last &&
