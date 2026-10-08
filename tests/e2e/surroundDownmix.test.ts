@@ -17,9 +17,27 @@ afterAll(() => rmSync(work, { recursive: true, force: true }))
 
 /** 左の音の大きさ(RMS・dB) */
 function leftDb(path: string): number {
+  return channelDb(path, 0)
+}
+
+/** 指定のチャンネルの音の大きさ(RMS・dB) */
+function channelDb(path: string, ch: number): number {
   const raw = execFileSync(
     ffmpegPath,
-    ['-v', 'error', '-i', path, '-vn', '-af', 'pan=mono|c0=c0', '-ar', '48000', '-f', 'f32le', '-'],
+    [
+      '-v',
+      'error',
+      '-i',
+      path,
+      '-vn',
+      '-af',
+      `pan=mono|c0=c${ch}`,
+      '-ar',
+      '48000',
+      '-f',
+      'f32le',
+      '-'
+    ],
     { maxBuffer: 1 << 26 }
   )
   const x = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4)
@@ -112,5 +130,45 @@ describe.skipIf(!existsSync(ffmpegPath))('5.1 の素材の書き出し', () => {
     const [stStd, stSeg, surStd, surSeg] = levels
     expect(Math.abs(surStd - stStd), levels.join(',')).toBeLessThan(0.5)
     expect(Math.abs(surSeg - stSeg), levels.join(',')).toBeLessThan(0.5)
+  }, 180_000)
+  it('センターにだけ音がある 4.0 の素材は、左右に同じ大きさで出す(片方だけにしない)', async () => {
+    const a = await clipOf(
+      'sine=f=1000:d=4:sample_rate=48000,pan=4.0|c0=0*c0|c1=0*c0|c2=0.1*c0|c3=0*c0',
+      'four'
+    )
+    const project = {
+      id: 'p',
+      name: 'p',
+      aspectRatio: '16:9',
+      assets: [a],
+      clips: [{ id: 'c', assetId: a.id, inPoint: 0, outPoint: 4, speed: 1 }],
+      audioTracks: [],
+      videoOverlayTracks: [],
+      textOverlays: []
+    } as unknown as Project
+    const std = join(work, 'four-std.mp4')
+    await exportProject({
+      project,
+      aspectRatio: '16:9',
+      resolutionHeight: 480,
+      quality: 'standard',
+      outputPath: std,
+      telopLayer: null,
+      onProgress: () => {}
+    })
+    const seg = join(work, 'four-seg.mp4')
+    await exportSequenceSegmented({
+      project: projectV1ToV2(project, { resolution: 480 }),
+      outputPath: seg,
+      quality: 'standard',
+      encoder: 'libx264',
+      telopLayer: null
+    })
+    for (const out of [std, seg]) {
+      const l = channelDb(out, 0)
+      const r = channelDb(out, 1)
+      expect(Number.isFinite(r), out).toBe(true)
+      expect(Math.abs(l - r), `${out} ${l} ${r}`).toBeLessThan(0.5)
+    }
   }, 180_000)
 })

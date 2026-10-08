@@ -963,9 +963,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           // 最初から `anullsrc` に `duration` を渡して尺ちょうどにしており、
           // ここでも**片方にだけ揃える処理が育っていた**。
           // 速さを変える前に少し無音を足す。20ms ほどの短い断片では atempo が1サンプルも出さず、
-          // 後の apad が時刻の無い音を作って、書き出しが丸ごと失敗していた(長さは後の atrim で切る)
+          // 後の apad が時刻の無い音を作って、書き出しが丸ごと失敗していた(長さは後の atrim で切る)。
+          // 足した無音には時刻を振り直す(範囲に音が1サンプルも無いと、時刻の無い無音が続き、
+          // 後の apad が終わらずに書き出しが止まっていた。頭は ALIGN で 0 にそろえてある)
           filterParts.push(
-            `[${audioIndex}:a]${ALIGN_AUDIO_START},apad=pad_dur=0.2,${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
+            `[${audioIndex}:a]${ALIGN_AUDIO_START},apad=pad_dur=0.2,asetpts=N/SR/TB,${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
               `apad,atrim=0:${ffSeconds(outputDuration)},asetpts=PTS-STARTPTS,` +
               `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
           )

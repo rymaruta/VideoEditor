@@ -161,8 +161,14 @@ export function ensurePreviewProxy(
                 '-row-mt 1',
                 '-auto-alt-ref 0'
               ])
-            if (hasAudio) command.audioCodec('libopus').outputOptions(['-ac 2'])
-            else command.noAudio()
+            if (hasAudio) {
+              command.audioCodec('libopus').outputOptions(['-ac 2'])
+              // 透過の素材も、書き出しと同じ大きさで聞かせる(下の H.264 の経路と同じ理由。
+              // モノラルの素材の試聴だけが 3dB 小さく、3ch 以上は畳み方が書き出しと違っていた)
+              if (isMonoChannelCount(audioChannels)) command.audioFilters(monoUpmixFilter())
+              else if (isMultiChannelCount(audioChannels))
+                command.audioFilters(multiChannelDownmixFilter(undefined, audioChannels))
+            } else command.noAudio()
             command
               .on('progress', (p) => {
                 if (typeof p.percent === 'number')

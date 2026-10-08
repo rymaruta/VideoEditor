@@ -271,8 +271,10 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         speed,
         origin: 'manual',
         ...(ac.volume !== undefined ? { volume: ac.volume } : {}),
-        ...(ac.fadeIn ? { fadeInFrames: toFrame(ac.fadeIn) } : {}),
-        ...(ac.fadeOut ? { fadeOutFrames: toFrame(ac.fadeOut) } : {}),
+        // 半コマより短いフェード(切れ目の 20ms)も 0 に丸めず1コマにする(24fps で 0 コマになり、
+        // 区間ごとの書き出しだけ切れ目で「プツッ」と鳴っていた)
+        ...(ac.fadeIn ? { fadeInFrames: Math.max(1, toFrame(ac.fadeIn)) } : {}),
+        ...(ac.fadeOut ? { fadeOutFrames: Math.max(1, toFrame(ac.fadeOut)) } : {}),
         ...(ac.linkedClipId ? { linkedItemId: ac.linkedClipId } : {})
       })
     }

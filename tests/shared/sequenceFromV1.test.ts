@@ -282,6 +282,31 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
     expect(m.opacity).toBeCloseTo(1, 6)
   })
 
+  it('半コマより短い音のフェード(切れ目の 20ms)も、0 コマに丸めない', () => {
+    const p = projectV1ToV2(
+      emptyProject({
+        assets: [asset('a', { fps: 24 }), asset('bgm', { hasVideo: false })],
+        clips: [{ id: 'c1', assetId: 'a', inPoint: 0, outPoint: 10, speed: 1 }],
+        audioTracks: [
+          {
+            id: 'mic',
+            name: 'マイク',
+            volume: 1,
+            muted: false,
+            duckingEnabled: false,
+            clips: [
+              { id: 'm1', assetId: 'bgm', startTime: 0, inPoint: 0, outPoint: 2, fadeOut: 0.02 },
+              { id: 'm2', assetId: 'bgm', startTime: 2, inPoint: 5, outPoint: 7, fadeIn: 0.02 }
+            ]
+          }
+        ]
+      } as Partial<Project>)
+    )
+    const items = p.sequence.audioTracks.find((t) => t.id === 'mic')!.items
+    expect(items.find((i) => i.id === 'm1')!.fadeOutFrames).toBeGreaterThanOrEqual(1)
+    expect(items.find((i) => i.id === 'm2')!.fadeInFrames).toBeGreaterThanOrEqual(1)
+  })
+
   it('テロップは書き出しの秒へ換算し、単語の時刻はアイテムの頭からの秒にする', () => {
     const p = projectV1ToV2(
       emptyProject({

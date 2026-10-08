@@ -254,6 +254,48 @@ describe('標準の書き出しの、とても短いクリップ', () => {
     }
   }, 180_000)
 
+  it('音声が映像より短い素材で、音の無い範囲のクリップがあっても書き出しが止まらない', async () => {
+    const path = join(work, 'shortaudio.mp4')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=320x180:r=30:d=10',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=f=440:d=4:sample_rate=48000',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      path
+    ])
+    const p = await probeMedia(path)
+    const a: MediaAsset = {
+      id: 'sa',
+      filePath: path,
+      fileName: 'sa',
+      duration: p.duration,
+      width: p.width,
+      height: p.height,
+      fps: p.fps,
+      hasAudio: true,
+      hasVideo: true
+    }
+    const project = {
+      ...base([a]),
+      clips: [
+        { id: 'c1', assetId: 'sa', inPoint: 0, outPoint: 2, speed: 1 },
+        { id: 'c2', assetId: 'sa', inPoint: 6, outPoint: 9, speed: 1 }
+      ]
+    } as unknown as Project
+    const [std] = await both(project, 'shortaudio')
+    expect(Math.abs((await probeMedia(std)).duration - 5)).toBeLessThan(0.1)
+  }, 120_000)
+
   it('どのクリップも半コマより短ければ、空のファイルを作らずに止める', async () => {
     const a = await asset('tiny2', 'tone', 2)
     const project = {
