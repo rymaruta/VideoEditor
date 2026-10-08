@@ -673,3 +673,54 @@ describe('第22回: 速さを変えて戻したときの SE・BGM(乱数の通�
     )
   })
 })
+
+describe('第23回: 第22回修正の見直し', () => {
+  const setBgm = (clips: Project['audioTracks'][number]['clips'], song = 20): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', song, false), asset('long', 120, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === 'bgmT' ? { ...t, clips } : t))
+      }
+    })
+  }
+  beforeEach(() =>
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+  )
+
+  it('ずらすだけの BGM は、同じ時刻に終わる2本もフェードも落とさない', () => {
+    const start: Project['audioTracks'][number]['clips'] = [
+      { id: 'b1', assetId: 'loop', startTime: 10, inPoint: 0, outPoint: 20, fadeOut: 1 },
+      { id: 'b2', assetId: 'loop', startTime: 28, inPoint: 0, outPoint: 2, fadeIn: 1 }
+    ]
+    setBgm(start)
+    const c0 = st().project.clips[0].id
+    st().updateClipSpeed(c0, 2)
+    expect(track('bgmT').map((c) => [c.id, c.startTime, c.fadeIn, c.fadeOut])).toEqual([
+      ['b1', 5, undefined, 1],
+      ['b2', 23, 1, undefined]
+    ])
+    st().updateClipSpeed(c0, 1)
+    expect(track('bgmT').map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])).toEqual(
+      start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])
+    )
+  })
+
+  it('長い BGM に重ねた短いクリップがあっても、関係の無い所の速さで切らない', () => {
+    setBgm([
+      { id: 'b1', assetId: 'long', startTime: 0, inPoint: 0, outPoint: 15 },
+      { id: 'b2', assetId: 'long', startTime: 5, inPoint: 50, outPoint: 52 }
+    ])
+    // BGM は 15 秒で終わる。後ろ(20〜30秒)のクリップの速さは関係しない
+    st().updateClipSpeed(st().project.clips[2].id, 2)
+    expect(track('bgmT').map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])).toEqual([
+      ['b1', 0, 0, 15],
+      ['b2', 5, 50, 52]
+    ])
+  })
+})

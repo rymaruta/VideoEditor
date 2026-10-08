@@ -5159,9 +5159,19 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
    */
   const retileBgm = (chain: AudioTrackClip[], usedIds: Set<string>): AudioTrackClip[] => {
     const first = chain[0]
-    const last = chain[chain.length - 1]
+    // 終わりは一番後ろで終わるクリップ(並びの最後とは限らない。終わりのフェードもそのクリップのもの)
+    // 同じ時刻に終わるクリップがあれば、後ろから始まる方(重ねて繰り返した次のループ)
+    const last = chain.reduce((a, c) =>
+      c.startTime + lenOf(c) >= a.startTime + lenOf(a) - 1e-9 ? c : a
+    )
     const shift = warp(first.startTime) - first.startTime
-    const end = warp(last.startTime + lenOf(last))
+    const origEnd = last.startTime + lenOf(last)
+    const end = warp(origEnd)
+    // ずらすだけ(長さが変わらない)なら、どのクリップもそのまま動かす(フェード・重ねたクリップを落とさない)
+    if (Math.abs(end - (origEnd + shift)) <= 1e-6)
+      return chain.map((c) =>
+        Math.abs(shift) <= 1e-9 ? c : { ...c, startTime: c.startTime + shift }
+      )
     const overlaps = chain
       .slice(1)
       .map((c, i) => chain[i].startTime + lenOf(chain[i]) - c.startTime)
@@ -5188,32 +5198,42 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       return id
     }
     const out: AudioTrackClip[] = []
-    // 頭をずらした並び。写した終わりより後ろで始まるクリップは落とし、またぐクリップは詰める
+    const endOf = (c: AudioTrackClip): number => c.startTime + lenOf(c)
+    /** 一番後ろで終わるクリップの位置 */
+    const tailIndex = (): number =>
+      out.reduce((best, c, i) => (endOf(c) >= endOf(out[best]) - 1e-9 ? i : best), 0)
+    // 頭をずらした並び。写した終わりより後ろで始まるクリップは落とし、またぐクリップは詰める。
+    // 1本を終わりで切ったら、そのあとは終わりまでに収まるもの(長いクリップに重ねた短いクリップ)だけ残す
+    // (重ねて始まる次のループの切れ端を残さない)
+    let reached = false
     for (const c of chain) {
       const at = c.startTime + shift
-      if (at >= end - 1e-6) break
+      if (at >= end - 1e-6) continue
+      const natural = at + lenOf(c)
+      if (reached && natural > end + 1e-6) continue
       const len = Math.min(lenOf(c), end - at)
       out.push({ ...c, startTime: at, outPoint: c.inPoint + len * (c.speed || 1) })
-      // 終わりまで届いたクリップで止める(重ねて始まる次のループの切れ端を残さない)
-      if (at + lenOf(c) >= end - 1e-6) break
+      if (natural > end + 1e-6) reached = true
     }
     if (out.length === 0) return []
-    // 足りなければ、最後のクリップを曲の終わりまで延ばし、そこからループを足す(多くても 1,000 本)
+    // 足りなければ、一番後ろのクリップを曲の終わりまで延ばし、そこからループを足す(多くても 1,000 本)
+    // 足したループは長さ 0 から延ばすので、一番後ろのクリップはここで追いかける
+    let ti = tailIndex()
     for (let i = chain.length; out.length < chain.length + 1000; i++) {
-      const tail = out[out.length - 1]
+      const tail = out[ti]
       const speed = tail.speed || 1
-      const tailEnd = tail.startTime + lenOf(tail)
+      const tailEnd = endOf(tail)
       if (tailEnd >= end - 1e-6) break
       const room = (limit - tail.outPoint) / speed
       if (room > 1e-6) {
         const grow = Math.min(room, end - tailEnd)
-        out[out.length - 1] = { ...tail, outPoint: tail.outPoint + grow * speed }
+        out[ti] = { ...tail, outPoint: tail.outPoint + grow * speed }
         continue
       }
       // 曲の終わりまで来た: 重ねて頭から繰り返す
       const at = tailEnd - Math.min(loopOverlap, lenOf(tail))
-      if (end - at <= 1e-3 || tailEnd - at >= songLen - 1e-3) break
-      out[out.length - 1] = { ...tail, fadeOut: loopCross?.fadeOut ?? tail.fadeOut }
+      if (end - at <= 1e-3) break
+      out[ti] = { ...tail, fadeOut: loopCross?.fadeOut ?? tail.fadeOut }
       out.push({
         ...last,
         id: freshId(i),
@@ -5224,11 +5244,10 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
         fadeOut: undefined,
         loopCross: undefined
       })
+      ti = out.length - 1
     }
-    // 終わりのフェードは最後のクリップに。つなぎ目の覚えは頭のクリップに
-    const lastOut = out[out.length - 1]
-    if (lastOut.id !== last.id || out.length !== chain.length)
-      out[out.length - 1] = { ...lastOut, fadeOut: last.fadeOut }
+    // 終わりのフェードは一番後ろで終わるクリップに。つなぎ目の覚えは頭のクリップに
+    if (out[ti].id !== last.id) out[ti] = { ...out[ti], fadeOut: last.fadeOut }
     if (loopCross) out[0] = { ...out[0], loopCross }
     return out.filter((c) => c.outPoint - c.inPoint > 1e-9)
   }
@@ -5248,10 +5267,10 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
         continue
       }
       const prev = chain[chain.length - 1]
+      // 並びの中で一番後ろの終わりと比べる(長いクリップの途中に重ねた短いクリップの後ろも、つながりのうち)
+      const chainEnd = Math.max(-Infinity, ...chain.map((x) => x.startTime + lenOf(x)))
       const touches =
-        prev !== undefined &&
-        c.assetId === prev.assetId &&
-        c.startTime <= prev.startTime + lenOf(prev) + 1e-3
+        prev !== undefined && c.assetId === prev.assetId && c.startTime <= chainEnd + 1e-3
       if (!touches) flush()
       chain.push(c)
     }

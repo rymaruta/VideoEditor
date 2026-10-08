@@ -288,6 +288,13 @@ function anglePieces(
     p.outPoint += take * p.speed
     rest -= take
   }
+  // それでも残れば、頭のクリップを前へ延ばす(終わりが隙間の中にあるクリップ)
+  if (rest > 1e-6 && out.length > 0) {
+    const head = out[0]
+    const take = Math.min(rest, head.inPoint / head.speed)
+    head.inPoint -= take * head.speed
+    rest -= take
+  }
   if (rest > 1e-6) return []
   // 最後の切れ端が丸めの残りだけなら前に含める
   return out.filter((p, i) => i === 0 || (p.outPoint - p.inPoint) / p.speed > 1e-3)
