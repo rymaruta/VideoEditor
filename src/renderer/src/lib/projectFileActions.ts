@@ -60,34 +60,37 @@ export async function checkMissingAssets(): Promise<void> {
 }
 
 export async function saveProjectAs(): Promise<void> {
-  const { project, markSaved } = useProjectStore.getState()
+  const { project, markSaved, projectSession } = useProjectStore.getState()
   const filePath = await window.api.selectProjectSavePath(
     `${safeFileBaseName(project.name)}.veproj`
   )
   if (!filePath) return
   await window.api.saveProject(filePath, project)
   // 書いたのは `project`。保存中に編集が入っていたら未保存のままにする(markSaved の理由)。
-  markSaved(filePath, project)
+  markSaved(filePath, project, projectSession)
   remember(filePath)
   // 保存している間に別の企画へ切り替えていたら、その企画の自動保存の控えは消さない
-  if (stillSameProject(project)) await clearAutosaveAfterSave()
+  if (stillSameProject(projectSession)) await clearAutosaveAfterSave()
 }
 
-/** 保存を始めた企画を、まだ開いているか(保存の途中で新しい企画・別の企画にしていないか) */
-function stillSameProject(saved: { id: string }): boolean {
-  return useProjectStore.getState().project.id === saved.id
+/**
+ * 保存を始めた企画を、まだ開いているか(保存の途中で新しい企画・別の企画・開き直しにしていないか)。
+ * 企画の id では見分けられない(写し・「名前を付けて保存」の元は同じ id)ので、開いた番号で見る
+ */
+function stillSameProject(session: number): boolean {
+  return useProjectStore.getState().projectSession === session
 }
 
 export async function saveProject(): Promise<void> {
-  const { project, currentFilePath, markSaved } = useProjectStore.getState()
+  const { project, currentFilePath, markSaved, projectSession } = useProjectStore.getState()
   if (!currentFilePath) {
     await saveProjectAs()
     return
   }
   await window.api.saveProject(currentFilePath, project)
-  markSaved(currentFilePath, project)
+  markSaved(currentFilePath, project, projectSession)
   remember(currentFilePath)
-  if (stillSameProject(project)) await clearAutosaveAfterSave()
+  if (stillSameProject(projectSession)) await clearAutosaveAfterSave()
 }
 
 // ダイアログで選ぶ経路と最近使った一覧から選ぶ経路で、確認・読み込み・後始末を

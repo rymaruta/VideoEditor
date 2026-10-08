@@ -1048,7 +1048,16 @@ interface ProjectState {
    * 保存が終わったことを記録する。`savedProject` には**実際にディスクへ書いた企画**を
    * 渡すこと(保存中に編集が入ったかどうかの判定に使う)。
    */
-  markSaved: (filePath: string, savedProject: Project) => void
+  /**
+   * 保存できた印を付ける。`session` は保存を始めたときの `projectSession`。保存の途中で別の企画
+   * (同じ企画を開き直した・写しを開いた も含む)にしていたら何もしない
+   */
+  markSaved: (filePath: string, savedProject: Project, session?: number) => void
+  /**
+   * 開いている企画の番号。新規・開く・自動保存から戻すたびに変わる。企画の id では見分けられない
+   * (「名前を付けて保存」した元と写し・複製したファイル・開き直した同じファイルは同じ id)
+   */
+  projectSession: number
   /** プロジェクト名を変える。空白だけなら既定名に戻す */
   setProjectName: (name: string) => void
 
@@ -1727,6 +1736,9 @@ function normalizeEditedTelops(raw: unknown): Record<string, EditedTelop> | unde
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/** 開いた企画ごとの番号(新規・開く・自動保存から戻すたびに進む) */
+let projectSessionCounter = 0
+
 function projectSwitchReset(): Pick<
   ProjectState,
   | 'past'
@@ -1744,8 +1756,10 @@ function projectSwitchReset(): Pick<
   | 'sourceAssetId'
   | 'sourceIn'
   | 'sourceOut'
+  | 'projectSession'
 > {
   return {
+    projectSession: ++projectSessionCounter,
     past: [],
     future: [],
     selectedClipId: null,
@@ -1917,6 +1931,7 @@ function omitKeys(
 
 const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   project: createBlankProject(),
+  projectSession: 0,
   past: [],
   future: [],
   currentFilePath: null,
@@ -2126,10 +2141,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })
   },
 
-  markSaved: (filePath, savedProject) =>
+  markSaved: (filePath, savedProject, session) =>
     set((state) => {
       // 保存している間に別の企画へ切り替えていたら、今の企画には何も付けない(付けると、新しい企画の
-      // 次の保存が前の企画のファイルを黙って上書きしていた)
+      // 次の保存が前の企画のファイルを黙って上書きしていた)。id では見分けられないので番号で見る
+      if (session !== undefined && session !== state.projectSession) return state
       if (state.project.id !== savedProject.id) return state
       return {
         currentFilePath: filePath,

@@ -1,5 +1,7 @@
 import {
+  existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -85,5 +87,16 @@ describe('シンボリックリンクの企画ファイル', () => {
     saveProjectFile(link, project('新しい名前'))
     expect(lstatSync(link).isSymbolicLink()).toBe(true)
     expect(loadProjectFile(real).name).toBe('新しい名前')
+  })
+
+  it('リンク先が一時的に無いリンクでも、リンクを壊さずリンク先へ書く', () => {
+    mkdirSync(join(dir, 'cloud'))
+    const real = join(dir, 'cloud', 'real.veproj')
+    const link = join(dir, 'dangling.veproj')
+    symlinkSync(real, link)
+    saveProjectFile(link, project('戻った'))
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(existsSync(real)).toBe(true)
+    expect(loadProjectFile(real).name).toBe('戻った')
   })
 })

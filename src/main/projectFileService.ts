@@ -1,15 +1,17 @@
 import {
   closeSync,
   existsSync,
+  lstatSync,
   fsyncSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
   writeFileSync
 } from 'fs'
-import { dirname, join } from 'path'
+import { dirname, join, resolve } from 'path'
 import type { Project } from '@shared/types'
 
 // 同じプロセス内で保存が重なっても衝突しない一時ファイル名を作るための連番。
@@ -111,8 +113,21 @@ function realTarget(filePath: string): string {
   try {
     return realpathSync(filePath)
   } catch {
-    // まだ無いファイル(初めての保存)・リンク先が無いリンクは、指定どおりの場所へ
-    return filePath
+    // まだ無いファイル(初めての保存)は指定どおりの場所へ。リンク先が無いリンク(同期で一時的に
+    // 動いた など)は、リンクをたどった先へ書く(リンクの名前へ書くと、リンクがただのファイルに
+    // 置き換わり、以後の保存がリンク先へ届かなくなる)。先のフォルダが無ければ、保存の失敗として出る
+    let p = filePath
+    for (let i = 0; i < 40; i++) {
+      let link = false
+      try {
+        link = lstatSync(p).isSymbolicLink()
+      } catch {
+        return p
+      }
+      if (!link) return p
+      p = resolve(dirname(p), readlinkSync(p))
+    }
+    return p
   }
 }
 
