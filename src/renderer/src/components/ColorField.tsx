@@ -52,6 +52,8 @@ export function ColorField({
   const latest = useRef(hex)
   // スポイトで拾っている間は、外を押しても閉じない
   const picking = useRef(false)
+  // Esc で閉じた(打ちかけの16進は捨てる。外を押して閉じたときだけ確定する)
+  const escaped = useRef(false)
   useLayoutEffect(() => {
     latest.current = hex
   })
@@ -110,7 +112,9 @@ export function ColorField({
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
-        e.stopPropagation()
+        // 同じ window の capture で待つダイアログ(テロップスタイルの管理)まで閉じない
+        e.stopImmediatePropagation()
+        escaped.current = true
         close(true)
       }
     }
@@ -147,6 +151,7 @@ export function ColorField({
           // 開き直すときは前の位置を使わない(見本が動いているかもしれない)
           setPos(null)
           openedWith.current = hex
+          escaped.current = false
           setOpen(true)
         }}
       />
@@ -157,6 +162,7 @@ export function ColorField({
             hex={hex}
             label={label}
             onChange={onChange}
+            escapedRef={escaped}
             onPicking={(v) => {
               picking.current = v
             }}
@@ -194,6 +200,7 @@ function ColorPopover({
   hex,
   label,
   onChange,
+  escapedRef,
   onPicking,
   ready,
   style
@@ -202,6 +209,8 @@ function ColorPopover({
   hex: string
   label: string
   onChange: (hex: string) => void
+  /** Esc で閉じたか(打ちかけを捨てる) */
+  escapedRef: React.RefObject<boolean>
   /** スポイトで拾っている間(外を押しても閉じない) */
   onPicking: (picking: boolean) => void
   /** 位置が決まって見えている(見えない要素にはフォーカスできない) */
@@ -244,10 +253,11 @@ function ColorPopover({
   useEffect(
     () => () => {
       const { draft, onChange: change } = pending.current
+      if (escapedRef.current) return
       const next = draft === null ? null : normalizeHex(draft)
       if (next) change(next)
     },
-    []
+    [escapedRef]
   )
   const commitHex = (): void => {
     if (hexDraft === null) return

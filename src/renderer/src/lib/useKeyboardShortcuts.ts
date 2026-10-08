@@ -16,10 +16,12 @@ export function isTypingTarget(el: EventTarget | null, key?: string): boolean {
   const tag = el.tagName
   if (tag === 'INPUT') {
     // スライダー・チェックボックスは文字を打つ欄ではない。触った後に Space・S・Delete が
-    // 効かなくなっていた。スライダーの矢印キー(値を動かす)だけは欄に任せる
+    // 効かなくなっていた。スライダーの矢印キー(値を動かす)は欄に任せる
     const type = (el as HTMLInputElement).type
     if (type === 'range') return key !== undefined && /^(Arrow|Home$|End$|Page)/.test(key)
-    if (type === 'checkbox' || type === 'radio' || type === 'button') return false
+    // チェックボックス・ラジオの Space(切り替え)は欄に任せる(再生にすると切り替えられなかった)
+    if (type === 'checkbox' || type === 'radio') return key === ' ' || key === 'Enter'
+    if (type === 'button') return false
     return true
   }
   return tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
