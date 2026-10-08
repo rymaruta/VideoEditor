@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useProjectStore } from '@renderer/store/projectStore'
+import { commitAsOwnStep, useProjectStore } from '@renderer/store/projectStore'
 import type { Project } from '@shared/types'
 
 const S = useProjectStore
@@ -1725,5 +1725,133 @@ describe('第43回: 収録の音のトラックに人が置いた音', () => {
     expect(narOn()).toBe(true)
     st().updateClipSpeed(id, 1)
     expect(narOn()).toBe(true)
+  })
+})
+
+describe('第44回: 収録のカメラのワイプに人が置いた画', () => {
+  const withLogo = (): void => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, { ...asset('logo', 5), filePath: '/rec/logo.png' }],
+        videoOverlayTracks: [
+          {
+            id: 'faceT',
+            name: '顔',
+            multicamSourceId: 'A',
+            hidden: false,
+            position: 'top-right',
+            scale: 0.3,
+            clips: [
+              { id: 'f1', assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 },
+              { id: 'f2', assetId: 'camA', startTime: 10, inPoint: 20, outPoint: 30 },
+              { id: 'f3', assetId: 'camA', startTime: 20, inPoint: 40, outPoint: 50 },
+              { id: 'logoC', assetId: 'logo', startTime: 12, inPoint: 0, outPoint: 2 }
+            ]
+          }
+        ]
+      } as unknown as Project
+    })
+  }
+  const logoOn = (): boolean =>
+    st().project.videoOverlayTracks.some((t) => t.clips.some((c) => c.assetId === 'logo'))
+
+  it('速さを変えて戻しても、仮編集を作り直しても消えない', () => {
+    withLogo()
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 1.5)
+    expect(logoOn()).toBe(true)
+    st().updateClipSpeed(id, 1)
+    expect(logoOn()).toBe(true)
+    st().applyRoughCut(
+      {
+        main: [
+          [0, 10],
+          [20, 30]
+        ].map(([a, b]) => ({ assetId: 'camA', inPoint: a, outPoint: b, speed: 1 })),
+        audio: [
+          {
+            name: '出演者A',
+            sourceId: 'M',
+            volume: 1,
+            clips: [{ assetId: 'micM', startTime: 0, inPoint: 0, outPoint: 10, speed: 1 }]
+          }
+        ],
+        overlays: [
+          {
+            name: '顔',
+            sourceId: 'A',
+            clips: [{ assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 }]
+          }
+        ],
+        duration: 20,
+        spans: []
+      } as never,
+      []
+    )
+    expect(logoOn()).toBe(true)
+  })
+
+  it('移した画のトラックは、編集のたびに増えずに同じ名前の1本にまとまる', () => {
+    withLogo()
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 1.5)
+    st().updateClipSpeed(id, 1)
+    st().updateClipSpeed(id, 2)
+    const names = st().project.videoOverlayTracks.map((t) => t.name)
+    expect(names.filter((n) => n === '顔(手で置いた画)').length).toBeLessThanOrEqual(1)
+  })
+})
+
+describe('第44回: 収録の音のトラックから移した音のトラック', () => {
+  it('2回目に移した音も同じ「(手で置いた音)」の1本にまとまり、声の基準の印も引き継ぐ', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const addNarration = (id: string, at: number): void => {
+      const p = st().project
+      const mic = p.audioTracks.find((t) => t.multicamSourceId === 'M')!
+      S.setState({
+        project: {
+          ...p,
+          assets: p.assets.some((a) => a.id === 'nar')
+            ? p.assets
+            : [...p.assets, { ...asset('nar', 5, false), filePath: '/rec/nar.wav' }],
+          audioTracks: p.audioTracks.map((t) =>
+            t.id === mic.id
+              ? {
+                  ...t,
+                  voice: true,
+                  clips: [
+                    ...t.clips,
+                    { id, assetId: 'nar', startTime: at, inPoint: 0, outPoint: 2 }
+                  ]
+                }
+              : t
+          )
+        }
+      })
+    }
+    // 1回ずつの操作として書く(ナレーションを置くのは履歴を区切る操作なので、続けてのトリムとまとめない)
+    const trimTo = (out: number): void => {
+      const c = st().project.clips[0].id
+      commitAsOwnStep(`t:${out}`, () => st().updateClipTrim(c, 0, out))
+    }
+    addNarration('n1', 3)
+    trimTo(8)
+    addNarration('n2', 5)
+    trimTo(6)
+    const hand = st().project.audioTracks.filter((t) => t.name.endsWith('(手で置いた音)'))
+    expect(hand).toHaveLength(1)
+    expect(hand[0].voice).toBe(true)
+    expect(hand[0].clips.map((c) => c.id).sort()).toEqual(['n1', 'n2'])
   })
 })

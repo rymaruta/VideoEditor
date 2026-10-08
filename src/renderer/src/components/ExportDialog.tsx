@@ -255,11 +255,13 @@ export function ExportDialog(): React.JSX.Element | null {
     const outputPath = await window.api.selectExportPath(`${safeFileBaseName(project.name)}.mp4`)
     if (!outputPath) return
     setRunning(true)
+    const session = useProjectStore.getState().projectSession
     try {
       await runOne(project.aspectRatio, resolutionHeight, quality, outputPath)
       // 書き出している間に別のプロジェクトを開いたなら、結果・確認はそのプロジェクトに出さない
-      // (前のプロジェクトのファイルを出し、確認の項目を押すと今のプロジェクトの別の時刻へ飛んでいた)
-      const sameProject = useProjectStore.getState().project.id === project.id
+      // (前のプロジェクトのファイルを出し、確認の項目を押すと今のプロジェクトの別の時刻へ飛んでいた)。
+      // 企画の id では写し・開き直した同じファイルを見分けられないので、開いた番号で見る
+      const sameProject = useProjectStore.getState().projectSession === session
       if (sameProject) setDonePath(outputPath)
       window.api.notifyDone('書き出しが終わりました', outputPath)
       // 書き出した動画をそのまま確認する(黒味・フリーズ・無音・ラウドネス・テロップ)

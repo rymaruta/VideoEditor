@@ -3452,6 +3452,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               muted: t.muted,
               volume: t.volume,
               duckingEnabled: false,
+              ...(t.voice ? { voice: true } : {}),
               clips: extras
             }
           ]
@@ -3462,28 +3463,38 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const fresh: Project = {
         ...state.project,
         clips: lookedClips,
-        audioTracks,
+        // 同じ名前の「(手で置いた音)」のトラックがもうあれば、そこへまとめる
+        audioTracks: mergeHandTracks(audioTracks, state.project.audioTracks),
         // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す。
         // ワイプで常に出すカメラ(ゲーム実況の顔カメラ)は、本編と同じ区間で並べ直す
         // (人が変えた置き場所・大きさ・表示は残す)
-        videoOverlayTracks: [
-          ...state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
-          ...(cut.overlays ?? []).map((o) => {
-            const prev = state.project.videoOverlayTracks.find(
-              (t) => t.multicamSourceId === o.sourceId
-            )
-            return {
-              id: uuid(),
-              name: o.name,
-              multicamSourceId: o.sourceId,
-              hidden: prev?.hidden ?? false,
-              audioMuted: prev ? prev.audioMuted : true,
-              position: prev?.position ?? FACE_PIP_POSITION,
-              scale: prev?.scale ?? FACE_PIP_SCALE,
-              clips: o.clips.map((c) => ({ id: uuid(), ...c }))
-            }
-          })
-        ],
+        videoOverlayTracks: mergeHandTracks(
+          [
+            ...state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
+            // 収録のカメラのワイプに人が置いた画(ロゴ・画像)は消さずに、別のトラックへ移す
+            ...state.project.videoOverlayTracks.flatMap((t) => {
+              if (!t.multicamSourceId) return []
+              const extras = t.clips.filter((c) => !recorded.has(c.assetId))
+              return extras.length > 0 ? [handOverlayTrack(t, extras)] : []
+            }),
+            ...(cut.overlays ?? []).map((o) => {
+              const prev = state.project.videoOverlayTracks.find(
+                (t) => t.multicamSourceId === o.sourceId
+              )
+              return {
+                id: uuid(),
+                name: o.name,
+                multicamSourceId: o.sourceId,
+                hidden: prev?.hidden ?? false,
+                audioMuted: prev ? prev.audioMuted : true,
+                position: prev?.position ?? FACE_PIP_POSITION,
+                scale: prev?.scale ?? FACE_PIP_SCALE,
+                clips: o.clips.map((c) => ({ id: uuid(), ...c }))
+              }
+            })
+          ],
+          state.project.videoOverlayTracks
+        ),
         // 作り直すときに今の本編と比べられるよう、組んだ本編を共通の時刻で覚える
         roughCutAuto: state.project.multicam
           ? coverageOfClips(cut.main, state.project.multicam)
@@ -5180,6 +5191,45 @@ function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i])
 }
 
+/** 収録のカメラのワイプから移す、人が置いた画のトラック(置き場所・大きさ・表示は元のまま) */
+function handOverlayTrack(t: VideoOverlayTrack, clips: VideoOverlayClip[]): VideoOverlayTrack {
+  return {
+    id: uuid(),
+    name: `${t.name}(手で置いた画)`,
+    hidden: t.hidden,
+    audioMuted: t.audioMuted,
+    position: t.position,
+    scale: t.scale,
+    clips
+  }
+}
+
+/**
+ * 今回新しく作った「(手で置いた音)」「(手で置いた画)」のトラックを、同じ名前の(収録でない)トラックが
+ * もうあればそこへまとめる(編集のたびに同じ名前のトラックが増えていた)
+ */
+function mergeHandTracks<
+  T extends { id: string; name: string; multicamSourceId?: string; clips: { startTime: number }[] }
+>(tracks: T[], before: readonly T[]): T[] {
+  const existed = new Set(before.map((t) => t.id))
+  const isNew = (t: T): boolean => !existed.has(t.id) && !t.multicamSourceId
+  const target = (t: T): T | undefined =>
+    tracks.find((o) => existed.has(o.id) && !o.multicamSourceId && o.name === t.name)
+  const extra = new Map<string, T['clips']>()
+  for (const t of tracks) {
+    const to = isNew(t) ? target(t) : undefined
+    if (to) extra.set(to.id, [...(extra.get(to.id) ?? []), ...t.clips])
+  }
+  if (extra.size === 0) return tracks
+  return tracks.flatMap((t) => {
+    if (isNew(t) && target(t)) return []
+    const more = extra.get(t.id)
+    return more
+      ? [{ ...t, clips: [...t.clips, ...more].sort((a, b) => a.startTime - b.startTime) }]
+      : [t]
+  })
+}
+
 function followMainEdit(
   prev: Project,
   next: Project,
@@ -5272,7 +5322,7 @@ function followMainEdit(
     c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)
   const overlapsAny = (c: AudioTrackClip, others: AudioTrackClip[]): boolean =>
     others.some((o) => o.startTime < endOfClip(c) - 1e-6 && endOfClip(o) > c.startTime + 1e-6)
-  const audioTracks = next.audioTracks.flatMap((t): AudioTrack[] => {
+  const audioTracksSplit = next.audioTracks.flatMap((t): AudioTrack[] => {
     if (!follows(t)) return [t]
     const untouched = isUntouchedAuto(t)
     const placedByHand = (c: AudioTrackClip): boolean =>
@@ -5311,13 +5361,20 @@ function followMainEdit(
         muted: t.muted,
         volume: t.volume,
         duckingEnabled: false,
+        // ピンマイクのトラックに置いた声(ナレーション)は、移した後も BGM を下げる基準にする
+        ...(t.voice ? { voice: true } : {}),
         clips: byHand
       })
     return out
   })
-  const videoOverlayTracks = next.videoOverlayTracks.map((t) => {
-    if (!follows(t)) return t
+  const audioTracks = mergeHandTracks(audioTracksSplit, next.audioTracks)
+  const overlaySplit = next.videoOverlayTracks.flatMap((t): VideoOverlayTrack[] => {
+    if (!follows(t)) return [t]
     const untouched = isUntouchedAuto(t)
+    // 収録のカメラのワイプに人が置いた画(ロゴ・画像など)は動かさない(写すと、速さを変えたクリップの
+    // 下では消え、戻しても戻らなかった)。動いたカメラの絵と重なるなら「(手で置いた画)」のトラックへ移す
+    const placedByHand = (c: VideoOverlayClip): boolean =>
+      Boolean(t.multicamSourceId) && !recordedAssets.has(c.assetId)
     // 伸ばして新しく見えた所: 収録素材のカメラ(ゲーム実況の顔カメラのワイプ)なら、そのカメラの絵を足す
     const added =
       t.multicamSourceId && gaps.length > 0
@@ -5331,15 +5388,28 @@ function followMainEdit(
             }))
           )
         : []
-    const clips = [...t.clips.flatMap((c) => remapClip(c)), ...added].sort(
+    let clips = [...t.clips.flatMap((c) => (placedByHand(c) ? [c] : remapClip(c))), ...added].sort(
       (a, b) => a.startTime - b.startTime
     )
     if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
-      return t
+      return [t]
     }
+    const byHand = clips.filter(placedByHand)
+    const cams = clips.filter((c) => !placedByHand(c))
+    const overlapsCam = (c: VideoOverlayClip): boolean =>
+      cams.some(
+        (o) =>
+          o.startTime < c.startTime + (c.outPoint - c.inPoint) - 1e-6 &&
+          o.startTime + (o.outPoint - o.inPoint) > c.startTime + 1e-6
+      )
+    const moveOut = byHand.some(overlapsCam)
+    if (moveOut) clips = cams
     const track = { ...t, clips }
-    return untouched ? withAutoSignature(track) : track
+    const out: VideoOverlayTrack[] = [untouched ? withAutoSignature(track) : track]
+    if (moveOut) out.push(handOverlayTrack(t, byHand))
+    return out
   })
+  const videoOverlayTracks = mergeHandTracks(overlaySplit, next.videoOverlayTracks)
   /** 本編から消えて落とした、人が直した自動テロップ(作り直しで戻したとき、直した内容で出す) */
   const droppedEdited: TextOverlay[] = []
   const textOverlays = next.textOverlays.flatMap((o) => {
