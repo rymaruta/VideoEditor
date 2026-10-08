@@ -210,6 +210,26 @@ describe('angleAlternatives — ファイルが分かれて録られたカメラ
   })
 })
 
+describe('angleAlternatives — ファイルの境目の短い隙間から始まるクリップ', () => {
+  it('頭が隙間でも替えられ、長さは変わらない', () => {
+    const gap: MulticamInfo = {
+      ...info,
+      files: [
+        { assetId: 'a1', sourceId: 'A', start: 0, rate: 1, duration: 100 },
+        { assetId: 'b1', sourceId: 'B', start: 0, rate: 1, duration: 50 },
+        { assetId: 'b2', sourceId: 'B', start: 50.02, rate: 1, duration: 50 }
+      ]
+    }
+    const b = angleAlternatives({ assetId: 'a1', inPoint: 50, outPoint: 60 }, gap).find(
+      (a) => a.sourceId === 'B'
+    )
+    expect(b?.clips).toHaveLength(1)
+    const c = b!.clips![0]
+    expect(c.assetId).toBe('b2')
+    expect(c.outPoint - c.inPoint).toBeCloseTo(10, 6)
+  })
+})
+
 describe('releaseOverridesForScenes', () => {
   it('残すと決めた場面の中の削った区間は戻し、落とすと決めた場面の中の足した区間は外す', () => {
     const o = {

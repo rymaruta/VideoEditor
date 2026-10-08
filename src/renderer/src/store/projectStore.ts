@@ -3086,22 +3086,36 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 同じ共通の時刻を映す新しいクリップへ紐づけ直す(しないと紐づきが外れ、元の時刻に取り残される)
       const relink = relinkToRebuiltClips(state.project.clips, clips, state.project.multicam)
       // 人が本編のクリップに付けた見た目(切り抜き・ぼかし・色ラベル)は、同じ時刻を映す新しいクリップへ
-      // 引き継ぐ(作り直すと消えていた)
-      const looks = new Map<string, Partial<Clip>>()
-      for (const pc of state.project.clips) {
-        const look: Partial<Clip> = {
-          ...(pc.fillCrop !== undefined ? { fillCrop: pc.fillCrop } : {}),
-          ...(pc.cropCenter ? { cropCenter: pc.cropCenter } : {}),
-          ...(pc.blurBackground !== undefined ? { blurBackground: pc.blurBackground } : {}),
-          ...(pc.colorLabel ? { colorLabel: pc.colorLabel } : {})
-        }
-        if (Object.keys(look).length === 0) continue
-        const to = relink(pc.id, 0, pc.assetId)
-        if (to && !looks.has(to.id)) looks.set(to.id, look)
-      }
+      // 引き継ぐ(作り直すと消えていた)。新しいクリップの真ん中の時刻を映していた前のクリップから取る
+      // (前のクリップの頭から探すと、分かれた後ろ・頭を詰めたクリップに付かなかった)
+      const lookOf = (pc: Clip): Partial<Clip> => ({
+        ...(pc.fillCrop !== undefined ? { fillCrop: pc.fillCrop } : {}),
+        ...(pc.cropCenter ? { cropCenter: pc.cropCenter } : {}),
+        ...(pc.blurBackground !== undefined ? { blurBackground: pc.blurBackground } : {}),
+        ...(pc.colorLabel ? { colorLabel: pc.colorLabel } : {})
+      })
+      const info = state.project.multicam
+      const styled = info
+        ? state.project.clips.filter((pc) => Object.keys(lookOf(pc)).length > 0)
+        : []
       const lookedClips =
-        looks.size > 0
-          ? clips.map((c) => (looks.has(c.id) ? { ...c, ...looks.get(c.id) } : c))
+        info && styled.length > 0
+          ? clips.map((c) => {
+              if (!rebuilt.includes(c)) return c
+              const f = info.files.find((x) => x.assetId === c.assetId)
+              if (!f) return c
+              const mid = toCommon(f, (c.inPoint + c.outPoint) / 2)
+              const from = styled.find((pc) => {
+                const g = info.files.find((x) => x.assetId === pc.assetId)
+                return (
+                  pc.assetId === c.assetId &&
+                  g !== undefined &&
+                  toCommon(g, pc.inPoint) <= mid &&
+                  mid < toCommon(g, pc.outPoint)
+                )
+              })
+              return from ? { ...c, ...lookOf(from) } : c
+            })
           : clips
       const recorded = new Set((state.project.multicam?.files ?? []).map((f) => f.assetId))
       const previousTracks = new Map(
@@ -5107,11 +5121,80 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const limit = durationOf.get(c.assetId) ?? Infinity
     return { ...c, startTime, outPoint: Math.min(limit, c.inPoint + newDur * speed) }
   }
+  /**
+   * 同じ曲を重ねて(つないで)繰り返す BGM(`planBgm` のループ)は、ひとつながりとして、写した範囲を
+   * 並べ直す。1本ずつ伸ばすと、曲の終わりより先へは伸ばせず、ループの間に穴が開き、速さを戻すと
+   * 縮めた分が戻らなかった。並べ直しは写した範囲だけで決まるので、行って戻れば元の並びに戻る
+   */
+  const retileChain = (chain: AudioTrackClip[]): AudioTrackClip[] => {
+    const first = chain[0]
+    const last = chain[chain.length - 1]
+    const startTime = warp(first.startTime)
+    const end = warp(last.startTime + (last.outPoint - last.inPoint) / (last.speed || 1))
+    const overlaps = chain
+      .slice(1)
+      .map(
+        (c, i) =>
+          chain[i].startTime +
+          (chain[i].outPoint - chain[i].inPoint) / (chain[i].speed || 1) -
+          c.startTime
+      )
+    const loopOverlap = overlaps[overlaps.length - 1] ?? 0
+    const out: AudioTrackClip[] = []
+    let at = startTime
+    for (let i = 0; at < end - 1e-6; i++) {
+      // 用意したクリップを使い切ったら、最後の(曲の頭から始まる)ループを足す
+      const base = i < chain.length ? chain[i] : { ...chain[chain.length - 1], id: uuid() }
+      const speed = base.speed || 1
+      const limit = durationOf.get(base.assetId) ?? Infinity
+      const inPoint = i < chain.length ? base.inPoint : 0
+      const len = Math.max(0, Math.min((limit - inPoint) / speed, end - at))
+      if (len <= 1e-6) break
+      out.push({
+        ...base,
+        startTime: at,
+        inPoint,
+        outPoint: inPoint + len * speed,
+        fadeIn: i === 0 ? first.fadeIn : base.fadeIn,
+        fadeOut: undefined
+      })
+      at += len - (i < overlaps.length ? overlaps[i] : loopOverlap)
+      if (at + (i < overlaps.length ? overlaps[i] : loopOverlap) >= end - 1e-6) break
+    }
+    if (out.length > 0) out[out.length - 1] = { ...out[out.length - 1], fadeOut: last.fadeOut }
+    return out
+  }
+  const moveAudioClips = (clips: AudioTrackClip[]): AudioTrackClip[] => {
+    const sorted = [...clips].sort((a, b) => a.startTime - b.startTime)
+    const out: AudioTrackClip[] = []
+    let chain: AudioTrackClip[] = []
+    const flush = (): void => {
+      if (chain.length >= 2) out.push(...retileChain(chain))
+      else out.push(...chain.map((c) => (c.linkedClipId ? c : moveClip(c))))
+      chain = []
+    }
+    for (const c of sorted) {
+      const prev = chain[chain.length - 1]
+      const touches =
+        prev &&
+        !c.linkedClipId &&
+        !prev.linkedClipId &&
+        c.assetId === prev.assetId &&
+        c.startTime <= prev.startTime + (prev.outPoint - prev.inPoint) / (prev.speed || 1) + 1e-3
+      if (!touches) flush()
+      chain.push(c)
+    }
+    flush()
+    // 何も動かなければ元の並びのまま
+    return out.length === clips.length && out.every((c, i) => c === clips[i]) ? clips : out
+  }
   const moveTrack = <T extends AudioTrack | VideoOverlayTrack>(t: T): T => {
     if (!t.autoRole || t.multicamSourceId) return t
     const untouched = isUntouchedAuto(t)
-    const clips = (t.clips as T['clips']).map((c) =>
-      'linkedClipId' in c && c.linkedClipId ? c : moveClip(c)
+    const clips = (
+      'duckingEnabled' in t
+        ? moveAudioClips(t.clips as AudioTrackClip[])
+        : (t.clips as T['clips']).map((c) => moveClip(c))
     ) as T['clips']
     if (sameItems(clips, t.clips)) return t
     const track = { ...t, clips }

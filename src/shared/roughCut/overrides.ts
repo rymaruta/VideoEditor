@@ -249,6 +249,8 @@ function anglePieces(
 ): AngleClip[] {
   const out: AngleClip[] = []
   let t = start
+  /** 頭の短い隙間(前のファイルが無いので、次のファイルを後ろへ延ばして長さを保つ) */
+  let leadGap = 0
   while (t < end - 1e-6) {
     const g = fileAt(info, sourceId, t)
     if (!g) {
@@ -257,9 +259,10 @@ function anglePieces(
         .filter((x) => x.sourceId === sourceId && x.start > t)
         .reduce((m, x) => Math.min(m, x.start), Infinity)
       const to = Math.min(end, nextStart)
+      if (!Number.isFinite(to)) return []
       const last = out[out.length - 1]
-      if (!last || !Number.isFinite(to)) return []
-      last.outPoint += (to - t) * last.speed
+      if (last) last.outPoint += (to - t) * last.speed
+      else leadGap += to - t
       t = to
       continue
     }
@@ -268,7 +271,7 @@ function anglePieces(
       assetId: g.assetId,
       // 素材の頭の丸めの残り(-5e-7 など)で、素材の外を指さないように
       inPoint: Math.max(0, (t - g.start) * g.rate),
-      outPoint: (to - g.start) * g.rate,
+      outPoint: (to - g.start + (out.length === 0 ? leadGap : 0)) * g.rate,
       speed: g.rate
     })
     t = to

@@ -225,3 +225,100 @@ describe('第17回: 用意している間に別のプロジェクトを開いた
     expect(st().project.audioTracks.some((t) => t.name === 'ナレーション')).toBe(true)
   })
 })
+
+describe('第18回: ループする BGM と速さ', () => {
+  it('遅くしてもループの間に穴が開かず、速さを戻すと元の並びに戻る', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', 20, false)],
+        audioTracks: p.audioTracks.map((t) =>
+          t.id === 'bgmT'
+            ? {
+                ...t,
+                clips: [
+                  { id: 'b1', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 20 },
+                  { id: 'b2', assetId: 'loop', startTime: 18.5, inPoint: 0, outPoint: 11.5 }
+                ]
+              }
+            : t
+        )
+      }
+    })
+    const clip2 = st().project.clips[1].id
+    st().updateClipSpeed(clip2, 0.5)
+    const slow = [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+    // 本編は 40 秒。BGM は頭から終わりまで、つなぎ目は重なったまま
+    expect(slow[0].startTime).toBe(0)
+    for (let i = 1; i < slow.length; i++) {
+      const prevEnd = slow[i - 1].startTime + (slow[i - 1].outPoint - slow[i - 1].inPoint)
+      expect(slow[i].startTime).toBeLessThanOrEqual(prevEnd + 1e-9)
+    }
+    const lastSlow = slow[slow.length - 1]
+    expect(lastSlow.startTime + (lastSlow.outPoint - lastSlow.inPoint)).toBeCloseTo(40, 6)
+    st().updateClipSpeed(clip2, 1)
+    const back = [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+    expect(back.map((c) => [c.startTime, c.inPoint, c.outPoint])).toEqual([
+      [0, 0, 20],
+      [18.5, 0, 11.5]
+    ])
+  })
+})
+
+describe('第18回: 作り直しで見た目を引き継ぐ', () => {
+  const rebuildMain = (ranges: [number, number][]): void =>
+    st().applyRoughCut(
+      {
+        main: ranges.map(([a, b]) => ({ assetId: 'camA', inPoint: a, outPoint: b, speed: 1 })),
+        audio: [
+          {
+            name: '出演者A',
+            sourceId: 'M',
+            volume: 1,
+            clips: ranges.map(([a, b], i) => ({
+              assetId: 'micM',
+              startTime: ranges.slice(0, i).reduce((x, [p, q]) => x + q - p, 0),
+              inPoint: a,
+              outPoint: b,
+              speed: 1
+            }))
+          }
+        ],
+        duration: ranges.reduce((x, [a, b]) => x + b - a, 0),
+        spans: []
+      },
+      []
+    )
+  const styleAll = (): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        clips: p.clips.map((c) => ({ ...c, fillCrop: true, colorLabel: 'red' as const }))
+      }
+    })
+  }
+
+  it('1本が分かれても、頭を詰めても、どのクリップにも付く', () => {
+    setup([[0, 30]])
+    styleAll()
+    rebuildMain([
+      [0, 10],
+      [15, 30]
+    ])
+    expect(st().project.clips.map((c) => [c.fillCrop, c.colorLabel])).toEqual([
+      [true, 'red'],
+      [true, 'red']
+    ])
+    setup([[0, 30]])
+    styleAll()
+    rebuildMain([[2, 30]])
+    expect(st().project.clips[0].fillCrop).toBe(true)
+  })
+})
