@@ -5268,11 +5268,11 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       const at = c.startTime + shift
       if (at >= end - 1e-6) continue
       const natural = at + lenOf(c)
-      if (natural > end + 1e-6 && c !== first && c.inPoint <= 1e-6 && c.id.includes('~')) {
-        const pred = predecessorOf(c)
-        const drop = pred
-          ? pred.startTime + shift + lenOf(pred) >= end - 1e-6
-          : reached && c.id.includes('~')
+      if (natural > end + 1e-6 && c !== first && c.id.includes('~')) {
+        // 曲の頭から始め直すループは手前のクリップで、続き(人が短くしたクリップの後ろに足したもの)は
+        // ほかのクリップが終わりまで届いているかで決める
+        const pred = c.inPoint <= 1e-6 ? predecessorOf(c) : undefined
+        const drop = pred ? pred.startTime + shift + lenOf(pred) >= end - 1e-6 : reached
         if (drop) continue
       }
       const len = Math.min(lenOf(c), end - at)
@@ -5283,27 +5283,51 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     // 足りなければ、一番後ろのクリップを曲の終わりまで延ばし、そこからループを足す(多くても 1,000 本)
     // 足したループは長さ 0 から延ばすので、一番後ろのクリップはここで追いかける
     let ti = tailIndex()
-    for (let i = chain.length; out.length < chain.length + 1000; i++) {
+    /** 人が置いた(延ばさない)クリップ。そこから先は、続きを足して鳴らす */
+    const frozen = new Set<number>()
+    // 回数でも止める(どの手も進まない並びで、止まらなくなっていた)
+    for (
+      let i = chain.length, guard = 0;
+      out.length < chain.length + 1000 && guard < 4000;
+      i++, guard++
+    ) {
       const tail = out[ti]
       const speed = tail.speed || 1
       const tailEnd = endOf(tail)
       if (tailEnd >= end - 1e-6) break
       const room = (limit - tail.outPoint) / speed
       if (room > 1e-6) {
+        if (frozen.has(ti)) {
+          // 人が短くしたクリップは延ばさず、その続きを足す(縮めて戻すと、足した続きは落ちる)
+          out.push({
+            ...tail,
+            id: freshId(i),
+            startTime: tailEnd,
+            inPoint: tail.outPoint,
+            outPoint: tail.outPoint,
+            fadeIn: undefined,
+            fadeOut: undefined,
+            loopCross: undefined
+          })
+          ti = out.length - 1
+          continue
+        }
         const grow = Math.min(room, end - tailEnd)
         out[ti] = { ...tail, outPoint: tail.outPoint + grow * speed }
         continue
       }
-      // 曲の終わりまで来た: 重ねて頭から繰り返す
-      const at = tailEnd - Math.min(loopOverlap, lenOf(tail))
+      // 曲の終わりまで来た: 重ねて頭から繰り返す(重なりは長さの半分まで。必ず前へ進む)
+      const at = tailEnd - Math.min(loopOverlap, lenOf(tail) / 2)
       if (end - at <= 1e-3) break
       out[ti] = { ...tail, fadeOut: loopCross?.fadeOut ?? tail.fadeOut }
-      // その位置に曲の頭から始めるクリップがもうあれば(人が短くしたループ)、足さずにそれを延ばす
+      // その位置に曲の頭から始めるクリップがもうあれば(人が短くしたループ)、新しく足さずにそこから続ける
       // (足すと、曲の頭が二重に鳴っていた)
       const existing = out.findIndex(
-        (c, k) => k !== ti && c.inPoint <= 1e-6 && Math.abs(c.startTime - at) <= 1e-6
+        (c, k) =>
+          k !== ti && !frozen.has(k) && c.inPoint <= 1e-6 && Math.abs(c.startTime - at) <= 1e-6
       )
       if (existing >= 0) {
+        frozen.add(existing)
         ti = existing
         continue
       }

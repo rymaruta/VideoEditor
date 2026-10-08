@@ -65,4 +65,35 @@ describe.skipIf(!existsSync(ffmpegPath))('区間の文字起こしの決まり�
     fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [0, null] }] }
     expect((await transcribeRange(src, 0, 20)).map((s) => s.text)).toEqual([STOCK])
   }, 60_000)
+
+  it('頭に無音がある区間でも、部屋の雑音の上の決まり文句は捨てる', async () => {
+    const src = join(work, 'lead-silence.wav')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'anoisesrc=c=white:a=0.0104:d=8:r=48000',
+      '-af',
+      'adelay=2000:all=1',
+      src
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [7, null] }] }
+    expect(await transcribeRange(src, 0, 10)).toEqual([])
+  }, 60_000)
+
+  it('短く(1.3秒)言った締めの言葉も、終わりが分からなくても残す', async () => {
+    const src = join(work, 'short-real.wav')
+    // 音節のように途切れる声(-30dBFS ほど)を 1.3 秒、あとは無音
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      "aevalsrc='0.045*sin(2*PI*180*t)*gt(sin(2*PI*5*t),-0.3)':d=1.3:s=48000",
+      '-af',
+      'apad=whole_dur=20',
+      src
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [0, null] }] }
+    expect((await transcribeRange(src, 0, 20)).map((x) => x.text)).toEqual([STOCK])
+  }, 60_000)
 })

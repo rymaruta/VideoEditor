@@ -956,7 +956,7 @@ describe('第26回: 足したループの手前', () => {
 })
 
 describe('第27回: BGM のループを足すとき', () => {
-  it('その位置に人が短くした曲の頭のクリップがあれば、足さずにそれを延ばす', () => {
+  it('その位置に人が短くした曲の頭のクリップがあれば、新しく足さずにそこから続ける', () => {
     setup([
       [0, 10],
       [20, 30],
@@ -1020,5 +1020,62 @@ describe('第27回: BGM のループを足すとき', () => {
     st().updateClipSpeed(st().project.clips[0].id, 0.25)
     const ids = st().project.audioTracks.flatMap((t) => t.clips.map((c) => c.id))
     expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe('第28回: BGM のループの続き', () => {
+  type BgmClip = Project['audioTracks'][number]['clips'][number]
+  const setBgm = (clips: BgmClip[]): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop10', 10, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === 'bgmT' ? { ...t, clips } : t))
+      }
+    })
+  }
+  beforeEach(() =>
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+  )
+
+  it('速さの違うクリップが混ざっていても止まらず、曲の頭を重ねない', () => {
+    setBgm([
+      {
+        id: 'F',
+        assetId: 'loop10',
+        startTime: 0,
+        inPoint: 0,
+        outPoint: 10,
+        loopCross: { overlap: 5 }
+      },
+      { id: 'G', assetId: 'loop10', startTime: 5, inPoint: 0, outPoint: 10, speed: 2 }
+    ])
+    st().updateClipSpeed(st().project.clips[0].id, 0.5)
+    const cs = track('bgmT')
+    expect(cs.length).toBeLessThan(50)
+    const heads = cs.filter((c) => c.inPoint === 0).map((c) => c.startTime.toFixed(6))
+    expect(new Set(heads).size).toBe(heads.length)
+  })
+
+  it('人が短くしたループは、延ばして戻すと元の長さに戻る', () => {
+    const start: BgmClip[] = [
+      { id: 'A', assetId: 'loop10', startTime: 0, inPoint: 0, outPoint: 10 },
+      { id: 'B', assetId: 'loop10', startTime: 8, inPoint: 0, outPoint: 10 },
+      { id: 'C', assetId: 'loop10', startTime: 16, inPoint: 0, outPoint: 0.1 }
+    ]
+    setBgm(start)
+    const c1 = st().project.clips[1].id
+    st().updateClipSpeed(c1, 0.5)
+    st().updateClipSpeed(c1, 1)
+    expect(
+      [...track('bgmT')]
+        .sort((a, b) => a.startTime - b.startTime)
+        .map((c) => [c.id, +c.startTime.toFixed(6), +c.inPoint.toFixed(6), +c.outPoint.toFixed(6)])
+    ).toEqual(start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint]))
   })
 })
