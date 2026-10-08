@@ -302,12 +302,47 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
       '96k',
       join(dir, 'tracks2', 'OBS', '2026-10-07 22-00-00.mp4')
     ])
+    // 2トラックの OBS(1: 全部入り = ゲーム音 + 配信者 + tomo、2: 配信者の声)。ゲーム音のトラックは無い
+    mkdirSync(join(dir, 'tracks3', 'OBS'), { recursive: true })
+    mkdirSync(join(dir, 'tracks3', 'craig'), { recursive: true })
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=320x180:r=30',
+      '-i',
+      t1,
+      '-i',
+      t2,
+      '-map',
+      '0:v',
+      '-map',
+      '1:a',
+      '-map',
+      '2:a',
+      '-t',
+      String(DURATION),
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-crf',
+      '45',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '96k',
+      join(dir, 'tracks3', 'OBS', '2026-10-07 23-00-00.mp4')
+    ])
     // Craig: OBS の 3 秒前から
     ff([
       '-i',
       wav('tomo.wav', renderVoice(friend, 210, CRAIG_EARLY)),
       join(shoot, 'craig', '1-tomo.flac')
     ])
+    ff(['-i', join(shoot, 'craig', '1-tomo.flac'), join(dir, 'tracks3', 'craig', '1-tomo.flac')])
   }, 240_000)
 
   afterAll(() => {
@@ -357,6 +392,33 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
       .log.map((l) => l.text)
       .find((l) => l.startsWith('声の盛り上がり'))
     expect(hypeLine).toBe(`声の盛り上がり(叫び・大声): ${HYPE_AT.length} 回`)
+  }, 300_000)
+
+  it('ゲーム音のトラックが無く全部入りを鳴らす録画では、全部入りに入っている Craig の声を重ねて鳴らさない', async () => {
+    const calls = { asrPaths: [] as string[] }
+    installApi(streamer, friend, calls)
+    useProjectStore.getState().newProject()
+    usePipelineStore.getState().reset()
+    useSettingsStore.setState({
+      aiProvider: 'off',
+      showKitFolder: '',
+      episodeKind: 'game',
+      editPolicy: 'highlights'
+    })
+    await usePipelineStore.getState().scanFolder(join(dir, 'tracks3'))
+    await usePipelineStore.getState().runPipeline()
+    const tracks = useProjectStore.getState().project.audioTracks
+    const audible = tracks.filter((t) => t.multicamSourceId && !t.muted).map((t) => t.name)
+    // 友達の声が鳴るのは全部入りからの1回だけ
+    expect(audible.some((n) => n.startsWith('全部入り'))).toBe(true)
+    expect(audible.some((n) => /tomo/.test(n))).toBe(false)
+    // tomo の発言は Craig のファイルから1回だけ文字起こしする
+    const transcript = useProjectStore.getState().project.transcript ?? []
+    const friendTexts = new Set(friend.map((l) => l.text))
+    const friendWords = transcript
+      .flatMap((u) => u.words.map((w) => ({ text: w.text, speaker: u.speaker })))
+      .filter((w) => friendTexts.has(w.text))
+    expect(friendWords.length).toBe(friend.length)
   }, 300_000)
 
   it('トラックを分け、役割を推し量り、声だけで盛り上がりを測る。ゲーム音と声を鳴らし、顔カメラはワイプで出す', async () => {

@@ -24,7 +24,19 @@ export interface SpeechTurn {
   end: number
   /** ほかのマイクの持ち主と声が重なっている */
   overlap: boolean
+  /**
+   * 持ち主の声か分からない(ほかのマイクが録っていない時間に、持ち主の普段の声よりずっと小さく
+   * 入っただけ)。止まったマイクの持ち主の声の回り込みかもしれないので、話者の名前を付けない
+   */
+  uncertain?: boolean
 }
+
+/**
+ * ほかのマイクが録っていない時間に、持ち主の普段の声よりこれ以上小さい音は、持ち主の声と決めない。
+ * かぶりは 15〜25dB 小さく入る。録っているマイク同士なら大きさを比べて見分けられるが、
+ * 止まったマイクの持ち主の声は比べる相手が無く、残ったマイクの持ち主の発言になっていた
+ */
+const ABSENT_PEER_MIN_REL_DB = -12
 
 export interface TurnOptions {
   /** 持ち主とみなす差(dB)。これより近ければ重なり */
@@ -135,6 +147,7 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
   // マイクごと・時刻ごとの「持ち主として話している / 重なりで話している」
   const owned = stats.map(() => new Uint8Array(n))
   const overlapped = stats.map(() => new Uint8Array(n))
+  const weak = stats.map(() => new Uint8Array(n))
   for (let t = 0; t < n; t++) {
     let best = -1
     let bestRel = -Infinity
@@ -156,6 +169,11 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
     }
     if (best < 0) continue
     owned[best][t] = 1
+    if (
+      bestRel < ABSENT_PEER_MIN_REL_DB &&
+      stats.some((st) => st.db[t] === undefined || Number.isNaN(st.db[t]))
+    )
+      weak[best][t] = 1
     // 2番目も「その人が話しているときの普段の大きさ」に近ければ、2人とも話している
     if (second >= 0 && bestRel - secondRel < margin && secondRel > -margin) {
       owned[second][t] = 1
@@ -167,6 +185,7 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
   const turns: SpeechTurn[] = []
   for (let m = 0; m < stats.length; m++) {
     const on = owned[m]
+    const heard = Uint8Array.from(on)
     // 短い切れ目をつなぐ
     let lastOn = -Infinity
     for (let t = 0; t < n; t++) {
@@ -204,12 +223,19 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
       for (const [a, b] of pieces) {
         if (b - a < minTurn) continue
         let ov = 0
-        for (let k = a; k < b; k++) ov += overlapped[m][k]
+        let wk = 0
+        let hd = 0
+        for (let k = a; k < b; k++) {
+          ov += overlapped[m][k]
+          wk += weak[m][k]
+          hd += heard[k]
+        }
         turns.push({
           micId: stats[m].id,
           start: Math.max(0, a - pad) / TURN_RATE,
           end: Math.min(n, b + pad) / TURN_RATE,
-          overlap: ov >= minTurn
+          overlap: ov >= minTurn,
+          ...(wk * 2 > hd ? { uncertain: true } : {})
         })
       }
       t = end

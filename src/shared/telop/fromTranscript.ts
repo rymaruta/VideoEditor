@@ -41,6 +41,13 @@ export interface ChunkOptions {
  */
 export const FIRST_TELOP_DELAY_SEC = 0.12
 
+/**
+ * 発話の最初の1枚を、最初の言葉の時刻より何秒まで前に出してよいか。音声認識の言葉の時刻は声より
+ * 遅れる(実際の回で 0.24 秒)ので、これだけ前なら声のほんの少し前。発話の区間が声と関係のない音
+ * (物音・別の人の声の回り込み)から始まると、区間の頭に合わせた枚が言葉の数秒前に出ていた(3.9 秒前)
+ */
+export const MAX_TELOP_LEAD_SEC = 0.4
+
 /** 表示用に整える(句点を落とし、読点を空白に。数字の桁区切り「2,800」のカンマは残す) */
 export function tidyTelopText(text: string): string {
   return text
@@ -131,7 +138,11 @@ export function utteranceToTelopChunks(
     // 区間の頭から `FIRST_TELOP_DELAY_SEC` 後に出すと、声のほんの少し前に出る。
     // 頭の言いよどみを除いた枚(from > 0)は、言いよどみのあいだに出さないよう言葉の時刻のまま
     if (from === 0 && timed.length > 0 && u.sourceStart < start)
-      start = Math.max(u.sourceStart, Math.min(start, u.sourceStart + FIRST_TELOP_DELAY_SEC))
+      start = Math.max(
+        u.sourceStart,
+        start - MAX_TELOP_LEAD_SEC,
+        Math.min(start, u.sourceStart + FIRST_TELOP_DELAY_SEC)
+      )
     const end = timed.length > 0 ? timed[to - 1].end : timeAt(to)
     // 辞書で長い言葉に直すと、区切ったときより文字が増えて行数を超えることがある。
     // 行数に収まる枚に分け、時間は文字数で割り振る

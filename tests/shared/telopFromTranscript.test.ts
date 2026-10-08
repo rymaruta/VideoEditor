@@ -250,3 +250,26 @@ describe('音声認識の繰り返しの暴走', () => {
       expect(isLikelyHallucination(t), t).toBe(false)
   })
 })
+
+describe('発話の最初の1枚の出だし', () => {
+  it('発話の区間が物音から始まっても、最初の言葉より何秒も前には出さない', () => {
+    const [first] = utteranceToTelopChunks({
+      text: 'こんにちは',
+      sourceStart: 0,
+      sourceEnd: 5,
+      words: [{ text: 'こんにちは', start: 3.9, end: 4.5 }]
+    } as Parameters<typeof utteranceToTelopChunks>[0])
+    expect(first.sourceStart).toBeGreaterThanOrEqual(3.9 - 0.4 - 1e-9)
+    expect(first.sourceStart).toBeLessThanOrEqual(3.9)
+  })
+
+  it('区間の頭が声の頭なら、これまでどおり区間の頭の少し後に出す', () => {
+    const [first] = utteranceToTelopChunks({
+      text: 'こんにちは',
+      sourceStart: 10,
+      sourceEnd: 12,
+      words: [{ text: 'こんにちは', start: 10.3, end: 11 }]
+    } as Parameters<typeof utteranceToTelopChunks>[0])
+    expect(first.sourceStart).toBeCloseTo(10 + FIRST_TELOP_DELAY_SEC, 6)
+  })
+})

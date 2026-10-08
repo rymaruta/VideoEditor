@@ -69,6 +69,7 @@ import { mapTimelineRange, timelineMapping } from '@shared/roughCut/follow'
 import { formatIpcError } from '../lib/ipcError'
 import {
   AUTO_TRACK_NAME,
+  mixCarriesVoice,
   mixHasUnaccountedSound,
   mixResidual,
   STREAMER_SPEAKER
@@ -449,6 +450,42 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         if (t.muted !== want) useProjectStore.getState().toggleAudioTrackMute(t.id)
       }
     }
+    // 鳴らす全部入りに、別に録ったマイク(Craig など)の人の声も入っていれば、そのマイクは鳴らさない
+    // (文字起こしには使う)。全部入りと Craig の両方が鳴り、友達の声が二重(+6dB)に重なっていた
+    for (const mixSrc of used.filter((s) => s.kind === 'audio' && s.trackRole === 'mix')) {
+      const audible = useProjectStore
+        .getState()
+        .project.audioTracks.some((x) => x.multicamSourceId === mixSrc.id && !x.muted)
+      if (!audible) continue
+      const mixFiles = files.filter(
+        (f) => f.sourceId === mixSrc.id && placeOf.get(f.id)?.method !== 'none'
+      )
+      if (mixFiles.length === 0) continue
+      const candidates = ownMics.filter((o) =>
+        useProjectStore
+          .getState()
+          .project.audioTracks.some((x) => x.multicamSourceId === o.id && !x.muted)
+      )
+      if (candidates.length === 0) continue
+      const mixEnvRaw = await window.api.footageEnvelopes(mixFiles.map(pathOf))
+      const mixEnv = new Float32Array(length).fill(NaN)
+      mixFiles.forEach((f, i) => {
+        const p = placeOf.get(f.id)!
+        placeEnvelope(mixEnvRaw[i], p.start, p.rate || 1, length, mixEnv)
+      })
+      for (const mic of candidates) {
+        const others = tracks.filter((t) => t.id !== mic.id && t.id !== mixSrc.id)
+        if (!mixCarriesVoice(mixEnv, activityMask([mic]), activityMask(others))) continue
+        const name = speakerSources.find((s) => s.id === mic.id)?.name ?? ''
+        log(
+          `「${mixSrc.name}」に「${name}」の声も入っているため、「${name}」は鳴らしません(文字起こしには使います)`
+        )
+        const track = useProjectStore
+          .getState()
+          .project.audioTracks.find((x) => x.multicamSourceId === mic.id && !x.muted)
+        if (track) useProjectStore.getState().toggleAudioTrackMute(track.id)
+      }
+    }
     const turns = detectTurns(tracks.filter((t) => !duplicates.has(t.id)))
     const overlapCount = turns.filter((t) => t.overlap).length
     setStep('speakers', {
@@ -516,7 +553,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         id: uuid(),
         assetId,
         speaker:
-          mics.length === 0
+          mics.length === 0 || j.turn.uncertain
             ? undefined
             : mixSpeakers.has(j.turn.micId)
               ? streamerName(nameOf.get(j.turn.micId))
@@ -1786,18 +1823,31 @@ function bubbledUtterances(
 }
 
 /**
+ * Unix 時刻を ms にそろえる。前の版は秒のまま企画に保存していたので、ms としては小さすぎる値
+ * (1e11 ms = 1973年より前)は秒とみなす
+ */
+export function epochMs(t: number): number {
+  return Math.abs(t) < 1e11 ? t * 1000 : t
+}
+
+/**
  * 素材ごとの撮影開始時刻(ms)。同期した素材の一覧(この起動で読んだもの)か、
  * 企画に覚えた値(開き直したとき)から取る
  */
-function recordedAtByAsset(
+export function recordedAtByAsset(
   project: Project,
   synced: readonly SyncInputFile[]
 ): Map<string, number> {
   const out = new Map<string, number>()
   for (const f of project.multicam?.files ?? [])
-    if (typeof f.recordedAt === 'number') out.set(f.assetId, f.recordedAt)
+    if (typeof f.recordedAt === 'number' && Number.isFinite(f.recordedAt))
+      out.set(f.assetId, epochMs(f.recordedAt))
+  // 素材の記録から読んだ時刻は秒(`recordedAtFromTags`)。ms にそろえる
+  // (秒のまま足していたので、時刻スーパーが 1970年1月1日の時刻「PM 4:54」になっていた)
   const byPath = new Map(
-    synced.filter((f) => f.recordedAt !== undefined).map((f) => [f.path, f.recordedAt!])
+    synced
+      .filter((f) => f.recordedAt !== undefined && Number.isFinite(f.recordedAt))
+      .map((f) => [f.path, epochMs(f.recordedAt!)])
   )
   for (const a of project.assets) {
     const t = byPath.get(a.denoisedFrom ?? a.filePath) ?? byPath.get(a.filePath)

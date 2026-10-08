@@ -70,3 +70,39 @@ describe('placeEnvelope', () => {
     expect(placeEnvelope(src, 0, 1.01, 1000)[500]).toBe(505)
   })
 })
+
+describe('detectTurns: 途中で止まったマイク', () => {
+  // A は 1〜4秒・21〜24秒・30〜34秒・45〜49秒に本人の声(-10dB)、B は 25 秒で止まる。B の持ち主が 36〜42 秒に話し、
+  // A には 20dB 小さく(-30dB)入る
+  const a = env(50, -60, [
+    [1, 4, -10],
+    [10, 14, -30],
+    [21, 24, -10],
+    [30, 34, -10],
+    [36, 42, -30],
+    [45, 49, -10]
+  ])
+  const b = env(50, -55, [
+    [10, 14, -12],
+    [16, 20, -12]
+  ])
+  for (let i = 25 * TURN_RATE; i < b.length; i++) b[i] = NaN
+  const turns = detectTurns([
+    { id: 'A', envelope: a },
+    { id: 'B', envelope: b }
+  ])
+
+  it('止まったマイクの持ち主の声(残ったマイクへの回り込み)を、残ったマイクの持ち主の発言と決めない', () => {
+    const late = turns.filter((t) => t.micId === 'A' && t.start > 35 && t.end < 44)
+    expect(late.length).toBeGreaterThan(0)
+    expect(late.every((t) => t.uncertain)).toBe(true)
+  })
+
+  it('残ったマイクの持ち主本人の声は、これまでどおり持ち主の発言', () => {
+    const own = turns.filter(
+      (t) => t.micId === 'A' && (t.start > 29 || t.start < 5) && !(t.start > 35 && t.end < 44)
+    )
+    expect(own).toHaveLength(3)
+    expect(own.every((t) => !t.uncertain)).toBe(true)
+  })
+})

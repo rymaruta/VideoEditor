@@ -213,4 +213,34 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     )
     for (const e of errs) expect(Math.abs(e)).toBeLessThan(0.01)
   }, 600_000)
+  it('分割ファイル(チャプター)のカメラも、時計のずれを測ってどのチャプターも終わりまで合わせる', async () => {
+    const T = 1500
+    const RATE = 1 + 100e-6
+    const CHAPTER = 450
+    // 共通の時刻での各チャプターの頭(チャプターの間に 33ms・21ms の切れ目)
+    const starts = [6, 6 + CHAPTER * RATE + 0.033, 6 + 2 * CHAPTER * RATE + 0.054]
+    const w = world(T, 0, 9)
+    const micPath = join(dir, 'chap_mic.wav')
+    writeWav(micPath, record(w, 0, T, 1, 13))
+    const files = [input('mic', micPath, 'mic', T)]
+    for (let k = 0; k < 3; k++) {
+      const camPath = join(dir, `GX0${k + 1}0042.m4a`)
+      writeAac(camPath, record(w, starts[k], CHAPTER, RATE, 40 + k), dir)
+      files.push(input(`cam${k}`, camPath, 'camera', CHAPTER))
+    }
+    const report = await syncInProcess(files)
+    const m = report.placements.find((p) => p.id === 'mic')!
+    const errs: number[] = []
+    for (let k = 0; k < 3; k++) {
+      const c = report.placements.find((p) => p.id === `cam${k}`)!
+      for (const tc of [30, 225, 420]) {
+        const t = starts[k] + tc * RATE
+        const common = m.start + t / (m.rate || 1)
+        errs.push((common - c.start) * (c.rate || 1) - tc)
+      }
+    }
+    console.log(JSON.stringify(errs.map((e) => Number(e.toFixed(4)))))
+    // 30fps の1フレームの半分より小さく
+    for (const e of errs) expect(Math.abs(e)).toBeLessThan(0.017)
+  }, 600_000)
 })

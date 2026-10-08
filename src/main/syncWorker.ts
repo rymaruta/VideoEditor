@@ -36,6 +36,21 @@ const post = (m: SyncWorkerMessage): void => parentPort!.postMessage(m)
 const REFINE_SAMPLE_RATE = 16000
 const REFINE_WINDOW_SEC = 20
 const DRIFT_MIN_OVERLAP_SEC = 600
+/**
+ * 分割ファイル(チャプター)の素材は、1本ずつの重なりが短い(GoPro は1本 8〜10 分ほど)。
+ * 機材の録画全体が長ければ、1本ずつでもこの長さの重なりで時計のずれを測る
+ * (測らないと、どのチャプターも時計のずれが無いものとして置かれ、終わりで1フレーム以上ずれていた)
+ */
+const CHAPTER_DRIFT_MIN_OVERLAP_SEC = 300
+
+/** この組で時計のずれを測るのに要る重なり(秒) */
+function driftMinOverlap(a: SyncInputFile, b: SyncInputFile): number {
+  const chaptered = (f: SyncInputFile): boolean => {
+    const same = input.files.filter((x) => x.sourceId === f.sourceId)
+    return same.length >= 2 && same.reduce((t, x) => t + x.duration, 0) >= DRIFT_MIN_OVERLAP_SEC
+  }
+  return chaptered(a) || chaptered(b) ? CHAPTER_DRIFT_MIN_OVERLAP_SEC : DRIFT_MIN_OVERLAP_SEC
+}
 /** 頭・中ほど・終わりの offset が一直線に並ぶとみなす幅(秒)。並ばなければ時計のずれを測れなかったとする */
 const DRIFT_LINE_TOLERANCE = 0.01
 /** 時計のずれとして信じる上限(2000ppm。安い録音機でも 500ppm ほど) */
@@ -165,6 +180,7 @@ async function matchPair(
     result.driftPpm = (m.rate - 1) * 1e6
   }
   // 重なっている区間(a の時刻)の中ほどで詰める
+  const minDriftOverlap = driftMinOverlap(a, b)
   const ovStart = Math.max(0, m.offset)
   const ovEnd = Math.min(a.duration, m.offset + b.duration)
   // offset を測った位置。時計がずれていると、測る位置で offset が変わる(sync/solve で補正する)
@@ -178,7 +194,7 @@ async function matchPair(
     if (
       !(mid.sharpness >= 5 && Math.abs(mid.offset - result.offset) <= 0.05) &&
       result.rate === undefined &&
-      ovEnd - ovStart >= DRIFT_MIN_OVERLAP_SEC
+      ovEnd - ovStart >= minDriftOverlap
     ) {
       const d =
         matchWithDrift(ea, eb, { around: m.offset }) ??
@@ -196,7 +212,7 @@ async function matchPair(
       result.offset = mid.offset
       result.refined = true
     }
-    if (result.refined && ovEnd - ovStart >= DRIFT_MIN_OVERLAP_SEC) {
+    if (result.refined && ovEnd - ovStart >= minDriftOverlap) {
       const early = ovStart + 60
       const late = ovEnd - 60
       const center = result.center

@@ -218,6 +218,33 @@ export function mixResidual(mix: Float32Array, others: readonly Float32Array[]):
   return out
 }
 
+/**
+ * 全部入りのトラックに、別に録ったマイク(Craig の1人ずつのファイルなど)の人の声も入っているか。
+ * その人だけが話している時刻(`voiceOn` が 1 で `othersOn` が 0)の全部入りの大きさが、
+ * 誰も話していない時刻より `minRiseDb` 以上大きければ、その声は全部入りにも入っている。
+ * 入っていれば、全部入りを鳴らす録画でそのマイクも鳴らすと、同じ声が二重に鳴る。
+ * 包絡線・印は 100Hz。比べる時間が 5 秒に満たなければ決めない(false)
+ */
+export function mixCarriesVoice(
+  mix: Float32Array,
+  voiceOn: Uint8Array,
+  othersOn: Uint8Array,
+  minRiseDb = 3
+): boolean {
+  const alone: number[] = []
+  const quiet: number[] = []
+  for (let i = 0; i < mix.length; i++) {
+    const m = mix[i]
+    if (!Number.isFinite(m) || othersOn[i]) continue
+    const db = 20 * Math.log10(m + 1e-6)
+    if (voiceOn[i]) alone.push(db)
+    else quiet.push(db)
+  }
+  if (alone.length < 500 || quiet.length < 500) return false
+  const median = (v: number[]): number => v.sort((a, b) => a - b)[Math.floor(v.length / 2)]
+  return median(alone) - median(quiet) >= minRiseDb
+}
+
 /** 全部入りにだけある声(配信者の実況)の発言の話者名(全部入りに人の名前を付けていなければ) */
 export const STREAMER_SPEAKER = '配信者'
 
