@@ -1240,4 +1240,38 @@ describe('第30回: BGM のループの続きの見直し', () => {
       Math.max(...clips.map((c) => c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)))
     ).toBeCloseTo(16, 6)
   })
+
+  it('人が短くした手前に続く頭からのループは、速くして戻しても手前を延ばさず元に戻る', () => {
+    const cases: BgmClip[][] = [
+      [
+        { id: 'A', assetId: 'loop10', startTime: 0, inPoint: 0, outPoint: 6 },
+        { id: 'A~1', assetId: 'loop10', startTime: 6, inPoint: 0, outPoint: 10 }
+      ],
+      [
+        {
+          id: 'A',
+          assetId: 'loop10',
+          startTime: 0,
+          inPoint: 0,
+          outPoint: 7,
+          loopCross: { overlap: 2 }
+        },
+        { id: 'A~1', assetId: 'loop10', startTime: 5, inPoint: 0, outPoint: 10 }
+      ]
+    ]
+    for (const start of cases) {
+      const progEnd = start[1].startTime + 10
+      for (const speed of [2, 4]) {
+        setupBgm(start, progEnd)
+        st().updateClipSpeed('m2', speed)
+        expect(st().project.audioTracks[0].clips.find((c) => c.id === 'A')?.outPoint).toBe(
+          start[0].outPoint
+        )
+        st().updateClipSpeed('m2', 1)
+        expect(shape(), `x${speed}`).toEqual(
+          start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])
+        )
+      }
+    }
+  })
 })

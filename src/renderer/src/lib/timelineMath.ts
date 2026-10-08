@@ -125,8 +125,10 @@ export function crossfadeSourceAt(
   // 繋ぎの頭から数えて、手前の絵の終わりから何秒戻った所か
   let back = Math.max(0, t - elapsed)
   let j = index - 1
+  // 飛ばすクリップが自分の繋ぎを持っていれば、書き出しではそのぶん手前と重なって早く終わっている
+  const seconds = exportTransitionSeconds(timedClips)
   while (j > 0 && back > timedClips[j].end - timedClips[j].start) {
-    back -= timedClips[j].end - timedClips[j].start
+    back -= timedClips[j].end - timedClips[j].start - (seconds[j] ?? 0)
     j--
   }
   const timed = timedClips[j]

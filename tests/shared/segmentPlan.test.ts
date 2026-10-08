@@ -187,3 +187,21 @@ describe('planSegments — 書き出しを区間に分ける', () => {
     }
   })
 })
+
+describe('planSegments — 長さ 0 の区間を作らない', () => {
+  it('繋ぎの終わりまで進めると尺の終わりに届く並びでも、どの区間も 1 フレーム以上', () => {
+    const items = [
+      media('c0', 0, 18),
+      media('c1', 4, 16, 14),
+      media('c2', 20, 16),
+      media('c3', 7, 30, 29)
+    ]
+    for (let min = 1; min <= 12; min++) {
+      for (let max = min; max <= 40; max++) {
+        const segs = planSegments(seq(items), { targetFrames: min, minFrames: min, maxFrames: max })
+        for (const g of segs) expect(g.endFrame - g.startFrame, `${min}/${max}`).toBeGreaterThan(0)
+        expect(segs[segs.length - 1].endFrame).toBe(37)
+      }
+    }
+  })
+})

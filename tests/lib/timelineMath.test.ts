@@ -279,6 +279,28 @@ describe('crossfadeSourceAt — 消えていく側として映す絵', () => {
     expect(s.localTime).toBeCloseTo(8 - 0.75 * 2, 6)
   })
 
+  it('飛ばす手前のクリップに自分の繋ぎがあれば、そのぶん早く終わる(書き出しと同じ)', () => {
+    const timed = buildTimedClips(
+      project({
+        clips: [
+          clip('A', 0, 10),
+          clip('B', 20, 21, { transitionIn: { type: 'crossfade', duration: 0.5 } }),
+          clip('C', 0, 5, { transitionIn: { type: 'crossfade', duration: 2 } })
+        ]
+      } as unknown as Partial<Project>)
+    )
+    expect(exportTransitionSeconds(timed)).toEqual([0, 0.5, 2])
+    for (const [elapsed, local] of [
+      [0, 8.5],
+      [0.4, 8.9],
+      [0.9, 9.4]
+    ]) {
+      const s = crossfadeSourceAt(timed, 2, elapsed, 2)!
+      expect(s.timed.clip.id).toBe('A')
+      expect(s.localTime).toBeCloseTo(local, 6)
+    }
+  })
+
   it('先頭のクリップには繋ぎの相手が無い', () => {
     const timed = buildTimedClips(
       project({ clips: [clip('A', 0, 3)] } as unknown as Partial<Project>)

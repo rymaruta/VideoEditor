@@ -176,6 +176,9 @@ export function planSegments(sequence: Sequence, options: SegmentPlanOptions): S
       best = backOff(hi)
       if (best <= cursor) best = forward(hi)
     }
+    // 繋ぎの終わりまで進めたら尺の終わりに届いた: 最後の区間は下で足す(ここで足すと長さ 0 の区間ができ、
+    // 区間ごとの書き出しがその区間で落ちていた)
+    if (best >= total) break
     bounds.push(best)
     cursor = best
   }

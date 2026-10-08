@@ -168,8 +168,11 @@ const FRAME = 320
 const QUIET_WINDOW_SEC = 2
 /** 静かな所を見積もる範囲(前後の秒)。区間の頭に無音があると、全体で見積もって 0 になっていた */
 const FLOOR_SPAN_SEC = 5
-/** 録音の無い所とみなす、デジタルの無音の続く長さ(フレーム数。1 秒) */
-const DIGITAL_SILENCE_FRAMES = 50
+/**
+ * 録音の無い所とみなす、デジタルの無音の続く長さ(フレーム数。0.3 秒)。ノイズゲートが言葉の間を 0 にする
+ * のは数フレームなので数えず、切った所の短い無音(0.5 秒ほど)は数える
+ */
+const DIGITAL_SILENCE_FRAMES = 15
 
 /**
  * 読んだ音(16kHz)で、素材の時刻 [start, end) に声が無いかを返す関数。決まり文句の作り話を、
@@ -187,7 +190,7 @@ function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: 
     for (let i = f * FRAME; i < (f + 1) * FRAME; i++) sum += audio[i] * audio[i]
     rms[f] = Math.sqrt(sum / FRAME)
   }
-  // 録音の無い所(デジタルの無音)。1 秒以上続くものだけ数える(録音の頭・終わり・切った所)。
+  // 録音の無い所(デジタルの無音)。0.3 秒以上続くものと、頭・終わりに付いたものだけ数える(切った所など)。
   // ノイズゲートのマイクは音節・言葉の間を短く 0 にするので、そこまで除くと静かな所を声だけで
   // 見積もり、小さな声で本当に言った言葉を無音と取って捨てていた
   const digital = new Uint8Array(frames)
@@ -198,7 +201,8 @@ function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: 
     }
     let g = f
     while (g < frames && rms[g] <= 1e-4) g++
-    if (g - f >= DIGITAL_SILENCE_FRAMES) digital.fill(1, f, g)
+    // 頭・終わりに付いた無音は短くても録音の無い所(読み込んだ範囲の外にはみ出した所)
+    if (f === 0 || g === frames || g - f >= DIGITAL_SILENCE_FRAMES) digital.fill(1, f, g)
     f = g
   }
   const span = Math.round((FLOOR_SPAN_SEC * 16000) / FRAME)

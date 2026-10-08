@@ -296,6 +296,36 @@ describe('標準の書き出しの、とても短いクリップ', () => {
     expect(Math.abs((await probeMedia(std)).duration - 5)).toBeLessThan(0.1)
   }, 120_000)
 
+  it('PiP の音は、絵と同じフレームの頭から鳴る(格子に乗らない始まりでも)', async () => {
+    const main = await asset('pipmain', 'none', 5)
+    const face = await asset('pipface', 'tone', 6)
+    const project = {
+      ...base([main, face]),
+      clips: [{ id: 'c1', assetId: 'pipmain', inPoint: 0, outPoint: 5, speed: 1 }],
+      videoOverlayTracks: [
+        {
+          id: 'face',
+          name: '顔',
+          hidden: false,
+          position: 'bottom-right',
+          scale: 0.26,
+          clips: [{ id: 'fc', assetId: 'pipface', startTime: 0.513, inPoint: 1.37, outPoint: 4 }]
+        }
+      ]
+    } as unknown as Project
+    for (const out of await both(project, 'pipgrid')) {
+      const raw = execFileSync(
+        ffmpegPath,
+        ['-v', 'error', '-i', out, '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', '-'],
+        { maxBuffer: 1 << 28 }
+      )
+      const x = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4)
+      const first = x.findIndex((v) => Math.abs(v) > 0.01) / 48000
+      // 絵は 15 フレーム目(0.5 秒)から
+      expect(Math.abs(first - 0.5), `${out} ${first}`).toBeLessThan(0.002)
+    }
+  }, 180_000)
+
   it('どのクリップも半コマより短ければ、空のファイルを作らずに止める', async () => {
     const a = await asset('tiny2', 'tone', 2)
     const project = {

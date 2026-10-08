@@ -111,6 +111,46 @@ describe.skipIf(!existsSync(ffmpegPath))('区間の文字起こしの決まり�
     expect((await transcribeRange(src, 0, 10)).map((x) => x.text)).toEqual([STOCK])
   }, 60_000)
 
+  it('頭・終わり・途中の短い無音(1秒未満)の隣でも、部屋の雑音の上の決まり文句は捨てる', async () => {
+    const lead = join(work, 'shortlead.wav')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'anoisesrc=c=white:a=0.0104:d=9.2:r=48000',
+      '-af',
+      'adelay=800:all=1',
+      lead
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [0.9, null] }] }
+    expect(await transcribeRange(lead, 0, 10)).toEqual([])
+    const tail = join(work, 'shorttail.wav')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'anoisesrc=c=white:a=0.0104:d=9.2:r=48000',
+      '-af',
+      'apad=whole_dur=10',
+      tail
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [8.5, null] }] }
+    expect(await transcribeRange(tail, 0, 10)).toEqual([])
+    const cuts = join(work, 'shortcuts.wav')
+    // 3・5・7 秒に 0.5 秒の無音(切った所)
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'anoisesrc=c=white:a=0.0104:d=10:r=48000',
+      '-af',
+      "volume='if(between(t,3,3.5)+between(t,5,5.5)+between(t,7,7.5),0,1)':eval=frame",
+      cuts
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [5.6, null] }] }
+    expect(await transcribeRange(cuts, 0, 10)).toEqual([])
+  }, 60_000)
+
   it('録音の頭・終わりの無音が近くにあっても、部屋の雑音の上の決まり文句は捨てる', async () => {
     const lead = join(work, 'lead2.wav')
     ff([

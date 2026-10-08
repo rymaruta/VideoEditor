@@ -5288,10 +5288,11 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
         // ほかのクリップが終わりまで届いているかで決める
         const pred = c.inPoint <= 1e-6 ? predecessorOf(c) : undefined
         // 手前が無くても、終わりをまたぐ続きは、ほかのクリップで終わりまで埋まっていれば落とす(人が最後の
-        // ループを分けた所が、短くした頭からの続きより後ろにあると、延ばして戻したときに続きが残っていた)
+        // ループを分けた所が、短くした頭からの続きより後ろにあると、延ばして戻したときに続きが残っていた)。
+        // 曲の頭から始め直すループはそれ自身で埋めてしまうので数えない(人が短くした手前を延ばし直していた)
         const drop = pred
           ? pred.startTime + shift + lenOf(pred) >= end - 1e-6
-          : reached || (natural > end + 1e-6 && coveredWithout(at))
+          : reached || (c.inPoint > 1e-6 && natural > end + 1e-6 && coveredWithout(at))
         if (drop) continue
       }
       const len = Math.min(lenOf(c), end - at)

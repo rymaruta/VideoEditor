@@ -1204,7 +1204,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             curV = outV
           }
           if (asset.hasAudio && !track.audioMuted) {
-            const delayMs = Math.max(0, Math.round(pipStart * 1000))
+            // 音も絵と同じフレームの格子から始める(丸める前の秒で遅らせると、最大半フレーム絵より遅れて鳴り、
+            // 長尺向けの書き出しとも食い違っていた)
+            const delayMs = Math.max(0, Math.round(pipFrameStart * 1000))
             const audioLabel = `pipaudio${pipCounter}`
             /**
              * **音も絵と同じ秒で終わらせる。**
