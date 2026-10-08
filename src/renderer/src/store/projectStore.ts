@@ -3504,16 +3504,20 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               ...overlays.filter((o) => !placed.has(o.sourceId)).map(rebuild)
             ]
             // 前の版で、移した画のトラックがカメラより下に置かれた企画: カメラのすぐ上へ戻す
+            // (カメラの名前を変えていた企画は、変える前の名前の「(手で置いた画)」も見る)
             for (let c = 0; c < all.length; c++) {
               const cam = all[c]
               if (!cam.multicamSourceId) continue
-              const h = all.findIndex(
-                (t, k) => k < c && !t.multicamSourceId && t.name === `${cam.name}(手で置いた画)`
-              )
+              const prevName = state.project.videoOverlayTracks.find(
+                (t) => t.multicamSourceId === cam.multicamSourceId
+              )?.name
+              const names = new Set([`${cam.name}(手で置いた画)`, `${prevName}(手で置いた画)`])
+              const h = all.findIndex((t, k) => k < c && !t.multicamSourceId && names.has(t.name))
               if (h < 0) continue
               const [hand] = all.splice(h, 1)
               all.splice(c, 0, hand)
-              c--
+              // カメラは1つ前へ動いた。同じ名前のトラックがまだ下にあれば、もう一度見る
+              c -= 2
             }
             return all
           })(),

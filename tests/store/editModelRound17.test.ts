@@ -2019,3 +2019,63 @@ describe('第46回: 重なりの順の小さな2件', () => {
     expect(st().project.videoOverlayTracks.map((t) => t.name)).toEqual(['CG(自動)', 'ロゴ'])
   })
 })
+
+describe('第47回: 古い企画の「(手で置いた画)」の並び', () => {
+  const run = (tracks: unknown[]): string[] => {
+    setup([[0, 10]])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, { ...asset('logo', 5), filePath: '/rec/logo.png' }],
+        videoOverlayTracks: tracks
+      } as unknown as Project
+    })
+    st().applyRoughCut(
+      {
+        main: [{ assetId: 'camA', inPoint: 0, outPoint: 10, speed: 1 }],
+        audio: [],
+        overlays: [
+          {
+            name: '顔',
+            sourceId: 'A',
+            clips: [{ assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 }]
+          }
+        ],
+        duration: 10,
+        spans: []
+      } as never,
+      []
+    )
+    return st().project.videoOverlayTracks.map((t) => t.name)
+  }
+  const hand = (id: string, name: string): unknown => ({
+    id,
+    name,
+    hidden: false,
+    position: 'top-right',
+    scale: 0.3,
+    clips: [{ id: `${id}c`, assetId: 'logo', startTime: 2, inPoint: 0, outPoint: 2 }]
+  })
+  const cam = (name: string): unknown => ({
+    id: 'camT',
+    name,
+    multicamSourceId: 'A',
+    hidden: false,
+    position: 'top-right',
+    scale: 0.3,
+    clips: [{ id: 'f1', assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 }]
+  })
+
+  it('カメラの名前を変えていた企画でも、カメラのすぐ上へ戻す', () => {
+    expect(run([hand('h1', 'Face(手で置いた画)'), cam('Face')])).toEqual([
+      '顔',
+      'Face(手で置いた画)'
+    ])
+  })
+
+  it('同じ名前のトラックが2本下にあっても、どちらもカメラの上へ戻す', () => {
+    const names = run([hand('h1', '顔(手で置いた画)'), hand('h2', '顔(手で置いた画)'), cam('顔')])
+    expect(names[0]).toBe('顔')
+  })
+})

@@ -71,6 +71,30 @@ function toTimelineIssues(issues: QcIssue[], project: Project): QcIssue[] {
   return issues.map((i) => ({ ...i, start: map(i.start), end: Math.max(map(i.start), map(i.end)) }))
 }
 
+/**
+ * 全面に重ねた静止画(版面CG など)を出している間の「画が止まっています」は外す。静止画を出しているので
+ * 止まって見えるのは当たり前で、自動の CG を置くたびにその数だけ誤った指摘が出ていた。
+ * 止まっている時間の半分以上を、表示中の全面の静止画が覆っていれば外す
+ */
+export function withoutStillOverlayFreezes(issues: QcIssue[], project: Project): QcIssue[] {
+  const stills = new Set(project.assets.filter((a) => a.still).map((a) => a.id))
+  const spans = project.videoOverlayTracks
+    .filter((t) => !t.hidden && t.position === 'full')
+    .flatMap((t) => t.clips)
+    .filter((c) => stills.has(c.assetId))
+    .map((c) => [c.startTime, c.startTime + (c.outPoint - c.inPoint)] as const)
+  if (spans.length === 0) return issues
+  return issues.filter((i) => {
+    if (i.kind !== 'freeze') return true
+    const len = i.end - i.start
+    const covered = spans.reduce(
+      (sum, [a, b]) => sum + Math.max(0, Math.min(b, i.end) - Math.max(a, i.start)),
+      0
+    )
+    return !(len > 0 && covered >= len / 2)
+  })
+}
+
 export const useQcStore = create<QcState>((set, get) => ({
   report: null,
   run: async (path, loudness, exported) => {
@@ -115,7 +139,10 @@ export const useQcStore = create<QcState>((set, get) => ({
           state: 'done',
           percent: 100,
           issues: sortIssues([
-            ...toTimelineIssues(mediaIssues(measurement, loudness), project),
+            ...withoutStillOverlayFreezes(
+              toTimelineIssues(mediaIssues(measurement, loudness), project),
+              project
+            ),
             ...telop
           ]),
           measurement
