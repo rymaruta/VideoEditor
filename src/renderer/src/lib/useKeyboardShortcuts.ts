@@ -20,8 +20,16 @@ export function isTypingTarget(el: EventTarget | null): boolean {
 // While any modal dialog is open, timeline-wide shortcuts must not reach the
 // timeline: Delete would remove the very clip the modal is editing behind the
 // user's back, S would split it, Space would start playback behind the dialog.
-// 画面全体を覆う自動編集の画面も同じ(見えていない後ろのタイムラインを Delete などで変えていた)
 export function isModalOpen(): boolean {
+  return document.querySelector('.modal-backdrop') !== null
+}
+
+/**
+ * タイムラインが隠れているか(ダイアログ、または画面全体を覆う自動編集の画面)。
+ * 隠れている間は、見えないタイムラインを変える操作(Delete・分割・再生・道具の切り替え)を通さない
+ * (自動編集の画面の後ろで Delete がクリップを消していた)。取り消し・やり直し・保存は通す
+ */
+export function isTimelineCovered(): boolean {
   return (
     document.querySelector('.modal-backdrop, .auto-edit-screen, [data-blocks-shortcuts]') !== null
   )
@@ -58,6 +66,17 @@ export function useKeyboardShortcuts(): void {
         store.redo()
         return
       }
+      if (matchesBinding(e, keymap.save)) {
+        e.preventDefault()
+        // Surface failures in the same spot as the toolbar save button — a silently
+        // swallowed Ctrl+S error looks like a successful save and invites data loss.
+        saveProject().catch((err) => {
+          useProjectStore.getState().setSaveError(formatIpcError(err))
+        })
+        return
+      }
+      // ここから先はタイムラインを変える操作。自動編集の画面で隠れている間は通さない
+      if (isTimelineCovered()) return
       if (matchesBinding(e, keymap.copy)) {
         e.preventDefault()
         store.copySelectedClip()
@@ -74,15 +93,6 @@ export function useKeyboardShortcuts(): void {
           e.preventDefault()
           store.duplicateClips(ids)
         }
-        return
-      }
-      if (matchesBinding(e, keymap.save)) {
-        e.preventDefault()
-        // Surface failures in the same spot as the toolbar save button — a silently
-        // swallowed Ctrl+S error looks like a successful save and invites data loss.
-        saveProject().catch((err) => {
-          useProjectStore.getState().setSaveError(formatIpcError(err))
-        })
         return
       }
       if (matchesBinding(e, keymap.playPause)) {

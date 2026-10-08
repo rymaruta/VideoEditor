@@ -4,7 +4,7 @@ import { ASSET_DRAG_TYPE, SOURCE_RANGE_DRAG_TYPE } from '../lib/assetDrag'
 import { previewSourceUrl } from '../lib/previewSource'
 import { totalTimelineDuration, buildTimedClips } from '../lib/timelineMath'
 import { waveformRenderSize, type WaveformSize } from '../lib/waveformSize'
-import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
+import { isTimelineCovered, isTypingTarget } from '../lib/useKeyboardShortcuts'
 import { Waveform } from './Waveform'
 import { targetFrameRate } from '@shared/frameRate'
 import {
@@ -127,9 +127,9 @@ export function SourceViewer(): React.JSX.Element | null {
       // (実測: クリップ1本の企画でトリムのモーダルを開き `f` を押すと
       //  **クリップ 1 → 2 本・履歴 0 → 1件**。`i` で `sourceIn` が **未設定 → 0**、
       //  `l` で裏の映像が **paused=false・0.42 → 0.72秒**と進み出した。
-      //  同じ場面の Delete は `isModalOpen` に守られて何も起きない)
+      //  同じ場面の Delete は `isTimelineCovered` に守られて何も起きない)
       // 判定は**共有の関数を呼ぶ**。ここに書き写すと、次に門が増えたときも同じ取り残しが起きる。
-      if (isModalOpen()) return
+      if (isTimelineCovered()) return
       if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       const key = e.key.toLowerCase()
       if (key === 'j') {

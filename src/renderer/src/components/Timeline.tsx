@@ -71,7 +71,7 @@ import {
   KEYMAP_SCHEME_LABELS,
   type KeymapScheme
 } from '../lib/keymap'
-import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
+import { isTimelineCovered, isTypingTarget } from '../lib/useKeyboardShortcuts'
 import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
 import { TrimModal } from './TrimModal'
 import { SilenceCutModal } from './SilenceCutModal'
@@ -863,7 +863,7 @@ export function Timeline(): React.JSX.Element {
           return
         }
       }
-      if (isModalOpen()) return
+      if (isTimelineCovered()) return
       // Audio/PiP-overlay clip selection lives in local state here, invisible to the
       // global keyboard shortcut hook (which only knows about the main clips track's
       // selectedClipId) — so split/delete for these clips has to be handled locally too.
@@ -992,8 +992,8 @@ export function Timeline(): React.JSX.Element {
       // (実測: トリムのモーダルを開いた状態で b → 道具が **A → B**、t → **T**。
       //  モーダルを閉じても **T のまま**。同じ場面の Delete は守られていて何も起きない)
       // 判定は**共有の関数を呼ぶ**。ここに書き写したせいで、あとから足された
-      // `isModalOpen` の門が届かなかった(理由は useKeyboardShortcuts)。
-      if (isModalOpen()) return
+      // `isTimelineCovered` の門が届かなかった(理由は useKeyboardShortcuts)。
+      if (isTimelineCovered()) return
       if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       const key = e.key.toLowerCase()
       if (key === 'a') setEditTool('select')
