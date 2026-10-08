@@ -133,6 +133,13 @@ export function TelopStyleDialog(): React.JSX.Element | null {
     // (渡すと、下の画面まで一緒に閉じる)
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
+      // 中で開いている色の欄・吹き出しが先に閉じる。字の入った検索欄の Esc は検索を消す。
+      // Esc を自分で使う欄(data-escape-local)はその欄に任せる。先に受けて窓ごと閉じると、
+      // 作りかけのスタイルが保存されずに消えていた
+      if (document.querySelector('.color-popover, .app-popover')) return
+      const t = e.target as HTMLInputElement | null
+      if (t?.matches?.('.look-search input') && t.value) return
+      if (t?.closest?.('[data-escape-local]')) return
       e.stopImmediatePropagation()
       setDraft(null)
     }

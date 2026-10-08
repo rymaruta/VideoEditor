@@ -20,8 +20,11 @@ export function isTypingTarget(el: EventTarget | null): boolean {
 // While any modal dialog is open, timeline-wide shortcuts must not reach the
 // timeline: Delete would remove the very clip the modal is editing behind the
 // user's back, S would split it, Space would start playback behind the dialog.
+// 画面全体を覆う自動編集の画面も同じ(見えていない後ろのタイムラインを Delete などで変えていた)
 export function isModalOpen(): boolean {
-  return document.querySelector('.modal-backdrop') !== null
+  return (
+    document.querySelector('.modal-backdrop, .auto-edit-screen, [data-blocks-shortcuts]') !== null
+  )
 }
 
 function selectedClipIds(store: ReturnType<typeof useProjectStore.getState>): string[] {

@@ -2,7 +2,7 @@ import { TelopInspector } from './TelopInspector'
 import { useState } from 'react'
 import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
-import { buildTimedClips } from '../lib/timelineMath'
+import { buildTimedClips, speedSelectChoices } from '../lib/timelineMath'
 import { CLIP_COLORS } from '../lib/clipColors'
 import { transitionSecondsForClip } from '@shared/transition'
 import type { ClipColorLabel, TransitionType } from '@shared/types'
@@ -252,6 +252,7 @@ export function Inspector(): React.JSX.Element {
   }
 
   const speed = clip.speed || 1
+  const speedChoices = speedSelectChoices(speed, SPEED_OPTIONS)
   const sourceDuration = clip.outPoint - clip.inPoint
   const timelineDuration = sourceDuration / speed
   const mismatch = isAspectMismatch(asset, project.aspectRatio)
@@ -367,10 +368,13 @@ export function Inspector(): React.JSX.Element {
           <GaugeIcon width={13} height={13} />
           再生速度
         </h3>
-        <select value={speed} onChange={(e) => updateClipSpeed(clip.id, Number(e.target.value))}>
-          {SPEED_OPTIONS.map((s) => (
+        <select
+          value={speedChoices.value}
+          onChange={(e) => updateClipSpeed(clip.id, Number(e.target.value))}
+        >
+          {speedChoices.options.map((s) => (
             <option key={s} value={s}>
-              {s}x
+              {Number(s.toFixed(4))}x
             </option>
           ))}
         </select>

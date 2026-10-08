@@ -58,6 +58,12 @@ export interface MenuItemSpec {
   id?: MenuCommand
   /** Electron の accelerator 形式(表示用) */
   accelerator?: string
+  /**
+   * キーをメニュー(OS)で受けるか。既定は受けない(画面のキー操作の設定で受ける操作は、画面で受ける)。
+   * 画面のキー操作に無いファイルの操作(開く・書き出し など)は受ける。受けないと、メニューに
+   * 書いてあるキーを押しても何も起きなかった
+   */
+  registerAccelerator?: boolean
   role?:
     | 'quit'
     | 'cut'
@@ -119,9 +125,19 @@ export function buildMenuTemplate(
     {
       label: 'ファイル(&F)',
       submenu: [
-        { label: '新規プロジェクト', id: 'file.new', accelerator: 'CmdOrCtrl+N' },
-        { label: '新しい回を作る…', id: 'file.newEpisode', accelerator: 'CmdOrCtrl+Shift+N' },
-        { label: '開く…', id: 'file.open', accelerator: 'CmdOrCtrl+O' },
+        {
+          label: '新規プロジェクト',
+          id: 'file.new',
+          accelerator: 'CmdOrCtrl+N',
+          registerAccelerator: true
+        },
+        {
+          label: '新しい回を作る…',
+          id: 'file.newEpisode',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          registerAccelerator: true
+        },
+        { label: '開く…', id: 'file.open', accelerator: 'CmdOrCtrl+O', registerAccelerator: true },
         {
           label: '最近使ったプロジェクト',
           submenu:
@@ -139,13 +155,28 @@ export function buildMenuTemplate(
         },
         SEP,
         { label: '保存', id: 'file.save', accelerator: key('save') },
-        { label: '名前を付けて保存…', id: 'file.saveAs', accelerator: 'CmdOrCtrl+Shift+S' },
+        {
+          label: '名前を付けて保存…',
+          id: 'file.saveAs',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          registerAccelerator: true
+        },
         SEP,
-        { label: '動画を読み込む…', id: 'file.importVideo', accelerator: 'CmdOrCtrl+I' },
+        {
+          label: '動画を読み込む…',
+          id: 'file.importVideo',
+          accelerator: 'CmdOrCtrl+I',
+          registerAccelerator: true
+        },
         { label: '音声を読み込む…', id: 'file.importAudio' },
         { label: 'フォルダをライブラリに追加…', id: 'file.addLibraryFolder' },
         SEP,
-        { label: '書き出し…', id: 'file.export', accelerator: 'CmdOrCtrl+M' },
+        {
+          label: '書き出し…',
+          id: 'file.export',
+          accelerator: 'CmdOrCtrl+M',
+          registerAccelerator: true
+        },
         SEP,
         { label: '終了', role: 'quit' }
       ]

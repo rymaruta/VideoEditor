@@ -13,6 +13,7 @@ vi.hoisted(() => {
 })
 import { useProjectStore } from '@renderer/store/projectStore'
 import { useQcStore } from '@renderer/store/qcStore'
+import { usePipelineStore } from '@renderer/store/pipelineStore'
 import { getKeymap } from '@renderer/lib/keymap'
 import type { MediaAsset, Project } from '@shared/types'
 
@@ -137,6 +138,20 @@ describe('保存・開く・素材の管理', () => {
     st().setAudioEvents([{ start: 1, end: 2, laugh: 0.9, cheer: 0 }])
     st().markSaved('/p.veproj', saved)
     expect(st().isDirty).toBe(true)
+  })
+
+  it('別のプロジェクトを開くと、前の回のショートの結果を捨てる', () => {
+    usePipelineStore.setState({
+      shorts: {
+        state: 'done',
+        done: 3,
+        total: 3,
+        files: ['/old/a.mp4', '/old/b.mp4', '/old/c.mp4']
+      }
+    })
+    st().newProject()
+    expect(usePipelineStore.getState().shorts.state).toBe('idle')
+    expect(usePipelineStore.getState().shorts.files).toEqual([])
   })
 
   it('壊れたキー操作の型の名前(constructor など)でも、既定のキー操作を使う', () => {

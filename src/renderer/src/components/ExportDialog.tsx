@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
-import { useProjectStore } from '../store/projectStore'
+import { onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
 import { useSettingsStore, type ExportLoudness } from '../store/settingsStore'
 import { useMenuCommand } from '../lib/menuCommands'
@@ -113,6 +113,19 @@ export function ExportDialog(): React.JSX.Element | null {
   useMenuCommand((id) => {
     if (id === 'file.export') setOpen(true)
   })
+
+  // 前のプロジェクトの「書き出しが完了しました」・失敗・待ち行列を、別のプロジェクトに出さない
+  // (完了の再生・フォルダを表示が、前のプロジェクトのファイルを開いていた)。書き出し中は残す
+  useEffect(() => {
+    if (running) return
+    return onProjectSwitch(() => {
+      setError(null)
+      setDonePath(null)
+      setProgress(null)
+      setQueue([])
+      setQueueStatus({})
+    })
+  }, [running])
 
   useEffect(() => window.api.onExportProgress((p) => setProgress(p)), [])
   // 書き出しの最中は、PC をスリープさせず、タスクバーに進み具合を出す

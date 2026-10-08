@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { sourceDuration } from '@shared/ingest/classify'
 import { usePipelineStore, STEPS, type StepStatus } from '../store/pipelineStore'
-import { useProjectStore } from '../store/projectStore'
+import { onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { useMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
 import { buildRunReport, formatElapsed } from '../lib/runReport'
@@ -90,7 +90,12 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const project = useProjectStore((s) => s.project)
   const projectName = project.name
   const asrDevice = usePipelineStore((s) => s.asrDevice)
-  const [telopsMade, setTelopsMade] = useState<number | null>(null)
+  // 並べた発言テロップ(数と ID)。取り消し・別の回で消えたら、また並べられるようにする
+  const [telopsMadeState, setTelopsMade] = useState<{ count: number; ids: string[] } | null>(null)
+  const telopsMade =
+    telopsMadeState && project.textOverlays.some((o) => telopsMadeState.ids.includes(o.id))
+      ? telopsMadeState.count
+      : null
   const [dictOpen, setDictOpen] = useState(false)
   const dictionary = useSettingsStore((s) => s.telopDictionary)
   const aiProvider = useSettingsStore((s) => s.aiProvider)
@@ -112,6 +117,16 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const [comparison, setComparison] = useState<
     { name: string; result: EditComparison } | { error: string } | null
   >(null)
+  // 前の回の「保存した」「比べた」の結果は、別の回を開いたら消す(画面はずっと開いたまま使う)
+  useEffect(
+    () =>
+      onProjectSwitch(() => {
+        setReportSaved(null)
+        setComparison(null)
+        setTelopsMade(null)
+      }),
+    []
+  )
 
   useMenuCommand((id) => {
     if (id === 'auto.screen') setOpen(true)
@@ -210,7 +225,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
     if (overlays.length === 0) return
     const store = useProjectStore.getState()
     store.addTextOverlays(overlays)
-    setTelopsMade(overlays.length)
+    const added = useProjectStore.getState().project.textOverlays.slice(-overlays.length)
+    setTelopsMade({ count: overlays.length, ids: added.map((o) => o.id) })
   }
 
   // 同期の結果: 共通の時間軸

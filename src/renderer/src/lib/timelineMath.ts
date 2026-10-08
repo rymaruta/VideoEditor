@@ -192,3 +192,18 @@ export function rollDragStep(
 ): number {
   return wantedSec - (currentOut - startOut) / (leftSpeed || 1)
 }
+
+/**
+ * 速さの選択欄に出す値と選択肢。収録を並べたクリップは、時計のずれを直した速さ(1.00005 など)を
+ * 持つので、選択肢にそのままでは無く、選択欄が先頭の選択肢(0.25x)を出していた。
+ * ごく近い選択肢があればそれを出し(ずれの直しは 0.2% 以内)、無ければその速さを選択肢に足す
+ */
+export function speedSelectChoices(
+  speed: number,
+  options: readonly number[]
+): { value: number; options: number[] } {
+  const s = Number.isFinite(speed) && speed > 0 ? speed : 1
+  const near = options.find((o) => Math.abs(o - s) <= 0.005)
+  if (near !== undefined) return { value: near, options: [...options] }
+  return { value: s, options: [...options, s].sort((a, b) => a - b) }
+}

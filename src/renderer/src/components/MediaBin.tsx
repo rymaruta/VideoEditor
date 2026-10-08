@@ -6,7 +6,7 @@ import { formatTimecode } from '../lib/timelineRuler'
 import { useMenuCommand } from '../lib/menuCommands'
 import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
-import { useProjectStore } from '../store/projectStore'
+import { onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { assetsNeedingPreviewProxy, canPreviewFile } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
@@ -47,6 +47,16 @@ export function MediaBin(): React.JSX.Element {
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
   const setDraggingAssetId = useProjectStore((s) => s.setDraggingAssetId)
   const [importing, setImporting] = useState(false)
+  const importingRef = useRef(false)
+  /** プロジェクトを替えた回数(読み込みの途中で替えたかを見る) */
+  const projectGeneration = useRef(0)
+  useEffect(
+    () =>
+      onProjectSwitch(() => {
+        projectGeneration.current++
+      }),
+    []
+  )
   // 「プロジェクト」(この企画の素材)と「ライブラリ」(全プロジェクト共通)の切り替え
   const [view, setView] = useState<'project' | 'library'>('project')
   // 素材の右クリックメニュー(操作のボタンを行に並べないため)
@@ -242,7 +252,25 @@ export function MediaBin(): React.JSX.Element {
       if (unsupported.length > 0) setError(unsupportedMessage(unsupported))
       return
     }
+    // メニュー(Ctrl+I)からも来るので、ここで二重に始めない
+    if (importingRef.current) return
+    importingRef.current = true
+    // 読み込みの途中で別のプロジェクトを開いたら、読んだ素材を後のプロジェクトに入れない
+    const generation = projectGeneration.current
     setImporting(true)
+    try {
+      await importInto(paths, unsupported, generation)
+    } finally {
+      importingRef.current = false
+      setImporting(false)
+    }
+  }
+
+  async function importInto(
+    paths: string[],
+    unsupported: string[],
+    generation: number
+  ): Promise<void> {
     // One bad file must not abort the batch: the files after it would silently
     // never be imported while the user assumes every valid selection was added.
     const failures: string[] = []
@@ -285,6 +313,7 @@ export function MediaBin(): React.JSX.Element {
         failures.push(`${fileNameFromPath(filePath)}: ${formatIpcError(e)}`)
       }
     }
+    if (generation !== projectGeneration.current) return
     // One history entry for the whole import, not one per file.
     addAssets(imported)
     // 読み込んだフォルダを共通ライブラリに覚える(次の回からは選ぶだけで使える)。
@@ -305,7 +334,6 @@ export function MediaBin(): React.JSX.Element {
       )
     }
     if (messages.length > 0) setError(messages.join(' / '))
-    setImporting(false)
   }
 
   async function denoiseAsset(asset: MediaAsset): Promise<void> {

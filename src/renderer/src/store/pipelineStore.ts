@@ -1388,6 +1388,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       set((s) => ({
         // 取り込み(フォルダの読み取り)の結果は残す。それより後の工程の結果だけ捨てる
         steps: { ...initialSteps(), ingest: s.steps.ingest },
+        // 前の回のショートの結果(書き出したファイルの一覧)も捨てる。書き出している最中なら残す
+        shorts:
+          s.shorts.state === 'run' ? s.shorts : { state: 'idle', done: 0, total: 0, files: [] },
         report: null,
         scenes: [],
         judgements: [],

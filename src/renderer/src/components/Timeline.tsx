@@ -18,7 +18,8 @@ import {
   rangeSelectionIds,
   totalTimelineDuration,
   findTimedClipAt,
-  rollDragStep
+  rollDragStep,
+  speedSelectChoices
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
 // テロップの最短の長さは**追加のときと同じ数字**を使う。ここに別の数字を書いていたころ、
@@ -657,7 +658,11 @@ export function Timeline(): React.JSX.Element {
     e.preventDefault()
     e.stopPropagation()
     selectOnly('clip')
-    selectClip(clipId)
+    // 選んでいる何本かの中で右クリックしたなら、選びはそのまま(1本に戻すと、見た目は1本なのに
+    // 一覧の「削除(2件)」が見えていない分まで消していた)
+    if (multiSelectedClipIds.length > 1 && multiSelectedClipIds.includes(clipId))
+      useProjectStore.setState({ selectedClipId: clipId })
+    else selectClip(clipId)
     const clip = project.clips.find((c) => c.id === clipId)
     const asset = project.assets.find((a) => a.id === clip?.assetId)
     if (!clip) return
@@ -1897,12 +1902,12 @@ export function Timeline(): React.JSX.Element {
             >
               <GaugeIcon width={13} height={13} />
               <select
-                value={selectedClip.speed || 1}
+                value={speedSelectChoices(selectedClip.speed || 1, SPEED_OPTIONS).value}
                 onChange={(e) => updateClipSpeed(selectedClip.id, Number(e.target.value))}
               >
-                {SPEED_OPTIONS.map((s) => (
+                {speedSelectChoices(selectedClip.speed || 1, SPEED_OPTIONS).options.map((s) => (
                   <option key={s} value={s}>
-                    {s}x
+                    {Number(s.toFixed(4))}x
                   </option>
                 ))}
               </select>

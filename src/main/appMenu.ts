@@ -41,7 +41,7 @@ function toElectron(spec: MenuItemSpec): MenuItemConstructorOptions {
   if (spec.role) item.role = spec.role
   if (spec.accelerator) {
     item.accelerator = spec.accelerator
-    item.registerAccelerator = false
+    item.registerAccelerator = spec.registerAccelerator === true
   }
   if (spec.id) {
     const id = spec.id

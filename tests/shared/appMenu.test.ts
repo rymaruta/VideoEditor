@@ -60,3 +60,21 @@ describe('appMenu — Windows の編集ソフトと同じメニューバー', ()
     expect(buildMenuTemplate({}, [], { isDev: false, isMac: true })[0].label).toBe('VideoEditor')
   })
 })
+
+describe('メニューのキーの受け方', () => {
+  it('画面のキー操作に無いファイルの操作(開く・書き出し など)のキーはメニューで受け、画面が受ける操作は受けない', () => {
+    const items = flatten(buildMenuTemplate({}, [], { isDev: false, isMac: false }))
+    const reg = (id: string): boolean | undefined =>
+      items.find((i) => i.id === id)?.registerAccelerator
+    for (const id of [
+      'file.new',
+      'file.newEpisode',
+      'file.open',
+      'file.saveAs',
+      'file.importVideo',
+      'file.export'
+    ])
+      expect(reg(id), id).toBe(true)
+    for (const id of ['file.save', 'edit.undo', 'clip.delete']) expect(reg(id), id).not.toBe(true)
+  })
+})
