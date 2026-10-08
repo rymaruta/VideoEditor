@@ -107,6 +107,36 @@ export function exportTransitionSeconds(timedClips: TimedClip[]): number[] {
   return exportLayoutOf(timedClips).transitionSeconds
 }
 
+/**
+ * クロスフェードの間に、消えていく側として映す絵(どのクリップの、素材の何秒か)。
+ * index 番目のクリップの繋ぎ(長さ t 秒)の、頭から elapsed 秒の所。
+ *
+ * 書き出しは「それまでにつないだ絵の最後の t 秒」と混ぜる。繋ぎが手前のクリップより長いと、
+ * その範囲は手前のクリップの頭より前(さらに手前のクリップ)にかかる。手前のクリップだけを見て
+ * 素材の位置を出すと、そのクリップの頭(inPoint)より前を指し、書き出しと違う絵が映っていた
+ */
+export function crossfadeSourceAt(
+  timedClips: TimedClip[],
+  index: number,
+  elapsed: number,
+  t: number
+): { timed: TimedClip; localTime: number } | null {
+  if (index <= 0 || index >= timedClips.length) return null
+  // 繋ぎの頭から数えて、手前の絵の終わりから何秒戻った所か
+  let back = Math.max(0, t - elapsed)
+  let j = index - 1
+  while (j > 0 && back > timedClips[j].end - timedClips[j].start) {
+    back -= timedClips[j].end - timedClips[j].start
+    j--
+  }
+  const timed = timedClips[j]
+  const speed = timed.clip.speed || 1
+  return {
+    timed,
+    localTime: Math.max(timed.clip.inPoint, timed.clip.outPoint - back * speed)
+  }
+}
+
 function exportLayoutOf(timedClips: TimedClip[]): ReturnType<typeof computeMainTrackLayout> {
   const clips = timedClips.map((tc) => tc.clip)
   const fps = projectFrameRate(

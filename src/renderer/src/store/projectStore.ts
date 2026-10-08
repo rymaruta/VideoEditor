@@ -5263,6 +5263,19 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       }
       return best
     }
+    /** 足した続き(曲の途中から始まる ~)を除いたクリップだけで、ずらした後の [from, end] が切れ目なく埋まるか */
+    const coveredWithout = (from: number): boolean => {
+      const spans = chain
+        .filter((p) => !(p.id.includes('~') && p.inPoint > 1e-6))
+        .map((p) => [p.startTime + shift, p.startTime + shift + lenOf(p)])
+        .sort((a, b) => a[0] - b[0])
+      let cur = from
+      for (const [s0, e0] of spans) {
+        if (s0 > cur + 1e-6) break
+        cur = Math.max(cur, e0)
+      }
+      return cur >= end - 1e-6
+    }
     let reached = false
     for (const c of chain) {
       const at = c.startTime + shift
@@ -5274,7 +5287,11 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
         // 曲の頭から始め直すループは手前のクリップで、続き(人が短くしたクリップの後ろに足したもの)は
         // ほかのクリップが終わりまで届いているかで決める
         const pred = c.inPoint <= 1e-6 ? predecessorOf(c) : undefined
-        const drop = pred ? pred.startTime + shift + lenOf(pred) >= end - 1e-6 : reached
+        // 手前が無くても、終わりをまたぐ続きは、ほかのクリップで終わりまで埋まっていれば落とす(人が最後の
+        // ループを分けた所が、短くした頭からの続きより後ろにあると、延ばして戻したときに続きが残っていた)
+        const drop = pred
+          ? pred.startTime + shift + lenOf(pred) >= end - 1e-6
+          : reached || (natural > end + 1e-6 && coveredWithout(at))
         if (drop) continue
       }
       const len = Math.min(lenOf(c), end - at)
@@ -5331,7 +5348,14 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
           c.inPoint <= 1e-6 &&
           // 重なりを短くした位置のほか、本来の重なりの位置にあるもの(最後のループを人が分けた)も探す
           (Math.abs(c.startTime - at) <= 1e-6 ||
-            Math.abs(c.startTime - (tailEnd - loopOverlap)) <= 1e-6)
+            Math.abs(c.startTime - (tailEnd - loopOverlap)) <= 1e-6) &&
+          // もう続きが鳴っているもの(人が分けた手前の半分)からは続けない(続きと同じ音が二重に鳴っていた)
+          !out.some(
+            (o, m) =>
+              m !== k &&
+              Math.abs(o.startTime - endOf(c)) <= 1e-6 &&
+              Math.abs(o.inPoint - c.outPoint) <= 1e-6
+          )
       )
       if (existing >= 0) {
         frozen.add(existing)

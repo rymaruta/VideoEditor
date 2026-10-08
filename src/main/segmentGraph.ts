@@ -215,7 +215,13 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
   if (base && !base.hidden) {
     const items = base.items
       .filter((i): i is MediaItem => i.kind === 'media' && intersects(i, segStart, segEnd))
-      .sort((a, b) => a.startFrame - b.startFrame)
+      // 終わりの順に並べる。始まりの順だと、手前のクリップより長い繋ぎを持つクリップが手前より先に来て、
+      // 手前(短いクリップ)が丸ごと捨てられていた(プレビューでは見えるのに、書き出しで消える)
+      .sort(
+        (a, b) =>
+          a.startFrame + a.durationFrames - (b.startFrame + b.durationFrames) ||
+          a.startFrame - b.startFrame
+      )
     for (const item of items) {
       if (!assetOf(item).hasVideo) continue
       const itemEnd = item.startFrame + item.durationFrames

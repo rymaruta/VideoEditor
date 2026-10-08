@@ -97,6 +97,20 @@ describe.skipIf(!existsSync(ffmpegPath))('区間の文字起こしの決まり�
     expect((await transcribeRange(src, 0, 20)).map((x) => x.text)).toEqual([STOCK])
   }, 60_000)
 
+  it('ノイズゲートのマイクで小さく言った締めの言葉(言葉の間が 0)も残す', async () => {
+    const src = join(work, 'gated.wav')
+    // 音節の間をゲートが 0 にした、小さな声(-37dBFS ほど)を 10 秒
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      "aevalsrc='0.02*sin(2*PI*180*t)*gt(sin(2*PI*5*t),-0.3)':d=10:s=48000",
+      src
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [8, null] }] }
+    expect((await transcribeRange(src, 0, 10)).map((x) => x.text)).toEqual([STOCK])
+  }, 60_000)
+
   it('録音の頭・終わりの無音が近くにあっても、部屋の雑音の上の決まり文句は捨てる', async () => {
     const lead = join(work, 'lead2.wav')
     ff([

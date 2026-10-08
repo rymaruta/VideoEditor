@@ -168,6 +168,8 @@ const FRAME = 320
 const QUIET_WINDOW_SEC = 2
 /** 静かな所を見積もる範囲(前後の秒)。区間の頭に無音があると、全体で見積もって 0 になっていた */
 const FLOOR_SPAN_SEC = 5
+/** 録音の無い所とみなす、デジタルの無音の続く長さ(フレーム数。1 秒) */
+const DIGITAL_SILENCE_FRAMES = 50
 
 /**
  * 読んだ音(16kHz)で、素材の時刻 [start, end) に声が無いかを返す関数。決まり文句の作り話を、
@@ -185,6 +187,20 @@ function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: 
     for (let i = f * FRAME; i < (f + 1) * FRAME; i++) sum += audio[i] * audio[i]
     rms[f] = Math.sqrt(sum / FRAME)
   }
+  // 録音の無い所(デジタルの無音)。1 秒以上続くものだけ数える(録音の頭・終わり・切った所)。
+  // ノイズゲートのマイクは音節・言葉の間を短く 0 にするので、そこまで除くと静かな所を声だけで
+  // 見積もり、小さな声で本当に言った言葉を無音と取って捨てていた
+  const digital = new Uint8Array(frames)
+  for (let f = 0; f < frames;) {
+    if (rms[f] > 1e-4) {
+      f++
+      continue
+    }
+    let g = f
+    while (g < frames && rms[g] <= 1e-4) g++
+    if (g - f >= DIGITAL_SILENCE_FRAMES) digital.fill(1, f, g)
+    f = g
+  }
   const span = Math.round((FLOOR_SPAN_SEC * 16000) / FRAME)
   return (start, end) => {
     // 長さの無い区切り(言葉の時刻が1点)は、その頭の少しを見る
@@ -193,10 +209,11 @@ function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: 
     const from = Math.max(0, Math.floor((s * 16000) / FRAME))
     const to = Math.min(frames, Math.ceil((Math.max(e, s + 0.3) * 16000) / FRAME))
     if (to <= from) return true
-    // 静かな所(下から1割)は、その区切りの前後 5 秒で見積もる。録音の無い所(デジタルの無音)は除き、
+    // 静かな所(下から1割)は、その区切りの前後 5 秒で見積もる。録音の無い所(長いデジタルの無音)は除き、
     // 半分以上が無音なら静かな所は 0(録音の頭・終わりの無音で 0 になり、部屋の雑音を声と取っていた)
-    const win = rms.subarray(Math.max(0, from - span), Math.min(frames, to + span))
-    const near = Float32Array.from(win.filter((v) => v > 1e-4)).sort()
+    const lo = Math.max(0, from - span)
+    const win = rms.subarray(lo, Math.min(frames, to + span))
+    const near = Float32Array.from(win.filter((_, k) => !digital[lo + k])).sort()
     const floor = near.length >= win.length * 0.5 ? near[Math.floor(near.length * 0.1)] : 0
     // 声とみなす大きさ。静かな所の 4 倍(12dB)。ただし -34dBFS(0.02)を超えれば声とみなす(全体が同じ
     // 大きさで鳴り続ける音では、静かな所の見積もりがその大きさになり、声をすべて無音と取っていた)

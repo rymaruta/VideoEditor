@@ -1384,11 +1384,19 @@ h3 {
 /* クロスフェードで消えていく前のクリップ。本編の**上**に重ねて不透明度を下げる。
    `z-index` は本編と同じ 1 のままで、DOM 上で本編より後ろに置くことで上に出す
    (2 にすると PiP やテロップより手前に来てしまう)。 */
-.preview-frame video.preview-crossfade-layer {
+.preview-frame .preview-crossfade-layer {
   position: absolute;
   inset: 0;
   z-index: 1;
+  overflow: hidden;
+  /* 余白は黒(書き出しの pad と同じ)。透けると出てくる側の絵が余白に見える */
+  background: #000;
   pointer-events: none;
+}
+
+.preview-frame .preview-crossfade-layer video.preview-crossfade-video {
+  position: absolute;
+  inset: 0;
 }
 
 .preview-empty {

@@ -1143,3 +1143,101 @@ describe('第29回: BGM のループの続きの見直し', () => {
     ).toEqual(start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint]))
   })
 })
+
+describe('第30回: BGM のループの続きの見直し', () => {
+  type BgmClip = Project['audioTracks'][number]['clips'][number]
+  /** 本編 m1(0〜10)・m2(10〜progEnd)と、BGM の並び */
+  const setupBgm = (clips: BgmClip[], progEnd: number): void => {
+    S.setState({
+      project: {
+        id: 'p',
+        name: 'x',
+        aspectRatio: '16:9',
+        multicam: {
+          anchorSourceId: 'A',
+          sources: [{ id: 'A', name: 'A', kind: 'camera' }],
+          files: [{ assetId: 'camA', sourceId: 'A', start: 0, rate: 1, duration: 100 }]
+        },
+        assets: [asset('camA', 100), asset('loop10', 10, false)],
+        clips: [
+          { id: 'm1', assetId: 'camA', inPoint: 0, outPoint: 10, speed: 1 },
+          { id: 'm2', assetId: 'camA', inPoint: 20, outPoint: 20 + progEnd - 10, speed: 1 }
+        ],
+        audioTracks: [
+          {
+            id: 'bgmT',
+            name: 'BGM',
+            volume: 1,
+            muted: false,
+            duckingEnabled: true,
+            autoRole: 'bgm',
+            clips
+          }
+        ],
+        videoOverlayTracks: [],
+        textOverlays: [],
+        beatGrid: null
+      } as unknown as Project,
+      past: [],
+      future: []
+    })
+  }
+  const shape = (): (string | number)[][] =>
+    [...st().project.audioTracks[0].clips]
+      .sort((a, b) => a.startTime - b.startTime)
+      .map((c) => [c.id, +c.startTime.toFixed(6), +c.inPoint.toFixed(6), +c.outPoint.toFixed(6)])
+
+  it('人が分けた所が、短くした曲の頭のクリップより後ろでも、延ばして戻すと元に戻る', () => {
+    const start: BgmClip[] = [
+      {
+        id: 'A',
+        assetId: 'loop10',
+        startTime: 0,
+        inPoint: 0,
+        outPoint: 10,
+        loopCross: { overlap: 2 }
+      },
+      { id: 'A~1', assetId: 'loop10', startTime: 8, inPoint: 0, outPoint: 9 },
+      { id: 'C', assetId: 'loop10', startTime: 16, inPoint: 0, outPoint: 0.5 },
+      { id: 'x', assetId: 'loop10', startTime: 17, inPoint: 9, outPoint: 10 }
+    ]
+    setupBgm(start, 18)
+    st().updateClipSpeed('m2', 0.5)
+    st().updateClipSpeed('m2', 1)
+    expect(shape()).toEqual(start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint]))
+  })
+
+  it('人が分けた倍速のループの手前の半分から、続きを足し直して同じ音を二重に鳴らさない', () => {
+    setupBgm(
+      [
+        {
+          id: 'A',
+          assetId: 'loop10',
+          startTime: 0,
+          inPoint: 0,
+          outPoint: 10,
+          loopCross: { overlap: 5 }
+        },
+        { id: 'R', assetId: 'loop10', startTime: 8, inPoint: 0, outPoint: 4, speed: 2 },
+        { id: 'x', assetId: 'loop10', startTime: 10, inPoint: 4, outPoint: 10, speed: 2 }
+      ],
+      13
+    )
+    st().updateClipSpeed('m2', 0.5)
+    const clips = st().project.audioTracks[0].clips
+    for (const c of clips) {
+      const twins = clips.filter(
+        (o) =>
+          o !== c &&
+          Math.abs(o.startTime - c.startTime) < 1e-6 &&
+          Math.abs(o.inPoint - c.inPoint) < 1e-6 &&
+          Math.abs(o.outPoint - c.outPoint) < 1e-6
+      )
+      expect(twins, `${c.id}`).toEqual([])
+    }
+    // 終わり(16)まで鳴っている
+    expect(
+      Math.max(...clips.map((c) => c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)))
+    ).toBeCloseTo(16, 6)
+  })
+})

@@ -42,6 +42,7 @@ import {
   totalTimelineDuration,
   totalExportDuration,
   exportTransitionSeconds,
+  crossfadeSourceAt,
   TimedClip
 } from '../lib/timelineMath'
 import {
@@ -305,7 +306,8 @@ function PreviewCrossfadeLayer({
   opacity,
   speed,
   fit,
-  seekToken
+  seekToken,
+  blur
 }: {
   src: string
   localTime: number
@@ -315,6 +317,8 @@ function PreviewCrossfadeLayer({
   fit: CSSProperties
   /** 明示的なシークの合図(`seekRequest.token`)。変わったら位置をぴったり入れ直す */
   seekToken: number
+  /** 消えていく側が余白をぼかしで埋めるクリップなら、そのぼかしの強さと色合わせ */
+  blur?: { blurPx: number; colorFilter?: string }
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
 
@@ -342,14 +346,23 @@ function PreviewCrossfadeLayer({
     else ref.current?.pause()
   }, [isPlaying])
 
+  // 消えていく側の**画面全体**(余白の黒・ぼかし背景ごと)を薄くする。絵だけを重ねると、
+  // 余白の所は出てくる側がそのまま見え、書き出し(余白込みの画を混ぜる)と違って見えていた
   return (
-    <video
-      ref={ref}
-      className="preview-crossfade-layer"
-      src={src}
-      muted
-      style={{ ...fit, opacity }}
-    />
+    <div className="preview-crossfade-layer" style={{ opacity }}>
+      {blur && (
+        <PreviewBlurBackdrop
+          src={src}
+          colorFilter={blur.colorFilter}
+          localTime={localTime}
+          isPlaying={isPlaying}
+          blurPx={blur.blurPx}
+          speed={speed}
+          seekToken={seekToken}
+        />
+      )}
+      <video ref={ref} className="preview-crossfade-video" src={src} muted style={fit} />
+    </div>
   )
 }
 
@@ -954,6 +967,7 @@ export function PreviewPlayer(): React.JSX.Element {
     speed: number
     fit: CSSProperties
     colorFilter?: string
+    blurPx?: number
   } | null => {
     const tc = findTimedClipAt(timedClips, playheadTime)
     if (!tc) return null
@@ -969,13 +983,21 @@ export function PreviewPlayer(): React.JSX.Element {
     if (tc.clip.transitionIn?.type !== 'crossfade') return null
     const elapsed = playheadTime - tc.start
     if (elapsed < 0 || elapsed >= t) return null
-    const prev = timedClips[index - 1]
+    // それまでの絵の**最後の t 秒**を流す(書き出しが混ぜているのと同じ範囲)。繋ぎが手前の
+    // クリップより長ければ、さらに手前のクリップの終わりにかかる
+    const source = crossfadeSourceAt(timedClips, index, elapsed, t)
+    if (!source) return null
+    const prev = source.timed
     const prevSpeed = prev.clip.speed || 1
     return {
       src: previewSourceUrl(prev.asset),
       colorFilter: colorMatchCss(prev.asset),
-      // 前のクリップの**最後の t 秒**を流す(書き出しが混ぜているのと同じ範囲)
-      localTime: prev.clip.outPoint - (t - elapsed) * prevSpeed,
+      localTime: source.localTime,
+      // 余白をぼかしで埋めるクリップは、消えていく側でもぼかし背景ごと映す(書き出しと同じ)
+      blurPx:
+        prev.clip.blurBackground && !prev.clip.fillCrop && outputScale > 0
+          ? blurSigmaFor(outputHeight) * outputScale * 2
+          : undefined,
       // 出てくる側の不透明度が `crossfadeOpacity`。重ねているのは消える側なので裏返す
       opacity: 1 - crossfadeOpacity(elapsed, t),
       speed: prevSpeed,
@@ -1428,6 +1450,11 @@ export function PreviewPlayer(): React.JSX.Element {
                 speed={crossfade.speed}
                 fit={{ ...crossfade.fit, filter: crossfade.colorFilter }}
                 seekToken={seekToken}
+                blur={
+                  crossfade.blurPx !== undefined
+                    ? { blurPx: crossfade.blurPx, colorFilter: crossfade.colorFilter }
+                    : undefined
+                }
               />
             )}
             {playbackError && <div className="preview-playback-error">{playbackError}</div>}

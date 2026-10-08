@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   audioClipDuration,
   buildTimedClips,
+  crossfadeSourceAt,
   findFreeAudioStart,
   toSourceSeconds,
   toTimelineSeconds,
@@ -240,5 +241,48 @@ describe('findFreeAudioStart — 重ならない置き場所', () => {
       const r = findFreeAudioStart([{ startTime: bad, inPoint: 0, outPoint: bad, speed: 1 }], 1, 2)
       expect(Number.isNaN(r), `${bad} -> ${r}`).toBe(false)
     }
+  })
+})
+
+describe('crossfadeSourceAt — 消えていく側として映す絵', () => {
+  const xf = { transitionIn: { type: 'crossfade', duration: 1 } }
+
+  it('繋ぎが手前のクリップより長いと、さらに手前のクリップの終わりを映す(書き出しと同じ)', () => {
+    const timed = buildTimedClips(
+      project({
+        clips: [clip('A', 5, 8), clip('B', 10, 10.3), clip('C', 0, 3, xf)]
+      } as unknown as Partial<Project>)
+    )
+    const head = crossfadeSourceAt(timed, 2, 0, 1)!
+    expect(head.timed.clip.id).toBe('A')
+    expect(head.localTime).toBeCloseTo(8 - 0.7, 6)
+    // 繋ぎの終わり近くは B の終わり
+    const tail = crossfadeSourceAt(timed, 2, 0.9, 1)!
+    expect(tail.timed.clip.id).toBe('B')
+    expect(tail.localTime).toBeCloseTo(10.2, 6)
+    // どの瞬間も、映すクリップの素材の範囲の中
+    for (let e = 0; e < 1; e += 0.05) {
+      const s = crossfadeSourceAt(timed, 2, e, 1)!
+      expect(s.localTime).toBeGreaterThanOrEqual(s.timed.clip.inPoint)
+      expect(s.localTime).toBeLessThanOrEqual(s.timed.clip.outPoint)
+    }
+  })
+
+  it('手前のクリップが十分長ければ、手前のクリップの最後の t 秒(速さも見る)', () => {
+    const timed = buildTimedClips(
+      project({
+        clips: [clip('A', 0, 8, { speed: 2 }), clip('C', 0, 3, xf)]
+      } as unknown as Partial<Project>)
+    )
+    const s = crossfadeSourceAt(timed, 1, 0.25, 1)!
+    expect(s.timed.clip.id).toBe('A')
+    expect(s.localTime).toBeCloseTo(8 - 0.75 * 2, 6)
+  })
+
+  it('先頭のクリップには繋ぎの相手が無い', () => {
+    const timed = buildTimedClips(
+      project({ clips: [clip('A', 0, 3)] } as unknown as Partial<Project>)
+    )
+    expect(crossfadeSourceAt(timed, 0, 0, 1)).toBeNull()
   })
 })
