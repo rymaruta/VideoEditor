@@ -1,5 +1,6 @@
 import type { Clip, MediaAsset, Project } from '@shared/types'
-import { effectiveTransitionSeconds } from '@shared/transition'
+import { computeMainTrackLayout } from '@shared/mainTrackLayout'
+import { projectFrameRate } from '@shared/frameRate'
 
 export interface TimedClip {
   clip: Clip
@@ -94,12 +95,25 @@ export function totalTimelineDuration(timedClips: TimedClip[]): number {
  * タイムライン秒の総尺側が正しい。これは「尺として見せる」ためだけの値。
  */
 export function totalExportDuration(timedClips: TimedClip[]): number {
-  const durations = timedClips.map((tc) => tc.end - tc.start)
-  const overlaps = effectiveTransitionSeconds(
-    durations,
-    timedClips.map((tc) => tc.clip.transitionIn)
+  return exportLayoutOf(timedClips).totalExportDuration
+}
+
+/**
+ * 各クリップの手前に実際に掛かる繋ぎの秒数(先頭は 0)。書き出しと同じ数え方
+ * (`computeMainTrackLayout`。尺をフレームに丸めてから繋ぎの長さを決める)。
+ * タイムラインの秒のまま数えると、とても短いクリップへの繋ぎが、プレビューでだけ掛かっていた
+ */
+export function exportTransitionSeconds(timedClips: TimedClip[]): number[] {
+  return exportLayoutOf(timedClips).transitionSeconds
+}
+
+function exportLayoutOf(timedClips: TimedClip[]): ReturnType<typeof computeMainTrackLayout> {
+  const clips = timedClips.map((tc) => tc.clip)
+  const fps = projectFrameRate(
+    clips,
+    timedClips.map((tc) => tc.asset)
   )
-  return durations.reduce((s, d) => s + d, 0) - overlaps.reduce((s, t) => s + t, 0)
+  return computeMainTrackLayout(clips, fps)
 }
 
 /**

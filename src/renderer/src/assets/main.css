@@ -1963,7 +1963,7 @@ h3 {
   min-width: 34px;
 }
 
-/* 音量の % はスライダーの見出し(title)でも分かるので、狭いときは出さない */
+/* 音量の % はスライダーの見出し(title)で分かるので出さない(見出しの列は狭く、1段に収めるため) */
 .track-label-controls .volume-percent {
   display: none;
 }

@@ -52,7 +52,7 @@ import {
 } from '@shared/audioUpmix'
 import { describeFfmpegError } from './ffmpegError'
 import { durationFromPacketCsv, finiteSeconds } from './mediaDuration'
-import { needsPreviewProxy } from './previewProxyService'
+import { isFourPointZero, needsPreviewProxy } from './previewProxyService'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
   'app.asar',
@@ -217,7 +217,13 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
           Boolean(audioStream),
           audioStream?.channels,
           normalizeChannelLayout(audioStream?.channel_layout)
-        )
+        ),
+        previewAudioNeedsFold:
+          Boolean(audioStream) &&
+          isFourPointZero(
+            audioStream?.channels,
+            normalizeChannelLayout(audioStream?.channel_layout)
+          )
       })
     })
   })

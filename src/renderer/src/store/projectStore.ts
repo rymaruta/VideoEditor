@@ -4635,17 +4635,21 @@ function remapOverlayLinks(
     // クリップの中で、無音カットなどで切り取られた所のテロップは、今までどおり次の断片の頭へ
     const first = newClips[0]
     const last = newClips[newClips.length - 1]
+    // 頭より前のものはクリップの頭からの距離、終わりより後ろのものはクリップの終わりからの距離を
+    // 保つ(無音カットで頭・終わりが切られても、置いた位置からずれない)
     if (sourceTime < original.inPoint && sourceTime < first.inPoint)
       return {
         ...o,
         linkedClipId: first.id,
-        linkOffset: (sourceTime - first.inPoint) / (first.speed || 1)
+        linkOffset: (sourceTime - original.inPoint) / speed
       }
     if (sourceTime >= original.outPoint && sourceTime >= last.outPoint)
       return {
         ...o,
         linkedClipId: last.id,
-        linkOffset: (sourceTime - last.inPoint) / (last.speed || 1)
+        linkOffset:
+          (last.outPoint - last.inPoint) / (last.speed || 1) +
+          (sourceTime - original.outPoint) / speed
       }
     const after = newClips.find((s) => s.inPoint >= sourceTime)
     if (after) return { ...o, linkedClipId: after.id, linkOffset: 0 }

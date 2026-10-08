@@ -230,6 +230,16 @@ describe('classifyFootage', () => {
         ]),
         `${a} ${b}`
       ).toHaveLength(2)
+    // 読み込んだフォルダそのものが DCIM なら、直下の DJI_001・DJI_002 は1台
+    expect(
+      classifyFootage(
+        [
+          file('DJI_001/DJI_0001.MP4', { device: 'X', recordedAt: 0, duration: 600 }),
+          file('DJI_002/DJI_0001.MP4', { device: 'X', recordedAt: 700, duration: 600 })
+        ],
+        'DCIM'
+      )
+    ).toHaveLength(1)
     // カメラが作る続きのフォルダ(100CANON → 101CANON・DJI_001 → DJI_002・Camera01 → Camera02・日付)は1台
     for (const [a, b] of [
       ['DCIM/100CANON', 'DCIM/101CANON'],

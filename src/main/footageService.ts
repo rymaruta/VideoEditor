@@ -2,7 +2,7 @@ import { trackUntilDone } from './liveProcesses'
 import { app } from 'electron'
 import { execFile } from 'child_process'
 import { readdir, stat } from 'fs/promises'
-import { join, relative } from 'path'
+import { basename, join, relative } from 'path'
 import { Worker } from 'worker_threads'
 import syncWorkerPath from './syncWorker?modulePath'
 import { ffmpegPath, ffprobePath } from './ffmpegService'
@@ -176,7 +176,7 @@ export async function scanFootage(
       }
     })
   )
-  return { root, sources: classifyFootage(probed), skipped, stats }
+  return { root, sources: classifyFootage(probed, basename(root)), skipped, stats }
 }
 
 let running: Worker | null = null

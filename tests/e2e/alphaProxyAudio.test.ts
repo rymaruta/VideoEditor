@@ -10,7 +10,7 @@ vi.mock('electron', () => ({
   app: { getPath: () => state.userData, isPackaged: false, getAppPath: () => process.cwd() }
 }))
 
-import { ffmpegPath } from '@main/ffmpegService'
+import { ffmpegPath, probeMedia } from '@main/ffmpegService'
 import { ensurePreviewProxy, needsPreviewProxy } from '@main/previewProxyService'
 
 const work = mkdtempSync(join(tmpdir(), 've-alphaaudio-'))
@@ -72,4 +72,31 @@ describe('4.0 の音声の試聴', () => {
     expect(needsPreviewProxy('h264', 'aac', true, true, 4, 'quad')).toBe(false)
     expect(needsPreviewProxy('h264', 'aac', true, true, 2, 'stereo')).toBe(false)
   })
+
+  it('そのまま再生できる 4.0 の素材も、試聴用の素材を作るよう知らせる(音の畳み方をそろえる)', async () => {
+    const src = join(work, 'four.mp4')
+    execFileSync(ffmpegPath, [
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=160x90:r=30:d=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=f=1000:d=1,pan=4.0|c0=0*c0|c1=0*c0|c2=0.1*c0|c3=0*c0',
+      '-shortest',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      src
+    ])
+    const meta = await probeMedia(src)
+    expect(meta.previewAudioNeedsFold).toBe(true)
+  }, 60_000)
 })

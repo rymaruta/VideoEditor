@@ -29,7 +29,7 @@ import {
   duckGainForLevel,
   isMainVoiceClip
 } from '@shared/ducking'
-import { crossfadeOpacity, effectiveTransitionSeconds } from '@shared/transition'
+import { crossfadeOpacity } from '@shared/transition'
 import { cropPreviewStyle } from '../lib/cropPreview'
 import { pipPreviewStyle } from '../lib/pipPreviewStyle'
 import {
@@ -40,6 +40,7 @@ import {
   nextTimedClip,
   totalTimelineDuration,
   totalExportDuration,
+  exportTransitionSeconds,
   TimedClip
 } from '../lib/timelineMath'
 import {
@@ -957,10 +958,9 @@ export function PreviewPlayer(): React.JSX.Element {
     if (!tc) return null
     const index = timedClips.findIndex((c) => c.clip.id === tc.clip.id)
     if (index <= 0) return null
-    const seconds = effectiveTransitionSeconds(
-      timedClips.map((c) => c.end - c.start),
-      timedClips.map((c) => c.clip.transitionIn)
-    )
+    // 繋ぎの長さは書き出しと同じ数え方で(タイムラインの秒のままだと、とても短いクリップへの繋ぎが
+    // プレビューでだけ掛かっていた)
+    const seconds = exportTransitionSeconds(timedClips)
     const t = seconds[index]
     if (t <= 0) return null
     // 範囲はまずクロスフェードだけ。`fade`(黒を挟む)と `wipe` は書き出し側の

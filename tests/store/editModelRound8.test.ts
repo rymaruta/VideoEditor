@@ -337,6 +337,45 @@ describe('第8回: 編集モデル', () => {
     expect(o.startTime).toBeCloseTo(10, 9)
   })
 
+  it('クリップの外に置いた追従テロップは、無音カットで頭・終わりが切られても置いた位置のまま', () => {
+    const setup = (linkedClipId: string, linkOffset: number, start: number): void =>
+      S.setState({
+        project: {
+          ...st().project,
+          clips: [
+            { id: 'c1', assetId: 'A', inPoint: 0, outPoint: 10, speed: 1 },
+            { id: 'c2', assetId: 'B', inPoint: 0, outPoint: 10, speed: 1 }
+          ],
+          textOverlays: [
+            {
+              id: 'o1',
+              text: 'あ',
+              startTime: start,
+              endTime: start + 0.8,
+              style: {},
+              source: 'manual',
+              linkedClipId,
+              linkOffset
+            }
+          ]
+        } as unknown as Project
+      })
+    // c2 の頭の 1 秒前(c1 の終わり)に置いたテロップ。c2 の頭の 3 秒が切られる
+    setup('c2', -1, 9)
+    st().replaceClipRange('c2', [
+      { id: 'p1', assetId: 'B', inPoint: 3, outPoint: 6, speed: 1 },
+      { id: 'p2', assetId: 'B', inPoint: 7, outPoint: 10, speed: 1 }
+    ])
+    expect(st().project.textOverlays[0].startTime).toBeCloseTo(9, 9)
+    // c1 の終わりの 1 秒後に置いたテロップ。c1 の終わりの 2 秒が切られる(c1 は 6 秒になる)
+    setup('c1', 11, 11)
+    st().replaceClipRange('c1', [
+      { id: 'q1', assetId: 'A', inPoint: 0, outPoint: 4, speed: 1 },
+      { id: 'q2', assetId: 'A', inPoint: 6, outPoint: 8, speed: 1 }
+    ])
+    expect(st().project.textOverlays[0].startTime).toBeCloseTo(7, 9)
+  })
+
   it('差し込みの画を短いファイルへ差し替えても、マイクの音は本編に付いていく', () => {
     roughCut([
       [0, 10],

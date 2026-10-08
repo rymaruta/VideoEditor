@@ -6,6 +6,7 @@ import {
   toSourceSeconds,
   toTimelineSeconds,
   totalExportDuration,
+  exportTransitionSeconds,
   totalTimelineDuration
 } from '@renderer/lib/timelineMath'
 import type { Project } from '@shared/types'
@@ -107,6 +108,20 @@ describe('totalTimelineDuration / totalExportDuration', () => {
     expect(totalExportDuration(timed)).toBe(9)
   })
 
+  it('とても短いクリップへの繋ぎは、書き出しと同じく尺をフレームに丸めてから決める', () => {
+    const timed = buildTimedClips(
+      project({
+        clips: [
+          clip('a', 0, 2.02),
+          clip('b', 0, 0.085, { transitionIn: { type: 'crossfade', duration: 1 } }),
+          clip('c', 0, 2)
+        ]
+      } as Partial<Project>)
+    )
+    // 書き出し(30fps)では 0.085 秒のクリップの尺が丸めで縮み、繋ぎは掛からない
+    expect(exportTransitionSeconds(timed)).toEqual([0, 0, 0])
+  })
+
   it('つなぎが無ければ両者は一致する', () => {
     const timed = buildTimedClips(
       project({ clips: [clip('a', 0, 5), clip('b', 0, 5)] } as Partial<Project>)
@@ -120,7 +135,7 @@ describe('totalTimelineDuration / totalExportDuration', () => {
     expect(totalExportDuration(timed)).toBe(0)
   })
 
-  it('【不変条件】書き出しの総尺 <= 画面の総尺、どちらも 0 以上の有限', () => {
+  it('【不変条件】書き出しの総尺 <= 画面の総尺(フレームへの丸めの半コマまで)、どちらも 0 以上の有限', () => {
     const rnd = seeded(24680)
     for (let i = 0; i < 2000; i++) {
       const n = Math.floor(rnd() * 6)
@@ -138,7 +153,8 @@ describe('totalTimelineDuration / totalExportDuration', () => {
       expect(Number.isFinite(t) && Number.isFinite(e), `n=${n}`).toBe(true)
       expect(t).toBeGreaterThanOrEqual(0)
       expect(e).toBeGreaterThanOrEqual(0)
-      expect(e).toBeLessThanOrEqual(t + 1e-9)
+      // 書き出しは尺をフレーム(30fps)に丸めるので、半コマまでは長くなりうる
+      expect(e).toBeLessThanOrEqual(t + 0.5 / 30 + 1e-9)
     }
   })
 })

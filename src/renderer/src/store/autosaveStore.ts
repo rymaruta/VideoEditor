@@ -37,7 +37,9 @@ export const useAutosaveStore = create<AutosaveState>((set, get) => ({
       discarded: status.discardedExists ? { mtimeMs: status.discardedMtimeMs } : null,
       // 確認を出したまま(メニューの新規・開く・保存で)自動保存が退避されたら、確認も閉じる
       // (閉じないと、無いファイルを「復元する」で失敗していた)。新しく出すことはしない
-      pending: status.exists ? get().pending : null
+      // 確認に出している自動保存がもう別のもの(このセッションの自動保存が前回の分を退避して書いた)
+      // なら閉じる。残すと「復元する」で、前回の作業ではなく今回の作業を読み込んでいた
+      pending: status.exists && get().pending?.mtimeMs === status.mtimeMs ? get().pending : null
     })
   },
   clearPending: () => set({ pending: null })

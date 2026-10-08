@@ -86,3 +86,10 @@ describe('wrapGlyphs: 英字の単語の中の「·」・結合文字', () => {
     ])
   })
 })
+
+describe('wrapGlyphs: 和文の囲み文字', () => {
+  it('「㈱」を英字の単語のように扱わず、文字のあいだで折る', () => {
+    const lines = wrapGlyphs(parseTelopMarkup('今日は 株式会社テスト㈱です'), 11, () => 1)
+    expect(lines.map((l) => l.map((x) => x.ch).join(''))[0]).toBe('今日は 株式会社テスト')
+  })
+})

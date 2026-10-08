@@ -164,6 +164,9 @@ function isSpacedWordChar(ch: string): boolean {
     )
   )
     return false
+  // 「㈱」「㍻」「㊤」のような、和文で使う囲み文字・組み文字(文字の種類は「共通」だが、使う文字に
+  // 漢字・かなが挙がっている)も和文。英語でも使う「·」(中点)は除く
+  if (head !== '\u00b7' && /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}]/u.test(head)) return false
   return /[\p{L}\p{N}\p{P}\p{S}\p{M}]/u.test(ch)
 }
 

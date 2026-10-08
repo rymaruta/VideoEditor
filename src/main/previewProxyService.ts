@@ -45,7 +45,7 @@ export function needsPreviewProxy(
  * 4.0(L・R・センター・後ろ中央)の音声。Chromium はどの 4ch も quad として畳む(センターが左だけに
  * なる)ので、書き出しと同じ畳み方をした試聴用の素材で聞かせる
  */
-function isFourPointZero(channels: number | undefined, layout: string | undefined): boolean {
+export function isFourPointZero(channels: number | undefined, layout: string | undefined): boolean {
   return channels === 4 && layout === '4.0'
 }
 

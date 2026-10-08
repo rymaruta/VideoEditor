@@ -88,8 +88,14 @@ export function MediaBin(): React.JSX.Element {
     assetId: string,
     filePath: string,
     codecSaysUnplayable: boolean,
-    hasVideo: boolean
+    hasVideo: boolean,
+    /** そのまま再生できても、試聴用の素材で聞かせる(4.0 の音声。音の畳み方を書き出しとそろえる) */
+    audioNeedsFold = false
   ): Promise<void> {
+    if (audioNeedsFold) {
+      await buildPreviewProxy(assetId, filePath)
+      return
+    }
     if (await canPreviewFile(filePath, hasVideo)) return
     if (!codecSaysUnplayable) {
       // The file failed to load for a reason a transcode won't fix (corrupt, or a
@@ -239,7 +245,13 @@ export function MediaBin(): React.JSX.Element {
         }
       }
       relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl)
-      void ensurePreviewable(assetId, filePath, meta.needsPreviewProxy, meta.hasVideo)
+      void ensurePreviewable(
+        assetId,
+        filePath,
+        meta.needsPreviewProxy,
+        meta.hasVideo,
+        meta.previewAudioNeedsFold
+      )
     } catch (e) {
       setError(formatIpcError(e))
     } finally {
@@ -275,7 +287,11 @@ export function MediaBin(): React.JSX.Element {
     // never be imported while the user assumes every valid selection was added.
     const failures: string[] = []
     const imported: MediaAsset[] = []
-    const proxyCandidates: { asset: MediaAsset; codecSaysUnplayable: boolean }[] = []
+    const proxyCandidates: {
+      asset: MediaAsset
+      codecSaysUnplayable: boolean
+      audioNeedsFold: boolean
+    }[] = []
     for (const filePath of paths) {
       try {
         // 静止画はワイプ・全面(CG)のトラック用の素材にする(プレビュー用の変換は要らない)
@@ -308,7 +324,11 @@ export function MediaBin(): React.JSX.Element {
           thumbnailDataUrl
         }
         imported.push(asset)
-        proxyCandidates.push({ asset, codecSaysUnplayable: meta.needsPreviewProxy })
+        proxyCandidates.push({
+          asset,
+          codecSaysUnplayable: meta.needsPreviewProxy,
+          audioNeedsFold: meta.previewAudioNeedsFold ?? false
+        })
       } catch (e) {
         failures.push(`${fileNameFromPath(filePath)}: ${formatIpcError(e)}`)
       }
@@ -323,8 +343,14 @@ export function MediaBin(): React.JSX.Element {
     }
     // Assets are added first and the (potentially slow) transcode runs afterwards, so
     // the media list appears immediately instead of freezing until ffmpeg finishes.
-    for (const { asset, codecSaysUnplayable } of proxyCandidates) {
-      void ensurePreviewable(asset.id, asset.filePath, codecSaysUnplayable, asset.hasVideo)
+    for (const { asset, codecSaysUnplayable, audioNeedsFold } of proxyCandidates) {
+      void ensurePreviewable(
+        asset.id,
+        asset.filePath,
+        codecSaysUnplayable,
+        asset.hasVideo,
+        audioNeedsFold
+      )
     }
     const messages: string[] = []
     if (unsupported.length > 0) messages.push(unsupportedMessage(unsupported))

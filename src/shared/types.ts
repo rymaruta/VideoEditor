@@ -423,6 +423,11 @@ export interface MediaProbeResult {
   audioCodec: string
   /** True when the preview <video> cannot decode this file and a proxy is required. */
   needsPreviewProxy: boolean
+  /**
+   * そのまま再生はできるが、音の畳み方がプレビュー(Chromium)と書き出しで違うので、試聴用の素材で
+   * 聞かせる(4.0 の音声。Chromium はセンターを左だけに畳む)
+   */
+  previewAudioNeedsFold?: boolean
 }
 
 export interface SilenceRange {

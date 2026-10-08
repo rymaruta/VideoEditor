@@ -123,9 +123,13 @@ const DCIM_ONLY_FOLDER = /^(?:DJI_\d{3,4}|Camera\d{2})$/i
  * フォルダらしい)。CamA/C0001 と CamB/C0001 のように名前で分けたフォルダは、同じ機種でも別のカメラ
  * (時刻が重ならないだけでまとめると、2台のカメラが1台になっていた)
  */
-function cardLikeSiblings(a: string, b: string): boolean {
+function cardLikeSiblings(a: string, b: string, rootName = ''): boolean {
   const last = (f: string): string => (f.split('/').pop() ?? '').normalize('NFKC')
-  const inDcim = (f: string): boolean => /^dcim$/i.test(last(parentOf(f)))
+  // 読み込んだフォルダそのものが DCIM のとき(SD/DCIM を選んだ)は、直下のフォルダが DCIM の中
+  const inDcim = (f: string): boolean =>
+    parentOf(f) === ''
+      ? /^dcim$/i.test(rootName.normalize('NFKC'))
+      : /^dcim$/i.test(last(parentOf(f)))
   const ok = (f: string): boolean =>
     CARD_NAME.test(last(f)) ||
     DCIM_FOLDER.test(last(f)) ||
@@ -168,7 +172,11 @@ function byRecordingOrder(a: ProbedFile, b: ProbedFile): number {
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
-export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
+export function classifyFootage(
+  files: readonly ProbedFile[],
+  /** 読み込んだフォルダの名前(DCIM そのものを選んだかを見分ける) */
+  rootName = ''
+): FootageSource[] {
   const all = files.filter((f) => f.hasVideo || f.hasAudio)
   // 取り出した音声トラックと Craig の話者別ファイルは、1本ずつが1つの音源(まとめない)
   const single = all.filter(
@@ -240,7 +248,7 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
     const parent = parentOf(c.g.folder)
     const chain = camChains.find(
       (x) =>
-        ((x.parent === parent && cardLikeSiblings(x.group.folder, c.g.folder)) ||
+        ((x.parent === parent && cardLikeSiblings(x.group.folder, c.g.folder, rootName)) ||
           sameCameraCards(x.group.folder, c.g.folder)) &&
         x.group.device === c.g.device &&
         x.group.prefix === c.g.prefix &&
