@@ -1809,6 +1809,97 @@ describe('第44回: 収録のカメラのワイプに人が置いた画', () => 
   })
 })
 
+describe('第45回: 移した画はカメラの上に重ねる', () => {
+  const rough = (
+    overlayClips: { assetId: string; startTime: number; inPoint: number; outPoint: number }[]
+  ): void =>
+    st().applyRoughCut(
+      {
+        main: [
+          [0, 10],
+          [20, 30]
+        ].map(([a, b]) => ({ assetId: 'camA', inPoint: a, outPoint: b, speed: 1 })),
+        audio: [
+          {
+            name: '出演者A',
+            sourceId: 'M',
+            volume: 1,
+            clips: [{ assetId: 'micM', startTime: 0, inPoint: 0, outPoint: 10, speed: 1 }]
+          }
+        ],
+        overlays: [{ name: '顔', sourceId: 'A', clips: overlayClips }],
+        duration: 20,
+        spans: []
+      } as never,
+      []
+    )
+  const cams = [
+    { assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 },
+    { assetId: 'camA', startTime: 10, inPoint: 20, outPoint: 30 }
+  ]
+  const order = (assetId: string): { cam: number; hand: number } => {
+    const ts = st().project.videoOverlayTracks
+    return {
+      cam: ts.findIndex((t) => t.multicamSourceId === 'A'),
+      hand: ts.findIndex((t) => !t.multicamSourceId && t.clips.some((c) => c.assetId === assetId))
+    }
+  }
+
+  it('仮編集を作り直しても、ワイプに置いた画はカメラの上(後ろの段)', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, { ...asset('logo', 5), filePath: '/rec/logo.png' }],
+        videoOverlayTracks: [
+          {
+            id: 'faceT',
+            name: '顔',
+            multicamSourceId: 'A',
+            hidden: false,
+            position: 'top-right',
+            scale: 0.3,
+            clips: [
+              { id: 'f1', assetId: 'camA', startTime: 0, inPoint: 0, outPoint: 10 },
+              { id: 'f2', assetId: 'camA', startTime: 10, inPoint: 20, outPoint: 30 },
+              { id: 'logoC', assetId: 'logo', startTime: 12, inPoint: 0, outPoint: 2 }
+            ]
+          }
+        ]
+      } as unknown as Project
+    })
+    rough(cams)
+    const o = order('logo')
+    expect(o.hand).toBeGreaterThan(o.cam)
+    // 作り直した後にまた置いた画も、まとめた先がカメラの上
+    const q = st().project
+    S.setState({
+      project: {
+        ...q,
+        assets: [...q.assets, { ...asset('logo2', 5), filePath: '/rec/logo2.png' }],
+        videoOverlayTracks: q.videoOverlayTracks.map((t) =>
+          t.multicamSourceId === 'A'
+            ? {
+                ...t,
+                clips: [
+                  ...t.clips,
+                  { id: 'logo2C', assetId: 'logo2', startTime: 15, inPoint: 0, outPoint: 2 }
+                ]
+              }
+            : t
+        )
+      }
+    })
+    commitAsOwnStep('t', () => st().updateClipTrim(st().project.clips[0].id, 0, 7))
+    const o2 = order('logo2')
+    expect(o2.hand).toBeGreaterThan(o2.cam)
+  })
+})
+
 describe('第44回: 収録の音のトラックから移した音のトラック', () => {
   it('2回目に移した音も同じ「(手で置いた音)」の1本にまとまり、声の基準の印も引き継ぐ', () => {
     setup([

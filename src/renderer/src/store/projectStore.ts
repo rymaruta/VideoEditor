@@ -3468,16 +3468,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         // 全アングルを本編で切り替えるので、同期で作った PiP のカメラは外す。
         // ワイプで常に出すカメラ(ゲーム実況の顔カメラ)は、本編と同じ区間で並べ直す
         // (人が変えた置き場所・大きさ・表示は残す)
+        // 重なりの順は元のまま: 作り直したカメラのトラックは元のトラックの位置に置き、人が置いた画は
+        // そのすぐ上へ(前へ寄せて並べると、顔カメラの上に置いた画・ワイプが、カメラの下に回って隠れていた)
         videoOverlayTracks: mergeHandTracks(
-          [
-            ...state.project.videoOverlayTracks.filter((t) => !t.multicamSourceId),
-            // 収録のカメラのワイプに人が置いた画(ロゴ・画像)は消さずに、別のトラックへ移す
-            ...state.project.videoOverlayTracks.flatMap((t) => {
-              if (!t.multicamSourceId) return []
-              const extras = t.clips.filter((c) => !recorded.has(c.assetId))
-              return extras.length > 0 ? [handOverlayTrack(t, extras)] : []
-            }),
-            ...(cut.overlays ?? []).map((o) => {
+          (() => {
+            const overlays = cut.overlays ?? []
+            const rebuild = (o: (typeof overlays)[number]): VideoOverlayTrack => {
               const prev = state.project.videoOverlayTracks.find(
                 (t) => t.multicamSourceId === o.sourceId
               )
@@ -3491,8 +3487,20 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
                 scale: prev?.scale ?? FACE_PIP_SCALE,
                 clips: o.clips.map((c) => ({ id: uuid(), ...c }))
               }
+            }
+            const placed = new Set<string>()
+            const ordered = state.project.videoOverlayTracks.flatMap((t): VideoOverlayTrack[] => {
+              if (!t.multicamSourceId) return [t]
+              // 収録のカメラのワイプに人が置いた画(ロゴ・画像)は消さずに、別のトラックへ移す
+              const extras = t.clips.filter((c) => !recorded.has(c.assetId))
+              const hand = extras.length > 0 ? [handOverlayTrack(t, extras)] : []
+              const o = overlays.find((x) => x.sourceId === t.multicamSourceId)
+              if (!o || placed.has(o.sourceId)) return hand
+              placed.add(o.sourceId)
+              return [rebuild(o), ...hand]
             })
-          ],
+            return [...ordered, ...overlays.filter((o) => !placed.has(o.sourceId)).map(rebuild)]
+          })(),
           state.project.videoOverlayTracks
         ),
         // 作り直すときに今の本編と比べられるよう、組んだ本編を共通の時刻で覚える
@@ -5213,21 +5221,26 @@ function mergeHandTracks<
 >(tracks: T[], before: readonly T[]): T[] {
   const existed = new Set(before.map((t) => t.id))
   const isNew = (t: T): boolean => !existed.has(t.id) && !t.multicamSourceId
-  const target = (t: T): T | undefined =>
-    tracks.find((o) => existed.has(o.id) && !o.multicamSourceId && o.name === t.name)
-  const extra = new Map<string, T['clips']>()
-  for (const t of tracks) {
-    const to = isNew(t) ? target(t) : undefined
-    if (to) extra.set(to.id, [...(extra.get(to.id) ?? []), ...t.clips])
+  const out = [...tracks]
+  for (let k = 0; k < out.length; k++) {
+    const t = out[k]
+    if (!isNew(t)) continue
+    const at = out.findIndex((o) => existed.has(o.id) && !o.multicamSourceId && o.name === t.name)
+    if (at < 0) continue
+    const clips = [...out[at].clips, ...t.clips].sort((a, b) => a.startTime - b.startTime)
+    if (at > k) {
+      // 前からあるトラックが上(後ろ)にあれば、そこへまとめる
+      out[at] = { ...out[at], clips }
+      out.splice(k, 1)
+    } else {
+      // 前からあるトラックが元のトラック(カメラ・マイク)より下にあれば、元のトラックのすぐ上
+      // (今回作った位置)へ動かしてまとめる(下に置くと、カメラの絵に隠れて見えなかった)
+      out[k] = { ...out[at], clips }
+      out.splice(at, 1)
+    }
+    k--
   }
-  if (extra.size === 0) return tracks
-  return tracks.flatMap((t) => {
-    if (isNew(t) && target(t)) return []
-    const more = extra.get(t.id)
-    return more
-      ? [{ ...t, clips: [...t.clips, ...more].sort((a, b) => a.startTime - b.startTime) }]
-      : [t]
-  })
+  return out
 }
 
 function followMainEdit(
