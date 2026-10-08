@@ -141,6 +141,7 @@ function installApi(streamer: Line[], friend: Line[], calls: { asrPaths: string[
     onLlmProgress: noop,
     llmRun: async () => [],
     showKitScan: async () => ({ se: [], bgm: [], cg: [] }),
+    checkFilesExist: async (paths: string[]) => paths.filter((p) => !existsSync(p)),
     saveProject: async (path: string, project: unknown) =>
       saveProjectFile(path, project as Parameters<typeof saveProjectFile>[1]),
     exportProject: (payload: Parameters<typeof exportProject>[0]) =>
