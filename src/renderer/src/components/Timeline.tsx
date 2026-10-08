@@ -852,13 +852,8 @@ export function Timeline(): React.JSX.Element {
 
   useEffect(() => {
     function handleDeleteKey(e: KeyboardEvent): void {
-      const target = e.target
-      if (target instanceof HTMLElement) {
-        const tag = target.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) {
-          return
-        }
-      }
+      // 文字を打つ欄の判定は共有の関数で(チェックボックス・スライダーは欄に数えない。本編のクリップと同じ)
+      if (isTypingTarget(e.target, e.key)) return
       if (isTimelineCovered()) return
       // Audio/PiP-overlay clip selection lives in local state here, invisible to the
       // global keyboard shortcut hook (which only knows about the main clips track's

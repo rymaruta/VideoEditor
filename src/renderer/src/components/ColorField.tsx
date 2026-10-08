@@ -261,6 +261,8 @@ function ColorPopover({
   )
   const commitHex = (): void => {
     if (hexDraft === null) return
+    // Esc で閉じるとき(見本へフォーカスを戻すので欄の blur が先に来る)は確定しない
+    if (escapedRef.current) return
     const next = normalizeHex(hexDraft)
     if (next) onChange(next)
     setHexDraft(null)
