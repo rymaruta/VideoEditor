@@ -262,7 +262,14 @@ function clampSeekSeconds(filePath: string, atSeconds: number): Promise<number> 
         (st) => st.codec_type === 'video' && !st.disposition?.attached_pic
       )
       const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v))
-      const videoDuration = num(video?.duration)
+      // Matroska(OBS の .mkv・.webm)はストリームの長さを tags.DURATION("00:00:02.000000000")にだけ持つ
+      const tagged = (video?.tags as { DURATION?: unknown } | undefined)?.DURATION
+      const fromTag =
+        typeof tagged === 'string' && /^\d+:\d+:[\d.]+$/.test(tagged)
+          ? tagged.split(':').reduce((acc, part) => acc * 60 + Number(part), 0)
+          : NaN
+      const direct = num(video?.duration)
+      const videoDuration = Number.isFinite(direct) && direct > 0 ? direct : fromTag
       const offset = num(video?.start_time) - num(data.format?.start_time)
       const videoEnd =
         Number.isFinite(videoDuration) && videoDuration > 0

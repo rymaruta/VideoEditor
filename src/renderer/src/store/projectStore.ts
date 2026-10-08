@@ -5227,8 +5227,23 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const out: AudioTrackClip[] = []
     const endOf = (c: AudioTrackClip): number => c.startTime + lenOf(c)
     /** 一番後ろで終わるクリップの位置 */
-    const tailIndex = (): number =>
-      out.reduce((best, c, i) => (endOf(c) >= endOf(out[best]) - 1e-9 ? i : best), 0)
+    // 延ばすのは曲の本筋。ほかのクリップの中に収まる(重ねただけの)短いクリップは延ばさない
+    // (延ばすと、その上にループを積み、曲が3〜4重に鳴っていた)
+    // (曲の頭から始め直すクリップは、重なりの中に収まっていても本筋のループ)
+    const mainLine = (c: AudioTrackClip): boolean =>
+      c.inPoint <= 1e-6 ||
+      !out.some(
+        (o) =>
+          o !== c &&
+          o.startTime <= c.startTime + 1e-6 &&
+          endOf(o) >= endOf(c) - 1e-6 &&
+          lenOf(o) > lenOf(c) + 1e-6
+      )
+    const tailIndex = (): number => {
+      const pool = out.some(mainLine) ? out.filter(mainLine) : out
+      const best = pool.reduce((a, c) => (endOf(c) >= endOf(a) - 1e-9 ? c : a))
+      return out.indexOf(best)
+    }
     // 頭をずらした並び。写した終わりより後ろで始まるクリップは落とし、またぐクリップは詰める。
     // (重ねて始まる次のループの切れ端を残さない)
     // 終わりをまたぐ「ここで足したループ」(id に ~)は、その手前で曲の終わりまで鳴るクリップが終わりまで
@@ -5240,7 +5255,8 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       for (const p of chain) {
         if (p === r || !Number.isFinite(limit) || Math.abs(p.outPoint - limit) > 1e-3) continue
         const pe = p.startTime + lenOf(p)
-        if (p.startTime >= r.startTime || pe < r.startTime - 1e-6) continue
+        // 同じ時刻に始まるもの(手前が重なりより短く、足したループが同じ所から始まった)も手前に数える
+        if (p.startTime > r.startTime + 1e-6 || pe < r.startTime - 1e-6) continue
         if (r.startTime + lenOf(r) <= pe + 1e-6) continue
         // 足したループは、その時の一番後ろで終わるクリップに続けて足している
         if (!best || pe > best.startTime + lenOf(best)) best = p

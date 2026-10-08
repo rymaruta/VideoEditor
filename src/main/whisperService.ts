@@ -140,7 +140,12 @@ export async function transcribeRange(
   if (!result.chunks || result.chunks.length === 0) {
     const text = result.text?.trim()
     if (!text) return []
-    return fitSegmentsToRange([{ start: rangeStart, end: rangeEnd, text }], rangeStart, rangeEnd)
+    return fitSegmentsToRange(
+      [{ start: rangeStart, end: rangeEnd, text }],
+      rangeStart,
+      rangeEnd,
+      quietIn(audio, rangeStart)
+    )
   }
 
   return fitSegmentsToRange(
@@ -152,8 +157,27 @@ export async function transcribeRange(
       }))
       .filter((seg) => seg.text.length > 0),
     rangeStart,
-    rangeEnd
+    rangeEnd,
+    quietIn(audio, rangeStart)
   )
+}
+
+/** ほぼ無音とみなす大きさ(RMS。-50dBFS ほど) */
+const QUIET_RMS = 0.003
+
+/**
+ * 読んだ音(16kHz)で、素材の時刻 [start, end) がほぼ無音かを返す関数。決まり文句の作り話を、
+ * 無音の所に出たものだけ捨てるのに使う
+ */
+function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: number) => boolean {
+  return (start, end) => {
+    const a = Math.max(0, Math.floor((start - rangeStart) * 16000))
+    const b = Math.min(audio.length, Math.ceil((end - rangeStart) * 16000))
+    if (b <= a) return true
+    let sum = 0
+    for (let i = a; i < b; i++) sum += audio[i] * audio[i]
+    return Math.sqrt(sum / (b - a)) < QUIET_RMS
+  }
 }
 
 function buildWordSegment(words: { raw: string; start: number; end: number }[]): TranscriptSegment {
@@ -222,5 +246,5 @@ export async function transcribeWordsRange(
     current.push(w)
   }
   if (current.length > 0) segments.push(buildWordSegment(current))
-  return fitSegmentsToRange(segments, rangeStart, rangeEnd)
+  return fitSegmentsToRange(segments, rangeStart, rangeEnd, quietIn(audio, rangeStart))
 }

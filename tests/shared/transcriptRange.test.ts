@@ -30,3 +30,16 @@ describe('fitSegmentsToRange — 区間を指定した文字起こしを区間�
     expect(out[0].end).toBe(5)
   })
 })
+
+describe('fitSegmentsToRange — 本当に言った決まり文句', () => {
+  it('音が鳴っている所の「ご視聴ありがとうございました」は残し、無音の所のものは捨てる', async () => {
+    const { fitSegmentsToRange } = await import('../../src/shared/transcript')
+    const seg = [{ start: 1, end: 3, text: 'ご視聴ありがとうございました' }]
+    expect(fitSegmentsToRange(seg, 0, 5, () => false)).toHaveLength(1)
+    expect(fitSegmentsToRange(seg, 0, 5, () => true)).toHaveLength(0)
+    // 繰り返しの作り話は、音が鳴っていても捨てる
+    expect(
+      fitSegmentsToRange([{ start: 0, end: 3, text: 'お前は、'.repeat(12) }], 0, 5, () => false)
+    ).toHaveLength(0)
+  })
+})

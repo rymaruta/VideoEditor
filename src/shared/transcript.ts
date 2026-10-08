@@ -87,6 +87,12 @@ function repetitionLoopLength(t: string): number {
   return longest
 }
 
+/** 決まり文句の作り話(「ご視聴ありがとうございました」など。本当に言うこともある)か */
+export function isStockHallucination(text: string): boolean {
+  const t = text.trim()
+  return t !== '' && HALLUCINATIONS.some((r) => r.test(t))
+}
+
 export function isLikelyHallucination(text: string): boolean {
   const t = text.trim()
   if (t === '' || HALLUCINATIONS.some((r) => r.test(t))) return true
@@ -134,11 +140,26 @@ export function fitSegmentsToRange<
     text: string
     words?: { start: number; end: number; text: string }[]
   }
->(segments: readonly S[], rangeStart: number, rangeEnd: number): S[] {
+>(
+  segments: readonly S[],
+  rangeStart: number,
+  rangeEnd: number,
+  /**
+   * その時刻の音がほぼ無音か。決まり文句(「ご視聴ありがとうございました」)は、無音の所に出たときだけ
+   * 作り話として捨てる(番組の締めで本当に言った言葉まで、テロップから消えていた)。省略時は常に捨てる
+   */
+  isQuiet?: (start: number, end: number) => boolean
+): S[] {
   const clamp = (t: number): number => Math.min(rangeEnd, Math.max(rangeStart, t))
   const out: S[] = []
   for (const seg of segments) {
-    if (isLikelyHallucination(seg.text)) continue
+    if (isLikelyHallucination(seg.text)) {
+      // 決まり文句だけなら、音が鳴っている所のものは本当の言葉として残す(繰り返しの作り話は常に捨てる)
+      const t = seg.text.trim()
+      const repetition = repetitionLoopLength(t) >= t.length * LOOP_SHARE
+      const spoken = isQuiet !== undefined && !isQuiet(seg.start, seg.end)
+      if (!(isStockHallucination(t) && !repetition && spoken)) continue
+    }
     if (!seg.words) {
       if (seg.start >= rangeEnd) continue
       out.push({ ...seg, start: clamp(seg.start), end: Math.max(clamp(seg.start), clamp(seg.end)) })

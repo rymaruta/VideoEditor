@@ -41,6 +41,32 @@ describe.skipIf(!existsSync(ffmpegPath))('サムネイル・波形の端の扱�
     }
   }, 60_000)
 
+  it('Matroska(.mkv・.webm)でも、映像の終わりより後ろのサムネイルは最後の1枚', async () => {
+    for (const [name, vcodec, acodec] of [
+      ['short.mkv', 'libx264', 'libvorbis'],
+      ['short.webm', 'libvpx', 'libopus']
+    ] as const) {
+      const src = join(work, name)
+      ff([
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=s=160x90:r=30:d=2',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=f=440:d=8',
+        '-c:v',
+        vcodec,
+        ...(vcodec === 'libx264' ? ['-pix_fmt', 'yuv420p'] : []),
+        '-c:a',
+        acodec,
+        src
+      ])
+      await expect(generateThumbnailDataUrl(src, 5), name).resolves.toMatch(/^data:image\/jpeg/)
+    }
+  }, 120_000)
+
   it('音声が遅れて始まる素材の波形は、鳴った時刻の所に描く', async () => {
     const src = join(work, 'late.mp4')
     ff([

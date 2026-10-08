@@ -906,3 +906,51 @@ describe('第25回: ループの始め直しの扱い', () => {
     expect(track('bgmT').find((c) => c.id === 'A')!.loopCross).toBeUndefined()
   })
 })
+
+describe('第26回: 足したループの手前', () => {
+  it('手前が重なりより短く、同じ時刻に始まったループも、戻したときに落とす', () => {
+    setup([
+      [0, 10],
+      [20, 24.5]
+    ])
+    const p = st().project
+    const start: Project['audioTracks'][number]['clips'] = [
+      {
+        id: 'b0',
+        assetId: 'loop',
+        startTime: 0,
+        inPoint: 0,
+        outPoint: 8,
+        loopCross: { overlap: 2 }
+      },
+      { id: 'b0~1', assetId: 'loop', startTime: 6, inPoint: 0, outPoint: 8 },
+      { id: 'b0~2', assetId: 'loop', startTime: 12, inPoint: 0, outPoint: 2.5 },
+      { id: 'u1', assetId: 'loop', startTime: 12.893, inPoint: 6.039, outPoint: 7.646 }
+    ]
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', 8, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === 'bgmT' ? { ...t, clips: start } : t))
+      }
+    })
+    const c1 = st().project.clips[1].id
+    st().updateClipSpeed(c1, 0.75)
+    st().updateClipSpeed(c1, 1)
+    const back = [...track('bgmT')].sort(
+      (a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id)
+    )
+    expect(
+      back.map((c) => [
+        c.id,
+        +c.startTime.toFixed(6),
+        +c.inPoint.toFixed(6),
+        +c.outPoint.toFixed(6)
+      ])
+    ).toEqual(
+      [...start]
+        .sort((a, b) => a.startTime - b.startTime || a.id.localeCompare(b.id))
+        .map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])
+    )
+  })
+})
