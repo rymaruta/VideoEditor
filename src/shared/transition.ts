@@ -1,4 +1,5 @@
 import type { TransitionType } from './types'
+import { frameRoundedDurations } from './frameRate'
 
 /**
  * 繋ぎ(トランジション)の**実際に掛かる長さ**を決める規則。
@@ -85,13 +86,20 @@ export function transitionSecondsForClip(
     speed?: number
     transitionIn?: TransitionSpec | null
   }[],
-  clipId: string
+  clipId: string,
+  /**
+   * 書き出しのフレームレート。渡すと、書き出しと同じく尺をフレームに丸めてから数える
+   * (渡さないとタイムラインの秒のまま。とても短いクリップへの繋ぎが、書き出しでは掛からないのに
+   * 「実際は 0.03 秒だけ掛かります」と出ていた)
+   */
+  fps?: number
 ): { specified: number; effective: number } | null {
   const index = clips.findIndex((c) => c.id === clipId)
   if (index < 0) return null
   const spec = clips[index].transitionIn
   if (!spec || spec.type === 'none') return null
-  const durations = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
+  const timeline = clips.map((c) => (c.outPoint - c.inPoint) / (c.speed || 1))
+  const durations = fps && fps > 0 ? frameRoundedDurations(timeline, fps) : timeline
   const effective = effectiveTransitionSeconds(
     durations,
     clips.map((c) => c.transitionIn)

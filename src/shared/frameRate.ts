@@ -112,3 +112,21 @@ export function frameCountForDuration(durationSeconds: number, fps: number): num
   if (!Number.isFinite(fps) || fps <= 0) return 0
   return Math.max(0, Math.round(durationSeconds * fps))
 }
+
+/**
+ * 本編の各クリップの、書き出しの中での尺(秒)。尺をフレームに丸めるが、丸めの差は積み上げない
+ * (タイムラインでの終わりの時刻を丸め、その差を尺にする)。書き出し・プレビュー・繋ぎの長さの表示が
+ * 同じ数え方をするための1つの入り口
+ */
+export function frameRoundedDurations(timelineDurations: readonly number[], fps: number): number[] {
+  const out: number[] = []
+  let acc = 0
+  let prevFrames = 0
+  for (const d of timelineDurations) {
+    acc += Number.isFinite(d) && d > 0 ? d : 0
+    const frames = frameCountForDuration(acc, fps)
+    out.push(fps > 0 ? Math.max(0, frames - prevFrames) / fps : 0)
+    prevFrames = Math.max(prevFrames, frames)
+  }
+  return out
+}

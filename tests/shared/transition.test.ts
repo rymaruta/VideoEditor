@@ -151,3 +151,21 @@ describe('crossfadeOpacity — 画面側の重なりの濃さ', () => {
     }
   })
 })
+
+describe('transitionSecondsForClip: 書き出しと同じ数え方', () => {
+  it('フレームレートを渡すと、尺をフレームに丸めてから実際に掛かる長さを出す', async () => {
+    const { transitionSecondsForClip } = await import('../../src/shared/transition')
+    const clips = [
+      { id: 'a', inPoint: 0, outPoint: 2.02 },
+      {
+        id: 'b',
+        inPoint: 0,
+        outPoint: 0.085,
+        transitionIn: { type: 'crossfade' as const, duration: 1 }
+      },
+      { id: 'c', inPoint: 0, outPoint: 2 }
+    ]
+    // 書き出し(30fps)では掛からない
+    expect(transitionSecondsForClip(clips, 'b', 30)?.effective).toBe(0)
+  })
+})

@@ -1,4 +1,4 @@
-import { previewSourcePath, toFileUrl } from './previewSource'
+import { toFileUrl } from './previewSource'
 import type { MediaAsset } from '@shared/types'
 
 const PROBE_TIMEOUT_MS = 6000
@@ -49,28 +49,62 @@ export function canPreviewFile(filePath: string, expectVideo: boolean): Promise<
   })
 }
 
+/** 開いたプロジェクトの素材1つについて、プレビューのために何をするか */
+export type LoadedPreviewPlan =
+  /** いまのままで聞ける・見られる */
+  | { kind: 'ok' }
+  /** 元ファイルで再生できるが、保存されていたプロキシの実体が無い。プロキシの指定を外す */
+  | { kind: 'clearProxy' }
+  /** プロキシを作る(作るかどうかの最終判断は取り込みと同じ `ensurePreviewable`) */
+  | { kind: 'build'; codecSaysUnplayable: boolean; audioNeedsFold: boolean }
+  /** 再生できず、素材を調べることもできない(移動・削除された) */
+  | { kind: 'probeFailed' }
+
 /**
- * 並びのうち、**いまのままではプレビューできない**素材を返す。
+ * 開いた/復元したプロジェクトの素材に、プレビューのために何をするかを決める。
  *
  * プロキシを作るのは取り込みのときだけだったので、変換が終わる前に保存する・変換が
  * 一度失敗する・別の環境で開く、のいずれでも**開き直した瞬間から再生できなくなり、
- * 誰も作り直さなかった**。開いたときにも同じ判定を通すために切り出してある。
+ * 誰も作り直さなかった**。開いたときにも取り込みと同じ判定を通すために切り出してある。
  *
- * 見るのは**プレビューが実際に読む側**(`proxyPath ?? filePath`)。保存されていた
- * プロキシの実体が消えていることがあるので、`proxyPath` があるだけでは在るとみなさない。
- * 作り直しは呼び出し側が**元ファイル**から行う。
+ * - プロキシで再生できれば何もしない(保存されていたプロキシの実体が消えていることが
+ *   あるので、`proxyPath` があるだけでは在るとみなさない)
+ * - 元ファイルで再生できても、4.0 の音声は試聴用の素材を作る(取り込み・差し替えと同じ。
+ *   開いた経路だけ作らず、プレビューだけセンターが左に寄っていた)
+ * - 元ファイルで再生できてプロキシの実体が無いなら、プロキシの指定を外す(外さないと
+ *   プレビューは無いプロキシを読みにいき、再生できないままだった)
  *
  * 判定関数を引数で受け取るのは、実際に読み込ませる `canPreviewFile` が DOM を使うため
  * (試験では差し替える)。
  */
-export async function assetsNeedingPreviewProxy(
-  assets: readonly MediaAsset[],
-  canPreview: (filePath: string, expectVideo: boolean) => Promise<boolean>
-): Promise<MediaAsset[]> {
-  const result: MediaAsset[] = []
-  for (const asset of assets) {
-    if (await canPreview(previewSourcePath(asset), asset.hasVideo)) continue
-    result.push(asset)
+export async function planLoadedAssetPreview(
+  asset: MediaAsset,
+  canPreview: (filePath: string, expectVideo: boolean) => Promise<boolean>,
+  probe: (
+    filePath: string
+  ) => Promise<{ needsPreviewProxy: boolean; previewAudioNeedsFold?: boolean }>
+): Promise<LoadedPreviewPlan> {
+  if (asset.proxyPath && (await canPreview(asset.proxyPath, asset.hasVideo))) return { kind: 'ok' }
+  if (await canPreview(asset.filePath, asset.hasVideo)) {
+    let audioNeedsFold = false
+    if (asset.hasAudio) {
+      try {
+        audioNeedsFold = (await probe(asset.filePath)).previewAudioNeedsFold ?? false
+      } catch {
+        // 再生はできているので、調べられなくても元ファイルで聞かせる
+      }
+    }
+    if (audioNeedsFold) return { kind: 'build', codecSaysUnplayable: false, audioNeedsFold }
+    return asset.proxyPath ? { kind: 'clearProxy' } : { kind: 'ok' }
   }
-  return result
+  try {
+    const meta = await probe(asset.filePath)
+    return {
+      kind: 'build',
+      codecSaysUnplayable: meta.needsPreviewProxy,
+      audioNeedsFold: meta.previewAudioNeedsFold ?? false
+    }
+  } catch {
+    return { kind: 'probeFailed' }
+  }
 }

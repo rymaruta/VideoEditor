@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
 import { onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
-import { assetsNeedingPreviewProxy, canPreviewFile } from '../lib/canPreview'
+import { canPreviewFile, planLoadedAssetPreview } from '../lib/canPreview'
 import { isAspectMismatch } from '../lib/aspect'
 import { isImagePath, isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
 import { stillAssetFrom } from '../lib/stillAsset'
@@ -150,25 +150,26 @@ export function MediaBin(): React.JSX.Element {
     setError(null)
     // 静止画は <img> でそのまま見せるので、プレビュー用の変換は要らない
     const playable = loaded.filter((a) => !a.still)
-    for (const asset of await assetsNeedingPreviewProxy(playable, canPreviewFile)) {
+    for (const asset of playable) {
       // 調べている間に別のプロジェクトを開かれたら、そこで止める。**遅れて返ってきた
       // 結果を今の画面に書かない**(実測: 消えた素材を調べている最中に別のプロジェクトを
       // 開くと、開いたあとの画面に前のプロジェクトのメッセージが出た)。
       if (!stillCurrent()) return
-      // 取り込みと同じ「コーデックのせいか、壊れているか」の判定材料をここで取る
-      // (プレビューできなかった素材だけなので、ffprobe は最小限しか走らない)。
-      let codecSaysUnplayable = false
-      try {
-        codecSaysUnplayable = (await window.api.probeMedia(asset.filePath)).needsPreviewProxy
-      } catch {
-        if (!stillCurrent()) return
+      const plan = await planLoadedAssetPreview(asset, canPreviewFile, window.api.probeMedia)
+      if (!stillCurrent()) return
+      if (plan.kind === 'clearProxy') setAssetProxyPath(asset.id, undefined)
+      else if (plan.kind === 'probeFailed')
         setError(
           `${asset.fileName}: プレビューで読み込めませんでした。ファイルが移動・削除されていないか確認してください。`
         )
-        continue
-      }
-      if (!stillCurrent()) return
-      await ensurePreviewable(asset.id, asset.filePath, codecSaysUnplayable, asset.hasVideo)
+      else if (plan.kind === 'build')
+        await ensurePreviewable(
+          asset.id,
+          asset.filePath,
+          plan.codecSaysUnplayable,
+          asset.hasVideo,
+          plan.audioNeedsFold
+        )
     }
   }
 

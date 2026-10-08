@@ -175,8 +175,17 @@ function reanchorLinkedOverlays(before: Project, after: Project): Project {
     // 追従は外さず、範囲でも丸めない(ロールのドラッグは動かすたびに呼ばれるので、行って戻ったときに
     // 元の位置へ戻れるよう、素材の時刻からそのまま計算し直す。クリップの頭より前・後ろに
     // ずらして置いたテロップ(負の・長い linkOffset)もそのまま)
-    const source = old.inPoint + (o.linkOffset ?? 0) * oldSpeed
-    const linkOffset = (source - nw.inPoint) / newSpeed
+    const offset = o.linkOffset ?? 0
+    const source = old.inPoint + offset * oldSpeed
+    // クリップの頭より前・終わりより後ろに置いたもの(素材の時刻が新しい範囲にも無い)は、
+    // 範囲の置き換え(`remapOverlayLinks`)と同じく、頭・終わりからの距離を保つ(トリムでは素材の
+    // 時刻を保っていたので、同じ切り方でもトリムと無音カットでテロップの位置が違っていた)
+    const linkOffset =
+      source < old.inPoint && source < nw.inPoint
+        ? offset
+        : source >= old.outPoint && source >= nw.outPoint
+          ? (nw.outPoint - nw.inPoint) / newSpeed + (source - old.outPoint) / oldSpeed
+          : (source - nw.inPoint) / newSpeed
     if (!Number.isFinite(linkOffset) || linkOffset === o.linkOffset) return o
     changed = true
     return { ...o, linkOffset }
@@ -927,7 +936,7 @@ interface ProjectState {
     /** 機材の名前・役割(企画に残す。仮編集の作り直しに使う) */
     sources?: MulticamSource[]
   ) => void
-  setAssetProxyPath: (assetId: string, proxyPath: string) => void
+  setAssetProxyPath: (assetId: string, proxyPath: string | undefined) => void
   removeAsset: (assetId: string) => void
   addAudioClipWithAsset: (
     asset: MediaAsset,

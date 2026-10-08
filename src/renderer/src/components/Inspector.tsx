@@ -5,6 +5,7 @@ import { isAspectMismatch } from '../lib/aspect'
 import { buildTimedClips, speedSelectChoices } from '../lib/timelineMath'
 import { CLIP_COLORS } from '../lib/clipColors'
 import { transitionSecondsForClip } from '@shared/transition'
+import { frameSeconds } from '@shared/frameRate'
 import type { ClipColorLabel, TransitionType } from '@shared/types'
 import { GaugeIcon, LayersIcon, MusicIcon, ScissorsIcon, TagIcon, TargetIcon } from './icons'
 import { DraftNumber } from './DraftNumber'
@@ -128,7 +129,14 @@ export function Inspector(): React.JSX.Element {
   const index = timedClips.findIndex((tc) => tc.clip.id === selectedClipId)
   const timed = index >= 0 ? timedClips[index] : null
   // 指定した繋ぎの長さと、実際に掛かる長さ。詰められているときだけ画面に出す
-  const transitionSeconds = clip ? transitionSecondsForClip(project.clips, clip.id) : null
+  // 書き出しと同じく、尺をフレームに丸めてから実際に掛かる長さを出す
+  const transitionSeconds = clip
+    ? transitionSecondsForClip(
+        project.clips,
+        clip.id,
+        1 / frameSeconds(project.clips, project.assets)
+      )
+    : null
   const trimmedTransition =
     transitionSeconds && transitionSeconds.effective < transitionSeconds.specified - 0.005
       ? transitionSeconds

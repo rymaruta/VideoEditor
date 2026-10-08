@@ -244,7 +244,9 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
         s = cut
       }
       pieces.push([s, end])
-      for (const [a, b] of splitByWeakness(pieces, heard, weak[m], minTurn)) {
+      const parts = splitByWeakness(pieces, heard, weak[m])
+      for (let pi = 0; pi < parts.length; pi++) {
+        const [a, b] = parts[pi]
         if (b - a < minTurn) continue
         let ov = 0
         let wk = 0
@@ -256,8 +258,9 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
         }
         turns.push({
           micId: stats[m].id,
-          start: Math.max(0, a - pad) / TURN_RATE,
-          end: Math.min(n, b + pad) / TURN_RATE,
+          // 分けた区間どうしは余白で重ねない(同じ音を2回文字起こしに送っていた)
+          start: Math.max(0, pi > 0 ? a : a - pad) / TURN_RATE,
+          end: Math.min(n, pi < parts.length - 1 ? b : b + pad) / TURN_RATE,
           overlap: ov >= minTurn,
           ...(wk * 2 > hd ? { uncertain: true } : {})
         })
@@ -268,47 +271,63 @@ export function detectTurns(tracks: readonly MicTrack[], options: TurnOptions = 
   return turns.sort((x, y) => x.start - y.start || x.micId.localeCompare(y.micId))
 }
 
+/** 持ち主の声か分からない区間として分ける最短の長さ(フレーム)。これより短い小声は文の中の小声とみなす */
+const MIN_UNCERTAIN_FRAMES = 50
+
 /**
- * 区間を「持ち主の声か分からない」時刻と、持ち主の声の時刻の切り替わりで分ける
- * (止まったマイクの人の声のすぐ後に持ち主が話すと、短い切れ目でつながって1つの発話になり、
- * 持ち主の発言まで話者の名前が付かなかった)。短すぎる切れ端は前の区間に含める
+ * 区間を「持ち主の声か分からない」所と、持ち主の声の所で分ける(止まったマイクの人の声のすぐ後に
+ * 持ち主が話すと、短い切れ目でつながって1つの発話になり、持ち主の発言まで話者の名前が付かなかった)。
+ * 分けるのは**声の無い切れ目**の所だけで、分からない側が 0.5 秒以上あるときだけ(文の終わりの
+ * 小声・文の中の小さな落ち込みでは分けない)
  */
 function splitByWeakness(
   pieces: readonly [number, number][],
   heard: Uint8Array,
-  weak: Uint8Array,
-  minTurn: number
+  weak: Uint8Array
 ): [number, number][] {
   const out: [number, number][] = []
   for (const [a, b] of pieces) {
-    const runs: { a: number; b: number; weak: boolean }[] = []
-    let label: boolean | null = null
-    for (let k = a; k < b; k++) {
-      // 声の無い切れ目は、直前の区間に含める
-      const w = heard[k] ? weak[k] === 1 : label
-      if (w === null) continue
-      const last = runs[runs.length - 1]
-      if (last && last.weak === w) last.b = k + 1
-      else runs.push({ a: last ? last.b : a, b: k + 1, weak: w })
-      label = w
+    // 声の続く塊ごとに、分からない側が多いかを決める
+    const blocks: { a: number; b: number; weak: boolean; len: number }[] = []
+    let k = a
+    while (k < b) {
+      while (k < b && !heard[k]) k++
+      if (k >= b) break
+      const s = k
+      let w = 0
+      while (k < b && heard[k]) w += weak[k++]
+      blocks.push({ a: s, b: k, weak: w * 2 > k - s, len: k - s })
     }
-    if (runs.length === 0) {
+    if (blocks.length <= 1) {
       out.push([a, b])
       continue
     }
-    runs[runs.length - 1].b = b
-    // 短い切れ端は前(無ければ後ろ)の区間に含める
-    const merged: { a: number; b: number; weak: boolean }[] = []
+    // 同じ種類の隣どうしをまとめる
+    const runs: { a: number; b: number; weak: boolean; len: number }[] = []
+    for (const blk of blocks) {
+      const last = runs[runs.length - 1]
+      if (last && last.weak === blk.weak) {
+        last.b = blk.b
+        last.len += blk.len
+      } else runs.push({ ...blk })
+    }
+    // 短い「分からない」区間は分けない(隣とまとめる。どちらにするかは呼び出し側の多数決)
+    const kept: { a: number; b: number; weak: boolean }[] = []
     for (const r of runs) {
-      const prev = merged[merged.length - 1]
-      if (prev && (r.b - r.a < minTurn || prev.weak === r.weak)) prev.b = r.b
-      else merged.push({ ...r })
+      const last = kept[kept.length - 1]
+      const tooShort = r.weak && r.len < MIN_UNCERTAIN_FRAMES
+      if (
+        last &&
+        (tooShort || (last.weak && last.b - last.a < MIN_UNCERTAIN_FRAMES) || last.weak === r.weak)
+      )
+        last.b = r.b
+      else kept.push({ a: r.a, b: r.b, weak: r.weak && !tooShort })
     }
-    if (merged.length > 1 && merged[0].b - merged[0].a < minTurn) {
-      merged[1].a = merged[0].a
-      merged.shift()
-    }
-    for (const r of merged) out.push([r.a, r.b])
+    // 切れ目(声の無い所)は前の区間に含め、区間の頭・終わりは元の区間の頭・終わりにそろえる
+    kept[0].a = a
+    for (let i = 1; i < kept.length; i++) kept[i - 1].b = kept[i].a
+    kept[kept.length - 1].b = b
+    for (const r of kept) out.push([r.a, r.b])
   }
   return out
 }

@@ -240,3 +240,29 @@ describe('detectTurns: 回り込みと持ち主の声がつながった発話・
     expect(turns.some((t) => t.overlap)).toBe(true)
   })
 })
+
+describe('detectTurns: 文の終わりの小声', () => {
+  it('持ち主の文の終わりが小声になっても、話者の名前の無い切れ端に分けない・同じマイクの発話を重ねない', () => {
+    const a = env(60, -60, [
+      [1, 4, -10],
+      [10, 14, -30],
+      [21, 24, -10],
+      [30, 34, -10],
+      [40, 43.4, -10],
+      [43.4, 44, -24],
+      [50, 54, -10]
+    ])
+    const b = env(60, -55, [[10, 14, -12]])
+    for (let i = 25 * TURN_RATE; i < b.length; i++) b[i] = NaN
+    const turns = detectTurns([
+      { id: 'A', envelope: a },
+      { id: 'B', envelope: b }
+    ])
+    const around = turns.filter((t) => t.micId === 'A' && t.end > 40 && t.start < 44.5)
+    expect(around).toHaveLength(1)
+    expect(around[0].uncertain).toBeUndefined()
+    const mine = turns.filter((t) => t.micId === 'A').sort((x, y) => x.start - y.start)
+    for (let i = 1; i < mine.length; i++)
+      expect(mine[i].start).toBeGreaterThanOrEqual(mine[i - 1].end - 1e-9)
+  })
+})

@@ -136,16 +136,16 @@ const PIP_POSITION_LABELS: Record<PipPosition, string> = {
  * ——隣に入らないぶんは書き出しが黙って詰めるので、実効値を添える
  * (理由と実測は `transitionSecondsForClip`)。
  */
-function transitionDurationTitle(clips: Clip[], clipId: string): string {
-  const seconds = transitionSecondsForClip(clips, clipId)
+function transitionDurationTitle(clips: Clip[], clipId: string, fps: number): string {
+  const seconds = transitionSecondsForClip(clips, clipId, fps)
   if (!seconds) return 'トランジション秒数'
   if (seconds.effective >= seconds.specified - 0.005) return 'トランジション秒数'
   return `トランジション秒数(指定 ${seconds.specified}秒。隣のクリップに入らないため実際は ${seconds.effective.toFixed(2)}秒)`
 }
 
 /** 詰められているときだけ実効秒数を返す。詰められていなければ null(何も出さない) */
-function trimmedTransitionOf(clips: Clip[], clipId: string): number | null {
-  const seconds = transitionSecondsForClip(clips, clipId)
+function trimmedTransitionOf(clips: Clip[], clipId: string, fps: number): number | null {
+  const seconds = transitionSecondsForClip(clips, clipId, fps)
   if (!seconds || seconds.effective >= seconds.specified - 0.005) return null
   return seconds.effective
 }
@@ -1963,7 +1963,7 @@ export function Timeline(): React.JSX.Element {
                         duration: Number(e.target.value)
                       })
                     }
-                    title={transitionDurationTitle(project.clips, selectedClip.id)}
+                    title={transitionDurationTitle(project.clips, selectedClip.id, rulerFps)}
                   />
                 )}
               </>
@@ -2262,11 +2262,12 @@ export function Timeline(): React.JSX.Element {
                         duration: Number(e.target.value)
                       })
                     }
-                    title={transitionDurationTitle(project.clips, popTc.clip.id)}
+                    title={transitionDurationTitle(project.clips, popTc.clip.id, rulerFps)}
                   />
-                  {trimmedTransitionOf(project.clips, popTc.clip.id) && (
+                  {trimmedTransitionOf(project.clips, popTc.clip.id, rulerFps) !== null && (
                     <span className="hint-text transition-trimmed">
-                      実際 {trimmedTransitionOf(project.clips, popTc.clip.id)!.toFixed(2)}秒
+                      実際 {trimmedTransitionOf(project.clips, popTc.clip.id, rulerFps)!.toFixed(2)}
+                      秒
                     </span>
                   )}
                 </>
