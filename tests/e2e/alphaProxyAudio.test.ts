@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
 }))
 
 import { ffmpegPath } from '@main/ffmpegService'
-import { ensurePreviewProxy } from '@main/previewProxyService'
+import { ensurePreviewProxy, needsPreviewProxy } from '@main/previewProxyService'
 
 const work = mkdtempSync(join(tmpdir(), 've-alphaaudio-'))
 state.userData = join(work, 'userdata')
@@ -64,4 +64,12 @@ describe.skipIf(!existsSync(ffmpegPath))('透過の素材の試聴用の音', ()
     expect(proxy.endsWith('.webm')).toBe(true)
     expect(Math.abs(leftDb(proxy) - leftDb(src))).toBeLessThan(1)
   }, 120_000)
+})
+
+describe('4.0 の音声の試聴', () => {
+  it('4.0 の素材は、書き出しと同じ畳み方の試聴用素材で聞かせる(quad はそのまま)', () => {
+    expect(needsPreviewProxy('h264', 'aac', true, true, 4, '4.0')).toBe(true)
+    expect(needsPreviewProxy('h264', 'aac', true, true, 4, 'quad')).toBe(false)
+    expect(needsPreviewProxy('h264', 'aac', true, true, 2, 'stereo')).toBe(false)
+  })
 })

@@ -155,10 +155,12 @@ export interface Glyph {
 
 /** 単語の途中で折らない文字(空白で区切って書く文字。和文の漢字・かな・全角の記号は文字のあいだで折る) */
 function isSpacedWordChar(ch: string): boolean {
-  // 長音「ー」・中黒「・」・濁点の記号は文字の種類が「共通」なので、かなと同じく和文として見る
+  // 長音「ー」・中黒「・」・濁点の記号は文字の種類が「共通」なので、かなと同じく和文として見る。
+  // 書記素の先頭の文字で見る(結合文字の付いた「ẹ」や「·」まで和文と見ると、英語などの単語の途中で折れた)
+  const head = String.fromCodePoint(ch.codePointAt(0) ?? 0)
   if (
-    /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\u3000-\u303f\uff00-\uffef\u30fc\u30fb\u309b\u309c]/u.test(
-      ch
+    /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\u3000-\u303f\uff00-\uffef\u30fc\u30fb\u309b\u309c\u30a0]/u.test(
+      head
     )
   )
     return false

@@ -18,4 +18,15 @@ describe('自動保存の状態', () => {
     expect(useAutosaveStore.getState().pending).toBeNull()
     expect(useAutosaveStore.getState().discarded).toEqual({ mtimeMs: 2 })
   })
+
+  it('確認を出したまま自動保存が退避されたら、確認も閉じる', async () => {
+    ;(globalThis as unknown as { window: unknown }).window = {
+      api: {
+        checkAutosave: async () => ({ exists: false, discardedExists: true, discardedMtimeMs: 3 })
+      }
+    }
+    useAutosaveStore.setState({ pending: { mtimeMs: 1 }, discarded: null })
+    await useAutosaveStore.getState().refreshDiscarded()
+    expect(useAutosaveStore.getState().pending).toBeNull()
+  })
 })

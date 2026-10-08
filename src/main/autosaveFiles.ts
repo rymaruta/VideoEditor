@@ -107,7 +107,12 @@ function describeAutosaveFailure(e: unknown): Error {
     typeof (e as { code?: unknown } | null)?.code === 'string' ? (e as { code: string }).code : ''
   for (const [pattern, message] of AUTOSAVE_ERROR_MESSAGES)
     if (code && pattern.test(code)) return new Error(message)
-  return e instanceof Error ? e : new Error(String(e))
+  const err = e instanceof Error ? e : new Error(String(e))
+  // 書き込み(`saveProjectFile`)の文面は「別の名前を付けてください」など、利用者が名前を決める保存の
+  // ための案内。自動保存の置き場所は利用者が決めないので、自動保存の文面に置き換える
+  if (/同じ名前のフォルダがあります/.test(err.message))
+    return new Error('自動保存の置き場所に同じ名前のフォルダがあります')
+  return err
 }
 
 /**
@@ -122,10 +127,15 @@ export function setAsideAutosaveFile(
   keepPreviousDiscarded: boolean
 ): boolean {
   if (!existsSync(autosavePath)) return false
-  const discarded = discardedPathFor(autosavePath)
-  if (keepPreviousDiscarded && existsSync(discarded)) {
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    renameSync(discarded, discarded.replace(/(\.veproj)?$/, `-${stamp}$1`))
+  // 破棄・開く・新規・保存の経路でも、失敗は日本語で(英語の生のエラーが出ていた)
+  try {
+    const discarded = discardedPathFor(autosavePath)
+    if (keepPreviousDiscarded && existsSync(discarded)) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      renameSync(discarded, discarded.replace(/(\.veproj)?$/, `-${stamp}$1`))
+    }
+    return discardAutosaveFile(autosavePath)
+  } catch (e) {
+    throw describeAutosaveFailure(e)
   }
-  return discardAutosaveFile(autosavePath)
 }

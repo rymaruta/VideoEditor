@@ -171,4 +171,35 @@ describe.skipIf(!existsSync(ffmpegPath))('5.1 の素材の書き出し', () => {
       expect(Math.abs(l - r), `${out} ${l} ${r}`).toBeLessThan(0.5)
     }
   }, 180_000)
+  it('quad の後ろ左の音は、プレビュー(Chromium の畳み方)と同じく左に半分の大きさで出す', async () => {
+    const tone = 'sine=f=1000:d=4:sample_rate=48000'
+    const ref = await clipOf(`${tone},pan=stereo|c0=0.2*c0|c1=0*c0`, 'qref')
+    const quad = await clipOf(`${tone},pan=quad|c0=0*c0|c1=0*c0|c2=0.2*c0|c3=0*c0`, 'quad')
+    const levels: number[] = []
+    for (const a of [ref, quad]) {
+      const project = {
+        id: 'p',
+        name: 'p',
+        aspectRatio: '16:9',
+        assets: [a],
+        clips: [{ id: 'c', assetId: a.id, inPoint: 0, outPoint: 4, speed: 1 }],
+        audioTracks: [],
+        videoOverlayTracks: [],
+        textOverlays: []
+      } as unknown as Project
+      const std = join(work, `${a.id}-std.mp4`)
+      await exportProject({
+        project,
+        aspectRatio: '16:9',
+        resolutionHeight: 480,
+        quality: 'standard',
+        outputPath: std,
+        telopLayer: null,
+        onProgress: () => {}
+      })
+      levels.push(channelDb(std, 0))
+    }
+    // 0.5 倍 = -6.02 dB
+    expect(Math.abs(levels[1] - (levels[0] - 6.02)), levels.join(',')).toBeLessThan(0.5)
+  }, 180_000)
 })

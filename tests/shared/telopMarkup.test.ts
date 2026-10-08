@@ -73,3 +73,16 @@ describe('wrapGlyphs: 禁則とルビ・和文の記号', () => {
     ])
   })
 })
+
+describe('wrapGlyphs: 英字の単語の中の「·」・結合文字', () => {
+  const text = (lines: { ch: string }[][]): string[] =>
+    lines.map((l) => l.map((x) => x.ch).join(''))
+  it('「col·lecció」「Viẹt」を単語の途中で折らない', () => {
+    expect(text(wrapGlyphs(parseTelopMarkup('ab col·lecció'), 6, () => 1))[0]).toBe('ab')
+    expect(text(wrapGlyphs(parseTelopMarkup('ab Viẹt Nam'), 5, () => 1))).toEqual([
+      'ab',
+      'Viẹt',
+      'Nam'
+    ])
+  })
+})

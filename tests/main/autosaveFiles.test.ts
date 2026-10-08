@@ -89,3 +89,16 @@ describe('自動保存の失敗の文面', () => {
     expect(err!.message).toBe('自動保存の置き場所に同じ名前のフォルダがあります')
   })
 })
+
+describe('自動保存の退避の失敗の文面(破棄・開く・新規・保存)', () => {
+  it('退避先に中身のあるフォルダがあっても、英語の生のエラーではなく日本語', async () => {
+    const { mkdirSync } = await import('fs')
+    const { setAsideAutosaveFile } = await import('../../src/main/autosaveFiles')
+    const path = setup()
+    writeFileSync(path, 'PREVIOUS')
+    mkdirSync(join(discardedPathFor(path), 'x'), { recursive: true })
+    expect(() => setAsideAutosaveFile(path, false)).toThrow(
+      '自動保存の置き場所に同じ名前のフォルダがあります'
+    )
+  })
+})

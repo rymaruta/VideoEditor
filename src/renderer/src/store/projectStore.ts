@@ -4630,23 +4630,26 @@ function remapOverlayLinks(
       }
     }
     if (newClips.length === 0) return { ...o, linkedClipId: undefined, linkOffset: undefined }
-    // クリップの頭より前・終わりより後ろにずらして置いたテロップ(負の・長い linkOffset)は、
-    // 一番近い断片に、同じ位置のまま付ける(頭へ寄せると、分割しただけでテロップが動いていた)
+    // 元のクリップの頭より前・終わりより後ろにずらして置いたテロップ(負の・長い linkOffset)は、
+    // 一番近い断片に、同じ位置のまま付ける(頭へ寄せると、分割しただけでテロップが動いていた)。
+    // クリップの中で、無音カットなどで切り取られた所のテロップは、今までどおり次の断片の頭へ
     const first = newClips[0]
     const last = newClips[newClips.length - 1]
-    if (sourceTime < first.inPoint)
+    if (sourceTime < original.inPoint && sourceTime < first.inPoint)
       return {
         ...o,
         linkedClipId: first.id,
         linkOffset: (sourceTime - first.inPoint) / (first.speed || 1)
       }
+    if (sourceTime >= original.outPoint && sourceTime >= last.outPoint)
+      return {
+        ...o,
+        linkedClipId: last.id,
+        linkOffset: (sourceTime - last.inPoint) / (last.speed || 1)
+      }
     const after = newClips.find((s) => s.inPoint >= sourceTime)
     if (after) return { ...o, linkedClipId: after.id, linkOffset: 0 }
-    return {
-      ...o,
-      linkedClipId: last.id,
-      linkOffset: (sourceTime - last.inPoint) / (last.speed || 1)
-    }
+    return { ...o, linkedClipId: undefined, linkOffset: undefined }
   })
 }
 

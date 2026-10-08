@@ -306,6 +306,37 @@ describe('第8回: 編集モデル', () => {
     expect(st().project.textOverlays[0].linkedClipId).toBeDefined()
   })
 
+  it('無音カットで切り取られた頭のテロップは、次の断片の頭へ寄せる(前のクリップへ移さない)', () => {
+    S.setState({
+      project: {
+        ...st().project,
+        clips: [
+          { id: 'c1', assetId: 'A', inPoint: 0, outPoint: 10, speed: 1 },
+          { id: 'c2', assetId: 'B', inPoint: 0, outPoint: 10, speed: 1 }
+        ],
+        textOverlays: [
+          {
+            id: 'o1',
+            text: 'あ',
+            startTime: 10.2,
+            endTime: 11,
+            style: {},
+            source: 'auto',
+            linkedClipId: 'c2',
+            linkOffset: 0.2
+          }
+        ]
+      } as unknown as Project
+    })
+    st().replaceClipRange('c2', [
+      { id: 'p1', assetId: 'B', inPoint: 1, outPoint: 4, speed: 1 },
+      { id: 'p2', assetId: 'B', inPoint: 6, outPoint: 9, speed: 1 }
+    ])
+    const o = st().project.textOverlays[0]
+    expect(o.linkedClipId).toBe('p1')
+    expect(o.startTime).toBeCloseTo(10, 9)
+  })
+
   it('差し込みの画を短いファイルへ差し替えても、マイクの音は本編に付いていく', () => {
     roughCut([
       [0, 10],

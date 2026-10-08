@@ -218,6 +218,18 @@ describe('classifyFootage', () => {
       file('CamB/C0001.MP4', { device: 'Sony FX3', recordedAt: 700, duration: 600 })
     ])
     expect(sources).toHaveLength(2)
+    // DCIM の外の「Camera01」「Camera02」「DJI_001」「DJI_002」は利用者が名前を付けたフォルダ(2台)
+    for (const [a, b] of [
+      ['Camera01', 'Camera02'],
+      ['DJI_001', 'DJI_002']
+    ])
+      expect(
+        classifyFootage([
+          file(`${a}/C0001.MP4`, { device: 'Sony FX3', recordedAt: 0, duration: 600 }),
+          file(`${b}/C0001.MP4`, { device: 'Sony FX3', recordedAt: 700, duration: 600 })
+        ]),
+        `${a} ${b}`
+      ).toHaveLength(2)
     // カメラが作る続きのフォルダ(100CANON → 101CANON・DJI_001 → DJI_002・Camera01 → Camera02・日付)は1台
     for (const [a, b] of [
       ['DCIM/100CANON', 'DCIM/101CANON'],

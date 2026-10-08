@@ -21,7 +21,7 @@ interface AutosaveState {
   clearPending: () => void
 }
 
-export const useAutosaveStore = create<AutosaveState>((set) => ({
+export const useAutosaveStore = create<AutosaveState>((set, get) => ({
   pending: null,
   discarded: null,
   refresh: async () => {
@@ -33,7 +33,12 @@ export const useAutosaveStore = create<AutosaveState>((set) => ({
   },
   refreshDiscarded: async () => {
     const status = await window.api.checkAutosave()
-    set({ discarded: status.discardedExists ? { mtimeMs: status.discardedMtimeMs } : null })
+    set({
+      discarded: status.discardedExists ? { mtimeMs: status.discardedMtimeMs } : null,
+      // 確認を出したまま(メニューの新規・開く・保存で)自動保存が退避されたら、確認も閉じる
+      // (閉じないと、無いファイルを「復元する」で失敗していた)。新しく出すことはしない
+      pending: status.exists ? get().pending : null
+    })
   },
   clearPending: () => set({ pending: null })
 }))

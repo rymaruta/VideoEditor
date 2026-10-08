@@ -14,6 +14,7 @@ import {
   ALIGN_AUDIO_START,
   audioSpeedChain,
   audioFormatFor,
+  audioLayoutOf,
   escapeFilterPath,
   xfadeName
 } from './ffmpegService'
@@ -529,7 +530,7 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       parts.push(
         `[${idx}:a]${ALIGN_AUDIO_START},${audioSpeedChain(readSpeed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
           `apad,atrim=0:${num(dur)},asetpts=PTS-STARTPTS,` +
-          `${audioFormatFor(ctx.audioChannels?.get(stretchedPath ?? asset.filePath))},` +
+          `${audioFormatFor(ctx.audioChannels?.get(stretchedPath ?? asset.filePath), audioLayoutOf(asset.filePath))},` +
           `${envelope(item, ordered, audioClipGain(track.volume, item.volume), skipSec)},` +
           `adelay=${delay}S:all=1,${AUDIO_FORMAT}[${label}]`
       )

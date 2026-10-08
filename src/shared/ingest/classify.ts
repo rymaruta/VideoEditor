@@ -110,11 +110,13 @@ function sameCameraCards(a: string, b: string): boolean {
   return isCard(ra) && isCard(rb)
 }
 
+/** カメラが作るフォルダの名前(DCIM の 100CANON・101MSDCF・100GOPRO・100MEDIA、日付のフォルダ) */
+const DCIM_FOLDER = /^(?:\d{3}[a-z0-9_]{5}|\d{4}[-_.]?\d{2}[-_.]?\d{2})$/i
 /**
- * カメラが作るフォルダの名前。DCIM の 100CANON・101MSDCF・100GOPRO・100MEDIA、新しい DJI の
- * DJI_001、Insta360 の Camera01、日付のフォルダ(2024-05-01・20240501)
+ * DCIM の中にだけカメラが作る名前(新しい DJI の DJI_001、Insta360 の Camera01)。
+ * DCIM の外にあれば、利用者が名前を付けたフォルダ(Camera01・Camera02 は2台のカメラ)
  */
-const DCIM_FOLDER = /^(?:\d{3}[a-z0-9_]{5}|DJI_\d{3,4}|Camera\d{2}|\d{4}[-_.]?\d{2}[-_.]?\d{2})$/i
+const DCIM_ONLY_FOLDER = /^(?:DJI_\d{3,4}|Camera\d{2})$/i
 
 /**
  * 同じ親フォルダの2つのフォルダが、1台のカメラのカードを替えた続きらしいか(名前がカード・DCIM の
@@ -123,7 +125,11 @@ const DCIM_FOLDER = /^(?:\d{3}[a-z0-9_]{5}|DJI_\d{3,4}|Camera\d{2}|\d{4}[-_.]?\d
  */
 function cardLikeSiblings(a: string, b: string): boolean {
   const last = (f: string): string => (f.split('/').pop() ?? '').normalize('NFKC')
-  const ok = (f: string): boolean => CARD_NAME.test(last(f)) || DCIM_FOLDER.test(last(f))
+  const inDcim = (f: string): boolean => /^dcim$/i.test(last(parentOf(f)))
+  const ok = (f: string): boolean =>
+    CARD_NAME.test(last(f)) ||
+    DCIM_FOLDER.test(last(f)) ||
+    (inDcim(f) && DCIM_ONLY_FOLDER.test(last(f)))
   return ok(a) && ok(b)
 }
 

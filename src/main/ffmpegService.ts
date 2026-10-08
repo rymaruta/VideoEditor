@@ -46,6 +46,7 @@ import { audioClipGain } from '@shared/audioGain'
 import {
   isMonoChannelCount,
   isMultiChannelCount,
+  normalizeChannelLayout,
   monoUpmixFilter,
   multiChannelDownmixFilter
 } from '@shared/audioUpmix'
@@ -213,7 +214,9 @@ export function probeMedia(filePath: string): Promise<MediaProbeResult> {
           videoCodec,
           audioCodec,
           Boolean(videoStream),
-          Boolean(audioStream)
+          Boolean(audioStream),
+          audioStream?.channels,
+          normalizeChannelLayout(audioStream?.channel_layout)
         )
       })
     })
@@ -632,14 +635,14 @@ export const VIDEO_FORMAT = 'format=yuv420p'
  * 等倍に直してから固定する。チャンネル数が分からない素材(ffprobe が答えなかった)は
  * 今までどおりの経路にする。
  */
-export function audioFormatFor(channels: number | undefined): string {
+export function audioFormatFor(channels: number | undefined, layout?: string): string {
   if (isMonoChannelCount(channels)) {
     return `${monoUpmixFilter(OUTPUT_SAMPLE_RATE)},${AUDIO_FORMAT}`
   }
   // 3ch 以上は、出力を `fltp` で固定しているせいで畳み込みの正規化が外れている。
   // 明示して戻す(理由は `@shared/audioUpmix` の `multiChannelDownmixFilter`)。
   if (isMultiChannelCount(channels)) {
-    return `${multiChannelDownmixFilter(OUTPUT_SAMPLE_RATE, channels)},${AUDIO_FORMAT}`
+    return `${multiChannelDownmixFilter(OUTPUT_SAMPLE_RATE, channels, layout)},${AUDIO_FORMAT}`
   }
   return AUDIO_FORMAT
 }
@@ -672,11 +675,22 @@ export function adelayFilter(delayMs: number): string {
  * 素材の音声チャンネル数を調べる。**書き出しを止める理由にはしない**ので、
  * 失敗しても `undefined` を返す(呼び出し側が今までどおりの経路に倒す)。
  */
+/** 調べた素材の音声の並び(channel_layout)。4ch の畳み方を見分ける(`audioLayoutOf`) */
+const audioLayoutByPath = new Map<string, string>()
+
+/** `probeAudioChannels` で調べた素材の音声の並び(4.0・quad など)。分からなければ undefined */
+export function audioLayoutOf(filePath: string): string | undefined {
+  return audioLayoutByPath.get(filePath)
+}
+
 export function probeAudioChannels(filePath: string): Promise<number | undefined> {
   return new Promise((resolve) => {
     ffmpeg.ffprobe(filePath, (err, data) => {
       if (err || !data) return resolve(undefined)
       const audio = data.streams.find((s) => s.codec_type === 'audio')
+      const layout = normalizeChannelLayout(audio?.channel_layout)
+      if (layout) audioLayoutByPath.set(filePath, layout)
+      else audioLayoutByPath.delete(filePath)
       const channels = audio?.channels
       resolve(typeof channels === 'number' && channels > 0 ? channels : undefined)
     })
@@ -969,7 +983,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(
             `[${audioIndex}:a]${ALIGN_AUDIO_START},apad=pad_dur=0.2,asetpts=N/SR/TB,${audioSpeedChain(speed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
               `apad,atrim=0:${ffSeconds(outputDuration)},asetpts=PTS-STARTPTS,` +
-              `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[a${i}]`
+              `${audioFormatFor(audioChannelsByPath.get(asset.filePath), audioLayoutOf(asset.filePath))}[a${i}]`
           )
         } else {
           filterParts.push(
@@ -1173,7 +1187,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                 : ''
             filterParts.push(
               `[${pipAudioIndex}:a]${ALIGN_AUDIO_START},asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
-                `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${audioLabel}]`
+                `${audioFormatFor(audioChannelsByPath.get(asset.filePath), audioLayoutOf(asset.filePath))}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })
           }
@@ -1322,7 +1336,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           filterParts.push(
             `[${myIndex}:a]${ALIGN_AUDIO_START},${audioSpeedChain(clipSpeed)},asetpts=PTS-STARTPTS,${trimChain}${fadeChain}` +
               `volume=${clipVolume},${adelayFilter(delayMs)},` +
-              `${audioFormatFor(audioChannelsByPath.get(asset.filePath))}[${label}]`
+              `${audioFormatFor(audioChannelsByPath.get(asset.filePath), audioLayoutOf(asset.filePath))}[${label}]`
           )
           if (
             duckingInUse &&

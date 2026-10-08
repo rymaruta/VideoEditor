@@ -10,6 +10,7 @@ import { contentFingerprint } from './fileFingerprint'
 import {
   isMonoChannelCount,
   isMultiChannelCount,
+  normalizeChannelLayout,
   monoUpmixFilter,
   multiChannelDownmixFilter
 } from '@shared/audioUpmix'
@@ -30,11 +31,22 @@ export function needsPreviewProxy(
   videoCodec: string,
   audioCodec: string,
   hasVideo: boolean,
-  hasAudio: boolean
+  hasAudio: boolean,
+  audioChannels?: number,
+  audioLayout?: string
 ): boolean {
   if (hasVideo && !PREVIEWABLE_VIDEO_CODECS.has(videoCodec)) return true
   if (hasAudio && !PREVIEWABLE_AUDIO_CODECS.has(audioCodec)) return true
+  if (hasAudio && isFourPointZero(audioChannels, audioLayout)) return true
   return false
+}
+
+/**
+ * 4.0(L・R・センター・後ろ中央)の音声。Chromium はどの 4ch も quad として畳む(センターが左だけに
+ * なる)ので、書き出しと同じ畳み方をした試聴用の素材で聞かせる
+ */
+function isFourPointZero(channels: number | undefined, layout: string | undefined): boolean {
+  return channels === 4 && layout === '4.0'
 }
 
 interface ProxyStreamInfo {
@@ -44,6 +56,8 @@ interface ProxyStreamInfo {
   hasAlpha: boolean
   /** 0 は「分からなかった」。等倍のモノラル展開を掛けてよいのは 1 のときだけ。 */
   audioChannels: number
+  /** 音声の並び(4.0・quad など)。4ch の畳み方を書き出しとそろえる */
+  audioLayout?: string
 }
 
 function probeStreams(filePath: string): Promise<ProxyStreamInfo> {
@@ -63,7 +77,8 @@ function probeStreams(filePath: string): Promise<ProxyStreamInfo> {
         hasAlpha: hasAlphaPixelFormat(String(video?.pix_fmt ?? '')),
         audioCodec: audio?.codec_name ?? '',
         hasAudio: Boolean(audio),
-        audioChannels: audio?.channels ?? 0
+        audioChannels: audio?.channels ?? 0,
+        audioLayout: normalizeChannelLayout(audio?.channel_layout)
       })
     })
   })
@@ -143,7 +158,7 @@ export function ensurePreviewProxy(
   // can never leave a half-written file that would later be treated as a valid cache.
   const task = Promise.all([probeStreams(filePath), detectVideoEncoder()])
     .then(
-      ([{ audioCodec, hasAudio, hasAlpha, audioChannels }, encoder]) =>
+      ([{ audioCodec, hasAudio, hasAlpha, audioChannels, audioLayout }, encoder]) =>
         new Promise<string>((resolve, reject) => {
           const finalPath = hasAlpha ? alphaPath : outPath
           const tmpPath = hasAlpha ? `${alphaPath}.partial.webm` : `${outPath}.partial.mp4`
@@ -167,7 +182,9 @@ export function ensurePreviewProxy(
               // モノラルの素材の試聴だけが 3dB 小さく、3ch 以上は畳み方が書き出しと違っていた)
               if (isMonoChannelCount(audioChannels)) command.audioFilters(monoUpmixFilter())
               else if (isMultiChannelCount(audioChannels))
-                command.audioFilters(multiChannelDownmixFilter(undefined, audioChannels))
+                command.audioFilters(
+                  multiChannelDownmixFilter(undefined, audioChannels, audioLayout)
+                )
             } else command.noAudio()
             command
               .on('progress', (p) => {
@@ -212,7 +229,11 @@ export function ensurePreviewProxy(
             // Re-encoding audio that the preview can already play is wasted time; only the
             // video stream is actually the problem in the common HEVC case.
             if (!hasAudio) command.noAudio()
-            else if (PREVIEWABLE_AUDIO_CODECS.has(audioCodec)) command.audioCodec('copy')
+            else if (
+              PREVIEWABLE_AUDIO_CODECS.has(audioCodec) &&
+              !isFourPointZero(audioChannels, audioLayout)
+            )
+              command.audioCodec('copy')
             else {
               command.audioCodec('aac').outputOptions(['-ac 2'])
               // `-ac 2` の裏の swresample は**モノラルを左右へ 1/√2 で配る**ので、
@@ -231,7 +252,9 @@ export function ensurePreviewProxy(
                 // **430サンプルが 0dBFS に張り付く**。この一段を足すと -18.6 dB・-5.6 dB。
                 // ここを通るのは AC-3 / DTS のように**そのまま再生できない音声**で、
                 // それはまさに 5.1 を運んでいる形式でもある。
-                command.audioFilters(multiChannelDownmixFilter(undefined, audioChannels))
+                command.audioFilters(
+                  multiChannelDownmixFilter(undefined, audioChannels, audioLayout)
+                )
               }
             }
             command
