@@ -62,9 +62,30 @@ export function discardAutosaveFile(autosavePath: string): boolean {
 export function writeAutosaveFile(
   autosavePath: string,
   project: Project,
-  setAsideExisting: boolean
+  setAsideExisting: boolean,
+  options: {
+    /**
+     * 退避した直後に呼ぶ(書き込みが失敗しても、退避したことは呼び出し側に伝わる。
+     * 伝わらないと、次の自動保存がもう一度退避して、退避した前回の作業を上書きしていた)
+     */
+    onSetAside?: () => void
+    /**
+     * 退避先に前に退避したもの(前回のセッションの作業)があれば、消さずに日時付きの名前で残す
+     * (画面が落ちて読み込み直したときに、落ちる前の作業を退避すると、前回の作業が消えていた)
+     */
+    keepPreviousDiscarded?: boolean
+  } = {}
 ): boolean {
-  const setAside = setAsideExisting ? discardAutosaveFile(autosavePath) : false
+  let setAside = false
+  if (setAsideExisting && existsSync(autosavePath)) {
+    const discarded = discardedPathFor(autosavePath)
+    if (options.keepPreviousDiscarded && existsSync(discarded)) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      renameSync(discarded, discarded.replace(/(\.veproj)?$/, `-${stamp}$1`))
+    }
+    setAside = discardAutosaveFile(autosavePath)
+    if (setAside) options.onSetAside?.()
+  }
   saveProjectFile(autosavePath, project)
   return setAside
 }

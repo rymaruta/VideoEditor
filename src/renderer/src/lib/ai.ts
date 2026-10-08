@@ -19,6 +19,17 @@ export interface AiProgress {
   percent: number
 }
 
+/**
+ * Gemini に頼んでいる途中の問い合わせ。自動編集の「中止」で止める(止めないと、残りの区切りを
+ * 全部問い合わせ終えるまで(1件数秒)中止が効かなかった)
+ */
+let geminiAbort: AbortController | null = null
+
+/** 頼んでいる途中の Gemini の問い合わせを止める(このPCの AI は `window.api.llmCancel`) */
+export function cancelAiRequests(): void {
+  geminiAbort?.abort()
+}
+
 export async function askAiJson(
   provider: Exclude<AiProvider, 'off'>,
   apiKey: string,
@@ -49,25 +60,49 @@ export async function askAiJson(
       off()
     }
   }
+  const abort = new AbortController()
+  geminiAbort = abort
+  try {
+    return { results: await askGemini(apiKey, requests, abort.signal, onProgress), model: 'Gemini' }
+  } finally {
+    if (geminiAbort === abort) geminiAbort = null
+  }
+}
+
+async function askGemini(
+  apiKey: string,
+  requests: LlmRequest[],
+  signal: AbortSignal,
+  onProgress?: (p: AiProgress) => void
+): Promise<(unknown | null)[]> {
   const results: (unknown | null)[] = []
   for (let i = 0; i < requests.length; i++) {
+    if (signal.aborted) throw new Error('LLM_CANCELED')
     onProgress?.({
       note: `AI が判定中(${i + 1}/${requests.length})`,
       percent: (i / requests.length) * 100
     })
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`
-    const data = await fetchJson<GeminiResponse>(
-      url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: requests[i].prompt }] }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      },
-      'Gemini API'
-    )
+    let data: GeminiResponse
+    try {
+      data = await fetchJson<GeminiResponse>(
+        url,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: requests[i].prompt }] }],
+            generationConfig: { responseMimeType: 'application/json' }
+          }),
+          signal
+        },
+        'Gemini API'
+      )
+    } catch (e) {
+      // 中止で切った問い合わせは「接続できませんでした」ではなく中止
+      if (signal.aborted) throw new Error('LLM_CANCELED')
+      throw e
+    }
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text
     // 1件の答えが壊れていても(途中で切れた・オブジェクトでない)、その件だけ答え無しにする
     // (投げると、ほかの件のちゃんとした答えまで捨てることになる。このPCの AI と同じ扱い)
@@ -79,5 +114,5 @@ export async function askAiJson(
     }
     results.push(parsed)
   }
-  return { results, model: 'Gemini' }
+  return results
 }

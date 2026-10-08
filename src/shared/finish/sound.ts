@@ -69,8 +69,10 @@ const ALIASES: Record<string, string> = {
 
 /** フォルダ名を分類名に揃える(分からなければそのまま) */
 export function normalizeCategory(folder: string): string {
-  const key = folder.trim().replace(/\s+/g, '').toLowerCase()
-  return ALIASES[key] ?? folder.trim()
+  // 全角の英数字・macOS の濁点を分けた名前(NFD)も、ふつうの名前とそろえる
+  const name = folder.normalize('NFKC').trim()
+  const key = name.replace(/\s+/g, '').toLowerCase()
+  return ALIASES[key] ?? name
 }
 
 export interface KitFile {

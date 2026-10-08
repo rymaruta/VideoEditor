@@ -4,7 +4,7 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
 import { join } from 'path'
 import { describeFfmpegError } from './ffmpegError'
-import { isShuttingDown, trackProcess } from './liveProcesses'
+import { isShuttingDown, trackUntilDone } from './liveProcesses'
 import { detectVideoEncoder } from './segmentRenderer'
 import { contentFingerprint } from './fileFingerprint'
 import {
@@ -52,7 +52,10 @@ function probeStreams(filePath: string): Promise<ProxyStreamInfo> {
       // 調べられなかったのに「音なし」で作ると、無音の試聴用素材がずっと使われ続ける
       if (err || !data)
         return reject(
-          new Error(`素材を調べられませんでした: ${err instanceof Error ? err.message : filePath}`)
+          new Error(
+            // ffprobe の失敗は版数・ビルド設定の羅列を含むので、短い日本語にする
+            `素材を調べられませんでした: ${err ? describeFfmpegError(err).message : filePath}`
+          )
         )
       const audio = data.streams.find((s) => s.codec_type === 'audio')
       const video = data.streams.find((s) => s.codec_type === 'video')
@@ -166,12 +169,10 @@ export function ensurePreviewProxy(
                   notifyProgress(Math.max(0, Math.min(100, Math.round(p.percent))))
               })
               .on('error', (err, _stdout, stderr) => {
-                untrack()
                 rmSync(tmpPath, { force: true })
                 reject(describeFfmpegError(err, stderr))
               })
               .on('end', () => {
-                untrack()
                 try {
                   renameSync(tmpPath, finalPath)
                   resolve(finalPath)
@@ -180,7 +181,8 @@ export function ensurePreviewProxy(
                   reject(e)
                 }
               })
-            const untrack = trackProcess(command)
+            // 起こす前の kill は効かないので、起きた時点で閉じている最中なら止める(trackUntilDone)
+            trackUntilDone(command, ['end', 'error'])
             command.save(tmpPath)
             return
           }
@@ -233,7 +235,6 @@ export function ensurePreviewProxy(
                 }
               })
               .on('error', (err, _stdout, stderr) => {
-                untrack()
                 rmSync(tmpPath, { force: true })
                 // GPU で失敗したら(同時に開ける数の上限・ドライバ)、CPU で作り直す。
                 // アプリを閉じるために止めたのなら作り直さない
@@ -243,7 +244,6 @@ export function ensurePreviewProxy(
                 } else reject(describeFfmpegError(err, stderr))
               })
               .on('end', () => {
-                untrack()
                 try {
                   renameSync(tmpPath, outPath)
                   resolve(outPath)
@@ -252,7 +252,8 @@ export function ensurePreviewProxy(
                   reject(e)
                 }
               })
-            const untrack = trackProcess(command)
+            // 起こす前の kill は効かないので、起きた時点で閉じている最中なら止める(trackUntilDone)
+            trackUntilDone(command, ['end', 'error'])
             command.save(tmpPath)
           }
           encode(encoder === 'h264_nvenc')

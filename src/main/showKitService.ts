@@ -42,7 +42,8 @@ async function listFiles(dir: string, exts: Set<string>): Promise<string[]> {
 /** 大文字小文字・言い換えを吸収して、SE / BGM / CG のフォルダを探す */
 async function findTop(root: string, names: string[]): Promise<string | null> {
   const dirs = await listDirs(root)
-  const hit = dirs.find((d) => names.includes(d.trim().toLowerCase()))
+  // 全角の「ＢＧＭ」・macOS の濁点を分けた名前(NFD)も同じ名前とみなす
+  const hit = dirs.find((d) => names.includes(d.normalize('NFKC').trim().toLowerCase()))
   return hit ? join(root, hit) : null
 }
 

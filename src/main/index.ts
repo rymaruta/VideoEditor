@@ -132,6 +132,8 @@ let autosaveOverwrittenThisSession = false
  * 移したなら、退避先に居るのは前回の作業。終了時に今回のぶんで上書きしない
  */
 let previousDraftSetAside = false
+/** 次に自動保存を退避するとき、退避先にある前のものを日時付きの名前で残す(画面が落ちて読み込み直したとき) */
+let keepDiscardedOnNextSetAside = false
 let windowStatePath = ''
 /** 画面のプロセスが落ちたら読み込み直す(続けて落ちるときは止める) */
 const rendererCrashGuard = new RendererCrashGuard()
@@ -295,6 +297,9 @@ function createWindow(): void {
       // 落ちる前の作業は自動保存にしか無い。読み込み直した画面の最初の自動保存で上書きせず、
       // 起動時と同じく退避してから書く(「あとで決める」を選んでも失われない)
       autosaveOverwrittenThisSession = false
+      // 前回のセッションの作業をもう退避してあれば、それは消さずに残す(退避先は1つなので、
+      // 落ちる前の作業を退避すると前回の作業が上書きされていた)
+      keepDiscardedOnNextSetAside = previousDraftSetAside
       mainWindow.webContents.reload()
       return
     }
@@ -789,10 +794,18 @@ app.whenReady().then(() => {
    * @returns 退避したら true(呼び出し側は上部バーの復元ボタンを出し直す)
    */
   ipcMain.handle(IPC.autosaveProject, (_e, project: Project) => {
-    const setAside = writeAutosaveFile(autosavePath, project, !autosaveOverwrittenThisSession)
+    const first = !autosaveOverwrittenThisSession
+    // 書き込みの前に「このセッションは書いた」にする。書き込みが失敗しても、次の自動保存が
+    // もう一度退避して、退避した前回の作業を上書きしないように
     autosaveOverwrittenThisSession = true
-    if (setAside) previousDraftSetAside = true
-    return setAside
+    const keepPreviousDiscarded = keepDiscardedOnNextSetAside
+    keepDiscardedOnNextSetAside = false
+    return writeAutosaveFile(autosavePath, project, first, {
+      onSetAside: () => {
+        previousDraftSetAside = true
+      },
+      keepPreviousDiscarded
+    })
   })
   /**
    * 保存・開く・新規のあとの後始末。**「このセッションが書いたぶん」だけ消す。**
@@ -876,7 +889,10 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.footageEnvelopes, (_e, paths: string[]) =>
     Promise.all(
       paths.map(async (path) => {
-        const st = await stat(path)
+        // 見つからないファイルは英語の「ENOENT: no such file …」ではなく、ほかと同じ日本語で
+        const st = await stat(path).catch((e: NodeJS.ErrnoException) => {
+          throw e?.code === 'ENOENT' ? missingFileError() : e
+        })
         return cachedEnvelope(ffmpegPath, join(app.getPath('userData'), 'analysis-cache'), {
           path,
           size: st.size,

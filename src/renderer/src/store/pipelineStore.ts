@@ -67,6 +67,7 @@ import {
 import { roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mapTimelineRange, timelineMapping } from '@shared/roughCut/follow'
 import { formatIpcError } from '../lib/ipcError'
+import { cancelAiRequests } from '../lib/ai'
 import {
   AUTO_TRACK_NAME,
   mixCarriesVoice,
@@ -1779,6 +1780,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       void window.api.eventsCancel()
       // このPCの AI(構成・演出テロップ)とノイズ除去も止める
       void window.api.llmCancel()
+      cancelAiRequests()
       void window.api.denoiseCancel()
     },
 

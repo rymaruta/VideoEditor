@@ -22,6 +22,7 @@ import { StatusBar } from './components/StatusBar'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { useProjectStore } from './store/projectStore'
+import { formatIpcError } from './lib/ipcError'
 import { useAutosaveStore } from './store/autosaveStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
@@ -240,9 +241,19 @@ function App(): React.JSX.Element {
       // 見送った前回の自動保存を上書きする前に退避したときは、メニューの「破棄した自動保存
       // データを戻す」をすぐ使えるようにする。
       if (isDirty) {
-        window.api.autosaveProject(project).then((setAside) => {
-          if (setAside) useAutosaveStore.getState().refresh()
-        })
+        window.api.autosaveProject(project).then(
+          (setAside) => {
+            if (setAside) useAutosaveStore.getState().refresh()
+          },
+          (err) => {
+            // 書けなかったことを知らせる(黙っていると、落ちたときに戻せる作業が無いことに気付けない)。
+            // 書く前に退避していることがあるので、復元のボタンも出し直す
+            useAutosaveStore.getState().refresh()
+            useProjectStore
+              .getState()
+              .setSaveError(`自動保存に失敗しました: ${formatIpcError(err)}`)
+          }
+        )
       }
     }, 60000)
     return () => clearInterval(interval)

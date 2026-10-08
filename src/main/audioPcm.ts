@@ -3,6 +3,7 @@ import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { contentFingerprint } from './fileFingerprint'
+import { describeFfmpegExit } from './ffmpegError'
 import { ENVELOPE_RATE, EnvelopeBuilder } from '@shared/sync/correlate'
 
 /**
@@ -44,9 +45,8 @@ export function readPcm(
       if (err.length < 4000) err += c.toString()
     })
     child.on('error', reject)
-    child.on('close', (code) =>
-      code === 0 ? resolve() : reject(new Error(err.trim().split('\n').pop() || `ffmpeg ${code}`))
-    )
+    // 失敗は利用者に見せられる日本語にする(ffmpeg の最後の英語の1行がそのまま工程の失敗に出ていた)
+    child.on('close', (code) => (code === 0 ? resolve() : reject(describeFfmpegExit(code, err))))
   })
 }
 

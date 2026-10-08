@@ -52,6 +52,18 @@ interface RecentProjectsState {
   forgetProject: (filePath: string) => void
 }
 
+/**
+ * 一覧を覚える。書けなくても(保存領域が満杯・使えない)止めない。投げると、保存・開くは済んでいるのに
+ * 英語のエラーが「保存に失敗」として出て、自動保存の後始末・見つからない素材の確認まで飛ばしていた
+ */
+function persist(list: RecentProject[]): void {
+  try {
+    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(list))
+  } catch {
+    // 一覧は画面の中では更新する。次に起動したときに出ないだけ
+  }
+}
+
 export const useRecentProjectsStore = create<RecentProjectsState>((set, get) => ({
   recentProjects: loadRecent(),
 
@@ -61,13 +73,13 @@ export const useRecentProjectsStore = create<RecentProjectsState>((set, get) => 
       { filePath, usedAt },
       ...get().recentProjects.filter((e) => e.filePath !== filePath)
     ].slice(0, MAX_RECENT)
-    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next))
+    persist(next)
     set({ recentProjects: next })
   },
 
   forgetProject: (filePath) => {
     const next = get().recentProjects.filter((e) => e.filePath !== filePath)
-    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next))
+    persist(next)
     set({ recentProjects: next })
   }
 }))

@@ -101,3 +101,38 @@ describe('仮編集の作り直しの中止', () => {
     expect(Object.values(after).some((s) => s.state === 'run' || s.state === 'error')).toBe(false)
   })
 })
+
+describe('Gemini の問い合わせの中止', () => {
+  it('中止したら、残りの区切りを問い合わせずに「中止」で終わる', async () => {
+    let calls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        calls++
+        // 1件目の問い合わせの途中で中止する
+        if (calls === 1) usePipelineStore.getState().cancel()
+        if (init?.signal?.aborted) throw new DOMException('aborted', 'AbortError')
+        const body = JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] })
+        return { ok: true, status: 200, json: async () => JSON.parse(body), text: async () => body }
+      })
+    )
+    const noop = (): Promise<void> => Promise.resolve()
+    ;(globalThis as unknown as { window: unknown }).window = {
+      api: {
+        syncCancel: noop,
+        asrCancel: noop,
+        eventsCancel: noop,
+        llmCancel: noop,
+        denoiseCancel: noop
+      }
+    }
+    const requests = Array.from({ length: 8 }, (_, i) => ({
+      prompt: `p${i}`,
+      schema: {},
+      maxTokens: 10
+    }))
+    await expect(askAiJson('gemini', 'key', requests as never)).rejects.toThrow('LLM_CANCELED')
+    expect(calls).toBe(1)
+    vi.unstubAllGlobals()
+  })
+})

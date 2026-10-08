@@ -1,4 +1,4 @@
-import { trackProcess, trackUntilDone } from './liveProcesses'
+import { trackUntilDone } from './liveProcesses'
 import { colorMatchFilter } from '@shared/color/match'
 import {
   loudnormApplyFilter,
@@ -528,8 +528,13 @@ let currentExportCommand: ffmpeg.FfmpegCommand | null = null
 
 /** アプリを閉じたら書き出しの ffmpeg も止める(終わったら一覧から外す) */
 function trackExportCommand(command: ffmpeg.FfmpegCommand): void {
-  const untrack = trackProcess(command)
-  command.on('end', untrack).on('error', untrack)
+  trackUntilDone(command, ['end', 'error'])
+  // fluent-ffmpeg は `.run()` の後に遅れて ffmpeg を起こし、起こす前の kill は何もしない。
+  // 書き出しを始めた直後の「中止」は、起きた時点で効かせる(中止したのに書き出しが最後まで進み、
+  // 「完了」になっていた)
+  command.once('start', () => {
+    if (exportCancelRequested) command.kill('SIGKILL')
+  })
 }
 let exportInProgress = false
 let exportCancelRequested = false
