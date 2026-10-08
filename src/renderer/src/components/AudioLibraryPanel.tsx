@@ -101,7 +101,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
   async function handleAdd(id: string, url: string, name: string): Promise<void> {
     setBusyId(`add-${id}`)
     setError(null)
-    const projectId = useProjectStore.getState().project.id
+    const session = useProjectStore.getState().projectSession
     try {
       const { filePath, duration } = await window.api.downloadAudioAsset(url, name)
       // Asset + track + clip as one undoable step, so a single undo doesn't leave
@@ -118,7 +118,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
           hasAudio: true,
           hasVideo: false
         },
-        { trackName, projectId }
+        { trackName, session }
       )
     } catch (e) {
       setError(formatIpcError(e))

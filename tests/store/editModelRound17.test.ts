@@ -218,11 +218,23 @@ describe('第17回: 用意している間に別のプロジェクトを開いた
   it('用意し始めたプロジェクトと違えば置かない', () => {
     setup([[0, 10]])
     const before = st().project
+    const session = st().projectSession
     const nar = { ...asset('nar', 5, false), filePath: '/rec/nar.wav' }
-    st().addAudioClipWithAsset(nar, { trackName: 'ナレーション', projectId: 'another' })
+    st().addAudioClipWithAsset(nar, { trackName: 'ナレーション', session: session - 1 })
     expect(st().project).toBe(before)
-    st().addAudioClipWithAsset(nar, { trackName: 'ナレーション', projectId: before.id })
+    st().addAudioClipWithAsset(nar, { trackName: 'ナレーション', session })
     expect(st().project.audioTracks.some((t) => t.name === 'ナレーション')).toBe(true)
+  })
+
+  it('同じ id の企画(写し・開き直した同じファイル)に替わっていても置かない', () => {
+    setup([[0, 10]])
+    const session = st().projectSession
+    const p = st().project
+    // 「名前を付けて保存」した写しを開く(id は同じ)
+    st().loadProject({ ...p, name: '写し' }, '/p/ep12.veproj')
+    const nar = { ...asset('nar', 5, false), filePath: '/rec/nar.wav' }
+    st().addAudioClipWithAsset(nar, { trackName: 'ナレーション', session })
+    expect(st().project.audioTracks.some((t) => t.name === 'ナレーション')).toBe(false)
   })
 })
 

@@ -50,7 +50,7 @@ export function NarrationPanel(): React.JSX.Element {
     setError(null)
     setDoneMessage(null)
     setGenerating(true)
-    const projectId = useProjectStore.getState().project.id
+    const session = useProjectStore.getState().projectSession
     try {
       const filePath = await window.api.voicevoxSynthesize(text, styleId)
       const meta = await window.api.probeMedia(filePath)
@@ -68,7 +68,7 @@ export function NarrationPanel(): React.JSX.Element {
           hasAudio: true,
           hasVideo: false
         },
-        { trackId: trackId || undefined, trackName: 'ナレーション', projectId }
+        { trackId: trackId || undefined, trackName: 'ナレーション', session }
       )
       setDoneMessage('ナレーションを音声トラックに追加しました。')
     } catch (e) {

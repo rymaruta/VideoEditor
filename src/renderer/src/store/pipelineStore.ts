@@ -337,6 +337,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     anchorSourceId: string
   ): Promise<void> {
     setStep('speakers', { state: 'run', percent: 0, note: '音量を読み込み中' })
+    // 待つ間に中止した・別の企画を開いたら先へ進まない(進むと、文字起こしの結果とマイクの消音を、
+    // 開き直した別の企画へ書き込んでいた)。待った後ごとに確かめる
+    const session = useProjectStore.getState().projectSession
+    const ensureSameRun = (): void => {
+      stopIfCanceled()
+      if (useProjectStore.getState().projectSession !== session)
+        throw new Error('PIPELINE_CANCELED')
+    }
     const mics = used.filter((s) => s.kind === 'mic')
     const speakerSources = mics.length > 0 ? mics : used.filter((s) => s.id === anchorSourceId)
     const placeOf = new Map(report.placements.map((p) => [p.id, p]))
@@ -348,6 +356,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const pathOf = (f: SyncInputFile): string =>
       assetsNow.find((a) => a.id === assetIdOf[f.id])?.filePath ?? f.path
     const envelopes = await window.api.footageEnvelopes(targetFiles.map(pathOf))
+    ensureSameRun()
     const length = Math.ceil(
       Math.max(
         0,
@@ -413,6 +422,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
       if (!ownFiles.some((f) => f.sourceId === mixSrc.id)) continue
       const ownEnv = await window.api.footageEnvelopes(ownFiles.map(pathOf))
+      ensureSameRun()
       const placed = (sourceId: string): Float32Array => {
         const env = new Float32Array(length).fill(NaN)
         ownFiles.forEach((f, i) => {
@@ -489,6 +499,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
       if (candidates.length === 0) continue
       const mixEnvRaw = await window.api.footageEnvelopes(mixFiles.map(pathOf))
+      ensureSameRun()
       const mixEnv = new Float32Array(length).fill(NaN)
       mixFiles.forEach((f, i) => {
         const p = placeOf.get(f.id)!
@@ -558,10 +569,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     })
     let results: AsrJobResult[]
     try {
+      ensureSameRun()
       results = await window.api.asrRun(jobs.map((j) => j.job))
     } finally {
       off()
     }
+    ensureSameRun()
     const byId = new Map(results.map((r) => [r.id, r]))
     const nameOf = new Map(used.map((s) => [s.id, s.name]))
     const utterances: TranscriptUtterance[] = []

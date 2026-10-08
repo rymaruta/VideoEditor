@@ -94,3 +94,19 @@ describe('第40回: 解析を待つ間に企画を替えたとき', () => {
     expect(st().past).toHaveLength(0)
   })
 })
+
+describe('第41回: 続けての操作と、前の企画の素材', () => {
+  it('ドラッグを離した直後の数値の欄のトリムも、別の履歴になる', () => {
+    setup([{ id: 'c1', assetId: 'A', inPoint: 0, outPoint: 4, speed: 1 }], 'c1', 0, 0)
+    commitAsOwnStep('trim-drop:c1', () => st().updateClipTrim('c1', 0, 3))
+    st().updateClipTrim('c1', 0, 2.5)
+    expect(st().past).toHaveLength(2)
+  })
+
+  it('キーワード連動SE: 今の企画に無い素材を指すものは置かない', () => {
+    st().newProject()
+    st().addKeywordSeClips([{ assetId: 'old-se', startTime: 1, outPoint: 1, volume: 1 }], [])
+    expect(st().project.audioTracks).toHaveLength(0)
+    expect(st().past).toHaveLength(0)
+  })
+})

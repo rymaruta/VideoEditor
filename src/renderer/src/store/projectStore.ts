@@ -1108,10 +1108,11 @@ interface ProjectState {
       trackName: string
       startTime?: number
       /**
-       * 音を用意し始めたときのプロジェクト。別のプロジェクトに替わっていたら置かない(合成・ダウンロード・
-       * 読み込みを待つ間に別のプロジェクトを開くと、そちらに入っていた)
+       * 音を用意し始めたときの企画の番号(`projectSession`)。別の企画に替わっていたら置かない(合成・
+       * ダウンロード・読み込みを待つ間に別の企画を開くと、そちらに入っていた)。企画の id では、
+       * 「名前を付けて保存」の元と写し・開き直した同じファイルを見分けられない
        */
-      projectId?: string
+      session?: number
     }
   ) => void
   /** `index` を渡すとその位置へ挿入する(省略時は末尾に足す) */
@@ -1476,6 +1477,8 @@ export function commitAsOwnStep(key: string, write: () => void): void {
     write()
   } finally {
     endHistoryGesture()
+    // 後に続く操作(数値の欄など)も、このドラッグの履歴にまとめない
+    resetHistoryCoalescing()
   }
 }
 
@@ -2453,7 +2456,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // track and an unused asset behind.
   addAudioClipWithAsset: (asset, target) =>
     set((state) => {
-      if (target.projectId !== undefined && target.projectId !== state.project.id) return state
+      if (target.session !== undefined && target.session !== state.projectSession) return state
       const existing =
         state.project.audioTracks.find((t) => t.id === target.trackId) ??
         state.project.audioTracks.find((t) => t.name === target.trackName)
@@ -4552,8 +4555,16 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return { ...pushHistory(state), project: { ...state.project, videoOverlayTracks } }
     }),
 
-  addKeywordSeClips: (placements, newAssets) =>
+  addKeywordSeClips: (rawPlacements, newAssets) =>
     set((state) => {
+      // 今の企画にも、一緒に足す素材にも無い素材を指すものは置かない(前の企画の素材を指す、
+      // 見えないのに書き出しで失敗するクリップになる)
+      const placements = rawPlacements.filter(
+        (p) =>
+          state.project.assets.some((a) => a.id === p.assetId) ||
+          (newAssets ?? []).some((a) => a.id === p.assetId)
+      )
+      if (placements.length === 0) return state
       // **ワンクリックで足す経路は重ねて置かない。** 完全に覆われたクリップは画面では手前の1本と
       // 見分けが付かないのに、書き出しでは**そのまま足し算される**
       // (実測: 同じスキャンを2回で SE の区間が +6.0dB、近い2件の重なりでも +6.0dB)。

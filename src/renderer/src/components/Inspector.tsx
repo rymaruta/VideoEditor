@@ -244,6 +244,8 @@ export function Inspector(): React.JSX.Element {
     if (!clip || !asset) return
     setDetecting(true)
     setDetectError(null)
+    // 調べる間に別の企画(同じ id の写しも)を開いたら当てない
+    const session = useProjectStore.getState().projectSession
     try {
       const center = await window.api.analyzeSmartCrop(
         asset.filePath,
@@ -253,6 +255,7 @@ export function Inspector(): React.JSX.Element {
         asset.height,
         targetAspect
       )
+      if (useProjectStore.getState().projectSession !== session) return
       updateClipCrop(clip.id, true, center)
     } catch {
       setDetectError('被写体の自動検出に失敗しました')

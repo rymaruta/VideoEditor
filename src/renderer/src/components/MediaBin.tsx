@@ -238,12 +238,16 @@ export function MediaBin(): React.JSX.Element {
   async function handleRelink(assetId: string): Promise<void> {
     setError(null)
     setRelinkingId(assetId)
+    // 選ぶ・読む間に別の企画(同じ id の写しも)を開いたら、つなぎ直さない
+    const session = useProjectStore.getState().projectSession
+    const switched = (): boolean => useProjectStore.getState().projectSession !== session
     try {
       const filePath = await window.api.selectRelinkFile()
-      if (!filePath) return
+      if (!filePath || switched()) return
       // 静止画は静止画として読む(動画として読むと、サムネイルが取れず、要らない変換が走っていた)
       if (isImagePath(filePath)) {
         const still = await stillAssetFrom(filePath)
+        if (switched()) return
         const refusal = relinkRefusal(useProjectStore.getState().project, assetId, filePath, still)
         if (refusal) {
           setError(refusal)
@@ -269,6 +273,7 @@ export function MediaBin(): React.JSX.Element {
           thumbnailDataUrl = undefined
         }
       }
+      if (switched()) return
       relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl)
       void ensurePreviewable(
         assetId,
@@ -400,8 +405,11 @@ export function MediaBin(): React.JSX.Element {
 
   async function denoiseAsset(asset: MediaAsset): Promise<void> {
     setError(null)
+    // 除く間に別の企画(同じ id の写しも)を開いたら当てない
+    const session = useProjectStore.getState().projectSession
     try {
       const [r] = await window.api.denoiseRun([asset.filePath])
+      if (useProjectStore.getState().projectSession !== session) return
       if (r?.cleaned)
         useProjectStore
           .getState()

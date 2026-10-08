@@ -1539,6 +1539,7 @@ export function Timeline(): React.JSX.Element {
     trackName: string,
     startTime: number
   ): Promise<void> {
+    const session = useProjectStore.getState().projectSession
     try {
       const known = project.assets.find((a) => a.filePath === payload.filePath)
       const duration = known?.duration ?? (await window.api.probeMedia(payload.filePath)).duration
@@ -1554,7 +1555,7 @@ export function Timeline(): React.JSX.Element {
           hasAudio: true,
           hasVideo: false
         },
-        { trackId, trackName, startTime, projectId: project.id }
+        { trackId, trackName, startTime, session }
       )
     } catch (e) {
       setSfxDropError(`${payload.fileName}: ${formatIpcError(e)}`)

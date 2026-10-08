@@ -38,6 +38,8 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
   async function handleApply(): Promise<void> {
     setApplying(true)
     setError(null)
+    // 効果音を読む間に別の企画を開いたら置かない(前の企画のテロップの時刻・素材で、開いた企画に置いていた)
+    const session = useProjectStore.getState().projectSession
     try {
       const chosen = matches.filter((m) => selected.has(m.id))
       const placements: {
@@ -93,6 +95,10 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
       }
       // One scan = one undo step: the newly used SE files are registered together
       // with the clips instead of one history entry per file.
+      if (useProjectStore.getState().projectSession !== session) {
+        setError('効果音を用意している間に別の企画を開いたため、置きませんでした')
+        return
+      }
       if (placements.length > 0) addKeywordSeClips(placements, newAssets)
       if (missing.size > 0) {
         setError(
