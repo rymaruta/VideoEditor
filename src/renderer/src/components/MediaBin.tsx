@@ -257,6 +257,7 @@ export function MediaBin(): React.JSX.Element {
         return
       }
       const meta = await window.api.probeMedia(filePath)
+      if (switched()) return
       const refusal = relinkRefusal(useProjectStore.getState().project, assetId, filePath, meta)
       if (refusal) {
         setError(refusal)
