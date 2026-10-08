@@ -27,6 +27,41 @@ describe('relinkRefusal — つなぎ直せない組み合わせ', () => {
     expect(relinkRefusal(project, 'bgm', '/a.mp3', { hasVideo: false })).toBeNull()
     expect(relinkRefusal(project, 'main', '/b.mp4', { hasVideo: true })).toBeNull()
   })
+  it('同期したカメラは、本編に無くても静止画・音声だけのファイルにはつなぎ直せない', () => {
+    const mc = {
+      ...project,
+      multicam: {
+        anchorSourceId: 'A',
+        sources: [
+          { id: 'A', name: 'A', kind: 'camera' },
+          { id: 'B', name: 'B', kind: 'camera' },
+          { id: 'M', name: 'M', kind: 'mic' }
+        ],
+        files: [
+          { assetId: 'camB', sourceId: 'B', start: 0, rate: 1, duration: 60 },
+          { assetId: 'micM', sourceId: 'M', start: 0, rate: 1, duration: 60 }
+        ]
+      }
+    } as unknown as Project
+    expect(relinkRefusal(mc, 'camB', '/x/b.png', { hasVideo: true })).toMatch('静止画')
+    expect(relinkRefusal(mc, 'camB', '/x/b.wav', { hasVideo: false })).toMatch('映像')
+    expect(relinkRefusal(mc, 'micM', '/x/m.wav', { hasVideo: false, hasAudio: true })).toBeNull()
+  })
+  it('音声トラックで鳴らしている素材は、音の無いファイル・静止画にはつなぎ直せない', () => {
+    const withAudio = {
+      ...project,
+      audioTracks: [
+        { id: 'a', clips: [{ id: 'b', assetId: 'bgm', startTime: 0, inPoint: 0, outPoint: 5 }] }
+      ]
+    } as unknown as Project
+    expect(relinkRefusal(withAudio, 'bgm', '/x/a.png', { hasVideo: true })).toMatch('音')
+    expect(
+      relinkRefusal(withAudio, 'bgm', '/x/v.mp4', { hasVideo: true, hasAudio: false })
+    ).toMatch('音')
+    expect(
+      relinkRefusal(withAudio, 'bgm', '/x/a.mp3', { hasVideo: false, hasAudio: true })
+    ).toBeNull()
+  })
   it('ストアも、つなぎ直せない組み合わせでは素材を変えない', () => {
     const asset = {
       id: 'main',

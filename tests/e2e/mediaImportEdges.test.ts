@@ -86,6 +86,22 @@ describe.skipIf(!existsSync(ffmpegPath))('素材の取り込みの端', () => {
     expect(await probeMedia(rotated)).toMatchObject({ width: 360, height: 640 })
     // 回転していない素材はそのまま
     expect(await probeMedia(jpg)).toMatchObject({ width: 640, height: 360 })
+    // 縦長に記録して横長に見せる素材(画素が正方形でない)は回転ではない
+    const anamorphic = join(work, 'half-d1.mkv')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=352x480:r=30:d=1',
+      '-vf',
+      'setsar=20/11',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      anamorphic
+    ])
+    expect(await probeMedia(anamorphic)).toMatchObject({ width: 640, height: 480 })
   }, 60_000)
 
   it('高さが奇数の素材も、プレビュー用の変換ができる', async () => {
@@ -163,5 +179,63 @@ describe.skipIf(!existsSync(ffmpegPath))('素材の取り込みの端', () => {
         onProgress: () => {}
       })
     ).rejects.toThrow('静止画として読めない')
+  }, 60_000)
+
+  it('音声トラックが音の無い素材を指していても、標準の書き出しは失敗せずに鳴らさない', async () => {
+    const main = join(work, 'main2.mp4')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=red:s=320x180:r=30:d=2',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      main
+    ])
+    const m = await probeMedia(main)
+    const project = {
+      id: 'p',
+      name: 'p',
+      aspectRatio: '16:9',
+      assets: [
+        {
+          id: 'm',
+          filePath: main,
+          fileName: 'main',
+          duration: m.duration,
+          width: 320,
+          height: 180,
+          fps: 30,
+          hasAudio: false,
+          hasVideo: true
+        }
+      ],
+      clips: [{ id: 'c', assetId: 'm', inPoint: 0, outPoint: 2, speed: 1 }],
+      audioTracks: [
+        {
+          id: 'bgm',
+          name: 'BGM',
+          volume: 1,
+          muted: false,
+          duckingEnabled: false,
+          clips: [{ id: 'b', assetId: 'm', startTime: 0, inPoint: 0, outPoint: 2 }]
+        }
+      ],
+      videoOverlayTracks: [],
+      textOverlays: []
+    } as unknown as Project
+    const out = join(work, 'silent.mp4')
+    await exportProject({
+      project,
+      aspectRatio: '16:9',
+      resolutionHeight: 720,
+      quality: 'standard',
+      outputPath: out,
+      telopLayer: null,
+      onProgress: () => {}
+    })
+    expect((await probeMedia(out)).duration).toBeGreaterThan(1.5)
   }, 60_000)
 })

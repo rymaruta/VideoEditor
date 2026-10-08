@@ -1653,3 +1653,30 @@ describe('第33回: 第32回修正の見直し', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 })
+
+describe('第35回: アングルを替える先', () => {
+  it('静止画・映像の無い素材になったカメラへは、アングルを替えない', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        multicam: {
+          ...p.multicam!,
+          sources: [...p.multicam!.sources, { id: 'B', name: 'カメラB', kind: 'camera' }],
+          files: [
+            ...p.multicam!.files,
+            { assetId: 'camB', sourceId: 'B', start: 0, rate: 1, duration: 100 }
+          ]
+        },
+        assets: [...p.assets, { ...asset('camB', 3600), still: true }]
+      }
+    })
+    const id = st().project.clips[0].id
+    st().switchClipAngle(id, 'B')
+    expect(st().project.clips[0].assetId).toBe('camA')
+  })
+})

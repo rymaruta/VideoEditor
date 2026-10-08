@@ -153,6 +153,8 @@ function pixelAspectRatio(stream: Record<string, unknown> | undefined): number {
 function displayDimensions(stream: Record<string, unknown> | undefined): {
   width: number
   height: number
+  /** ffprobe が回転を読んで縦横を入れ替えたか */
+  rotated: boolean
 } {
   const coded = typeof stream?.width === 'number' ? stream.width : 0
   const height = typeof stream?.height === 'number' ? stream.height : 0
@@ -169,7 +171,9 @@ function displayDimensions(stream: Record<string, unknown> | undefined): {
         ? Number(tags.rotate)
         : 0
   const degrees = Number.isFinite(raw) ? Math.abs(raw) % 180 : 0
-  return degrees === 90 ? { width: height, height: width } : { width, height }
+  return degrees === 90
+    ? { width: height, height: width, rotated: true }
+    : { width, height, rotated: false }
 }
 
 /**
@@ -235,15 +239,26 @@ export function probeMedia(
       const duration =
         declared ?? (options.skipDurationScan ? null : await measureDurationByScan(filePath)) ?? 0
       let display = displayDimensions(videoStream as Record<string, unknown> | undefined)
-      // 向きを読めない入れ物は、ffmpeg が読んだ絵と縦横の向きが違えば入れ替える
+      // 向きを読めない入れ物は、ffmpeg が回して読んだ(読んだ絵の縦横が、記録された縦横と逆)のに
+      // ffprobe が回していなければ入れ替える。比べるのは**画素の縦横比で伸ばす前**の大きさどうし
+      // (伸ばした後と比べると、縦長に記録して横長に見せる素材(352x480 を 20:11 で伸ばす)を回転と取り違えた)。
+      // 企画を開くとき(尺を測らない読み方)は大きさを使わないので、余計に読まない
       const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
-      if (videoStream && ROTATION_BLIND_EXTENSIONS.has(ext) && display.width !== display.height) {
+      const coded = {
+        width: Number(videoStream?.width) || 0,
+        height: Number(videoStream?.height) || 0
+      }
+      if (
+        videoStream &&
+        !options.skipDurationScan &&
+        !display.rotated &&
+        ROTATION_BLIND_EXTENSIONS.has(ext) &&
+        coded.width !== coded.height
+      ) {
         const decoded = await decodedDimensions(filePath)
-        if (decoded && decoded.width !== decoded.height) {
-          const portrait = (d: { width: number; height: number }): boolean => d.height > d.width
-          if (portrait(decoded) !== portrait(display))
-            display = { width: display.height, height: display.width }
-        }
+        const portrait = (d: { width: number; height: number }): boolean => d.height > d.width
+        if (decoded && decoded.width !== decoded.height && portrait(decoded) !== portrait(coded))
+          display = { width: display.height, height: display.width, rotated: true }
       }
       resolve({
         duration,
@@ -1422,7 +1437,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         const clipLabels: string[] = []
         track.clips.forEach((trackClip, clipIdx) => {
           const asset = assetById.get(trackClip.assetId)
-          if (!asset) return
+          // 音の無い素材は鳴らさない(長尺向けの書き出しと同じ。音を読もうとして書き出しごと失敗していた)
+          if (!asset || !asset.hasAudio) return
           const dur = trackClip.outPoint - trackClip.inPoint
           if (dur <= 0) return
           // 本編の終わりより後に始まる音は鳴らない(下で本編の終わりで切るので、長さが無くなる)

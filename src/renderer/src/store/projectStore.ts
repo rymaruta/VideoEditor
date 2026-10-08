@@ -3689,6 +3689,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       if (!info || !clip) return state
       const found = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clips
       if (!found || found.length === 0) return state
+      // 映像の無い素材・静止画へは替えない(本編へは置けない。書き出しが失敗する)
+      const playable = (id: string): boolean => {
+        const a = state.project.assets.find((x) => x.id === id)
+        return Boolean(a && a.hasVideo && !a.still)
+      }
+      if (!found.every((p) => playable(p.assetId))) return state
       // 人が変えた速さ(素材の速さとの比)を保つ。素材の速さに戻すと長さが変わり、後ろが全部ずれる
       const currentRate = info.files.find((f) => f.assetId === clip.assetId)?.rate || 1
       const ratio = (clip.speed || 1) / currentRate

@@ -49,6 +49,8 @@ export function MediaBin(): React.JSX.Element {
   const setDraggingAssetId = useProjectStore((s) => s.setDraggingAssetId)
   const [importing, setImporting] = useState(false)
   const importingRef = useRef(false)
+  /** 取り込みの途中に来て入れなかったファイルがあったか(終わったときの知らせが上書きしないように) */
+  const busyDroppedRef = useRef(false)
   /** プロジェクトを替えた回数(読み込みの途中で替えたかを見る) */
   const projectGeneration = useRef(0)
   useEffect(
@@ -290,6 +292,7 @@ export function MediaBin(): React.JSX.Element {
     // メニュー(Ctrl+I)からも来るので、ここで二重に始めない
     // 取り込みの途中に来たものは、黙って捨てずに知らせる(落としたファイルが入らないまま気づけなかった)
     if (importingRef.current) {
+      busyDroppedRef.current = true
       setError('取り込み中です。終わってから、もう一度入れてください')
       return
     }
@@ -302,6 +305,12 @@ export function MediaBin(): React.JSX.Element {
     } finally {
       importingRef.current = false
       setImporting(false)
+      // 取り込み中に入れたものがあれば、終わったときの知らせ(失敗の一覧)に足す
+      if (busyDroppedRef.current) {
+        busyDroppedRef.current = false
+        const note = '取り込み中に入れたファイルは取り込んでいません。もう一度入れてください'
+        setError((prev) => (prev && !prev.startsWith('取り込み中です') ? `${prev}\n${note}` : note))
+      }
     }
   }
 
@@ -511,6 +520,7 @@ export function MediaBin(): React.JSX.Element {
   // (プロキシ生成・履歴1件・失敗の集約が経路ごとにばらけないようにするため)。
   async function importDroppedFiles(files: File[]): Promise<void> {
     if (importing || importingRef.current) {
+      busyDroppedRef.current = true
       setError('取り込み中です。終わってから、もう一度入れてください')
       return
     }
