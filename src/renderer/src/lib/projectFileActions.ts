@@ -69,7 +69,13 @@ export async function saveProjectAs(): Promise<void> {
   // 書いたのは `project`。保存中に編集が入っていたら未保存のままにする(markSaved の理由)。
   markSaved(filePath, project)
   remember(filePath)
-  await clearAutosaveAfterSave()
+  // 保存している間に別の企画へ切り替えていたら、その企画の自動保存の控えは消さない
+  if (stillSameProject(project)) await clearAutosaveAfterSave()
+}
+
+/** 保存を始めた企画を、まだ開いているか(保存の途中で新しい企画・別の企画にしていないか) */
+function stillSameProject(saved: { id: string }): boolean {
+  return useProjectStore.getState().project.id === saved.id
 }
 
 export async function saveProject(): Promise<void> {
@@ -81,7 +87,7 @@ export async function saveProject(): Promise<void> {
   await window.api.saveProject(currentFilePath, project)
   markSaved(currentFilePath, project)
   remember(currentFilePath)
-  await clearAutosaveAfterSave()
+  if (stillSameProject(project)) await clearAutosaveAfterSave()
 }
 
 // ダイアログで選ぶ経路と最近使った一覧から選ぶ経路で、確認・読み込み・後始末を

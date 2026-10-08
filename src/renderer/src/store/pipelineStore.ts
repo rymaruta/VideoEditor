@@ -289,6 +289,20 @@ function fileName(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
 }
 
+/**
+ * ショートを置く名前(拡張子なし)。同じ名前の企画・動画がすでにあれば「(2)」「(3)」…を付ける。
+ * 作り直すと、前に作って手で直したショートの企画と動画を、黙って上書きしていた
+ */
+export async function freeShortBase(base: string): Promise<string> {
+  for (let n = 1; n < 1000; n++) {
+    const name = n === 1 ? base : `${base} (${n})`
+    const paths = [`${name}.veproj`, `${name}.mp4`]
+    const missing = await window.api.checkFilesExist(paths)
+    if (missing.length === paths.length) return name
+  }
+  return `${base} (${Date.now()})`
+}
+
 export const usePipelineStore = create<PipelineState>((set, get) => {
   const log = (text: string): void =>
     set((s) => ({ log: [...s.log, { time: Date.now(), text }].slice(-500) }))
@@ -1389,7 +1403,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             windows[i],
             i
           )
-          const base = `${folder}/${safeFileBaseName(short.name)}`
+          const base = await freeShortBase(`${folder}/${safeFileBaseName(short.name)}`)
           await window.api.saveProject(`${base}.veproj`, short)
           const telopLayer = await prepareTelopLayerForExport(short, '9:16', 1080)
           try {

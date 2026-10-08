@@ -4,6 +4,7 @@ import {
   fsyncSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync
@@ -101,7 +102,22 @@ function writeDurably(path: string, text: string): void {
   }
 }
 
-export function saveProjectFile(filePath: string, project: Project): void {
+/**
+ * 書き込む本当の場所。保存先がシンボリックリンクなら、その先のファイル。
+ * リンクの名前へ一時ファイルを rename すると、リンクがただのファイルに置き換わり、リンク先
+ * (Dropbox・NAS に置いた本体)は古いまま残って、黙って同期されなくなっていた
+ */
+function realTarget(filePath: string): string {
+  try {
+    return realpathSync(filePath)
+  } catch {
+    // まだ無いファイル(初めての保存)・リンク先が無いリンクは、指定どおりの場所へ
+    return filePath
+  }
+}
+
+export function saveProjectFile(requestedPath: string, project: Project): void {
+  const filePath = realTarget(requestedPath)
   // **一時ファイルの名前は、保存先の名前から作らない。**
   // `${filePath}.saving-…` のように後ろへ足すと、一時ファイルだけが名前の長さの上限
   // (1要素 255バイト)を先に超えて、**利用者が付けられる名前なのに保存だけできない**

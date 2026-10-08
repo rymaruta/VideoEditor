@@ -10,7 +10,12 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import { dirname, extname, join } from 'path'
-import { partialPathFor, withMp4Extension, writeViaPartial } from '../../src/main/partialOutput'
+import {
+  partialPathFor,
+  withMp4Extension,
+  withVeprojExtension,
+  writeViaPartial
+} from '../../src/main/partialOutput'
 
 const dirs: string[] = []
 const work = (): string => {
@@ -90,5 +95,14 @@ describe('withMp4Extension', () => {
     expect(withMp4Extension('/out/clip')).toBe('/out/clip.mp4')
     expect(withMp4Extension('/out/clip.MP4')).toBe('/out/clip.MP4')
     expect(withMp4Extension('/out/v1.2')).toBe('/out/v1.2.mp4')
+  })
+})
+
+describe('withVeprojExtension', () => {
+  it('拡張子が無ければ .veproj を足し、あればそのまま(大文字も)', () => {
+    expect(withVeprojExtension('/x/myshow')).toBe('/x/myshow.veproj')
+    expect(withVeprojExtension('/x/a.veproj')).toBe('/x/a.veproj')
+    expect(withVeprojExtension('/x/a.VEPROJ')).toBe('/x/a.VEPROJ')
+    expect(withVeprojExtension('/x/v1.2')).toBe('/x/v1.2.veproj')
   })
 })

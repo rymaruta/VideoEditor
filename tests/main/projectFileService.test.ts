@@ -1,4 +1,12 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -65,5 +73,17 @@ describe('手直しした企画ファイル', () => {
     const path = join(dir, 'bom.veproj')
     writeFileSync(path, '﻿' + JSON.stringify(project('BOM付き')), 'utf-8')
     expect(loadProjectFile(path).name).toBe('BOM付き')
+  })
+})
+
+describe('シンボリックリンクの企画ファイル', () => {
+  it('リンクを通して保存すると、リンクはそのままで、リンク先の本体が新しくなる', () => {
+    const real = join(dir, 'real.veproj')
+    const link = join(dir, 'link.veproj')
+    writeFileSync(real, '{}')
+    symlinkSync(real, link)
+    saveProjectFile(link, project('新しい名前'))
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(loadProjectFile(real).name).toBe('新しい名前')
   })
 })

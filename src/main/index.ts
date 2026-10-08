@@ -16,7 +16,7 @@ import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
-import { withMp4Extension, writeViaPartial } from './partialOutput'
+import { withMp4Extension, withVeprojExtension, writeViaPartial } from './partialOutput'
 import { basename, join } from 'path'
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
@@ -345,6 +345,31 @@ function showSaveDialogForSender(
 }
 
 /**
+ * 保存ダイアログで選んだ名前に拡張子を足したとき、その名前のファイルがあれば上書きしてよいか確かめる
+ * (足した名前は、保存ダイアログの上書きの確認を通っていない)。やめたら null
+ */
+async function confirmExtendedPath(
+  event: Electron.IpcMainInvokeEvent,
+  chosen: string,
+  extended: string
+): Promise<string | null> {
+  if (extended === chosen || !existsSync(extended)) return extended
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning',
+    buttons: ['上書きする', 'キャンセル'],
+    defaultId: 1,
+    cancelId: 1,
+    message: `「${basename(extended)}」はすでにあります`,
+    detail: '上書きしますか?'
+  }
+  const { response } = win
+    ? await dialog.showMessageBox(win, options)
+    : await dialog.showMessageBox(options)
+  return response === 0 ? extended : null
+}
+
+/**
  * 進捗などの通知を、その処理を頼んできたウィンドウにだけ返す。
  * (別のウィンドウの進捗バーを動かさないため、`webContents.send` の直呼びはしない)
  *
@@ -455,24 +480,7 @@ function registerWindowScopedIpcHandlers(): void {
       filters: [{ name: 'MP4動画', extensions: ['mp4'] }]
     })
     if (result.canceled || !result.filePath) return null
-    const outputPath = withMp4Extension(result.filePath)
-    // 拡張子を足した名前は、保存ダイアログの上書きの確認を通っていない。あれば確かめる
-    if (outputPath !== result.filePath && existsSync(outputPath)) {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      const options: Electron.MessageBoxOptions = {
-        type: 'warning',
-        buttons: ['上書きする', 'キャンセル'],
-        defaultId: 1,
-        cancelId: 1,
-        message: `「${basename(outputPath)}」はすでにあります`,
-        detail: '上書きしますか?'
-      }
-      const { response } = win
-        ? await dialog.showMessageBox(win, options)
-        : await dialog.showMessageBox(options)
-      if (response !== 0) return null
-    }
-    return outputPath
+    return confirmExtendedPath(event, result.filePath, withMp4Extension(result.filePath))
   })
 
   ipcMain.handle(IPC.selectExportFolder, async (event) => {
@@ -489,7 +497,7 @@ function registerWindowScopedIpcHandlers(): void {
       filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
     })
     if (result.canceled || !result.filePath) return null
-    return result.filePath
+    return confirmExtendedPath(event, result.filePath, withVeprojExtension(result.filePath))
   })
 
   ipcMain.handle(IPC.selectProjectOpenPath, async (event) => {

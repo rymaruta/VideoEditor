@@ -2127,19 +2127,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   },
 
   markSaved: (filePath, savedProject) =>
-    set((state) => ({
-      currentFilePath: filePath,
-      // **ディスクに書いたのは `savedProject`。** 保存は IPC を跨ぐので、書いている
-      // 途中の編集は成果物に入らない。それでも一律 `false` にすると、その編集だけが
-      // 「保存済み」の顔をして残り、閉じるときの警告も出ず、`clearAutosave` で
-      // 復元用の控えまで消えるので**どこにも無くなる**。
-      // (実測: 保存に 465ms かかる状態で、保存を始めた直後にクリップを1本足すと、
-      //  画面は ABCD・`isDirty=false`・警告なしなのに、ファイルの中身は **ABC** だった)
-      // 編集があれば `project` は必ず別のオブジェクトに差し替わる(どの操作も
-      // `{...state.project}` を作る)ので、参照が同じかどうかで判定できる。
-      isDirty: !savedOrBackgroundOnly(state.project, savedProject),
-      saveError: null
-    })),
+    set((state) => {
+      // 保存している間に別の企画へ切り替えていたら、今の企画には何も付けない(付けると、新しい企画の
+      // 次の保存が前の企画のファイルを黙って上書きしていた)
+      if (state.project.id !== savedProject.id) return state
+      return {
+        currentFilePath: filePath,
+        // **ディスクに書いたのは `savedProject`。** 保存は IPC を跨ぐので、書いている
+        // 途中の編集は成果物に入らない。それでも一律 `false` にすると、その編集だけが
+        // 「保存済み」の顔をして残り、閉じるときの警告も出ず、`clearAutosave` で
+        // 復元用の控えまで消えるので**どこにも無くなる**。
+        // (実測: 保存に 465ms かかる状態で、保存を始めた直後にクリップを1本足すと、
+        //  画面は ABCD・`isDirty=false`・警告なしなのに、ファイルの中身は **ABC** だった)
+        // 編集があれば `project` は必ず別のオブジェクトに差し替わる(どの操作も
+        // `{...state.project}` を作る)ので、参照が同じかどうかで判定できる。
+        isDirty: !savedOrBackgroundOnly(state.project, savedProject),
+        saveError: null
+      }
+    }),
 
   setProjectName: (name) =>
     set((state) => ({

@@ -24,6 +24,14 @@ export function withMp4Extension(outputPath: string): string {
   return extname(outputPath).toLowerCase() === '.mp4' ? outputPath : `${outputPath}.mp4`
 }
 
+/**
+ * 企画の保存先の名前を `.veproj` で終わらせる。Linux の保存ダイアログは拡張子を足さないので、
+ * 「myshow」と打つと拡張子の無いファイルになり、「開く」のダイアログ(.veproj だけを出す)に出なかった
+ */
+export function withVeprojExtension(filePath: string): string {
+  return extname(filePath).toLowerCase() === '.veproj' ? filePath : `${filePath}.veproj`
+}
+
 export async function writeViaPartial<T>(
   outputPath: string,
   write: (path: string) => Promise<T>
