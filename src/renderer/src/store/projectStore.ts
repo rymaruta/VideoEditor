@@ -137,6 +137,52 @@ function clampSourceRange<T extends { inPoint: number; outPoint: number }>(
     : { ...clip, inPoint: nextIn, outPoint: nextOut }
 }
 
+/**
+ * 複製・貼り付けたクリップの「音を消した」印。マルチカムの収録のクリップはマイクのトラックが
+ * 声を鳴らす(複製にもマイクの音が付く)ので、消したまま。分離した音で消していたクリップは、
+ * 複製には分離した音が付かないので、自分の音を鳴らす
+ * (どちらも外していたので、マルチカムの複製でカメラの音とマイクの音が二重に鳴っていた)
+ */
+function copiedAudioDetached(project: Project, clip: Clip): boolean {
+  return (
+    clip.audioDetached === true &&
+    (project.multicam?.files.some((f) => f.assetId === clip.assetId) ?? false)
+  )
+}
+
+/**
+ * 本編のクリップの入点・速さを変えたとき、そのクリップに追従するテロップの `linkOffset` を、
+ * 同じ中身(素材の同じ時刻)を指すように直す。直さないと、頭を詰めた・速くしたクリップの上で
+ * テロップが元の秒数の所に残り、別の中身(次のクリップ)の上に出ていた。
+ * 指していた中身がクリップから外れたら、追従を外す(その時点の位置で固定)
+ */
+function reanchorLinkedOverlays(before: Project, after: Project): Project {
+  if (!after.textOverlays.some((o) => o.linkedClipId)) return after
+  const oldById = new Map(before.clips.map((c) => [c.id, c]))
+  const newById = new Map(after.clips.map((c) => [c.id, c]))
+  let changed = false
+  const textOverlays = after.textOverlays.map((o) => {
+    if (!o.linkedClipId) return o
+    const old = oldById.get(o.linkedClipId)
+    const nw = newById.get(o.linkedClipId)
+    if (!old || !nw) return o
+    const oldSpeed = old.speed || 1
+    const newSpeed = nw.speed || 1
+    if (old.inPoint === nw.inPoint && old.outPoint === nw.outPoint && oldSpeed === newSpeed)
+      return o
+    const source = old.inPoint + (o.linkOffset ?? 0) * oldSpeed
+    if (source < nw.inPoint - 1e-6 || source >= nw.outPoint) {
+      changed = true
+      return { ...o, linkedClipId: undefined, linkOffset: undefined }
+    }
+    const linkOffset = Math.max(0, (source - nw.inPoint) / newSpeed)
+    if (linkOffset === o.linkOffset) return o
+    changed = true
+    return { ...o, linkOffset }
+  })
+  return changed ? { ...after, textOverlays } : after
+}
+
 function createBlankProject(): Project {
   return {
     id: uuid(),
@@ -492,11 +538,25 @@ function normalizeVideoOverlayTrack(
  * (実測: BPM 100000 の `.veproj` を開くと線が **50,002本**できて、
  *  開くのに 3,066ms かかった——正常なファイルは 602ms)。
  */
+/**
+ * この版の知らない項目(新しい版が書いた項目)。読み込みで整えるときに先に広げて残す。
+ * 知っている項目は外す(形の崩れた値が、整えた値の代わりに残らないように)
+ */
+function unknownFields(
+  raw: Record<string, unknown>,
+  known: readonly string[]
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw)) if (!known.includes(k)) out[k] = v
+  return out
+}
+
 function normalizeBeatGrid(raw: unknown): BeatGrid | null {
   if (!isRecord(raw)) return null
   const bpm = asFinite(raw.bpm, 0)
   if (bpm <= 0) return null
   return {
+    ...unknownFields(raw, ['bpm', 'offsetSeconds', 'enabled', 'sourceLabel']),
     bpm: clampBpm(bpm),
     offsetSeconds: asFinite(raw.offsetSeconds, 0),
     enabled: asBoolean(raw.enabled, false),
@@ -636,6 +696,7 @@ function normalizeSegs(raw: unknown, camera: boolean): (Range | CameraSeg)[] | u
         (!camera || typeof (r as Record<string, unknown>).cameraId === 'string')
     )
     .map((r) => ({
+      ...unknownFields(r, ['start', 'end', 'cameraId']),
       start: r.start as number,
       end: r.end as number,
       ...(camera ? { cameraId: r.cameraId as string } : {})
@@ -647,6 +708,7 @@ function normalizeOverrides(raw: unknown): CutOverrides | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const r = raw as Record<string, unknown>
   const o: CutOverrides = {
+    ...unknownFields(r, ['removed', 'added', 'angles']),
     removed: (normalizeSegs(r.removed, false) as Range[] | undefined) ?? [],
     added: (normalizeSegs(r.added, false) as Range[] | undefined) ?? [],
     angles: (normalizeSegs(r.angles, true) as CameraSeg[] | undefined) ?? []
@@ -680,6 +742,7 @@ function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
         typeof s.id === 'string' && (s.kind === 'camera' || s.kind === 'mic' || s.kind === 'audio')
     )
     .map((s) => ({
+      ...unknownFields(s, ['id', 'name', 'kind', 'subject', 'trackRole', 'trackOf', 'cameraRole']),
       id: s.id as string,
       name: typeof s.name === 'string' ? s.name : '',
       kind: s.kind as 'camera' | 'mic' | 'audio',
@@ -698,6 +761,7 @@ function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
   const files = asRecordArray<Record<string, unknown>>(r.files)
     .filter((f) => typeof f.assetId === 'string' && typeof f.sourceId === 'string')
     .map((f) => ({
+      ...unknownFields(f, ['assetId', 'sourceId', 'start', 'rate', 'duration', 'recordedAt']),
       assetId: f.assetId as string,
       sourceId: f.sourceId as string,
       start: asFinite(f.start, 0),
@@ -707,7 +771,12 @@ function normalizeMulticam(raw: unknown): MulticamInfo | undefined {
         ? { recordedAt: f.recordedAt }
         : {})
     }))
-  return { anchorSourceId: r.anchorSourceId, sources, files }
+  return {
+    ...unknownFields(r, ['anchorSourceId', 'sources', 'files']),
+    anchorSourceId: r.anchorSourceId,
+    sources,
+    files
+  }
 }
 
 /** 文字起こしは作り直せる結果なので、形の崩れたものは黙って捨てる(企画を開けなくするより良い) */
@@ -724,12 +793,23 @@ function normalizeTranscript(raw: unknown): TranscriptUtterance[] | undefined {
       ? (r.words as Record<string, unknown>[])
           .filter((w) => w && typeof w.text === 'string')
           .map((w) => ({
+            ...unknownFields(w, ['text', 'start', 'end']),
             text: w.text as string,
             start: asFinite(w.start, start),
             end: asFinite(w.end, end)
           }))
       : []
     out.push({
+      ...unknownFields(r, [
+        'id',
+        'assetId',
+        'speaker',
+        'sourceStart',
+        'sourceEnd',
+        'text',
+        'words',
+        'overlap'
+      ]),
       id: asNonEmptyString(r.id, uuid()),
       assetId: r.assetId,
       speaker: typeof r.speaker === 'string' && r.speaker ? r.speaker : undefined,
@@ -1454,6 +1534,7 @@ function normalizeEditedTelops(raw: unknown): Record<string, EditedTelop> | unde
     const r = v as Record<string, unknown>
     if (typeof r.text !== 'string') continue
     out[key] = {
+      ...unknownFields(r, ['text', 'style', 'styleId', 'speaker']),
       text: r.text,
       style: normalizeTextStyle(r.style),
       ...(typeof r.styleId === 'string' ? { styleId: r.styleId } : {}),
@@ -1539,6 +1620,31 @@ function pushHistory(
  * プロキシのパス書き込み)は**素通し**——履歴を捨てる側の操作まで捨ててしまうと、
  * 同じ内容の企画を開き直したときに古い履歴が残る。
  */
+/**
+ * 編集で消えたクリップ・テロップを選んだままにしない。上書き・無音のカット・演出テロップの置き直しは
+ * クリップやテロップを作り替えるので、選択が消えたものを指したままになり、「選んだクリップに
+ * 自動テロップ」が黙って何もせず、貼り付けが選んだ所の後ろではなく最後に入っていた
+ */
+function pruneSelection(state: ProjectState, patch: Partial<ProjectState>): Partial<ProjectState> {
+  const project = patch.project
+  if (!project) return patch
+  const ids = new Set(project.clips.map((c) => c.id))
+  const selected = 'selectedClipId' in patch ? (patch.selectedClipId ?? null) : state.selectedClipId
+  const multi = patch.multiSelectedClipIds ?? state.multiSelectedClipIds
+  const overlay =
+    'selectedOverlayId' in patch ? (patch.selectedOverlayId ?? null) : state.selectedOverlayId
+  const nextSelected = selected && ids.has(selected) ? selected : null
+  const nextMulti = multi.every((id) => ids.has(id)) ? multi : multi.filter((id) => ids.has(id))
+  const nextOverlay = overlayStillThere(project, overlay)
+  if (nextSelected === selected && nextMulti === multi && nextOverlay === overlay) return patch
+  return {
+    ...patch,
+    selectedClipId: nextSelected,
+    multiSelectedClipIds: nextMulti,
+    selectedOverlayId: nextOverlay
+  }
+}
+
 function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<ProjectState> {
   return (set, get, api) => {
     const guardedSet: typeof set = (partial) => {
@@ -1553,7 +1659,7 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         else if (patch.project && patch.project.clips !== state.project.clips)
           patch = { ...patch, project: followMainEdit(state.project, patch.project) }
         if (!patch.project || !sameProjectContent(patch.project, state.project)) {
-          return omitKeys(patch, ['__historyPush'])
+          return pruneSelection(state, omitKeys(patch, ['__historyPush']))
         }
         // **落とすなら、まとめ判定の目印も落とす。** 残すと、この直後に来た本物の
         // 編集が「起点はもう積んである」と誤って判断し、**履歴を1件も積まないまま
@@ -1713,7 +1819,19 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           videoOverlayTracks: state.project.videoOverlayTracks.map((t) => ({
             ...t,
             clips: t.clips.map(forAsset)
-          }))
+          })),
+          // マルチカムの収録の長さも新しいファイルに合わせる(古い長さのまま、後の編集で
+          // マイクの音を素材の終わりの先まで作っていた)
+          ...(state.project.multicam && !still && probe.duration > 0
+            ? {
+                multicam: {
+                  ...state.project.multicam,
+                  files: state.project.multicam.files.map((f) =>
+                    f.assetId === assetId ? { ...f, duration: probe.duration } : f
+                  )
+                }
+              }
+            : {})
         },
         isDirty: true,
         missingAssetIds: state.missingAssetIds.filter((id) => id !== assetId)
@@ -2157,14 +2275,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   updateClipTrim: (clipId, inPoint, outPoint) =>
     set((state) => ({
       ...pushHistory(state, `clipTrim:${clipId}`),
-      project: {
+      project: reanchorLinkedOverlays(state.project, {
         ...state.project,
         clips: state.project.clips.map((c) =>
           c.id === clipId
             ? clampSourceRange(c, inPoint, outPoint, assetDurationOf(state.project, c.assetId))
             : c
         )
-      }
+      })
     })),
 
   // Roll trim: moves the boundary between two neighbours without changing the total
@@ -2206,7 +2324,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
       return {
         ...pushHistory(state, `roll:${leftClipId}:${rightClipId}`),
-        project: {
+        project: reanchorLinkedOverlays(state.project, {
           ...state.project,
           clips: state.project.clips.map((c) => {
             // 端まで動かしたときの丸めの残り(-2.8e-17 など)で、素材の外を指さないように
@@ -2219,7 +2337,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               return { ...c, inPoint: Math.max(0, c.inPoint + delta * rightSpeed) }
             return c
           })
-        }
+        })
       }
     }),
 
@@ -2229,12 +2347,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       if (!validSpeed(speed)) return state
       return {
         ...pushHistory(state),
-        project: {
+        project: reanchorLinkedOverlays(state.project, {
           ...state.project,
           // 分離音声にも同じ速度がミラーされる(syncLinkedAudioClips)ので、分離済みでも
           // 速度を変えられる。
           clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, speed } : c))
-        }
+        })
       }
     }),
 
@@ -2358,7 +2476,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 「適用」ボタン1回 = 履歴1件。updateClipTrim と updateClipCrop を続けて呼ぶと
       // 履歴が2件積まれ、Undo 1回で利用者が一度も選んでいない中間状態に戻ってしまう
       ...pushHistory(state),
-      project: {
+      project: reanchorLinkedOverlays(state.project, {
         ...state.project,
         clips: state.project.clips.map((c) => {
           if (c.id !== clipId) return c
@@ -2373,7 +2491,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             fillCrop !== (trimmed.fillCrop ?? false) || nextCenter !== trimmed.cropCenter
           return cropChanged ? { ...trimmed, fillCrop, cropCenter: nextCenter } : trimmed
         })
-      }
+      })
     })),
 
   replaceClipRange: (clipId, newClips) =>
@@ -2519,7 +2637,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ...state.project.clips[i],
         id: uuid(),
         transitionIn: undefined,
-        audioDetached: false
+        audioDetached: copiedAudioDetached(state.project, state.project.clips[i])
       }))
       const clips = [...state.project.clips]
       clips.splice(lastIndex + 1, 0, ...newClips)
@@ -2537,11 +2655,11 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const idSet = new Set(clipIds)
       return {
         ...pushHistory(state),
-        project: {
+        project: reanchorLinkedOverlays(state.project, {
           ...state.project,
           // 分離音声にも同じ速度がミラーされるので、分離済みでも速度を変えられる。
           clips: state.project.clips.map((c) => (idSet.has(c.id) ? { ...c, speed } : c))
-        }
+        })
       }
     }),
 
@@ -2666,13 +2784,22 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 書き出しは Error: アセットが見つかりません: a1）。消えた素材のぶんは貼らない。
       // 素材削除を取り消せば同じIDが戻るので、クリップボードは捨てずに残す。
       const assetIds = new Set(state.project.assets.map((a) => a.id))
-      const pastable = state.clipboardClips.filter((c) => assetIds.has(c.assetId))
+      // コピーした後に素材を短いファイルへ差し替えていれば、その尺に収める
+      // (素材の終わりを越えた範囲のまま貼っていた)。収まる所が無ければ貼らない
+      const pastable = state.clipboardClips
+        .filter((c) => assetIds.has(c.assetId))
+        .map((c) => {
+          const duration = assetDurationOf(state.project, c.assetId)
+          if (typeof duration === 'number' && duration > 0 && c.inPoint >= duration) return null
+          return clampSourceRange(c, c.inPoint, c.outPoint, duration)
+        })
+        .filter((c): c is Clip => c !== null)
       if (pastable.length === 0) return state
       const newClips: Clip[] = pastable.map((c) => ({
         ...c,
         id: uuid(),
         transitionIn: undefined,
-        audioDetached: false
+        audioDetached: copiedAudioDetached(state.project, c)
       }))
       const idx = state.project.clips.findIndex((c) => c.id === state.selectedClipId)
       const clips = [...state.project.clips]
@@ -2841,7 +2968,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       return {
         // 何件掛けても履歴は1件。合体キーを付けているのは、色や数値を連続で
         // 動かしたときに1回の調整で履歴が埋まらないようにするため(1件用と同じ考え方)。
-        ...pushHistory(state, 'overlaysStyle'),
+        // キーには選んだテロップを含める(別のテロップへの変更まで1回の取り消しで戻っていた)
+        ...pushHistory(state, `overlaysStyle:${[...idSet].sort().join(',')}`),
         project: {
           ...state.project,
           textOverlays: state.project.textOverlays.map((o) =>
@@ -3113,7 +3241,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               }))
             })
           : null
+      // 履歴には積まないが、未保存にする(保存の途中に届いた CG が、保存済みと扱われて残らなかった)
       return {
+        isDirty: true,
         project: {
           ...state.project,
           assets,
@@ -3159,7 +3289,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         .filter((t) => !isUntouchedAuto(t))
         .map((t) => (t.autoRole ? { ...t, autoSignature: undefined } : t))
       const editedRoles = new Set(kept.filter((t) => t.autoRole).map((t) => t.autoRole))
+      // 履歴には積まないが、未保存にする(保存の途中に届いた SE・BGM が、保存済みと扱われて残らなかった)
       return {
+        isDirty: true,
         project: {
           ...state.project,
           assets,
@@ -3520,20 +3652,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       if (!clip || fromTrackId === toTrackId) return state
       if (!state.project.audioTracks.some((t) => t.id === toTrackId)) return state
       const moved = { ...clip, startTime: Math.max(0, startTime), linkedClipId: undefined }
+      // 分離した音はまだ鳴っているので、元のクリップの音は消したまま(戻すと台詞が二重に鳴っていた)
       return {
         ...pushHistory(state),
-        project: reattachClipsWithoutLinkedAudio(
-          {
-            ...state.project,
-            audioTracks: state.project.audioTracks.map((t) => {
-              if (t.id === fromTrackId)
-                return { ...t, clips: t.clips.filter((c) => c.id !== clipId) }
-              if (t.id === toTrackId) return { ...t, clips: [...t.clips, moved] }
-              return t
-            })
-          },
-          clip.linkedClipId ? [clip.linkedClipId] : []
-        )
+        project: {
+          ...state.project,
+          audioTracks: state.project.audioTracks.map((t) => {
+            if (t.id === fromTrackId) return { ...t, clips: t.clips.filter((c) => c.id !== clipId) }
+            if (t.id === toTrackId) return { ...t, clips: [...t.clips, moved] }
+            return t
+          })
+        }
       }
     }),
 
