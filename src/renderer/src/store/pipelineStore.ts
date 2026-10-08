@@ -436,7 +436,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           residual.fill(NaN, Math.max(0, i - pad), Math.min(residual.length, i + pad + 1))
         }
       }
-      tracks.push({ id: mixSrc.id, envelope: residual })
+      // 伏せた所(NaN)は「録っていない」ではない。止まったマイクとして扱わせない
+      tracks.push({ id: mixSrc.id, envelope: residual, masked: true })
       mixSpeakers.add(mixSrc.id)
       for (const f of ownFiles) if (f.sourceId === mixSrc.id) targetFiles.push(f)
       speakerSources.push(mixSrc)

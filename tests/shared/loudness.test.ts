@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   loudnormApplyFilter,
   loudnormMeasureFilter,
-  normalizeLoudnessTarget
+  normalizeLoudnessTarget,
+  planLimitedGain
 } from '../../src/shared/loudness'
 
 const measured = {
@@ -37,5 +38,21 @@ describe('loudness', () => {
     expect(normalizeLoudnessTarget('broadcast')).toBe('broadcast')
     expect(normalizeLoudnessTarget('x')).toBe('web')
     expect(normalizeLoudnessTarget(undefined)).toBe('web')
+  })
+})
+
+describe('planLimitedGain', () => {
+  it('抑えた高さどおりにピークが収まる素材は、1回の測りで決める(音を丸ごと測り直さない)', async () => {
+    const peaky = { ...measured, inputI: -24, inputTP: -2 }
+    let calls = 0
+    const filter = await planLimitedGain('web', peaky, async (f) => {
+      calls++
+      const gain = Number(/volume=(-?[\d.]+)dB/.exec(f)![1])
+      const limit = Number(/limit=([\d.]+)/.exec(f)![1])
+      // 4 倍の細かさで抑えると、測ったトゥルーピークは抑えた高さとほぼ同じ
+      return { ...peaky, inputI: peaky.inputI + gain, inputTP: 20 * Math.log10(limit) + 0.02 }
+    })
+    expect(filter).toContain('alimiter')
+    expect(calls).toBe(1)
   })
 })

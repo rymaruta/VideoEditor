@@ -106,3 +106,37 @@ describe('detectTurns: 途中で止まったマイク', () => {
     expect(own.every((t) => !t.uncertain)).toBe(true)
   })
 })
+
+describe('detectTurns: 伏せた全部入りの残り', () => {
+  // 友達のマイク: 普段の声 -10dB、30〜33 秒は小さい声(-26dB)。全部入りの残り(配信者)は、
+  // 友達が話している所を伏せてある(NaN)
+  const friend = env(60, -60, [
+    [1, 5, -10],
+    [10, 15, -10],
+    [20, 24, -10],
+    [30, 33, -26],
+    [40, 45, -10]
+  ])
+  const residual = env(60, -60, [
+    [6, 9, -12],
+    [50, 55, -12]
+  ])
+  for (const [a, b] of [
+    [0.8, 5.2],
+    [9.8, 15.2],
+    [19.8, 24.2],
+    [29.8, 33.2],
+    [39.8, 45.2]
+  ])
+    residual.fill(NaN, a * TURN_RATE, b * TURN_RATE)
+
+  it('伏せた所を「止まったマイク」とみなさず、友達の小さい声も友達の発言にする', () => {
+    const turns = detectTurns([
+      { id: 'friend', envelope: friend },
+      { id: 'mix', envelope: residual, masked: true }
+    ])
+    const soft = turns.filter((t) => t.micId === 'friend' && t.start > 29 && t.end < 34)
+    expect(soft).toHaveLength(1)
+    expect(soft[0].uncertain).toBeUndefined()
+  })
+})

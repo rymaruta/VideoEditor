@@ -2124,6 +2124,28 @@ describe('タイムライン編集(第4回の調査)', () => {
     expect(count()).toBe(4)
   })
 
+  it('言葉の効果音: 段が埋まった所に同じ素材の言葉が増えたら、スキャンし直したときに足す', () => {
+    const se = (
+      startTime: number
+    ): { assetId: string; startTime: number; outPoint: number; volume: number } => ({
+      assetId: 'M',
+      startTime,
+      outPoint: 2.5,
+      volume: 1
+    })
+    const scan = [se(10), se(10.3), se(10.6), se(10.9)]
+    st().addKeywordSeClips(scan)
+    const count = (): number =>
+      st()
+        .project.audioTracks.filter((t) => /^SE( \d)?$/.test(t.name))
+        .flatMap((t) => t.clips).length
+    // 言葉の時刻が逆の順で来ても同じ
+    st().addKeywordSeClips([se(11.2), ...scan])
+    expect(count()).toBe(5)
+    st().addKeywordSeClips([...scan, se(11.2)])
+    expect(count()).toBe(5)
+  })
+
   it('言葉の効果音: 間の段を消した後に足す段は、残っている段と同じ名前にしない', () => {
     const se = (
       startTime: number

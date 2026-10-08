@@ -87,6 +87,17 @@ describe.skipIf(!existsSync(ffmpegPath))('裏側の処理', () => {
     expect(r[0].cleaned).toBeTruthy()
   }, 180_000)
 
+  it('ノイズ除去: 中止した実行を待っている間に中止されたら、作り直さずに止まる', async () => {
+    const f = tone('again2.wav', 300)
+    const a = denoiseFiles([f], () => {})
+    await new Promise((r) => setTimeout(r, 400))
+    cancelDenoise()
+    const b = denoiseFiles([f], () => {})
+    cancelDenoise()
+    await expect(a).rejects.toThrow('DENOISE_CANCELED')
+    await expect(b).rejects.toThrow('DENOISE_CANCELED')
+  }, 180_000)
+
   it('音の大きさのキャッシュ: 壊れたキャッシュは作り直し、同じ大きさ・更新時刻の別のファイルに古い結果を返さない', async () => {
     const cache = join(work, 'envcache')
     const f = tone('env.wav', 5)

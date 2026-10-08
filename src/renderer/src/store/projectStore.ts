@@ -4036,7 +4036,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           (c) =>
             start + len <= c.startTime + 1e-6 || start >= c.startTime + audioClipDuration(c) - 1e-6
         )
-      for (const p of placements) {
+      const absorbed = new Set<string>()
+      const ordered = placements
+        .map((p, i) => ({ p, i }))
+        .sort((a, b) => a.p.startTime - b.p.startTime || a.i - b.i)
+        .map((x) => x.p)
+      for (const p of ordered) {
         // 数でない時刻・長さ(壊れた値)は置かない
         if (!Number.isFinite(p.startTime) || !(Number.isFinite(p.outPoint) && p.outPoint > 0))
           continue
@@ -4056,18 +4061,22 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         // 段が全部埋まっていて後ろへずらす場合: 前のスキャンで同じ言葉からずらして置いた同じ素材
         // (言葉の時刻から、今ずらすと置く位置までの間にある)があれば置かない
         // (スキャンし直すたびに、同じ SE がさらに後ろへ1本ずつ増えていた)
+        // 1本のずらしたクリップが見分けるのは1件だけ(同じ素材の別の言葉まで「置いてある」として
+        // 落とさない)。言葉の時刻の順に処理するので、早い言葉から先に見分ける
         if (!lane) {
           const at = findFreeAudioStart(lanes[0].clips, start, p.outPoint)
-          if (
-            lanes[0].clips.some(
-              (c) =>
-                before.has(c.id) &&
-                c.assetId === p.assetId &&
-                c.startTime >= start - 0.05 &&
-                c.startTime <= at + 0.05
-            )
+          const prior = lanes[0].clips.find(
+            (c) =>
+              before.has(c.id) &&
+              !absorbed.has(c.id) &&
+              c.assetId === p.assetId &&
+              c.startTime >= start - 0.05 &&
+              c.startTime <= at + 0.05
           )
+          if (prior) {
+            absorbed.add(prior.id)
             continue
+          }
         }
         const clip: AudioTrackClip = {
           id: uuid(),

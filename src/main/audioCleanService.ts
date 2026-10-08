@@ -56,16 +56,24 @@ export function denoiseFilter(modelPath: string): string {
   )
 }
 
-async function runOne(source: string, out: string, onPercent: (p: number) => void): Promise<void> {
+async function runOne(
+  source: string,
+  out: string,
+  onPercent: (p: number) => void,
+  generation: number
+): Promise<void> {
   const shared = inFlight.get(out)
   if (shared) {
-    if (shared.generation === cancelGeneration) return shared.task
+    if (shared.generation === generation) return shared.task
     // 中止した実行の作りかけ(いずれ「中止」で終わる)は共有せず、終わるのを待って作り直す
     // (中止の直後に同じ素材をもう一度頼むと、その実行まで「中止」の失敗になっていた)
     await shared.task.catch(() => {})
-    return runOne(source, out, onPercent)
+    // 待っている間に、この実行も中止された(待っている間は止める ffmpeg が無い)
+    if (generation !== cancelGeneration) throw new Error('DENOISE_CANCELED')
+    // 待っていた実行が、中止の前に作り終えていた
+    if (existsSync(out)) return
+    return runOne(source, out, onPercent, generation)
   }
-  const generation = cancelGeneration
   const task = runOneUnshared(source, out, onPercent, generation).finally(() => {
     if (inFlight.get(out)?.task === task) inFlight.delete(out)
   })
@@ -163,8 +171,11 @@ export async function denoiseFiles(
     try {
       const out = cachePath(source)
       if (!existsSync(out))
-        await runOne(source, out, (p) =>
-          onProgress(i, sources.length, ((i + p / 100) / sources.length) * 100)
+        await runOne(
+          source,
+          out,
+          (p) => onProgress(i, sources.length, ((i + p / 100) / sources.length) * 100),
+          generation
         )
       results.push({ source, cleaned: out })
     } catch (e) {

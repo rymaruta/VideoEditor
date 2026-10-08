@@ -58,8 +58,12 @@ export function loudnormApplyFilter(
   )
 }
 
-/** リミッタで抑える高さの、トゥルーピークの上限からの余裕(dB)の始めの値 */
-const TRUE_PEAK_MARGIN_DB = 0.5
+/**
+ * リミッタで抑える高さの、測ったトゥルーピークの上限(`peakCeiling`)からの余裕(dB)の始めの値。
+ * 4 倍の細かさで抑えると、測ったトゥルーピークはほぼ抑えた高さになる。上限より高く抑え始めると
+ * 1回目の測りが必ず「越えた」になり、書き出しのたびに音を丸ごと測り直していた
+ */
+const TRUE_PEAK_MARGIN_DB = 0.1
 /**
  * 書き出しの前(浮動小数)で測ったトゥルーピークに残す、AAC にしたときの持ち上がり分(dB)。
  * 実測: 書き出しの前で -0.9 dBTP の音が、AAC にすると -0.1 dBTP になった
@@ -115,7 +119,7 @@ export async function planLimitedGain(
   const t = LOUDNESS_TARGETS[normalizeLoudnessTarget(target)]
   const peakCeiling = t.truePeak - AAC_TRUE_PEAK_HEADROOM_DB
   let gain = t.integrated - measured.inputI
-  let ceiling = t.truePeak - TRUE_PEAK_MARGIN_DB
+  let ceiling = peakCeiling - TRUE_PEAK_MARGIN_DB
   for (let i = 0; i < 6; i++) {
     const filter = limitedGainFilter(gain, ceiling)
     const r = await measure(filter)
