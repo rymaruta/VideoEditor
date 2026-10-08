@@ -123,9 +123,8 @@ export function pickShortWindows(
       ...c,
       start: a,
       end:
-        b > a + maxSec + 3
-          ? capAtLineBreak(a, a + maxSec + 3, strongest.get(c)!.start + PEAK_KEEP_SEC)
-          : b
+        // 選んだ長さ(「30 秒まで」)は超えない
+        b > a + maxSec ? capAtLineBreak(a, a + maxSec, strongest.get(c)!.start + PEAK_KEEP_SEC) : b
     }
   })
 

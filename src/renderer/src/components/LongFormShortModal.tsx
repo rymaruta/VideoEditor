@@ -1,3 +1,4 @@
+import { playableOnMain } from '../lib/relinkCheck'
 import { useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -87,7 +88,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
   const note = useSettingsStore((s) => s.shortNote)
   const setNote = useSettingsStore((s) => s.setShortNote)
 
-  const videoAssets = assets.filter((a) => a.hasVideo).sort((a, b) => b.duration - a.duration)
+  const videoAssets = assets.filter(playableOnMain).sort((a, b) => b.duration - a.duration)
   const [assetId, setAssetId] = useState(videoAssets[0]?.id ?? '')
   const [target, setTarget] = useState(30)
   const [refineNote, setRefineNote] = useState('')

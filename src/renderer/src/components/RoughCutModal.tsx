@@ -1,3 +1,4 @@
+import { playableOnMain } from '../lib/relinkCheck'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
@@ -38,7 +39,7 @@ function autoSelect(candidates: FlatCandidate[], targetSeconds: number): Set<num
 export function RoughCutModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const addRoughCutClips = useProjectStore((s) => s.addRoughCutClips)
-  const videoAssets = useMemo(() => project.assets.filter((a) => a.hasVideo), [project.assets])
+  const videoAssets = useMemo(() => project.assets.filter(playableOnMain), [project.assets])
 
   const [loading, setLoading] = useState(true)
   const [progress, setProgress] = useState(0)

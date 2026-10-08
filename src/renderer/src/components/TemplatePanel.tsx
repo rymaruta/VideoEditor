@@ -1,3 +1,4 @@
+import { playableOnMain } from '../lib/relinkCheck'
 import { useMemo, useState } from 'react'
 import { editTemplates } from '@shared/templates'
 import { useProjectStore } from '../store/projectStore'
@@ -10,7 +11,7 @@ export function TemplatePanel(): React.JSX.Element {
   const clipCount = useProjectStore((s) => s.project.clips.length)
   const overlayCount = useProjectStore((s) => s.project.textOverlays.length)
   const assets = useProjectStore((s) => s.project.assets)
-  const videoAssets = useMemo(() => assets.filter((a) => a.hasVideo), [assets])
+  const videoAssets = useMemo(() => assets.filter(playableOnMain), [assets])
   const [autoCutting, setAutoCutting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 

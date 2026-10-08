@@ -179,7 +179,11 @@ function shortProjectFromPlan(
     id: uuid(),
     name: `${project.name} ショート${index + 1}`,
     aspectRatio: '9:16',
-    assets: project.assets.filter((a) => used.has(a.id)),
+    // 同期の記録が指す素材は全部残す(使う区間の素材だけにすると、ショートを開いてクリップを伸ばしたとき、
+    // 外した素材(分かれたマイクの続きのファイルなど)を指す声・ワイプが入り、黙って鳴らなかった)
+    assets: project.assets.filter(
+      (a) => used.has(a.id) || info.files.some((f) => f.assetId === a.id)
+    ),
     clips: cut.main.map((m) => ({
       id: uuid(),
       assetId: m.assetId,

@@ -30,7 +30,7 @@ describe('ショートにする区間(pickShortWindows)', () => {
     expect(w[0].peaks).toBe(3)
     expect(w[0].strength).toBe(24)
     expect(w[1].start).toBeGreaterThan(380)
-    expect(w[0].end - w[0].start).toBeLessThanOrEqual(45 + 3)
+    expect(w[0].end - w[0].start).toBeLessThanOrEqual(45)
   })
 
   it('端が発話の途中なら発話を丸ごと入れ、収録の外にははみ出さない', () => {
@@ -50,7 +50,7 @@ describe('ショートの終わりは発話の切れ目', () => {
       start: 0,
       end: 600
     })
-    expect(w.end - w.start).toBeLessThanOrEqual(63)
+    expect(w.end - w.start).toBeLessThanOrEqual(60)
     expect(lines.some((l) => l.start < w.end - 1e-6 && l.end > w.end + 1e-6)).toBe(false)
     expect(lines.some((l) => l.start < w.start - 1e-6 && l.end > w.start + 1e-6)).toBe(false)
   })
@@ -77,5 +77,25 @@ describe('pickShortWindows: 使える範囲の外の山', () => {
     expect(
       pickShortWindows([{ start: 150, end: 152, riseDb: 20 }], [], [], { start: 0, end: 100 })
     ).toEqual([])
+  })
+})
+
+describe('ショートの長さは選んだ上限を超えない', () => {
+  it('話し続けていても「30 秒まで」「45 秒まで」を超えない', () => {
+    const lines = Array.from({ length: 75 }, (_, k) => ({ start: k * 4, end: k * 4 + 3.5 }))
+    for (const maxSec of [30, 45, 60]) {
+      const [w] = pickShortWindows(
+        [{ start: 150, end: 151, riseDb: 10 }],
+        [],
+        lines,
+        { start: 0, end: 300 },
+        {
+          maxSec,
+          leadSec: 40,
+          tailSec: 40
+        }
+      )
+      expect(w.end - w.start, `${maxSec}`).toBeLessThanOrEqual(maxSec + 1e-6)
+    }
   })
 })

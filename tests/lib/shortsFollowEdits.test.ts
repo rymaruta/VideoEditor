@@ -224,3 +224,43 @@ describe('ショートを広げても上限は超えない', () => {
     expect(total).toBeLessThanOrEqual(60)
   })
 })
+
+describe('第37回: ショートの見直し', () => {
+  it('同期の記録が指す素材は全部残す(分かれたマイクの続きのファイルも)', () => {
+    const split: MulticamInfo = {
+      ...info,
+      files: [
+        { assetId: 'C', sourceId: 'cam', start: 0, rate: 1, duration: 60 },
+        { assetId: 'MA', sourceId: 'a', start: 0, rate: 1, duration: 30 },
+        { assetId: 'MA2', sourceId: 'a', start: 30, rate: 1, duration: 30 },
+        { assetId: 'MB', sourceId: 'b', start: 0, rate: 1, duration: 60 }
+      ]
+    }
+    const project = {
+      id: 'p',
+      name: '本編',
+      aspectRatio: '16:9',
+      assets: [asset('C', true), asset('MA', false), asset('MA2', false), asset('MB', false)],
+      clips: [],
+      audioTracks: [],
+      videoOverlayTracks: [],
+      textOverlays: [],
+      transcript: [utt('u1', 'MA', 2, 5, 'あ'), utt('u2', 'MB', 10, 14, 'い')],
+      multicam: split
+    } as unknown as Project
+    const short = buildShortProject(
+      {
+        project,
+        info: split,
+        hype: [],
+        activity,
+        styles: [],
+        speechLook: { style: defaultTextStyle() }
+      },
+      { start: 0, end: 25, strength: 10, peaks: 1 },
+      0
+    )
+    const ids = new Set(short.assets.map((a) => a.id))
+    for (const f of short.multicam!.files) expect(ids.has(f.assetId), f.assetId).toBe(true)
+  })
+})
