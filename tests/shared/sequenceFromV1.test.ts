@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { MediaAsset, Project } from '@shared/types'
 import { defaultTextStyle } from '@shared/textStyle'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
+import { telopItemSource } from '@shared/telop/layer'
+import { telopMotionAt } from '@shared/telop/render'
 import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import type { ItemBase, MediaItem, ProjectV2 } from '@shared/sequence/types'
 import { seeded } from '../helpers/boundary'
@@ -250,6 +252,34 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
     const laneOf = (id: string): number =>
       p.sequence.videoTracks.findIndex((t) => t.items.some((i) => i.id === id))
     expect(laneOf('blue')).toBeGreaterThan(laneOf('red'))
+  })
+
+  it('本編の終わりで切ったテロップの消える動きは、切る前の終わりから数える(プレビューと同じ)', () => {
+    const p = projectV1ToV2(
+      emptyProject({
+        clips: [{ id: 'c1', assetId: 'a', inPoint: 0, outPoint: 5, speed: 1 }],
+        textOverlays: [
+          {
+            id: 't1',
+            text: 'あ',
+            startTime: 4,
+            endTime: 8,
+            style: { ...defaultTextStyle(), exitAnimation: 'fadeOut' },
+            source: 'manual'
+          }
+        ]
+      } as Partial<Project>)
+    )
+    const item = p.sequence.videoTracks
+      .flatMap((t) => t.items)
+      .find((i) => i.id === 't1')! as Parameters<typeof telopItemSource>[0]
+    // 見えるのは本編の終わり(5秒)まで
+    expect(item.startFrame + item.durationFrames).toBe(150)
+    const src = telopItemSource(item, 30)
+    const last = 149 / 30
+    const m = telopMotionAt(src.style, last - src.startTime, src.endTime - last, 1080)
+    // プレビューは終わりが 8 秒なので、5 秒の手前ではまだ消え始めていない
+    expect(m.opacity).toBeCloseTo(1, 6)
   })
 
   it('テロップは書き出しの秒へ換算し、単語の時刻はアイテムの頭からの秒にする', () => {

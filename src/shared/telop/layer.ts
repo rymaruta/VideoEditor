@@ -112,7 +112,9 @@ export function telopItemSource(item: TelopItem, fps: number): TelopSource {
   return {
     text: item.text,
     startTime: start,
-    endTime: (item.startFrame + item.durationFrames) / fps,
+    // 本編の終わりで切ったテロップも、消える動きは切る前の終わりから数える(プレビューと同じ。
+    // 切った終わりから数えると、書き出しだけ本編の終わりでフェードアウトしていた)
+    endTime: Math.max(item.startFrame + item.durationFrames, item.motionEndFrame ?? 0) / fps,
     style: item.style,
     ...(item.words
       ? { words: item.words.map((w) => ({ ...w, start: start + w.start, end: start + w.end })) }

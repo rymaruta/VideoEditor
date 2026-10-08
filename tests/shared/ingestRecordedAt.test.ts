@@ -46,3 +46,17 @@ describe('tagValue', () => {
     expect(tagValue({ Make: ' ', MODEL: ' FX3 ' }, 'make', 'model')).toBe('FX3')
   })
 })
+
+describe('recordedAtFromTags: 時が1桁・日付の区切りが : の日時', () => {
+  it('2024-05-01T9:11:12Z と 2024:05:01 10:11:12 を読む', () => {
+    expect(recordedAtFromTags({ creation_time: '2024-05-01T9:11:12Z' })).toBe(
+      Date.parse('2024-05-01T09:11:12Z') / 1000
+    )
+    expect(recordedAtFromTags({ creation_time: '2024:05:01 10:11:12' })).toBe(
+      Date.parse('2024-05-01T10:11:12') / 1000
+    )
+    expect(recordedAtFromTags({ creation_time: '2024-05-01T10:11:12+0900' })).toBe(
+      Date.parse('2024-05-01T01:11:12Z') / 1000
+    )
+  })
+})

@@ -111,6 +111,11 @@ export interface TelopItem extends ItemBase {
    * 段(トラック)は空いた段を使い回すので、段の順では重なりの上下がプレビューと食い違う
    */
   z?: number
+  /**
+   * 消える動き(フェードアウトなど)の基準になる終わりのフレーム。本編の終わりで切ったテロップは、
+   * 切る前の終わり(プレビューと同じ)を持つ。無ければアイテムの終わり
+   */
+  motionEndFrame?: number
 }
 
 export type VideoItem = MediaItem | TelopItem

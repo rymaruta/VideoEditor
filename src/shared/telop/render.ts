@@ -10,6 +10,7 @@ import {
   textSlideOffsetPx
 } from '../textStyle'
 import { isKaraokeWordSung, karaokeWords } from '../captionWords'
+import { NO_LINE_END, NO_LINE_START } from './polish'
 
 /**
  * 共通テロップレンダラ。**画面のプレビューと書き出しが同じ関数で描く。**
@@ -152,6 +153,12 @@ export interface Glyph {
   src?: number
 }
 
+/** 単語の途中で折らない文字(空白で区切って書く文字。和文の漢字・かな・全角の記号は文字のあいだで折る) */
+function isSpacedWordChar(ch: string): boolean {
+  if (/[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\u3000-\u303f\uff00-\uffef]/u.test(ch)) return false
+  return /[\p{L}\p{N}\p{P}\p{S}\p{M}]/u.test(ch)
+}
+
 /**
  * 本文を枠の幅で折り返す。改行はそのまま行の区切りにする。
  * 和文は文字のあいだで折る。空白を含む並び(英文)は、行の中に空白があればそこで折る。
@@ -173,9 +180,10 @@ export function wrapGlyphs(
     }
     const w = advance(g.ch, g)
     if (line.length > 0 && width + w > maxWidth && g.ch !== ' ') {
-      // 行の中に空白があれば、その後ろで折る(単語を割らない)
+      // 行の中に空白があれば、その後ろで折る(単語を割らない)。和文(漢字・かな)以外の文字の単語が
+      // 対象(英字だけを見ていたので「Pokémon」「안녕하세요」の途中で折れていた)
       const space = line.map((x) => x.ch).lastIndexOf(' ')
-      if (space > 0 && /[\x21-\x7e]/.test(g.ch)) {
+      if (space > 0 && isSpacedWordChar(g.ch)) {
         const rest = line.slice(space + 1)
         lines.push(line.slice(0, space))
         line = rest
@@ -189,6 +197,13 @@ export function wrapGlyphs(
             cut = k
             break
           }
+        }
+        // 禁則: 行頭に「。」「ー」「っ」「」」など、行末に「「」「(」などを置かない。
+        // 1文字ずつ前の行から送る(句読点が続いても、数文字まで)
+        for (let n = 0; n < 3 && cut > 1; n++) {
+          const head = cut < line.length ? line[cut].ch : g.ch
+          if (!NO_LINE_START.test(head) && !NO_LINE_END.test(line[cut - 1].ch)) break
+          cut--
         }
         const rest = cut > 0 ? line.slice(cut) : []
         lines.push(cut > 0 ? line.slice(0, cut) : line)
@@ -667,12 +682,22 @@ function measureLayout(
     : (ch: string, g: Glyph): number => baseAdvance(ch) * scaleOf(g) + spacing
   const karaoke = karaokeWords(source)
   const glyphs: Glyph[] = karaoke
-    ? karaoke.flatMap((w, i) => [...w.text].map((ch) => ({ ch, word: i })))
+    ? karaoke.flatMap((w, i) => graphemes(w.text).map((ch) => ({ ch, word: i })))
     : parseTelopMarkup(source.text ?? '')
   const marginV = textMarginVPx(canvas.h)
-  const maxLength = vertical
-    ? Math.max(1, canvas.h - marginV * 2)
-    : Math.max(1, canvas.w - textMarginHPx(canvas.w) * 2)
+  const availW = Math.max(1, canvas.w - textMarginHPx(canvas.w) * 2)
+  const availH = Math.max(1, canvas.h - marginV * 2)
+  // 回したテロップは、回した後に枠へ収まる長さで折り返す(回す前の幅で折ると、90度回した
+  // 長いテロップが枠の上下へはみ出していた)
+  const theta = (finite(style.rotation, 0) * Math.PI) / 180
+  const along = Math.abs(Math.cos(theta))
+  const across = Math.abs(Math.sin(theta))
+  const fit = (main: number, cross: number): number =>
+    Math.max(
+      1,
+      Math.min(along > 1e-9 ? main / along : Infinity, across > 1e-9 ? cross / across : Infinity)
+    )
+  const maxLength = vertical ? fit(availH, availW) : fit(availW, availH)
   const wrapped = wrapGlyphs(glyphs, maxLength, advance)
   const factor = lineHeightOf(style)
   let top = 0
@@ -751,18 +776,36 @@ function measureLayout(
     const pad = style.background
       ? telopBackgroundPadding(style, fontSize)
       : { x: telopStrokeRings(style)[0]?.reach ?? 0, y: telopStrokeRings(style)[0]?.reach ?? 0 }
+    // 吹き出しの尻尾は箱の外へ出る(下向きの尻尾が枠の下で切れていた)
+    const tail = bubbleTailReach(style)
     // 回したテロップは、回した後の外枠で収める(軸はアンカー = ブロックの中心)
     const theta = (finite(style.rotation, 0) * Math.PI) / 180
     const cos = Math.abs(Math.cos(theta))
     const sin = Math.abs(Math.sin(theta))
-    const w0 = blockWidth / 2 + pad.x
-    const h0 = blockHeight / 2 + pad.y
-    const halfW = cos * w0 + sin * h0
-    const halfH = sin * w0 + cos * h0
-    anchor.x =
-      halfW * 2 >= canvas.w ? canvas.w / 2 : Math.min(canvas.w - halfW, Math.max(halfW, anchor.x))
-    anchor.y =
-      halfH * 2 >= canvas.h ? canvas.h / 2 : Math.min(canvas.h - halfH, Math.max(halfH, anchor.y))
+    const clampAxis = (pos: number, before: number, after: number, size: number): number =>
+      before + after >= size ? size / 2 : Math.min(size - after, Math.max(before, pos))
+    if (sin < 1e-9) {
+      // 回していなければ、尻尾の出る側だけ広く見る
+      anchor.x = clampAxis(
+        anchor.x,
+        blockWidth / 2 + pad.x + tail.left,
+        blockWidth / 2 + pad.x + tail.right,
+        canvas.w
+      )
+      anchor.y = clampAxis(
+        anchor.y,
+        blockHeight / 2 + pad.y + tail.top,
+        blockHeight / 2 + pad.y + tail.bottom,
+        canvas.h
+      )
+    } else {
+      const w0 = blockWidth / 2 + pad.x + Math.max(tail.left, tail.right)
+      const h0 = blockHeight / 2 + pad.y + Math.max(tail.top, tail.bottom)
+      const halfW = cos * w0 + sin * h0
+      const halfH = sin * w0 + cos * h0
+      anchor.x = clampAxis(anchor.x, halfW, halfW, canvas.w)
+      anchor.y = clampAxis(anchor.y, halfH, halfH, canvas.h)
+    }
   } else if (style.position === 'top') {
     anchor = { x: canvas.w / 2, y: marginV }
     topFromAnchor = 0
@@ -813,6 +856,19 @@ export function telopStrokeRings(
 }
 
 /** 背景の余白(px) */
+/** 吹き出しの尻尾が箱の外へ出る長さ(向きごと、キャンバス px) */
+function bubbleTailReach(style: TextStyle): {
+  left: number
+  right: number
+  top: number
+  bottom: number
+} {
+  const out = { left: 0, right: 0, top: 0, bottom: 0 }
+  const tail = style.background && style.backgroundShape === 'bubble' ? style.bubbleTail : undefined
+  if (tail) out[tail.side] = Math.max(0, finite(tail.length, 0))
+  return out
+}
+
 export function telopBackgroundPadding(
   style: TextStyle,
   fontSize: number
@@ -1009,13 +1065,15 @@ export function telopHitBounds(
         const reach = telopStrokeRings(style)[0]?.reach ?? 0
         return { x: reach, y: reach }
       })()
-  // 行の左端はそろえ方によらずブロックの左端(-幅/2)から始まる(`drawTelop` の lineX)
+  // 行の左端はそろえ方によらずブロックの左端(-幅/2)から始まる(`drawTelop` の lineX)。
+  // 吹き出しの尻尾も含める(つかめる所・段の高さ)
+  const tail = bubbleTailReach(style)
   return {
     anchor: layout.anchor,
-    x: -layout.blockWidth / 2 - pad.x,
-    y: layout.topFromAnchor - pad.y,
-    w: layout.blockWidth + pad.x * 2,
-    h: layout.blockHeight + pad.y * 2
+    x: -layout.blockWidth / 2 - pad.x - tail.left,
+    y: layout.topFromAnchor - pad.y - tail.top,
+    w: layout.blockWidth + pad.x * 2 + tail.left + tail.right,
+    h: layout.blockHeight + pad.y * 2 + tail.top + tail.bottom
   }
 }
 
@@ -1061,6 +1119,9 @@ export function drawTelop(
   const opacity = anim.opacity * motion.opacity
   if (opacity <= 0) return
   const layout = layoutTelop(ctx, source, canvas)
+  // 見える文字が無ければ(空・空白・印だけ)、背景の箱・吹き出しも描かない(形によって描いたり
+  // 描かなかったりしていた)。矢印だけのテロップは描く
+  if (!style.pointer && !layout.lines.some((l) => l.glyphs.some((g) => g.ch.trim() !== ''))) return
   const unit = frame.width / canvas.w
   const fs = layout.fontSize
   const rings = telopStrokeRings(style)

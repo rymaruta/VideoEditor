@@ -440,3 +440,18 @@ describe('Premiere の書き出しの細部', () => {
     expect(seq.texts.map((t) => t.text)).toEqual(['使う'])
   })
 })
+
+describe('readFcp7: パスの % ', () => {
+  it('生の % が混ざったパスも file:// を外して読み、正しい %XX は戻す', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<xmeml version="4"><sequence id="s"><name>x</name><duration>30</duration>
+<rate><timebase>30</timebase></rate><media><video><track>
+<clipitem id="c1"><name>A.MP4</name><start>0</start><end>30</end><in>0</in><out>30</out>
+<file id="f"><name>A.MP4</name><pathurl>file://localhost/D:/100%完成/%E3%83%AD%E3%82%B1/A.MP4</pathurl>
+<rate><timebase>30</timebase></rate><duration>300</duration></file></clipitem>
+</track></video></media></sequence></xmeml>`
+    const r = new DOMParser().parseFromString(xml, 'text/xml')
+      .documentElement as unknown as XmlElement
+    expect(readFcp7(r)!.video[0][0].path).toBe('D:/100%完成/ロケ/A.MP4')
+  })
+})

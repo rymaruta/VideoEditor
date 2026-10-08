@@ -209,10 +209,13 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
     const range = toFrameRange(o.startTime, o.endTime)
     if (!range) continue
     const itemStartSec = range.startFrame / fpsNum
+    // 本編の終わりで切った分は、消える動きの基準に切る前の終わりを残す
+    const uncutEnd = toFrame(toExportEndTime(o.startTime, o.endTime))
     telops.push({
       kind: 'telop',
       id: o.id,
       ...range,
+      ...(uncutEnd > range.startFrame + range.durationFrames ? { motionEndFrame: uncutEnd } : {}),
       text: o.text,
       style: { ...o.style },
       origin: o.source === 'auto' ? 'auto' : 'manual',

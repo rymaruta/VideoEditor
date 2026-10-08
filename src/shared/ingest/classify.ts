@@ -110,6 +110,20 @@ function sameCameraCards(a: string, b: string): boolean {
   return isCard(ra) && isCard(rb)
 }
 
+/** カメラが作るフォルダの名前(DCIM の 100CANON・101MSDCF・100GOPRO など) */
+const DCIM_FOLDER = /^\d{3}[a-z0-9_]{5}$/i
+
+/**
+ * 同じ親フォルダの2つのフォルダが、1台のカメラのカードを替えた続きらしいか(名前がカード・DCIM の
+ * フォルダらしい)。CamA/C0001 と CamB/C0001 のように名前で分けたフォルダは、同じ機種でも別のカメラ
+ * (時刻が重ならないだけでまとめると、2台のカメラが1台になっていた)
+ */
+function cardLikeSiblings(a: string, b: string): boolean {
+  const last = (f: string): string => (f.split('/').pop() ?? '').normalize('NFKC')
+  const ok = (f: string): boolean => CARD_NAME.test(last(f)) || DCIM_FOLDER.test(last(f))
+  return ok(a) && ok(b)
+}
+
 /** ファイル名の、撮った回の番号より後ろ(ZOOM0001_Tr1 → TR1。同じ録音機の何本目のトラックか) */
 function trackTag(fileName: string): string {
   const base = fileName.normalize('NFKC').replace(/\.[^.]+$/, '')
@@ -217,7 +231,8 @@ export function classifyFootage(files: readonly ProbedFile[]): FootageSource[] {
     const parent = parentOf(c.g.folder)
     const chain = camChains.find(
       (x) =>
-        (x.parent === parent || sameCameraCards(x.group.folder, c.g.folder)) &&
+        ((x.parent === parent && cardLikeSiblings(x.group.folder, c.g.folder)) ||
+          sameCameraCards(x.group.folder, c.g.folder)) &&
         x.group.device === c.g.device &&
         x.group.prefix === c.g.prefix &&
         x.end <= c.range[0] + 1

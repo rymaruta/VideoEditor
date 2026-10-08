@@ -4,6 +4,8 @@ import {
   drawTelop,
   layoutTelop,
   telopAnimationAt,
+  telopBackgroundPadding,
+  telopHitBounds,
   telopStrokeRings,
   telopVisualKey,
   withAlpha,
@@ -95,6 +97,17 @@ describe('wrapGlyphs — 折り返し', () => {
 
   it('英文は空白のところで折り、単語を割らない', () => {
     expect(text(wrapGlyphs(g('hello world'), 8, () => 1))).toEqual(['hello', 'world'])
+  })
+
+  it('英字以外の空白で区切る文字(アクセント付き・ハングル)も単語を割らない', () => {
+    expect(text(wrapGlyphs(g('I love Pokémon'), 10, () => 1))).toEqual(['I love', 'Pokémon'])
+    expect(text(wrapGlyphs(g('안녕 하세요'), 4, () => 1))).toEqual(['안녕', '하세요'])
+  })
+
+  it('禁則: 句点・長音・小書きかな・閉じかっこを行頭に、開きかっこを行末に置かない', () => {
+    expect(text(wrapGlyphs(g('あいう。えお'), 3, () => 1))).toEqual(['あい', 'う。え', 'お'])
+    expect(text(wrapGlyphs(g('あいゲーム'), 3, () => 1))).toEqual(['あい', 'ゲーム'])
+    expect(text(wrapGlyphs(g('あい「うえ」'), 3, () => 1))).toEqual(['あい', '「う', 'え」'])
   })
 
   it('空・幅0でも落ちない', () => {
@@ -239,6 +252,28 @@ describe('drawTelop — 描く順と装飾', () => {
     expect(fills).toEqual(['#ffe600', '#ffe600', '#ffffff', '#ffffff', '#ffffff'])
   })
 
+  it('カラオケ: 濁点の合成文字・絵文字の連結は1文字として描く(ハイライトの有無で描き方が変わらない)', () => {
+    const nfd = 'か\u3099'
+    const family = '👨\u200d👩\u200d👧'
+    const words = [
+      { text: nfd, start: 1, end: 1.5 },
+      { text: family, start: 2, end: 2.5 }
+    ]
+    const count = (wordHighlight: boolean): number => {
+      const ctx = fakeContext()
+      drawTelop(
+        ctx,
+        source(nfd + family, { wordHighlight, outline: false }, { words }),
+        1.6,
+        { width: 1920, height: 1080 },
+        CANVAS
+      )
+      return ctx.calls.filter((c) => c.op === 'fillText').length
+    }
+    expect(count(true)).toBe(count(false))
+    expect(count(true)).toBe(2)
+  })
+
   it('タイプライター: 見えている文字だけ描く', () => {
     const ctx = fakeContext()
     drawTelop(
@@ -342,5 +377,50 @@ describe('drawTelop — 動く文字のグラデーション', () => {
         CANVAS
       )
     ).not.toThrow()
+  })
+})
+
+describe('第9回: 回転・吹き出しの尻尾・空のテロップ', () => {
+  it('90度回した長いテロップは、回した後に枠の上下へはみ出さない長さで折り返す', () => {
+    const ctx = fakeContext()
+    const src = source('あ'.repeat(40), { rotation: 90, customPosition: { x: 0.5, y: 0.5 } })
+    const l = layoutTelop(ctx, src, CANVAS)
+    // 回すと幅が縦になる
+    expect(l.blockWidth).toBeLessThanOrEqual(1080)
+  })
+
+  it('下向きの尻尾の吹き出しを一番下に置いても、尻尾の先まで枠に収める', () => {
+    const ctx = fakeContext()
+    const src = source('ヒント', {
+      background: true,
+      backgroundShape: 'bubble',
+      bubbleTail: { side: 'bottom', at: 0.5, length: 26 },
+      customPosition: { x: 0.5, y: 1 }
+    } as Partial<TextStyle>)
+    const l = layoutTelop(ctx, src, CANVAS)
+    const pad = telopBackgroundPadding(src.style, l.fontSize)
+    // 尻尾の先 = 箱の下端 + 尻尾の長さ
+    expect(l.anchor.y + l.blockHeight / 2 + pad.y + 26).toBeLessThanOrEqual(1080 + 1e-6)
+    // つかめる所(当たり判定)も尻尾を含む
+    const b = telopHitBounds(ctx, src, CANVAS)
+    expect(b.h).toBeCloseTo(l.blockHeight + pad.y * 2 + 26, 6)
+  })
+
+  it('見える文字の無いテロップは、どの形の背景も描かない', () => {
+    for (const shape of ['box', 'bubble', 'lines'] as const)
+      for (const text of ['', '**', '   ']) {
+        const ctx = fakeContext()
+        drawTelop(
+          ctx,
+          source(text, { background: true, backgroundShape: shape } as Partial<TextStyle>),
+          1.5,
+          { width: 1920, height: 1080 },
+          CANVAS
+        )
+        expect(
+          ctx.calls.filter((c) => c.op === 'fillRect' || c.op === 'fillText'),
+          `${shape}:${text}`
+        ).toEqual([])
+      }
   })
 })

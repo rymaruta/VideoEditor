@@ -92,13 +92,23 @@ function rateOf(el: XmlElement | undefined, fallback: number): number {
 
 function decodePath(url: string | undefined): string | undefined {
   if (!url) return undefined
+  const raw = url.replace(/^file:\/\/(localhost)?/, '')
+  // 正しい「%XX」だけを戻す(「100%完成」のような生の % が混ざると decodeURIComponent が失敗し、
+  // file:// の付いたままのパスになっていた)
+  let p: string
   try {
-    const p = decodeURIComponent(url.replace(/^file:\/\/(localhost)?/, ''))
-    // Windows のパス(/C:/...)は頭の / を外す
-    return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p
+    p = decodeURIComponent(raw)
   } catch {
-    return url
+    p = raw.replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => {
+      try {
+        return decodeURIComponent(m)
+      } catch {
+        return m
+      }
+    })
   }
+  // Windows のパス(/C:/...)は頭の / を外す
+  return /^\/[A-Za-z]:\//.test(p) ? p.slice(1) : p
 }
 
 /** 文書の中の、ID で参照されるファイルの定義(2回目以降は `<file id="x"/>` だけになる) */

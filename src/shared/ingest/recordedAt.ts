@@ -30,7 +30,25 @@ const DATE_TIME = /^\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:\d{2}/
 
 const pad = (s: string): string => s.padStart(2, '0')
 
+/** 日付と時刻(区切りは - : / どれでも、時は1桁でも、秒・時差は無くても) */
+const DATE_TIME_PARTS =
+  /^(\d{4})[-:/](\d{1,2})[-:/](\d{1,2})[T ](\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/i
+
 function parseDateTime(v: string): number | undefined {
+  // 部分ごとに読んで、Date.parse の読める形(2桁にそろえた ISO)に組み直す。
+  // そのまま Date.parse に渡すと、「T9:11:12」(時が1桁)・「2024:05:01 10:11:12」(日付の区切りが :)を
+  // 読めず、撮影時刻が分からないものとして扱っていた
+  const m = DATE_TIME_PARTS.exec(v.trim())
+  if (m) {
+    const zone = m[8]
+      ? /^z$/i.test(m[8])
+        ? 'Z'
+        : m[8].replace(/^([+-]\d{2})(\d{2})$/, '$1:$2')
+      : ''
+    const iso = `${m[1]}-${pad(m[2])}-${pad(m[3])}T${pad(m[4])}:${m[5]}:${m[6] ?? '00'}${m[7] ?? ''}${zone}`
+    const t = Date.parse(iso)
+    return Number.isFinite(t) ? t / 1000 : undefined
+  }
   if (!DATE_TIME.test(v)) return undefined
   const t = Date.parse(v)
   return Number.isFinite(t) ? t / 1000 : undefined

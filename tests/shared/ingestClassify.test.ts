@@ -212,6 +212,21 @@ describe('classifyFootage', () => {
     ).toHaveLength(2)
   })
 
+  it('名前で分けたカメラのフォルダ(CamA と CamB)は、同じ機種で時刻が続いていても別のカメラ', () => {
+    const sources = classifyFootage([
+      file('CamA/C0001.MP4', { device: 'Sony FX3', recordedAt: 0, duration: 600 }),
+      file('CamB/C0001.MP4', { device: 'Sony FX3', recordedAt: 700, duration: 600 })
+    ])
+    expect(sources).toHaveLength(2)
+    // DCIM の続きのフォルダ(100CANON → 101CANON)は1台
+    expect(
+      classifyFootage([
+        file('DCIM/100CANON/MVI_0001.MP4', { device: 'X', recordedAt: 0, duration: 600 }),
+        file('DCIM/101CANON/MVI_0001.MP4', { device: 'X', recordedAt: 700, duration: 600 })
+      ])
+    ).toHaveLength(1)
+  })
+
   it('同じ機種でも同じ時間に撮っていれば・時刻が分からなければ別のカメラのまま', () => {
     const sources = classifyFootage([
       file('CAM_A/C0001.MP4', { device: 'Sony FX3', recordedAt: 0, duration: 600 }),

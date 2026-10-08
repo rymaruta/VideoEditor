@@ -62,10 +62,10 @@ export function parseDictionary(text: string): DictionaryEntry[] {
 }
 
 /** 行頭に置かない文字 */
-const NO_LINE_START =
+export const NO_LINE_START =
   /[、。,.!?！？)）」』】ゝゞーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ・…]/u
 /** 行末に置かない文字 */
-const NO_LINE_END = /[(（「『【]/u
+export const NO_LINE_END = /[(（「『【]/u
 const PUNCT = /[、。！？!?,.\s]/u
 const PARTICLE = /[はがをにでともへやのね]/u
 const KANA = /[぀-ヿ]/u

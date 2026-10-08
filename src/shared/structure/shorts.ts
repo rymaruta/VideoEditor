@@ -75,7 +75,11 @@ export function pickShortWindows(
   const peaks = [
     ...hype.map((h) => ({ start: h.start, end: h.end, strength: Math.max(1, h.riseDb) })),
     ...laughs.map((l) => ({ start: l.start, end: l.end, strength: LAUGH_STRENGTH }))
-  ].sort((a, b) => a.start - b.start)
+  ]
+    // 使える範囲(カメラの映っている時間)の外の山は使わない。範囲の端へ寄せると、
+    // 山の入っていない区間がいちばん強いショートとして出ていた(マイクはカメラより長く録りがち)
+    .filter((p) => p.end > range.start && p.start < range.end)
+    .sort((a, b) => a.start - b.start)
 
   // 山ごとの区間。近い(重なる)ものはつなぐ。つないで上限を超えるなら別の区間にする
   const merged: ShortCandidate[] = []

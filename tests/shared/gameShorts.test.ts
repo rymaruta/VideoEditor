@@ -71,3 +71,11 @@ describe('ショートの終わりを詰めても山は残す', () => {
     expect(w.end).toBeGreaterThan(103)
   })
 })
+
+describe('pickShortWindows: 使える範囲の外の山', () => {
+  it('カメラの映っていない時間の山からは、ショートを作らない', () => {
+    expect(
+      pickShortWindows([{ start: 150, end: 152, riseDb: 20 }], [], [], { start: 0, end: 100 })
+    ).toEqual([])
+  })
+})
