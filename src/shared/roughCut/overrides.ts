@@ -271,10 +271,19 @@ function anglePieces(
       assetId: g.assetId,
       // 素材の頭の丸めの残り(-5e-7 など)で、素材の外を指さないように
       inPoint: Math.max(0, (t - g.start) * g.rate),
-      outPoint: (to - g.start + (out.length === 0 ? leadGap : 0)) * g.rate,
+      outPoint: (to - g.start) * g.rate,
       speed: g.rate
     })
     t = to
+  }
+  // 頭の隙間の分は、ファイルに余りのあるクリップを延ばして長さを保つ(無ければ最後のクリップ)
+  if (leadGap > 0 && out.length > 0) {
+    const room = out.find((p) => {
+      const g = info.files.find((x) => x.assetId === p.assetId)
+      return g !== undefined && p.outPoint + leadGap * p.speed <= g.duration + 1e-9
+    })
+    const target = room ?? out[out.length - 1]
+    target.outPoint += leadGap * target.speed
   }
   // 最後の切れ端が丸めの残りだけなら前に含める
   return out.filter((p, i) => i === 0 || (p.outPoint - p.inPoint) / p.speed > 1e-3)

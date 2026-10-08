@@ -3104,16 +3104,27 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
               if (!rebuilt.includes(c)) return c
               const f = info.files.find((x) => x.assetId === c.assetId)
               if (!f) return c
-              const mid = toCommon(f, (c.inPoint + c.outPoint) / 2)
-              const from = styled.find((pc) => {
-                const g = info.files.find((x) => x.assetId === pc.assetId)
-                return (
-                  pc.assetId === c.assetId &&
-                  g !== undefined &&
-                  toCommon(g, pc.inPoint) <= mid &&
-                  mid < toCommon(g, pc.outPoint)
-                )
-              })
+              const a = toCommon(f, c.inPoint)
+              const b = toCommon(f, c.outPoint)
+              const mid = (a + b) / 2
+              // 真ん中の時刻を映していた前のクリップ。無ければ(前の切れ目をまたいでつながった)一番長く
+              // 重なっていた前のクリップ
+              let from: Clip | undefined
+              let best = 0
+              for (const pc of styled) {
+                if (pc.assetId !== c.assetId) continue
+                const pa = toCommon(f, pc.inPoint)
+                const pb = toCommon(f, pc.outPoint)
+                if (pa <= mid && mid < pb) {
+                  from = pc
+                  break
+                }
+                const overlap = Math.min(b, pb) - Math.max(a, pa)
+                if (overlap > best) {
+                  best = overlap
+                  from = pc
+                }
+              }
               return from ? { ...c, ...lookOf(from) } : c
             })
           : clips
@@ -5124,59 +5135,71 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
   /**
    * 同じ曲を重ねて(つないで)繰り返す BGM(`planBgm` のループ)は、ひとつながりとして、写した範囲を
    * 並べ直す。1本ずつ伸ばすと、曲の終わりより先へは伸ばせず、ループの間に穴が開き、速さを戻すと
-   * 縮めた分が戻らなかった。並べ直しは写した範囲だけで決まるので、行って戻れば元の並びに戻る
+   * 縮めた分が戻らなかった。並べ直しは写した範囲だけで決まるので、行って戻れば元の並びに戻る。
+   * ループの間のクロスフェードは残す。足すループの id は決まった形(作り直すたびに変わらない)
    */
-  const retileChain = (chain: AudioTrackClip[]): AudioTrackClip[] => {
+  const retileLoop = (chain: AudioTrackClip[]): AudioTrackClip[] => {
     const first = chain[0]
     const last = chain[chain.length - 1]
+    const lenOf = (c: AudioTrackClip): number => (c.outPoint - c.inPoint) / (c.speed || 1)
     const startTime = warp(first.startTime)
-    const end = warp(last.startTime + (last.outPoint - last.inPoint) / (last.speed || 1))
+    const end = warp(last.startTime + lenOf(last))
     const overlaps = chain
       .slice(1)
-      .map(
-        (c, i) =>
-          chain[i].startTime +
-          (chain[i].outPoint - chain[i].inPoint) / (chain[i].speed || 1) -
-          c.startTime
-      )
-    const loopOverlap = overlaps[overlaps.length - 1] ?? 0
+      .map((c, i) => chain[i].startTime + lenOf(chain[i]) - c.startTime)
+    const loopOverlap = Math.max(0, overlaps[overlaps.length - 1] ?? 0)
+    const crossOut = chain.length > 1 ? chain[0].fadeOut : undefined
+    const crossIn = chain.length > 1 ? chain[1].fadeIn : undefined
+    const limit = durationOf.get(first.assetId) ?? Infinity
     const out: AudioTrackClip[] = []
     let at = startTime
-    for (let i = 0; at < end - 1e-6; i++) {
-      // 用意したクリップを使い切ったら、最後の(曲の頭から始まる)ループを足す
-      const base = i < chain.length ? chain[i] : { ...chain[chain.length - 1], id: uuid() }
+    // 足すループは多くても 1,000 本(重なりが曲の長さに近い壊れた並びで、際限なく増やさない)
+    for (let i = 0; at < end - 1e-6 && i < chain.length + 1000; i++) {
+      const own = chain[i]
+      const base = own ?? { ...last, id: `${first.id}~${i}`, inPoint: 0 }
       const speed = base.speed || 1
-      const limit = durationOf.get(base.assetId) ?? Infinity
-      const inPoint = i < chain.length ? base.inPoint : 0
-      const len = Math.max(0, Math.min((limit - inPoint) / speed, end - at))
+      const len = Math.max(0, Math.min((limit - base.inPoint) / speed, end - at))
       if (len <= 1e-6) break
       out.push({
         ...base,
         startTime: at,
-        inPoint,
-        outPoint: inPoint + len * speed,
-        fadeIn: i === 0 ? first.fadeIn : base.fadeIn,
-        fadeOut: undefined
+        outPoint: base.inPoint + len * speed,
+        fadeIn: i === 0 ? first.fadeIn : (own?.fadeIn ?? crossIn),
+        fadeOut: i < chain.length - 1 ? own!.fadeOut : crossOut
       })
-      at += len - (i < overlaps.length ? overlaps[i] : loopOverlap)
-      if (at + (i < overlaps.length ? overlaps[i] : loopOverlap) >= end - 1e-6) break
+      if (at + len >= end - 1e-6) break
+      const overlap = Math.min(i < overlaps.length ? overlaps[i] : loopOverlap, len)
+      // 重なりが長さと同じ(進まない)なら、そこで止める
+      if (len - overlap <= 1e-3) break
+      at += len - overlap
     }
     if (out.length > 0) out[out.length - 1] = { ...out[out.length - 1], fadeOut: last.fadeOut }
     return out
   }
-  const moveAudioClips = (clips: AudioTrackClip[]): AudioTrackClip[] => {
+  /** BGM の、同じ曲を頭から重ねて繰り返す並び(2本目から曲の頭・最後以外は曲の終わりまで)か */
+  const isLoopChain = (chain: AudioTrackClip[]): boolean => {
+    const limit = durationOf.get(chain[0].assetId)
+    if (limit === undefined) return false
+    return chain.every(
+      (c, i) =>
+        (i === 0 || c.inPoint <= 1e-6) &&
+        (i === chain.length - 1 || Math.abs(c.outPoint - limit) <= 1e-3) &&
+        (c.speed || 1) === (chain[0].speed || 1)
+    )
+  }
+  const moveBgmClips = (clips: AudioTrackClip[]): AudioTrackClip[] => {
     const sorted = [...clips].sort((a, b) => a.startTime - b.startTime)
     const out: AudioTrackClip[] = []
     let chain: AudioTrackClip[] = []
     const flush = (): void => {
-      if (chain.length >= 2) out.push(...retileChain(chain))
+      if (chain.length > 0 && isLoopChain(chain)) out.push(...retileLoop(chain))
       else out.push(...chain.map((c) => (c.linkedClipId ? c : moveClip(c))))
       chain = []
     }
     for (const c of sorted) {
       const prev = chain[chain.length - 1]
       const touches =
-        prev &&
+        prev !== undefined &&
         !c.linkedClipId &&
         !prev.linkedClipId &&
         c.assetId === prev.assetId &&
@@ -5185,16 +5208,17 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       chain.push(c)
     }
     flush()
-    // 何も動かなければ元の並びのまま
-    return out.length === clips.length && out.every((c, i) => c === clips[i]) ? clips : out
+    return out
   }
   const moveTrack = <T extends AudioTrack | VideoOverlayTrack>(t: T): T => {
     if (!t.autoRole || t.multicamSourceId) return t
     const untouched = isUntouchedAuto(t)
     const clips = (
-      'duckingEnabled' in t
-        ? moveAudioClips(t.clips as AudioTrackClip[])
-        : (t.clips as T['clips']).map((c) => moveClip(c))
+      t.autoRole === 'bgm' && 'duckingEnabled' in t
+        ? moveBgmClips(t.clips as AudioTrackClip[])
+        : (t.clips as T['clips']).map((c) =>
+            'linkedClipId' in c && c.linkedClipId ? c : moveClip(c)
+          )
     ) as T['clips']
     if (sameItems(clips, t.clips)) return t
     const track = { ...t, clips }

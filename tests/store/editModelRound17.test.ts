@@ -322,3 +322,97 @@ describe('第18回: 作り直しで見た目を引き継ぐ', () => {
     expect(st().project.clips[0].fillCrop).toBe(true)
   })
 })
+
+describe('第19回: 速さを変えたときの BGM・SE の並べ直しの見直し', () => {
+  const setTrack = (id: string, clips: Project['audioTracks'][number]['clips']): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop', 20, false), asset('sfx', 1, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === id ? { ...t, clips } : t))
+      }
+    })
+  }
+  beforeEach(() =>
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+  )
+
+  it('同じ SE を重ねて置いていても止まらず、増えない', () => {
+    setTrack('seT', [
+      { id: 's1', assetId: 'sfx', startTime: 13, inPoint: 0, outPoint: 1 },
+      { id: 's2', assetId: 'sfx', startTime: 13, inPoint: 0, outPoint: 1 }
+    ])
+    st().updateClipSpeed(st().project.clips[1].id, 0.5)
+    expect(track('seT')).toHaveLength(2)
+  })
+
+  it('同じ素材の別の所を続けて置いた SE は、それぞれ長さを保って動く', () => {
+    setTrack('seT', [
+      { id: 's1', assetId: 'bgm', startTime: 13, inPoint: 50, outPoint: 51 },
+      { id: 's2', assetId: 'bgm', startTime: 14, inPoint: 60, outPoint: 61 }
+    ])
+    st().updateClipSpeed(st().project.clips[1].id, 0.5)
+    expect(track('seT').map((c) => [c.id, c.startTime, c.inPoint, c.outPoint])).toEqual([
+      ['s1', 16, 50, 51],
+      ['s2', 18, 60, 61]
+    ])
+  })
+
+  it('ループのつなぎ目のクロスフェードは、ほかの所の速さを変えても残る', () => {
+    setTrack('bgmT', [
+      { id: 'b1', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 20, fadeIn: 2, fadeOut: 2 },
+      { id: 'b2', assetId: 'loop', startTime: 18, inPoint: 0, outPoint: 12, fadeIn: 2, fadeOut: 2 }
+    ])
+    st().updateClipSpeed(st().project.clips[2].id, 1.25)
+    const b1 = track('bgmT').find((c) => c.id === 'b1')!
+    expect(b1.fadeOut).toBe(2)
+  })
+
+  it('1本にまで縮んだ BGM も、速さを戻すと本編の終わりまで戻る', () => {
+    setup([[0, 30]])
+    setTrack('bgmT', [
+      { id: 'b1', assetId: 'loop', startTime: 0, inPoint: 0, outPoint: 20 },
+      { id: 'b2', assetId: 'loop', startTime: 18, inPoint: 0, outPoint: 12 }
+    ])
+    const id = st().project.clips[0].id
+    st().updateClipSpeed(id, 2)
+    expect(track('bgmT')).toHaveLength(1)
+    st().updateClipSpeed(id, 1)
+    const back = [...track('bgmT')].sort((a, b) => a.startTime - b.startTime)
+    const last = back[back.length - 1]
+    expect(last.startTime + (last.outPoint - last.inPoint)).toBeCloseTo(30, 6)
+  })
+
+  it('作り直しで前の2本が1本につながっても、見た目を引き継ぐ', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const p = st().project
+    S.setState({
+      project: { ...p, clips: p.clips.map((c) => ({ ...c, fillCrop: true })) }
+    })
+    st().applyRoughCut(
+      {
+        main: [{ assetId: 'camA', inPoint: 0, outPoint: 30, speed: 1 }],
+        audio: [
+          {
+            name: '出演者A',
+            sourceId: 'M',
+            volume: 1,
+            clips: [{ assetId: 'micM', startTime: 0, inPoint: 0, outPoint: 30, speed: 1 }]
+          }
+        ],
+        duration: 30,
+        spans: []
+      },
+      []
+    )
+    expect(st().project.clips[0].fillCrop).toBe(true)
+  })
+})
