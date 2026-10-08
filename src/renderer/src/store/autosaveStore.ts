@@ -13,6 +13,11 @@ interface AutosaveState {
   /** 破棄して退避したデータ。あれば戻せる */
   discarded: { mtimeMs?: number } | null
   refresh: () => Promise<void>
+  /**
+   * 退避したデータ(復元ボタン)だけを読み直す。作業中の自動保存・保存のあとはこちら
+   * (`refresh` を使うと、今回の自動保存を「前回の自動保存」として起動時の確認がもう一度出ていた)
+   */
+  refreshDiscarded: () => Promise<void>
   clearPending: () => void
 }
 
@@ -25,6 +30,10 @@ export const useAutosaveStore = create<AutosaveState>((set) => ({
       pending: status.exists ? { mtimeMs: status.mtimeMs } : null,
       discarded: status.discardedExists ? { mtimeMs: status.discardedMtimeMs } : null
     })
+  },
+  refreshDiscarded: async () => {
+    const status = await window.api.checkAutosave()
+    set({ discarded: status.discardedExists ? { mtimeMs: status.discardedMtimeMs } : null })
   },
   clearPending: () => set({ pending: null })
 }))

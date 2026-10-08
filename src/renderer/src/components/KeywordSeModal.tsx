@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { useSfxDictionaryStore } from '../store/sfxDictionaryStore'
 import { detectKeywordSeMatches } from '../lib/keywordSe'
 import { formatIpcError } from '../lib/ipcError'
 import { WandIcon, PlusIcon } from './icons'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -92,8 +93,11 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
     }
   }
 
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal keyword-se-modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <WandIcon width={15} height={15} />

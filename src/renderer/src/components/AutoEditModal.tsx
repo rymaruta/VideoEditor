@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useEditPreferenceStore } from '../store/editPreferenceStore'
@@ -16,6 +16,7 @@ import {
   ClapperboardIcon,
   TrashIcon
 } from './icons'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -122,8 +123,11 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
     void startFinish(pattern.id, geminiApiKey)
   }
 
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal autoedit-modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <WandIcon width={15} height={15} />

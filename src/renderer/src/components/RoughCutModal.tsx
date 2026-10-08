@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { noHighlightsMessage } from '../lib/autoEdit'
 import { TargetIcon, PlusIcon } from './icons'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 interface FlatCandidate {
   assetId: string
@@ -134,8 +135,11 @@ export function RoughCutModal({ onClose }: { onClose: () => void }): React.JSX.E
     onClose()
   }
 
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal roughcut-modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <TargetIcon width={15} height={15} />

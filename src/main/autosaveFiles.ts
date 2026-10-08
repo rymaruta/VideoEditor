@@ -76,12 +76,38 @@ export function writeAutosaveFile(
     keepPreviousDiscarded?: boolean
   } = {}
 ): boolean {
-  const setAside = setAsideExisting
-    ? setAsideAutosaveFile(autosavePath, options.keepPreviousDiscarded ?? false)
-    : false
-  if (setAside) options.onSetAside?.()
-  saveProjectFile(autosavePath, project)
-  return setAside
+  try {
+    const setAside = setAsideExisting
+      ? setAsideAutosaveFile(autosavePath, options.keepPreviousDiscarded ?? false)
+      : false
+    if (setAside) options.onSetAside?.()
+    saveProjectFile(autosavePath, project)
+    return setAside
+  } catch (e) {
+    throw describeAutosaveFailure(e)
+  }
+}
+
+/** 自動保存の退避・書き込みの失敗(Node のエラーコード)の日本語 */
+const AUTOSAVE_ERROR_MESSAGES: [RegExp, string][] = [
+  [/^(ENOSPC|EDQUOT)$/, 'ディスクの空き容量が足りません'],
+  [/^(EACCES|EPERM|EROFS)$/, '自動保存の置き場所に書き込む権限がありません'],
+  [/^EBUSY$/, '自動保存のファイルが他のアプリで使用中です'],
+  [/^(EISDIR|ENOTEMPTY|EEXIST|ENOTDIR)$/, '自動保存の置き場所に同じ名前のフォルダがあります'],
+  [/^ENOENT$/, '自動保存の置き場所のフォルダが見つかりません']
+]
+
+/**
+ * 自動保存の失敗を短い日本語にする。退避(名前の付け替え)の失敗は Node の生のエラー
+ * (「ENOTEMPTY: directory not empty, rename …」)がそのまま画面に出ていた。
+ * 書き込み(`saveProjectFile`)の失敗は、すでに日本語になっているのでそのまま
+ */
+function describeAutosaveFailure(e: unknown): Error {
+  const code =
+    typeof (e as { code?: unknown } | null)?.code === 'string' ? (e as { code: string }).code : ''
+  for (const [pattern, message] of AUTOSAVE_ERROR_MESSAGES)
+    if (code && pattern.test(code)) return new Error(message)
+  return e instanceof Error ? e : new Error(String(e))
 }
 
 /**

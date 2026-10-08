@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { formatIpcError } from '../lib/ipcError'
@@ -20,6 +20,7 @@ import {
 import { defaultTextStyle } from '@shared/textStyle'
 import { WandIcon, SparklesIcon } from './icons'
 import type { TextOverlay, TranscriptSegment, TransitionType } from '@shared/types'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 // How many windows are shortlisted from the audio scan. Every one of these costs a
 // transcription pass, so this is the main lever on how long the whole run takes:
@@ -318,8 +319,12 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
     ) - existingLength
   const trimmedTotal = cuts.reduce((sum, c) => sum + c.headTrimmed + c.tailTrimmed, 0)
 
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose, !running)
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    // 作っている間は、外を押しても閉じない(閉じるボタンと同じ。閉じると裏で走ったまま結果が捨てられていた)
+    <div className="modal-backdrop" ref={backdropRef} onClick={() => !running && onClose()}>
       <div className="modal long-form-modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <WandIcon width={15} height={15} />

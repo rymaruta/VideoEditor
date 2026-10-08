@@ -11,7 +11,7 @@ import { safeFileBaseName } from '@shared/fileName'
  */
 async function setAsideAutosave(): Promise<void> {
   await window.api.discardAutosave()
-  await useAutosaveStore.getState().refresh()
+  await useAutosaveStore.getState().refreshDiscarded()
 }
 
 /**
@@ -23,7 +23,7 @@ async function setAsideAutosave(): Promise<void> {
  */
 async function clearAutosaveAfterSave(): Promise<void> {
   if (await window.api.clearAutosave()) {
-    await useAutosaveStore.getState().refresh()
+    await useAutosaveStore.getState().refreshDiscarded()
   }
 }
 

@@ -121,6 +121,7 @@ import {
 import { stripTelopMarkup } from '@shared/telop/render'
 import { DraftNumber } from './DraftNumber'
 import { Popover } from './Popover'
+import { nextTrackName } from '../lib/trackNames'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -3020,7 +3021,13 @@ export function Timeline(): React.JSX.Element {
         <button
           className="small-button add-track-button"
           onClick={() =>
-            addVideoOverlayTrack(`動画トラック ${project.videoOverlayTracks.length + 2}`)
+            addVideoOverlayTrack(
+              nextTrackName(
+                '動画トラック',
+                project.videoOverlayTracks.map((t) => t.name),
+                project.videoOverlayTracks.length + 2
+              )
+            )
           }
         >
           <PlusIcon width={12} height={12} />
@@ -3028,7 +3035,15 @@ export function Timeline(): React.JSX.Element {
         </button>
         <button
           className="small-button add-track-button"
-          onClick={() => addAudioTrack(`音声トラック ${project.audioTracks.length + 1}`)}
+          onClick={() =>
+            addAudioTrack(
+              nextTrackName(
+                '音声トラック',
+                project.audioTracks.map((t) => t.name),
+                project.audioTracks.length + 1
+              )
+            )
+          }
         >
           <PlusIcon width={12} height={12} />
           音声トラック

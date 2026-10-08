@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import type { HighlightCandidate, HighlightSensitivity } from '@shared/types'
 import { DEFAULT_HIGHLIGHT_SENSITIVITY, HIGHLIGHT_SENSITIVITY_OPTIONS } from '@shared/highlight'
 import { TargetIcon, PlusIcon } from './icons'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -18,6 +19,8 @@ export function HighlightModal({
   assetId: string
   onClose: () => void
 }): React.JSX.Element | null {
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
   const asset = useProjectStore((s) => s.project.assets.find((a) => a.id === assetId))
   const addTrimmedClipToTimeline = useProjectStore((s) => s.addTrimmedClipToTimeline)
 
@@ -53,7 +56,7 @@ export function HighlightModal({
   const maxScore = Math.max(1, ...candidates.map((c) => c.score))
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <TargetIcon width={15} height={15} />

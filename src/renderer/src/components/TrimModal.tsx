@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
 import { ScissorsIcon } from './icons'
 import { previewSourceUrl } from '../lib/previewSource'
 import { cropPreviewStyle } from '../lib/cropPreview'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -21,6 +22,8 @@ export function TrimModal({
   clipId: string
   onClose: () => void
 }): React.JSX.Element | null {
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
   const project = useProjectStore((s) => s.project)
   const applyClipTrimAndCrop = useProjectStore((s) => s.applyClipTrimAndCrop)
 
@@ -72,7 +75,7 @@ export function TrimModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <ScissorsIcon width={15} height={15} />

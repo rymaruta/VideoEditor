@@ -5,6 +5,7 @@ import { buildCutSegments } from '../lib/silenceCut'
 import { toTimelineSeconds } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { WandIcon } from './icons'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -152,8 +153,11 @@ export function SilenceCutModal({
     0
   )
 
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <WandIcon width={15} height={15} />

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { buildTimedClips, toTimelineSeconds } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { defaultTextStyle } from '@shared/textStyle'
 import type { TextOverlay, TranscriptSegment } from '@shared/types'
 import { MicIcon } from './icons'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -19,6 +20,8 @@ export function AutoCaptionModal({
   clipId: string
   onClose: () => void
 }): React.JSX.Element | null {
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
   const project = useProjectStore((s) => s.project)
   const addTextOverlays = useProjectStore((s) => s.addTextOverlays)
 
@@ -103,7 +106,7 @@ export function AutoCaptionModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <MicIcon width={15} height={15} />

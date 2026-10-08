@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { toTimelineSeconds } from '../lib/timelineMath'
 import type { TranscriptWord } from '@shared/types'
 import { buildCutSegments } from '../lib/silenceCut'
 import { formatIpcError } from '../lib/ipcError'
 import { TypeIcon } from './icons'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 
 export function TextBasedEditModal({
   clipId,
@@ -13,6 +14,8 @@ export function TextBasedEditModal({
   clipId: string
   onClose: () => void
 }): React.JSX.Element | null {
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, onClose)
   const project = useProjectStore((s) => s.project)
   const replaceClipRange = useProjectStore((s) => s.replaceClipRange)
 
@@ -98,7 +101,7 @@ export function TextBasedEditModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div className="modal text-edit-modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           <TypeIcon width={15} height={15} />

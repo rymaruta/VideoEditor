@@ -243,12 +243,12 @@ function App(): React.JSX.Element {
       if (isDirty) {
         window.api.autosaveProject(project).then(
           (setAside) => {
-            if (setAside) useAutosaveStore.getState().refresh()
+            if (setAside) useAutosaveStore.getState().refreshDiscarded()
           },
           (err) => {
             // 書けなかったことを知らせる(黙っていると、落ちたときに戻せる作業が無いことに気付けない)。
             // 書く前に退避していることがあるので、復元のボタンも出し直す
-            useAutosaveStore.getState().refresh()
+            useAutosaveStore.getState().refreshDiscarded()
             useProjectStore
               .getState()
               .setSaveError(`自動保存に失敗しました: ${formatIpcError(err)}`)
