@@ -5264,10 +5264,20 @@ function followMainEdit(
     segs
   )
 
-  const audioTracks = next.audioTracks.map((t) => {
-    if (!follows(t)) return t
+  // 収録の音のトラックに人が置いた、収録素材以外の音(ナレーションなど)は、人が置いたトラックの音と
+  // 同じく動かさない(写すと、速さを変えたクリップの下では消え、速さを戻しても戻らなかった)。
+  // 動いた声と重なるなら、仮編集を作り直すときと同じく「(手で置いた音)」のトラックへ移す
+  const recordedAssets = new Set(info.files.map((f) => f.assetId))
+  const endOfClip = (c: AudioTrackClip): number =>
+    c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)
+  const overlapsAny = (c: AudioTrackClip, others: AudioTrackClip[]): boolean =>
+    others.some((o) => o.startTime < endOfClip(c) - 1e-6 && endOfClip(o) > c.startTime + 1e-6)
+  const audioTracks = next.audioTracks.flatMap((t): AudioTrack[] => {
+    if (!follows(t)) return [t]
     const untouched = isUntouchedAuto(t)
-    const moved = t.clips.flatMap((c) => (c.linkedClipId ? [c] : remapClip(c)))
+    const placedByHand = (c: AudioTrackClip): boolean =>
+      Boolean(t.multicamSourceId) && !c.linkedClipId && !recordedAssets.has(c.assetId)
+    const moved = t.clips.flatMap((c) => (c.linkedClipId || placedByHand(c) ? [c] : remapClip(c)))
     // 伸ばして新しく見えた所: 収録素材のトラックなら、その機材の音を足す
     const added =
       t.multicamSourceId && gaps.length > 0
@@ -5282,14 +5292,28 @@ function followMainEdit(
             }))
           )
         : []
-    const clips = [...moved, ...added].sort((a, b) => a.startTime - b.startTime)
+    let clips = [...moved, ...added].sort((a, b) => a.startTime - b.startTime)
     // どのクリップも動かなかったトラックは、元のトラックのまま(履歴で共有できるように)
     if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
-      return t
+      return [t]
     }
+    const byHand = clips.filter(placedByHand)
+    const voices = clips.filter((c) => !placedByHand(c))
+    const moveOut = byHand.length > 0 && byHand.some((c) => overlapsAny(c, voices))
+    if (moveOut) clips = voices
     const track = { ...t, clips }
     // 手を付けていない自動のトラックは、動かしたあとも「手を付けていない」のまま(作り直しで入れ替わる)
-    return untouched ? withAutoSignature(track) : track
+    const out: AudioTrack[] = [untouched ? withAutoSignature(track) : track]
+    if (moveOut)
+      out.push({
+        id: uuid(),
+        name: `${t.name}(手で置いた音)`,
+        muted: t.muted,
+        volume: t.volume,
+        duckingEnabled: false,
+        clips: byHand
+      })
+    return out
   })
   const videoOverlayTracks = next.videoOverlayTracks.map((t) => {
     if (!follows(t)) return t

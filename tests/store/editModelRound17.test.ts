@@ -1692,3 +1692,38 @@ describe('第35回: アングルを替える先', () => {
     expect(st().project.clips[0].assetId).toBe('camA')
   })
 })
+
+describe('第43回: 収録の音のトラックに人が置いた音', () => {
+  it('下のクリップの速さを変えて戻しても、マイクのトラックに置いたナレーションは消えない', () => {
+    setup([
+      [0, 10],
+      [20, 30]
+    ])
+    const p = st().project
+    const mic = p.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, { ...asset('nar', 5, false), filePath: '/rec/nar.wav' }],
+        audioTracks: p.audioTracks.map((t) =>
+          t.id === mic.id
+            ? {
+                ...t,
+                clips: [
+                  ...t.clips,
+                  { id: 'narC', assetId: 'nar', startTime: 12, inPoint: 0, outPoint: 2 }
+                ]
+              }
+            : t
+        )
+      }
+    })
+    const id = st().project.clips[1].id
+    const narOn = (): boolean =>
+      st().project.audioTracks.some((t) => t.clips.some((c) => c.id === 'narC'))
+    st().updateClipSpeed(id, 1.5)
+    expect(narOn()).toBe(true)
+    st().updateClipSpeed(id, 1)
+    expect(narOn()).toBe(true)
+  })
+})

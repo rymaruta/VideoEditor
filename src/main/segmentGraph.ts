@@ -486,7 +486,18 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
 
   const trackMixes: { label: string; duck: boolean }[] = []
   const voiceLabels: string[] = []
-  const duckingInUse = seq.audioTracks.some((t) => t.duckingEnabled && !t.muted)
+  // 声を割ってダッキングの基準にするのは、この区間でダッキングするトラックが実際に鳴るときだけ。
+  // 鳴らない区間で割ると、声の枝を anullsink で捨てることになり、終わりの先を apad で延ばした声
+  // (速さを変えた音・映像より短い音)が最後に終わる入力だと、ffmpeg が
+  // `Assertion best_input >= 0 failed` で落ちて書き出しごと失敗していた(BGM が本編より先に終わる企画など)
+  const duckingInUse = seq.audioTracks.some(
+    (t) =>
+      t.duckingEnabled &&
+      !t.muted &&
+      t.items.some(
+        (i) => intersects(i, renderStart, renderEnd) && ctx.assetsById.get(i.assetId)?.hasAudio
+      )
+  )
   seq.audioTracks.forEach((track) => {
     if (track.muted) return
     const labels: string[] = []
