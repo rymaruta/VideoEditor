@@ -1227,7 +1227,7 @@ function keepBackgroundResults(restored: Project, current: Project): Project {
   return { ...restored, assets, ...(events ? { audioEvents: current.audioEvents } : {}) }
 }
 
-/** 裏の結果(プロキシ・検出結果)だけを書き込んだプロジェクト → 書き込む前のプロジェクト */
+/** 裏の結果(プレビュー用のプロキシ)だけを書き込んだプロジェクト → 書き込む前のプロジェクト */
 const backgroundBase = new WeakMap<Project, Project>()
 
 /** 裏の結果だけの書き込み。未保存の判定(`markSaved`)で編集と数えないよう、元を覚えておく */
@@ -1237,7 +1237,7 @@ function backgroundUpdate(base: Project, next: Project): Project {
 }
 
 /**
- * 今のプロジェクトが、保存したもの(か、それに裏の結果だけを書き込んだもの)か。
+ * 今のプロジェクトが、保存したもの(か、それにプロキシだけを書き込んだもの)か。
  * 保存の途中で変換が終わってプロキシが入っても、未保存にしない
  */
 function savedOrBackgroundOnly(current: Project, saved: Project): boolean {
@@ -3166,9 +3166,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
+  // 笑い・歓声の検出結果は企画ファイルに保存するもの(作り直せるプロキシとは違う)。
+  // 取り消しの履歴には積まないが、未保存にする(保存の途中に届いても、保存済みと扱わない)
   setAudioEvents: (events) =>
     set((state) => ({
-      project: backgroundUpdate(state.project, { ...state.project, audioEvents: events })
+      isDirty: true,
+      project: { ...state.project, audioEvents: events }
     })),
 
   setAssetsDenoised: (changes, options) =>

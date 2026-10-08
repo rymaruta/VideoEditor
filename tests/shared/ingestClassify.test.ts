@@ -151,6 +151,29 @@ describe('classifyFootage', () => {
       expect(s.basis).not.toMatch(/フォルダ ・|・$/)
   })
 
+  it('カードのフォルダの名前は、全角の数字・後ろの日付・リール名・〜枚目でもカードとみなす', () => {
+    for (const [c1, c2] of [
+      ['カード１', 'カード２'],
+      ['SD1_0501', 'SD2_0501'],
+      ['A001', 'A002'],
+      ['1枚目', '2枚目']
+    ]) {
+      const sources = classifyFootage([
+        file(`CamA/${c1}/DCIM/100CANON/MVI_0001.MP4`, {
+          device: 'R6',
+          recordedAt: 0,
+          duration: 1800
+        }),
+        file(`CamA/${c2}/DCIM/100CANON/MVI_0001.MP4`, {
+          device: 'R6',
+          recordedAt: 1900,
+          duration: 1800
+        })
+      ])
+      expect(sources, c1).toHaveLength(1)
+    }
+  })
+
   it('1段深いフォルダ(Day1/CamA/DCIM と Day1/CamB/DCIM)でも、別々のカメラのまま', () => {
     const sources = classifyFootage([
       file('Day1/CamA/DCIM/100CANON/MVI_0001.MP4', { device: 'R6', recordedAt: 0, duration: 600 }),

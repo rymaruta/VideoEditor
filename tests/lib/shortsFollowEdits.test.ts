@@ -182,3 +182,45 @@ describe('ショートの長さの下限', () => {
     expect(total).toBeGreaterThanOrEqual(15)
   })
 })
+
+describe('ショートを広げても上限は超えない', () => {
+  it('選んだ所の前後だけ話していても、広げたショートは 60 秒以内', () => {
+    const lines: unknown[] = []
+    const act = new Uint8Array(300 * TURN_RATE)
+    for (let t = 0; t < 296; t += 4) {
+      if (t > 136 && t < 160) continue
+      lines.push(utt(`u${t}`, 'MA', t, t + 3.8, `発言${t}`))
+      act.fill(1, t * TURN_RATE, (t + 3.8) * TURN_RATE)
+    }
+    const long: MulticamInfo = { ...info, files: info.files.map((f) => ({ ...f, duration: 300 })) }
+    const p = {
+      id: 'p',
+      name: '本編',
+      aspectRatio: '16:9',
+      assets: [asset('C', true), asset('MA', false), asset('MB', false)].map((a) => ({
+        ...(a as object),
+        duration: 300
+      })),
+      clips: [],
+      audioTracks: [],
+      videoOverlayTracks: [],
+      textOverlays: [],
+      transcript: lines,
+      multicam: long
+    } as unknown as Project
+    const short = buildShortProject(
+      {
+        project: p,
+        info: long,
+        hype: [],
+        activity: act,
+        styles: [],
+        speechLook: { style: defaultTextStyle() }
+      },
+      { start: 140, end: 158, strength: 10, peaks: 1 },
+      0
+    )
+    const total = short.clips.reduce((t, c) => t + (c.outPoint - c.inPoint) / c.speed, 0)
+    expect(total).toBeLessThanOrEqual(60)
+  })
+})

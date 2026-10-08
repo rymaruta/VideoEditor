@@ -86,8 +86,12 @@ function cardRoot(folder: string): string {
   return i < 0 ? folder : parts.slice(0, i).join('/')
 }
 
-/** カードのフォルダらしい名前(Card1・SD_02・Roll3・カード2) */
-const CARD_NAME = /^(card|sd|cf|cfexpress|roll|reel|disk|mag|カード)[\s_-]*\d+$/i
+/**
+ * カードのフォルダらしい名前(Card1・SD_02・Roll3・カード２・SD1_0501・A001(リール)・1枚目)。
+ * 全角の数字は半角にしてから見る
+ */
+const CARD_NAME =
+  /^(?:(?:card|sd|cf|cfexpress|roll|reel|disk|mag|カード)[\s_-]*\d+(?:[\s_-].*)?|[a-z]\d{3}|\d+枚目)$/i
 
 /**
  * カードを丸ごと写した2つのフォルダが、1台のカメラのカードを替えたものか
@@ -102,7 +106,8 @@ function sameCameraCards(a: string, b: string): boolean {
   if (parentOf(ra) !== parentOf(rb)) return false
   // カードのフォルダの名前がカードらしいときだけ(Day1/CamA と Day1/CamB は別々のカメラ)
   const last = (f: string): string => f.split('/').pop() ?? ''
-  return CARD_NAME.test(last(ra)) && CARD_NAME.test(last(rb))
+  const isCard = (f: string): boolean => CARD_NAME.test(last(f).normalize('NFKC'))
+  return isCard(ra) && isCard(rb)
 }
 
 /** ファイル名の、撮った回の番号より後ろ(ZOOM0001_Tr1 → TR1。同じ録音機の何本目のトラックか) */

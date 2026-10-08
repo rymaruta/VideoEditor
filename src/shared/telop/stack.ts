@@ -25,15 +25,26 @@ const estimateCtx: Pick<TelopContext, 'measureText' | 'font'> = {
   font: '',
   measureText(ch: string) {
     const size = Number(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? 40)
-    return { width: /[\x20-\x7e]/.test(ch) ? size * 0.55 : size } as TextMetrics
+    return { width: size * halfWidthEm(ch) } as TextMetrics
   }
+}
+
+/**
+ * 半角の文字の幅(文字の大きさに対する比)の見積もり。少し広めに見る(狭く見ると折り返しを見落とし、
+ * 上の段が下の段に重なる。太字の W は 0.94・M は 0.83 だった)
+ */
+function halfWidthEm(ch: string): number {
+  if (!/[\x20-\x7e]/.test(ch)) return 1
+  if (/[WM]/.test(ch)) return 0.95
+  if (/[mw]/.test(ch)) return 0.9
+  if (/[A-Z]/.test(ch)) return 0.8
+  if (/[\sIijlt.,:;'!|]/.test(ch)) return 0.35
+  return 0.62
 }
 
 /** キャンバスの幅(縦長なら 9:16、横長なら 16:9。テロップのキャンバスはこの2つ) */
 function canvasWidthFor(canvasH: number): number {
-  return canvasH > TELOP_LINE_HEIGHT_EM * 1000
-    ? Math.round((canvasH * 9) / 16)
-    : Math.round((canvasH * 16) / 9)
+  return canvasH > 1500 ? Math.round((canvasH * 9) / 16) : Math.round((canvasH * 16) / 9)
 }
 
 /**
@@ -43,8 +54,14 @@ function canvasWidthFor(canvasH: number): number {
 function blockHeightRatio(
   o: Pick<TextOverlay, 'text' | 'style'>,
   canvasH: number,
-  canvasW: number
+  canvasW: number,
+  legacy = false
 ): number {
+  // 以前の数え方(改行の数 × 文字の大きさ × 行の高さ)。前に積んで保存した段を見分けるのに使う
+  if (legacy)
+    return (
+      (Math.max(1, o.text.split('\n').length) * o.style.fontSize * TELOP_LINE_HEIGHT_EM) / canvasH
+    )
   const bounds = telopHitBounds(
     estimateCtx,
     { text: o.text, style: o.style, startTime: 0, endTime: 1 },
@@ -64,7 +81,7 @@ export function stackSimultaneousTelops<
 >(
   telops: readonly T[],
   canvasH: number,
-  options: { baseCenter?: number; canvasW?: number } = {}
+  options: { baseCenter?: number; canvasW?: number; legacyHeights?: boolean } = {}
 ): T[] {
   const canvasW = options.canvasW ?? canvasWidthFor(canvasH)
   const order = telops
@@ -78,7 +95,7 @@ export function stackSimultaneousTelops<
     // 終わったものを外す
     for (let k = active.length - 1; k >= 0; k--)
       if (active[k].end <= t.startTime + 1e-6) active.splice(k, 1)
-    const h = blockHeightRatio(t, canvasH, canvasW)
+    const h = blockHeightRatio(t, canvasH, canvasW, options.legacyHeights)
     if (active.length === 0) {
       const base = options.baseCenter
       if (base === undefined) {
@@ -112,13 +129,19 @@ export function stackedBottomTelops<
     return { ...t, style: style as T['style'] }
   }
   const restacked = stackSimultaneousTelops(telops.map(strip), canvasH, options)
+  // 段の高さの測り方を変える前に積んで保存した段も、段のテロップとして見分ける
+  const legacy = stackSimultaneousTelops(telops.map(strip), canvasH, {
+    ...options,
+    legacyHeights: true
+  })
+  const same = (a: { x: number; y: number } | undefined, own: { x: number; y: number }): boolean =>
+    Boolean(a) && Math.abs(a!.x - own.x) < 1e-9 && Math.abs(a!.y - own.y) < 1e-9
   return telops.map((t, i) => {
     if (t.style.position !== 'bottom') return false
     const own = t.style.customPosition
     if (!own) return options.baseCenter === undefined
     if (own.x !== 0.5) return false
-    const again = restacked[i].style.customPosition
-    return Boolean(again) && Math.abs(again!.x - own.x) < 1e-9 && Math.abs(again!.y - own.y) < 1e-9
+    return same(restacked[i].style.customPosition, own) || same(legacy[i].style.customPosition, own)
   })
 }
 

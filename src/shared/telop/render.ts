@@ -751,8 +751,14 @@ function measureLayout(
     const pad = style.background
       ? telopBackgroundPadding(style, fontSize)
       : { x: telopStrokeRings(style)[0]?.reach ?? 0, y: telopStrokeRings(style)[0]?.reach ?? 0 }
-    const halfW = blockWidth / 2 + pad.x
-    const halfH = blockHeight / 2 + pad.y
+    // 回したテロップは、回した後の外枠で収める(軸はアンカー = ブロックの中心)
+    const theta = (finite(style.rotation, 0) * Math.PI) / 180
+    const cos = Math.abs(Math.cos(theta))
+    const sin = Math.abs(Math.sin(theta))
+    const w0 = blockWidth / 2 + pad.x
+    const h0 = blockHeight / 2 + pad.y
+    const halfW = cos * w0 + sin * h0
+    const halfH = sin * w0 + cos * h0
     anchor.x =
       halfW * 2 >= canvas.w ? canvas.w / 2 : Math.min(canvas.w - halfW, Math.max(halfW, anchor.x))
     anchor.y =

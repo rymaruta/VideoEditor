@@ -46,4 +46,33 @@ describe.skipIf(!existsSync(ffmpegPath))('片方だけ途中で終わった書�
     expect(await kinds(make('audio-short.mp4', 8, 4))).toContain('silence')
     expect(await kinds(make('ok.mp4', 8, 8))).toEqual([])
   }, 120_000)
+
+  it('音が映像より遅れて始まる書き出しは、頭の無音を知らせる(ファイルの終わりより先は言わない)', async () => {
+    const out = join(work, 'late-audio.mp4')
+    execFileSync(ffmpegPath, [
+      '-y',
+      '-v',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=320x180:r=30:d=6',
+      '-itsoffset',
+      '3',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=f=440:d=3:sample_rate=48000',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      out
+    ])
+    const m = await measureExport(out, () => {})
+    expect(m.silence.some((s) => s.start < 0.5 && s.end > 2.5)).toBe(true)
+    expect(m.silence.every((s) => s.end <= 6.2)).toBe(true)
+  }, 60_000)
 })

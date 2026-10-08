@@ -49,6 +49,16 @@ export interface ShortPlanInput {
   overrides?: CutOverrides
 }
 
+/** ショート1本の長さの上限(秒) */
+const SHORT_MAX_SEC = 60
+/** 長さが足りないとき、1回に広げる長さ(秒) */
+const SHORT_WIDEN_STEP_SEC = 12
+
+/** 組んだショートに、選んだ区間(山)が入っているか */
+function coversChosen(plan: ReturnType<typeof planRoughCut>, chosen: ShortCandidate): boolean {
+  return plan.pieces.some((p) => p.start < chosen.end && p.end > chosen.start)
+}
+
 /** 長さが足りないときに広げる区間の長さの上限(秒) */
 const SHORT_MAX_WINDOW_SEC = 120
 
@@ -81,11 +91,13 @@ export function buildShortProject(
   const range = cameraRange(info)
   let win = window
   let plan = planShort(input, win, window)
-  for (let i = 0; i < 5 && plan.cut.duration < SHORT_MIN_SEC; i++) {
-    // 詰めた後に残る割合から、下限に届く区間の長さを見込む(少し多めに)
+  const hadChosen = coversChosen(plan, window)
+  for (let i = 0; i < 8 && plan.cut.duration < SHORT_MIN_SEC; i++) {
+    // 詰めた後に残る割合から、下限に届く区間の長さを見込む。一度に広げるのは少しずつ
+    // (残りがほぼ無いと一度に 120 秒まで広げ、選んだ所の無い 100 秒のショートになっていた)
     const len = win.end - win.start
     const want = (len * SHORT_MIN_SEC) / Math.max(1, plan.cut.duration) + 2
-    const extra = Math.max(2, Math.min(want, SHORT_MAX_WINDOW_SEC) - len) / 2
+    const extra = Math.min(SHORT_WIDEN_STEP_SEC, Math.max(2, want - len)) / 2
     const next = {
       ...win,
       start: Math.max(range.start, win.start - extra),
@@ -93,8 +105,12 @@ export function buildShortProject(
     }
     if (next.start === win.start && next.end === win.end) break
     if (next.end - next.start > SHORT_MAX_WINDOW_SEC) break
+    const nextPlan = planShort(input, next, window)
+    // 上限を超える・選んだ所が入らない組み直しは使わない(前の組み方のまま)
+    if (nextPlan.cut.duration > SHORT_MAX_SEC || (hadChosen && !coversChosen(nextPlan, window)))
+      break
     win = next
-    plan = planShort(input, win, window)
+    plan = nextPlan
   }
   return shortProjectFromPlan(input, plan, index)
 }

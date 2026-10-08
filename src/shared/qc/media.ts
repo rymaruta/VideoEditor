@@ -57,7 +57,9 @@ export function qcFilter(hasVideo: boolean, hasAudio: boolean, duration?: number
     )
   if (hasAudio)
     parts.push(
-      `[0:a]${d ? `apad=whole_dur=${d},` : ''}ebur128=peak=true:framelog=quiet,` +
+      // 音が映像より遅れて始まるファイルは、頭の隙間を無音で埋めてから測る(apad は最初の音から数えるので、
+      // 埋めないと終わりの先まで延ばし、頭の無音を見逃していた)
+      `[0:a]${d ? `aresample=async=1:first_pts=0,apad=whole_dur=${d},` : ''}ebur128=peak=true:framelog=quiet,` +
         `silencedetect=noise=${t.silenceDb}dB:d=${t.silenceMinSec}[qa]`
     )
   return parts.join(';')

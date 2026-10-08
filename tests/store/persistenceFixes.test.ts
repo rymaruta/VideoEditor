@@ -130,6 +130,15 @@ describe('保存・開く・素材の管理', () => {
     expect(st().isDirty).toBe(true)
   })
 
+  it('保存の途中に届いた笑い・歓声の検出結果は、保存済みにしない(企画ファイルに入る結果なので)', () => {
+    st().loadProject(project([asset('A')]), '/p.veproj')
+    st().setProjectName('名前')
+    const saved = st().project
+    st().setAudioEvents([{ start: 1, end: 2, laugh: 0.9, cheer: 0 }])
+    st().markSaved('/p.veproj', saved)
+    expect(st().isDirty).toBe(true)
+  })
+
   it('壊れたキー操作の型の名前(constructor など)でも、既定のキー操作を使う', () => {
     expect(getKeymap('constructor' as never)).toBe(getKeymap('default'))
     expect(getKeymap('garbage' as never)).toBe(getKeymap('default'))
