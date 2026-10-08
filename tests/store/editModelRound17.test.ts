@@ -1079,3 +1079,67 @@ describe('第28回: BGM のループの続き', () => {
     ).toEqual(start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint]))
   })
 })
+
+describe('第29回: BGM のループの続きの見直し', () => {
+  type BgmClip = Project['audioTracks'][number]['clips'][number]
+  const setBgm = (clips: BgmClip[]): void => {
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('loop10', 10, false)],
+        audioTracks: p.audioTracks.map((t) => (t.id === 'bgmT' ? { ...t, clips } : t))
+      }
+    })
+  }
+  beforeEach(() =>
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+  )
+
+  it('最後のループを人が分けていても、人が短くした曲の頭のクリップを見つけて二重に鳴らさない', () => {
+    setBgm([
+      {
+        id: 'A',
+        assetId: 'loop10',
+        startTime: 0,
+        inPoint: 0,
+        outPoint: 10,
+        loopCross: { overlap: 2 }
+      },
+      { id: 'A~1', assetId: 'loop10', startTime: 8, inPoint: 0, outPoint: 7 },
+      { id: 'x', assetId: 'loop10', startTime: 15, inPoint: 7, outPoint: 10 },
+      { id: 'C', assetId: 'loop10', startTime: 16, inPoint: 0, outPoint: 0.1 }
+    ])
+    st().updateClipSpeed(st().project.clips[1].id, 0.5)
+    expect(
+      track('bgmT').some((c) => c.inPoint === 0 && c.startTime > 16 + 1e-6 && c.startTime < 17)
+    ).toBe(false)
+  })
+
+  it('速さの違うクリップの続きは、元の終わりの手前で終わっても、戻すと消える', () => {
+    const start: BgmClip[] = [
+      {
+        id: 'A',
+        assetId: 'loop10',
+        startTime: 0,
+        inPoint: 0,
+        outPoint: 10,
+        loopCross: { overlap: 5 }
+      },
+      { id: 'B', assetId: 'loop10', startTime: 5, inPoint: 0, outPoint: 3, speed: 2 }
+    ]
+    setBgm(start)
+    const c0 = st().project.clips[0].id
+    st().updateClipSpeed(c0, 0.1)
+    st().updateClipSpeed(c0, 1)
+    expect(
+      [...track('bgmT')]
+        .sort((a, b) => a.startTime - b.startTime)
+        .map((c) => [c.id, +c.startTime.toFixed(6), +c.inPoint.toFixed(6), +c.outPoint.toFixed(6)])
+    ).toEqual(start.map((c) => [c.id, c.startTime, c.inPoint, c.outPoint]))
+  })
+})

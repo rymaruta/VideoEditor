@@ -5268,7 +5268,9 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       const at = c.startTime + shift
       if (at >= end - 1e-6) continue
       const natural = at + lenOf(c)
-      if (natural > end + 1e-6 && c !== first && c.id.includes('~')) {
+      // 足した続き(曲の途中から始まる ~)は、終わりをまたがなくても、ほかのクリップが終わりまで届いていれば
+      // 落とす(速さの違うクリップの続きが元の終わりの手前で終わり、延ばして戻しても残っていた)
+      if ((natural > end + 1e-6 || c.inPoint > 1e-6) && c !== first && c.id.includes('~')) {
         // 曲の頭から始め直すループは手前のクリップで、続き(人が短くしたクリップの後ろに足したもの)は
         // ほかのクリップが終わりまで届いているかで決める
         const pred = c.inPoint <= 1e-6 ? predecessorOf(c) : undefined
@@ -5324,7 +5326,12 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       // (足すと、曲の頭が二重に鳴っていた)
       const existing = out.findIndex(
         (c, k) =>
-          k !== ti && !frozen.has(k) && c.inPoint <= 1e-6 && Math.abs(c.startTime - at) <= 1e-6
+          k !== ti &&
+          !frozen.has(k) &&
+          c.inPoint <= 1e-6 &&
+          // 重なりを短くした位置のほか、本来の重なりの位置にあるもの(最後のループを人が分けた)も探す
+          (Math.abs(c.startTime - at) <= 1e-6 ||
+            Math.abs(c.startTime - (tailEnd - loopOverlap)) <= 1e-6)
       )
       if (existing >= 0) {
         frozen.add(existing)

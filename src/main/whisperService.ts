@@ -193,11 +193,11 @@ function quietIn(audio: Float32Array, rangeStart: number): (start: number, end: 
     const from = Math.max(0, Math.floor((s * 16000) / FRAME))
     const to = Math.min(frames, Math.ceil((Math.max(e, s + 0.3) * 16000) / FRAME))
     if (to <= from) return true
-    // 静かな所(下から1割)は、その区切りの前後 5 秒で見積もる
-    const near = Float32Array.from(
-      rms.subarray(Math.max(0, from - span), Math.min(frames, to + span))
-    ).sort()
-    const floor = near.length > 0 ? near[Math.floor(near.length * 0.1)] : 0
+    // 静かな所(下から1割)は、その区切りの前後 5 秒で見積もる。録音の無い所(デジタルの無音)は除き、
+    // 半分以上が無音なら静かな所は 0(録音の頭・終わりの無音で 0 になり、部屋の雑音を声と取っていた)
+    const win = rms.subarray(Math.max(0, from - span), Math.min(frames, to + span))
+    const near = Float32Array.from(win.filter((v) => v > 1e-4)).sort()
+    const floor = near.length >= win.length * 0.5 ? near[Math.floor(near.length * 0.1)] : 0
     // 声とみなす大きさ。静かな所の 4 倍(12dB)。ただし -34dBFS(0.02)を超えれば声とみなす(全体が同じ
     // 大きさで鳴り続ける音では、静かな所の見積もりがその大きさになり、声をすべて無音と取っていた)
     const voiced = Math.max(0.002, Math.min(floor * 4, 0.02))

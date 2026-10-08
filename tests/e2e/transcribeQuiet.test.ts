@@ -96,4 +96,31 @@ describe.skipIf(!existsSync(ffmpegPath))('区間の文字起こしの決まり�
     fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [0, null] }] }
     expect((await transcribeRange(src, 0, 20)).map((x) => x.text)).toEqual([STOCK])
   }, 60_000)
+
+  it('録音の頭・終わりの無音が近くにあっても、部屋の雑音の上の決まり文句は捨てる', async () => {
+    const lead = join(work, 'lead2.wav')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'anoisesrc=c=white:a=0.0104:d=8:r=48000',
+      '-af',
+      'adelay=2000:all=1',
+      lead
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [3, null] }] }
+    expect(await transcribeRange(lead, 0, 10)).toEqual([])
+    const tail = join(work, 'tail2.wav')
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'anoisesrc=c=white:a=0.0104:d=8:r=48000',
+      '-af',
+      'apad=whole_dur=12',
+      tail
+    ])
+    fake = { text: STOCK, chunks: [{ text: STOCK, timestamp: [6, null] }] }
+    expect(await transcribeRange(tail, 0, 12)).toEqual([])
+  }, 60_000)
 })
