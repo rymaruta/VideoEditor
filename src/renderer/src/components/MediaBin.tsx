@@ -519,7 +519,8 @@ export function MediaBin(): React.JSX.Element {
   // ドロップされたものの取り込み。取り込み経路はダイアログと同じ importFiles に集約する
   // (プロキシ生成・履歴1件・失敗の集約が経路ごとにばらけないようにするため)。
   async function importDroppedFiles(files: File[]): Promise<void> {
-    if (importing || importingRef.current) {
+    // 画面の状態(importing)は描き直すまで古いことがあるので、印(ref)だけで見る
+    if (importingRef.current) {
       busyDroppedRef.current = true
       setError('取り込み中です。終わってから、もう一度入れてください')
       return

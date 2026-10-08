@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { relinkRefusal } from '@renderer/lib/relinkCheck'
+import { playableOnMain, relinkRefusal } from '@renderer/lib/relinkCheck'
 import { stillAssetFrom } from '@renderer/lib/stillAsset'
 import { useProjectStore } from '@renderer/store/projectStore'
 import type { Project } from '@shared/types'
@@ -46,6 +46,9 @@ describe('relinkRefusal — つなぎ直せない組み合わせ', () => {
     expect(relinkRefusal(mc, 'camB', '/x/b.png', { hasVideo: true })).toMatch('静止画')
     expect(relinkRefusal(mc, 'camB', '/x/b.wav', { hasVideo: false })).toMatch('映像')
     expect(relinkRefusal(mc, 'micM', '/x/m.wav', { hasVideo: false, hasAudio: true })).toBeNull()
+    // 同期したマイクは、今は音声トラックに無くても(仮編集を作り直すと戻る)、音の無いファイルにはつなぎ直せない
+    expect(relinkRefusal(mc, 'micM', '/x/m.png', { hasVideo: true })).toMatch('音')
+    expect(relinkRefusal(mc, 'micM', '/x/m.mp4', { hasVideo: true, hasAudio: false })).toMatch('音')
   })
   it('音声トラックで鳴らしている素材は、音の無いファイル・静止画にはつなぎ直せない', () => {
     const withAudio = {
@@ -130,5 +133,15 @@ describe('stillAssetFrom — 静止画の取り込み', () => {
       still: true,
       fps: 30
     })
+  })
+})
+
+describe('playableOnMain — 本編に置ける素材', () => {
+  it('映像があり静止画でない素材だけ', () => {
+    const a = { hasVideo: true } as never
+    expect(playableOnMain(a)).toBe(true)
+    expect(playableOnMain({ hasVideo: true, still: true } as never)).toBe(false)
+    expect(playableOnMain({ hasVideo: false } as never)).toBe(false)
+    expect(playableOnMain(undefined)).toBe(false)
   })
 })

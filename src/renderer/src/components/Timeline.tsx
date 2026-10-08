@@ -1,3 +1,4 @@
+import { playableOnMain } from '../lib/relinkCheck'
 import { angleAlternatives } from '@shared/roughCut/overrides'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
@@ -684,9 +685,19 @@ export function Timeline(): React.JSX.Element {
     if (project.multicam) {
       for (const alt of angleAlternatives(clip, project.multicam)) {
         if (alt.current) continue
+        // 静止画・映像の無い素材になったカメラへは替えられない(前の版で保存した企画にありうる)
+        const playable =
+          !alt.clips ||
+          alt.clips.every((p) => playableOnMain(project.assets.find((a) => a.id === p.assetId)))
         items.push({
-          label: `アングルを ${alt.name} に替える${alt.clips ? '' : '(この時間は録っていません)'}`,
-          disabled: !alt.clips,
+          label: `アングルを ${alt.name} に替える${
+            !alt.clips
+              ? '(この時間は録っていません)'
+              : playable
+                ? ''
+                : '(静止画・映像の無い素材です)'
+          }`,
+          disabled: !alt.clips || !playable,
           onSelect: () => useProjectStore.getState().switchClipAngle(clipId, alt.sourceId)
         })
       }

@@ -1,5 +1,5 @@
 import { isImagePath } from '@shared/mediaExtensions'
-import type { Project } from '@shared/types'
+import type { MediaAsset, Project } from '@shared/types'
 
 /**
  * つなぎ直せないなら、その理由(つなぎ直せるなら null)。
@@ -29,9 +29,15 @@ export function relinkRefusal(
   const onOverlay = project.videoOverlayTracks.some((t) =>
     t.clips.some((c) => c.assetId === assetId)
   )
-  const audible = (project.audioTracks ?? []).some((t) =>
-    t.clips.some((c) => c.assetId === assetId)
+  // 同期したマイク・音声の素材は、今は音声トラックに無くても、仮編集を作り直すと戻ってくる
+  const syncedSound = project.multicam?.files.some(
+    (f) =>
+      f.assetId === assetId &&
+      project.multicam?.sources.find((s) => s.id === f.sourceId)?.kind !== 'camera'
   )
+  const audible =
+    syncedSound ||
+    (project.audioTracks ?? []).some((t) => t.clips.some((c) => c.assetId === assetId))
   if (onMain && image)
     return '本編で使っている素材は、静止画につなぎ直せません。動画ファイルを選んでください'
   if ((onMain || onOverlay) && !probe.hasVideo && !image)
@@ -39,4 +45,9 @@ export function relinkRefusal(
   if (audible && (image || probe.hasAudio === false))
     return '音として使っている素材は、音の無いファイルにつなぎ直せません'
   return null
+}
+
+/** 本編に置ける素材か(映像があり、静止画でない)。アングルを替える先にも使う */
+export function playableOnMain(asset: MediaAsset | undefined): boolean {
+  return Boolean(asset && asset.hasVideo && !asset.still)
 }

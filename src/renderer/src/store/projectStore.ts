@@ -1,4 +1,4 @@
-import { relinkRefusal } from '../lib/relinkCheck'
+import { playableOnMain, relinkRefusal } from '../lib/relinkCheck'
 import { carriesVoice, silencedTrack, tracksReplaceAnchorAudio } from '@shared/roughCut/build'
 import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
 import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
@@ -3690,11 +3690,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       const found = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)?.clips
       if (!found || found.length === 0) return state
       // 映像の無い素材・静止画へは替えない(本編へは置けない。書き出しが失敗する)
-      const playable = (id: string): boolean => {
-        const a = state.project.assets.find((x) => x.id === id)
-        return Boolean(a && a.hasVideo && !a.still)
-      }
-      if (!found.every((p) => playable(p.assetId))) return state
+      if (!found.every((p) => playableOnMain(state.project.assets.find((x) => x.id === p.assetId))))
+        return state
       // 人が変えた速さ(素材の速さとの比)を保つ。素材の速さに戻すと長さが変わり、後ろが全部ずれる
       const currentRate = info.files.find((f) => f.assetId === clip.assetId)?.rate || 1
       const ratio = (clip.speed || 1) / currentRate
