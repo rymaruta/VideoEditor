@@ -5366,8 +5366,10 @@ function followMainEdit(
     c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)
   const overlapsAny = (c: AudioTrackClip, others: AudioTrackClip[]): boolean =>
     others.some((o) => o.startTime < endOfClip(c) - 1e-6 && endOfClip(o) > c.startTime + 1e-6)
+  // 速さだけを変えた編集では、収録の音と自動テロップは上の `followSpeedChanges` で伸び縮みさせてある
+  const speedOnly = Boolean(warped)
   const audioTracksSplit = next.audioTracks.flatMap((t): AudioTrack[] => {
-    if (!follows(t)) return [t]
+    if (!follows(t) || (speedOnly && t.multicamSourceId)) return [t]
     const untouched = isUntouchedAuto(t)
     const placedByHand = (c: AudioTrackClip): boolean =>
       Boolean(t.multicamSourceId) && !c.linkedClipId && !recordedAssets.has(c.assetId)
@@ -5457,7 +5459,7 @@ function followMainEdit(
   /** 本編から消えて落とした、人が直した自動テロップ(作り直しで戻したとき、直した内容で出す) */
   const droppedEdited: TextOverlay[] = []
   const textOverlays = next.textOverlays.flatMap((o) => {
-    if (o.linkedClipId || autoTelopKey(o) === null) return [o]
+    if (speedOnly || o.linkedClipId || autoTelopKey(o) === null) return [o]
     // 長さの無いテロップは、その時刻の点を写す(区間として写すと、どこにも写らず消える)
     const point = o.endTime - o.startTime <= 1e-6
     const pieces = mapTimelineRange(segs, o.startTime, point ? o.startTime + 1e-3 : o.endTime)
@@ -5853,10 +5855,99 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const track = { ...t, clips }
     return untouched ? withAutoSignature(track) : track
   }
+  // 収録の音(ピンマイク・周りの音)は、本編の速さに合わせて区間ごとに伸び縮みさせる(声も一緒に速く・
+  // 遅くなる)。外すと、速さを変えたクリップの所だけ声が無くなっていた。人が置いた音(ナレーションなど)は
+  // SE と同じく頭だけ動かし、動いた声と重なるなら「(手で置いた音)」のトラックへ移す
+  const recordedAssets = new Set((next.multicam?.files ?? []).map((f) => f.assetId))
+  const bounds = segs.flatMap((g) => [g.from, g.to])
+  const scaleOf = (t: number): number =>
+    segs.find((g) => t >= g.from - 1e-9 && t < g.to - 1e-9)?.scale ?? 1
+  const scaleClip = (c: AudioTrackClip): AudioTrackClip[] => {
+    const sp = c.speed || 1
+    const s = c.startTime
+    const e = s + (c.outPoint - c.inPoint) / sp
+    if (!(e > s)) return [c]
+    const cuts = [...new Set([s, ...bounds.filter((t) => t > s + 1e-9 && t < e - 1e-9), e])].sort(
+      (a, b) => a - b
+    )
+    const pieces = cuts.slice(0, -1).map((a, k) => {
+      const b = cuts[k + 1]
+      const speed = sp / scaleOf(a)
+      return {
+        startTime: warp(a),
+        inPoint: c.inPoint + (a - s) * sp,
+        outPoint: c.inPoint + (b - s) * sp,
+        speed
+      }
+    })
+    if (
+      pieces.length === 1 &&
+      Math.abs(pieces[0].startTime - s) <= 1e-9 &&
+      Math.abs(pieces[0].speed - sp) <= 1e-9
+    )
+      return [c]
+    return pieces.map((p, k) => ({
+      ...c,
+      id: k === 0 ? c.id : uuid(),
+      startTime: p.startTime,
+      inPoint: p.inPoint,
+      outPoint: p.outPoint,
+      speed: Math.abs(p.speed - 1) <= 1e-9 ? undefined : p.speed,
+      fadeIn: k === 0 ? c.fadeIn : undefined,
+      fadeOut: k === pieces.length - 1 ? c.fadeOut : undefined
+    }))
+  }
+  const audioEnd = (c: AudioTrackClip): number =>
+    c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)
+  const recordedTracks = next.audioTracks.flatMap((t): AudioTrack[] => {
+    if (!t.multicamSourceId) return [t]
+    const byHand = (c: AudioTrackClip): boolean => !c.linkedClipId && !recordedAssets.has(c.assetId)
+    let clips = t.clips.flatMap((c) =>
+      c.linkedClipId ? [c] : byHand(c) ? [moveClip(c)] : scaleClip(c)
+    )
+    if (sameItems(clips, t.clips)) return [t]
+    const hand = clips.filter(byHand)
+    const voices = clips.filter((c) => !byHand(c))
+    const overlaps = hand.some((h) =>
+      voices.some((v) => v.startTime < audioEnd(h) - 1e-6 && audioEnd(v) > h.startTime + 1e-6)
+    )
+    if (!overlaps) return [{ ...t, clips }]
+    clips = voices
+    return [
+      { ...t, clips },
+      {
+        id: uuid(),
+        name: `${t.name}(手で置いた音)`,
+        muted: t.muted,
+        volume: t.volume,
+        duckingEnabled: false,
+        ...(t.voice ? { voice: true } : {}),
+        clips: hand
+      }
+    ]
+  })
+  // 自動の発言・演出テロップも、同じだけ伸び縮みさせる(声と合ったまま)
+  const textOverlays = next.textOverlays.map((o) => {
+    if (o.linkedClipId || autoTelopKey(o) === null) return o
+    const startTime = warp(o.startTime)
+    const endTime = Math.max(startTime, warp(o.endTime))
+    if (Math.abs(startTime - o.startTime) <= 1e-9 && Math.abs(endTime - o.endTime) <= 1e-9) return o
+    return {
+      ...o,
+      startTime,
+      endTime,
+      words: o.words?.map((w) => ({
+        ...w,
+        start: warp(w.start),
+        end: Math.max(warp(w.start), warp(w.end))
+      }))
+    }
+  })
   return {
     ...next,
-    audioTracks: next.audioTracks.map(moveTrack),
-    videoOverlayTracks: next.videoOverlayTracks.map(moveTrack)
+    audioTracks: mergeHandTracks(recordedTracks, next.audioTracks).map(moveTrack),
+    videoOverlayTracks: next.videoOverlayTracks.map(moveTrack),
+    textOverlays
   }
 }
 

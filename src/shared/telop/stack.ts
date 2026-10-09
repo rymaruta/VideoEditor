@@ -178,3 +178,34 @@ export function hudStackBase<
   const managed = stackedBottomTelops(telops, canvasH, { baseCenter: base })
   return telops.some((t, i) => managed[i] && t.style.customPosition?.y === base) ? base : undefined
 }
+
+/** 縦型ショートで、下の発言テロップの下端をここ(画面の高さに対する比)より上に置く */
+export const SHORTS_TELOP_BOTTOM = 0.82
+
+/**
+ * 縦型ショートの下の発言テロップを、YouTube Shorts の下部の帯(チャンネル名・説明文。高さの 84〜94%)
+ * より上へ上げる。既定の位置(下端が 92%)のままだと帯に完全に隠れ、自動で作ったショートは確認の
+ * 画面を通らずにそのまま書き出されるので、隠れたまま公開されていた。
+ * 既定の位置のものは下端を `limit` に揃え、同時に出ていて上に積んであるもの(画面の下半分に置いた
+ * 自由配置)は同じだけ上へずらす(積んだ間隔はそのまま)
+ */
+export function liftAboveShortsUi<T extends Pick<TextOverlay, 'text' | 'style'>>(
+  telops: readonly T[],
+  canvasH: number,
+  options: { canvasW?: number; limit?: number } = {}
+): T[] {
+  const canvasW = options.canvasW ?? canvasWidthFor(canvasH)
+  const limit = options.limit ?? SHORTS_TELOP_BOTTOM
+  const lift = 1 - TEXT_MARGIN_V_RATIO - limit
+  if (!(lift > 0)) return [...telops]
+  return telops.map((t) => {
+    if (t.style.position !== 'bottom') return t
+    const pos = t.style.customPosition
+    if (!pos) {
+      const h = blockHeightRatio(t, canvasH, canvasW)
+      return { ...t, style: { ...t.style, customPosition: { x: 0.5, y: limit - h / 2 } } }
+    }
+    if (pos.y <= 0.5) return t
+    return { ...t, style: { ...t.style, customPosition: { ...pos, y: pos.y - lift } } }
+  })
+}

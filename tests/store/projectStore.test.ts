@@ -1230,10 +1230,16 @@ describe('本編を直したときの追従 — 速さ・差し込み・直し�
     st().updateClipSpeed(st().project.clips[0].id, 2)
     // 1本目は 5 秒になる。2本目の声(素材の 20 秒〜)とテロップは 5 秒前へ
     expect(micClips().filter((c) => c[1] >= 20)).toEqual([[5, 20, 30]])
-    const clips = micClips().sort((a, b) => a[0] - b[0])
+    // 1本目の声は消さずに、同じ速さ(2倍)で鳴らす
+    const mic = st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    const first = mic.clips.find((c) => c.inPoint === 0)
+    expect(first?.speed).toBe(2)
+    const clips = [...mic.clips].sort((a, b) => a.startTime - b.startTime)
     for (let i = 1; i < clips.length; i++) {
       const prev = clips[i - 1]
-      expect(prev[0] + (prev[2] - prev[1])).toBeLessThanOrEqual(clips[i][0] + 1e-9)
+      expect(
+        prev.startTime + (prev.outPoint - prev.inPoint) / (prev.speed || 1)
+      ).toBeLessThanOrEqual(clips[i].startTime + 1e-9)
     }
     expect(st().project.textOverlays.find((o) => o.utteranceId === 'u2')?.startTime).toBe(7)
   })

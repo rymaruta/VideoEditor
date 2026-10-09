@@ -2079,3 +2079,57 @@ describe('第47回: 古い企画の「(手で置いた画)」の並び', () => {
     expect(names[0]).toBe('顔')
   })
 })
+
+describe('速さを変えた区間の声は、同じ速さで鳴らして残す', () => {
+  const voice = (): { start: number; end: number; src: [number, number] }[] =>
+    st()
+      .project.audioTracks.filter((t) => t.multicamSourceId === 'M')
+      .flatMap((t) => t.clips)
+      .filter((c) => c.assetId === 'micM')
+      .map((c) => ({
+        start: +c.startTime.toFixed(6),
+        end: +(c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)).toFixed(6),
+        src: [+c.inPoint.toFixed(6), +c.outPoint.toFixed(6)] as [number, number]
+      }))
+      .sort((a, b) => a.start - b.start)
+
+  it('1.5 倍にすると、その区間の声は 1.5 倍で鳴り、本編の長さと合う', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    st().updateClipSpeed(st().project.clips[1].id, 1.5)
+    const v = voice()
+    const mid = v.find((x) => x.src[0] === 20)!
+    expect(mid.start).toBeCloseTo(10, 6)
+    expect(mid.end).toBeCloseTo(10 + 10 / 1.5, 6)
+    // 隙間なく続く
+    expect(v[v.length - 1].end).toBeCloseTo(10 + 10 / 1.5 + 10, 6)
+  })
+
+  it('速さを戻すと、元の声の並び(位置・素材の範囲)に戻る', () => {
+    setup([
+      [0, 10],
+      [20, 30],
+      [40, 50]
+    ])
+    const before = voice()
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 1.5)
+    st().updateClipSpeed(id, 1)
+    const after = voice()
+    // 切れ端に分かれていても、鳴る所と素材の範囲は同じ
+    const cover = (xs: typeof before): string =>
+      xs.map((x) => `${x.start}-${x.end}:${x.src[0]}-${x.src[1]}`).join(',')
+    const merge = (xs: typeof before): typeof before =>
+      xs.reduce<typeof before>((acc, x) => {
+        const last = acc[acc.length - 1]
+        if (last && Math.abs(last.end - x.start) < 1e-6 && Math.abs(last.src[1] - x.src[0]) < 1e-6)
+          acc[acc.length - 1] = { start: last.start, end: x.end, src: [last.src[0], x.src[1]] }
+        else acc.push({ ...x })
+        return acc
+      }, [])
+    expect(cover(merge(after))).toBe(cover(merge(before)))
+  })
+})

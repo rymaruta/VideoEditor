@@ -1,3 +1,5 @@
+import { liftAboveShortsUi } from '@shared/telop/stack'
+import { textCanvasSize } from '@shared/resolution'
 import { v4 as uuid } from 'uuid'
 import type { Project, TextStyle } from '@shared/types'
 import type { MulticamInfo } from '@shared/sync/multicam'
@@ -236,11 +238,15 @@ function shortProjectFromPlan(
       }
     }),
     // 本編で人が直した文字・消したテロップは、ショートでも同じに
-    textOverlays: mergeManualTelops(
-      project.textOverlays,
-      plan.telops,
-      new Set(project.dismissedTelops ?? []),
-      project.editedTelops
+    // 下の発言テロップは、Shorts の下部の帯(チャンネル名・説明文)に隠れない高さへ上げる
+    textOverlays: liftAboveShortsUi(
+      mergeManualTelops(
+        project.textOverlays,
+        plan.telops,
+        new Set(project.dismissedTelops ?? []),
+        project.editedTelops
+      ),
+      textCanvasSize('9:16').h
     ).map((t) => ({ ...t, id: uuid() })),
     transcript: project.transcript,
     multicam: info,

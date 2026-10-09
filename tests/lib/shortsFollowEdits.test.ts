@@ -106,6 +106,10 @@ describe('ショートは本編の人の修正に従う', () => {
     )
     const texts = short.textOverlays.map((t) => t.text)
     expect(texts).toContain('誤字直し')
+    // 下の発言テロップは Shorts の下部の帯(84% より下)に隠れない高さ
+    const bottoms = short.textOverlays.filter((t) => t.style.position === 'bottom')
+    expect(bottoms.length).toBeGreaterThan(0)
+    for (const t of bottoms) expect(t.style.customPosition?.y ?? 1).toBeLessThan(0.82)
     expect(texts).not.toContain('ごしきじ')
     expect(texts).not.toContain('すごい')
     expect(texts).not.toContain('じゅうしょはとうきょう')

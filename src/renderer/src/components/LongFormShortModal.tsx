@@ -1,3 +1,5 @@
+import { liftAboveShortsUi } from '@shared/telop/stack'
+import { textCanvasSize } from '@shared/resolution'
 import { playableOnMain } from '../lib/relinkCheck'
 import { useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
@@ -308,7 +310,12 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
         }
       })
     }
-    applyShortPlan(picks, overlays)
+    // 縦型の企画なら、下の発言テロップを Shorts の下部の帯(チャンネル名・説明文)に隠れない高さへ上げる
+    const vertical = useProjectStore.getState().project.aspectRatio === '9:16'
+    applyShortPlan(
+      picks,
+      vertical ? liftAboveShortsUi(overlays, textCanvasSize('9:16').h) : overlays
+    )
     onClose()
   }
 
