@@ -40,7 +40,8 @@ export function placedClips(project: Project): PlacedClipRef[] {
       assetId: c.assetId,
       startTime: c.startTime,
       inPoint: c.inPoint,
-      outPoint: c.outPoint
+      outPoint: c.outPoint,
+      speed: c.speed
     }))
   )
   // 声を拾った素材(マイク)のクリップを先に見る

@@ -7,6 +7,7 @@ import { textCanvasSize } from '@shared/resolution'
 import type { LoudnessTarget } from '@shared/loudness'
 import { exportToTimelineTime } from '@shared/exportTimeline'
 import { computeMainTrackLayout } from '@shared/mainTrackLayout'
+import { overlayClipEnd } from '@shared/overlayClip'
 import { projectFrameRate } from '@shared/frameRate'
 import type { Project } from '@shared/types'
 import { onProjectSwitch, useProjectStore } from './projectStore'
@@ -82,7 +83,7 @@ export function withoutStillOverlayFreezes(issues: QcIssue[], project: Project):
     .filter((t) => !t.hidden && t.position === 'full')
     .flatMap((t) => t.clips)
     .filter((c) => stills.has(c.assetId))
-    .map((c) => [c.startTime, c.startTime + (c.outPoint - c.inPoint)] as const)
+    .map((c) => [c.startTime, overlayClipEnd(c)] as const)
   if (spans.length === 0) return issues
   return issues.filter((i) => {
     if (i.kind !== 'freeze') return true

@@ -1,4 +1,5 @@
 import type { VideoOverlayClip } from '@shared/types'
+import { overlayClipDuration } from '@shared/overlayClip'
 
 /** PiPクリップとして残す最小の長さ(秒)。これ未満だとレーン上で掴めない */
 export const MIN_PIP_DURATION = 0.5
@@ -22,7 +23,8 @@ export function activeVideoOverlayClips(
   time: number
 ): VideoOverlayClip[] {
   return clips.filter((c) => {
-    const duration = c.outPoint - c.inPoint
+    // タイムライン上の長さ(速くしたワイプは素材の秒数より短く映る)
+    const duration = overlayClipDuration(c)
     // 尺0以下は書き出しも `dur <= 0` で読み飛ばすので、画面にも出さない。
     if (!(duration > 0)) return false
     return time >= c.startTime && time < c.startTime + duration

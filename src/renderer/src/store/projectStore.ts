@@ -1,6 +1,7 @@
 import { playableOnMain, relinkRefusal } from '../lib/relinkCheck'
 import { carriesVoice, silencedTrack, tracksReplaceAnchorAudio } from '@shared/roughCut/build'
 import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
+import { overlayClipDuration, overlayClipEnd } from '@shared/overlayClip'
 import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
 import { isImagePath, STILL_DURATION_SEC } from '@shared/mediaExtensions'
 import type { AudioEventWindow } from '@shared/events/audioEvents'
@@ -557,12 +558,16 @@ function normalizeVideoOverlayClip(
   durationOf: (id: string) => number
 ): VideoOverlayClip | null {
   if (typeof raw.assetId !== 'string' || raw.assetId === '') return null
+  const { speed: rawSpeed, ...rest } = raw as unknown as VideoOverlayClip
+  const speed = asFinite(rawSpeed, 1)
   return {
-    ...(raw as unknown as VideoOverlayClip),
+    ...rest,
     id: asNonEmptyString(raw.id, uuid()),
     assetId: raw.assetId,
     startTime: asNonNegative(raw.startTime, 0),
-    ...normalizeRange(raw, durationOf(raw.assetId))
+    ...normalizeRange(raw, durationOf(raw.assetId)),
+    // 速さは等倍なら持たない(前の版で保存した企画と同じ形のまま。壊れた値は等倍に戻す)
+    ...(speed > 0 && Math.abs(speed - 1) > 1e-9 ? { speed } : {})
   }
 }
 
@@ -1369,7 +1374,7 @@ function audioTrackEnd(track: AudioTrack): number {
 }
 
 function videoOverlayTrackEnd(track: Project['videoOverlayTracks'][number]): number {
-  return track.clips.reduce((max, c) => Math.max(max, c.startTime + (c.outPoint - c.inPoint)), 0)
+  return track.clips.reduce((max, c) => Math.max(max, overlayClipEnd(c)), 0)
 }
 
 // Detached audio that is still linked belongs to its clip, so it goes with it —
@@ -4553,9 +4558,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           t.id === trackId
             ? {
                 ...t,
-                clips: t.clips.map((c) =>
-                  c.id === clipId ? { ...c, assetId, inPoint: 0, outPoint } : c
-                )
+                clips: t.clips.map((c) => {
+                  if (c.id !== clipId) return c
+                  // 別の素材に差し替えたら等倍に戻す(`outPoint` は等倍で本編に収まるよう選んだ長さ。
+                  // 速さを残すと、差し替えた素材が選んだ長さより短く(速く)映る)
+                  const { speed: _speed, ...rest } = c
+                  void _speed
+                  return { ...rest, assetId, inPoint: 0, outPoint }
+                })
               }
             : t
         )
@@ -4584,9 +4594,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           ...t,
           clips: t.clips.flatMap((c) => {
             if (c.id !== clipId) return [c]
-            const dur = c.outPoint - c.inPoint
+            const dur = overlayClipDuration(c)
             if (absoluteTime <= c.startTime || absoluteTime >= c.startTime + dur) return [c]
-            const splitLocal = c.inPoint + (absoluteTime - c.startTime)
+            // 押した位置はタイムラインの秒なので、速さを掛けて素材の秒にする(本編・音声と同じ規則)
+            const splitLocal = c.inPoint + toSourceSeconds(absoluteTime - c.startTime, c.speed)
             // 最短の長さに満たない断片は作らない(後で縮めると最短まで戻され、次の断片に重なる)
             if (
               splitLocal - c.inPoint < MIN_CLIP_SOURCE_DURATION ||
@@ -5509,22 +5520,39 @@ function followMainEdit(
     // 下では消え、戻しても戻らなかった)。動いたカメラの絵と重なるなら「(手で置いた画)」のトラックへ移す
     const placedByHand = (c: VideoOverlayClip): boolean =>
       Boolean(t.multicamSourceId) && !recordedAssets.has(c.assetId)
-    // 伸ばして新しく見えた所: 収録素材のカメラ(ゲーム実況の顔カメラのワイプ)なら、そのカメラの絵を足す
-    const added =
-      t.multicamSourceId && gaps.length > 0
-        ? gaps.flatMap((g) =>
-            sourcePieces(info, t.multicamSourceId!, g).map((p) => ({
-              id: uuid(),
-              assetId: p.assetId,
-              startTime: p.startTime,
-              inPoint: p.inPoint,
-              outPoint: p.outPoint
-            }))
+    // 速さだけを変えた編集では、カメラの絵は上の `followSpeedChanges` で伸び縮みさせてあるので動かさない
+    // (写すと、速くしたクリップの下は仮の時刻なので対応が取れず、そこのワイプが消えていた)
+    const moved =
+      speedOnly && t.multicamSourceId
+        ? t.clips
+        : t.clips.flatMap((c) => (placedByHand(c) ? [c] : remapClip(c)))
+    // 伸ばして新しく見えた所: 収録素材のカメラ(ゲーム実況の顔カメラのワイプ)なら、そのカメラの絵を足す。
+    // 声と同じ区間(速さを変えたクリップを伸ばした所も、同じ速さで)に足し、もうカメラの絵がある所には
+    // 足さない(足すと、同じトラックで顔が2枚重なる)
+    const shown = coveredIndex(
+      moved
+        .filter((c) => recordedAssets.has(c.assetId))
+        .map((c) => ({ start: c.startTime, end: overlayClipEnd(c) }))
+    )
+    const added: VideoOverlayClip[] =
+      t.multicamSourceId && !speedOnly
+        ? voiceGaps.flatMap(({ span, scale }) =>
+            sourcePieces(info, t.multicamSourceId!, span, scale).flatMap((p) => {
+              // 素材の時計のずれ(`p.speed` の中の素材の速さ)は、仮編集のワイプと同じく持たせない
+              // (区間ごとの頭で合わせ直す)。持たせるのは本編の速さの分だけ
+              const len = (p.outPoint - p.inPoint) / scale
+              return uncoveredBy(shown, p.startTime, p.startTime + len).map(([a, b]) => ({
+                id: uuid(),
+                assetId: p.assetId,
+                startTime: a,
+                inPoint: p.inPoint + (a - p.startTime) * scale,
+                outPoint: p.inPoint + (b - p.startTime) * scale,
+                ...(Math.abs(scale - 1) > 1e-9 ? { speed: scale } : {})
+              }))
+            })
           )
         : []
-    let clips = [...t.clips.flatMap((c) => (placedByHand(c) ? [c] : remapClip(c))), ...added].sort(
-      (a, b) => a.startTime - b.startTime
-    )
+    let clips = [...moved, ...added].sort((a, b) => a.startTime - b.startTime)
     if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
       return [t]
     }
@@ -5532,9 +5560,7 @@ function followMainEdit(
     const cams = clips.filter((c) => !placedByHand(c))
     const overlapsCam = (c: VideoOverlayClip): boolean =>
       cams.some(
-        (o) =>
-          o.startTime < c.startTime + (c.outPoint - c.inPoint) - 1e-6 &&
-          o.startTime + (o.outPoint - o.inPoint) > c.startTime + 1e-6
+        (o) => o.startTime < overlayClipEnd(c) - 1e-6 && overlayClipEnd(o) > c.startTime + 1e-6
       )
     const moveOut = byHand.some(overlapsCam)
     if (moveOut) clips = cams
@@ -5951,11 +5977,17 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
   const bounds = segs.flatMap((g) => [g.from, g.to])
   const scaleOf = (t: number): number =>
     segs.find((g) => t >= g.from - 1e-9 && t < g.to - 1e-9)?.scale ?? 1
-  const scaleClip = (c: AudioTrackClip): AudioTrackClip[] => {
+  /** 区間ごとに切って伸び縮みさせた切れ端(動かないなら null)。声と顔カメラのワイプで同じ式を使う */
+  const scalePieces = (c: {
+    startTime: number
+    inPoint: number
+    outPoint: number
+    speed?: number
+  }): { startTime: number; inPoint: number; outPoint: number; speed: number }[] | null => {
     const sp = c.speed || 1
     const s = c.startTime
     const e = s + (c.outPoint - c.inPoint) / sp
-    if (!(e > s)) return [c]
+    if (!(e > s)) return null
     // 端とほぼ同じ所の境目では切らない(浮動小数の誤差で 1e-7 秒ほどの切れ端ができ、隣の区間の倍率で
     // 伸ばされて次の声と重なっていた)
     const cuts = [...new Set([s, ...bounds.filter((t) => t > s + 1e-6 && t < e - 1e-6), e])].sort(
@@ -5977,7 +6009,12 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       Math.abs(pieces[0].startTime - s) <= 1e-9 &&
       Math.abs(pieces[0].speed - sp) <= 1e-9
     )
-      return [c]
+      return null
+    return pieces
+  }
+  const scaleClip = (c: AudioTrackClip): AudioTrackClip[] => {
+    const pieces = scalePieces(c)
+    if (!pieces) return [c]
     return pieces.map((p, k) => ({
       ...c,
       id: k === 0 ? c.id : uuid(),
@@ -6033,10 +6070,44 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
       }))
     }
   })
+  // 収録のカメラのワイプ(ゲーム実況の顔カメラ)も、声と同じく区間ごとに伸び縮みさせる(速くした所でも
+  // 顔が声と同じ速さで映る)。外すと、速くした区間のワイプが下の追従で落ち、書き出しは声だけで顔が消えていた。
+  // 人が置いた画(ロゴ・画像)は声のときと同じく動かさず、伸び縮みしたカメラの絵と重なるなら
+  // 「(手で置いた画)」のトラックへ移す
+  const scaleOverlayClip = (c: VideoOverlayClip): VideoOverlayClip[] => {
+    const pieces = scalePieces(c)
+    if (!pieces) return [c]
+    const { speed: _speed, ...rest } = c
+    void _speed
+    return pieces.map((p, k) => ({
+      ...rest,
+      id: k === 0 ? c.id : uuid(),
+      startTime: p.startTime,
+      inPoint: p.inPoint,
+      outPoint: p.outPoint,
+      ...(Math.abs(p.speed - 1) <= 1e-9 ? {} : { speed: p.speed })
+    }))
+  }
+  const cameraTracks = next.videoOverlayTracks.flatMap((t): VideoOverlayTrack[] => {
+    if (!t.multicamSourceId) return [t]
+    const byHand = (c: VideoOverlayClip): boolean => !recordedAssets.has(c.assetId)
+    let clips = t.clips.flatMap((c) => (byHand(c) ? [c] : scaleOverlayClip(c)))
+    if (sameItems(clips, t.clips)) return [t]
+    const hand = clips.filter(byHand)
+    const cams = clips.filter((c) => !byHand(c))
+    const overlaps = hand.some((h) =>
+      cams.some(
+        (v) => v.startTime < overlayClipEnd(h) - 1e-6 && overlayClipEnd(v) > h.startTime + 1e-6
+      )
+    )
+    if (!overlaps) return [{ ...t, clips }]
+    clips = cams
+    return [{ ...t, clips }, handOverlayTrack(t, hand)]
+  })
   return {
     ...next,
     audioTracks: mergeHandTracks(recordedTracks, next.audioTracks).map(moveTrack),
-    videoOverlayTracks: next.videoOverlayTracks.map(moveTrack),
+    videoOverlayTracks: mergeHandTracks(cameraTracks, next.videoOverlayTracks).map(moveTrack),
     textOverlays
   }
 }

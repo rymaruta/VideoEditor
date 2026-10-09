@@ -53,6 +53,7 @@ import {
 import { clipColorOf } from '../lib/clipColors'
 import { autoScrollLeft } from '../lib/timelineScroll'
 import { videoOverlayClipOutPoint } from '../lib/videoOverlay'
+import { overlayClipDuration, overlayClipEnd, overlayClipSpeed } from '@shared/overlayClip'
 import {
   BPM_MAX,
   BPM_MIN,
@@ -807,7 +808,7 @@ export function Timeline(): React.JSX.Element {
     })
     project.videoOverlayTracks.forEach((track) => {
       track.clips.forEach((c) => {
-        times.push(c.startTime, c.startTime + (c.outPoint - c.inPoint))
+        times.push(c.startTime, overlayClipEnd(c))
       })
     })
     project.textOverlays.forEach((o) => {
@@ -2621,11 +2622,7 @@ export function Timeline(): React.JSX.Element {
               )}
               {track.clips.map((clip) => {
                 if (
-                  !inWindow(
-                    visibleWindow,
-                    clip.startTime,
-                    clip.startTime + (clip.outPoint - clip.inPoint)
-                  ) &&
+                  !inWindow(visibleWindow, clip.startTime, overlayClipEnd(clip)) &&
                   !pinned.has(clip.id)
                 ) {
                   return null
@@ -2636,7 +2633,8 @@ export function Timeline(): React.JSX.Element {
                   mediaTrimDrag?.kind === 'videoOverlay' && mediaTrimDrag.clipId === clip.id
                 const inPoint = isTrimmingThis ? mediaTrimDrag.liveInPoint : clip.inPoint
                 const outPoint = isTrimmingThis ? mediaTrimDrag.liveOutPoint : clip.outPoint
-                const dur = outPoint - inPoint
+                // 幅はタイムラインの秒(速くしたワイプは素材の秒数より短い。音声クリップと同じ)
+                const dur = overlayClipDuration({ inPoint, outPoint, speed: clip.speed })
                 const clipWidth = dur * pixelsPerSecond
                 const isDraggingThis = videoOverlayDrag?.clipId === clip.id
                 const displayStart = isTrimmingThis
@@ -2703,7 +2701,8 @@ export function Timeline(): React.JSX.Element {
                           clipId: clip.id,
                           edge: 'left',
                           startX: e.clientX,
-                          speed: 1,
+                          // マウスの移動量(タイムラインの秒)を素材の秒へ直す倍率(音声クリップと同じ)
+                          speed: overlayClipSpeed(clip),
                           assetDuration: asset.duration,
                           originalStartTime: clip.startTime,
                           originalInPoint: clip.inPoint,
@@ -2726,7 +2725,7 @@ export function Timeline(): React.JSX.Element {
                           clipId: clip.id,
                           edge: 'right',
                           startX: e.clientX,
-                          speed: 1,
+                          speed: overlayClipSpeed(clip),
                           assetDuration: asset.duration,
                           originalStartTime: clip.startTime,
                           originalInPoint: clip.inPoint,
@@ -3319,10 +3318,7 @@ export function Timeline(): React.JSX.Element {
           <SplitAtPlayheadButton
             title={`分割 (${keymap.split.display})`}
             start={selectedVideoOverlayClipData.startTime}
-            end={
-              selectedVideoOverlayClipData.startTime +
-              (selectedVideoOverlayClipData.outPoint - selectedVideoOverlayClipData.inPoint)
-            }
+            end={overlayClipEnd(selectedVideoOverlayClipData)}
             onSplit={(time) =>
               splitVideoOverlayClipAtTime(
                 selectedVideoOverlayClip.trackId,

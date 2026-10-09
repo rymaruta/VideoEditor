@@ -2,6 +2,7 @@ import type { Project } from '../types'
 import { createExportTimeMap } from '../exportTimeline'
 import { projectRate, rateValue } from '../frameRate'
 import { computeMainTrackLayout } from '../mainTrackLayout'
+import { overlayClipDuration, overlayClipSpeed } from '../overlayClip'
 import { PIP_MARGIN_RATIO } from '../pipLayout'
 import { targetResolution } from '../resolution'
 import { assignLanes, assignStackedLanes } from './lanes'
@@ -141,7 +142,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
     const items: MediaItem[] = []
     for (const oc of track.clips) {
       if (!assetById.has(oc.assetId)) continue
-      const dur = oc.outPoint - oc.inPoint
+      // タイムライン上の長さ(速くしたワイプは素材の秒数 ÷ 速さ)。標準の書き出し・プレビューと同じ式
+      const dur = overlayClipDuration(oc)
       if (!(dur > 0)) continue
       const range = toFrameRange(oc.startTime, oc.startTime + dur)
       if (!range) continue
@@ -152,7 +154,9 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         assetId: oc.assetId,
         ...range,
         sourceIn: oc.inPoint,
-        speed: 1,
+        // 本編を速くした所の顔カメラのワイプは、マイクの声と同じ速さで流す
+        // (静止画は同じ画を流し続けるだけなので等倍。標準の書き出しと同じ)
+        speed: assetById.get(oc.assetId)?.still ? 1 : overlayClipSpeed(oc),
         origin: 'manual',
         placement:
           track.position === 'full'
@@ -186,7 +190,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
           sourceIn: it.sourceIn,
           // 出点の先の音は読まない(フレームに丸めて伸びたぶんは無音。本編・音声トラックと同じ)
           sourceOut: pipSourceOut.get(it.id),
-          speed: 1,
+          // 絵と同じ速さで鳴らす(等倍のままだと、速くしたワイプの音だけ間延びして絵から遅れる)
+          speed: it.speed,
           origin: 'manual',
           linkedItemId: it.id
         }))

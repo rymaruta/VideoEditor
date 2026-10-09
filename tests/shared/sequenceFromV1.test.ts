@@ -161,6 +161,37 @@ describe('projectV1ToV2 — v1 を v2 へ、書き出しと同じ位置で写す
     expect(audio?.sourceOut).toBe(4.5)
   })
 
+  it('速くしたワイプは、タイムラインの長さ(素材の秒数 ÷ 速さ)で置き、絵も音も同じ速さで流す', () => {
+    const p = projectV1ToV2(
+      emptyProject({
+        clips: crossfadeClips(),
+        videoOverlayTracks: [
+          {
+            id: 'face',
+            name: '顔',
+            hidden: false,
+            position: 'bottom-right',
+            scale: 0.26,
+            // 素材 2〜8 秒(6秒)を2倍で → タイムライン 1〜4 秒(書き出しも同じ。繋ぎより前)
+            clips: [{ id: 'f1', assetId: 'a', startTime: 1, inPoint: 2, outPoint: 8, speed: 2 }]
+          }
+        ]
+      })
+    )
+    const item = p.sequence.videoTracks
+      .flatMap((t) => t.items)
+      .find((it) => it.id === 'f1') as MediaItem
+    expect(item).toMatchObject({ startFrame: 30, durationFrames: 90, sourceIn: 2, speed: 2 })
+    const audio = p.sequence.audioTracks.flatMap((t) => t.items).find((it) => it.id === 'f1:audio')
+    expect(audio).toMatchObject({
+      startFrame: 30,
+      durationFrames: 90,
+      sourceIn: 2,
+      sourceOut: 8,
+      speed: 2
+    })
+  })
+
   it('PiP は本編の尺で頭打ち。v1 の同じトラックで重なっていれば段を分ける', () => {
     const p = projectV1ToV2(
       emptyProject({

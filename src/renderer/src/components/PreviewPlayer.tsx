@@ -43,6 +43,7 @@ import {
   totalExportDuration,
   exportTransitionSeconds,
   crossfadeSourceAt,
+  toSourceSeconds,
   TimedClip
 } from '../lib/timelineMath'
 import {
@@ -74,6 +75,7 @@ import type {
 } from '@shared/types'
 import { previewSourceUrl } from '../lib/previewSource'
 import { activeVideoOverlayClips } from '../lib/videoOverlay'
+import { overlayClipSpeed } from '@shared/overlayClip'
 import { toPlaybackRate } from '../lib/playbackRate'
 import {
   PREVIEW_BLEND_FOLLOW_TOLERANCE_SEC,
@@ -174,7 +176,10 @@ function VideoOverlayLayer({
   seekToken: number
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null)
-  const localTime = clip.inPoint + (playheadTime - clip.startTime)
+  // 速くしたワイプ(本編を速くした所の顔カメラ)は、タイムラインの1秒で素材を `speed` 秒進める
+  // (書き出しの `setpts` と同じ。等倍で読むと、速くした区間の後ろほど顔が声より遅れて映る)
+  const speed = overlayClipSpeed(clip)
+  const localTime = clip.inPoint + toSourceSeconds(playheadTime - clip.startTime, speed)
 
   // 連続再生中の追従はゆるく(毎フレーム書き込まない)。理由は previewSync。
   useEffect(() => {
@@ -190,6 +195,14 @@ function VideoOverlayLayer({
     // 走ってしまう。入れ直すのは「シークした」という合図が来たときだけ。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekToken])
+
+  // 速さは本編・ぼかし背景と同じく、それ自身の依存を持つ effect で入れ直す。等倍のまま回すと、
+  // 上の 0.3秒 の合わせ直しだけで引きずられ、**再生中ずっとシークし続ける**(理由は PreviewBlurBackdrop)。
+  // **`src` も依存に入れる**(差し替えると `playbackRate` は既定へ戻される。理由は previewSync)
+  const src = asset.still ? '' : previewSourceUrl(asset)
+  useEffect(() => {
+    applyPreviewRate(ref.current, speed)
+  }, [speed, src])
 
   useEffect(() => {
     if (isPlaying) {
@@ -218,7 +231,7 @@ function VideoOverlayLayer({
   return (
     <video
       ref={ref}
-      src={previewSourceUrl(asset)}
+      src={src}
       style={{ ...pipPreviewStyle(position, scale, frameWidth), filter: colorMatchCss(asset) }}
     />
   )

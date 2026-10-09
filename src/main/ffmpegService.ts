@@ -34,6 +34,7 @@ import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { duckingFilterArgs, isMainVoiceClip } from '@shared/ducking'
 import { ffSeconds } from './ffArgs'
 import { normalizeFades } from '@shared/audioFade'
+import { overlayClipDuration, overlayClipSpeed } from '@shared/overlayClip'
 import { SQUARE_PIXEL_FILTER, scaleToFrameFilter, thumbnailScaleFilter } from '@shared/videoFrame'
 import {
   frameCountForDuration,
@@ -1221,8 +1222,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         track.clips.forEach((overlayClip) => {
           const asset = assetById.get(overlayClip.assetId)
           if (!asset) return
-          const dur = overlayClip.outPoint - overlayClip.inPoint
+          // `dur` はタイムライン(書き出し)の秒。速くしたワイプ(本編を速くした所の顔カメラ)は
+          // 素材を `speed` 倍で流すので、素材から読む秒数は `dur × speed`(本編のクリップと同じ規則)。
+          // 静止画は同じ画を流し続けるだけなので、速さは掛けない
+          const dur = overlayClipDuration(overlayClip)
           if (dur <= 0) return
+          const pipSpeed = asset.still ? 1 : overlayClipSpeed(overlayClip)
           const pipStart = toExportTime(overlayClip.startTime)
           // **本編より後ろへはみ出したぶんは、graph へ渡す前に切る。**
           //
@@ -1262,10 +1267,14 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           )
           // 読む長さは、絵と音のどちらにも足りるように(音は格子に揃えると半フレーム長くなることがある)
           const pipReadDur = Math.max(pipVisibleDuration, pipAudibleDur)
-          // 動画は本編と同じく少し手前から読み、頭の1コマも正しい絵にする(音は別の入力で頭から)
+          // 動画は本編と同じく少し手前から読み、頭の1コマも正しい絵にする(音は別の入力で頭から)。
+          // `pipPre` は素材の秒。書き出しの時刻からは速さで割った秒(`pipPreOut`)だけ戻す
           const pipPre = asset.still
             ? 0
             : Math.min(Math.max(0, overlayClip.inPoint), MAIN_PREROLL_SEC)
+          const pipPreOut = pipPre / pipSpeed
+          // 素材から読む秒数(書き出しの秒 × 速さ)
+          const pipSourceReadDur = pipReadDur * pipSpeed
           command.input(asset.filePath).inputOptions(
             // 静止画は同じ画を、書き出しのフレームレートで必要な秒数ぶん流す
             asset.still
@@ -1275,7 +1284,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                     ? [`-c:v ${alphaDecoderByPath.get(asset.filePath)}`]
                     : []),
                   `-ss ${ffSeconds(overlayClip.inPoint - pipPre)}`,
-                  `-t ${ffSeconds(pipReadDur + pipPre)}`
+                  `-t ${ffSeconds(pipSourceReadDur + pipPre)}`
                 ]
           )
           const myIndex = inputIndex++
@@ -1285,7 +1294,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               .input(asset.filePath)
               .inputOptions([
                 `-ss ${ffSeconds(overlayClip.inPoint)}`,
-                `-t ${ffSeconds(pipReadDur)}`
+                `-t ${ffSeconds(pipSourceReadDur)}`
               ])
             pipAudioIndex = inputIndex++
           }
@@ -1305,9 +1314,15 @@ export async function exportProject(options: ExportOptions): Promise<void> {
                 (full
                   ? `scale=${w}:${h}:force_original_aspect_ratio=decrease,`
                   : `scale=${scaledWidth}:-2,`) +
-                (pipPre > 0
-                  ? `setpts=PTS-${ffSeconds(pipPre)}/TB+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`
-                  : `setpts=PTS-STARTPTS+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`)
+                // 速くしたワイプは時刻を速さで割って縮める(本編の `setpts=PTS/speed` と同じ)。
+                // 等倍は今までと同じ式のまま(書き出しを1バイトも変えない)
+                (pipSpeed !== 1
+                  ? pipPre > 0
+                    ? `setpts=PTS/${pipSpeed}-${ffSeconds(pipPreOut)}/TB+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`
+                    : `setpts=(PTS-STARTPTS)/${pipSpeed}+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`
+                  : pipPre > 0
+                    ? `setpts=PTS-${ffSeconds(pipPre)}/TB+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`
+                    : `setpts=PTS-STARTPTS+${ffSeconds(pipFrameStart)}/TB[${pipLabel}]`)
             )
             const margin = Math.round(pipMarginPx(w))
             const xExpr = full
@@ -1351,8 +1366,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
              * (約23ms)でしか切れないので、秒ちょうどに揃えるのはここで行う。
              */
             const pipTrim = `atrim=0:${ffSeconds(pipAudibleDur)},`
+            // 速くしたワイプの音は、音声トラックの速くしたクリップと同じ式で速さを変える(切る長さは
+            // 速さを変えたあとの、書き出しの秒)
+            const pipTempo = pipSpeed !== 1 ? `${audioSpeedChain(pipSpeed)},` : ''
             filterParts.push(
-              `[${pipAudioIndex}:a]${ALIGN_AUDIO_START},asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
+              `[${pipAudioIndex}:a]${ALIGN_AUDIO_START},${pipTempo}asetpts=PTS-STARTPTS,${pipTrim}${adelayFilter(delayMs)},` +
                 `${audioFormatFor(audioChannelsByPath.get(asset.filePath), audioLayoutOf(asset.filePath))}[${audioLabel}]`
             )
             pipAudioEntries.push({ label: audioLabel, duck: false })

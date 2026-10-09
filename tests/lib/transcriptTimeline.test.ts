@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { mainHardCuts, telopsFromTranscript } from '../../src/renderer/src/lib/transcriptTimeline'
+import {
+  mainHardCuts,
+  placedUtterances,
+  telopsFromTranscript
+} from '../../src/renderer/src/lib/transcriptTimeline'
 import type { Project } from '@shared/types'
 
 const asset = (id: string): unknown => ({ id, filePath: `/x/${id}.mp4`, duration: 600 })
@@ -103,5 +107,27 @@ describe('telopsFromTranscript — 枚ごとの番号', () => {
     const out = telopsFromTranscript(project, [])
     expect(out.length).toBeGreaterThan(1)
     expect(out.map((o) => o.utteranceChunk)).toEqual(out.map((_, i) => i))
+  })
+})
+
+describe('placedUtterances — 速くしたワイプの素材の発話', () => {
+  it('ワイプの速さで割って、タイムラインの位置にする(顔カメラの音で拾った発話)', () => {
+    const project = {
+      assets: [asset('face')],
+      clips: [],
+      audioTracks: [],
+      videoOverlayTracks: [
+        {
+          id: 'w',
+          clips: [{ id: 'f1', assetId: 'face', startTime: 10, inPoint: 20, outPoint: 30, speed: 2 }]
+        }
+      ],
+      transcript: [
+        { id: 'u', assetId: 'face', sourceStart: 22, sourceEnd: 26, text: 'はい', words: [] }
+      ]
+    } as unknown as Project
+    const [u] = placedUtterances(project)
+    expect(u.start).toBeCloseTo(11, 9)
+    expect(u.end).toBeCloseTo(13, 9)
   })
 })

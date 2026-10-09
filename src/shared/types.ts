@@ -330,6 +330,11 @@ export interface VideoOverlayClip {
   startTime: number
   inPoint: number
   outPoint: number
+  /**
+   * 再生速度(未設定は等倍)。タイムライン上の長さは (outPoint - inPoint) / speed
+   * (`overlayClipDuration`)。本編を速くした所の顔カメラのワイプを、マイクの声と同じ速さで流す
+   */
+  speed?: number
 }
 
 export interface VideoOverlayTrack {
