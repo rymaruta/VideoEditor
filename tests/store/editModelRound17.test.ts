@@ -2324,4 +2324,14 @@ describe('速さを変えたクリップを伸ばす・速さを戻すと、声�
     for (let i = 1; i < spans.length; i++)
       expect(spans[i][0]).toBeGreaterThanOrEqual(spans[i - 1][1] - 1e-6)
   })
+
+  it('3 倍のクリップを素材の数ミリ秒だけ伸ばしてから速さを戻しても、声が欠けない', () => {
+    setup(R)
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 3)
+    // 素材で 1.8ms(タイムラインで 0.6ms)だけ前へ伸ばす
+    st().updateClipTrim(id, 19.9982, 30)
+    st().updateClipSpeed(id, 1)
+    expect(misaligned()).toEqual([])
+  })
 })

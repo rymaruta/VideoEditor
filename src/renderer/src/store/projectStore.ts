@@ -5274,7 +5274,7 @@ function mergeHandTracks<
   return out
 }
 
-/** [a, b) のうち、`covered` のどれにも重ならない区間(短すぎる切れ端は捨てる) */
+/** [a, b) のうち、`covered` のどれにも重ならない区間(速くしたクリップの下の短い切れ端も残す: 捨てると、速さを戻したとき素材の数ミリ秒ぶん声が欠けた) */
 function uncoveredBy(
   covered: readonly { start: number; end: number }[],
   a: number,
@@ -5284,10 +5284,10 @@ function uncoveredBy(
   let t = a
   for (const r of [...covered].sort((x, y) => x.start - y.start)) {
     if (r.end <= t + 1e-6 || r.start >= b - 1e-6) continue
-    if (r.start - t > 1e-3) out.push([t, r.start])
+    if (r.start - t > 1e-6) out.push([t, r.start])
     t = Math.max(t, r.end)
   }
-  if (b - t > 1e-3) out.push([t, b])
+  if (b - t > 1e-6) out.push([t, b])
   return out
 }
 
@@ -5378,24 +5378,43 @@ function followMainEdit(
   // (足さないと、伸ばした所・速さを戻した所だけ声が無いまま書き出されていた)
   const fileOfAsset = new Map(info.files.map((f) => [f.assetId, f]))
   const nextClipOf = new Map(next.clips.map((c) => [c.id, c]))
-  const spedGaps = after.flatMap((n) => {
-    const c = nextClipOf.get(n.id)
-    const f = c && fileOfAsset.get(c.assetId)
-    if (n.real || !c || !f) return []
-    const scale = (c.speed || 1) / f.rate
-    const voiceStart = toCommon(f, c.inPoint)
-    return uncoveredSpans([n], segs).map((g) => {
+  // (速さだけの編集では足さないので数えない。`uncoveredSpans` は1回で全部の区間を調べる: クリップごとに
+  //  呼ぶと毎回対応の索引を作り直し、2,000クリップを速くした本編で1回の編集に 280ms かかっていた)
+  // 速さだけを変えた編集では、収録の音と自動テロップは上の `followSpeedChanges` で伸び縮みさせてある
+  const speedOnly = Boolean(warped)
+  const sped = speedOnly
+    ? []
+    : after.flatMap((n) => {
+        const c = nextClipOf.get(n.id)
+        const f = c && fileOfAsset.get(c.assetId)
+        if (n.real || !c || !f) return []
+        return [{ n, scale: (c.speed || 1) / f.rate, voiceStart: toCommon(f, c.inPoint) }]
+      })
+  const spedGaps: { span: { timeline: number; start: number; end: number }; scale: number }[] = []
+  {
+    // 足りない所は、渡した区間の順(タイムラインの順)に出てくる
+    let k = 0
+    for (const g of uncoveredSpans(
+      sped.map((x) => x.n),
+      segs
+    )) {
+      while (
+        k < sped.length - 1 &&
+        g.timeline >= sped[k].n.timeline + (sped[k].n.end - sped[k].n.start) - 1e-9
+      )
+        k++
+      const { n, scale, voiceStart } = sped[k]
       const offset = g.timeline - n.timeline
-      return {
+      spedGaps.push({
         span: {
           timeline: g.timeline,
           start: voiceStart + offset * scale,
           end: voiceStart + (offset + (g.end - g.start)) * scale
         },
         scale
-      }
-    })
-  })
+      })
+    }
+  }
   const voiceGaps = [...gaps.map((span) => ({ span, scale: 1 })), ...spedGaps]
 
   // 収録の音のトラックに人が置いた、収録素材以外の音(ナレーションなど)は、人が置いたトラックの音と
@@ -5406,8 +5425,6 @@ function followMainEdit(
     c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)
   const overlapsAny = (c: AudioTrackClip, others: AudioTrackClip[]): boolean =>
     others.some((o) => o.startTime < endOfClip(c) - 1e-6 && endOfClip(o) > c.startTime + 1e-6)
-  // 速さだけを変えた編集では、収録の音と自動テロップは上の `followSpeedChanges` で伸び縮みさせてある
-  const speedOnly = Boolean(warped)
   const audioTracksSplit = next.audioTracks.flatMap((t): AudioTrack[] => {
     if (!follows(t)) return [t]
     const untouched = isUntouchedAuto(t)

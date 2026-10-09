@@ -201,9 +201,10 @@ export function liftAboveShortsUi<
   if (!(lift > 0)) return [...telops]
   const tiers = stackedBottomTelops(telops, canvasH)
   return telops.map((t, i) => {
+    // 下以外(上・真ん中に置く演出テロップなど)は動かさない(真ん中のテロップに重なる)
+    if (t.style.position !== 'bottom') return t
     const pos = t.style.customPosition
     if (!pos) {
-      if (t.style.position !== 'bottom') return t
       const h = blockHeightRatio(t, canvasH, canvasW)
       return { ...t, style: { ...t.style, customPosition: { x: 0.5, y: limit - h / 2 } } }
     }

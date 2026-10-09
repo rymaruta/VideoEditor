@@ -94,4 +94,9 @@ describe('liftAboveShortsUi — 縦型ショートの下のテロップを Short
     expect(rects[0][0] < rects[1][1] - 1e-6 && rects[1][0] < rects[0][1] - 1e-6).toBe(false)
     for (const r of rects) expect(r[1]).toBeLessThanOrEqual(SHORTS_TELOP_BOTTOM + 1e-6)
   })
+
+  it('真ん中・上に自由配置した演出テロップは、画面の下半分にあっても動かさない', () => {
+    const sad = telop('しょんぼり', { position: 'center', customPosition: { x: 0.5, y: 0.62 } })
+    expect(liftAboveShortsUi([sad], canvas.h)[0]).toBe(sad)
+  })
 })
