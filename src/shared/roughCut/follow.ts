@@ -337,7 +337,12 @@ export function uncoveredSpans(
 export function sourcePieces(
   info: MulticamInfo,
   sourceId: string,
-  span: TimelineSpan
+  span: TimelineSpan,
+  /**
+   * タイムラインの1秒あたりの共通の時刻の秒(速さを変えた本編のクリップの下: クリップの速さ ÷ カメラの素材の速さ)。
+   * 声も同じ速さで鳴らす
+   */
+  scale = 1
 ): { assetId: string; startTime: number; inPoint: number; outPoint: number; speed: number }[] {
   const out: {
     assetId: string
@@ -359,10 +364,10 @@ export function sourcePieces(
     const end = Math.min(span.end, f.start + f.duration / f.rate)
     out.push({
       assetId: f.assetId,
-      startTime: span.timeline + (t - span.start),
+      startTime: span.timeline + (t - span.start) / scale,
       inPoint: toSource(f, t),
       outPoint: toSource(f, end),
-      speed: f.rate
+      speed: f.rate * scale
     })
     t = end
   }

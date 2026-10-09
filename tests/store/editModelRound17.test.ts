@@ -2133,3 +2133,184 @@ describe('速さを変えた区間の声は、同じ速さで鳴らして残す'
     expect(cover(merge(after))).toBe(cover(merge(before)))
   })
 })
+
+describe('速さを変えたクリップを伸ばす・速さを戻すと、声を足し直す', () => {
+  /** タイムラインのどの時刻でも、本編が映す時刻の声がちょうど1本だけ鳴っているか(ずれていたら、その時刻) */
+  const misaligned = (): string[] => {
+    const p = st().project
+    const fileOf = new Map(p.multicam!.files.map((f) => [f.assetId, f]))
+    const spans: { s: number; e: number; c: Project['clips'][number] }[] = []
+    let cur = 0
+    for (const c of p.clips) {
+      const len = (c.outPoint - c.inPoint) / (c.speed || 1)
+      spans.push({ s: cur, e: cur + len, c })
+      cur += len
+    }
+    const voices = p.audioTracks
+      .filter((t) => t.multicamSourceId === 'M')
+      .flatMap((t) => t.clips)
+      .filter((c) => c.assetId === 'micM')
+    const out: string[] = []
+    for (let t = 0.01; t < cur - 0.01; t += 0.037) {
+      const sp = spans.find((x) => t >= x.s && t < x.e)!
+      const f = fileOf.get(sp.c.assetId)!
+      const common = f.start + (sp.c.inPoint + (t - sp.s) * (sp.c.speed || 1)) / f.rate
+      const vs = voices.filter(
+        (v) => t >= v.startTime && t < v.startTime + (v.outPoint - v.inPoint) / (v.speed || 1)
+      )
+      if (vs.length !== 1) {
+        out.push(`${t.toFixed(3)}: ${vs.length}本`)
+        continue
+      }
+      const v = vs[0]
+      const m = fileOf.get('micM')!
+      const vc = m.start + (v.inPoint + (t - v.startTime) * (v.speed || 1)) / m.rate
+      if (Math.abs(vc - common) > 1 / 60)
+        out.push(`${t.toFixed(3)}: ${(vc - common).toFixed(3)}秒ずれ`)
+    }
+    return out.slice(0, 5)
+  }
+  const R: [number, number][] = [
+    [0, 10],
+    [20, 30],
+    [40, 50]
+  ]
+
+  it('1.5 倍のクリップを後ろへ伸ばすと、伸ばした所にも声が 1.5 倍で入る', () => {
+    setup(R)
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 1.5)
+    st().updateClipTrim(id, 20, 35)
+    expect(misaligned()).toEqual([])
+  })
+
+  it('1.5 倍のクリップを前へ伸ばしても、声が入る', () => {
+    setup(R)
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 1.5)
+    st().updateClipTrim(id, 15, 30)
+    expect(misaligned()).toEqual([])
+  })
+
+  it('伸ばしたあと速さを戻しても、声はずれず・重ならず・欠けない', () => {
+    setup(R)
+    const id = st().project.clips[1].id
+    st().updateClipSpeed(id, 1.5)
+    st().updateClipTrim(id, 20, 35)
+    st().updateClipSpeed(id, 1)
+    expect(misaligned()).toEqual([])
+  })
+
+  it('速さを変えた所の声を外して保存した企画でも、速さを戻すと声が戻る', () => {
+    setup(R)
+    const id = st().project.clips[1].id
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        clips: p.clips.map((c) => (c.id === id ? { ...c, speed: 1.5 } : c)),
+        audioTracks: p.audioTracks.map((t) =>
+          t.multicamSourceId !== 'M'
+            ? t
+            : {
+                ...t,
+                clips: t.clips
+                  .filter((c) => c.inPoint < 15 || c.inPoint > 35)
+                  .map((c) =>
+                    c.startTime > 15 ? { ...c, startTime: c.startTime - 10 + 10 / 1.5 } : c
+                  )
+              }
+        )
+      }
+    })
+    st().updateClipSpeed(id, 1)
+    expect(misaligned()).toEqual([])
+  })
+
+  it('ピンマイクのトラックに手で置いた音は、速さを変えて戻しても置いた時刻のまま', () => {
+    setup(R)
+    const id = st().project.clips[1].id
+    const p = st().project
+    S.setState({
+      project: {
+        ...p,
+        assets: [...p.assets, asset('nar', 100, false)],
+        audioTracks: p.audioTracks.map((t) =>
+          t.multicamSourceId !== 'M'
+            ? t
+            : {
+                ...t,
+                clips: [
+                  ...t.clips,
+                  { id: 'nar1', assetId: 'nar', startTime: 25, inPoint: 0, outPoint: 2 }
+                ]
+              }
+        )
+      }
+    })
+    const at = (): number[] =>
+      st()
+        .project.audioTracks.flatMap((t) => t.clips)
+        .filter((c) => c.id === 'nar1')
+        .map((c) => c.startTime)
+    st().updateClipSpeed(id, 1.5)
+    st().updateClipSpeed(id, 1)
+    expect(at()).toEqual([25])
+  })
+
+  it('声の端が区間の境目から浮動小数の誤差だけずれていても、切れ端を伸ばして次の声に重ねない', () => {
+    setup([
+      [0, 3],
+      [20, 36.323],
+      [49.9, 50]
+    ])
+    const sp = 9.44663653750904
+    const sp2 = 14.791320829768665
+    const p = st().project
+    const ids = p.clips.map((c) => c.id)
+    S.setState({
+      project: {
+        ...p,
+        clips: p.clips.map((c, i) =>
+          i === 1 ? { ...c, speed: sp } : i === 2 ? { ...c, speed: sp2 } : c
+        ),
+        audioTracks: p.audioTracks.map((t) =>
+          !t.multicamSourceId
+            ? t
+            : {
+                ...t,
+                clips: [
+                  { id: 'v0', assetId: 'micM', startTime: 0, inPoint: 0, outPoint: 3 },
+                  { id: 'v1', assetId: 'micM', startTime: 3, inPoint: 20, outPoint: 30, speed: sp },
+                  // 編集を重ねた誤差で、端が本編の区間の境目から 3e-8 秒ずれている
+                  {
+                    id: 'v2',
+                    assetId: 'micM',
+                    startTime: 3 + 10 / sp + 3e-8,
+                    inPoint: 30,
+                    outPoint: 36.323,
+                    speed: sp
+                  },
+                  {
+                    id: 'v3',
+                    assetId: 'micM',
+                    startTime: 3 + 16.323 / sp,
+                    inPoint: 49.9,
+                    outPoint: 50,
+                    speed: sp2
+                  }
+                ]
+              }
+        )
+      }
+    })
+    st().updateClipSpeed(ids[2], 0.25)
+    const spans = st()
+      .project.audioTracks.filter((t) => t.multicamSourceId)
+      .flatMap((t) => t.clips)
+      .map((c) => [c.startTime, c.startTime + (c.outPoint - c.inPoint) / (c.speed || 1)])
+      .sort((a, b) => a[0] - b[0])
+    for (let i = 1; i < spans.length; i++)
+      expect(spans[i][0]).toBeGreaterThanOrEqual(spans[i - 1][1] - 1e-6)
+  })
+})

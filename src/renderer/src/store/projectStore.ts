@@ -5274,6 +5274,23 @@ function mergeHandTracks<
   return out
 }
 
+/** [a, b) のうち、`covered` のどれにも重ならない区間(短すぎる切れ端は捨てる) */
+function uncoveredBy(
+  covered: readonly { start: number; end: number }[],
+  a: number,
+  b: number
+): [number, number][] {
+  const out: [number, number][] = []
+  let t = a
+  for (const r of [...covered].sort((x, y) => x.start - y.start)) {
+    if (r.end <= t + 1e-6 || r.start >= b - 1e-6) continue
+    if (r.start - t > 1e-3) out.push([t, r.start])
+    t = Math.max(t, r.end)
+  }
+  if (b - t > 1e-3) out.push([t, b])
+  return out
+}
+
 function followMainEdit(
   prev: Project,
   next: Project,
@@ -5352,11 +5369,34 @@ function followMainEdit(
   }
   const follows = (t: { multicamSourceId?: string; autoRole?: string }): boolean =>
     Boolean(t.multicamSourceId || (!onlyRebuilt && !warped && t.autoRole))
-  // 新しく見えた所に足す声は、収録素材のクリップの所だけ(差し込んだ素材・速さを変えたクリップには足さない)
+  // 新しく見えた所に足す声・顔カメラの絵は、収録素材のクリップの所だけ(差し込んだ素材には足さない)
   const gaps = uncoveredSpans(
     after.filter((x) => x.real),
     segs
   )
+  // 速さを変えた収録素材のクリップを伸ばして新しく見えた所には、声を同じ速さで足す
+  // (足さないと、伸ばした所・速さを戻した所だけ声が無いまま書き出されていた)
+  const fileOfAsset = new Map(info.files.map((f) => [f.assetId, f]))
+  const nextClipOf = new Map(next.clips.map((c) => [c.id, c]))
+  const spedGaps = after.flatMap((n) => {
+    const c = nextClipOf.get(n.id)
+    const f = c && fileOfAsset.get(c.assetId)
+    if (n.real || !c || !f) return []
+    const scale = (c.speed || 1) / f.rate
+    const voiceStart = toCommon(f, c.inPoint)
+    return uncoveredSpans([n], segs).map((g) => {
+      const offset = g.timeline - n.timeline
+      return {
+        span: {
+          timeline: g.timeline,
+          start: voiceStart + offset * scale,
+          end: voiceStart + (offset + (g.end - g.start)) * scale
+        },
+        scale
+      }
+    })
+  })
+  const voiceGaps = [...gaps.map((span) => ({ span, scale: 1 })), ...spedGaps]
 
   // 収録の音のトラックに人が置いた、収録素材以外の音(ナレーションなど)は、人が置いたトラックの音と
   // 同じく動かさない(写すと、速さを変えたクリップの下では消え、速さを戻しても戻らなかった)。
@@ -5369,25 +5409,35 @@ function followMainEdit(
   // 速さだけを変えた編集では、収録の音と自動テロップは上の `followSpeedChanges` で伸び縮みさせてある
   const speedOnly = Boolean(warped)
   const audioTracksSplit = next.audioTracks.flatMap((t): AudioTrack[] => {
-    if (!follows(t) || (speedOnly && t.multicamSourceId)) return [t]
+    if (!follows(t)) return [t]
     const untouched = isUntouchedAuto(t)
     const placedByHand = (c: AudioTrackClip): boolean =>
       Boolean(t.multicamSourceId) && !c.linkedClipId && !recordedAssets.has(c.assetId)
-    const moved = t.clips.flatMap((c) => (c.linkedClipId || placedByHand(c) ? [c] : remapClip(c)))
-    // 伸ばして新しく見えた所: 収録素材のトラックなら、その機材の音を足す
-    const added =
-      t.multicamSourceId && gaps.length > 0
-        ? gaps.flatMap((g) =>
-            sourcePieces(info, t.multicamSourceId!, g).map((p) => ({
+    // 速さだけを変えた編集では、収録の音は上の `followSpeedChanges` で伸び縮みさせてあるので動かさない
+    const moved =
+      speedOnly && t.multicamSourceId
+        ? t.clips
+        : t.clips.flatMap((c) => (c.linkedClipId || placedByHand(c) ? [c] : remapClip(c)))
+    // 伸ばして・速さを戻して新しく見えた所: 収録素材のトラックなら、その機材の音を足す。
+    // もう声のある所には足さない(速さだけ変えたとき・前に声を外して保存した所を戻したとき)
+    const voiced = moved
+      .filter((c) => recordedAssets.has(c.assetId))
+      .map((c) => ({ start: c.startTime, end: endOfClip(c) }))
+    const added = t.multicamSourceId
+      ? voiceGaps.flatMap(({ span, scale }) =>
+          sourcePieces(info, t.multicamSourceId!, span, scale).flatMap((p) => {
+            const len = (p.outPoint - p.inPoint) / p.speed
+            return uncoveredBy(voiced, p.startTime, p.startTime + len).map(([a, b]) => ({
               id: uuid(),
               assetId: p.assetId,
-              startTime: p.startTime,
-              inPoint: p.inPoint,
-              outPoint: p.outPoint,
+              startTime: a,
+              inPoint: p.inPoint + (a - p.startTime) * p.speed,
+              outPoint: p.inPoint + (b - p.startTime) * p.speed,
               ...(Math.abs(p.speed - 1) > 1e-9 ? { speed: p.speed } : {})
             }))
-          )
-        : []
+          })
+        )
+      : []
     let clips = [...moved, ...added].sort((a, b) => a.startTime - b.startTime)
     // どのクリップも動かなかったトラックは、元のトラックのまま(履歴で共有できるように)
     if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
@@ -5857,7 +5907,8 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
   }
   // 収録の音(ピンマイク・周りの音)は、本編の速さに合わせて区間ごとに伸び縮みさせる(声も一緒に速く・
   // 遅くなる)。外すと、速さを変えたクリップの所だけ声が無くなっていた。人が置いた音(ナレーションなど)は
-  // SE と同じく頭だけ動かし、動いた声と重なるなら「(手で置いた音)」のトラックへ移す
+  // 本編を詰めたときと同じく動かさず、動いた声と重なるなら「(手で置いた音)」のトラックへ移す
+  // (頭を動かして移すと、速さを戻しても移した先のトラックは戻らず、置いた所からずれたままだった)
   const recordedAssets = new Set((next.multicam?.files ?? []).map((f) => f.assetId))
   const bounds = segs.flatMap((g) => [g.from, g.to])
   const scaleOf = (t: number): number =>
@@ -5867,12 +5918,15 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
     const s = c.startTime
     const e = s + (c.outPoint - c.inPoint) / sp
     if (!(e > s)) return [c]
-    const cuts = [...new Set([s, ...bounds.filter((t) => t > s + 1e-9 && t < e - 1e-9), e])].sort(
+    // 端とほぼ同じ所の境目では切らない(浮動小数の誤差で 1e-7 秒ほどの切れ端ができ、隣の区間の倍率で
+    // 伸ばされて次の声と重なっていた)
+    const cuts = [...new Set([s, ...bounds.filter((t) => t > s + 1e-6 && t < e - 1e-6), e])].sort(
       (a, b) => a - b
     )
     const pieces = cuts.slice(0, -1).map((a, k) => {
       const b = cuts[k + 1]
-      const speed = sp / scaleOf(a)
+      // 区間の倍率は切れ端の真ん中で引く(端が境目のすぐ手前にあるとき、前の区間の倍率になる)
+      const speed = sp / scaleOf((a + b) / 2)
       return {
         startTime: warp(a),
         inPoint: c.inPoint + (a - s) * sp,
@@ -5902,9 +5956,7 @@ function followSpeedChanges(prev: Project, next: Project): Project | null {
   const recordedTracks = next.audioTracks.flatMap((t): AudioTrack[] => {
     if (!t.multicamSourceId) return [t]
     const byHand = (c: AudioTrackClip): boolean => !c.linkedClipId && !recordedAssets.has(c.assetId)
-    let clips = t.clips.flatMap((c) =>
-      c.linkedClipId ? [c] : byHand(c) ? [moveClip(c)] : scaleClip(c)
-    )
+    let clips = t.clips.flatMap((c) => (c.linkedClipId || byHand(c) ? [c] : scaleClip(c)))
     if (sameItems(clips, t.clips)) return [t]
     const hand = clips.filter(byHand)
     const voices = clips.filter((c) => !byHand(c))
