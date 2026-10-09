@@ -2201,30 +2201,41 @@ describe('速さを変えたクリップを伸ばす・速さを戻すと、声�
     expect(misaligned()).toEqual([])
   })
 
-  it('速さを変えた所の声を外して保存した企画でも、速さを戻すと声が戻る', () => {
+  it('人が消した声は、速さを変えても戻さない', () => {
     setup(R)
     const id = st().project.clips[1].id
+    const mic = (): Project['audioTracks'][number] =>
+      st().project.audioTracks.find((t) => t.multicamSourceId === 'M')!
+    // 咳を切った所(素材の 22〜26 秒)の声を消す
     const p = st().project
     S.setState({
       project: {
         ...p,
-        clips: p.clips.map((c) => (c.id === id ? { ...c, speed: 1.5 } : c)),
         audioTracks: p.audioTracks.map((t) =>
           t.multicamSourceId !== 'M'
             ? t
             : {
                 ...t,
-                clips: t.clips
-                  .filter((c) => c.inPoint < 15 || c.inPoint > 35)
-                  .map((c) =>
-                    c.startTime > 15 ? { ...c, startTime: c.startTime - 10 + 10 / 1.5 } : c
-                  )
+                clips: t.clips.flatMap((c) =>
+                  c.inPoint === 20
+                    ? [
+                        { ...c, outPoint: 22 },
+                        { ...c, id: 'tail', startTime: 16, inPoint: 26 }
+                      ]
+                    : [c]
+                )
               }
         )
       }
     })
-    st().updateClipSpeed(id, 1)
-    expect(misaligned()).toEqual([])
+    const silent = (): boolean =>
+      mic().clips.every(
+        (c) => c.assetId !== 'micM' || c.outPoint <= 22 + 1e-6 || c.inPoint >= 26 - 1e-6
+      )
+    for (const sp of [2, 0.5, 1]) {
+      st().updateClipSpeed(id, sp)
+      expect(silent()).toBe(true)
+    }
   })
 
   it('ピンマイクのトラックに手で置いた音は、速さを変えて戻しても置いた時刻のまま', () => {

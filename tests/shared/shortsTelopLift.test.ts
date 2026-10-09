@@ -79,4 +79,19 @@ describe('liftAboveShortsUi — 縦型ショートの下のテロップを Short
     const high = telop('見出し', { customPosition: { x: 0.3, y: 0.2 } })
     expect(liftAboveShortsUi([high], canvas.h)[0]).toBe(high)
   })
+
+  it('下の段を消した(段と見分けられない)テロップも、間隔を保って上げ、同じ高さに集めない', () => {
+    const base = telop('今日はいい天気ですね')
+    const [, b, c] = stackSimultaneousTelops(
+      [
+        { ...base, id: 'a', startTime: 0, endTime: 2 },
+        { ...base, id: 'b', startTime: 1, endTime: 4 },
+        { ...base, id: 'c', startTime: 1.5, endTime: 4 }
+      ],
+      canvas.h
+    )
+    const rects = liftAboveShortsUi([b, c], canvas.h).map(rect)
+    expect(rects[0][0] < rects[1][1] - 1e-6 && rects[1][0] < rects[0][1] - 1e-6).toBe(false)
+    for (const r of rects) expect(r[1]).toBeLessThanOrEqual(SHORTS_TELOP_BOTTOM + 1e-6)
+  })
 })

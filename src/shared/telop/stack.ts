@@ -188,8 +188,9 @@ export const SHORTS_TELOP_BOTTOM = 0.82
  * 画面を通らずにそのまま書き出されるので、隠れたまま公開されていた。
  * 既定の位置のものは下端を `limit` に揃え、同時に出ていて上に積んであるもの(`stackSimultaneousTelops`
  * の段)は、画面のどこにあっても同じだけ上へずらす(積んだ間隔はそのまま。画面の下半分の段だけを
- * ずらすと、高い段が真ん中をまたいだとき、ずらさなかった段に下の段が重なった)。
- * それ以外の自由配置(縦書きの発言など)も、下端が帯にかかるなら下端を `limit` まで上げる
+ * ずらすと、高い段が真ん中をまたいだとき、ずらさなかった段に下の段が重なった)。画面の下半分の
+ * 自由配置も同じだけ上げる(段と見分けられなかったもの——消した発言の上の段など——の間隔を保つ)。
+ * それでも下端が帯にかかるもの(縦書きの発言など)は、下端を `limit` まで上げる
  */
 export function liftAboveShortsUi<
   T extends Pick<TextOverlay, 'text' | 'style' | 'startTime' | 'endTime'>
@@ -207,7 +208,9 @@ export function liftAboveShortsUi<
       return { ...t, style: { ...t.style, customPosition: { x: 0.5, y: limit - h / 2 } } }
     }
     const h = blockHeightRatio(t, canvasH, canvasW)
-    const y = tiers[i] ? pos.y - lift : pos.y
+    // 段と、画面の下半分の自由配置は、同じだけ上げる(間隔はそのまま。下端を揃えると、同時に出る
+    // テロップが同じ高さに集まって重なる)
+    const y = tiers[i] || pos.y > 0.5 ? pos.y - lift : pos.y
     // 画面より高い(帯の上に収まらない)ものは、上端が画面の外へ出ない所まで(元より下げない)
     const fitted = Math.min(y, Math.max(limit - h / 2, Math.min(pos.y, h / 2)))
     if (Math.abs(fitted - pos.y) <= 1e-12) return t

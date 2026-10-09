@@ -5418,26 +5418,28 @@ function followMainEdit(
       speedOnly && t.multicamSourceId
         ? t.clips
         : t.clips.flatMap((c) => (c.linkedClipId || placedByHand(c) ? [c] : remapClip(c)))
-    // 伸ばして・速さを戻して新しく見えた所: 収録素材のトラックなら、その機材の音を足す。
-    // もう声のある所には足さない(速さだけ変えたとき・前に声を外して保存した所を戻したとき)
+    // 伸ばして新しく見えた所: 収録素材のトラックなら、その機材の音を足す(もう声のある所には足さない)。
+    // 速さだけを変えた編集では足さない(新しく見える素材の時刻は無い。足すと、人が消した声
+    // ——咳を切った所など——まで戻っていた)
     const voiced = moved
       .filter((c) => recordedAssets.has(c.assetId))
       .map((c) => ({ start: c.startTime, end: endOfClip(c) }))
-    const added = t.multicamSourceId
-      ? voiceGaps.flatMap(({ span, scale }) =>
-          sourcePieces(info, t.multicamSourceId!, span, scale).flatMap((p) => {
-            const len = (p.outPoint - p.inPoint) / p.speed
-            return uncoveredBy(voiced, p.startTime, p.startTime + len).map(([a, b]) => ({
-              id: uuid(),
-              assetId: p.assetId,
-              startTime: a,
-              inPoint: p.inPoint + (a - p.startTime) * p.speed,
-              outPoint: p.inPoint + (b - p.startTime) * p.speed,
-              ...(Math.abs(p.speed - 1) > 1e-9 ? { speed: p.speed } : {})
-            }))
-          })
-        )
-      : []
+    const added =
+      t.multicamSourceId && !speedOnly
+        ? voiceGaps.flatMap(({ span, scale }) =>
+            sourcePieces(info, t.multicamSourceId!, span, scale).flatMap((p) => {
+              const len = (p.outPoint - p.inPoint) / p.speed
+              return uncoveredBy(voiced, p.startTime, p.startTime + len).map(([a, b]) => ({
+                id: uuid(),
+                assetId: p.assetId,
+                startTime: a,
+                inPoint: p.inPoint + (a - p.startTime) * p.speed,
+                outPoint: p.inPoint + (b - p.startTime) * p.speed,
+                ...(Math.abs(p.speed - 1) > 1e-9 ? { speed: p.speed } : {})
+              }))
+            })
+          )
+        : []
     let clips = [...moved, ...added].sort((a, b) => a.startTime - b.startTime)
     // どのクリップも動かなかったトラックは、元のトラックのまま(履歴で共有できるように)
     if (sameItems(clips, t.clips) && (!untouched || t.autoSignature === autoSignatureOf(t))) {
