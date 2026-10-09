@@ -42,9 +42,13 @@ function naiveRange(segs: TimelineMapSeg[], a: number, b: number): TimelineMapSe
   return out
 }
 
-function naiveUncovered(after: TimelineSpan[], segs: TimelineMapSeg[]): TimelineSpan[] {
-  const out: TimelineSpan[] = []
-  for (const n of after) {
+function naiveUncovered(
+  after: TimelineSpan[],
+  segs: TimelineMapSeg[]
+): (TimelineSpan & { owner: number })[] {
+  const out: (TimelineSpan & { owner: number })[] = []
+  for (let owner = 0; owner < after.length; owner++) {
+    const n = after[owner]
     const len = n.end - n.start
     const covered = segs
       .map((s) => ({
@@ -59,12 +63,13 @@ function naiveUncovered(after: TimelineSpan[], segs: TimelineMapSeg[]): Timeline
         out.push({
           timeline: t,
           start: n.start + (t - n.timeline),
-          end: n.start + (r.a - n.timeline)
+          end: n.start + (r.a - n.timeline),
+          owner
         })
       t = Math.max(t, r.b)
     }
     if (n.timeline + len - t > EPS)
-      out.push({ timeline: t, start: n.start + (t - n.timeline), end: n.end })
+      out.push({ timeline: t, start: n.start + (t - n.timeline), end: n.end, owner })
   }
   return out
 }

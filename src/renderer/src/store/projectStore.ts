@@ -5390,31 +5390,23 @@ function followMainEdit(
         if (n.real || !c || !f) return []
         return [{ n, scale: (c.speed || 1) / f.rate, voiceStart: toCommon(f, c.inPoint) }]
       })
-  const spedGaps: { span: { timeline: number; start: number; end: number }; scale: number }[] = []
-  {
-    // 足りない所は、渡した区間の順(タイムラインの順)に出てくる
-    let k = 0
-    for (const g of uncoveredSpans(
-      sped.map((x) => x.n),
-      segs
-    )) {
-      while (
-        k < sped.length - 1 &&
-        g.timeline >= sped[k].n.timeline + (sped[k].n.end - sped[k].n.start) - 1e-9
-      )
-        k++
-      const { n, scale, voiceStart } = sped[k]
-      const offset = g.timeline - n.timeline
-      spedGaps.push({
-        span: {
-          timeline: g.timeline,
-          start: voiceStart + offset * scale,
-          end: voiceStart + (offset + (g.end - g.start)) * scale
-        },
-        scale
-      })
+  // 足りない所がどの区間のものかは、索引(owner)で引く(時刻の比較で辿ると、仮の時刻が大きい所では
+  // 浮動小数の誤差が 1e-9 を超え、隣のクリップの所が前のクリップの続きの声になっていた)
+  const spedGaps = uncoveredSpans(
+    sped.map((x) => x.n),
+    segs
+  ).map((g) => {
+    const { n, scale, voiceStart } = sped[g.owner]
+    const offset = g.timeline - n.timeline
+    return {
+      span: {
+        timeline: g.timeline,
+        start: voiceStart + offset * scale,
+        end: voiceStart + (offset + (g.end - g.start)) * scale
+      },
+      scale
     }
-  }
+  })
   const voiceGaps = [...gaps.map((span) => ({ span, scale: 1 })), ...spedGaps]
 
   // 収録の音のトラックに人が置いた、収録素材以外の音(ナレーションなど)は、人が置いたトラックの音と

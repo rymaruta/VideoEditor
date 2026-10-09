@@ -296,15 +296,17 @@ function sortedRange(
 export function uncoveredSpans(
   after: readonly TimelineSpan[],
   segs: readonly TimelineMapSeg[]
-): TimelineSpan[] {
-  const out: TimelineSpan[] = []
+): (TimelineSpan & { owner: number })[] {
+  // owner: その区間が `after` の何番目の区間のものか(呼ぶ側が、区間ごとの情報を引けるように)
+  const out: (TimelineSpan & { owner: number })[] = []
   // 対応を変更後の時刻(at)で引けるようにしておく(総当たりだと 2,000 × 2,000 の組を毎回作っていた)
   const index = spanIndex(
     segs,
     (s) => s.at,
     (s) => s.at + (s.to - s.from)
   )
-  for (const n of after) {
+  for (let owner = 0; owner < after.length; owner++) {
+    const n = after[owner]
     const len = n.end - n.start
     const covered = index
       .overlapping(n.timeline, n.timeline + len)
@@ -323,12 +325,13 @@ export function uncoveredSpans(
         out.push({
           timeline: t,
           start: n.start + (t - n.timeline),
-          end: n.start + (r.a - n.timeline)
+          end: n.start + (r.a - n.timeline),
+          owner
         })
       t = Math.max(t, r.b)
     }
     if (n.timeline + len - t > EPS)
-      out.push({ timeline: t, start: n.start + (t - n.timeline), end: n.end })
+      out.push({ timeline: t, start: n.start + (t - n.timeline), end: n.end, owner })
   }
   return out
 }
