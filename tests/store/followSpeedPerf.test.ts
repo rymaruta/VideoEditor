@@ -78,7 +78,7 @@ function setup(n: number): void {
   )
 }
 
-describe('速さを変えたクリップの多い本編でも、編集の追従が重くならない', () => {
+describe('2,000クリップの本編でも、編集の追従が重くならない', () => {
   it('2,000クリップを全部速くした本編で、1本を伸ばす追従が速い', () => {
     setup(2000)
     const ids = st().project.clips.map((c) => c.id)
@@ -88,5 +88,14 @@ describe('速さを変えたクリップの多い本編でも、編集の追従�
     st().updateClipTrim(ids[500], c.inPoint, c.outPoint + 0.5)
     // 速くしたクリップごとに対応の索引を作り直していたときは 280ms(今は 20ms ほど)
     expect(performance.now() - t0).toBeLessThan(150)
+  }, 120000)
+
+  it('2,000クリップを全部複製しても、声を足す追従が速い', () => {
+    setup(2000)
+    const ids = st().project.clips.map((c) => c.id)
+    const t0 = performance.now()
+    st().duplicateClips(ids)
+    // 声の区間を足すたびに全部並べ直していたときは 600ms(今は 100ms ほど)
+    expect(performance.now() - t0).toBeLessThan(300)
   }, 120000)
 })

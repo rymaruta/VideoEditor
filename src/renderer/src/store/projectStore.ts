@@ -5274,16 +5274,41 @@ function mergeHandTracks<
   return out
 }
 
-/** [a, b) のうち、`covered` のどれにも重ならない区間(速くしたクリップの下の短い切れ端も残す: 捨てると、速さを戻したとき素材の数ミリ秒ぶん声が欠けた) */
-function uncoveredBy(
-  covered: readonly { start: number; end: number }[],
-  a: number,
-  b: number
-): [number, number][] {
+/** 声のある区間を、`uncoveredBy` で何度も引けるように頭の順に並べたもの */
+interface CoveredIndex {
+  spans: { start: number; end: number }[]
+  /** 先頭から k 番目までの終わりの最大(増えていくので二分探索できる) */
+  maxEnd: number[]
+}
+function coveredIndex(list: readonly { start: number; end: number }[]): CoveredIndex {
+  const spans = [...list].sort((x, y) => x.start - y.start)
+  const maxEnd: number[] = []
+  for (let k = 0; k < spans.length; k++)
+    maxEnd.push(Math.max(k > 0 ? maxEnd[k - 1] : -Infinity, spans[k].end))
+  return { spans, maxEnd }
+}
+
+/**
+ * [a, b) のうち、`covered` のどれにも重ならない区間(速くしたクリップの下の短い切れ端も残す: 捨てると、
+ * 速さを戻したとき素材の数ミリ秒ぶん声が欠けた)。声の区間は1回だけ並べ、a に届く所から調べる
+ * (呼ぶたびに全部を並べ直すと、2,000クリップを複製したときの追従に 600ms かかっていた)
+ */
+function uncoveredBy(covered: CoveredIndex, a: number, b: number): [number, number][] {
+  const { spans, maxEnd } = covered
+  // a より後ろで終わる区間がはじめて現れる所(それより前の区間は、どれも a までに終わっている)
+  let lo = 0
+  let hi = spans.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (maxEnd[mid] <= a + 1e-6) lo = mid + 1
+    else hi = mid
+  }
   const out: [number, number][] = []
   let t = a
-  for (const r of [...covered].sort((x, y) => x.start - y.start)) {
-    if (r.end <= t + 1e-6 || r.start >= b - 1e-6) continue
+  for (let k = lo; k < spans.length; k++) {
+    const r = spans[k]
+    if (r.start >= b - 1e-6) break
+    if (r.end <= t + 1e-6) continue
     if (r.start - t > 1e-6) out.push([t, r.start])
     t = Math.max(t, r.end)
   }
@@ -5430,9 +5455,11 @@ function followMainEdit(
     // 伸ばして新しく見えた所: 収録素材のトラックなら、その機材の音を足す(もう声のある所には足さない)。
     // 速さだけを変えた編集では足さない(新しく見える素材の時刻は無い。足すと、人が消した声
     // ——咳を切った所など——まで戻っていた)
-    const voiced = moved
-      .filter((c) => recordedAssets.has(c.assetId))
-      .map((c) => ({ start: c.startTime, end: endOfClip(c) }))
+    const voiced = coveredIndex(
+      moved
+        .filter((c) => recordedAssets.has(c.assetId))
+        .map((c) => ({ start: c.startTime, end: endOfClip(c) }))
+    )
     const added =
       t.multicamSourceId && !speedOnly
         ? voiceGaps.flatMap(({ span, scale }) =>
