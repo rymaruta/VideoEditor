@@ -7,9 +7,10 @@
  *   頭の値になり中ほどの値にならない。中ほどで詰められず、時計のずれを測らないまま終わりで大きくずれていた
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { execFile, execFileSync } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, rmSync, statSync } from 'fs'
+import { writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -47,6 +48,14 @@ interface Burst {
  * 話し声のような音の粒(0.2〜0.8 秒の雑音の塊が 0.3〜2 秒おき)。quietUntil より前は鳴らさない。
  * busyUntil を渡すと、そこから先はまばら(5〜15 秒おき)にする(にぎやかな頭と、落ち着いた後半)
  */
+/**
+ * 長い音(60〜90分)を作る・書く間も、ときどきテストの作業スレッドを空ける。一気に作ると手元で
+ * 2〜3 秒、約7倍遅い Windows の CI では 1 組で 40 秒ほど止まり、vitest の通信の待ち時間(60 秒)を
+ * 超えて「Timeout calling onTaskUpdate」で全体が失敗していた(試験はどれも合格なのに終了コードが 1)
+ */
+const YIELD_EVERY = 1 << 20
+const yieldThread = (): Promise<void> => new Promise((r) => setImmediate(r))
+
 function world(T: number, quietUntil: number, seed: number, busyUntil = Infinity): Burst[] {
   const r = rng(seed)
   const out: Burst[] = []
@@ -59,17 +68,20 @@ function world(T: number, quietUntil: number, seed: number, busyUntil = Infinity
  * その機材で録った音。機材の時刻 tc の音は、共通の時刻 start + tc × rate の音(rate = 機材の 1 秒が共通の何秒か)。
  * 雑音は機材ごとに別
  */
-function record(
+async function record(
   bursts: readonly Burst[],
   start: number,
   length: number,
   rate: number,
   noiseSeed: number
-): Float32Array {
+): Promise<Float32Array> {
   const n = Math.round(length * SR)
   const out = new Float32Array(n)
   const nz = rng(noiseSeed)
-  for (let i = 0; i < n; i++) out[i] = (nz() - 0.5) * 0.004
+  for (let i = 0; i < n; i++) {
+    out[i] = (nz() - 0.5) * 0.004
+    if (i % YIELD_EVERY === 0) await yieldThread()
+  }
   for (const b of bursts) {
     const tc = (b.t - start) / rate
     if (tc < 0 || tc >= length) continue
@@ -84,7 +96,7 @@ function record(
   return out
 }
 
-function writeWav(path: string, x: Float32Array): void {
+async function writeWav(path: string, x: Float32Array): Promise<void> {
   const buf = Buffer.alloc(44 + x.length * 2)
   buf.write('RIFF', 0)
   buf.writeUInt32LE(36 + x.length * 2, 4)
@@ -99,8 +111,11 @@ function writeWav(path: string, x: Float32Array): void {
   buf.write('data', 36)
   buf.writeUInt32LE(x.length * 2, 40)
   const view = new Int16Array(buf.buffer, buf.byteOffset + 44, x.length)
-  for (let i = 0; i < x.length; i++) view[i] = Math.round(Math.max(-1, Math.min(1, x[i])) * 32767)
-  writeFileSync(path, buf)
+  for (let i = 0; i < x.length; i++) {
+    view[i] = Math.round(Math.max(-1, Math.min(1, x[i])) * 32767)
+    if (i % YIELD_EVERY === 0) await yieldThread()
+  }
+  await writeFile(path, buf)
 }
 
 /** カメラの音として AAC 48kHz の m4a にする(マイクの WAV とは別の形式・別の標本化周波数) */
@@ -108,7 +123,7 @@ const execFileAsync = promisify(execFile)
 
 async function writeAac(path: string, x: Float32Array, dir: string): Promise<void> {
   const wav = join(dir, 'tmp_cam.wav')
-  writeWav(wav, x)
+  await writeWav(wav, x)
   // 待つ間もテストの作業スレッドを止めない(60分の音の AAC 化は 30 秒ほどかかる)
   await execFileAsync(ffmpegPath, [
     '-y',
@@ -174,11 +189,11 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     const CAM_LEN = 3500
     const w = world(T, 300, 7)
     const micPath = join(dir, 'quiet_mic.wav')
-    writeWav(micPath, record(w, 0, T, 1, 11))
+    await writeWav(micPath, await record(w, 0, T, 1, 11))
     const errors: number[] = []
     for (const seed of [21, 22, 23, 24, 25, 26]) {
       const camPath = join(dir, `quiet_cam${seed}.m4a`)
-      await writeAac(camPath, record(w, CAM_START, CAM_LEN, 1, seed), dir)
+      await writeAac(camPath, await record(w, CAM_START, CAM_LEN, 1, seed), dir)
       const report = await syncInProcess([
         input('mic', micPath, 'mic', T),
         input('cam', camPath, 'camera', CAM_LEN)
@@ -203,8 +218,8 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     const w = world(T, 0, 8, 900)
     const micPath = join(dir, 'long_mic.wav')
     const camPath = join(dir, 'long_cam.m4a')
-    writeWav(micPath, record(w, 0, T, 1, 12))
-    await writeAac(camPath, record(w, CAM_START, CAM_LEN, RATE, 31), dir)
+    await writeWav(micPath, await record(w, 0, T, 1, 12))
+    await writeAac(camPath, await record(w, CAM_START, CAM_LEN, RATE, 31), dir)
     const report = await syncInProcess([
       input('mic', micPath, 'mic', T),
       input('cam', camPath, 'camera', CAM_LEN)
@@ -226,11 +241,11 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     const starts = [6, 6 + CHAPTER * RATE + 0.033, 6 + 2 * CHAPTER * RATE + 0.054]
     const w = world(T, 0, 9)
     const micPath = join(dir, 'chap_mic.wav')
-    writeWav(micPath, record(w, 0, T, 1, 13))
+    await writeWav(micPath, await record(w, 0, T, 1, 13))
     const files = [input('mic', micPath, 'mic', T)]
     for (let k = 0; k < 3; k++) {
       const camPath = join(dir, `GX0${k + 1}0042.m4a`)
-      await writeAac(camPath, record(w, starts[k], CHAPTER, RATE, 40 + k), dir)
+      await writeAac(camPath, await record(w, starts[k], CHAPTER, RATE, 40 + k), dir)
       files.push(input(`cam${k}`, camPath, 'camera', CHAPTER))
     }
     const report = await syncInProcess(files)
@@ -252,12 +267,12 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     const T = 120
     const w = world(T, 0, 11)
     const micPath = join(dir, 'late_mic.wav')
-    writeWav(micPath, record(w, 0, T, 1, 21))
+    await writeWav(micPath, await record(w, 0, T, 1, 21))
     // カメラの音は 0.35 秒から(映像は 0 秒から)
     const audioWav = join(dir, 'late_cam_audio.wav')
-    writeWav(audioWav, record(w, 0.35, T - 0.35, 1, 22))
+    await writeWav(audioWav, await record(w, 0.35, T - 0.35, 1, 22))
     const camPath = join(dir, 'late_cam.mp4')
-    execFileSync(ffmpegPath, [
+    await execFileAsync(ffmpegPath, [
       '-y',
       '-v',
       'error',
