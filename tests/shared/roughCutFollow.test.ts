@@ -7,6 +7,7 @@ import {
   type TimelineSpan
 } from '@shared/roughCut/follow'
 import { NASTY_NUMBERS, seeded } from '../helpers/boundary'
+import { perfBudget } from '../perfBudget'
 
 /**
  * 本編を手で詰めたときに、ピンマイク・自動テロップを付いていかせる時刻の対応。
@@ -154,6 +155,6 @@ describe('roughCut/follow — 索引で絞っても総当たりと同じ結果',
     for (let i = 0; i < 12000; i++) mapTimelineRange(segs, i * 0.35, i * 0.35 + 1.8)
     // 実測(他の処理と CPU を取り合う中で): 索引あり 51ms / 総当たり 681ms
     // (2,000 × 2,000 の組 + 1万2千 × 2,000 回)。総当たりに戻ると必ず超える
-    expect(performance.now() - t0).toBeLessThan(400)
+    expect(performance.now() - t0).toBeLessThan(perfBudget(400))
   })
 })

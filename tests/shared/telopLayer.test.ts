@@ -4,6 +4,7 @@ import { planTelopRuns, telopConcatList, telopItemSource } from '@shared/telop/l
 import type { Sequence, TelopItem } from '@shared/sequence/types'
 import type { Project, TextStyle } from '@shared/types'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
+import { perfBudget } from '../perfBudget'
 
 const telop = (
   id: string,
@@ -87,7 +88,7 @@ describe('planTelopRuns — 絵が変わる区間だけを並べる', () => {
     )
     const t0 = performance.now()
     const runs = planTelopRuns(seq([items]), 1080)
-    expect(performance.now() - t0).toBeLessThan(1000)
+    expect(performance.now() - t0).toBeLessThan(perfBudget(1000))
     expect(runs.length).toBe(400 * 7 + 800)
   })
 

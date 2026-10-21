@@ -7,6 +7,7 @@ import { balancedLineEnds, breakScore } from '../../src/shared/telop/polish'
 import { planCg } from '../../src/shared/finish/cg'
 import { buildScenes, type TimedLine } from '../../src/shared/structure/scenes'
 import { applyCutOverrides } from '../../src/shared/roughCut/overrides'
+import { perfBudget } from '../perfBudget'
 
 describe('取り込み〜仮編集の境目', () => {
   it('カメラ1台・1本だけの回も、基準の素材として並べる', () => {
@@ -87,7 +88,7 @@ describe('取り込み〜仮編集の境目', () => {
     }))
     let t = performance.now()
     buildScenes(lines, { start: 0, end: 10800 })
-    expect(performance.now() - t).toBeLessThan(400)
+    expect(performance.now() - t).toBeLessThan(perfBudget(400))
     const pieces = Array.from({ length: 2000 }, (_, i) => ({
       start: i * 5,
       end: i * 5 + 4,
@@ -96,7 +97,7 @@ describe('取り込み〜仮編集の境目', () => {
     const removed = Array.from({ length: 2000 }, (_, i) => ({ start: i * 5 + 1, end: i * 5 + 2 }))
     t = performance.now()
     const kept = applyCutOverrides(pieces, { removed, added: [], angles: [] })
-    expect(performance.now() - t).toBeLessThan(300)
+    expect(performance.now() - t).toBeLessThan(perfBudget(300))
     expect(kept).toHaveLength(4000)
   })
 })
