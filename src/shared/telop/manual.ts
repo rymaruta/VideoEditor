@@ -398,15 +398,23 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
   const hasSource = parsed.every((p) => p.vis.every((c) => c.src !== null))
   // 今あるテロップと新しい枚が同じタイムラインか(同じ番号の直していない枚が、同じ時刻に、同じ文
   // (またはその一部)で出る)。同じなら前の版の修正を今の時刻の重なりで探せる。違う(ショート・カットを
-  // 変えた)なら、時刻の重なりは別の言葉を指すので、これまでどおり何枚目かで当てる
+  // 変えた)なら、時刻の重なりは別の言葉を指すので、これまでどおり何枚目かで当てる。
+  // 文が同じなら終わりの時刻もそろう(別のカットで、同じ文の枚が偶然 0.05 秒以内に始まっただけで同じと
+  // みなし、前の版の修正を別の言葉に当てて、直した言葉が自動の枚にも出ていた)
   const sameTimeline = existingAuto.some((o) =>
     pieces.some((p) => {
       if ((p.utteranceChunk ?? 0) !== (o.utteranceChunk ?? 0)) return false
       if (Math.abs(p.startTime - o.startTime) > 0.05) return false
       const a = flatText(o.text)
       const b = flatText(p.text)
+      if (a === b) return Math.abs(p.endTime - o.endTime) <= 0.05
       return a.includes(b) || b.includes(a)
     })
+  )
+  // 今のタイムラインに無い前の版の修正(覚えておいただけのもの)が何枚目かで当たる枚。時刻で当てる修正は
+  // 自分の番号でないこの枚を取らない(延ばした修正が次の枚まで取り、その修正が消えていた。前の版は両方を出す)
+  const byChunkOnly = new Set(
+    edits.filter((e) => !e.at && !(e.src && hasSource)).map((e) => e.chunk)
   )
   const tMid = (c: Char): number => (c.t0 + c.t1) / 2
   const claimWith = (e: EditEntry, test: (c: Char, chunk: number) => boolean): number => {
@@ -427,7 +435,15 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     }
     // 前の版の修正(範囲なし)・範囲の分からない枚: 枚の分け方が変わったなら今の時刻の重なりで、
     // 見つからなければ(ショートなど、別のタイムライン)これまでどおり何枚目かで当てる
-    if (e.at && sameTimeline && claimWith(e, (c) => inRange(tMid(c), e.at!)) > 0) continue
+    if (
+      e.at &&
+      sameTimeline &&
+      claimWith(
+        e,
+        (c, chunk) => inRange(tMid(c), e.at!) && (chunk === e.chunk || !byChunkOnly.has(chunk))
+      ) > 0
+    )
+      continue
     claimWith(e, (_, chunk) => chunk === e.chunk)
   }
   // 当てた文字が言いよどみの言葉の切れ端だけ(枚の境目で「えっ|と」に分かれた「と」)の修正は出さない。

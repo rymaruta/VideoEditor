@@ -173,119 +173,133 @@ function makeProject(r: () => number) {
 }
 
 describe('仮編集の発言テロップの性質(辞書・言いよどみ・ランダムなカット)', () => {
-  it('聞こえる言葉はちょうど1回、声に遅れず・声より早く消えない', () => {
-    const N = Number(process.env.TELOP_PLAN_SEEDS ?? 300)
-    const fails: string[] = []
-    let telopCount = 0
-    for (let seed = 1; seed <= N; seed++) {
-      const r = rng(seed * 104729)
-      const p = makeProject(r)
-      for (let step = 0; step < 4; step++) {
-        const n = 1 + Math.floor(r() * 3)
-        const cuts = Array.from({ length: n * 2 }, () => r() * p.total).sort((a, b) => a - b)
-        const scenes = Array.from({ length: n }, (_, i) => ({
-          id: `s${i}`,
-          start: cuts[i * 2],
-          end: Math.max(cuts[i * 2] + 0.5, cuts[i * 2 + 1]),
-          lines: [],
-          speech: 0
-        }))
-        const lineChars = 4 + Math.floor(r() * 12)
-        const res = planRoughCut(
-          p.project,
-          info,
-          scenes,
-          scenes.map((s) => ({
-            sceneId: s.id,
-            score: 100,
-            kind: 'highlight' as const,
-            reason: ''
-          })),
-          p.activity,
-          {
-            targetSec: 0,
-            keep: Object.fromEntries(scenes.map((s) => [s.id, true])),
-            styles: [],
-            speechLook: { style: defaultTextStyle() },
-            kind: 'game',
-            policy: 'light',
-            dictionary: p.dict,
-            style: { telopLineChars: lineChars } as never
-          }
-        )
-        const tag = `seed${seed}/step${step}`
-        const telops = res.telops as Omit<TextOverlay, 'id'>[]
-        const spans = res.cut.spans
-        telopCount += telops.length
-        const show = (): string => telops.map((t) => t.text.replace(/\n/g, '')).join(' | ')
-        // 出た回数
-        const count = new Map<string, number>()
-        for (const t of telops) for (const c of toks(t)) count.set(c, (count.get(c) ?? 0) + 1)
-        for (const [c, k] of count) if (k > 1) fails.push(`${tag} 「${c}」x${k} :: ${show()}`)
-        // 聞こえる文字(枚ごとに、0.3 秒以上残る区間で話している文字)
-        const inSpan = (x: number): boolean =>
-          spans.some((sp) => x >= sp.start - 1e-6 && x < sp.end)
-        const expected = new Set<string>()
-        const excused = new Set<string>()
-        for (const u of p.project.transcript ?? []) {
-          for (const ch of utteranceToTelopChunks(u, {
-            dictionary: p.dict,
-            maxLineChars: lineChars
-          })) {
-            const longEnough = spans.filter(
-              (sp) => Math.min(ch.sourceEnd, sp.end) - Math.max(ch.sourceStart, sp.start) >= 0.3
-            )
-            for (const c of toks({ text: ch.text, utteranceId: u.id })) {
-              // 言葉の真ん中が残した区間に入る言葉が聞こえる(辞書で直した文字は直す前の言葉で見る)
-              const w = c.startsWith('R:') ? p.replyWord.get(u.id)! : p.wordOf.get(c)!
-              const mid = (w.start + w.end) / 2
-              if (!inSpan(mid)) {
-                // 言葉がカットに掛かり、言葉の途中で分けた枚(辞書で長くなって分けた枚・言葉の途中で区切った枚)が
-                // まるごと残った所: その枚の文字の声は残した区間で聞こえるので、出てもよい(出なくてもよい)
-                const v = p.voice.get(c) ?? [w.start, w.end]
-                if (spans.some((sp) => v[0] < sp.end && v[1] > sp.start)) excused.add(c)
-                continue
+  it(
+    '聞こえる言葉はちょうど1回、声に遅れず・声より早く消えない',
+    async () => {
+      const N = Number(process.env.TELOP_PLAN_SEEDS ?? 300)
+      const fails: string[] = []
+      let telopCount = 0
+      // 既定の数より後で見つかった通り(いつも回す)。3729: 辞書で長くして分けた枚の言葉がカットに掛かり、
+      // 落としていない側へ続く言葉の真ん中を残した区間の中とみなして、声が区間の外の文字まで出た
+      const FIXED_SEEDS = [3729]
+      for (const seed of [
+        ...Array.from({ length: N }, (_, i) => i + 1),
+        ...FIXED_SEEDS.filter((x) => x > N)
+      ]) {
+        // 長く続けて回すとテストの作業スレッドが応答できなくなるので、ときどき空ける
+        if (seed % 100 === 0) await new Promise((r) => setTimeout(r, 0))
+        const r = rng(seed * 104729)
+        const p = makeProject(r)
+        for (let step = 0; step < 4; step++) {
+          const n = 1 + Math.floor(r() * 3)
+          const cuts = Array.from({ length: n * 2 }, () => r() * p.total).sort((a, b) => a - b)
+          const scenes = Array.from({ length: n }, (_, i) => ({
+            id: `s${i}`,
+            start: cuts[i * 2],
+            end: Math.max(cuts[i * 2] + 0.5, cuts[i * 2 + 1]),
+            lines: [],
+            speech: 0
+          }))
+          const lineChars = 4 + Math.floor(r() * 12)
+          const res = planRoughCut(
+            p.project,
+            info,
+            scenes,
+            scenes.map((s) => ({
+              sceneId: s.id,
+              score: 100,
+              kind: 'highlight' as const,
+              reason: ''
+            })),
+            p.activity,
+            {
+              targetSec: 0,
+              keep: Object.fromEntries(scenes.map((s) => [s.id, true])),
+              styles: [],
+              speechLook: { style: defaultTextStyle() },
+              kind: 'game',
+              policy: 'light',
+              dictionary: p.dict,
+              style: { telopLineChars: lineChars } as never
+            }
+          )
+          const tag = `seed${seed}/step${step}`
+          const telops = res.telops as Omit<TextOverlay, 'id'>[]
+          const spans = res.cut.spans
+          telopCount += telops.length
+          const show = (): string => telops.map((t) => t.text.replace(/\n/g, '')).join(' | ')
+          // 出た回数
+          const count = new Map<string, number>()
+          for (const t of telops) for (const c of toks(t)) count.set(c, (count.get(c) ?? 0) + 1)
+          for (const [c, k] of count) if (k > 1) fails.push(`${tag} 「${c}」x${k} :: ${show()}`)
+          // 聞こえる文字(枚ごとに、0.3 秒以上残る区間で話している文字)
+          const inSpan = (x: number): boolean =>
+            spans.some((sp) => x >= sp.start - 1e-6 && x < sp.end)
+          const expected = new Set<string>()
+          const excused = new Set<string>()
+          for (const u of p.project.transcript ?? []) {
+            for (const ch of utteranceToTelopChunks(u, {
+              dictionary: p.dict,
+              maxLineChars: lineChars
+            })) {
+              const longEnough = spans.filter(
+                (sp) => Math.min(ch.sourceEnd, sp.end) - Math.max(ch.sourceStart, sp.start) >= 0.3
+              )
+              for (const c of toks({ text: ch.text, utteranceId: u.id })) {
+                // 言葉の真ん中が残した区間に入る言葉が聞こえる(辞書で直した文字は直す前の言葉で見る)
+                const w = c.startsWith('R:') ? p.replyWord.get(u.id)! : p.wordOf.get(c)!
+                const mid = (w.start + w.end) / 2
+                if (!inSpan(mid)) {
+                  // 言葉がカットに掛かり、言葉の途中で分けた枚(辞書で長くなって分けた枚・言葉の途中で区切った枚)が
+                  // まるごと残った所: その枚の文字の声は残した区間で聞こえるので、出てもよい(出なくてもよい)
+                  const v = p.voice.get(c) ?? [w.start, w.end]
+                  if (spans.some((sp) => v[0] < sp.end && v[1] > sp.start)) excused.add(c)
+                  continue
+                }
+                if (longEnough.some((sp) => mid >= sp.start - 1e-6 && mid < sp.end)) expected.add(c)
+                else excused.add(c)
               }
-              if (longEnough.some((sp) => mid >= sp.start - 1e-6 && mid < sp.end)) expected.add(c)
-              else excused.add(c)
             }
           }
-        }
-        for (const c of expected)
-          if ((count.get(c) ?? 0) !== 1) fails.push(`${tag} 「${c}」が出ない :: ${show()}`)
-        for (const c of count.keys())
-          if (!expected.has(c) && !excused.has(c))
-            fails.push(`${tag} 聞こえない「${c}」が出た :: ${show()}`)
-        // 時刻: 文字の声(その枚の区間の中)に対して
-        for (const t of telops) {
-          const mid = (t.startTime + t.endTime) / 2
-          const sp = spans.find(
-            (s) => mid >= s.timeline - 1e-6 && mid <= s.timeline + (s.end - s.start) + 1e-6
-          )
-          if (!sp) continue
-          let lo = Infinity
-          let hi = -Infinity
-          for (const c of kanji(t.text)) {
-            const v = p.voice.get(c)
-            if (!v) continue
-            const a = Math.max(v[0], sp.start)
-            const b = Math.min(v[1], sp.end)
-            if (b <= a) continue
-            lo = Math.min(lo, sp.timeline + a - sp.start)
-            hi = Math.max(hi, sp.timeline + b - sp.start)
-          }
-          if (!(lo < hi)) continue
-          if (t.startTime - lo > 0.15)
-            fails.push(`${tag} ${t.text.replace(/\n/g, '')} 遅れ ${(t.startTime - lo).toFixed(3)}s`)
-          if (hi - t.endTime > 0.15)
-            fails.push(
-              `${tag} ${t.text.replace(/\n/g, '')} 早く消える ${(hi - t.endTime).toFixed(3)}s`
+          for (const c of expected)
+            if ((count.get(c) ?? 0) !== 1) fails.push(`${tag} 「${c}」が出ない :: ${show()}`)
+          for (const c of count.keys())
+            if (!expected.has(c) && !excused.has(c))
+              fails.push(`${tag} 聞こえない「${c}」が出た :: ${show()}`)
+          // 時刻: 文字の声(その枚の区間の中)に対して
+          for (const t of telops) {
+            const mid = (t.startTime + t.endTime) / 2
+            const sp = spans.find(
+              (s) => mid >= s.timeline - 1e-6 && mid <= s.timeline + (s.end - s.start) + 1e-6
             )
+            if (!sp) continue
+            let lo = Infinity
+            let hi = -Infinity
+            for (const c of kanji(t.text)) {
+              const v = p.voice.get(c)
+              if (!v) continue
+              const a = Math.max(v[0], sp.start)
+              const b = Math.min(v[1], sp.end)
+              if (b <= a) continue
+              lo = Math.min(lo, sp.timeline + a - sp.start)
+              hi = Math.max(hi, sp.timeline + b - sp.start)
+            }
+            if (!(lo < hi)) continue
+            if (t.startTime - lo > 0.15)
+              fails.push(
+                `${tag} ${t.text.replace(/\n/g, '')} 遅れ ${(t.startTime - lo).toFixed(3)}s`
+              )
+            if (hi - t.endTime > 0.15)
+              fails.push(
+                `${tag} ${t.text.replace(/\n/g, '')} 早く消える ${(hi - t.endTime).toFixed(3)}s`
+              )
+          }
         }
       }
-    }
-    if (fails.length > 0) console.log(`${fails.length} fails\n${fails.slice(0, 12).join('\n')}`)
-    expect(fails).toEqual([])
-    expect(telopCount).toBeGreaterThan(N * 4)
-  }, 120000)
+      if (fails.length > 0) console.log(`${fails.length} fails\n${fails.slice(0, 12).join('\n')}`)
+      expect(fails).toEqual([])
+      expect(telopCount).toBeGreaterThan(N * 4)
+    },
+    Math.max(120000, Number(process.env.TELOP_PLAN_SEEDS ?? 300) * 100)
+  )
 })

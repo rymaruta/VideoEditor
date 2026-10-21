@@ -377,6 +377,8 @@ interface VisibleChar {
   word: number
   /** 言いよどみの言葉(まるごとなら整えると消える言葉)の文字か */
   fill: boolean
+  /** 辞書で直した文字か */
+  dict: boolean
 }
 
 function visibleInfo(
@@ -401,7 +403,8 @@ function visibleInfo(
         a,
         b,
         word: wordAt((a + b) / 2),
-        fill: !t.run[unit] && fillerWord(wordAt((a + b) / 2))
+        fill: !t.run[unit] && fillerWord(wordAt((a + b) / 2)),
+        dict: t.run[unit]
       })
     }
     unit += c.length
@@ -532,7 +535,12 @@ export function clipTelopChunk(
   chunk: TelopChunk,
   from: number,
   to: number,
-  options: ChunkOptions = {}
+  options: ChunkOptions = {},
+  /**
+   * 残した区間そのもの(素材の秒)。`from`・`to` は落とした側だけなので、辞書で長くして分けた枚の、
+   * 落としていない側へ続く言葉の文字を選ぶのに使う
+   */
+  kept?: [number, number]
 ): {
   text: string
   times?: number[]
@@ -586,7 +594,16 @@ export function clipTelopChunk(
       options
     )
     const all = visibleInfo(polished, timed, fillerWords(u.words))
-    const keepVis = all.map((v, i) => i >= skip && i < skip + count && inside(v.word))
+    // 辞書で直した文字は、言葉の真ん中が残した区間に入るか、その文字の声(直す前の言葉を等分した分)が
+    // 残した区間に掛かるときだけ。言葉の単位だけで選ぶと、落としていない側(`from`・`to` が無限)へ続く
+    // 言葉の真ん中を区間の中とみなし、声が区間の外の文字まで出ていた
+    const audible = (v: VisibleChar): boolean => {
+      if (!kept || !v.dict) return true
+      const w = u.words[v.word]
+      const mid = w ? (w.start + w.end) / 2 : (v.lo + v.hi) / 2
+      return (mid >= kept[0] - 1e-6 && mid < kept[1] + 1e-6) || (v.lo < kept[1] && v.hi > kept[0])
+    }
+    const keepVis = all.map((v, i) => i >= skip && i < skip + count && inside(v.word) && audible(v))
     let text = ''
     let k = 0
     for (const c of polished.text) {

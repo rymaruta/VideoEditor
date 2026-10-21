@@ -253,7 +253,8 @@ const KNOWN_KINDS = [
   'k2-same-chunk-as-old',
   'k3-filler-only-chunk',
   'k4-old-chunk-cut-now',
-  'k5-legacy-edit-by-time'
+  'k5-legacy-edit-by-time',
+  'k6-old-auto-same-text'
 ]
 /**
  * 1通りごとに前の版と比べる誤りの種類: 消した言葉が戻る・直した言葉が自動の枚にも出る・言葉が消える・
@@ -375,6 +376,8 @@ function check(
     // 3. 前の版は修正を出した枚が、今の版では言いよどみの切れ端だけの枚(切れ端を直した修正は出さない)
     // 4. 前の版は修正を出した枚が、今の版の仮編集に無く、その枚の言葉も今の版の仮編集に出ない(今の版は
     //    カットの外の言葉・0.3 秒に満たない枚を出さない。長さ 0 の言葉を辞書で長くした枚など)
+    // 6. 前の版も修正を当てていない(見た目だけの修正の文が、前の版の自動の枚の文とたまたま同じで、数えると
+    //    出たことになる)。今の版は同じ番号の枚に、そのうちカットの中で話す文字だけを出すので文が違う
     const shownNew = merged.filter((t) => t.text === text)
     const shownOld = OLD ? OLD.merged.filter((t) => t.text === text).map(chunkOf) : []
     const newChunk = (t: Omit<TextOverlay, 'id'>): boolean =>
@@ -401,7 +404,23 @@ function check(
                       .every((o) => kanji(o.text).every((c) => !pc.has(c)))
                 )
               ? 'k4-old-chunk-cut-now'
-              : null
+              : n === 0 &&
+                  OLD.merged.some((t) => t.text === text) &&
+                  OLD.merged
+                    .filter((t) => t.text === text)
+                    .every((t) => {
+                      if (t.edited) return false
+                      const now = plain.filter((p) => chunkOf(p) === chunkOf(t))
+                      const was = kanji(t.text)
+                      const shown = now.flatMap((p) => kanji(p.text))
+                      return (
+                        now.length > 0 &&
+                        shown.length < was.length &&
+                        shown.every((c) => was.includes(c))
+                      )
+                    })
+                ? 'k6-old-auto-same-text'
+                : null
     if (expected < 0 ? n > 1 : n !== expected)
       fail(
         known ?? (expected === 0 ? 'c-edit-inaudible' : 'c-edit-count'),
@@ -493,6 +512,13 @@ const expand = (p: Gen, cs: Iterable<string>): Set<string> => {
 }
 
 const N = Number(process.env.TELOP_MIGRATE_SEEDS ?? 2000)
+/**
+ * 既定の数より後で見つかった通り(いつも回す)。7153: 別のカットで同じ文の枚が偶然 0.05 秒以内に始まり、
+ * 同じタイムラインとみなして前の版の修正を時刻で当て、直した言葉が自動の枚にも出た。7413: 時刻で当てた
+ * 修正(延ばした枚)が、覚えておいた前の版の修正の番号の枚まで取り、その修正が消えた。7007: 前の版も
+ * 当てていない見た目だけの修正(既知の型 6)
+ */
+const FIXED_SEEDS = [7007, 7153, 7413]
 describe('前の版(c25f5af)で保存した企画の作り直し(辞書・長さ 0 の言葉・相づち)', () => {
   it(
     '前の版のまま作り直すより、消したものが戻る・言葉が消える・修正の回数の誤りが増えない',
@@ -503,7 +529,10 @@ describe('前の版(c25f5af)で保存した企画の作り直し(辞書・長さ
       }
       let paired = 0
       const worse: string[] = []
-      for (let seed = ONLY || 1; seed <= (ONLY || N); seed++) {
+      const seeds = ONLY
+        ? [ONLY]
+        : [...Array.from({ length: N }, (_, i) => i + 1), ...FIXED_SEEDS.filter((x) => x > N)]
+      for (const seed of seeds) {
         // 長く続けて回すとテストの作業スレッドが応答できなくなるので、ときどき空ける
         if (seed % 100 === 0) await new Promise((r) => setTimeout(r, 0))
         const r = rng(seed * 7919)
@@ -724,7 +753,7 @@ describe('前の版(c25f5af)で保存した企画の作り直し(辞書・長さ
         console.log(
           `既知の型(前の版と比べない): ${KNOWN_KINDS.map((k) => `${k} ${pairs.get('NEW:' + k)?.length ?? 0} 件`).join(' / ')}`
         )
-      expect(paired).toBe(ONLY ? 1 : N)
+      expect(paired).toBe(seeds.length)
     },
     Math.max(120000, N * 1000)
   )

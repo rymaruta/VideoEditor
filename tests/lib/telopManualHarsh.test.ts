@@ -540,13 +540,15 @@ const N = Number(process.env.TELOP_HARSH_SEEDS ?? 200)
 describe('人の修正・消した印の性質(厳しい版: 辞書・言いよどみ・句読点・直し直し・取り消し)', () => {
   it(
     '作り直し・保存・ショートを重ねても、言葉が2回出ない・消えない・消したものが戻らない',
-    () => {
+    async () => {
       let merges = 0
       const ONLY = process.env.TELOP_HARSH_SEED ? Number(process.env.TELOP_HARSH_SEED) : 0
       const dbg = (...a: unknown[]): void => {
         if (ONLY) console.log(...a)
       }
       for (let seed = ONLY || 1; seed <= (ONLY || N); seed++) {
+        // 長く続けて回すとテストの作業スレッドが応答できなくなるので、ときどき空ける
+        if (seed % 100 === 0) await new Promise((r) => setTimeout(r, 0))
         const r = rng(seed * 7919)
         const p = makeProject(r)
         GEN = p

@@ -114,6 +114,8 @@ export function telopsFromTranscript(
         { assetId: u.assetId, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd },
         clips
       )
+      // 0.2 秒に満たない枚は出さない。長さ 0 の言葉(認識が時刻を付けられなかった言葉)が続き、1枚分の
+      // 時間が足りないときは、その枚が出ない(既知の制限。仮編集の 0.3 秒未満と同じ)
       if (!r || r.end - r.start < 0.2) continue
       out.push({
         text: chunk.text,

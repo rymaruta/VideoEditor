@@ -454,9 +454,10 @@ export function planRoughCut(
           const start = sp.timeline + (visStart - sp.start)
           // 終わりがカットで落ちた所に掛かるなら、その区間の終わりまで
           const end = sp.timeline + (visEnd - sp.start)
-          // 0.3 秒に満たない枚は出さない。辞書で長さ 0 の言葉を極端に長くして3枚以上に分けると、真ん中の枚が
-          // 0.01 秒ほどしかなく出ないことがある(既知の制限。隣の枚にまとめると枚が何枚目かが変わり、前の版の
-          // 「発話+何枚目か」で覚えた消した印・修正が当たらなくなる。枚の時刻をずらすと順・カットが崩れる)
+          // 0.3 秒に満たない枚は出さない。長さ 0 の言葉(認識が時刻を付けられなかった言葉)が続き、1枚分の
+          // 時間が 0.3 秒に満たないときは、その枚が 0.01〜0.05 秒ほどしかなく出ない(辞書を使わなくても起きる。
+          // 既知の制限。隣の枚にまとめると枚が何枚目かが変わり、前の版の「発話+何枚目か」で覚えた消した印・
+          // 修正が当たらなくなる。枚の時刻をずらすと順・カットが崩れる)
           if (end - start < 0.3) return null
           // 頭・終わりを落とした枚は、残った所で話している言葉だけにする(切れて聞こえない言葉を出さない)。
           // 長さ 0 の言葉の文字は言葉の時刻の前後へ並べるので、枚がカットの中でも言葉の時刻がカットの外なら
@@ -476,7 +477,8 @@ export function planRoughCut(
                 // 外でも残す。辞書で長くなって分けた後ろの枚は、頭が言葉の途中から始まる)
                 cutHead ? toSource(f, sp.start) : -Infinity,
                 cutTail ? toSource(f, sp.end) : Infinity,
-                chunkOptions
+                chunkOptions,
+                [toSource(f, sp.start), toSource(f, sp.end)]
               )
             : {
                 text: chunk.text,
