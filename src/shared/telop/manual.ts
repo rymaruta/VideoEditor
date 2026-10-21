@@ -399,18 +399,31 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
   // 今あるテロップと新しい枚が同じタイムラインか(同じ番号の直していない枚が、同じ時刻に、同じ文
   // (またはその一部)で出る)。同じなら前の版の修正を今の時刻の重なりで探せる。違う(ショート・カットを
   // 変えた)なら、時刻の重なりは別の言葉を指すので、これまでどおり何枚目かで当てる。
-  // 文が同じなら終わりの時刻もそろう(別のカットで、同じ文の枚が偶然 0.05 秒以内に始まっただけで同じと
-  // みなし、前の版の修正を別の言葉に当てて、直した言葉が自動の枚にも出ていた)
-  const sameTimeline = existingAuto.some((o) =>
-    pieces.some((p) => {
-      if ((p.utteranceChunk ?? 0) !== (o.utteranceChunk ?? 0)) return false
-      if (Math.abs(p.startTime - o.startTime) > 0.05) return false
-      const a = flatText(o.text)
-      const b = flatText(p.text)
-      if (a === b) return Math.abs(p.endTime - o.endTime) <= 0.05
-      return a.includes(b) || b.includes(a)
-    })
-  )
+  // 文が同じでも終わりの時刻が違う枚だけでは決めない(別のカットで、同じ文の枚が偶然 0.05 秒以内に始まり、
+  // 前の版の修正を別の言葉に当てていた。頭がぴったりそろっても、発話の途中で別のカットに変わることがある)。
+  // そのときは、ほかの枚(人の直した枚も)の頭か終わりも今の枚とそろうなら同じとみなす(同じカットで1行の
+  // 文字数を変えると、隣の枚の分け方・延ばす量が変わって終わりがずれる)
+  const near = (x: number, y: number): boolean => Math.abs(x - y) <= 0.05
+  const match = (o: TextOverlay, p: T): 'same' | 'start' | null => {
+    if ((p.utteranceChunk ?? 0) !== (o.utteranceChunk ?? 0)) return null
+    if (!near(p.startTime, o.startTime)) return null
+    const a = flatText(o.text)
+    const b = flatText(p.text)
+    if (a === b) return near(p.endTime, o.endTime) ? 'same' : 'start'
+    return a.includes(b) || b.includes(a) ? 'same' : null
+  }
+  const sameTimeline =
+    existingAuto.some((o) => pieces.some((p) => match(o, p) === 'same')) ||
+    existingAuto.some(
+      (o) =>
+        pieces.some((p) => match(o, p) === 'start') &&
+        [
+          ...existingAuto
+            .filter((o2) => o2 !== o)
+            .map((o2) => ({ start: o2.startTime, end: o2.endTime })),
+          ...edits.flatMap((e) => (e.at ? [e.at] : []))
+        ].some((r) => pieces.some((p) => near(p.startTime, r.start) || near(p.endTime, r.end)))
+    )
   // 今のタイムラインに無い前の版の修正(覚えておいただけのもの)が何枚目かで当たる枚。時刻で当てる修正は
   // 自分の番号でないこの枚を取らない(延ばした修正が次の枚まで取り、その修正が消えていた。前の版は両方を出す)
   const byChunkOnly = new Set(
@@ -435,13 +448,16 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     }
     // 前の版の修正(範囲なし)・範囲の分からない枚: 枚の分け方が変わったなら今の時刻の重なりで、
     // 見つからなければ(ショートなど、別のタイムライン)これまでどおり何枚目かで当てる
+    // 時刻の重なりが、何枚目かで当てる修正の枚にしか無いなら、その枚を取る(何枚目かで当てると、自分の
+    // 番号の枚の別の言葉を覆って、聞こえる言葉が消えていた)
     if (
       e.at &&
       sameTimeline &&
-      claimWith(
+      (claimWith(
         e,
         (c, chunk) => inRange(tMid(c), e.at!) && (chunk === e.chunk || !byChunkOnly.has(chunk))
-      ) > 0
+      ) > 0 ||
+        claimWith(e, (c) => inRange(tMid(c), e.at!)) > 0)
     )
       continue
     claimWith(e, (_, chunk) => chunk === e.chunk)
