@@ -49,6 +49,16 @@ const info: MulticamInfo = {
 }
 const FILLERS = ['えー、', 'あのー、', 'えっと、', 'まあ、', 'えーと、']
 const kanji = (s: string): string[] => [...s].filter((c) => /\p{Script=Han}/u.test(c))
+/** 相づち・言いよどみに似た本当の言葉(言いよどみとして消さない) */
+const REPLIES = ['そう', 'うん', 'ええ', 'あの', 'あと', 'まま', 'はい', 'えっ', 'そうそう']
+/** テロップの言葉の印。漢字は1文字ずつどれも違う字。相づちだけの発話のテロップは「R:発話」 */
+const toks = (t: { text: string; utteranceId?: string }): string[] => {
+  const flat = t.text.replace(/[\s、。]/g, '')
+  return [
+    ...kanji(t.text),
+    ...(t.utteranceId?.startsWith('r') && REPLIES.includes(flat) ? [`R:${t.utteranceId}`] : [])
+  ]
+}
 type Word = { text: string; start: number; end: number }
 
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
@@ -61,11 +71,16 @@ function makeProject(r: () => number) {
   const voice = new Map<string, [number, number]>()
   /** 文字 → その文字の言葉(辞書で直した文字は直す前の言葉) */
   const wordOf = new Map<string, Word>()
-  const transcript = Array.from({ length: 4 }, (_, k) => {
+  /** 相づちの発話 → その言葉 */
+  const replyWord = new Map<string, Word>()
+  const transcript: Project['transcript'] & object = []
+  const replies = [...REPLIES].sort(() => r() - 0.5)
+  for (let k = 0; k < 4; k++) {
     const n = 4 + Math.floor(r() * 10)
     const words: Word[] = []
     const push = (text: string, to = ''): void => {
-      const d = (0.12 + r() * 0.2) * [...text].length * (r() < 0.2 ? 3 : 1)
+      // 長さ 0 の言葉も混ぜる(Whisper の語の時刻は 0.02 秒刻みで、長さ 0 がよく出る)
+      const d = r() < 0.08 ? 0 : (0.12 + r() * 0.2) * [...text].length * (r() < 0.2 ? 3 : 1)
       const word = { text, start: t, end: t + d }
       words.push(word)
       for (const c of [...text, ...to]) wordOf.set(c, word)
@@ -103,7 +118,7 @@ function makeProject(r: () => number) {
       push(w, to)
     }
     t += 1 + r() * 2
-    return {
+    transcript.push({
       id: `u${k}`,
       assetId: 'MA',
       speaker: 'A',
@@ -112,8 +127,25 @@ function makeProject(r: () => number) {
       text: words.map((w) => w.text).join(''),
       words,
       overlap: false
+    })
+    if (replies.length > 0 && r() < 0.4) {
+      const text = replies.pop()! + (r() < 0.2 ? '、' : '')
+      const d = r() < 0.3 ? 0 : 0.2 + r() * 0.5
+      const word = { text, start: t, end: t + d }
+      replyWord.set(`r${k}`, word)
+      transcript.push({
+        id: `r${k}`,
+        assetId: 'MA',
+        speaker: 'A',
+        sourceStart: t,
+        sourceEnd: t + d,
+        text,
+        words: [word],
+        overlap: false
+      })
+      t += d + 1 + r() * 2
     }
-  })
+  }
   const activity = new Uint8Array(400 * TURN_RATE)
   for (const u of transcript)
     activity.fill(1, Math.floor(u.sourceStart * TURN_RATE), Math.ceil(u.sourceEnd * TURN_RATE))
@@ -129,7 +161,7 @@ function makeProject(r: () => number) {
     transcript,
     multicam: info
   } as unknown as Project
-  return { project, total: t, activity, dict, voice, wordOf }
+  return { project, total: t, activity, dict, voice, wordOf, replyWord }
 }
 
 describe('仮編集の発言テロップの性質(辞書・言いよどみ・ランダムなカット)', () => {
@@ -180,7 +212,7 @@ describe('仮編集の発言テロップの性質(辞書・言いよどみ・ラ
         const show = (): string => telops.map((t) => t.text.replace(/\n/g, '')).join(' | ')
         // 出た回数
         const count = new Map<string, number>()
-        for (const t of telops) for (const c of kanji(t.text)) count.set(c, (count.get(c) ?? 0) + 1)
+        for (const t of telops) for (const c of toks(t)) count.set(c, (count.get(c) ?? 0) + 1)
         for (const [c, k] of count) if (k > 1) fails.push(`${tag} 「${c}」x${k} :: ${show()}`)
         // 聞こえる文字(枚ごとに、0.3 秒以上残る区間で話している文字)
         const inSpan = (x: number): boolean =>
@@ -195,14 +227,14 @@ describe('仮編集の発言テロップの性質(辞書・言いよどみ・ラ
             const longEnough = spans.filter(
               (sp) => Math.min(ch.sourceEnd, sp.end) - Math.max(ch.sourceStart, sp.start) >= 0.3
             )
-            for (const c of kanji(ch.text)) {
+            for (const c of toks({ text: ch.text, utteranceId: u.id })) {
               // 言葉の真ん中が残した区間に入る言葉が聞こえる(辞書で直した文字は直す前の言葉で見る)
-              const w = p.wordOf.get(c)!
+              const w = c.startsWith('R:') ? p.replyWord.get(u.id)! : p.wordOf.get(c)!
               const mid = (w.start + w.end) / 2
               if (!inSpan(mid)) {
                 // 言葉がカットに掛かり、言葉の途中で分けた枚(辞書で長くなって分けた枚・言葉の途中で区切った枚)が
                 // まるごと残った所: その枚の文字の声は残した区間で聞こえるので、出てもよい(出なくてもよい)
-                const v = p.voice.get(c)!
+                const v = p.voice.get(c) ?? [w.start, w.end]
                 if (spans.some((sp) => v[0] < sp.end && v[1] > sp.start)) excused.add(c)
                 continue
               }

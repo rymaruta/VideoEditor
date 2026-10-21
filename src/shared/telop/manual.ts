@@ -32,6 +32,13 @@ export interface AutoTelopSource {
    * 含むなら、直した言葉を丸ごと当てる(含まないと、消した言葉が戻る・直した文字が2回出る)
    */
   runs?: [number, number, number, number][]
+  /**
+   * 文字ごとの話している長さ(秒。頭〜終わり = `times` ∓ 長さ/2)。切り分けた枚の時刻を声に合わせる
+   * (無いもの(前の版)は、隣の文字との間隔の短い方の半分を受け持つとみなす)
+   */
+  durs?: number[]
+  /** 言いよどみの言葉が枚の境目で分かれて残った切れ端の文字(何文字目か。`TelopChunk.fill`) */
+  fill?: number[]
 }
 
 /** 発言テロップに付ける、作ったときの元の部分(仮編集が付ける。無いのは前の版で作ったもの) */
@@ -72,6 +79,12 @@ export function normalizeAutoSource(raw: unknown): AutoTelopSource | undefined {
             x[3] ?? x[2]
           ])
         }
+      : {}),
+    ...(Array.isArray(r.durs) && r.durs.every((v) => finite(v) && v >= 0)
+      ? { durs: [...(r.durs as number[])] }
+      : {}),
+    ...(Array.isArray(r.fill) && r.fill.every((v) => finite(v))
+      ? { fill: [...(r.fill as number[])] }
       : {})
   }
 }
@@ -154,6 +167,10 @@ interface Char {
   /** 辞書で直した言葉の文字なら、直す前の言葉の最初の文字の時刻と前の版の時刻の候補の頭(`runs`) */
   runT0: number | null
   runG0: number | null
+  /** 話している長さ(秒。分からなければ null) */
+  dur: number | null
+  /** 言いよどみの言葉の切れ端の文字か */
+  fill: boolean
   /** タイムラインの頭・終わり(枚の時間を文字数で割り振る) */
   t0: number
   t1: number
@@ -167,11 +184,13 @@ const flatText = (t: string): string => t.replace(/\s/g, '')
  * 文字が範囲に入るか。話している時刻(文字の真ん中)が入るか、辞書で直した言葉の文字なら、直す前の
  * 言葉の最初の文字の時刻が入るか(前の版はこの時刻で範囲を覚えた。直した言葉は1つのまとまりとして当てる)
  */
-const hits = (c: Char, r: Range): boolean =>
+const hits = (c: Char, r: Range, oldPoint: boolean): boolean =>
   (c.src !== null && inRange(c.src, r)) ||
   (c.runT0 !== null && inRange(c.runT0, r)) ||
-  // 前の版の点のような範囲(直した文字の1つの時刻 ± 0.002 秒)は、その版が付けえた時刻の間に掛かれば当てる
-  (c.runT0 !== null &&
+  // 前の版の点のような範囲(直した文字の1つの時刻 ± 0.002 秒)は、その版が付けえた時刻の間に掛かれば当てる。
+  // 今の版の短い範囲(長さ 0 の言葉「はい」[3.0, 3.0] の枚)には当てない(隣の辞書の言葉まで消えていた)
+  (oldPoint &&
+    c.runT0 !== null &&
     c.runG0 !== null &&
     r.end - r.start < OLD_POINT_SEC &&
     r.end >= c.runG0 - 1e-9 &&
@@ -192,6 +211,21 @@ function runsOfChars(cs: readonly Char[]): [number, number, number, number][] | 
   return out.length > 0 ? out : undefined
 }
 
+/** 文字の並びの、話している長さと言いよどみの切れ端(`AutoTelopSource.durs`・`fill`) */
+function extrasOfChars(cs: readonly Char[]): { durs?: number[]; fill?: number[] } {
+  const fill = cs.map((c, i) => (c.fill ? i : -1)).filter((i) => i >= 0)
+  return {
+    ...(cs.every((c) => c.dur !== null) ? { durs: cs.map((c) => c.dur!) } : {}),
+    ...(fill.length > 0 ? { fill } : {})
+  }
+}
+
+/**
+ * 話している長さを覚えていない枚(前の版)で、文字が長い間の向こうへ受け持つ長さの上限(秒)。
+ * 伸ばした語尾(「ね」1.2 秒)の終わりまでは出し、間の真ん中までは延ばさない
+ */
+const HALF_GAP_CAP = 0.6
+
 /** 枚の文字ごとの時刻 */
 function charsOf(n: Omit<TextOverlay, 'id'> & WithAutoSource): { chars: string[]; vis: Char[] } {
   const chars = [...n.text]
@@ -210,31 +244,36 @@ function charsOf(n: Omit<TextOverlay, 'id'> & WithAutoSource): { chars: string[]
   const d = n.endTime - n.startTime
   const runT0: (number | null)[] = pos.map(() => null)
   const runG0: (number | null)[] = pos.map(() => null)
+  const durs = exact && src?.durs && src.durs.length === L ? src.durs : null
+  const fills = new Set(exact ? (src?.fill ?? []) : [])
   if (exact && src?.runs)
     for (const [f, t, t0, g0] of src.runs)
       for (let k = Math.max(0, f); k < Math.min(L, t); k++) {
         runT0[k] = t0
         runG0[k] = g0 ?? t0
       }
-  // 話している時刻が分かれば、文字の頭・終わりのタイムラインの時刻もそこから決める。文字の受け持ちは
-  // 隣の文字との間隔の短い方の半分まで(長い間の真ん中を境にすると、間の後の枚が声より 0.8 秒早く出て、
-  // 間の前の枚が声より 0.8 秒長く残っていた)。枚の最初・最後の文字は枚の頭・終わりまで。
+  // 話している時刻が分かれば、文字の頭・終わりのタイムラインの時刻もそこから決める。文字の話している
+  // 長さが分かればその頭〜終わり(伸ばした語尾「ね」1.2 秒も、終わりまで出す)、分からなければ(前の版)
+  // 前・後それぞれの隣の文字との間の半分(上限あり。長い間の真ん中を境にすると、間の後の枚が声より 0.8 秒
+  // 早く出て、間の前の枚が声より 0.8 秒長く残っていた)。枚の最初・最後の文字は枚の頭・終わりまで。
   // 分からなければ枚の時間を文字数で割り振る
   if (exact && src) {
     const rate = src.rate && src.rate > 0 ? src.rate : 1
     const toTl = (t: number): number =>
       src.offset !== undefined ? src.offset + t / rate : n.startTime + (t - src.start) / rate
     const clamp = (t: number): number => Math.min(n.endTime, Math.max(n.startTime, t))
-    const half = exact.map((c, k) => {
-      const gaps = [k > 0 ? c - exact[k - 1] : Infinity, k < L - 1 ? exact[k + 1] - c : Infinity]
-      const g = Math.min(...gaps)
-      return Number.isFinite(g) ? Math.max(0, g) / 2 : 0
-    })
+    // 長さが分からなければ、前・後それぞれ隣の文字との間の半分(長い間の向こうへは HALF_GAP_CAP まで)
+    const before = exact.map((c, k) =>
+      durs ? durs[k] / 2 : k > 0 ? Math.min(Math.max(0, c - exact[k - 1]) / 2, HALF_GAP_CAP) : 0
+    )
+    const after = exact.map((c, k) =>
+      durs ? durs[k] / 2 : k < L - 1 ? Math.min(Math.max(0, exact[k + 1] - c) / 2, HALF_GAP_CAP) : 0
+    )
     const t0s: number[] = []
     const t1s: number[] = []
     for (let k = 0; k < L; k++) {
-      const a = k === 0 ? n.startTime : clamp(toTl(exact[k] - half[k]))
-      const b = k === L - 1 ? n.endTime : clamp(toTl(exact[k] + half[k]))
+      const a = k === 0 ? n.startTime : clamp(toTl(exact[k] - before[k]))
+      const b = k === L - 1 ? n.endTime : clamp(toTl(exact[k] + after[k]))
       t0s.push(Math.max(a, k > 0 ? t1s[k - 1] : -Infinity))
       t1s.push(Math.max(b, t0s[k]))
     }
@@ -247,6 +286,8 @@ function charsOf(n: Omit<TextOverlay, 'id'> & WithAutoSource): { chars: string[]
         srcHi: k === L - 1 ? Math.max(src.end, exact[k]) : (exact[k] + exact[k + 1]) / 2,
         runT0: runT0[k],
         runG0: runG0[k],
+        dur: durs ? durs[k] : null,
+        fill: fills.has(k),
         t0: t0s[k],
         t1: t1s[k]
       }))
@@ -261,6 +302,8 @@ function charsOf(n: Omit<TextOverlay, 'id'> & WithAutoSource): { chars: string[]
       srcHi: src ? src.start + ((src.end - src.start) * (k + 1)) / Math.max(1, L) : null,
       runT0: null,
       runG0: null,
+      dur: null,
+      fill: false,
       t0: n.startTime + (d * k) / Math.max(1, L),
       t1: n.startTime + (d * (k + 1)) / Math.max(1, L)
     }))
@@ -424,6 +467,11 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     })
   )
   const tMid = (c: Char): number => (c.t0 + c.t1) / 2
+  // 前の版の点のような範囲か(短い範囲で、辞書で直した文字以外の今出ている文字の時刻を含まない。
+  // 前の版の点の範囲は、辞書で直した文字だけの枚にしか付かなかった)
+  const oldPointOf = (r: Range): boolean =>
+    r.end - r.start < OLD_POINT_SEC &&
+    !parsed.some((p) => p.vis.some((c) => c.runT0 === null && c.src !== null && inRange(c.src, r)))
   const claimWith = (e: EditEntry, test: (c: Char, chunk: number) => boolean): number => {
     let n = 0
     for (const p of parsed)
@@ -437,7 +485,8 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
   for (const e of edits) {
     if (e.src && hasSource) {
       // 範囲で当てる。範囲の言葉が今は無い(カットで落ちた)なら出さない
-      claimWith(e, (c) => hits(c, e.src!))
+      const old = oldPointOf(e.src)
+      claimWith(e, (c) => hits(c, e.src!, old))
       continue
     }
     // 前の版の修正(範囲なし)・範囲の分からない枚: 枚の分け方が変わったなら今の時刻の重なりで、
@@ -445,9 +494,18 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     if (e.at && sameTimeline && claimWith(e, (c) => inRange(tMid(c), e.at!)) > 0) continue
     claimWith(e, (_, chunk) => chunk === e.chunk)
   }
+  // 当てた文字が言いよどみの言葉の切れ端だけ(枚の境目で「えっ|と」に分かれた「と」)の修正は出さない。
+  // 直した言葉はもう聞こえないのに、直した文字が 0.3 秒だけ光っていた。その文字は自動の文字に戻す
+  // (話した文字は消さない。「そう」「うん」のような言葉そのものは切れ端ではないので、修正を出す)
+  for (const e of edits) {
+    const mine = parsed.flatMap((p) => p.vis.filter((c) => c.claim === e))
+    if (mine.length > 0 && mine.every((c) => c.fill)) for (const c of mine) c.claim = undefined
+  }
+  const dismissedOld = dismissedSpans.map((d) => oldPointOf(d))
   for (const p of parsed)
     for (const c of p.vis)
-      if (!c.claim && c.src !== null && dismissedSpans.some((d) => hits(c, d))) c.dropped = true
+      if (!c.claim && c.src !== null && dismissedSpans.some((d, i) => hits(c, d, dismissedOld[i])))
+        c.dropped = true
 
   const out: (T & WithAutoSource)[] = []
   /** 出す枚ごとの、動かしてよい範囲(元の枚の頭〜終わり)と、切り分けて作った枚か */
@@ -489,7 +547,8 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
                 times: known,
                 ...(n.autoSource?.offset !== undefined ? { offset: n.autoSource.offset } : {}),
                 ...(n.autoSource?.rate !== undefined ? { rate: n.autoSource.rate } : {}),
-                ...(runsOfChars(run) ? { runs: runsOfChars(run) } : {})
+                ...(runsOfChars(run) ? { runs: runsOfChars(run) } : {}),
+                ...extrasOfChars(run)
               }
             }
           : {})
@@ -526,14 +585,7 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     }
     flush()
   }
-  const unplaced = new Set<number>()
   for (const [e, x] of placed) {
-    // 当てた文字が言いよどみの切れ端(枚の境目で「えっ|と」に分かれた「と」)だけなら出さない。
-    // 直した言葉はもう聞こえないのに、直した文字が 0.3 秒だけ光っていた
-    if (isFillerFragment(x.texts.join(''))) {
-      unplaced.add(x.at)
-      continue
-    }
     const srcs = x.chars.map((c) => c.src)
     const known = srcs.every((t) => t !== null) ? (srcs as number[]) : null
     const keepWords = x.wholeHost && e.rec.text === x.host.text
@@ -559,7 +611,8 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
               end: Math.max(...x.chars.map((c) => c.srcHi ?? c.src!)),
               text: x.texts.join(''),
               times: known,
-              ...(runsOfChars(x.chars) ? { runs: runsOfChars(x.chars) } : {})
+              ...(runsOfChars(x.chars) ? { runs: runsOfChars(x.chars) } : {}),
+              ...extrasOfChars(x.chars)
             }
           : x.host.autoSource)
     const edited = applyEdit(
@@ -574,10 +627,7 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     }
     out[x.at] = edited
   }
-  return settleCarved(
-    out.filter((_, i) => !unplaced.has(i)),
-    meta.filter((_, i) => !unplaced.has(i))
-  )
+  return settleCarved(out, meta)
 }
 
 interface CarveMeta {
@@ -588,30 +638,6 @@ interface CarveMeta {
   host: unknown
   /** 2枚以上の元の枚にまたがる(直した言葉) */
   multi: boolean
-}
-
-/** 言いよどみの切れ端か(かなだけの、言いよどみの一部。切れ端が2つ並んだ「と」「あ」も) */
-const FILLER_WORDS = [
-  'えーっと',
-  'えーと',
-  'えっと',
-  'あのー',
-  'そのー',
-  'まあ',
-  'うーん',
-  'んーっ',
-  'あー',
-  'えー'
-]
-function isFillerFragment(text: string): boolean {
-  const t = text.replace(/[\s、。,.]/g, '')
-  return (
-    t.length > 0 &&
-    t.length <= 4 &&
-    /^[ぁ-んー]+$/u.test(t) &&
-    (FILLER_WORDS.some((f) => f.includes(t)) ||
-      [...t].every((c) => FILLER_WORDS.some((f) => f.includes(c))))
-  )
 }
 
 /** 切り分けた枚の最短の長さ(秒)。仮編集もこれより短い枚は出さない */
@@ -693,8 +719,19 @@ function settleCarved<T extends Omit<TextOverlay, 'id'> & WithAutoSource>(
         const after = z < list.length - 1 ? list[z + 1].t.startTime : Infinity
         bounds[0] = Math.min(bounds[0], Math.max(block[0].m.lo, before))
         bounds[n] = Math.max(bounds[n], Math.min(block[n - 1].m.hi, after))
-        const total = bounds[n] - bounds[0]
-        const target = fit(MIN) ? MIN : total < MIN * n ? total / n - 1e-9 : null
+        // 0.3 秒ずつ入りきらないなら、入るいちばん長い長さでそろえる(元の枚の境目で動かせない所が
+        // あっても、長さ 0 の枚を残さない)
+        let target: number | null = fit(MIN) ? MIN : null
+        if (target === null) {
+          let lo = 0
+          let hi = MIN
+          for (let k = 0; k < 30; k++) {
+            const mid = (lo + hi) / 2
+            if (fit(mid)) lo = mid
+            else hi = mid
+          }
+          target = lo > 1e-6 ? lo : null
+        }
         next = target === null ? null : fit(target)
         // 広げすぎた分は戻す(頭・終わりの枚は、要る長さだけ空いている所へ出す)
         if (next && target !== null) {
@@ -724,6 +761,8 @@ function settleCarved<T extends Omit<TextOverlay, 'id'> & WithAutoSource>(
       const text = `${a.t.text}${sep}${b.t.text}`
       const times = sa?.times && sb?.times ? [...sa.times, ...sb.times] : undefined
       const shift = sa?.times?.length ?? 0
+      const durs = sa?.durs && sb?.durs ? [...sa.durs, ...sb.durs] : undefined
+      const fill = [...(sa?.fill ?? []), ...(sb?.fill ?? []).map((i) => i + shift)]
       const runs = [
         ...(sa?.runs ?? []),
         ...(sb?.runs ?? []).map(([f, t, t0, g0]): [number, number, number, number] => [
@@ -747,7 +786,9 @@ function settleCarved<T extends Omit<TextOverlay, 'id'> & WithAutoSource>(
                   end: Math.max(sa.end, sb.end),
                   text,
                   ...(times ? { times } : {}),
-                  ...(runs.length > 0 ? { runs } : {})
+                  ...(runs.length > 0 ? { runs } : {}),
+                  ...(durs ? { durs } : { durs: undefined }),
+                  ...(fill.length > 0 ? { fill } : { fill: undefined })
                 }
               }
             : {})

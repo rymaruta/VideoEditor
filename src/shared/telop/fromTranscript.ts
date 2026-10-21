@@ -40,6 +40,16 @@ export interface TelopChunk {
    * 付けて範囲を覚えたので、その範囲を当てるのに使う(`manual.ts`)
    */
   runs?: [number, number, number, number][]
+  /**
+   * 文字ごとの話している長さ(秒、1/1000 に丸める。頭〜終わり = 時刻 ∓ 長さ/2)。切り分けた枚の時刻を
+   * 声に合わせるのに使う(隣の文字との間隔から決めると、伸ばした語尾「ね」の枚が声より早く消えていた)
+   */
+  durs?: number[]
+  /**
+   * 言いよどみの言葉(「えっと、」)が枚の境目で分かれて残った切れ端の文字(何文字目か)。人の修正が
+   * この切れ端だけに当たるときは修正を出さない(言いよどみの言葉そのものでない「そう」「うん」は含まない)
+   */
+  fill?: number[]
   /** 元の文字の範囲と、その整えた文の何文字目から何文字がこの枚か(カットで頭・終わりを落とすのに使う) */
   piece?: { from: number; to: number; skip: number; count: number }
 }
@@ -123,6 +133,9 @@ function spacesFromText(words: readonly AsrWord[], text: string | undefined): bo
  */
 const charTimesCache = new WeakMap<readonly AsrWord[], Map<string, TimedChar[]>>()
 
+/** 長さ 0 の言葉の文字の間隔(秒)。人の修正の範囲の余裕(0.002 秒)より十分長く */
+const ZERO_WORD_CHAR_SEC = 0.01
+
 /** 文字単位の時刻(言葉の時刻を文字数で按分する) */
 function charTimes(words: readonly AsrWord[], text?: string): TimedChar[] {
   let byText = charTimesCache.get(words)
@@ -148,7 +161,15 @@ function makeCharTimes(words: readonly AsrWord[], text?: string): TimedChar[] {
     if (prev && spaced[wi] && /[A-Za-z0-9]/.test(prev.ch) && /^[A-Za-z0-9]/.test(w.text))
       out.push({ ch: ' ', start: prev.end, end: prev.end, word: -1 })
     const chars = [...w.text]
-    const step = chars.length > 0 ? (w.end - w.start) / chars.length : 0
+    // 長さ 0 の言葉(Whisper の語の時刻は 0.02 秒刻みで、長さ 0 がよく出る)は、文字を 0.01 秒ずつ
+    // 並べる。同じ時刻にすると、枚の境目で分かれた言葉の文字を時刻で見分けられず、隣の枚を直した・
+    // 消した範囲に入っていた
+    const step =
+      chars.length > 0
+        ? w.end - w.start > 1e-6
+          ? (w.end - w.start) / chars.length
+          : ZERO_WORD_CHAR_SEC
+        : 0
     chars.forEach((ch, i) =>
       out.push({ ch, start: w.start + step * i, end: w.start + step * (i + 1), word: wi })
     )
@@ -304,6 +325,8 @@ interface VisibleChar {
    * 元の文字(言いよどみ・句読点を含む)の時刻にしていた。その版で覚えた点のような範囲を当てるのに使う
    */
   runG0: number
+  /** 言いよどみの言葉(まるごとなら整えると消える言葉)の文字か */
+  fill: boolean
 }
 
 /** 前の枚から続けて数える、直前に残った文字の次の元の文字の位置 */
@@ -314,7 +337,8 @@ interface OldCursor {
 function visibleInfo(
   t: Tracked,
   timed: readonly TimedChar[],
-  carry: OldCursor = { at: null }
+  carry: OldCursor = { at: null },
+  fillerWord: (word: number) => boolean = () => false
 ): VisibleChar[] {
   const out: VisibleChar[] = []
   const n = timed.length
@@ -344,7 +368,8 @@ function visibleInfo(
         word: wordAt((a + b) / 2),
         run,
         runT0: run >= 0 ? center(t.runAt.get(run) ?? a) : NaN,
-        runG0: run >= 0 ? oldTime(t.runAt.get(run) ?? a) : NaN
+        runG0: run >= 0 ? oldTime(t.runAt.get(run) ?? a) : NaN,
+        fill: run < 0 && fillerWord(wordAt((a + b) / 2))
       })
       // 合った文字の次へ進む。直した文字では進めない(前の版も進めなかった。続く直した言葉も同じ時刻)
       if (run < 0) carry.at = Math.floor(a) + 1
@@ -365,6 +390,27 @@ function runsOf(vis: readonly VisibleChar[]): [number, number, number, number][]
     else out.push([i, i + 1, v.runT0, Math.min(v.runG0, v.runT0)])
   })
   return out.length > 0 ? out : undefined
+}
+
+/** 言いよどみの言葉(まるごとなら整えると消える言葉)か。言葉ごと */
+const fillerCache = new WeakMap<readonly AsrWord[], boolean[]>()
+function fillerWords(words: readonly AsrWord[]): (word: number) => boolean {
+  let flags = fillerCache.get(words)
+  if (!flags) {
+    flags = words.map((w) => w.text.trim() !== '' && removeFillers(w.text) === '')
+    fillerCache.set(words, flags)
+  }
+  const f = flags
+  return (i) => f[i] === true
+}
+
+/** 文字ごとの話している長さと、言いよどみの切れ端の文字(`TelopChunk.durs`・`fill`) */
+function extrasOf(vis: readonly VisibleChar[]): { durs: number[]; fill?: number[] } {
+  const fill = vis.map((v, i) => (v.fill ? i : -1)).filter((i) => i >= 0)
+  return {
+    durs: vis.map((v) => Math.round(Math.max(0, v.hi - v.lo) * 1000) / 1000),
+    ...(fill.length > 0 ? { fill } : {})
+  }
 }
 
 const spokenOf = (vis: readonly VisibleChar[]): [number, number] | undefined =>
@@ -418,6 +464,8 @@ export function clipTelopChunk(
   times?: number[]
   spoken?: [number, number]
   runs?: [number, number, number, number][]
+  durs?: number[]
+  fill?: number[]
 } {
   if (u.words.length === 0) return { text: chunk.text }
   const timed = charTimes(u.words, u.text)
@@ -431,7 +479,8 @@ export function clipTelopChunk(
     text: wrapTelopLines(text, options.maxLineChars ?? 14).join('\n'),
     times: vis.map((v) => (v.lo + v.hi) / 2),
     spoken: spokenOf(vis),
-    runs: runsOf(vis)
+    runs: runsOf(vis),
+    ...extrasOf(vis)
   })
   // 1枚に収まった枚は、これまでどおり枚の時刻の中の元の文字を選んで整え直す(文は前と同じ)。
   // 辞書で長くなって何枚かに分けた枚だけ、その枚の文字そのものから選ぶ
@@ -450,7 +499,7 @@ export function clipTelopChunk(
       ),
       options
     )
-    const all = visibleInfo(polished, timed)
+    const all = visibleInfo(polished, timed, { at: null }, fillerWords(u.words))
     const keepVis = all.map((v, i) => i >= skip && i < skip + count && inside(v.word))
     let text = ''
     let k = 0
@@ -482,7 +531,7 @@ export function clipTelopChunk(
     ),
     options
   )
-  return finish(polished.text, visibleInfo(polished, timed))
+  return finish(polished.text, visibleInfo(polished, timed, { at: null }, fillerWords(u.words)))
 }
 
 /**
@@ -570,7 +619,8 @@ export function utteranceToTelopChunks(
               options
             ),
             timed,
-            carry
+            carry,
+            fillerWords(u.words)
           )
         : null
     const times = vis ? vis.map((v) => (v.lo + v.hi) / 2) : null
@@ -625,7 +675,7 @@ export function utteranceToTelopChunks(
         text: sheetText,
         sourceStart: a,
         sourceEnd: Math.max(b, a + minDur),
-        ...(mine ? { times: mine.map((v) => (v.lo + v.hi) / 2) } : {}),
+        ...(mine ? { times: mine.map((v) => (v.lo + v.hi) / 2), ...extrasOf(mine) } : {}),
         ...(sheetSpoken ? { spoken: sheetSpoken } : {}),
         ...(runs ? { runs } : {}),
         ...(ok ? { piece: { from: p.from, to: p.to, skip: shown, count: n } } : {})

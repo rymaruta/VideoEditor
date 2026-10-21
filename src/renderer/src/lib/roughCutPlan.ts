@@ -468,7 +468,14 @@ export function planRoughCut(
                 visEnd < commonEnd - 1e-6 ? toSource(f, visEnd) : Infinity,
                 chunkOptions
               )
-            : { text: chunk.text, times: chunk.times, spoken: chunk.spoken, runs: chunk.runs }
+            : {
+                text: chunk.text,
+                times: chunk.times,
+                spoken: chunk.spoken,
+                runs: chunk.runs,
+                durs: chunk.durs,
+                fill: chunk.fill
+              }
           return shown.text ? { span: sp, start, end, ...shown, clipped, visStart, visEnd } : null
         })
         .filter((x) => x !== null)
@@ -480,6 +487,8 @@ export function planRoughCut(
         times,
         spoken,
         runs,
+        durs,
+        fill,
         clipped,
         visStart,
         visEnd
@@ -511,7 +520,9 @@ export function planRoughCut(
                   times,
                   offset,
                   ...(f.rate !== 1 ? { rate: f.rate } : {}),
-                  ...(runs ? { runs } : {})
+                  ...(runs ? { runs } : {}),
+                  ...(durs && durs.length === times.length ? { durs } : {}),
+                  ...(fill ? { fill } : {})
                 }
               : clipped
                 ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }

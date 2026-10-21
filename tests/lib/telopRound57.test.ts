@@ -233,7 +233,8 @@ describe('切り分けた枚の時刻・言いよどみの切れ端', () => {
       speaker: 'A',
       utteranceId: 'u0',
       utteranceChunk: 1,
-      autoSource: { start: 10, end: 11, text: 'と 亥', times: [10.2, 10.8], offset: -10 }
+      // 「と」は言いよどみの言葉「えっと、」の切れ端(仮編集が `fill` で印を付ける)
+      autoSource: { start: 10, end: 11, text: 'と 亥', times: [10.2, 10.8], offset: -10, fill: [0] }
     }
     // 前の作り直しで「えっと 亥」の「えっと」の枚(10.0〜10.3)を直したが、今は「と」しか当たらない
     const merged = NM.mergeManualTelops([], [piece], new Set(), {
@@ -243,6 +244,7 @@ describe('切り分けた枚の時刻・言いよどみの切れ端', () => {
         autoSource: { start: 9.9, end: 10.3, text: 'えっと' }
       } as never
     })
-    expect(show(merged)).toBe('亥')
+    // 切れ端の文字は自動の文字に戻す(話した文字は消さない)
+    expect(show(merged)).toBe('と 亥')
   })
 })

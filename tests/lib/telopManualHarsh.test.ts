@@ -79,11 +79,15 @@ function makeProject(r: () => number): Gen {
   let rep = 0x8a00
   const dict: { from: string; to: string }[] = []
   const atom = new Map<string, string[]>()
-  const transcript = Array.from({ length: 4 }, (_, k) => {
+  const transcript: Project['transcript'] & object = []
+  // 相づち・言いよどみに似た言葉だけの発話(どの企画でも同じ言葉は1回だけ。言葉を見分けるため)
+  const replies = [...REPLIES].sort(() => r() - 0.5)
+  for (let k = 0; k < 4; k++) {
     const n = 4 + Math.floor(r() * 10)
     const words: Word[] = []
     const push = (text: string, speed: number): void => {
-      const d = (0.12 + r() * 0.2) * [...text].length * speed
+      // 長さ 0 の言葉(Whisper の語の時刻は 0.02 秒刻みで、長さ 0 がよく出る)
+      const d = on('zero') && r() < 0.08 ? 0 : (0.12 + r() * 0.2) * [...text].length * speed
       words.push({ text, start: t, end: t + d })
       t += d + 0.02 + r() * (r() < 0.1 ? 1.2 : 0.2)
     }
@@ -108,7 +112,7 @@ function makeProject(r: () => number): Gen {
       if (on('punct') && r() < 0.25) w += r() < 0.5 ? '、' : '。'
       push(w, 1)
     }
-    const u = {
+    transcript.push({
       id: `u${k}`,
       assetId: 'MA',
       speaker: 'A',
@@ -117,10 +121,24 @@ function makeProject(r: () => number): Gen {
       text: words.map((w) => w.text).join(''),
       words,
       overlap: false
-    }
+    })
     t += 1 + r() * 2
-    return u
-  })
+    if (on('reply') && replies.length > 0 && r() < 0.4) {
+      const text = replies.pop()! + (r() < 0.2 ? '、' : '')
+      const d = r() < 0.3 ? 0 : 0.2 + r() * 0.5
+      transcript.push({
+        id: `r${k}`,
+        assetId: 'MA',
+        speaker: 'A',
+        sourceStart: t,
+        sourceEnd: t + d,
+        text,
+        words: [{ text, start: t, end: t + d }],
+        overlap: false
+      })
+      t += d + 1 + r() * 2
+    }
+  }
   const activity = new Uint8Array(400 * TURN_RATE)
   for (const u of transcript)
     activity.fill(1, Math.floor(u.sourceStart * TURN_RATE), Math.ceil(u.sourceEnd * TURN_RATE))
@@ -169,6 +187,20 @@ function randomPlan(r: () => number, p: Gen): Omit<TextOverlay, 'id'>[] {
   ).telops
 }
 const kanji = (s: string): string[] => [...s].filter((c) => /\p{Script=Han}/u.test(c))
+/** 相づち・言いよどみに似た本当の言葉(言いよどみとして消さない。人の修正も消さない) */
+const REPLIES = ['そう', 'うん', 'ええ', 'あの', 'あと', 'まま', 'はい', 'えっ', 'そうそう']
+/**
+ * テロップの言葉の印。漢字は1文字ずつどれも違う字。相づちだけの発話は、その発話の自動のテロップが
+ * 相づちそのものなら「R:発話」
+ */
+const toks = (t: { text: string; utteranceId?: string; edited?: boolean }): string[] => {
+  const flat = t.text.replace(/[\s、。]/g, '')
+  const reply =
+    t.utteranceId?.startsWith('r') && !t.edited && REPLIES.includes(flat)
+      ? [`R:${t.utteranceId}`]
+      : []
+  return [...kanji(t.text), ...reply]
+}
 interface Model {
   edits: Map<string, Set<string>>
   dismissed: Set<string>
@@ -191,12 +223,12 @@ function check(
   m: Model,
   tag: string
 ): void {
-  const audible = new Set(plain.flatMap((t) => kanji(t.text)))
+  const audible = new Set(plain.flatMap((t) => toks(t)))
   const count = new Map<string, number>()
-  for (const t of merged) for (const c of kanji(t.text)) count.set(c, (count.get(c) ?? 0) + 1)
+  for (const t of merged) for (const c of toks(t)) count.set(c, (count.get(c) ?? 0) + 1)
   const covered = new Set([...m.edits.values()].flatMap((s) => [...s]))
   const pc = new Map<string, number>()
-  for (const t of plain) for (const c of kanji(t.text)) pc.set(c, (pc.get(c) ?? 0) + 1)
+  for (const t of plain) for (const c of toks(t)) pc.set(c, (pc.get(c) ?? 0) + 1)
   const plainDup = [...pc].filter(([, n]) => n > 1).map(([c]) => c)
   // 仮編集そのものが同じ言葉を2枚に出すのも誤り(辞書で長くなって何枚かに分けた枚で起きていた)
   if (plainDup.length)
@@ -230,7 +262,7 @@ function check(
         `${tag} edit ${text} [${[...words].join('')}] n=${n} :: ${merged.map((t) => t.text.replace(/\n/g, '')).join(' | ')}`
       )
   }
-  const autoCount = new Set(merged.filter((t) => !t.edited).flatMap((t) => kanji(t.text)))
+  const autoCount = new Set(merged.filter((t) => !t.edited).flatMap((t) => toks(t)))
   for (const t of merged)
     if (t.edited && !m.edits.has(t.text))
       fail(
@@ -400,7 +432,7 @@ describe('人の修正・消した印の性質(厳しい版: 辞書・言いよ�
           const t = timeline[i]
           const words = t.edited
             ? (m.edits.get(t.text) ?? new Set<string>())
-            : expand(p, kanji(t.text))
+            : expand(p, toks({ ...t, edited: false }))
           // 辞書で直す言葉の一部だけを出した枚: その言葉の残り・直した形の扱いは決められない
           if (!t.edited) {
             const shownChars = new Set(kanji(t.text))
