@@ -216,4 +216,62 @@ describe('音声分離した本編の音と繋ぎ(クロスフェード)', () =>
       expect(worst, `${name} 全体の差(dB)`).toBeLessThan(1)
     }
   }, 60_000)
+
+  it('クリップの長さがフレームの整数倍でなくても、標準の書き出しの分離した音に繋ぎを掛ける', async () => {
+    // 4.013秒・4.007秒・4秒(1秒の繋ぎ)。書き出しの秒の終わりはフレームの格子に丸めた値なので、
+    // 書き出しの秒で揃いを見ると 0.5 フレーム以上食い違い、フェードアウトを掛け損ねていた
+    // (直す前の標準: 分離前 −20.57dB・分離後 −16.97dB)
+    const lens = [120.4 / 30, 120.2 / 30, 4]
+    const ids = ['R', 'B', 'R']
+    const of = (detached: boolean): Project => {
+      const det = detached ? { audioDetached: true } : {}
+      let t = 0
+      const audio: unknown[] = []
+      const clips = lens.map((len, i) => {
+        if (detached)
+          audio.push({
+            id: `d${i}`,
+            assetId: ids[i],
+            startTime: t,
+            inPoint: 0,
+            outPoint: len,
+            speed: 1,
+            linkedClipId: `c${i}`
+          })
+        t += len
+        return {
+          id: `c${i}`,
+          assetId: ids[i],
+          inPoint: 0,
+          outPoint: len,
+          speed: 1,
+          ...(i === 2 ? { transitionIn: { type: 'crossfade', duration: 1 } } : {}),
+          ...det
+        }
+      })
+      return {
+        id: 'p',
+        name: 'p',
+        aspectRatio: '16:9',
+        assets: [red, blue],
+        clips,
+        audioTracks: detached
+          ? [{ id: 'd', name: 'd', volume: 1, muted: false, duckingEnabled: false, clips: audio }]
+          : [],
+        videoOverlayTracks: [],
+        textOverlays: []
+      } as unknown as Project
+    }
+    const [attStd, attSeg] = await both(of(false), 'r-attached')
+    const [detStd, detSeg] = await both(of(true), 'r-detached')
+    for (const [name, att, det] of [
+      ['標準', attStd, detStd],
+      ['区間ごと', attSeg, detSeg]
+    ] as [string, string, string][]) {
+      const a = await envelopeDb(att)
+      const d = await envelopeDb(det)
+      // 2つ目と3つ目の繋ぎ(およそ 7.0〜8.0 秒)の真ん中
+      expect(Math.abs(levelDb(d, 7.3, 7.7) - levelDb(a, 7.3, 7.7)), `${name} 繋ぎ`).toBeLessThan(1)
+    }
+  }, 60_000)
 })

@@ -1536,7 +1536,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
            * 本編クリップの側は分離すると無音(`anullsrc`)と畳むので、ここで同じ直線を掛ければ
            * 足し算は分離前と同じになる。利用者のフェードとは掛け算で重なる(afade を並べる)。
            * 紐づく本編のクリップと頭・終わりが揃っている側だけに掛ける(ずらして置いた音は
-           * 利用者が位置を決めたものなので触らない)。揃っているかは半フレームで見る。
+           * 利用者が位置を決めたものなので触らない)。揃っているかは**タイムラインの秒**で半フレームで見る
+           * (書き出しの秒の終わりは繋ぎで詰めた後のフレームの格子に丸めた値なので、クリップの長さが
+           * フレームの整数倍でないと最大1フレーム食い違い、約4回に1回フェードアウトを掛け損ねていた。
+           * 実測: 分離前 −20.57dB・分離後 −16.97dB。区間ごとの書き出しはずれなかった)。
            */
           const mainIdx = trackClip.linkedClipId
             ? mainIndexById.get(trackClip.linkedClipId)
@@ -1544,14 +1547,16 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           if (mainIdx !== undefined) {
             const halfFrame = 0.5 / outputFps
             const tIn = clips[mainIdx].transitionIn ? transitionSeconds[mainIdx] : 0
-            if (tIn > 0 && Math.abs(clipStartExport - exportStarts[mainIdx]) <= halfFrame) {
+            const mainStart = timelineStarts[mainIdx]
+            const mainEnd = mainStart + mainLayout.timelineDurations[mainIdx]
+            if (tIn > 0 && Math.abs(trackClip.startTime - mainStart) <= halfFrame) {
               fadeParts.push(`afade=t=in:st=0:d=${ffSeconds(Math.min(tIn, audibleDur))}`)
             }
             const next = mainIdx + 1
             const tOut =
               next < clips.length && clips[next].transitionIn ? transitionSeconds[next] : 0
             const audibleEnd = clipStartExport + audibleDur
-            if (tOut > 0 && Math.abs(audibleEnd - mainLayout.exportEnds[mainIdx]) <= halfFrame) {
+            if (tOut > 0 && Math.abs(trackClip.startTime + timelineDur - mainEnd) <= halfFrame) {
               const d = Math.min(audibleDur, Math.max(0, audibleEnd - exportStarts[next]))
               if (d > 0) {
                 fadeParts.push(`afade=t=out:st=${ffSeconds(audibleDur - d)}:d=${ffSeconds(d)}`)
