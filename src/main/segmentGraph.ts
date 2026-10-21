@@ -434,12 +434,52 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
     return out
   }
 
+  const mainVideoItems = seq.videoTracks[0]?.items ?? []
+  /**
+   * **音声分離した本編の音にも、本編の繋ぎのクロスフェードを掛ける**(標準の書き出しと同じ)。
+   *
+   * 分離した音は本編の音のトラック(`a1-main`)ではなく音声トラックに居り、繋ぎで重なる2本は
+   * 別の段に分かれるので、上の畳み込み(同じトラックで重なる相手)の対象にならない。
+   * そのため繋ぎの区間で2本とも全音量のまま鳴り、分離しただけで繋ぎの音が変わっていた
+   * (実測: 4秒×2本を1秒の繋ぎでつなぐと、重なりの音量は分離前 **−2.85dB**・分離後 **+2.94dB**。
+   *  標準の書き出しも同じだった)。
+   * 紐づく本編のクリップと頭・終わりが揃っている側だけ、`a1-main` と同じ直線で出す/下げる
+   * (ずらして置いた音は利用者が位置を決めたものなので触らない)。区間の秒 L で式を返す。
+   */
+  const detachedCrossfadeTerms = (item: AudioItem, L: string): string[] => {
+    if (!item.linkedItemId) return []
+    const m = mainVideoItems.findIndex((v) => v.id === item.linkedItemId)
+    if (m < 0) return []
+    const terms: string[] = []
+    const mv = mainVideoItems[m]
+    const transitionFrames = (v: VideoItem | undefined): number =>
+      v && v.kind === 'media' && v.transitionIn ? Math.max(0, v.transitionIn.durationFrames) : 0
+    const tIn = transitionFrames(mv)
+    if (tIn > 0 && Math.abs(item.startFrame - mv.startFrame) <= 1) {
+      const a = sec(mv.startFrame - item.startFrame)
+      terms.push(`min(1\\,max(0\\,(${L}-(${num(a)}))/${num(sec(tIn))}))`)
+    }
+    const nv = mainVideoItems[m + 1]
+    const tOut = transitionFrames(nv)
+    if (
+      nv &&
+      tOut > 0 &&
+      Math.abs(item.startFrame + item.durationFrames - (mv.startFrame + mv.durationFrames)) <= 1
+    ) {
+      const a = sec(nv.startFrame - item.startFrame)
+      terms.push(`min(1\\,max(0\\,${num(a + sec(tOut))}-${L})/${num(sec(tOut))})`)
+    }
+    return terms
+  }
+
   /** アイテム内の秒 L に対する音量の式(フェード・繋ぎの重なりを直線で) */
   const envelope = (
     item: AudioItem,
     fold: readonly FoldItem[],
     gain: number,
-    skipSec: number
+    skipSec: number,
+    /** 本編以外のトラックで、本編に紐づく音(音声分離)に本編の繋ぎを写すか */
+    linkedCrossfade: boolean
   ): string => {
     const dur = sec(item.durationFrames)
     const { fadeIn, fadeOut } = normalizeFades(
@@ -479,6 +519,7 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
     rampIn(fadeIn)
     rampOut(fadeOut)
     rampIn(xIn)
+    if (linkedCrossfade) terms.push(...detachedCrossfadeTerms(item, L))
     if (terms.length === 0) return `volume=${num(gain)}`
     const g = [num(gain), ...terms].join('*')
     return `aeval=exprs='val(0)*${g}|val(1)*${g}':channel_layout=stereo`
@@ -546,11 +587,19 @@ export function buildSegmentAudioGraph(ctx: GraphContext, segment: Segment): Seg
       const idx = inputs.length - 1
       const label = newLabel('a')
       const delay = frameToSample(seq, visStart) - frameToSample(seq, renderStart)
+      // `atrim` の後ろの時刻は**引き算ではなく、何サンプル目かから作り直す**(`N/SR/TB`)。
+      // 読む範囲に音が1サンプルも無い(素材の音声が先に終わった後ろ・音声が遅れて始まる録画の頭)と、
+      // `apad` は時刻の無い無音を出し、`PTS-STARTPTS` では時刻が無いまま残る。すると後ろの
+      // `aeval`(フェード・繋ぎの音量の式)の `t` が NaN になって NaN のサンプルが流れ、AAC が
+      // `Terminating thread with return code -22` で止まり、書き出しごと失敗していた
+      // (標準の書き出しは同じ所で `asetpts=N/SR/TB` を通しており、同じ企画で成功していた)。
+      // 音がある普通の範囲では時刻は 0 から隙間無く並んでいるので、どちらの式でも同じ値になる。
+      // 速さを変えた音(伸び縮みさせた WAV)も同じ枝を通るので、ここ1箇所で両方を塞ぐ
       parts.push(
         `[${idx}:a]${ALIGN_AUDIO_START},${audioSpeedChain(readSpeed)},aresample=async=1,asetpts=PTS-STARTPTS,` +
-          `apad,atrim=0:${num(dur)},asetpts=PTS-STARTPTS,` +
+          `apad,atrim=0:${num(dur)},asetpts=N/SR/TB,` +
           `${audioFormatFor(ctx.audioChannels?.get(stretchedPath ?? asset.filePath), audioLayoutOf(asset.filePath))},` +
-          `${envelope(item, ordered, audioClipGain(track.volume, item.volume), skipSec)},` +
+          `${envelope(item, ordered, audioClipGain(track.volume, item.volume), skipSec, track.id !== 'a1-main')},` +
           `adelay=${delay}S:all=1,${AUDIO_FORMAT}[${label}]`
       )
       // 本編(一番下の映像トラック)に紐づく音は「本編の声」。ダッキングの基準にもする

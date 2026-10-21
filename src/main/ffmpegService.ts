@@ -1033,14 +1033,21 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 少し手前から読む(長尺向けの書き出しの `addMediaInput` と同じ)。切り出しの頭が素材の
         // フレームの間にあると、頭で見えているはずの1つ前の絵が読み込まれず、最初の1コマだけ
         // 次の絵が出ていた。絵も音も、手前のぶんを時刻のずらし・切り落としで戻す
-        const pre = Math.min(Math.max(0, clip.inPoint), MAIN_PREROLL_SEC)
+        //
+        // **静止画は `-ss` で探さず、同じ画を流す**(ワイプの静止画・長尺向けの `addMediaInput` と同じ)。
+        // 画像の入力には 0 秒の1枚しか無いので、分割した静止画の後ろ半分・頭を詰めた静止画
+        // (入点 > 0)を `-ss 入点` で開くと、その1枚を飛び越えて**枝が空**になっていた。
+        // (実測: 動画2秒+静止画2秒+静止画の後半2秒+動画2秒の8秒の企画で、映像 **180枚/6.0秒**・
+        //  音声 8.0秒。後ろの絵が2秒ずつ前へずれた。繋ぎ入りでは映像が **62枚/2.07秒**で止まった)
+        const pre = asset.still ? 0 : Math.min(Math.max(0, clip.inPoint), MAIN_PREROLL_SEC)
         const preOut = pre / speed
         command
           .input(asset.filePath)
-          .inputOptions([
-            `-ss ${ffSeconds(clip.inPoint - pre)}`,
-            `-t ${ffSeconds(sourceDuration + pre)}`
-          ])
+          .inputOptions(
+            asset.still
+              ? ['-loop 1', `-framerate ${fpsArg}`, `-t ${ffSeconds(sourceDuration)}`]
+              : [`-ss ${ffSeconds(clip.inPoint - pre)}`, `-t ${ffSeconds(sourceDuration + pre)}`]
+          )
         const myIndex = inputIndex++
         // 音は手前から読まない(別の入力で、切り出しの頭から読む)。音と絵の頭がそろっていない素材
         // (絵が数フレーム遅れて始まる録画など)では、手前から読むと音の頭の位置がずれ、
@@ -1450,6 +1457,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       // プロジェクトの枝は1本も変えない(割った出力を誰も受け取らないと、
       // `Error binding filtergraph inputs/outputs` で書き出しごと落ちる)。
       const duckingInUse = project.audioTracks.some((t) => t.duckingEnabled && !t.muted)
+      /** 本編クリップの並びの番号(音声分離した音に本編の繋ぎを写すため) */
+      const mainIndexById = new Map(clips.map((c, i) => [c.id, i]))
       project.audioTracks.forEach((track, trackIdx) => {
         if (track.muted) return
         const clipLabels: string[] = []
@@ -1516,6 +1525,38 @@ export async function exportProject(options: ExportOptions): Promise<void> {
             fadeParts.push(
               `afade=t=out:st=${ffSeconds(audibleDur - fadeOut)}:d=${ffSeconds(fadeOut)}`
             )
+          }
+          /**
+           * **音声分離した本編の音にも、本編の繋ぎのクロスフェードを掛ける。**
+           *
+           * 分離前は本編の音が `acrossfade`(両側とも直線)で重なりの区間を溶かしているのに、
+           * 分離した音は普通の音声クリップとして混ぜるだけだったので、繋ぎの区間で
+           * **2本とも全音量のまま重なって鳴っていた**(実測: 4秒×2本を1秒の繋ぎでつなぐと、
+           * 重なりの音量は分離前 **−2.85dB**・分離後 **+2.94dB**。区間ごとの書き出しも同じだった)。
+           * 本編クリップの側は分離すると無音(`anullsrc`)と畳むので、ここで同じ直線を掛ければ
+           * 足し算は分離前と同じになる。利用者のフェードとは掛け算で重なる(afade を並べる)。
+           * 紐づく本編のクリップと頭・終わりが揃っている側だけに掛ける(ずらして置いた音は
+           * 利用者が位置を決めたものなので触らない)。揃っているかは半フレームで見る。
+           */
+          const mainIdx = trackClip.linkedClipId
+            ? mainIndexById.get(trackClip.linkedClipId)
+            : undefined
+          if (mainIdx !== undefined) {
+            const halfFrame = 0.5 / outputFps
+            const tIn = clips[mainIdx].transitionIn ? transitionSeconds[mainIdx] : 0
+            if (tIn > 0 && Math.abs(clipStartExport - exportStarts[mainIdx]) <= halfFrame) {
+              fadeParts.push(`afade=t=in:st=0:d=${ffSeconds(Math.min(tIn, audibleDur))}`)
+            }
+            const next = mainIdx + 1
+            const tOut =
+              next < clips.length && clips[next].transitionIn ? transitionSeconds[next] : 0
+            const audibleEnd = clipStartExport + audibleDur
+            if (tOut > 0 && Math.abs(audibleEnd - mainLayout.exportEnds[mainIdx]) <= halfFrame) {
+              const d = Math.min(audibleDur, Math.max(0, audibleEnd - exportStarts[next]))
+              if (d > 0) {
+                fadeParts.push(`afade=t=out:st=${ffSeconds(audibleDur - d)}:d=${ffSeconds(d)}`)
+              }
+            }
           }
           const fadeChain = fadeParts.length > 0 ? `${fadeParts.join(',')},` : ''
           filterParts.push(
