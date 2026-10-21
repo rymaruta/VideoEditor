@@ -18,6 +18,7 @@ import {
 } from '../../src/renderer/src/lib/roughCutPlan'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { planCg } from '@shared/finish/cg'
+import { autoTelopKey } from '@shared/telop/manual'
 import type { MulticamInfo } from '@shared/sync/multicam'
 import type { EffectProposal } from '@shared/telop/effects'
 import type { Project } from '@shared/types'
@@ -176,5 +177,40 @@ describe('SE・CG は人が消した演出テロップに付けない', () => {
     })
     expect(cg.map((c) => c.startTime)).toEqual([live.effects[0].startTime])
     expect(live.effects[0].startTime).toBeGreaterThan(20)
+  })
+})
+
+describe('仮編集: 枚の途中の間をカットで詰めて2つに分かれた発言テロップ', () => {
+  it('残った所ごとに1枚ずつ出し、聞こえる言葉は全部どこかに出る', () => {
+    const plan = planRoughCut(
+      project,
+      info,
+      [
+        { id: 's1', start: 0, end: 4, lines: [], speech: 0 },
+        { id: 's2', start: 5, end: 10, lines: [], speech: 0 }
+      ],
+      [
+        { sceneId: 's1', score: 100, kind: 'highlight', reason: '' },
+        { sceneId: 's2', score: 100, kind: 'highlight', reason: '' }
+      ],
+      activity,
+      {
+        targetSec: 0,
+        keep: { s1: true, s2: true },
+        styles: [],
+        speechLook: look,
+        kind: 'game',
+        policy: 'light'
+      }
+    )
+    const u0 = [...plan.telops]
+      .filter((t) => t.utteranceId === 'u0')
+      .sort((a, b) => a.startTime - b.startTime)
+    expect(u0.map((t) => t.text.replace(/\n/g, ''))).toEqual([
+      'きょう0はすごいボス',
+      'たおしにいきますよ'
+    ])
+    // 片方だけ直す・消すことができるよう、鍵は分かれる
+    expect(new Set(u0.map((t) => autoTelopKey(t))).size).toBe(2)
   })
 })

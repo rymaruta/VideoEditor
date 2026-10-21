@@ -26,6 +26,7 @@ import {
   autoTelopKey,
   isManualEdit,
   mergeManualTelops,
+  normalizeAutoSource,
   rememberEditedTelops
 } from '@shared/telop/manual'
 import type { PlacedCg } from '@shared/finish/cg'
@@ -600,7 +601,9 @@ function normalizeTextOverlay(raw: Record<string, unknown>): TextOverlay {
     linkedClipId: typeof raw.linkedClipId === 'string' ? raw.linkedClipId : undefined,
     linkOffset: raw.linkOffset === undefined ? undefined : asFinite(raw.linkOffset, 0),
     speaker: typeof raw.speaker === 'string' && raw.speaker.trim() ? raw.speaker : undefined,
-    styleId: typeof raw.styleId === 'string' && raw.styleId ? raw.styleId : undefined
+    styleId: typeof raw.styleId === 'string' && raw.styleId ? raw.styleId : undefined,
+    // 自動の発言テロップの元の部分(人の修正を作り直しで当て直す鍵)。壊れた値は外す
+    ...('autoSource' in raw ? { autoSource: normalizeAutoSource(raw.autoSource) } : {})
   }
 }
 
@@ -1788,7 +1791,9 @@ function normalizeEditedTelops(raw: unknown): Record<string, EditedTelop> | unde
       text: r.text,
       style: normalizeTextStyle(r.style),
       ...(typeof r.styleId === 'string' ? { styleId: r.styleId } : {}),
-      ...(typeof r.speaker === 'string' ? { speaker: r.speaker } : {})
+      ...(typeof r.speaker === 'string' ? { speaker: r.speaker } : {}),
+      // 覚えた修正の元の部分。壊れた値は外す
+      ...('autoSource' in r ? { autoSource: normalizeAutoSource(r.autoSource) } : {})
     }
   }
   return Object.keys(out).length > 0 ? out : undefined
@@ -2240,6 +2245,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 次の保存が前の企画のファイルを黙って上書きしていた)。id では見分けられないので番号で見る
       if (session !== undefined && session !== state.projectSession) return state
       if (state.project.id !== savedProject.id) return state
+      // ドラッグ・入力のまとまりの途中で保存したら、まとまりの始まりは「保存したものと違う」状態。
+      // 始めた所へ戻して離したとき、始まりの「保存済み」を戻すと、保存したものと違うのに未保存と
+      // 出ず、閉じても確かめず・自動保存もしなかった(画面は戻した値、ファイルは保存した値のまま)
+      if (coalesceStart) coalesceStart = { ...coalesceStart, isDirty: true }
       return {
         currentFilePath: filePath,
         // **ディスクに書いたのは `savedProject`。** 保存は IPC を跨ぐので、書いている

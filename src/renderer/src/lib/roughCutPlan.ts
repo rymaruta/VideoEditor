@@ -441,13 +441,14 @@ export function planRoughCut(
       const chunk = chunks[ci]
       const commonStart = toCommon(f, chunk.sourceStart)
       const commonEnd = toCommon(f, chunk.sourceEnd)
-      // 枚の残る区間(長く残る所から)。頭がカットで落ちた枚を捨てると、ショートや詰めた場面の頭が
-      // 発話の途中から始まるとき、その声が字幕なしで流れていた(頭が落ちた枚は、残った所の頭から出す)
+      // 枚の残る区間ごとに出す。頭がカットで落ちた枚を捨てると、ショートや詰めた場面の頭が発話の途中から
+      // 始まるとき、その声が字幕なしで流れていた(頭が落ちた枚は、残った所の頭から出す)。
+      // 枚の途中の間をカットで詰めて2つに分かれた枚も、一番長く残る所だけに出すと、もう一方の声
+      // (「きょう0はすごいボスを」の 3 秒)が字幕なしで流れていたので、残った所ごとに1枚ずつ出す
       const placed = cut.spans
-        .map((sp) => ({ sp, kept: Math.min(commonEnd, sp.end) - Math.max(commonStart, sp.start) }))
-        .filter((x) => x.kept > 0)
-        .sort((a, b) => b.kept - a.kept)
-        .map(({ sp }) => {
+        .filter((sp) => Math.min(commonEnd, sp.end) - Math.max(commonStart, sp.start) > 0)
+        .sort((a, b) => a.timeline - b.timeline)
+        .map((sp) => {
           const visStart = Math.max(commonStart, sp.start)
           const visEnd = Math.min(commonEnd, sp.end)
           const start = sp.timeline + (visStart - sp.start)
@@ -459,27 +460,31 @@ export function planRoughCut(
           const text = clipped
             ? clipTelopChunkText(u, chunk, toSource(f, visStart), toSource(f, visEnd), chunkOptions)
             : chunk.text
-          return text ? { span: sp, start, end, text } : null
+          return text ? { span: sp, start, end, text, visStart, visEnd } : null
         })
-        .find((x) => x !== null)
-      if (!placed) continue
-      const { span, start, end, text } = placed
-      const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
-      const telop: Omit<TextOverlay, 'id'> & WithAutoSource = {
-        text,
-        startTime: start,
-        endTime: end,
-        style: speechTelopStyle(def ? def.style : look.style),
-        styleId: def ? def.id : look.styleId,
-        speaker: u.speaker,
-        source: 'auto',
-        utteranceId: u.id,
-        utteranceChunk: ci,
-        // 作ったときの元の部分(人の修正・消した印を、枚の分け方が変わっても同じ言葉の枚へ当てる)
-        autoSource: { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
+        .filter((x) => x !== null)
+      for (const { span, start, end, text, visStart, visEnd } of placed) {
+        const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
+        const telop: Omit<TextOverlay, 'id'> & WithAutoSource = {
+          text,
+          startTime: start,
+          endTime: end,
+          style: speechTelopStyle(def ? def.style : look.style),
+          styleId: def ? def.id : look.styleId,
+          speaker: u.speaker,
+          source: 'auto',
+          utteranceId: u.id,
+          utteranceChunk: ci,
+          // 作ったときの元の部分(人の修正・消した印を、枚の分け方が変わっても同じ言葉の枚へ当てる)。
+          // 1枚が2つに分かれたときは、それぞれ残った部分(鍵が分かれ、片方だけ直す・消すことができる)
+          autoSource:
+            placed.length > 1
+              ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
+              : { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
+        }
+        telops.push(telop)
+        voiceEnds.set(telop, voiceEnd)
       }
-      telops.push(telop)
-      voiceEnds.set(telop, voiceEnd)
     }
   }
   // 短い発言(「はい」)は最低表示時間まで延ばすので、すぐ後の発言のテロップに重なることがある。

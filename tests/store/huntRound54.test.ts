@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { commitAsOwnStep, useProjectStore } from '@renderer/store/projectStore'
+import {
+  beginHistoryGesture,
+  commitAsOwnStep,
+  endHistoryGesture,
+  useProjectStore
+} from '@renderer/store/projectStore'
 import { playableOnMain } from '@renderer/lib/relinkCheck'
 import { audioClipDuration, buildTimedClips } from '@renderer/lib/timelineMath'
 import type { MediaAsset, Project } from '@shared/types'
@@ -265,5 +270,47 @@ describe('音声だけの素材は、ソースビューアからも本編(V1)に
     st().addTrimmedClipToTimeline('vid', 1, 2)
     st().insertClipAtTime('vid', 0, 1, 0)
     expect(st().project.clips.length).toBe(3)
+  })
+})
+
+describe('ドラッグ・入力のまとまりの途中で保存してから、始めた所へ戻す', () => {
+  function savedProject(): void {
+    S.setState({
+      project: {
+        id: 'p',
+        name: 'g',
+        aspectRatio: '16:9',
+        assets: [asset('A', 10)],
+        clips: [{ id: 'c1', assetId: 'A', inPoint: 0, outPoint: 4, speed: 1 }],
+        audioTracks: [],
+        videoOverlayTracks: [],
+        textOverlays: [],
+        beatGrid: null
+      } as unknown as Project,
+      past: [],
+      future: [],
+      isDirty: false
+    })
+    st().markSaved('/x/p.veproj', st().project, st().projectSession)
+  }
+
+  it('ドラッグの途中で保存し、始めた所へ戻して離すと、保存したものと違うので未保存になる', () => {
+    savedProject()
+    beginHistoryGesture('clipTrim:c1')
+    st().updateClipTrim('c1', 0, 6)
+    // マウスを押したまま保存(ファイルは 0〜6)
+    st().markSaved('/x/p.veproj', st().project, st().projectSession)
+    st().updateClipTrim('c1', 0, 4)
+    endHistoryGesture()
+    expect(st().project.clips[0].outPoint).toBe(4)
+    expect(st().isDirty).toBe(true)
+  })
+
+  it('名前を打つ途中で保存し、元の名前へ戻しても未保存になる', () => {
+    savedProject()
+    st().setProjectName('gx')
+    st().markSaved('/x/p.veproj', st().project, st().projectSession)
+    st().setProjectName('g')
+    expect(st().isDirty).toBe(true)
   })
 })
