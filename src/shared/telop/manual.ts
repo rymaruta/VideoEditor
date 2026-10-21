@@ -13,6 +13,11 @@ export interface AutoTelopSource {
   start: number
   end: number
   text: string
+  /**
+   * 文(空白・改行を除く)の1文字ごとの、話している時刻(素材の秒、文字の真ん中)。人が直した・消した
+   * 範囲で新しい枚を切り分けるのに使う。無いもの(前の版)は、範囲の中に文字数で割り振る
+   */
+  times?: number[]
 }
 
 /** 発言テロップに付ける、作ったときの元の部分(仮編集が付ける。無いのは前の版で作ったもの) */
@@ -29,7 +34,11 @@ export function normalizeAutoSource(raw: unknown): AutoTelopSource | undefined {
   if (typeof r.start !== 'number' || typeof r.end !== 'number' || typeof r.text !== 'string')
     return undefined
   if (!Number.isFinite(r.start) || !Number.isFinite(r.end) || r.end < r.start) return undefined
-  return { start: r.start, end: r.end, text: r.text }
+  const times =
+    Array.isArray(r.times) && r.times.every((t) => typeof t === 'number' && Number.isFinite(t))
+      ? (r.times as number[])
+      : undefined
+  return { start: r.start, end: r.end, text: r.text, ...(times ? { times: [...times] } : {}) }
 }
 
 /** 覚えておく人の修正(元の部分も覚える。無いのは前の版で覚えたもの) */
@@ -73,31 +82,80 @@ export function isManualEdit(patch: Partial<TextOverlay>): boolean {
   return ['text', 'style', 'startTime', 'endTime', 'speaker', 'styleId'].some((k) => k in patch)
 }
 
-const overlapOf = (a0: number, a1: number, b0: number, b1: number): number =>
-  Math.max(0, Math.min(a1, b1) - Math.max(a0, b0))
+/** 範囲の端の余裕(秒)。鍵の時刻は 1/1000 秒に丸めるので、それより大きく、文字の間隔より小さく */
+export const AUTO_SOURCE_MARGIN = 0.002
 
-/** 重なりとみなす下限(秒)。隣の枚と境目が触れているだけのものは数えない */
-const OVERLAP_EPS = 0.01
-
-interface Edit {
-  rec: RememberedEdit
-  /** 今タイムラインにある修正なら、その時刻(元の部分を覚えていない前の版の修正を、時刻で探す) */
-  at?: { start: number; end: number }
+interface Range {
+  start: number
+  end: number
 }
 
-interface Piece<T> {
-  n: T & WithAutoSource
-  edited: boolean
+const inRange = (t: number, r: Range): boolean => t >= r.start - 1e-9 && t <= r.end + 1e-9
+
+interface EditEntry {
+  key: string
+  rec: RememberedEdit
+  /** 今タイムラインにある修正なら、その時刻 */
+  at?: Range
+  /** 直した部分(素材の時刻)。無いのは前の版の修正(何枚目かで当てる) */
+  src?: Range
+  utteranceId?: string
+  chunk?: number
+}
+
+interface Char {
+  /** 枚の文の中の位置(空白・改行を含む文字の並びで) */
+  pos: number
+  /** 話している時刻(素材の秒)。分からなければ null */
+  src: number | null
+  /** タイムラインの頭・終わり(枚の時間を文字数で割り振る) */
+  t0: number
+  t1: number
+  claim?: EditEntry
+  dropped?: boolean
+}
+
+const flatText = (t: string): string => t.replace(/\s/g, '')
+
+/** 枚の文字ごとの時刻 */
+function charsOf(n: Omit<TextOverlay, 'id'> & WithAutoSource): { chars: string[]; vis: Char[] } {
+  const chars = [...n.text]
+  const pos: number[] = []
+  chars.forEach((c, i) => {
+    if (!/\s/.test(c)) pos.push(i)
+  })
+  const L = pos.length
+  const src = n.autoSource
+  const times =
+    src?.times && src.times.length === L
+      ? src.times
+      : src
+        ? pos.map((_, k) => src.start + ((src.end - src.start) * (k + 0.5)) / Math.max(1, L))
+        : null
+  const d = n.endTime - n.startTime
+  return {
+    chars,
+    vis: pos.map((p, k) => ({
+      pos: p,
+      src: times ? times[k] : null,
+      t0: n.startTime + (d * k) / Math.max(1, L),
+      t1: n.startTime + (d * (k + 1)) / Math.max(1, L)
+    }))
+  }
 }
 
 /**
  * 作り直したテロップ(`incoming`)に、今あるテロップの人の修正を重ねる。
- * 戻り値は `incoming` と同じ並び(消したものは除く)。
+ * 戻り値は `incoming` と同じ並び(消したものは除く。直した・消した範囲で分けた枚はその位置に入る)。
  *
- * 枚の分け方が変わったとき(元の部分の鍵が合わない)は、直した枚の元の部分と重なる新しい枚を探し、
- * 直した文字をそこへ1回だけ出す。直した部分と同じ言葉の新しい枚は外し、直した部分の外の言葉は
- * 残す(言葉が2回出ない・消えない)。元の文で位置が合わせられないときは、いちばん重なる枚に出し、
- * 大半(半分以上)が直した部分に入る枚を外す。消した印も、元の部分と大半が重なる枚を足さない
+ * 人の修正・消した印は、**元の発話の時刻の範囲**として当てる(枚の分け方・カットが変わっても、
+ * 同じ言葉に当たる)。新しい枚の文字を、話している時刻で
+ * 1. 直した範囲に入る文字 → その修正に置き換える(修正は1回だけ。分かれた枚にまたがっても1枚にまとめる)
+ * 2. 消した範囲に入る文字 → 出さない
+ * 3. ほか → 自動の文字のまま(枚の一部が直した・消した範囲に入るなら、残りだけの枚にする)
+ * に分ける。何枚目かで当てたり、枚を丸ごと外したりすると、言葉が2回出る・消えることがあった
+ * (2つに分かれた枚の片方を消してカットを戻すと、残した方の言葉まで消えていた)。
+ * 前の版の修正(範囲を覚えていない)は、これまでどおり何枚目かで当てる(分かれた枚は全部まとめて)
  */
 export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
   existing: readonly TextOverlay[],
@@ -106,302 +164,274 @@ export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
   /** 覚えておいた人の修正(今タイムラインに無いものも含む) */
   remembered: Readonly<Record<string, EditedTelop>> = {}
 ): T[] {
-  const edits = new Map<string, Edit>()
-  for (const [key, rec] of Object.entries(remembered)) edits.set(key, { rec })
+  // 修正を集める(今タイムラインにあるものが新しい)
+  const byKey = new Map<string, EditEntry>()
+  for (const [key, rec] of Object.entries(remembered)) byKey.set(key, { key, rec })
   for (const o of existing) {
     const key = autoTelopKey(o)
-    if (key && o.edited) edits.set(key, { rec: o, at: { start: o.startTime, end: o.endTime } })
+    if (key && o.edited) byKey.set(key, { key, rec: o, at: { start: o.startTime, end: o.endTime } })
   }
-  // 同じ元の部分の修正は1つだけ(枚を移した修正は、前の鍵でも覚えている。今タイムラインにある方を使う)
-  const bySource = new Map<string, string>()
-  for (const [key, e] of edits) {
-    const span = keySpan(key)
-    if (!span) continue
-    const id = `${span.utteranceId}@${spanLabel(span.start)}-${spanLabel(span.end)}`
-    const prev = bySource.get(id)
-    if (prev !== undefined && edits.get(prev)!.at && !e.at) {
-      edits.delete(key)
-      continue
-    }
-    if (prev !== undefined) edits.delete(prev)
-    bySource.set(id, key)
-  }
-  // 同じ枚(発話+何枚目)の、前の版の鍵の修正と元の部分つきの鍵の修正は、新しい方だけを使う。
-  // 前の版の鍵で直した枚を作り直すと元の部分つきの鍵でも覚えるので、両方が残り、その後で直し直して
-  // 枚の分け方を変えると、古い文字が何枚目かで当たったうえ直し直した文字も当たり、同じ発言が2回出ていた
-  // (今タイムラインにある方が新しい。どちらも無ければ元の部分つきの方が新しい)
+  // 同じ枚の、前の版の鍵の修正と範囲つきの鍵の修正は、新しい方だけ(両方を当てると、直し直す前の
+  // 古い文字と直し直した文字が両方出ていた)。今タイムラインにある方、無ければ範囲つきの方が新しい
   const spanKeysOf = new Map<string, string[]>()
-  for (const key of edits.keys())
+  for (const key of byKey.keys())
     if (keySpan(key)) spanKeysOf.set(baseKey(key), [...(spanKeysOf.get(baseKey(key)) ?? []), key])
   for (const [base, keys] of spanKeysOf) {
-    const legacy = edits.get(base)
+    const legacy = byKey.get(base)
     if (!legacy) continue
-    if (legacy.at) for (const k of keys) if (!edits.get(k)!.at) edits.delete(k)
-    if (!legacy.at || keys.some((k) => edits.has(k))) edits.delete(base)
+    if (legacy.at) for (const k of keys) if (!byKey.get(k)!.at) byKey.delete(k)
+    if (!legacy.at || keys.some((k) => byKey.has(k))) byKey.delete(base)
   }
 
-  const dismissedSpans = [...dismissed].map(keySpan).filter((s) => s !== null)
-  /** 元の部分の大半(半分以上)が、人が消した部分に入るか */
-  const spanDismissed = (utteranceId: string, src: { start: number; end: number }): boolean =>
+  const dismissedSpans = [...dismissed].map(keySpan).filter((x) => x !== null)
+  const dismissedBases = new Set([...dismissed].filter((k) => k.startsWith('u:') && !keySpan(k)))
+  const spanDismissed = (utteranceId: string, r: Range): boolean =>
     dismissedSpans.some((d) => {
-      const ov = overlapOf(d.start, d.end, src.start, src.end)
-      return d.utteranceId === utteranceId && ov > OVERLAP_EPS && ov >= 0.5 * (src.end - src.start)
+      const ov = Math.max(0, Math.min(d.end, r.end) - Math.max(d.start, r.start))
+      return d.utteranceId === utteranceId && ov > 0 && ov >= 0.5 * (r.end - r.start) - 1e-9
     })
-  /** 人が消した枚か(鍵が同じ、または元の部分の大半が消した部分に入る) */
-  const isDismissed = (
-    n: WithAutoSource & Pick<TextOverlay, 'utteranceId' | 'utteranceChunk' | 'effectId'>
-  ): boolean => {
-    const key = autoTelopKey(n)
-    if (!key) return false
-    const base = baseKey(key)
-    if (dismissed.has(key) || (base !== key && dismissed.has(base))) return true
-    return !!n.utteranceId && !!n.autoSource && spanDismissed(n.utteranceId, n.autoSource)
-  }
-  // 直してから消した枚は、作り直しても(枚の分け方が変わって隣の枚へ移しても)出さない
-  for (const [key, e] of edits) {
-    const span = keySpan(key)
-    const src = e.rec.autoSource
-    const gone =
-      dismissed.has(key) ||
-      (span !== null && src !== undefined && spanDismissed(span.utteranceId, src))
-    if (gone) edits.delete(key)
-  }
 
-  // 枚の分け方が変わった発話(今ある直していない枚の元の文が、同じ番号の新しい枚の元の文と違う)。
-  // 元の文(`autoSource.text`)で比べる: 頭・終わりがカットで落ちて文字を削った枚(ショートの頭など)を
-  // 分け方が変わったとみなすと、前の版の修正が何枚目かで当たらず、ショートで消えていた
-  const autoText = (x: WithAutoSource & { text: string }): string => x.autoSource?.text ?? x.text
-  const incomingText = new Map<string, string>()
-  for (const n of incoming) {
-    const k = n.utteranceId ? `${n.utteranceId}#${n.utteranceChunk ?? 0}` : null
-    if (k && !incomingText.has(k)) incomingText.set(k, autoText(n))
-  }
-  const rechunked = new Set<string>()
-  for (const o of existing) {
-    if (!o.utteranceId || o.edited) continue
-    if (incomingText.get(`${o.utteranceId}#${o.utteranceChunk ?? 0}`) !== autoText(o))
-      rechunked.add(o.utteranceId)
-  }
-
-  const used = new Set<Edit>()
-  const apply = (n: T & WithAutoSource, e: Edit): T & WithAutoSource => {
-    used.add(e)
-    const sameText = e.rec.text === n.text
-    return {
-      ...n,
-      text: e.rec.text,
-      style: e.rec.style,
-      // スタイルとのつながり・話者も人の修正のとおり(見た目を手で替えてスタイルから外したもの、
-      // 話者を消したものを、作り直しでつなぎ直さない。覚えておいた修正はいつも両方を写している)
-      styleId: e.rec.styleId,
-      speaker: e.rec.speaker,
-      // 文字を直していれば、単語ごとの時刻(カラオケ表示)は合わなくなるので外す
-      words: sameText ? n.words : undefined,
-      edited: true
+  const edits: EditEntry[] = []
+  const effectEdits = new Map<string, EditEntry>()
+  for (const e of byKey.values()) {
+    if (e.key.startsWith('e:')) {
+      if (!dismissed.has(e.key)) effectEdits.set(e.key, e)
+      continue
     }
+    const m = /^u:(.+)#(\d+)(?:@|$)/.exec(e.key)
+    if (!m) continue
+    e.utteranceId = m[1]
+    e.chunk = Number(m[2])
+    const span = keySpan(e.key)
+    const src = e.rec.autoSource ?? (span ? { start: span.start, end: span.end } : undefined)
+    if (src) e.src = { start: src.start, end: src.end }
+    // 直してから消した修正は、作り直しても(隣の枚へ移しても)出さない
+    if (dismissed.has(e.key) || dismissedBases.has(baseKey(e.key))) continue
+    if (e.src && spanDismissed(e.utteranceId, e.src)) continue
+    edits.push(e)
   }
+  // 同じ範囲の修正は1つだけ(今タイムラインにある方)。今あるものを先に当てる
+  edits.sort((a, b) => Number(!!b.at) - Number(!!a.at))
+  const seenSpan = new Set<string>()
+  const uniq = edits.filter((e) => {
+    if (!e.src) return true
+    const id = `${e.utteranceId}@${spanLabel(e.src.start)}-${spanLabel(e.src.end)}`
+    if (seenSpan.has(id)) return false
+    seenSpan.add(id)
+    return true
+  })
 
   // 発話ごとの枚の並び(同じ発話の枚は、最初の枚の位置にまとめて出す)
-  const groups = new Map<string, Piece<T>[]>()
-  const order: (Piece<T> | string)[] = []
+  const groups = new Map<string, (T & WithAutoSource)[]>()
+  const order: (T | string)[] = []
   for (const n0 of incoming) {
     const n = n0 as T & WithAutoSource
     const key = autoTelopKey(n)
-    const base = key ? baseKey(key) : null
-    if (isDismissed(n)) continue
-    // 前の版で覚えた修正(元の部分なし)は、これまでどおり何枚目かで当てる。ただし今タイムラインにあって、
-    // 枚の分け方が変わった発話なら、何枚目かは別の言葉を指すので、下で時刻の重なりで探す
-    const byIndex = (x: Edit | undefined): Edit | undefined =>
-      x && !x.rec.autoSource && !(x.at && rechunked.has(n.utteranceId ?? '')) ? x : undefined
-    let e = key ? edits.get(key) : undefined
-    if (e && !e.rec.autoSource && n.utteranceId) e = byIndex(e)
-    if (!e && base && base !== key) e = byIndex(edits.get(base))
-    const piece: Piece<T> =
-      e && !used.has(e) ? { n: apply(n, e), edited: true } : { n, edited: false }
     if (!n.utteranceId) {
-      order.push(piece)
+      if (key && dismissed.has(key)) continue
+      const e = key ? effectEdits.get(key) : undefined
+      order.push(e ? applyEdit(n, e.rec, n.text === e.rec.text) : n)
       continue
     }
+    // 前の版の消した印(何枚目かだけ)は、これまでどおりその番号の枚を出さない(分かれた枚も全部)
+    if (dismissedBases.has(`u:${n.utteranceId}#${n.utteranceChunk ?? 0}`)) continue
+    if (key && dismissed.has(key)) continue
     const g = groups.get(n.utteranceId)
-    if (g) g.push(piece)
+    if (g) g.push(n)
     else {
-      groups.set(n.utteranceId, [piece])
+      groups.set(n.utteranceId, [n])
       order.push(n.utteranceId)
-    }
-  }
-
-  // 鍵の合わなかった修正を、発話の中で元の部分と重なる枚へ当て直す
-  for (const [key, e] of edits) {
-    if (used.has(e) || !key.startsWith('u:')) continue
-    const span = keySpan(key)
-    const utteranceId = span?.utteranceId ?? /^u:(.+)#\d+$/.exec(key)?.[1]
-    if (!utteranceId) continue
-    const pieces = groups.get(utteranceId)
-    if (!pieces) continue
-    if (span && e.rec.autoSource) {
-      // 元の部分(素材の時刻)で探す
-      relocateEdit(
-        pieces,
-        e,
-        span,
-        (p) => p.n.autoSource ?? null,
-        e.rec.autoSource.text,
-        apply,
-        isDismissed
-      )
-    } else if (e.at && rechunked.has(utteranceId)) {
-      // 前の版の修正: 今タイムラインにある時刻で探す。見つからなければ(ショートなど、今の時刻と
-      // 別のタイムライン)、これまでどおり何枚目かで当てる
-      const found = relocateEdit(
-        pieces,
-        e,
-        e.at,
-        (p) => ({ start: p.n.startTime, end: p.n.endTime }),
-        undefined,
-        apply,
-        isDismissed
-      )
-      const chunk = Number(/#(\d+)$/.exec(key)?.[1])
-      const k = found ? -1 : pieces.findIndex((p) => !p.edited && p.n.utteranceChunk === chunk)
-      if (k >= 0) pieces[k] = { n: apply(pieces[k].n, e), edited: true }
     }
   }
 
   const out: T[] = []
   for (const x of order) {
-    if (typeof x !== 'string') out.push(x.n)
-    else for (const p of groups.get(x)!) out.push(p.n)
+    if (typeof x !== 'string') out.push(x)
+    else
+      out.push(
+        ...carveUtterance(
+          groups.get(x)!,
+          uniq.filter((e) => e.utteranceId === x),
+          dismissedSpans.filter((d) => d.utteranceId === x),
+          existing.filter((o) => o.utteranceId === x && !o.edited)
+        )
+      )
   }
   return out
 }
 
-/** 空白・改行を除いた文字の、元の文での位置 */
-function visibleIndex(text: string): { chars: string[]; at: number[] } {
-  const chars = [...text]
-  const at: number[] = []
-  chars.forEach((c, i) => {
-    if (!/\s/.test(c)) at.push(i)
-  })
-  return { chars, at }
+function applyEdit<T extends Omit<TextOverlay, 'id'>>(
+  n: T,
+  rec: RememberedEdit,
+  keepWords: boolean
+): T {
+  return {
+    ...n,
+    text: rec.text,
+    style: rec.style,
+    // スタイルとのつながり・話者も人の修正のとおり(見た目を手で替えてスタイルから外したもの、
+    // 話者を消したものを、作り直しでつなぎ直さない。覚えておいた修正はいつも両方を写している)
+    styleId: rec.styleId,
+    speaker: rec.speaker,
+    // 文字を直していれば、単語ごとの時刻(カラオケ表示)は合わなくなるので外す
+    words: keepWords ? n.words : undefined,
+    edited: true
+  }
 }
 
-/**
- * 修正 `e` を、元の部分 `span` と重なる枚へ当てる(`pieces` を書き換える)。
- * `origText`(直す前の文)が分かれば、重なる枚をつないだ文の中で直した部分を探し、その前後の言葉は
- * 残して、直した部分だけを直した文字の1枚にする
- */
-function relocateEdit<T extends Omit<TextOverlay, 'id'>>(
-  pieces: Piece<T>[],
-  e: Edit,
-  span: { start: number; end: number },
-  coords: (p: Piece<T>) => { start: number; end: number } | null,
-  origText: string | undefined,
-  apply: (n: T & WithAutoSource, e: Edit) => T & WithAutoSource,
-  /** 人が消した枚か(分けた残りの枚を消したものも、作り直しで足し直さない) */
-  isDismissed: (n: T & WithAutoSource) => boolean
-): boolean {
-  const cand = pieces
-    .map((p, i) => ({ p, i, c: coords(p) }))
-    .filter(
-      (x): x is { p: Piece<T>; i: number; c: { start: number; end: number } } =>
-        !x.p.edited &&
-        x.c !== null &&
-        overlapOf(x.c.start, x.c.end, span.start, span.end) > OVERLAP_EPS
-    )
-  if (cand.length === 0) return false
-  const withSource = (n: T & WithAutoSource): T & WithAutoSource =>
-    e.rec.autoSource ? { ...n, autoSource: e.rec.autoSource } : n
-
-  // 重なる枚をつないだ文(空白・改行を除く)の中で、直した部分 [p, q) を決める。
-  // 直す前の文が分かれば、その文の位置。分からない(前の版の修正)・見つからない(辞書を替えた)ときは、
-  // 元の部分の頭・終わりの時刻を、枚の中の文字の位置へ割り振って決める(言葉の時刻は文字数で按分して
-  // いるので、ほぼ言葉の境目に当たる)。枚を丸ごと外すと、直した部分の外の言葉まで消えていた
-  const vis = cand.map((x) => visibleIndex(x.p.n.text))
-  const lens = vis.map((v) => v.at.length)
-  const starts = lens.map((_, i) => lens.slice(0, i).reduce((t, l) => t + l, 0))
-  const joined = vis.map((v) => v.at.map((k) => v.chars[k]).join('')).join('')
-  const target = origText !== undefined ? origText.replace(/\s/g, '') : ''
-  let p = target ? joined.indexOf(target) : -1
-  let q = p + target.length
-  if (p < 0) {
-    const posAt = (t: number): number => {
-      const ci = cand.findIndex((x) => t < x.c.end - 1e-6)
-      const i = ci < 0 ? cand.length - 1 : ci
-      const c = cand[i].c
-      const r = c.end > c.start ? (t - c.start) / (c.end - c.start) : 1
-      return starts[i] + Math.round(lens[i] * Math.min(1, Math.max(0, r)))
-    }
-    p = posAt(span.start)
-    q = Math.max(p + 1, posAt(span.end))
+/** 1つの発話の新しい枚を、人の修正・消した範囲で切り分ける */
+function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
+  pieces: (T & WithAutoSource)[],
+  edits: EditEntry[],
+  dismissedSpans: readonly Range[],
+  existingAuto: readonly TextOverlay[]
+): T[] {
+  const parsed = pieces.map((n) => ({ n, ...charsOf(n) }))
+  const hasSource = parsed.every((p) => p.vis.every((c) => c.src !== null))
+  // 今あるテロップと新しい枚が同じタイムラインか(同じ番号の直していない枚が、同じ時刻に、同じ文
+  // (またはその一部)で出る)。同じなら前の版の修正を今の時刻の重なりで探せる。違う(ショート・カットを
+  // 変えた)なら、時刻の重なりは別の言葉を指すので、これまでどおり何枚目かで当てる
+  const sameTimeline = existingAuto.some((o) =>
+    pieces.some((p) => {
+      if ((p.utteranceChunk ?? 0) !== (o.utteranceChunk ?? 0)) return false
+      if (Math.abs(p.startTime - o.startTime) > 0.05) return false
+      const a = flatText(o.text)
+      const b = flatText(p.text)
+      return a.includes(b) || b.includes(a)
+    })
+  )
+  const tMid = (c: Char): number => (c.t0 + c.t1) / 2
+  const claimWith = (e: EditEntry, test: (c: Char, chunk: number) => boolean): number => {
+    let n = 0
+    for (const p of parsed)
+      for (const c of p.vis)
+        if (!c.claim && test(c, p.n.utteranceChunk ?? 0)) {
+          c.claim = e
+          n++
+        }
+    return n
   }
-  const replaced: Piece<T>[] = []
-  cand.forEach((x, ci) => {
-    const v = vis[ci]
-    const len = lens[ci]
-    const g0 = starts[ci]
-    const g1 = g0 + len
-    const n = x.p.n
-    const timeAt = (k: number): number =>
-      n.startTime + ((n.endTime - n.startTime) * k) / Math.max(1, len)
-    const srcAt = (k: number): number | null =>
-      n.autoSource
-        ? n.autoSource.start + ((n.autoSource.end - n.autoSource.start) * k) / Math.max(1, len)
-        : null
-    const part = (k0: number, k1: number): Piece<T> | null => {
-      const from = k0 === 0 ? 0 : v.at[k0]
-      const to = k1 >= len ? v.chars.length : v.at[k1]
-      const text = v.chars.slice(from, to).join('').trim()
-      if (!text) return null
-      const a = timeAt(k0)
-      const b = timeAt(k1)
-      const s0 = srcAt(k0)
-      const s1 = srcAt(k1)
-      const piece: T & WithAutoSource = {
+  for (const e of edits) {
+    if (e.src && hasSource) {
+      // 範囲で当てる。範囲の言葉が今は無い(カットで落ちた)なら出さない
+      claimWith(e, (c) => inRange(c.src!, e.src!))
+      continue
+    }
+    // 前の版の修正(範囲なし)・範囲の分からない枚: 枚の分け方が変わったなら今の時刻の重なりで、
+    // 見つからなければ(ショートなど、別のタイムライン)これまでどおり何枚目かで当てる
+    if (e.at && sameTimeline && claimWith(e, (c) => inRange(tMid(c), e.at!)) > 0) continue
+    claimWith(e, (_, chunk) => chunk === e.chunk)
+  }
+  for (const p of parsed)
+    for (const c of p.vis)
+      if (!c.claim && c.src !== null && dismissedSpans.some((d) => inRange(c.src!, d)))
+        c.dropped = true
+
+  const out: (T & WithAutoSource)[] = []
+  const placed = new Map<
+    EditEntry,
+    { at: number; host: T & WithAutoSource; chars: Char[]; texts: string[]; wholeHost: boolean }
+  >()
+  for (const p of parsed) {
+    const { n, chars, vis } = p
+    if (vis.every((c) => !c.claim && !c.dropped)) {
+      out.push(n)
+      continue
+    }
+    let run: Char[] = []
+    const flush = (): void => {
+      if (run.length === 0) return
+      const first = run[0]
+      const last = run[run.length - 1]
+      const text = chars
+        .slice(first.pos, last.pos + 1)
+        .join('')
+        .trim()
+      const srcs = run.map((c) => c.src)
+      const known = srcs.every((t) => t !== null) ? (srcs as number[]) : null
+      out.push({
         ...n,
         text,
-        startTime: a,
-        endTime: b,
-        words: n.words?.filter((w) => w.start >= a - 1e-6 && w.start < b - 1e-6),
-        ...(s0 !== null && s1 !== null ? { autoSource: { start: s0, end: s1, text } } : {})
-      }
-      // 分けた残りの枚を人が消したなら、作り直しても足さない(元の枚の半分に満たないので、
-      // 元の枚の消した印の判定だけでは毎回出し直していた)
-      return isDismissed(piece) ? null : { n: piece, edited: false }
-    }
-    if (g1 <= p || g0 >= q) {
-      replaced.push(x.p)
-      return
-    }
-    if (g0 < p) {
-      const before = part(0, p - g0)
-      if (before) replaced.push(before)
-    }
-    if (g0 <= p && p < g1) {
-      // 直した部分の終わりの時刻(終わりのある枚の中の位置)
-      const cj = Math.max(
-        0,
-        starts.findIndex((st, j) => q <= st + lens[j])
-      )
-      const last = cand[cj].p.n
-      const endAt =
-        last.startTime +
-        ((last.endTime - last.startTime) * (q - starts[cj])) / Math.max(1, lens[cj])
-      replaced.push({
-        n: withSource({ ...apply(n, e), startTime: timeAt(p - g0), endTime: endAt }),
-        edited: true
+        startTime: first.t0,
+        endTime: last.t1,
+        words: n.words?.filter((w) => w.start >= first.t0 - 1e-6 && w.start < last.t1 - 1e-6),
+        ...(known
+          ? {
+              autoSource: {
+                start: Math.min(...known) - AUTO_SOURCE_MARGIN,
+                end: Math.max(...known) + AUTO_SOURCE_MARGIN,
+                text,
+                times: known
+              }
+            }
+          : {})
       })
+      run = []
     }
-    if (g1 > q) {
-      const after = part(q - g0, len)
-      if (after) replaced.push(after)
+    for (const c of vis) {
+      if (c.claim) {
+        flush()
+        const e = c.claim
+        const got = placed.get(e)
+        if (got) {
+          got.chars.push(c)
+          got.texts.push(chars[c.pos])
+          if (got.host !== n) got.wholeHost = false
+        } else {
+          placed.set(e, {
+            at: out.length,
+            host: n,
+            chars: [c],
+            texts: [chars[c.pos]],
+            wholeHost: vis.every((v) => v.claim === e)
+          })
+          out.push(n) // 後で修正に置き換える
+        }
+      } else if (c.dropped) flush()
+      else run.push(c)
     }
-  })
-  const first = cand[0].i
-  const lastIndex = cand[cand.length - 1].i
-  // 重ならない枚が間に挟まっていても並びは崩さない(重なる枚は続いている)
-  const between = pieces.slice(first, lastIndex + 1).filter((x) => !cand.some((c) => c.p === x))
-  pieces.splice(first, lastIndex - first + 1, ...replaced, ...between)
-  return true
+    flush()
+  }
+  for (const [e, x] of placed) {
+    const srcs = x.chars.map((c) => c.src)
+    const known = srcs.every((t) => t !== null) ? (srcs as number[]) : null
+    const keepWords = x.wholeHost && e.rec.text === x.host.text
+    const startTime = Math.min(...x.chars.map((c) => c.t0))
+    const endTime = Math.max(...x.chars.map((c) => c.t1))
+    // 範囲を覚えていない修正は、当てた文字の範囲を覚えさせる(次からは範囲で当たる)。
+    // 枚を丸ごと当てたなら、その枚の範囲のまま(文字の時刻の分からない枚でも、隣の枚の文字を含まない)
+    const hosts = parsed.filter((p) => p.vis.some((c) => c.claim === e))
+    const wholePieces =
+      hosts.length > 0 && hosts.every((p) => p.n.autoSource && p.vis.every((c) => c.claim === e))
+    const autoSource: AutoTelopSource | undefined =
+      e.rec.autoSource ??
+      (wholePieces
+        ? {
+            start: Math.min(...hosts.map((p) => p.n.autoSource!.start)),
+            end: Math.max(...hosts.map((p) => p.n.autoSource!.end)),
+            text: x.texts.join(''),
+            ...(known ? { times: known } : {})
+          }
+        : known
+          ? {
+              start: Math.min(...known) - AUTO_SOURCE_MARGIN,
+              end: Math.max(...known) + AUTO_SOURCE_MARGIN,
+              text: x.texts.join(''),
+              times: known
+            }
+          : x.host.autoSource)
+    const edited = applyEdit(
+      { ...x.host, startTime, endTime, ...(autoSource ? { autoSource } : {}) },
+      e.rec,
+      keepWords
+    )
+    if (keepWords) {
+      edited.startTime = x.host.startTime
+      edited.endTime = x.host.endTime
+    }
+    out[x.at] = edited
+  }
+  return out
 }
 
 /** 今あるテロップの人の修正を、覚えておいた修正に重ねる(新しい修正が勝つ) */
@@ -422,10 +452,23 @@ export function rememberEditedTelops(
       // 元の部分も覚える(枚の分け方が変わっても、同じ言葉の枚へ当て直せるように)
       ...(src ? { autoSource: src } : {})
     }
-    out[key] = rec
-    // 同じ枚の前の版の鍵(何枚目かだけ)は消す。残すと、直し直す前の古い文字が作り直しで何枚目かで当たる
+    // 同じ枚の前の版の鍵(何枚目かだけ)・同じ範囲の別の鍵は消す。残すと、直し直す前の古い文字が
+    // 作り直しで当たる(当て直した修正は、出す位置の枚の番号が変わるので、同じ範囲でも鍵が変わる)
     const base = baseKey(key)
     if (base !== key) delete out[base]
+    const span = keySpan(key)
+    if (span)
+      for (const k of Object.keys(out)) {
+        const other = keySpan(k)
+        if (
+          other &&
+          other.utteranceId === span.utteranceId &&
+          spanLabel(other.start) === spanLabel(span.start) &&
+          spanLabel(other.end) === spanLabel(span.end)
+        )
+          delete out[k]
+      }
+    out[key] = rec
   }
   return Object.keys(out).length > 0 ? out : undefined
 }

@@ -169,6 +169,58 @@ export function clipTelopChunkText(
   return wrapTelopLines(polished, options.maxLineChars ?? 14).join('\n')
 }
 
+/**
+ * テロップの文の1文字ごと(空白・改行を除く)の、話している時刻(素材の秒、文字の真ん中)。
+ *
+ * 人が直した・消した範囲(元の発話の時刻)で、作り直した枚を切り分けるのに使う。枚の時間に文字数で
+ * 割り振ると、言葉ごとの長さの違い(「は」0.7 秒と「きょう0」0.7 秒)で数文字ずれ、消していない言葉まで
+ * 消えていた。整えた文(言いよどみを除く・辞書で直す)の文字を、元の言葉の文字に前から順に合わせる
+ * (合わない文字 = 辞書で直した文字は、直前に合った所の時刻)。`from`〜`to` は、頭・終わりを
+ * カットで落とした枚の残った範囲(`clipTelopChunkText` と同じ言葉を見る)。
+ * 言葉の時刻が無い発話は null
+ */
+export function telopCharTimes(
+  u: Pick<TranscriptUtterance, 'text' | 'words'>,
+  chunk: TelopChunk,
+  text: string,
+  from = -Infinity,
+  to = Infinity
+): number[] | null {
+  if (u.words.length === 0) return null
+  const timed = charTimes(u.words, u.text)
+  const inside = (wi: number): boolean => {
+    const w = u.words[wi]
+    const mid = (w.start + w.end) / 2
+    return mid >= from - 1e-6 && mid < to + 1e-6
+  }
+  const cand = timed.filter(
+    (c) =>
+      c.word >= 0 &&
+      !/\s/.test(c.ch) &&
+      c.start >= chunk.sourceStart - 1e-6 &&
+      c.start < chunk.sourceEnd - 1e-6 &&
+      inside(c.word)
+  )
+  if (cand.length === 0) return null
+  const mid = (k: number): number => (cand[k].start + cand[k].end) / 2
+  const out: number[] = []
+  let j = 0
+  for (const ch of [...text]) {
+    if (/\s/.test(ch)) continue
+    let k = -1
+    for (let x = j; x < Math.min(cand.length, j + 12); x++)
+      if (cand[x].ch === ch) {
+        k = x
+        break
+      }
+    if (k >= 0) {
+      out.push(mid(k))
+      j = k + 1
+    } else out.push(mid(Math.min(j, cand.length - 1)))
+  }
+  return out
+}
+
 export function utteranceToTelopChunks(
   u: Pick<TranscriptUtterance, 'text' | 'words' | 'sourceStart' | 'sourceEnd'>,
   options: ChunkOptions = {}

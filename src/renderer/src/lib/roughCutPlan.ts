@@ -56,9 +56,10 @@ import { mixResidual } from '@shared/ingest/tracks'
 import {
   clipTelopChunkText,
   settleTelopTimes,
+  telopCharTimes,
   utteranceToTelopChunks
 } from '@shared/telop/fromTranscript'
-import type { WithAutoSource } from '@shared/telop/manual'
+import { AUTO_SOURCE_MARGIN, type WithAutoSource } from '@shared/telop/manual'
 import {
   speechLook,
   speechTelopStyle,
@@ -460,11 +461,15 @@ export function planRoughCut(
           const text = clipped
             ? clipTelopChunkText(u, chunk, toSource(f, visStart), toSource(f, visEnd), chunkOptions)
             : chunk.text
-          return text ? { span: sp, start, end, text, visStart, visEnd } : null
+          return text ? { span: sp, start, end, text, clipped, visStart, visEnd } : null
         })
         .filter((x) => x !== null)
-      for (const { span, start, end, text, visStart, visEnd } of placed) {
+      for (const { span, start, end, text, clipped, visStart, visEnd } of placed) {
         const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
+        // 1文字ごとの話している時刻(人が直した・消した範囲で、作り直した枚を切り分ける)
+        const times = clipped
+          ? telopCharTimes(u, chunk, text, toSource(f, visStart), toSource(f, visEnd))
+          : telopCharTimes(u, chunk, text)
         const telop: Omit<TextOverlay, 'id'> & WithAutoSource = {
           text,
           startTime: start,
@@ -475,12 +480,25 @@ export function planRoughCut(
           source: 'auto',
           utteranceId: u.id,
           utteranceChunk: ci,
-          // 作ったときの元の部分(人の修正・消した印を、枚の分け方が変わっても同じ言葉の枚へ当てる)。
-          // 1枚が2つに分かれたときは、それぞれ残った部分(鍵が分かれ、片方だけ直す・消すことができる)
+          // 作ったときの元の部分(人の修正・消した印を、枚の分け方・カットが変わっても同じ言葉に当てる)。
+          // 頭・終わりを落とした枚・2つに分かれた枚は、出している言葉の範囲(片方だけ直す・消すことができ、
+          // 消した範囲に出していない言葉が入らない)
           autoSource:
-            placed.length > 1
-              ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
-              : { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
+            clipped && times && times.length > 0
+              ? {
+                  start: Math.min(...times) - AUTO_SOURCE_MARGIN,
+                  end: Math.max(...times) + AUTO_SOURCE_MARGIN,
+                  text,
+                  times
+                }
+              : clipped
+                ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
+                : {
+                    start: chunk.sourceStart,
+                    end: chunk.sourceEnd,
+                    text: chunk.text,
+                    ...(times ? { times } : {})
+                  }
         }
         telops.push(telop)
         voiceEnds.set(telop, voiceEnd)

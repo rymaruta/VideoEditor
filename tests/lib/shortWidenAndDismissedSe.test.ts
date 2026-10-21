@@ -18,10 +18,10 @@ import {
 } from '../../src/renderer/src/lib/roughCutPlan'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { planCg } from '@shared/finish/cg'
-import { autoTelopKey } from '@shared/telop/manual'
+import { autoTelopKey, mergeManualTelops, rememberEditedTelops } from '@shared/telop/manual'
 import type { MulticamInfo } from '@shared/sync/multicam'
 import type { EffectProposal } from '@shared/telop/effects'
-import type { Project } from '@shared/types'
+import type { Project, TextOverlay } from '@shared/types'
 import { TURN_RATE } from '@shared/diarize/micTurns'
 import { defaultTextStyle } from '@shared/textStyle'
 
@@ -212,5 +212,93 @@ describe('仮編集: 枚の途中の間をカットで詰めて2つに分かれ�
     ])
     // 片方だけ直す・消すことができるよう、鍵は分かれる
     expect(new Set(u0.map((t) => autoTelopKey(t))).size).toBe(2)
+  })
+})
+
+describe('2つに分かれた枚と、人の修正・消した印(カットを変えて作り直す)', () => {
+  const planWith = (s1: [number, number], s2: [number, number]): Omit<TextOverlay, 'id'>[] =>
+    planRoughCut(
+      project,
+      info,
+      [
+        { id: 's1', start: s1[0], end: s1[1], lines: [], speech: 0 },
+        { id: 's2', start: s2[0], end: s2[1], lines: [], speech: 0 }
+      ],
+      [
+        { sceneId: 's1', score: 100, kind: 'highlight', reason: '' },
+        { sceneId: 's2', score: 100, kind: 'highlight', reason: '' }
+      ],
+      activity,
+      {
+        targetSec: 0,
+        keep: { s1: true, s2: true },
+        styles: [],
+        speechLook: look,
+        kind: 'game',
+        policy: 'light'
+      }
+    ).telops
+  // u0 の1枚が「きょう0はすごい」「をたおしにいきますよ」に分かれるカットと、分かれないカット
+  const split = (): Omit<TextOverlay, 'id'>[] => planWith([0, 3], [4.1, 10])
+  const whole = (): Omit<TextOverlay, 'id'>[] => planWith([0, 10], [10, 20])
+  const u0 = <T extends { utteranceId?: string }>(xs: readonly T[]): T[] =>
+    xs.filter((t) => t.utteranceId === 'u0')
+  const ids = (xs: readonly Omit<TextOverlay, 'id'>[]): TextOverlay[] =>
+    xs.map((o, i) => ({ ...o, id: `o${i}` }))
+  const flat = (xs: readonly { text: string; utteranceId?: string }[]): string =>
+    u0(xs)
+      .map((t) => t.text.replace(/\s/g, ''))
+      .join('|')
+  const strip = (o: TextOverlay): TextOverlay => {
+    const { autoSource: _drop, ...rest } = o as TextOverlay & { autoSource?: unknown }
+    void _drop
+    return rest
+  }
+
+  it('前の版の修正(範囲なし)は、分かれた枚の両方をまとめて1回だけ出す', () => {
+    const old = ids(whole()).map(strip)
+    const i = old.findIndex((t) => t.utteranceId === 'u0')
+    old[i] = { ...old[i], text: '今日はすごいボスを倒しに行きますよ', edited: true }
+    const rem = rememberEditedTelops(old, undefined)
+    expect(flat(mergeManualTelops(old, split(), new Set(), rem))).toBe(
+      '今日はすごいボスを倒しに行きますよ'
+    )
+    expect(flat(mergeManualTelops([], split(), new Set(), rem))).toBe(
+      '今日はすごいボスを倒しに行きますよ'
+    )
+  })
+
+  it('分かれた枚の片方を消してカットを戻すと、消した言葉だけを出さない', () => {
+    const tl = ids(split())
+    const [p1, p2] = u0(tl)
+    const after = (gone: TextOverlay): string => {
+      const rest = tl.filter((t) => t !== gone)
+      return flat(
+        mergeManualTelops(
+          rest,
+          whole(),
+          new Set([autoTelopKey(gone)!]),
+          rememberEditedTelops(rest, undefined)
+        )
+      )
+    }
+    // 2枚目を消した: 1枚目の言葉は残る(分けて消えたのは 2枚目の言葉だけ。ボスは 2つのカットの間で聞こえる)
+    expect(after(p2)).toBe('きょう0はすごいボス')
+    // 1枚目を消した: 消した言葉は戻らない
+    expect(after(p1)).toBe('ボスをたおしにいきますよ')
+  })
+
+  it('1枚目を直して2枚目を消し、カットを戻しても、直した文字は残る', () => {
+    const tl = ids(split())
+    const [p1, p2] = u0(tl)
+    const edited = tl.map((t) => (t === p1 ? { ...t, text: '今日は凄い', edited: true } : t))
+    const rest = edited.filter((t) => t.id !== p2.id)
+    const merged = mergeManualTelops(
+      rest,
+      whole(),
+      new Set([autoTelopKey(p2)!]),
+      rememberEditedTelops(rest, undefined)
+    )
+    expect(flat(merged)).toBe('今日は凄い|ボス')
   })
 })
