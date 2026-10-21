@@ -11,7 +11,11 @@ vi.mock('../../src/main/projectFileService', () => ({
   }
 }))
 
-import { discardedPathFor, writeAutosaveFile } from '../../src/main/autosaveFiles'
+import {
+  describeAutosaveFailure,
+  discardedPathFor,
+  writeAutosaveFile
+} from '../../src/main/autosaveFiles'
 import type { Project } from '../../src/shared/types'
 
 const dirs: string[] = []
@@ -99,6 +103,38 @@ describe('自動保存の退避の失敗の文面(破棄・開く・新規・保
     mkdirSync(join(discardedPathFor(path), 'x'), { recursive: true })
     expect(() => setAsideAutosaveFile(path, false)).toThrow(
       '自動保存の置き場所に同じ名前のフォルダがあります'
+    )
+  })
+})
+
+describe('Windows の名前の付け替えの失敗(EPERM)の文面', () => {
+  // Windows では、中身のあるフォルダへの名前の付け替えが ENOTEMPTY ではなく EPERM になる
+  // (Windows の CI で実測)。Linux では起きないので、Windows と同じ形のエラーで確かめる
+  const renameError = (code: string, dest: string): Error =>
+    Object.assign(new Error(`${code}: operation not permitted, rename`), {
+      code,
+      syscall: 'rename',
+      path: '/x/autosave.veproj',
+      dest
+    })
+
+  it('行き先がフォルダなら、権限ではなく同じ名前のフォルダの文面', async () => {
+    const { mkdirSync } = await import('fs')
+    const dir = mkdtempSync(join(tmpdir(), 've-perm-'))
+    try {
+      const dest = join(dir, 'autosave-discarded.veproj')
+      mkdirSync(join(dest, 'x'), { recursive: true })
+      expect(describeAutosaveFailure(renameError('EPERM', dest)).message).toBe(
+        '自動保存の置き場所に同じ名前のフォルダがあります'
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('行き先がフォルダでなければ、これまでどおり権限の文面', () => {
+    expect(describeAutosaveFailure(renameError('EPERM', '/no/such/file.veproj')).message).toBe(
+      '自動保存の置き場所に書き込む権限がありません'
     )
   })
 })

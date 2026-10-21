@@ -42,7 +42,7 @@ import { readFramesRgb } from '@main/frameService'
 import { usePipelineStore } from '@renderer/store/pipelineStore'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
-import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
+import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import type { AsrJob, AsrJobResult } from '@shared/transcript'
 import {
   DURATION,
@@ -57,6 +57,7 @@ import {
   writeWav,
   type Line
 } from './gameShoot'
+import { runSyncWorker } from './syncWorkerThread'
 
 const HAVE_FFMPEG = existsSync(ffmpegPath) && existsSync(ffprobePath)
 
@@ -77,19 +78,8 @@ function renderAudio(lines: Line[]): Float32Array {
 // ---------------------------------------------------------------- アプリの main 側
 
 async function syncInProcess(files: SyncInputFile[]): Promise<SyncReport> {
-  return new Promise<SyncReport>((resolve, reject) => {
-    vi.resetModules()
-    vi.doMock('worker_threads', () => ({
-      parentPort: {
-        postMessage: (m: SyncWorkerMessage) => {
-          if (m.type === 'done') resolve(m.report)
-          else if (m.type === 'error') reject(new Error(m.message))
-        }
-      },
-      workerData: { files, ffmpegPath, cacheDir: state.cacheDir }
-    }))
-    import('@main/syncWorker').catch(reject)
-  }).finally(() => vi.doUnmock('worker_threads'))
+  // 本番と同じく別のスレッドで走らせる(テストの作業スレッドを長く止めない)
+  return runSyncWorker(files, ffmpegPath, state.cacheDir)
 }
 
 function installApi(lines: Line[]): void {

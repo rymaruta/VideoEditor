@@ -98,13 +98,33 @@ const AUTOSAVE_ERROR_MESSAGES: [RegExp, string][] = [
 ]
 
 /**
+ * 失敗した名前の付け替えの行き先が、フォルダとして在るか。付け替え以外の失敗(書き込み・フォルダ作り)は
+ * 見ない(読めない置き場所の権限の失敗まで、フォルダの文面にしないように)
+ */
+function failedOnFolder(e: unknown): boolean {
+  const { syscall, dest } = (e ?? {}) as { syscall?: unknown; dest?: unknown }
+  if (syscall !== 'rename' || typeof dest !== 'string' || dest === '') return false
+  try {
+    return statSync(dest).isDirectory()
+  } catch {
+    // 調べられない(消えた・読めない)なら、フォルダとはみなさない
+    return false
+  }
+}
+
+/**
  * 自動保存の失敗を短い日本語にする。退避(名前の付け替え)の失敗は Node の生のエラー
  * (「ENOTEMPTY: directory not empty, rename …」)がそのまま画面に出ていた。
  * 書き込み(`saveProjectFile`)の失敗は、すでに日本語になっているのでそのまま
  */
-function describeAutosaveFailure(e: unknown): Error {
+export function describeAutosaveFailure(e: unknown): Error {
   const code =
     typeof (e as { code?: unknown } | null)?.code === 'string' ? (e as { code: string }).code : ''
+  // Windows では、中身のあるフォルダへの名前の付け替えが ENOTEMPTY ではなく EPERM になる。
+  // 権限の文面にすると、利用者は権限を探して直せない(Windows の CI で実測)。行き先が
+  // フォルダなら、フォルダの文面にする
+  if (/^(EPERM|EACCES)$/.test(code) && failedOnFolder(e))
+    return new Error('自動保存の置き場所に同じ名前のフォルダがあります')
   for (const [pattern, message] of AUTOSAVE_ERROR_MESSAGES)
     if (code && pattern.test(code)) return new Error(message)
   const err = e instanceof Error ? e : new Error(String(e))

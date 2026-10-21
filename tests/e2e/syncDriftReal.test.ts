@@ -7,7 +7,8 @@
  *   頭の値になり中ほどの値にならない。中ほどで詰められず、時計のずれを測らないまま終わりで大きくずれていた
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { execFileSync } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
+import { promisify } from 'util'
 import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -18,7 +19,8 @@ vi.mock('electron', () => ({
 }))
 
 import { ffmpegPath, ffprobePath } from '@main/ffmpegService'
-import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
+import type { SyncInputFile, SyncReport } from '@shared/sync/report'
+import { runSyncWorker } from './syncWorkerThread'
 
 const HAVE_FFMPEG = existsSync(ffmpegPath) && existsSync(ffprobePath)
 const SR = 16000
@@ -102,27 +104,30 @@ function writeWav(path: string, x: Float32Array): void {
 }
 
 /** カメラの音として AAC 48kHz の m4a にする(マイクの WAV とは別の形式・別の標本化周波数) */
-function writeAac(path: string, x: Float32Array, dir: string): void {
+const execFileAsync = promisify(execFile)
+
+async function writeAac(path: string, x: Float32Array, dir: string): Promise<void> {
   const wav = join(dir, 'tmp_cam.wav')
   writeWav(wav, x)
-  execFileSync(ffmpegPath, ['-y', '-v', 'error', '-i', wav, '-ar', '48000', '-c:a', 'aac', path])
+  // 待つ間もテストの作業スレッドを止めない(60分の音の AAC 化は 30 秒ほどかかる)
+  await execFileAsync(ffmpegPath, [
+    '-y',
+    '-v',
+    'error',
+    '-i',
+    wav,
+    '-ar',
+    '48000',
+    '-c:a',
+    'aac',
+    path
+  ])
   rmSync(wav, { force: true })
 }
 
 async function syncInProcess(files: SyncInputFile[]): Promise<SyncReport> {
-  return new Promise<SyncReport>((resolve, reject) => {
-    vi.resetModules()
-    vi.doMock('worker_threads', () => ({
-      parentPort: {
-        postMessage: (m: SyncWorkerMessage) => {
-          if (m.type === 'done') resolve(m.report)
-          else if (m.type === 'error') reject(new Error(m.message))
-        }
-      },
-      workerData: { files, ffmpegPath, cacheDir: state.cacheDir }
-    }))
-    import('@main/syncWorker').catch(reject)
-  }).finally(() => vi.doUnmock('worker_threads'))
+  // 本番と同じく別のスレッドで走らせる(テストの作業スレッドを長く止めない)
+  return runSyncWorker(files, ffmpegPath, state.cacheDir)
 }
 
 const input = (
@@ -173,7 +178,7 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     const errors: number[] = []
     for (const seed of [21, 22, 23, 24, 25, 26]) {
       const camPath = join(dir, `quiet_cam${seed}.m4a`)
-      writeAac(camPath, record(w, CAM_START, CAM_LEN, 1, seed), dir)
+      await writeAac(camPath, record(w, CAM_START, CAM_LEN, 1, seed), dir)
       const report = await syncInProcess([
         input('mic', micPath, 'mic', T),
         input('cam', camPath, 'camera', CAM_LEN)
@@ -199,7 +204,7 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     const micPath = join(dir, 'long_mic.wav')
     const camPath = join(dir, 'long_cam.m4a')
     writeWav(micPath, record(w, 0, T, 1, 12))
-    writeAac(camPath, record(w, CAM_START, CAM_LEN, RATE, 31), dir)
+    await writeAac(camPath, record(w, CAM_START, CAM_LEN, RATE, 31), dir)
     const report = await syncInProcess([
       input('mic', micPath, 'mic', T),
       input('cam', camPath, 'camera', CAM_LEN)
@@ -225,7 +230,7 @@ describe.skipIf(!HAVE_FFMPEG)('長い収録の時計のずれ', () => {
     const files = [input('mic', micPath, 'mic', T)]
     for (let k = 0; k < 3; k++) {
       const camPath = join(dir, `GX0${k + 1}0042.m4a`)
-      writeAac(camPath, record(w, starts[k], CHAPTER, RATE, 40 + k), dir)
+      await writeAac(camPath, record(w, starts[k], CHAPTER, RATE, 40 + k), dir)
       files.push(input(`cam${k}`, camPath, 'camera', CHAPTER))
     }
     const report = await syncInProcess(files)

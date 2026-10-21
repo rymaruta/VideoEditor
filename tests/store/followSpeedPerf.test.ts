@@ -5,6 +5,11 @@ import type { Project } from '@shared/types'
 const S = useProjectStore
 const st = (): ReturnType<typeof S.getState> => S.getState()
 const MICS = [1, 2, 3, 4, 5, 6]
+/**
+ * 時間の上限の倍率。CI の Windows の機械はこの開発環境より約7倍遅い(実測: 複製 100ms → 730ms)。
+ * 直す前の遅さ(複製 600ms・伸ばす 280ms)は CI でも上限を大きく超えるので、退行は見逃さない
+ */
+const SLOW = process.env.CI ? 7 : 1
 
 /** 60分・2,000クリップ・ピンマイク6本の仮編集 */
 function setup(n: number): void {
@@ -87,7 +92,7 @@ describe('2,000クリップの本編でも、編集の追従が重くならな�
     const t0 = performance.now()
     st().updateClipTrim(ids[500], c.inPoint, c.outPoint + 0.5)
     // 速くしたクリップごとに対応の索引を作り直していたときは 280ms(今は 20ms ほど)
-    expect(performance.now() - t0).toBeLessThan(150)
+    expect(performance.now() - t0).toBeLessThan(150 * SLOW)
   }, 120000)
 
   it('2,000クリップを全部複製しても、声を足す追従が速い', () => {
@@ -96,6 +101,6 @@ describe('2,000クリップの本編でも、編集の追従が重くならな�
     const t0 = performance.now()
     st().duplicateClips(ids)
     // 声の区間を足すたびに全部並べ直していたときは 600ms(今は 100ms ほど)
-    expect(performance.now() - t0).toBeLessThan(300)
+    expect(performance.now() - t0).toBeLessThan(300 * SLOW)
   }, 120000)
 })

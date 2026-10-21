@@ -42,10 +42,11 @@ import { scanShowKit } from '@main/showKitService'
 import { usePipelineStore } from '@renderer/store/pipelineStore'
 import { getTotalDuration, useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
-import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
+import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import type { AsrJob, AsrJobResult } from '@shared/transcript'
 import type { Project } from '@shared/types'
 import type { SourceKind } from '@shared/ingest/classify'
+import { runSyncWorker } from './syncWorkerThread'
 
 const HAVE_FFMPEG = existsSync(ffmpegPath) && existsSync(ffprobePath)
 const FRAME = 1 / 30
@@ -496,19 +497,8 @@ function makeShoot(
 
 /** syncWorker を同じスレッドで走らせる(Worker と同じ入力・同じ出力) */
 async function syncInProcess(files: SyncInputFile[]): Promise<SyncReport> {
-  return new Promise<SyncReport>((resolve, reject) => {
-    vi.resetModules()
-    vi.doMock('worker_threads', () => ({
-      parentPort: {
-        postMessage: (m: SyncWorkerMessage) => {
-          if (m.type === 'done') resolve(m.report)
-          else if (m.type === 'error') reject(new Error(m.message))
-        }
-      },
-      workerData: { files, ffmpegPath, cacheDir: state.cacheDir }
-    }))
-    import('@main/syncWorker').catch(reject)
-  }).finally(() => vi.doUnmock('worker_threads'))
+  // 本番と同じく別のスレッドで走らせる(テストの作業スレッドを長く止めない)
+  return runSyncWorker(files, ffmpegPath, state.cacheDir)
 }
 
 interface Calls {

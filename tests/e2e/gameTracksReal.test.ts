@@ -9,7 +9,8 @@
  * トラックを分けて声だけで測れば、叫びだけを拾えることを確かめる。
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { execFileSync } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
+import { promisify } from 'util'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -41,7 +42,7 @@ import { cachedEnvelope } from '@main/audioPcm'
 import { STREAMER_SPEAKER, usePipelineStore } from '@renderer/store/pipelineStore'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
-import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
+import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import type { AsrJob, AsrJobResult } from '@shared/transcript'
 import type { Project } from '@shared/types'
 import { detectHype } from '@shared/structure/hype'
@@ -61,25 +62,15 @@ import {
   writeWav,
   type Line
 } from './gameShoot'
+import { runSyncWorker } from './syncWorkerThread'
 
 const HAVE_FFMPEG = existsSync(ffmpegPath) && existsSync(ffprobePath)
 const FACE_LATE = 1.5
 const CRAIG_EARLY = 3
 
 async function syncInProcess(files: SyncInputFile[]): Promise<SyncReport> {
-  return new Promise<SyncReport>((resolve, reject) => {
-    vi.resetModules()
-    vi.doMock('worker_threads', () => ({
-      parentPort: {
-        postMessage: (m: SyncWorkerMessage) => {
-          if (m.type === 'done') resolve(m.report)
-          else if (m.type === 'error') reject(new Error(m.message))
-        }
-      },
-      workerData: { files, ffmpegPath, cacheDir: state.cacheDir }
-    }))
-    import('@main/syncWorker').catch(reject)
-  }).finally(() => vi.doUnmock('worker_threads'))
+  // 本番と同じく別のスレッドで走らせる(テストの作業スレッドを長く止めない)
+  return runSyncWorker(files, ffmpegPath, state.cacheDir)
 }
 
 function installApi(streamer: Line[], friend: Line[], calls: { asrPaths: string[] }): void {
@@ -166,8 +157,14 @@ function installApi(streamer: Line[], friend: Line[], calls: { asrPaths: string[
   }
 }
 
-function ff(args: string[]): void {
-  execFileSync(ffmpegPath, ['-y', '-v', 'error', ...args])
+const execFileAsync = promisify(execFile)
+
+/**
+ * ffmpeg で素材を作る。待つ間もテストの作業スレッドを止めない(`execFileSync` で長い録画を作ると
+ * 1分以上止まり、遅い機械では vitest の通信の待ち時間を超えて全体が失敗していた)
+ */
+async function ff(args: string[]): Promise<void> {
+  await execFileAsync(ffmpegPath, ['-y', '-v', 'error', ...args])
 }
 
 describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声トラック別・顔カメラ・Craig)', () => {
@@ -176,7 +173,7 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
   const streamer = makeScript()
   const friend = makeFriendScript(streamer)
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = keep ? process.env.E2E_GAME_DIR! : mkdtempSync(join(tmpdir(), 've-gametracks-'))
     const shoot = join(dir, 'tracks')
     rmSync(shoot, { recursive: true, force: true })
@@ -195,7 +192,7 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     const t1 = wav('t1.wav', mix(game, voice, tomo))
     const t2 = wav('t2.wav', voice)
     const t3 = wav('t3.wav', game)
-    ff([
+    await ff([
       '-f',
       'lavfi',
       '-i',
@@ -242,7 +239,7 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
         new Float32Array(face.length)
       )
     )
-    ff([
+    await ff([
       '-f',
       'lavfi',
       '-i',
@@ -268,7 +265,7 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     // 名前の無い 3 トラックの OBS(1: 全部入り・2: 通話=相手の声だけ・3: ゲーム音)。配信者の声は全部入りにしか無い
     mkdirSync(join(dir, 'tracks2', 'OBS'), { recursive: true })
     const callOnly = wav('call.wav', renderVoice(friend, 210))
-    ff([
+    await ff([
       '-f',
       'lavfi',
       '-i',
@@ -306,7 +303,7 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
     // 2トラックの OBS(1: 全部入り = ゲーム音 + 配信者 + tomo、2: 配信者の声)。ゲーム音のトラックは無い
     mkdirSync(join(dir, 'tracks3', 'OBS'), { recursive: true })
     mkdirSync(join(dir, 'tracks3', 'craig'), { recursive: true })
-    ff([
+    await ff([
       '-f',
       'lavfi',
       '-i',
@@ -338,12 +335,16 @@ describe.skipIf(!HAVE_FFMPEG)('ゲーム実況の取り込み(OBS の音声ト�
       join(dir, 'tracks3', 'OBS', '2026-10-07 23-00-00.mp4')
     ])
     // Craig: OBS の 3 秒前から
-    ff([
+    await ff([
       '-i',
       wav('tomo.wav', renderVoice(friend, 210, CRAIG_EARLY)),
       join(shoot, 'craig', '1-tomo.flac')
     ])
-    ff(['-i', join(shoot, 'craig', '1-tomo.flac'), join(dir, 'tracks3', 'craig', '1-tomo.flac')])
+    await ff([
+      '-i',
+      join(shoot, 'craig', '1-tomo.flac'),
+      join(dir, 'tracks3', 'craig', '1-tomo.flac')
+    ])
   }, 240_000)
 
   afterAll(() => {
