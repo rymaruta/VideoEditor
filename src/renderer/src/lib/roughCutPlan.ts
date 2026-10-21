@@ -55,10 +55,12 @@ import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/d
 import { mixResidual } from '@shared/ingest/tracks'
 import {
   clipTelopChunk,
+  joinShortTelops,
+  joinTelopText,
   settleTelopTimes,
   utteranceToTelopChunks
 } from '@shared/telop/fromTranscript'
-import { AUTO_SOURCE_MARGIN, type WithAutoSource } from '@shared/telop/manual'
+import { AUTO_SOURCE_MARGIN, MIN_CARVED_SEC, type WithAutoSource } from '@shared/telop/manual'
 import {
   speechLook,
   speechTelopStyle,
@@ -437,6 +439,7 @@ export function planRoughCut(
       minDurationSec: options.style?.telopMinSec
     }
     const chunks = utteranceToTelopChunks(u, chunkOptions)
+    const entries: PlacedChunk[] = []
     for (let ci = 0; ci < chunks.length; ci++) {
       const chunk = chunks[ci]
       const commonStart = toCommon(f, chunk.sourceStart)
@@ -445,18 +448,32 @@ export function planRoughCut(
       // 始まるとき、その声が字幕なしで流れていた(頭が落ちた枚は、残った所の頭から出す)。
       // 枚の途中の間をカットで詰めて2つに分かれた枚も、一番長く残る所だけに出すと、もう一方の声
       // (「きょう0はすごいボスを」の 3 秒)が字幕なしで流れていたので、残った所ごとに1枚ずつ出す
+      // 長さ 0 の枚(長さ 0 の言葉を辞書で長くして分けた枚)は、頭の入る区間に置く(短い枚なので隣の枚にまとめる)
+      const point = commonEnd <= commonStart + 1e-9
       const placed = cut.spans
-        .filter((sp) => Math.min(commonEnd, sp.end) - Math.max(commonStart, sp.start) > 0)
+        .filter((sp) =>
+          point
+            ? commonStart >= sp.start - 1e-9 && commonStart < sp.end
+            : Math.min(commonEnd, sp.end) - Math.max(commonStart, sp.start) > 0
+        )
         .sort((a, b) => a.timeline - b.timeline)
-        .map((sp) => {
+        .map((sp): PlacedChunk | null => {
           const visStart = Math.max(commonStart, sp.start)
-          const visEnd = Math.min(commonEnd, sp.end)
+          const visEnd = Math.max(visStart, Math.min(commonEnd, sp.end))
           const start = sp.timeline + (visStart - sp.start)
           // 終わりがカットで落ちた所に掛かるなら、その区間の終わりまで
           const end = sp.timeline + (visEnd - sp.start)
-          if (end - start < 0.3) return null
-          // 頭・終わりを落とした枚は、残った所で話している言葉だけにする(切れて聞こえない言葉を出さない)
-          const clipped = visStart > commonStart + 1e-6 || visEnd < commonEnd - 1e-6
+          // 頭・終わりを落とした枚は、残った所で話している言葉だけにする(切れて聞こえない言葉を出さない)。
+          // 長さ 0 の言葉の文字は言葉の時刻の前後へ並べるので、枚がカットの中でも言葉の時刻がカットの外なら
+          // 落としたとみなす(短い枚を隣の枚にまとめると、カットの外の言葉の文字が出ていた)
+          const zero = chunk.zero
+          const cutHead =
+            (!point && visStart > commonStart + 1e-6) ||
+            (!!zero && toCommon(f, zero[0]) < sp.start - 1e-6)
+          const cutTail =
+            (!point && visEnd < commonEnd - 1e-6) ||
+            (!!zero && toCommon(f, zero[1]) > sp.end + 1e-6)
+          const clipped = cutHead || cutTail
           // 1文字ごとの話している時刻(人が直した・消した範囲で、作り直した枚を切り分ける)
           const shown = clipped
             ? clipTelopChunk(
@@ -464,8 +481,8 @@ export function planRoughCut(
                 chunk,
                 // 落とした側だけで言葉を選ぶ(落としていない頭・終わりの言葉は、言葉の真ん中が枚の時刻の
                 // 外でも残す。辞書で長くなって分けた後ろの枚は、頭が言葉の途中から始まる)
-                visStart > commonStart + 1e-6 ? toSource(f, visStart) : -Infinity,
-                visEnd < commonEnd - 1e-6 ? toSource(f, visEnd) : Infinity,
+                cutHead ? toSource(f, sp.start) : -Infinity,
+                cutTail ? toSource(f, sp.end) : Infinity,
                 chunkOptions
               )
             : {
@@ -476,62 +493,68 @@ export function planRoughCut(
                 durs: chunk.durs,
                 fill: chunk.fill
               }
-          return shown.text ? { span: sp, start, end, ...shown, clipped, visStart, visEnd } : null
+          return shown.text
+            ? { ci, span: sp, start, end, ...shown, clipped, merged: false, visStart, visEnd }
+            : null
         })
         .filter((x) => x !== null)
-      for (const {
-        span,
-        start,
-        end,
+      entries.push(...placed)
+    }
+    for (const {
+      ci,
+      span,
+      start,
+      end,
+      text,
+      times,
+      spoken,
+      range,
+      durs,
+      fill,
+      clipped,
+      merged,
+      visStart,
+      visEnd
+    } of joinShortChunks(entries)) {
+      const chunk = chunks[ci]
+      const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
+      // 素材の時刻 → このタイムラインの時刻(タイムライン = offset + 素材の秒 / rate)。
+      // 直した・消した範囲で切り分けた枚の時刻を、文字数ではなく話している時刻から決めるのに使う
+      const offset = span.timeline - span.start + f.start
+      const telop: Omit<TextOverlay, 'id'> & WithAutoSource = {
         text,
-        times,
-        spoken,
-        range,
-        durs,
-        fill,
-        clipped,
-        visStart,
-        visEnd
-      } of placed) {
-        const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
-        // 素材の時刻 → このタイムラインの時刻(タイムライン = offset + 素材の秒 / rate)。
-        // 直した・消した範囲で切り分けた枚の時刻を、文字数ではなく話している時刻から決めるのに使う
-        const offset = span.timeline - span.start + f.start
-        const telop: Omit<TextOverlay, 'id'> & WithAutoSource = {
-          text,
-          startTime: start,
-          endTime: end,
-          style: speechTelopStyle(def ? def.style : look.style),
-          styleId: def ? def.id : look.styleId,
-          speaker: u.speaker,
-          source: 'auto',
-          utteranceId: u.id,
-          utteranceChunk: ci,
-          // 作ったときの元の部分(人の修正・消した印を、枚の分け方・カットが変わっても同じ言葉に当てる)。
-          // 範囲は出している文字の話している時刻から取る。枚の時間(発話の頭へ寄せた・最低表示時間で
-          // 延ばした・辞書で行数を超えて文字数で割り振った)から取ると、隣の枚の文字まで範囲に入り、
-          // 消した枚の隣の言葉まで消えていた
-          autoSource:
-            times && times.length > 0
-              ? {
-                  start:
-                    range?.[0] ??
-                    Math.max(0, (spoken?.[0] ?? Math.min(...times)) - AUTO_SOURCE_MARGIN),
-                  end: range?.[1] ?? (spoken?.[1] ?? Math.max(...times)) + AUTO_SOURCE_MARGIN,
-                  text,
-                  times,
-                  offset,
-                  ...(f.rate !== 1 ? { rate: f.rate } : {}),
-                  ...(durs && durs.length === times.length ? { durs } : {}),
-                  ...(fill ? { fill } : {})
-                }
-              : clipped
-                ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
-                : { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
-        }
-        telops.push(telop)
-        voiceEnds.set(telop, voiceEnd)
+        startTime: start,
+        endTime: end,
+        style: speechTelopStyle(def ? def.style : look.style),
+        styleId: def ? def.id : look.styleId,
+        speaker: u.speaker,
+        source: 'auto',
+        utteranceId: u.id,
+        utteranceChunk: ci,
+        // 作ったときの元の部分(人の修正・消した印を、枚の分け方・カットが変わっても同じ言葉に当てる)。
+        // 範囲は出している文字の話している時刻から取る。枚の時間(発話の頭へ寄せた・最低表示時間で
+        // 延ばした・辞書で行数を超えて文字数で割り振った)から取ると、隣の枚の文字まで範囲に入り、
+        // 消した枚の隣の言葉まで消えていた
+        autoSource:
+          times && times.length > 0
+            ? {
+                start:
+                  range?.[0] ??
+                  Math.max(0, (spoken?.[0] ?? Math.min(...times)) - AUTO_SOURCE_MARGIN),
+                end: range?.[1] ?? (spoken?.[1] ?? Math.max(...times)) + AUTO_SOURCE_MARGIN,
+                text,
+                times,
+                offset,
+                ...(f.rate !== 1 ? { rate: f.rate } : {}),
+                ...(durs && durs.length === times.length ? { durs } : {}),
+                ...(fill ? { fill } : {})
+              }
+            : clipped || merged
+              ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
+              : { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
       }
+      telops.push(telop)
+      voiceEnds.set(telop, voiceEnd)
     }
   }
   // 短い発言(「はい」)は最低表示時間まで延ばすので、すぐ後の発言のテロップに重なることがある。
@@ -562,6 +585,76 @@ export function planRoughCut(
     telops: stacked,
     judgements: checked.judgements,
     ...(checked.demoted ? { demoted: checked.demoted } : {})
+  }
+}
+
+/** 発言テロップの1枚を、仮編集のある区間に置いたもの(その区間で残った文字) */
+interface PlacedChunk {
+  /** 発話の何枚目から作ったか */
+  ci: number
+  span: RoughCut['spans'][number]
+  /** タイムラインの頭・終わり */
+  start: number
+  end: number
+  text: string
+  times?: number[]
+  spoken?: [number, number]
+  range?: [number, number]
+  durs?: number[]
+  fill?: number[]
+  /** 頭・終わりをカットで落とした */
+  clipped: boolean
+  /** 短い枚をまとめた */
+  merged: boolean
+  /** 残った所(共通の時刻) */
+  visStart: number
+  visEnd: number
+}
+
+/**
+ * 0.3 秒(`MIN_CARVED_SEC`)に満たない枚は、捨てずに同じ発言・同じ区間の隣の枚に文字をまとめる
+ * (`joinShortTelops`)。まとめた枚の時刻・元の部分(文字の時刻・範囲)は2枚を合わせたもの
+ */
+function joinShortChunks(entries: readonly PlacedChunk[]): PlacedChunk[] {
+  const short = (e: PlacedChunk): boolean => e.end - e.start < MIN_CARVED_SEC
+  // 何枚目かは、まとめた先(短くない方)の枚のもの
+  return joinShortTelops(
+    entries,
+    short,
+    (a, b) => a.span === b.span,
+    (a, b) => joinPlaced(a, b, short(a) ? b.ci : a.ci)
+  )
+}
+
+/** 2枚(`a` が前)を1枚にまとめる。何枚目かは `ci` のもの */
+function joinPlaced(a: PlacedChunk, b: PlacedChunk, ci: number): PlacedChunk {
+  const text = joinTelopText(a.text, b.text)
+  const both = <T>(x: T[] | undefined, y: T[] | undefined): T[] | undefined =>
+    x && y ? [...x, ...y] : undefined
+  const pair = (
+    x: [number, number] | undefined,
+    y: [number, number] | undefined
+  ): [number, number] | undefined =>
+    x && y ? [Math.min(x[0], y[0]), Math.max(x[1], y[1])] : undefined
+  const times = both(a.times, b.times)
+  const shift = a.times?.length ?? 0
+  const fill = [...(a.fill ?? []), ...(b.fill ?? []).map((i) => i + shift)]
+  const durs = both(a.durs, b.durs)
+  return {
+    ci,
+    span: a.span,
+    start: Math.min(a.start, b.start),
+    end: Math.max(a.end, b.end),
+    text,
+    ...(times ? { times } : {}),
+    ...(times && durs && durs.length === times.length ? { durs } : {}),
+    ...(times && fill.length > 0 ? { fill } : {}),
+    spoken: pair(a.spoken, b.spoken),
+    range: pair(a.range, b.range),
+    clipped: a.clipped || b.clipped,
+    merged: true,
+    visStart: Math.min(a.visStart, b.visStart),
+    visEnd: Math.max(a.visEnd, b.visEnd)
   }
 }
 
