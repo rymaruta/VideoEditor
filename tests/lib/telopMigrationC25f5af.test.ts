@@ -14,7 +14,6 @@ import * as NP from '../../src/renderer/src/lib/roughCutPlan'
 import * as NM from '@shared/telop/manual'
 import * as OP from './fixtures/telopc25f5af/roughCutPlan'
 import * as OM from './fixtures/telopc25f5af/manual'
-import { SAMECUT_KNOWN_TEXT, SAMECUT_KNOWN_UPTO } from './fixtures/telopSameCutKnown'
 let OLDNOW = false
 const planRoughCut = (...a: unknown[]): { telops: Omit<TextOverlay, 'id'>[] } =>
   (
@@ -240,9 +239,17 @@ let PAIRED = false
 const COUNTFROM = 0
 let PREFIX = ''
 export const pairs = new Map<string, string[]>()
+/**
+ * 誤りを数える。`kind` は「種類」か「種類|既知の型」(前の版と比べられない既知の型)。既知の型は前の版との
+ * 比べから除き、`RAW` を付けた名前には除かずに数える(10/09 版の当て方との比べに使う)
+ */
 function fail(kind: string, msg: string): void {
+  const [raw, known] = kind.split('|')
+  if (known) msg = `[${known}] ${msg}`
+  kind = known || raw
   if (PAIRED) {
     pairs.set(PREFIX + kind, [...(pairs.get(PREFIX + kind) ?? []), msg])
+    pairs.set('RAW' + PREFIX + raw, [...(pairs.get('RAW' + PREFIX + raw) ?? []), msg])
     return
   }
   if (STEP < COUNTFROM) return
@@ -268,7 +275,6 @@ const KNOWN_KINDS = [
   'k2-same-chunk-as-old',
   'k3-filler-only-chunk',
   'k4-old-chunk-cut-now',
-  'k5-legacy-edit-by-time',
   'k6-old-auto-same-text'
 ]
 /**
@@ -284,6 +290,8 @@ const WORSE_KINDS = [
   'h-stale-edit',
   'a-dup'
 ]
+/** 既知の型なら「種類|既知の型」 */
+const kn = (known: string | null, raw: string): string => (known ? raw + '|' + known : raw)
 function check(
   merged: readonly Omit<TextOverlay, 'id'>[],
   plain: readonly Omit<TextOverlay, 'id'>[],
@@ -320,41 +328,14 @@ function check(
               kanji(t.text).includes(c) &&
               !OLD!.plain.some((o) => chunkOf(o) === chunkOf(t))
           )
-          ? 'k1-old-key-on-new-chunk'
+          ? kn('k1-old-key-on-new-chunk', 'a-dup')
           : 'a-dup',
         `${tag} 「${c}」x${n} :: ${merged.map((t) => t.text.replace(/\n/g, '')).join(' | ')}`
       )
-  // 前の版で保存した修正(元の部分を覚えていない)のうち、前の版では鍵の枚が仮編集に無く出なかったもの
-  const legacyHidden = (t: Omit<TextOverlay, 'id'>): boolean =>
-    !!OLD &&
-    !!t.edited &&
-    OLD.existing.some(
-      (x) =>
-        x.edited &&
-        x.text === t.text &&
-        !(x as { autoSource?: unknown }).autoSource &&
-        !OLD!.plain.some((o) => chunkOf(o) === chunkOf(x))
-    )
   for (const c of audible)
     if (!m.dismissed.has(c) && !covered.has(c) && (count.get(c) ?? 0) !== 1)
       fail(
-        // 既知の型 5: 前の版の修正(元の部分を覚えていない)を時刻で当て直して、その時刻の言葉を覆った
-        // (前の版は鍵の枚が仮編集に無いので出さなかった)
-        OLD &&
-          (count.get(c) ?? 0) === 0 &&
-          plain
-            .filter((p) => kanji(p.text).includes(c))
-            .every((p) =>
-              merged.some(
-                (t) =>
-                  legacyHidden(t) &&
-                  t.utteranceId === p.utteranceId &&
-                  t.startTime < p.endTime - 1e-6 &&
-                  t.endTime > p.startTime + 1e-6
-              )
-            )
-          ? 'k5-legacy-edit-by-time'
-          : 'b-lost',
+        'b-lost',
         `${tag} 「${c}」lost :: merged=${merged.map((t) => t.text.replace(/\n/g, '')).join(' | ')} :: plain=${plain.map((t) => t.text.replace(/\n/g, '')).join(' | ')}`
       )
   for (const [text, words] of m.edits) {
@@ -443,7 +424,7 @@ function check(
                 : null
     if (expected < 0 ? n > 1 : n !== expected)
       fail(
-        known ?? (expected === 0 ? 'c-edit-inaudible' : 'c-edit-count'),
+        kn(known, expected === 0 ? 'c-edit-inaudible' : 'c-edit-count'),
         `${tag} edit ${text} [${[...words].join('')}] n=${n} :: ${merged.map((t) => t.text.replace(/\n/g, '')).join(' | ')}`
       )
   }
@@ -471,7 +452,7 @@ function check(
                 ) &&
                 !OLD!.plain.some((o) => chunkOf(o) === chunkOf(t))
             )
-          ? 'k1-old-key-on-new-chunk'
+          ? kn('k1-old-key-on-new-chunk', 'd-resurrect')
           : 'd-resurrect',
         `${tag} dismissed 「${c}」 :: ${merged.map((t) => t.text.replace(/\n/g, '')).join(' | ')}`
       )
@@ -548,11 +529,10 @@ const expand = (p: Gen, cs: Iterable<string>): Set<string> => {
 const N = Number(process.env.TELOP_MIGRATE_SEEDS ?? 2000)
 /**
  * 作り直す回に、直前と同じ場面(カット)のまま1行の文字数だけ変える通りの数(`TELOP_MIGRATE_SAMECUT_SEEDS`。
- * 既定は `TELOP_MIGRATE_SEEDS` の半分で、前からある誤りを覚えた 10,000 通りまで)
+ * 既定は `TELOP_MIGRATE_SEEDS` の半分)。通常の通りと同じく、1通りごとに 10/09 版のまま作り直した結果より
+ * 悪くならないことを確かめる
  */
-const N_SAME = Number(
-  process.env.TELOP_MIGRATE_SAMECUT_SEEDS ?? Math.min(SAMECUT_KNOWN_UPTO, Math.ceil(N / 2))
-)
+const N_SAME = Number(process.env.TELOP_MIGRATE_SAMECUT_SEEDS ?? Math.ceil(N / 2))
 /**
  * 既定の数より後で見つかった通り(いつも回す)。7153: 別のカットで同じ文の枚が偶然 0.05 秒以内に始まり、
  * 同じタイムラインとみなして前の版の修正を時刻で当て、直した言葉が自動の枚にも出た。7413: 時刻で当てた
@@ -563,22 +543,14 @@ const N_SAME = Number(
  */
 const FIXED_SEEDS = [7007, 7153, 7413, 11735, 15763]
 /**
- * 同じカットのまま1行の文字数だけ変える通りで、いつも回す通り。1522・3754 など: 文が同じ枚の終わりが
- * (隣の枚の分け方・延ばす量が変わって)ずれただけで別のタイムラインとみなし、前の版の修正を何枚目かで当てて
- * 新しい枚をまるごと覆い、聞こえる言葉が消えた。7153 は別のカットで同じ文の枚が偶然近くに始まった通り
+ * 同じカットのまま1行の文字数だけ変える通りで、いつも回し、10/09 版の当て方(何枚目か)を今の仮編集に当てた
+ * 結果と同じになることも確かめる通り。235・492・494・1331・7048: 第66回の版は 10/09 版の修正を時刻で当て、
+ * 消した言葉が戻る・同じ言葉が2回出る・覚えておいた修正が消えた(第66回の監査)。1522・1590・3440・3754:
+ * 文が同じ枚の終わりがずれた通り(第66回で見つけた。10/09 版と同じ当て方のままでよい)。7153: 別のカットで
+ * 同じ文の枚が偶然近くに始まった通り
  */
-const FIXED_SAMECUT_SEEDS = [1522, 1590, 3440, 3754, 7153]
+const FIXED_SAMECUT_SEEDS = [235, 492, 494, 1331, 1522, 1590, 3440, 3754, 7048, 7153]
 let SAMECUT = false
-/** 通り → 誤りの種類(`WORSE_KINDS` の順)ごとの、前の版との差(覚えた数) */
-const SAMECUT_KNOWN = new Map(
-  SAMECUT_KNOWN_TEXT.trim()
-    .split(/\s+/)
-    .filter((x) => x)
-    .map((x) => {
-      const [seed, v] = x.split(':')
-      return [Number(seed), v.split(',').map(Number)] as const
-    })
-)
 const ONLY = process.env.TELOP_MIGRATE_SEED ? Number(process.env.TELOP_MIGRATE_SEED) : 0
 const seedsFor = (n: number, fixed: number[]): number[] =>
   ONLY ? [ONLY] : [...Array.from({ length: n }, (_, i) => i + 1), ...fixed.filter((x) => x > n)]
@@ -590,6 +562,10 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
   }
   let paired = 0
   const worse: string[] = []
+  const midWorse: string[] = []
+  let fillerExcused = 0
+  let knownCases = 0
+  let knownHid = 0
   for (const seed of seeds) {
     // 長く続けて回すとテストの作業スレッドが応答できなくなるので、ときどき空ける
     if (seed % 100 === 0) await new Promise((r) => setTimeout(r, 0))
@@ -620,6 +596,9 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
         OLDNOW = false
         const plainNew = randomPlan(rng(ps), p, SAMECUT)
         const mergedNew = mergeManualTelops(timeline, plainNew, dismissed, remembered)
+        OLDNOW = true
+        const mergedMid = mergeManualTelops(timeline, plainNew, dismissed, remembered)
+        OLDNOW = false
         if (ONLY) {
           const f2 = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
             ts
@@ -652,27 +631,67 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
         PREFIX = 'NEW:'
         OLD = { plain: plainOld, merged: mergedOld, existing: timeline }
         check(mergedNew, plainNew, m, `seed${seed}/step${step}`)
+        OLD = null
+        PREFIX = 'MID:'
+        check(mergedMid, plainNew, m, `seed${seed}/step${step}`)
         PAIRED = false
         BOTH = null
         OLD = null
         // この通りで、前の版のまま作り直したより悪くなった誤りの種類(1通りごとに比べる)
         const grew = (k: string): number => (pairs.get(k)?.length ?? 0) - (before.get(k) ?? 0)
-        // 同じカットで1行の文字数だけ変える通り: 前の版も枚の分け方が変わって「何枚目か」が別の枚を指すので、
-        // 前の版と比べられない通りがある(良い通りも悪い通りもある)。前の版との差を `SAMECUT_KNOWN` に覚え、
-        // それより増えないこと(前の版より良かった通りが悪くなるのも捕まえる)
-        const delta = sameCut ? SAMECUT_KNOWN.get(seed) : undefined
-        if (process.env.TELOP_MIGRATE_SAMECUT_PRINT) {
-          const v = WORSE_KINDS.map((k) => grew('NEW:' + k) - grew('OLD:' + k))
-          if (v.some((x) => x !== 0))
-            console.log(`${sameCut ? 'SAMECUT' : 'NORMAL'} ${seed}:${v.join(',')}`)
+        // 既知の型で除いた通り(既知の型を除かずに比べると前の版より悪い通り)の数。中身は上の 10/09 版の当て方
+        // との比べで確かめる(除いた誤りが当て直し方から来ていれば、そちらで捕まる)
+        if (KNOWN_KINDS.some((k) => grew('NEW:' + k) > 0)) {
+          knownCases++
+          if (WORSE_KINDS.some((k) => grew('RAWNEW:' + k) > grew('OLD:' + k))) knownHid++
         }
-        WORSE_KINDS.forEach((k, q) => {
+        // 今の版の当て直しそのものが 10/09 版の当て方より悪くないか(どちらも今の仮編集に当てて比べる。既知の型を
+        // 除かずに比べる。既知の型は、前の版と今の版の仮編集の違い(枚の分け方・出す言葉)から来るものだけのはず)。
+        // ただし今の版は、言いよどみの切れ端だけの枚(漢字の無い枚)に当たった修正を出さない(仕様。直した言葉は
+        // もう聞こえない)。10/09 版の当て方ではそこにだけ出る修正の、出る回数の違いは比べない
+        const nOf = (ts: readonly Omit<TextOverlay, 'id'>[], text: string): number =>
+          ts.filter((t) => t.text === text).length
+        const fillerOnly = (text: string): boolean => {
+          const at = mergedMid.filter((t) => t.edited && t.text === text)
+          return (
+            nOf(mergedNew, text) === 0 &&
+            at.length > 0 &&
+            at.every((t) =>
+              plainNew
+                .filter((q) => chunkOf(q) === chunkOf(t))
+                .every((q) => kanji(q.text).length === 0)
+            )
+          )
+        }
+        const differ = [...m.edits.keys()].filter(
+          (text) => nOf(mergedNew, text) !== nOf(mergedMid, text)
+        )
+        const fillerEdits = differ.length > 0 && differ.every(fillerOnly)
+        if (sameCut && FIXED_SAMECUT_SEEDS.includes(seed)) {
+          const flat = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
+            ts.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')
+          if (flat(mergedNew) !== flat(mergedMid))
+            midWorse.push(
+              `seed${seed} 10/09 版の当て方と違う: 今 ${flat(mergedNew)} / 10/09 版の当て方 ${flat(mergedMid)}`
+            )
+        }
+        if (fillerEdits) fillerExcused++
+        WORSE_KINDS.forEach((k) => {
+          if (fillerEdits && k.startsWith('c-')) return
+          if (grew('RAWNEW:' + k) > grew('RAWMID:' + k)) {
+            const v = pairs.get('RAWNEW:' + k)!
+            midWorse.push(
+              `seed${seed} ${k} MID ${grew('RAWMID:' + k)} → 今 ${grew('RAWNEW:' + k)}: ${v[v.length - 1]}\n      MIDMERGED=${mergedMid.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')}`
+            )
+          }
+        })
+        WORSE_KINDS.forEach((k) => {
           const grewNew = grew('NEW:' + k)
-          const grewOld = grew('OLD:' + k) + (sameCut ? (delta?.[q] ?? 0) : 0)
+          const grewOld = grew('OLD:' + k)
           if (grewNew > grewOld) {
             const v = pairs.get('NEW:' + k)!
             worse.push(
-              `seed${seed} ${k} ${sameCut ? '覚えた数' : '前の版'} ${grewOld} → 今 ${grewNew}: ${v[v.length - 1]}\n      OLDMERGED=${mergedOld.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')}`
+              `seed${seed} ${k} 前の版 ${grewOld} → 今 ${grewNew}: ${v[v.length - 1]}\n      OLDMERGED=${mergedOld.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')}`
             )
           }
         })
@@ -812,13 +831,20 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
     console.log(
       `${worse.length} 通りで悪くなった\n${worse.slice(0, process.env.TELOP_MIGRATE_REPORT ? undefined : 10).join('\n')}`
     )
+  if (midWorse.length > 0)
+    console.log(
+      `10/09 版の当て方より悪い ${midWorse.length} 通り\n${midWorse.slice(0, 10).join('\n')}`
+    )
   expect(worse.slice(0, 5)).toEqual([])
+  expect(midWorse.slice(0, 5)).toEqual([])
   if (!sameCut)
     for (const k of kinds)
       expect(total('NEW:' + k), report.join(' / ')).toBeLessThanOrEqual(total('OLD:' + k))
   if (process.env.TELOP_MIGRATE_REPORT)
     console.log(
-      `既知の型(前の版と比べない): ${KNOWN_KINDS.map((k) => `${k} ${pairs.get('NEW:' + k)?.length ?? 0} 件`).join(' / ')}`
+      `既知の型(前の版と比べない): ${KNOWN_KINDS.map((k) => `${k} ${pairs.get('NEW:' + k)?.length ?? 0} 件`).join(' / ')}\n` +
+        `既知の型の出た通り ${knownCases} / うち除かなければ前の版より悪い通り ${knownHid} / ` +
+        `言いよどみの切れ端の修正で 10/09 版の当て方と回数を比べなかった通り ${fillerExcused}`
     )
   expect(paired).toBe(seeds.length)
 }
@@ -924,5 +950,98 @@ describe('前の版で消した・直した枚(監査の再現)', () => {
     )
     expect(flatText(got.filter((t) => !t.edited))).toBe('訋訌訍三丌')
     expect(got.filter((t) => t.text === '★').length).toBeLessThanOrEqual(1)
+  })
+})
+
+/**
+ * 第66回の監査 1: 10/09 版の企画を同じカットのまま1行の文字数だけ変えて作り直すと、10/09 版の修正を時刻
+ * (10/09 版で延ばした枚の範囲。話した時刻ではない)で当て、10/09 版の消した印は何枚目かでしか効かないので、
+ * 消した言葉が戻る・同じ言葉が2回出ていた。10/09 版の修正は 10/09 版と同じく何枚目かで当て、10/09 版のまま
+ * 作り直した結果と同じになること
+ */
+describe('10/09 版の修正・消した印を、同じカットで1行の文字数だけ変えて当て直す(第66回の監査)', () => {
+  const style = defaultTextStyle()
+  const looked = { ...style, fontSize: 99 }
+  /** 10/09 版で保存した枚(元の部分を覚えていない) */
+  const saved = (
+    utteranceChunk: number,
+    text: string,
+    startTime: number,
+    endTime: number,
+    edited = false
+  ): TextOverlay => ({
+    id: `o${utteranceChunk}`,
+    text,
+    startTime,
+    endTime,
+    style: edited ? looked : style,
+    speaker: 'A',
+    source: 'auto',
+    utteranceId: 'u',
+    utteranceChunk,
+    ...(edited ? { edited: true } : {})
+  })
+  /** 今の仮編集の枚(文字ごとの話した時刻を持つ) */
+  const fresh = (
+    utteranceChunk: number,
+    text: string,
+    startTime: number,
+    endTime: number,
+    times: number[]
+  ): Omit<TextOverlay, 'id'> =>
+    ({
+      text,
+      startTime,
+      endTime,
+      style,
+      speaker: 'A',
+      source: 'auto',
+      utteranceId: 'u',
+      utteranceChunk,
+      autoSource: { start: startTime, end: endTime, text, times, offset: 0 }
+    }) as Omit<TextOverlay, 'id'>
+  const flat = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
+    ts.map((t) => (t.edited ? '*' : '') + t.text).join(' | ')
+  const both = (
+    existing: TextOverlay[],
+    incoming: Omit<TextOverlay, 'id'>[],
+    dismissed: string[]
+  ): { got: string; want: string } => {
+    const remembered = NM.rememberEditedTelops(existing, undefined)
+    return {
+      got: flat(NM.mergeManualTelops(existing, incoming, new Set(dismissed), remembered)),
+      want: flat(OM.mergeManualTelops(existing, incoming, new Set(dismissed), remembered))
+    }
+  }
+
+  it('例1: 修正した枚の次の枚を消してあっても、消した言葉が戻らない', () => {
+    const { got, want } = both(
+      [saved(0, '一二', 0, 1), saved(1, '三四', 1.5, 2.5, true)],
+      [fresh(0, '一二', 0, 1.5, [0.3, 0.9]), fresh(1, '三四五六', 1.5, 3.5, [1.7, 2.2, 2.7, 3.2])],
+      ['u:u#2']
+    )
+    expect(want).toBe('一二 | *三四')
+    expect(got).toBe(want)
+  })
+
+  // 第65回の版は、ほかの枚が頭も終わりもそろうと同じタイムラインとみなし、10/09 版の修正を時刻で当てていた
+  it('例1 で直していない枚がそろっていても、消した言葉が戻らない', () => {
+    const { got, want } = both(
+      [saved(0, '一二', 0, 1), saved(1, '三四', 1.5, 2.5, true)],
+      [fresh(0, '一二', 0, 1, [0.3, 0.7]), fresh(1, '三四五六', 1.5, 3.5, [1.7, 2.2, 2.7, 3.2])],
+      ['u:u#2']
+    )
+    expect(want).toBe('一二 | *三四')
+    expect(got).toBe(want)
+  })
+
+  it('例2: 見た目だけの修正の言葉が、自動の枚と2回出ない', () => {
+    const { got, want } = both(
+      [saved(0, '一二', 0, 2), saved(1, '三四', 2, 3, true)],
+      [fresh(0, '一二', 0, 1.2, [0.3, 0.9]), fresh(1, '三四', 1.2, 3, [1.6, 2.5])],
+      []
+    )
+    expect(want).toBe('一二 | *三四')
+    expect(got).toBe(want)
   })
 })
