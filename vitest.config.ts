@@ -22,8 +22,10 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     bail: 0,
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    // CI の Windows の機械はこの開発環境より約7倍遅い(手元 2.7 秒の不変条件の試験が CI で 10 秒を
+    // 超えていた)。CI だけ上限を広げる。手元では短いままにして、重くなった試験はすぐ気づく
+    testTimeout: process.env.CI ? 60000 : 10000,
+    hookTimeout: process.env.CI ? 60000 : 10000,
     reporters: ['default'],
     coverage: {
       provider: 'v8',
