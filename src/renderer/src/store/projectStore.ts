@@ -1456,8 +1456,20 @@ let lastCoalesceAt = 0
 /** ドラッグ中の操作の目印。押してから離すまでは、手を止めた時間に関わらず1件にまとめる */
 let gestureKey: string | null = null
 
+/**
+ * まとめている1件の履歴を積む前の状態(積んだスナップショット・その時の履歴・未保存の印)。
+ * ドラッグを始めた所へ戻して離したら、積んだ1件を下ろして始める前に戻すために控える
+ */
+let coalesceStart: {
+  snapshot: Project
+  past: Project[]
+  future: Project[]
+  isDirty: boolean
+} | null = null
+
 function resetHistoryCoalescing(): void {
   lastCoalesceKey = null
+  coalesceStart = null
 }
 
 /**
@@ -1495,13 +1507,18 @@ export function commitAsOwnStep(key: string, write: () => void): void {
  * (いまと同じ中身だったとき)。落としたぶんの目印を残すと、**次に来た本物の
  * 書き込みが「起点はもう積んである」と思い込んで、履歴を1件も積まない**。
  */
-function historyCoalescingMark(): { key: string | null; at: number } {
-  return { key: lastCoalesceKey, at: lastCoalesceAt }
+function historyCoalescingMark(): {
+  key: string | null
+  at: number
+  start: typeof coalesceStart
+} {
+  return { key: lastCoalesceKey, at: lastCoalesceAt, start: coalesceStart }
 }
 
-function restoreHistoryCoalescing(mark: { key: string | null; at: number }): void {
+function restoreHistoryCoalescing(mark: ReturnType<typeof historyCoalescingMark>): void {
   lastCoalesceKey = mark.key
   lastCoalesceAt = mark.at
+  coalesceStart = mark.start
 }
 
 /**
@@ -1833,8 +1850,15 @@ function pushHistory(
     if (continuing) {
       return { __historyPush: true, past: state.past, future: [], isDirty: true }
     }
+    coalesceStart = {
+      snapshot: state.project,
+      past: state.past,
+      future: state.future,
+      isDirty: state.isDirty
+    }
   } else {
     lastCoalesceKey = null
+    coalesceStart = null
   }
   return {
     __historyPush: true,
@@ -1930,6 +1954,33 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
           }
         } else if (patch.project && patch.project.clips !== state.project.clips)
           patch = { ...patch, project: followMainEdit(state.project, patch.project) }
+        // まとめている1件の続きで、積んだ時(ドラッグの始まり)と同じ中身に戻ったなら、その1件を下ろす。
+        // 1つ前の書き込みとだけ比べると、行って戻したドラッグが「中身の変わらない1件」と未保存の印を残し、
+        // 取り消しを押しても画面が何も変わらなかった
+        // (実測: トリムの端を 0..4 → 0..6 → 0..4 と動かして離すと、企画は始まりと同じなのに `past` が1件)。
+        // 次の書き込みは新しく積み直させる(まとめ判定の目印を下ろす)
+        const start = coalesceStart
+        if (
+          patch.project &&
+          start &&
+          patch.past === state.past &&
+          state.past.length > 0 &&
+          state.past[state.past.length - 1] === start.snapshot
+        ) {
+          // 途中で届いた裏の結果(プロキシ)は引き継いで比べる。差し替える先は積んだスナップショットそのもの
+          // (参照が戻るので、保存済みの判定も始まりと同じになる)
+          const restored = keepBackgroundResults(start.snapshot, patch.project)
+          if (sameProjectContent(patch.project, restored)) {
+            resetHistoryCoalescing()
+            return pruneSelection(state, {
+              ...omitKeys(patch, ['__historyPush', 'project', 'past', 'future', 'isDirty']),
+              project: restored,
+              past: start.past,
+              future: start.future,
+              isDirty: start.isDirty
+            })
+          }
+        }
         if (!patch.project || !sameProjectContent(patch.project, state.project)) {
           return pruneSelection(state, omitKeys(patch, ['__historyPush']))
         }
@@ -2236,17 +2287,65 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 収録全体が本編に戻る
       const prev = sources ? state.project.multicam : undefined
       const prevAssets = new Set(prev?.files.map((f) => f.assetId) ?? [])
+      // 人が手で置いたトラック(PiP・分離した音声など)に残る前の収録素材のクリップは、同じファイルの
+      // 新しい素材へ指し直す。外した素材を指したままだと、プレビューにも書き出しにも出ないまま黙って消えていた
+      // (実測: 同期をやり直すと、手置きの PiP に置いたカメラB と、分離したカメラA の音が居ない素材を指していた)。
+      // 同じファイルが無いものは落とす。外した本編クリップに紐づく分離音声も、相手が居ないので落とす
+      const newIdByPath = new Map(assets.map((a) => [a.filePath, a.id]))
+      const prevPathOf = new Map(
+        state.project.assets.filter((a) => prevAssets.has(a.id)).map((a) => [a.id, a.filePath])
+      )
+      const removedMainIds = new Set(
+        state.project.clips.filter((c) => prevAssets.has(c.assetId)).map((c) => c.id)
+      )
+      const repoint = <C extends { assetId: string }>(c: C): C | null => {
+        if (!prevAssets.has(c.assetId)) return c
+        const id = newIdByPath.get(prevPathOf.get(c.assetId) ?? '')
+        return id ? { ...c, assetId: id } : null
+      }
+      const unlinkedClipIds: string[] = []
+      const keptAudioTracks = state.project.audioTracks
+        .filter((t) => !t.multicamSourceId && !t.autoRole)
+        .map((t) => {
+          const clips = t.clips.flatMap((c) => {
+            const linkedGone = c.linkedClipId != null && removedMainIds.has(c.linkedClipId)
+            const next = linkedGone ? null : repoint(c)
+            if (!next && c.linkedClipId) unlinkedClipIds.push(c.linkedClipId)
+            return next ? [next] : []
+          })
+          return { track: t, clips }
+        })
+        // このやり直しで空になったトラック(分離で作った「◯◯の音声」)は消す。もとから空のものは残す
+        // (`removeAsset` と同じ)
+        .filter(({ track, clips }) => clips.length > 0 || track.clips.length === 0)
+        .map(({ track, clips }) =>
+          clips.length === track.clips.length && clips.every((c, i) => c === track.clips[i])
+            ? track
+            : { ...track, clips }
+        )
+      const keptOverlayTracks = state.project.videoOverlayTracks
+        .filter((t) => !t.multicamSourceId && !t.autoRole)
+        .map((t) => {
+          const clips = t.clips.flatMap((c) => {
+            const next = repoint(c)
+            return next ? [next] : []
+          })
+          return clips.length === t.clips.length && clips.every((c, i) => c === t.clips[i])
+            ? t
+            : { ...t, clips }
+        })
       const base: Project = prev
         ? {
-            ...state.project,
+            ...reattachClipsWithoutLinkedAudio(
+              {
+                ...state.project,
+                clips: state.project.clips.filter((c) => !prevAssets.has(c.assetId)),
+                audioTracks: keptAudioTracks
+              },
+              unlinkedClipIds
+            ),
             assets: state.project.assets.filter((a) => !prevAssets.has(a.id)),
-            clips: state.project.clips.filter((c) => !prevAssets.has(c.assetId)),
-            videoOverlayTracks: state.project.videoOverlayTracks.filter(
-              (t) => !t.multicamSourceId && !t.autoRole
-            ),
-            audioTracks: state.project.audioTracks.filter(
-              (t) => !t.multicamSourceId && !t.autoRole
-            ),
+            videoOverlayTracks: keptOverlayTracks,
             textOverlays: state.project.textOverlays.filter(
               (o) => !(o.source === 'auto' && (o.utteranceId || o.effectId))
             ),
@@ -2420,30 +2519,50 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }))
       const stillSelected =
         state.selectedClipId != null && clips.some((c) => c.id === state.selectedClipId)
+      const removed: Project = {
+        ...state.project,
+        assets: state.project.assets.filter((a) => a.id !== assetId),
+        clips,
+        audioTracks,
+        videoOverlayTracks
+      }
+      const multicam = state.project.multicam
+      const syncedFile = multicam?.files.some((f) => f.assetId === assetId)
+      // 同期の記録からも外す。残すと、本編を伸ばしたときにピンマイクの声として
+      // 消した素材のクリップを足し、カメラの切り替え先にも出てしまう。
+      // ただし本編に付いていかせる処理(`followMainEdit`)は**外す前の記録で**通す。
+      // 記録を差し替えたまま関門に任せると「別の収録に入れ替わった」と読んで追従を丸ごと飛ばし、
+      // 本編だけが詰まってピンマイクの声・自動テロップ・SE/BGM/CG・顔カメラのワイプが元の位置に残っていた
+      // (実測: アングルを替えたカメラの素材をメディア一覧から消すと、後ろの本編は 10 秒前へ詰まるのに
+      //  声は動かず、残った本編の下で 10 秒ずれた声が鳴っていた)。`relinkAsset` と同じ形
+      const followed =
+        multicam && syncedFile
+          ? (() => {
+              const f = followMainEdit(state.project, removed)
+              // 追従で足した所に、消した素材のクリップが戻ってこないようにする
+              const gone = (c: { assetId: string }): boolean => c.assetId === assetId
+              return {
+                ...f,
+                audioTracks: f.audioTracks.map((t) =>
+                  t.clips.some(gone) ? { ...t, clips: t.clips.filter((c) => !gone(c)) } : t
+                ),
+                videoOverlayTracks: f.videoOverlayTracks.map((t) =>
+                  t.clips.some(gone) ? { ...t, clips: t.clips.filter((c) => !gone(c)) } : t
+                ),
+                multicam: {
+                  ...multicam,
+                  files: multicam.files.filter((x) => x.assetId !== assetId)
+                }
+              }
+            })()
+          : removed
       return {
         ...pushHistory(state),
+        // 同期の記録を差し替えたときは、上で追従を済ませてあるので関門では通さない
+        ...(followed !== removed ? { __noFollow: true as const } : {}),
         // 紐づく分離音声が消えた本編クリップは、印を下ろして内蔵の音へ戻す
         // (`removeAudioClip` / `removeAudioTrack` / `moveAudioClipToTrack` と同じ関門)。
-        project: reattachClipsWithoutLinkedAudio(
-          {
-            ...state.project,
-            assets: state.project.assets.filter((a) => a.id !== assetId),
-            clips,
-            audioTracks,
-            videoOverlayTracks,
-            // 同期の記録からも外す。残すと、本編を伸ばしたときにピンマイクの声として
-            // 消した素材のクリップを足し、カメラの切り替え先にも出てしまう
-            ...(state.project.multicam?.files.some((f) => f.assetId === assetId)
-              ? {
-                  multicam: {
-                    ...state.project.multicam,
-                    files: state.project.multicam.files.filter((f) => f.assetId !== assetId)
-                  }
-                }
-              : {})
-          },
-          unlinkedClipIds
-        ),
+        project: reattachClipsWithoutLinkedAudio(followed, unlinkedClipIds),
         selectedClipId: stillSelected ? state.selectedClipId : null,
         multiSelectedClipIds: state.multiSelectedClipIds.filter((id) =>
           clips.some((c) => c.id === id)
@@ -2509,8 +2628,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   addClipToTimeline: (assetId, index) =>
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
-      // 静止画は本編に置かない(ワイプ・全面(CG)のトラック用)
-      if (!asset || asset.still) return state
+      // 静止画は本編に置かない(ワイプ・全面(CG)のトラック用)。音声だけの素材(BGM・ナレーション)も
+      // 置かない: 本編は映像を読むので、映像の無いクリップが1本入ると標準の書き出しが失敗していた
+      // (タイムラインへのドロップ・「本編に追加」と同じ `playableOnMain` で断る)
+      if (!asset || !playableOnMain(asset)) return state
       const newClip: Clip = {
         id: uuid(),
         assetId,
@@ -2531,7 +2652,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   addTrimmedClipToTimeline: (assetId, inPoint, outPoint, index) =>
     set((state) => {
       const asset = state.project.assets.find((a) => a.id === assetId)
-      if (!asset || asset.still) return state
+      // ソースビューアは音声だけの素材も開けるので、「末尾に追加 (F)」からも映像の無い素材が届く。
+      // 本編に置けない素材(静止画・音声だけ)は断る(`addClipToTimeline` と同じ)
+      if (!asset || !playableOnMain(asset)) return state
       // 頭と終わりが逆・数値でない区間は置かない(長さが負のクリップで後ろが全部重なる)
       if (!Number.isFinite(inPoint) || !Number.isFinite(outPoint) || outPoint <= inPoint) {
         return state
@@ -2556,7 +2679,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // consumes the same amount of existing material instead.
   insertClipAtTime: (assetId, inPoint, outPoint, atTime) =>
     set((state) => {
-      if (state.project.assets.find((x) => x.id === assetId)?.still) return state
+      // 本編に置けない素材(静止画・音声だけ)は断る。ソースビューアの「挿入」から音声だけの素材が届き、
+      // 映像の無いクリップが本編に入って標準の書き出しが失敗していた
+      if (!playableOnMain(state.project.assets.find((x) => x.id === assetId))) return state
       const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, false)
       if (!built) return state
       return { ...pushHistory(state), project: applyInsertedClips(state.project, built) }
@@ -2564,7 +2689,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   overwriteClipAtTime: (assetId, inPoint, outPoint, atTime) =>
     set((state) => {
-      if (state.project.assets.find((x) => x.id === assetId)?.still) return state
+      // 本編に置けない素材(静止画・音声だけ)は断る(`insertClipAtTime` と同じ)
+      if (!playableOnMain(state.project.assets.find((x) => x.id === assetId))) return state
       const built = buildInsertedClips(state.project, assetId, inPoint, outPoint, atTime, true)
       if (!built) return state
       return { ...pushHistory(state), project: applyInsertedClips(state.project, built) }

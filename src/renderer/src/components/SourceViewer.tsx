@@ -5,6 +5,7 @@ import { previewSourceUrl } from '../lib/previewSource'
 import { totalTimelineDuration, buildTimedClips } from '../lib/timelineMath'
 import { waveformRenderSize, type WaveformSize } from '../lib/waveformSize'
 import { isTimelineCovered, isTypingTarget } from '../lib/useKeyboardShortcuts'
+import { playableOnMain } from '../lib/relinkCheck'
 import { Waveform } from './Waveform'
 import { targetFrameRate } from '@shared/frameRate'
 import {
@@ -212,9 +213,19 @@ export function SourceViewer(): React.JSX.Element | null {
   const rangeEnd = sourceOut ?? duration
   const rangeDuration = Math.max(0, rangeEnd - rangeStart)
   const timelineDuration = totalTimelineDuration(buildTimedClips(project))
+  // ソースビューアは音声だけの素材(BGM・ナレーション)や静止画も開けるが、本編(V1)には置けない。
+  // 押せたままだと映像の無いクリップが本編に入り、標準の書き出しが失敗していた
+  // (タイムラインへのドロップ・「本編(V1)の末尾に追加」と同じ `playableOnMain` で決める)
+  const mainRefusal = playableOnMain(asset)
+    ? null
+    : asset.still
+      ? '静止画は本編(V1)には置けません。ワイプ・CG のトラックへドラッグしてください'
+      : '音声だけの素材は本編(V1)には置けません。音声トラックへドラッグしてください'
+  const cannotPlace = rangeDuration <= 0 || mainRefusal !== null
 
   function appendToTimeline(): void {
-    if (rangeDuration <= 0) return
+    // F キーもボタンと同じ条件で断る(ボタンを止めてもキーから本編へ入っていた)
+    if (cannotPlace) return
     addTrimmedClipToTimeline(asset!.id, rangeStart, rangeEnd)
   }
 
@@ -387,8 +398,8 @@ export function SourceViewer(): React.JSX.Element | null {
         <button
           className="primary-button"
           onClick={appendToTimeline}
-          disabled={rangeDuration <= 0}
-          title="タイムラインの末尾に追加 (F)"
+          disabled={cannotPlace}
+          title={mainRefusal ?? 'タイムラインの末尾に追加 (F)'}
         >
           <PlusIcon width={13} height={13} />
           末尾に追加 (F)
@@ -396,16 +407,18 @@ export function SourceViewer(): React.JSX.Element | null {
         <button
           className="small-button"
           onClick={() => insertClipAtTime(asset.id, rangeStart, rangeEnd, playheadTime)}
-          disabled={rangeDuration <= 0}
-          title="再生位置で切って割り込ませる。以降のクリップは後ろにずれます"
+          disabled={cannotPlace}
+          title={mainRefusal ?? '再生位置で切って割り込ませる。以降のクリップは後ろにずれます'}
         >
           挿入
         </button>
         <button
           className="small-button"
           onClick={() => overwriteClipAtTime(asset.id, rangeStart, rangeEnd, playheadTime)}
-          disabled={rangeDuration <= 0}
-          title="再生位置から同じ長さ分を置き換える。以降のクリップの位置は変わりません"
+          disabled={cannotPlace}
+          title={
+            mainRefusal ?? '再生位置から同じ長さ分を置き換える。以降のクリップの位置は変わりません'
+          }
         >
           上書き
         </button>
