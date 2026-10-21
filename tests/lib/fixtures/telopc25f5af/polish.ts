@@ -10,7 +10,7 @@
  * 言い換え・要約はしない(言葉を作らない)。
  */
 
-export const FILLER =
+const FILLER =
   /(^|[、,。\s])(?:え[ーぇ]+と|えっと|え[ーぇ]*っと|え[ーぇ]+(?=[、,\s])|あの[ーぉ]+|そ[のー]ー+|ま[あー]+(?=[、,\s])|う[ーん]+(?=[、,\s])|ん[ーっ]+(?=[、,\s])|あ[ーぁ]+(?=[、,\s]))[、,\s]*/gu
 
 export function removeFillers(text: string): string {
@@ -39,21 +39,14 @@ export interface DictionaryEntry {
  * 正しい書き方(置き換え先)がそのまま出てきたら、そこは触らない
  */
 export function applyDictionary(text: string, entries: readonly DictionaryEntry[]): string {
-  const d = dictionaryPattern(entries)
-  return d ? text.replace(d.pattern, (m) => d.replace.get(m) ?? m) : text
-}
-
-/** 辞書を当てる正規表現と置き換え(`applyDictionary` と、文字の出どころを追う整えで同じものを使う) */
-export function dictionaryPattern(
-  entries: readonly DictionaryEntry[]
-): { pattern: RegExp; replace: Map<string, string> } | null {
   const replace = new Map<string, string>()
   for (const e of entries) if (e.from && !replace.has(e.from)) replace.set(e.from, e.to)
-  if (replace.size === 0) return null
+  if (replace.size === 0) return text
   const keep = new Set(entries.map((e) => e.to).filter((t) => t && !replace.has(t)))
   const candidates = [...replace.keys(), ...keep].sort((a, b) => b.length - a.length)
   const escape = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return { pattern: new RegExp(candidates.map(escape).join('|'), 'gu'), replace }
+  const pattern = new RegExp(candidates.map(escape).join('|'), 'gu')
+  return text.replace(pattern, (m) => replace.get(m) ?? m)
 }
 
 /** 「誤 → 正」の行を読み込む(→ / => / タブ区切り。空行・# の行は飛ばす) */
@@ -127,10 +120,6 @@ export function breakScore(chars: readonly string[], k: number): number {
   // 絵文字の組み合わせ(ZWJ・肌の色・異体字セレクタ)・後ろに付けた濁点の途中では切らない
   if (JOINS_PREVIOUS.test(next) || prev === '\u200d') return -Infinity
   if (NO_LINE_START.test(next) || NO_LINE_END.test(prev)) return -Infinity
-  // 数字の桁区切り・小数点(「2,800」「1.5」)の後では切らない。句読点の後として一番良い区切りになり、
-  // 「お会計は2,」/「800円」と分かれたうえ、行末のカンマは整えるときに落ちて「2」「800円」と出ていた
-  if (/[,.，．]/u.test(prev) && /[0-9０-９]/u.test(chars[k - 2] ?? '') && /[0-9０-９]/u.test(next))
-    return -Infinity
   if (PUNCT.test(prev)) return 3
   // 単語の途中(「カ / ラス」「で / すね」「み / たい」)では、ほかに区切れる所があれば切らない。
   // 実写の素材(12分の食べ歩き)では、テロップの境目・改行 248 か所のうち 45 か所が単語の途中だった

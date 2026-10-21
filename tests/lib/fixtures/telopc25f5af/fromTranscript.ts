@@ -58,61 +58,20 @@ export function tidyTelopText(text: string): string {
     .trim()
 }
 
-interface TimedChar {
-  ch: string
-  start: number
-  end: number
-  /** 何番目の言葉の文字か(言葉の間に足した空白は -1) */
-  word: number
-}
-
-/**
- * 言葉の間を空けるか(認識した文に空白があった所だけ)。
- *
- * 音声認識は英数字の言葉を細かい片(「Mine」「craft」、「15」「000」)で返すことがあり、英数字どうしの
- * 間をいつも空けると、テロップが「Mine craft」「15 000円」になっていた。認識した文(`text`)を言葉の
- * 順に読み、文で空白を挟んでいた所だけ空ける(「Good morning」は空く)。文と言葉が合わなくなったら
- * (文を後から直した など)、そこから先は従来どおり英数字どうしの間を空ける
- */
-function spacesFromText(words: readonly AsrWord[], text: string | undefined): boolean[] {
-  const out: boolean[] = []
-  let cursor = 0
-  let aligned = typeof text === 'string' && text.length > 0
-  for (const w of words) {
-    const t = w.text.trim()
-    if (!aligned || !text) {
-      out.push(true)
-      continue
-    }
-    let j = cursor
-    while (j < text.length && /\s/.test(text[j])) j++
-    if (t.length > 0 && text.startsWith(t, j)) {
-      out.push(j > cursor)
-      cursor = j + t.length
-    } else {
-      aligned = false
-      out.push(true)
-    }
-  }
-  return out
-}
-
 /** 文字単位の時刻(言葉の時刻を文字数で按分する) */
-function charTimes(words: readonly AsrWord[], text?: string): TimedChar[] {
-  const out: TimedChar[] = []
-  const spaced = spacesFromText(words, text)
-  words.forEach((w, wi) => {
-    // 英数字どうしの言葉の間は空ける(発話の文と同じ規則。詰めると「Helloworld」になり、言葉の途中で改行される)。
-    // ただし認識した文で続いていた片(「Mine」「craft」)は詰める
+function charTimes(words: readonly AsrWord[]): { ch: string; start: number; end: number }[] {
+  const out: { ch: string; start: number; end: number }[] = []
+  for (const w of words) {
+    // 英数字どうしの言葉の間は空ける(発話の文と同じ規則。詰めると「Helloworld」になり、言葉の途中で改行される)
     const prev = out[out.length - 1]
-    if (prev && spaced[wi] && /[A-Za-z0-9]/.test(prev.ch) && /^[A-Za-z0-9]/.test(w.text))
-      out.push({ ch: ' ', start: prev.end, end: prev.end, word: -1 })
+    if (prev && /[A-Za-z0-9]/.test(prev.ch) && /^[A-Za-z0-9]/.test(w.text))
+      out.push({ ch: ' ', start: prev.end, end: prev.end })
     const chars = [...w.text]
     const step = chars.length > 0 ? (w.end - w.start) / chars.length : 0
     chars.forEach((ch, i) =>
-      out.push({ ch, start: w.start + step * i, end: w.start + step * (i + 1), word: wi })
+      out.push({ ch, start: w.start + step * i, end: w.start + step * (i + 1) })
     )
-  })
+  }
   return out
 }
 
@@ -129,98 +88,6 @@ export function wrapTelopLines(text: string, maxLineChars: number): string[] {
     .filter((l) => l.length > 0)
 }
 
-/** 言いよどみを除き、辞書で直し、表示用に整える */
-function polishTelopText(text: string, options: ChunkOptions): string {
-  let body = text
-  if (options.removeFillers !== false) body = removeFillers(body)
-  if (options.dictionary?.length) body = applyDictionary(body, options.dictionary)
-  return tidyTelopText(body)
-}
-
-/**
- * 枚の一部(素材の時刻 `from`〜`to`)だけが本編に残ったときの、その部分の言葉だけの文。
- *
- * 頭・終わりがカットで落ちた枚に元の文のまま出すと、聞こえない言葉まで出る(ショートの頭が発話の途中から
- * 始まると、その枚は丸ごと捨てられて声だけが字幕なしで流れ、終わりで切れた枚は切れた言葉まで出ていた)。
- * 言葉の真ん中の時刻が残った範囲に入る言葉だけを残す(`buildSpeechOverlays` と同じく言葉の単位で)。
- * 言葉の時刻が無い発話は、元の文のまま
- */
-export function clipTelopChunkText(
-  u: Pick<TranscriptUtterance, 'text' | 'words'>,
-  chunk: TelopChunk,
-  from: number,
-  to: number,
-  options: ChunkOptions = {}
-): string {
-  if (u.words.length === 0) return chunk.text
-  const timed = charTimes(u.words, u.text)
-  const inside = (wi: number): boolean => {
-    const w = u.words[wi]
-    const mid = (w.start + w.end) / 2
-    return mid >= from - 1e-6 && mid < to + 1e-6
-  }
-  const kept = timed.filter(
-    (c) =>
-      c.start >= chunk.sourceStart - 1e-6 &&
-      c.start < chunk.sourceEnd - 1e-6 &&
-      (c.word < 0 || inside(c.word))
-  )
-  const polished = polishTelopText(kept.map((c) => c.ch).join(''), options)
-  return wrapTelopLines(polished, options.maxLineChars ?? 14).join('\n')
-}
-
-/**
- * テロップの文の1文字ごと(空白・改行を除く)の、話している時刻(素材の秒、文字の真ん中)。
- *
- * 人が直した・消した範囲(元の発話の時刻)で、作り直した枚を切り分けるのに使う。枚の時間に文字数で
- * 割り振ると、言葉ごとの長さの違い(「は」0.7 秒と「きょう0」0.7 秒)で数文字ずれ、消していない言葉まで
- * 消えていた。整えた文(言いよどみを除く・辞書で直す)の文字を、元の言葉の文字に前から順に合わせる
- * (合わない文字 = 辞書で直した文字は、直前に合った所の時刻)。`from`〜`to` は、頭・終わりを
- * カットで落とした枚の残った範囲(`clipTelopChunkText` と同じ言葉を見る)。
- * 言葉の時刻が無い発話は null
- */
-export function telopCharTimes(
-  u: Pick<TranscriptUtterance, 'text' | 'words'>,
-  chunk: TelopChunk,
-  text: string,
-  from = -Infinity,
-  to = Infinity
-): number[] | null {
-  if (u.words.length === 0) return null
-  const timed = charTimes(u.words, u.text)
-  const inside = (wi: number): boolean => {
-    const w = u.words[wi]
-    const mid = (w.start + w.end) / 2
-    return mid >= from - 1e-6 && mid < to + 1e-6
-  }
-  const cand = timed.filter(
-    (c) =>
-      c.word >= 0 &&
-      !/\s/.test(c.ch) &&
-      c.start >= chunk.sourceStart - 1e-6 &&
-      c.start < chunk.sourceEnd - 1e-6 &&
-      inside(c.word)
-  )
-  if (cand.length === 0) return null
-  const mid = (k: number): number => (cand[k].start + cand[k].end) / 2
-  const out: number[] = []
-  let j = 0
-  for (const ch of [...text]) {
-    if (/\s/.test(ch)) continue
-    let k = -1
-    for (let x = j; x < Math.min(cand.length, j + 12); x++)
-      if (cand[x].ch === ch) {
-        k = x
-        break
-      }
-    if (k >= 0) {
-      out.push(mid(k))
-      j = k + 1
-    } else out.push(mid(Math.min(j, cand.length - 1)))
-  }
-  return out
-}
-
 export function utteranceToTelopChunks(
   u: Pick<TranscriptUtterance, 'text' | 'words' | 'sourceStart' | 'sourceEnd'>,
   options: ChunkOptions = {}
@@ -229,7 +96,7 @@ export function utteranceToTelopChunks(
   const maxLines = options.maxLines ?? 2
   const minDur = options.minDurationSec ?? 1.0
 
-  const timed = u.words.length > 0 ? charTimes(u.words, u.text) : []
+  const timed = u.words.length > 0 ? charTimes(u.words) : []
   const raw = timed.length > 0 ? timed.map((c) => c.ch).join('') : u.text
   const chars = [...raw]
   // 1枚の長さを揃えて区切ってから、1枚ずつ改行する。前から1枚ずつ上限まで詰めると、最後の1枚が
@@ -239,7 +106,12 @@ export function utteranceToTelopChunks(
   const ends = balancedLineEnds(chars, sheetMax, dictionaryNoCut(chars, options.dictionary))
   const pieces = ends.map((end, i) => ({ from: i === 0 ? 0 : ends[i - 1], to: end }))
 
-  const polish = (text: string): string => polishTelopText(text, options)
+  const polish = (text: string): string => {
+    let body = text
+    if (options.removeFillers !== false) body = removeFillers(body)
+    if (options.dictionary?.length) body = applyDictionary(body, options.dictionary)
+    return tidyTelopText(body)
+  }
   // 言葉の時刻が無いときは、発話の時間を文字数で割り振る(全部の枚を発話の頭からにすると、
   // 重ならないように詰めた結果、最後の1枚以外が長さ 0 になる)
   const timeAt = (i: number): number =>

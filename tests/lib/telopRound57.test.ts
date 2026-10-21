@@ -12,8 +12,6 @@ vi.hoisted(() => {
 })
 import * as NP from '../../src/renderer/src/lib/roughCutPlan'
 import * as NM from '@shared/telop/manual'
-import * as OP from './fixtures/telop01b3ed7/roughCutPlan'
-import * as OM from './fixtures/telop01b3ed7/manual'
 import { TURN_RATE } from '@shared/diarize/micTurns'
 import { defaultTextStyle } from '@shared/textStyle'
 import type { MulticamInfo } from '@shared/sync/multicam'
@@ -62,15 +60,13 @@ function project(words: W[]): { p: Project; activity: Uint8Array } {
   }
 }
 function plan(
-  impl: 'old' | 'new',
   g: ReturnType<typeof project>,
   start: number,
   end: number,
   dictionary: { from: string; to: string }[],
   lineChars = 14
 ): Auto[] {
-  const f = (impl === 'old' ? OP.planRoughCut : NP.planRoughCut) as typeof NP.planRoughCut
-  return f(
+  return NP.planRoughCut(
     g.p,
     info,
     [{ id: 's0', start, end, lines: [], speech: 0 }],
@@ -96,78 +92,6 @@ const show = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
 const ids = (ts: readonly Auto[]): TextOverlay[] =>
   ts.map((t, i) => ({ ...t, id: `t${i}` })) as TextOverlay[]
 
-describe('前の版(01b3ed7)で保存した、辞書で直した文字の範囲', () => {
-  const dict = [{ from: '三丌丏', to: '言訁訂訃訄' }]
-
-  it('頭を落とした「言訁訂訃訄丒丕」を消して開き直し、カットを広げても、消した言葉は戻らない', () => {
-    const g = project([
-      { text: '一七丆', start: 1.0, end: 1.6 },
-      { text: '三丌丏', start: 1.7, end: 2.3 },
-      { text: '丒丕', start: 2.4, end: 2.8 }
-    ])
-    const timeline = ids(plan('old', g, 1.45, 3.5, dict))
-    const victim = timeline.find((t) => t.text.includes('言'))!
-    const saved = save({
-      timeline: timeline.filter((t) => t !== victim),
-      dismissed: [OM.autoTelopKey(victim)!]
-    })
-    const merged = NM.mergeManualTelops(
-      saved.timeline,
-      plan('new', g, 0.5, 3.5, dict),
-      new Set(saved.dismissed)
-    )
-    // 直す前(dc65a0d)は「一七丆言」(直した言葉の最初の文字が戻った)
-    expect(show(merged)).toBe('一七丆')
-  })
-
-  it('終わりを落とした枚を消した・直したのを開き直しても、前の版のまま作り直したのと同じ', () => {
-    const g = project([
-      { text: '一七', start: 1.0, end: 1.4 },
-      { text: '三丌丏', start: 1.5, end: 2.1 },
-      { text: '丒丕', start: 2.2, end: 2.6 }
-    ])
-    const timeline = ids(plan('old', g, 0.5, 2.3, dict))
-    const victim = timeline.find((t) => t.text.includes('言'))!
-    const deleted = save({
-      timeline: timeline.filter((t) => t !== victim),
-      dismissed: [OM.autoTelopKey(victim)!]
-    })
-    const edited = save(
-      timeline.map((t) => (t === victim ? { ...t, text: 'EDIT', edited: true } : t))
-    )
-    const wide = (impl: 'old' | 'new'): Auto[] => plan(impl, g, 0.5, 3.0, dict)
-    const mergedNew = NM.mergeManualTelops(
-      deleted.timeline,
-      wide('new'),
-      new Set(deleted.dismissed)
-    )
-    const mergedOld = OM.mergeManualTelops(
-      deleted.timeline,
-      wide('old'),
-      new Set(deleted.dismissed)
-    )
-    expect(show(mergedNew)).toBe(show(mergedOld))
-    // 直す前は「*EDIT | 訁訂訃訄丒丕」(直した言葉が2回出た)
-    expect(show(NM.mergeManualTelops(edited, wide('new'), new Set()))).toBe(
-      show(OM.mergeManualTelops(edited, wide('old'), new Set()))
-    )
-  })
-
-  it('辞書で直した言葉だけの枚を直したのを開き直しても、直した文字は消えない', () => {
-    const g = project([
-      { text: '一七', start: 1.0, end: 1.4 },
-      { text: '三丌丏', start: 1.5, end: 2.1 },
-      { text: '丒丕', start: 2.2, end: 2.6 }
-    ])
-    const tl = ids(plan('old', g, 1.45, 2.15, dict))
-    const edited = save(
-      tl.map((t) => (t.text.includes('言') ? { ...t, text: 'EDIT', edited: true } : t))
-    )
-    const merged = NM.mergeManualTelops(edited, plan('new', g, 0.5, 3.0, dict), new Set())
-    expect(show(merged)).toBe('一七 | *EDIT | 丒丕')
-  })
-})
-
 describe('辞書で長くなって何枚かに分けた枚', () => {
   it('カットで頭を落としても、同じ言葉が2枚に出ない', () => {
     const g = project([
@@ -180,7 +104,7 @@ describe('辞書で長くなって何枚かに分けた枚', () => {
       { from: '丂七', to: '言訁訂訃訄' },
       { from: '丄丅', to: '訅訆訇' }
     ]
-    const all = plan('new', g, 1.91, 4.4, dict, 5)
+    const all = plan(g, 1.91, 4.4, dict, 5)
       .map((x) => x.text.replace(/\s/g, ''))
       .join('')
     expect(all.split('訆').length - 1).toBe(1)
@@ -194,7 +118,7 @@ describe('辞書で長くなって何枚かに分けた枚', () => {
       { text: '三丌', start: 2.0, end: 2.4 },
       { text: '丘丛', start: 2.5, end: 2.9 }
     ])
-    const telops = plan('new', g, 0.5, 3.0, [{ from: '三丌', to: '言訁訂訃訄訅訆訇計訉' }], 4)
+    const telops = plan(g, 0.5, 3.0, [{ from: '三丌', to: '言訁訂訃訄訅訆訇計訉' }], 4)
     const all = telops.map((t) => t.text.replace(/\s/g, '')).join('')
     expect(all).toContain('丘')
     expect(all).toContain('計')
@@ -210,11 +134,11 @@ describe('切り分けた枚の時刻・言いよどみの切れ端', () => {
       { text: '一七', start: 1.0, end: 1.4 },
       { text: '丒丕', start: 3.0, end: 3.4 }
     ])
-    const tl = ids(plan('new', g, 0.5, 4.0, [], 2))
+    const tl = ids(plan(g, 0.5, 4.0, [], 2))
     const edited = save(
       tl.map((t) => (t.text === '一七' ? { ...t, text: 'EDITED', edited: true } : t))
     )
-    const merged = NM.mergeManualTelops(edited, plan('new', g, 0.5, 4.0, [], 14), new Set())
+    const merged = NM.mergeManualTelops(edited, plan(g, 0.5, 4.0, [], 14), new Set())
     const rest = merged.find((t) => t.text === '丒丕')!
     const edit = merged.find((t) => t.edited)!
     // 声はタイムラインの 0.50〜0.90(一七)と 2.50〜2.90(丒丕)。直す前は間の真ん中(1.7)で区切っていた

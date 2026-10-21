@@ -11,8 +11,6 @@ vi.hoisted(() => {
   }
 })
 import { planRoughCut } from '../../src/renderer/src/lib/roughCutPlan'
-import { planRoughCut as planA322c86 } from './fixtures/telopa322c86/roughCutPlan'
-import * as OM from './fixtures/telopa322c86/manual'
 import {
   autoTelopKey,
   mergeManualTelops,
@@ -42,9 +40,7 @@ function plan(
   utterances: W[][],
   scenes: { start: number; end: number }[],
   lineChars: number,
-  dictionary: { from: string; to: string }[] = [],
-  /** 前の版(a322c86: 長さ 0 の言葉の文字をみな言葉の頭の時刻にした)で作る */
-  old = false
+  dictionary: { from: string; to: string }[] = []
 ): Auto[] {
   const transcript = utterances.map((words, k) => ({
     id: `u${k}`,
@@ -70,7 +66,7 @@ function plan(
   } as unknown as Project
   const activity = new Uint8Array(100 * TURN_RATE).fill(1, 0, 10 * TURN_RATE)
   const sc = scenes.map((s, i) => ({ id: `s${i}`, ...s, lines: [], speech: 0 }))
-  return (old ? (planA322c86 as unknown as typeof planRoughCut) : planRoughCut)(
+  return planRoughCut(
     project,
     info,
     sc,
@@ -95,7 +91,7 @@ const flat = (t: { text: string }): string => t.text.replace(/\s/g, '')
 const kanji = (s: string): string[] => [...s].filter((c) => /\p{Script=Han}/u.test(c))
 
 /**
- * 第59回: 長さ 0 の言葉の文字を少しずつ並べた(第58回)ことで起きた退行と、前の版で保存した企画の当て直し。
+ * 第59回: 長さ 0 の言葉の文字を少しずつ並べた(第58回)ことで起きた退行。
  * Whisper の語の時刻は 0.02 秒刻みで、長さ 0 の言葉の次の言葉は同じ時刻か 0.02 秒後に続くことが多い
  */
 describe('長さ 0 の言葉の文字の時刻', () => {
@@ -180,11 +176,10 @@ describe('長さ 0 の言葉の文字の時刻', () => {
   })
 })
 
-describe('前の版の点のような範囲の決め方', () => {
-  it('今の版の狭い範囲(辞書で5文字に直した短い言葉の1文字の枚)を消しても、次の辞書の言葉は消えない', () => {
-    // 前の版の点のような範囲は辞書の言葉の候補の時刻の間に掛かれば丸ごと当てる。今の版の範囲は今出て
-    // いる文字の時刻を含むので、点の範囲とはみなさない(みなすと、次の言葉「らた」→「太郎」が、前の版が
-    // 付けえた時刻の間に掛かって消えていた)
+describe('狭い範囲', () => {
+  it('狭い範囲(辞書で5文字に直した短い言葉の1文字の枚)を消しても、次の辞書の言葉は消えない', () => {
+    // 範囲は文字の話している時刻だけで当てる(前の版の点の範囲とみなして辞書の言葉を丸ごと当てる規則が
+    // あったときは、次の言葉「らた」→「太郎」まで消えていた)
     const words: W[] = [
       { text: '今日は', start: 1.0, end: 1.6 },
       { text: 'きむ', start: 2.0, end: 2.02 },
@@ -247,6 +242,16 @@ describe('切り分けた枚がみな 0.3 秒入らない元の枚', () => {
 
 /** 長さ 0 の言葉を含む発話(同じ時刻の長さ 0 の言葉が続く・次の言葉が同じ時刻に始まる) */
 const LAYOUTS: W[][] = [
+  // 長さ 0 の言葉が前後の言葉の間に入りきらない(文字を 0.006 秒より詰める)
+  [
+    { text: '今日は', start: 1.0, end: 1.6 },
+    { text: '一二三四五六', start: 1.6, end: 1.6 },
+    { text: '七八九十', start: 1.6, end: 1.6 },
+    { text: '配信', start: 1.6, end: 1.62 },
+    { text: '丁丂', start: 1.62, end: 1.62 },
+    { text: '书乩', start: 1.62, end: 1.64 },
+    { text: 'します', start: 1.64, end: 2.2 }
+  ],
   [
     { text: '今日は', start: 1.0, end: 1.5 },
     { text: '一二', start: 2.0, end: 2.0 },
@@ -275,19 +280,14 @@ const LAYOUTS: W[][] = [
   ]
 ]
 
-describe('前の版(a322c86: 長さ 0 の言葉の文字をみな言葉の頭の時刻にした)で保存した企画', () => {
+describe('長さ 0 の言葉を含む発話の枚を消した・直したまま、1行の長さを変えて作り直す', () => {
   for (const [li, words] of LAYOUTS.entries())
     for (const lc of [3, 4, 5, 6, 8])
-      it(`発話${li}・1行${lc}文字の枚を消した・直したまま、今の版で作り直す`, () => {
+      it(`発話${li}・1行${lc}文字`, () => {
         const dict = [{ from: 'きむら', to: '木村' }]
-        const saved = ids(plan([words], [{ start: 0, end: 5 }], lc, dict, true))
-        const all = kanji(
-          plan([words], [{ start: 0, end: 5 }], 40, dict)
-            .map(flat)
-            .join('')
-        )
-        // 前の版が出していなかった言葉(前の版の不具合)がある企画は、どの枚の言葉だったか決められない
-        if (kanji(saved.map(flat).join('')).join('') !== all.join('')) return
+        const saved = ids(plan([words], [{ start: 0, end: 5 }], lc, dict))
+        // 長さ 0 の言葉だけの短い枚(0.3 秒未満)は仮編集が出さない(仮編集の決まり)。比べるのは作り直した
+        // 仮編集に出る言葉
         const bad: string[] = []
         for (const S of saved)
           for (const mode of ['dismiss', 'edit'] as const) {
@@ -295,20 +295,17 @@ describe('前の版(a322c86: 長さ 0 の言葉の文字をみな言葉の頭の
               mode === 'dismiss'
                 ? saved.filter((t) => t !== S)
                 : saved.map((t) => (t === S ? { ...t, text: 'X!', edited: true } : t))
-            const dis = new Set(mode === 'dismiss' ? [OM.autoTelopKey(S as never)!] : [])
-            for (const nlc of [4, 14]) {
-              const merged = mergeManualTelops(
-                tl,
-                plan([words], [{ start: 0, end: 5 }], nlc, dict),
-                dis,
-                rememberEditedTelops(tl, undefined)
-              )
-              // 消した・直した枚の漢字だけが消える・修正に替わる(長さ 0 の言葉が戻る・隣の枚の言葉が消える
-              // ことがない)。修正は1回だけ出る
+            const dis = new Set(mode === 'dismiss' ? [autoTelopKey(S)!] : [])
+            for (const nlc of [3, 4, 14]) {
+              const plain = plan([words], [{ start: 0, end: 5 }], nlc, dict)
+              const merged = mergeManualTelops(tl, plain, dis, rememberEditedTelops(tl, undefined))
+              // 消した・直した枚の漢字だけが消える・修正に替わる(隣の枚の言葉を取らない・2回出ない)。
+              // 修正は1回だけ出る
               const shown = merged.filter((t) => !t.edited).flatMap((t) => kanji(t.text))
-              const want = all.filter((c) => !kanji(S.text).includes(c))
+              const want = kanji(plain.map(flat).join('')).filter((c) => !kanji(S.text).includes(c))
               const edits = merged.filter((t) => t.edited).length
-              if (shown.join('') !== want.join('') || edits !== (mode === 'edit' ? 1 : 0))
+              const heard = kanji(S.text).some((c) => kanji(plain.map(flat).join('')).includes(c))
+              if (shown.join('') !== want.join('') || edits !== (mode === 'edit' && heard ? 1 : 0))
                 bad.push(
                   `${mode} [${flat(S)}] → ${nlc}: ${merged.map((t) => (t.edited ? '*' : '') + flat(t)).join('|')}`
                 )
