@@ -459,12 +459,31 @@ export function planRoughCut(
           const clipped = visStart > commonStart + 1e-6 || visEnd < commonEnd - 1e-6
           // 1文字ごとの話している時刻(人が直した・消した範囲で、作り直した枚を切り分ける)
           const shown = clipped
-            ? clipTelopChunk(u, chunk, toSource(f, visStart), toSource(f, visEnd), chunkOptions)
-            : { text: chunk.text, times: chunk.times, spoken: chunk.spoken }
+            ? clipTelopChunk(
+                u,
+                chunk,
+                // 落とした側だけで言葉を選ぶ(落としていない頭・終わりの言葉は、言葉の真ん中が枚の時刻の
+                // 外でも残す。辞書で長くなって分けた後ろの枚は、頭が言葉の途中から始まる)
+                visStart > commonStart + 1e-6 ? toSource(f, visStart) : -Infinity,
+                visEnd < commonEnd - 1e-6 ? toSource(f, visEnd) : Infinity,
+                chunkOptions
+              )
+            : { text: chunk.text, times: chunk.times, spoken: chunk.spoken, runs: chunk.runs }
           return shown.text ? { span: sp, start, end, ...shown, clipped, visStart, visEnd } : null
         })
         .filter((x) => x !== null)
-      for (const { span, start, end, text, times, spoken, clipped, visStart, visEnd } of placed) {
+      for (const {
+        span,
+        start,
+        end,
+        text,
+        times,
+        spoken,
+        runs,
+        clipped,
+        visStart,
+        visEnd
+      } of placed) {
         const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
         // 素材の時刻 → このタイムラインの時刻(タイムライン = offset + 素材の秒 / rate)。
         // 直した・消した範囲で切り分けた枚の時刻を、文字数ではなく話している時刻から決めるのに使う
@@ -491,7 +510,8 @@ export function planRoughCut(
                   text,
                   times,
                   offset,
-                  ...(f.rate !== 1 ? { rate: f.rate } : {})
+                  ...(f.rate !== 1 ? { rate: f.rate } : {}),
+                  ...(runs ? { runs } : {})
                 }
               : clipped
                 ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }

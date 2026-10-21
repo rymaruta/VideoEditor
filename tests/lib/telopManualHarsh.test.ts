@@ -33,10 +33,10 @@ import type { EditedTelop, Project, TextOverlay } from '@shared/types'
  *
  * 正しい結果(どの言葉を直した・消したか)は実装とは別に覚える。ただし次の所は、その覚え方では
  * 正解が決まらないので確かめない(実装の誤りを見逃さないよう、狭く限る):
- * - 仮編集そのものが同じ言葉を2枚に出した所(z。人の修正と関係のない、区切り方の問題)
  * - 辞書で直す言葉の一部だけを出した枚(カット・枚の境目で言葉が分かれた)を直した・消した所。
  *   その言葉の残りの部分・直した後の形を出すべきかは決められない(実装は話している時刻で分ける)
- * - 漢字を含まない枚(言いよどみの切れ端)を直した修正の、出る回数(聞こえるかを言葉で判断できない)
+ * - 漢字を含まない枚(言いよどみの切れ端)を直した修正の、出る回数(聞こえるかを言葉で判断できない。
+ *   1 回以下とだけ確かめる)
  * - 元の枚が短く、切り分けた枚を全部 0.3 秒にできない所(元の枚の外へ延ばすとカットを越える)
  * 試す数は `TELOP_HARSH_SEEDS`(既定 200)、1つだけ詳しく見るときは `TELOP_HARSH_SEED`
  */
@@ -198,15 +198,12 @@ function check(
   const pc = new Map<string, number>()
   for (const t of plain) for (const c of kanji(t.text)) pc.set(c, (pc.get(c) ?? 0) + 1)
   const plainDup = [...pc].filter(([, n]) => n > 1).map(([c]) => c)
+  // 仮編集そのものが同じ言葉を2枚に出すのも誤り(辞書で長くなって何枚かに分けた枚で起きていた)
   if (plainDup.length)
     fail(
-      'z-plain-dup(plan bug, not merge)',
+      'a-plan-dup',
       `${tag} ${plainDup.join('')} :: ${plain.map((t) => t.text.replace(/\n/g, '')).join(' | ')}`
     )
-  for (const c of plainDup) {
-    count.delete(c)
-    audible.delete(c)
-  }
   for (const c of m.ambiguous) audible.delete(c)
   for (const [c, n] of count)
     if (n !== 1)
@@ -226,24 +223,7 @@ function check(
     // 出るなら、出る回数は 1 回以下とだけ確かめる
     const heard = [...words].filter((w) => pc.has(w))
     const judged = heard.some((w) => !m.ambiguous.has(w))
-    let expected = judged ? 1 : heard.length > 0 || words.size === 0 ? -1 : 0
-    // 漢字の言葉は聞こえなくても、修正した範囲の言いよどみ・かなの切れ端(「と」)が聞こえるなら出てよい
-    // (かなは同じ字が何度も出るので、どの言葉かを覚えられない)。その切れ端と同じ時刻に出ているときだけ
-    if (expected === 0) {
-      const shownAt = merged.filter((t) => t.text === text)
-      if (
-        shownAt.every((e) =>
-          plain.some(
-            (q) =>
-              q.utteranceId === e.utteranceId &&
-              q.startTime < e.endTime - 1e-6 &&
-              q.endTime > e.startTime + 1e-6 &&
-              /[^\p{Script=Han}\s]/u.test(q.text)
-          )
-        )
-      )
-        expected = -1
-    }
+    const expected = judged ? 1 : heard.length > 0 || words.size === 0 ? -1 : 0
     if (expected < 0 ? n > 1 : n !== expected)
       fail(
         expected === 0 ? 'c-edit-inaudible' : 'c-edit-count',
@@ -461,7 +441,7 @@ describe('人の修正・消した印の性質(厳しい版: 辞書・言いよ�
         }
       }
     }
-    const real = [...stats.fails].filter(([k]) => !k.startsWith('z-'))
+    const real = [...stats.fails]
     const rep = real.map(([k, v]) => `${k}: ${v}\n   e.g. ${stats.examples.get(k)}`).join('\n')
     if (process.env.TELOP_HARSH_REPORT || real.length > 0)
       console.log(
