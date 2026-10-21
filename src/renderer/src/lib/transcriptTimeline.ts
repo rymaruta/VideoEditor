@@ -4,12 +4,7 @@ import {
   type PlacedClipRef,
   type TranscriptUtterance
 } from '@shared/transcript'
-import {
-  joinShortTelops,
-  joinTelopText,
-  settleTelopTimes,
-  utteranceToTelopChunks
-} from '@shared/telop/fromTranscript'
+import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
 import { toCommon } from '@shared/sync/multicam'
 import {
   speechLook,
@@ -114,39 +109,16 @@ export function telopsFromTranscript(
       maxLineChars: telop?.lineChars,
       minDurationSec: telop?.minSec
     })
-    const placed = chunks.flatMap((chunk, ci) => {
+    for (const [ci, chunk] of chunks.entries()) {
       const r = utteranceTimelineRange(
         { assetId: u.assetId, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd },
         clips
       )
-      // どのクリップに置いたか(違うクリップの枚どうしはまとめない。間にカットがありうる)
-      const clip = clips.findIndex(
-        (c) =>
-          c.assetId === u.assetId &&
-          chunk.sourceStart >= c.inPoint - 1e-6 &&
-          chunk.sourceStart < c.outPoint
-      )
-      return r ? [{ ci, clip, text: chunk.text, ...r }] : []
-    })
-    // 短すぎる枚(辞書で長くして分けた枚・長さ 0 の言葉の枚)は、捨てずに隣の枚にまとめる(仮編集と同じ)
-    const short = (x: (typeof placed)[number]): boolean => x.end - x.start < 0.2
-    const joined = joinShortTelops(
-      placed,
-      short,
-      (a, b) => a.clip === b.clip,
-      (a, b) => ({
-        ci: short(a) ? b.ci : a.ci,
-        clip: a.clip,
-        text: joinTelopText(a.text, b.text),
-        start: Math.min(a.start, b.start),
-        end: Math.max(a.end, b.end)
-      })
-    )
-    for (const { ci, text, start, end } of joined) {
+      if (!r || r.end - r.start < 0.2) continue
       out.push({
-        text,
-        startTime: start,
-        endTime: end,
+        text: chunk.text,
+        startTime: r.start,
+        endTime: r.end,
         style: speechTelopStyle(def ? def.style : look.style),
         styleId: def ? def.id : look.styleId,
         speaker: u.speaker,

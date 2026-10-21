@@ -549,16 +549,12 @@ export function clipTelopChunk(
     const mid = (w.start + w.end) / 2
     return mid >= from - 1e-6 && mid < to + 1e-6
   }
-  const finish = (
-    text: string,
-    vis: VisibleChar[],
-    before?: VisibleChar,
-    after?: VisibleChar
-  ): ReturnType<typeof clipTelopChunk> => {
+  const finish = (text: string, vis: VisibleChar[]): ReturnType<typeof clipTelopChunk> => {
     const times = vis.map((v) => (v.lo + v.hi) / 2)
-    let range = rangeOf(vis, timed, before, after)
-    // 残った文字は元の枚の文字の一部なので、範囲も元の枚の範囲の中(元の枚の範囲は前後の piece の文字も
-    // 見て縮めてある。ここでは同じ piece の文字しか見ないので、広く取りすぎることがある)
+    let range = rangeOf(vis, timed)
+    // 残った文字は元の枚の文字の一部なので、範囲も元の枚の範囲の中(元の枚の範囲は、辞書で長くして分けた
+    // 隣の枚の文字・前後の piece の文字も見て縮めてある。ここでは元の文字の並びしか見ないので、広く取り
+    // すぎて、カットで終わりを落とした枚を消すと隣の枚の辞書で長くした文字まで消えていた)
     const whole = chunk.range
     if (range && whole && times.length > 0) {
       const clamped: [number, number] = [Math.max(range[0], whole[0]), Math.min(range[1], whole[1])]
@@ -600,13 +596,9 @@ export function clipTelopChunk(
         k++
       }
     }
-    const firstKept = keepVis.indexOf(true)
-    const lastKept = keepVis.lastIndexOf(true)
     return finish(
       text.replace(/\s+/g, ' ').trim(),
-      all.filter((_, i) => keepVis[i]),
-      all[firstKept - 1],
-      lastKept >= 0 ? all[lastKept + 1] : undefined
+      all.filter((_, i) => keepVis[i])
     )
   }
   // 枚の元の文字(何文字目から何文字目まで)から選ぶ。時刻の窓で選ぶと、音声認識の言葉の時刻が重なる
@@ -825,9 +817,9 @@ export function utteranceToTelopChunks(
     })
   })
   // 枚の頭は時刻順に。長さ 0 の言葉の文字は言葉の時刻の後ろへ並べるので、辞書で長くして分けた後ろの枚の
-  // 頭(並べた文字の時刻)が、次の piece の頭(言葉の時刻)より後ろになることがあり、詰めると長さが負になって
-  // その枚の文字が出なかった。後ろの枚の頭より後ろの頭は、そこまで早める(長さ 0 の枚になる。仮編集で
-  // 隣の枚にまとめる)
+  // 頭(並べた文字の時刻)が、次の piece の頭(言葉の時刻)より後ろになることがある。そのままだと前の枚の
+  // 終わりをその遅い頭まで延ばし、前の枚が後ろの枚に重なっていた。後ろの枚の頭より後ろの頭は、そこまで
+  // 早める(長さ 0 の枚になり、仮編集で 0.3 秒未満として出さない。既知の制限)
   for (let k = chunks.length - 2; k >= 0; k--)
     chunks[k].sourceStart = Math.min(chunks[k].sourceStart, chunks[k + 1].sourceStart)
   // 次のテロップに重ならないように(最低表示時間で伸ばした分を詰める)
@@ -835,56 +827,6 @@ export function utteranceToTelopChunks(
     chunks[k].sourceEnd = Math.min(chunks[k].sourceEnd, chunks[k + 1].sourceStart)
   }
   return chunks
-}
-
-/**
- * 2枚の文をまとめる。後ろの枚の文字は前の枚の最後の行に続ける(行数は増やさず、1行の文字数は超えてよい)。
- * 英数字どうしは空けてつなぐ(「Good」「morning」を「Goodmorning」にしない)
- */
-export function joinTelopText(a: string, b: string): string {
-  const join = (x: string, y: string): string =>
-    `${x}${/[A-Za-z0-9]$/.test(x) && /^[A-Za-z0-9]/.test(y) ? ' ' : ''}${y}`
-  const lines = a.split('\n')
-  return [...lines.slice(0, -1), [lines[lines.length - 1], ...b.split('\n')].reduce(join)].join(
-    '\n'
-  )
-}
-
-/** 短い枚を前の枚にまとめる隙間の上限(秒。離れていれば後ろの枚へ) */
-const JOIN_GAP_SEC = 0.3
-
-/**
- * 短すぎる枚(`short`)を、捨てずに同じ発言の隣の枚に文字をまとめる(`items` は1つの発言の枚を時刻順に)。
- * 枚の時刻は声に合わせて決めるので、辞書で長くして何枚かに分けた枚・長さ 0 の言葉の枚は 0.01 秒ほどしか
- * 無いことがあり、捨てるとその言葉が一度も出なかった(枚の頭をずらして間を作ると、声のある枚まで短くなって
- * 捨てられ、枚の順が崩れて重なり、カットの外へ文字が出ていた)。
- * まとめる先は、続きの枚(`sameRun`。カットをまたがない)のうち、すぐ前に続く枚、無ければ後ろの枚、
- * それも無ければ離れた前の枚。まとめられない(カットで落ちて残りが短い)枚は、これまでどおり出さない
- */
-export function joinShortTelops<T extends { start: number; end: number }>(
-  items: readonly T[],
-  short: (t: T) => boolean,
-  sameRun: (a: T, b: T) => boolean,
-  join: (a: T, b: T) => T
-): T[] {
-  const out: T[] = []
-  let pending: T | null = null
-  items.forEach((e0, i) => {
-    let e = e0
-    if (pending) e = join(pending, e)
-    pending = null
-    if (!short(e)) {
-      out.push(e)
-      return
-    }
-    const prev = out[out.length - 1]
-    const before = prev && sameRun(prev, e) ? prev : undefined
-    const after = i + 1 < items.length && sameRun(e, items[i + 1])
-    if (before && (e.start - before.end <= JOIN_GAP_SEC || !after))
-      out[out.length - 1] = join(before, e)
-    else if (after) pending = e
-  })
-  return out
 }
 
 export interface SettleOptions {

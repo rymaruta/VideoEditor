@@ -121,11 +121,21 @@ function expectOrdered(ts: readonly Auto[], tag: string): void {
   }
 }
 
+/** 出した文字が、全部の文字の並びの一部で順も同じ(同じ文字を2回出さない・順が崩れない) */
+function expectSubsequence(ts: readonly { text: string }[], full: string, tag: string): void {
+  const got = ts.map(flat).join('')
+  let k = 0
+  for (const c of full) if (k < got.length && got[k] === c) k++
+  expect(k, `${tag} ${got} ⊄ ${full}`).toBe(got.length)
+}
+
 /**
- * 第62回の監査 1: 辞書で長くして分けた枚の頭をずらして間を作ると(spaceSheets)、間が足りないとき枚を
- * 0.3 秒未満に均して仮編集で全部捨てられ、声のある言葉まで出なかった
+ * 0.3 秒に満たない枚は出さない(第61回と同じ)。第62回は枚の頭をずらして間を作り(spaceSheets)、第63回は
+ * 短い枚を隣の枚にまとめたが、どちらも退行を生んだのでやめた。辞書で短い言葉を極端に長くすると、その言葉の
+ * 一部の枚が出ないことがある(既知の制限)。それでも、声のある言葉・枚の順・時刻は崩れない
+ * (第62回の監査 1: 枚の時刻をずらすと、声のある言葉の枚まで 0.3 秒未満に均されて捨てられていた)
  */
-describe('声のある言葉が消えない(短い枚は隣の枚にまとめる)', () => {
+describe('辞書で極端に長くした言葉(0.3 秒未満の枚は出さない)', () => {
   it('します|はい|します(1行4文字)', () => {
     const words: W[] = [
       { text: 'します', start: 0.31, end: 0.54 },
@@ -133,12 +143,11 @@ describe('声のある言葉が消えない(短い枚は隣の枚にまとめる
       { text: 'します', start: 1.0, end: 1.08 }
     ]
     const a = plan([words], sc04, 4, HYPER)
-    expect(a.map(flat).join(''), show(a)).toBe('しますハイパーメディアクリエイターします')
+    expectSubsequence(a, 'しますハイパーメディアクリエイターします', show(a))
+    expect(a.map(flat).join(''), show(a)).toMatch(/^します.*します$/)
     expectOrdered(a, '')
     // 声に合わせたまま(頭は声の少し前から、声の後へずらさない)
     expect(a[0].startTime, show(a)).toBeLessThanOrEqual(0.31)
-    const last = a.find((t) => flat(t).endsWith('します') && !flat(t).startsWith('します'))
-    expect(last ?? a[a.length - 1], show(a)).toBeDefined()
   })
 
   it('ゆう|ゆう(長さ0)|あ|ゆう(長さ0)(1行2文字)', () => {
@@ -149,14 +158,15 @@ describe('声のある言葉が消えない(短い枚は隣の枚にまとめる
       { text: 'ゆう', start: 1.77, end: 1.77 }
     ]
     const a = plan([words], sc04, 2, YT)
-    expect(a.map(flat).join(''), show(a)).toBe(`${ytFull}${ytFull}あ${ytFull}`)
+    expectSubsequence(a, `${ytFull}${ytFull}あ${ytFull}`, show(a))
+    expect(a.map(flat).join(''), show(a)).toContain('あ')
     expectOrdered(a, '')
   })
 })
 
-/** 仮編集を使わない文字起こしのテロップも、短い枚を捨てずに隣の枚にまとめる */
+/** 仮編集を使わない文字起こしのテロップも、0.3 秒に満たない枚は出さない(仮編集と同じく、まとめない) */
 describe('文字起こしのテロップ(仮編集なし)', () => {
-  it('辞書で長くして3枚に分けた言葉が落ちない', () => {
+  it('辞書で長くして分けた言葉の前後の言葉は出て、順が崩れない', () => {
     const words: W[] = [
       { text: '今日は', start: 0.4, end: 1.0 },
       { text: 'ゆう', start: 1.0, end: 1.0 },
@@ -182,8 +192,16 @@ describe('文字起こしのテロップ(仮編集なし)', () => {
         ]
       } as unknown as Project
       const out = telopsFromTranscript(project, [], YT, { lineChars: lc, minSec: 1 })
-      expect(out.map(flat).join(''), `${lc} ${show(out)}`).toBe(`今日は${ytFull}配信します`)
+      const all = out.map(flat).join('')
+      expectSubsequence(out, `今日は${ytFull}配信します`, `${lc} ${show(out)}`)
+      expect(all, `${lc} ${show(out)}`).toMatch(/^今日は.*配信します$/)
+      // 1行 5 文字以上なら、どの枚も 0.3 秒以上あって全部出る
+      if (lc >= 5) expect(all, `${lc} ${show(out)}`).toBe(`今日は${ytFull}配信します`)
       expectOrdered(out as Auto[], `${lc}`)
+      // 1行の文字数を超えない
+      for (const t of out)
+        for (const line of t.text.split('\n'))
+          expect([...line].length, `${lc} ${show(out)}`).toBeLessThanOrEqual(lc)
     }
   })
 })
@@ -201,7 +219,36 @@ describe('枚の頭が時刻順で重ならない', () => {
       { text: 'えーと', start: 1.81, end: 2.01 }
     ]
     const a = plan([words], sc04, 2, HYPER)
-    expect(a.map(flat).join(''), show(a)).toBe('ハイパーメディアクリエイター今日は今日はあ')
+    expectSubsequence(a, 'ハイパーメディアクリエイター今日は今日はあ', show(a))
+    expect(a.map(flat).join(''), show(a)).toMatch(/あ$/)
+    expectOrdered(a, '')
+  })
+})
+
+/**
+ * 第63回の監査 2: 短い枚を離れた前の枚にまとめると、声から 2 秒以上ずれて出た(「今日は配信」0.40〜3.20)。
+ * 短い枚は出さないので、枚は声に合わせたまま
+ */
+describe('短い枚が離れた枚にまとめられない', () => {
+  it('今日は|配信(カットの手前で 0.15 秒)|です(カットの外)(1行3文字)', () => {
+    const words: W[] = [
+      { text: '今日は', start: 0.4, end: 1.0 },
+      { text: '配信', start: 3.0, end: 3.15 },
+      { text: 'です', start: 3.3, end: 3.8 }
+    ]
+    const a = plan(
+      [words],
+      [
+        { start: 0, end: 3.2 },
+        { start: 5, end: 8 }
+      ],
+      3
+    )
+    expect(a.map(flat).join(''), show(a)).not.toMatch(/今日は配/)
+    for (const t of a) {
+      if (flat(t).includes('今日は')) expect(t.startTime, show(a)).toBeCloseTo(0.4, 1)
+      if (/[配信]/.test(flat(t))) expect(t.startTime, show(a)).toBeGreaterThan(2.5)
+    }
     expectOrdered(a, '')
   })
 })
@@ -229,6 +276,31 @@ describe('カットの外の文字が出ない', () => {
     for (const t of a) expect(t.endTime, show(a)).toBeLessThanOrEqual(2.37 + 1e-6)
     expectOrdered(a, '')
   })
+
+  // 長さ 0 の言葉の文字は言葉の時刻の後ろへ 0.0015 秒おきに並べるので、言葉の時刻がカットの頭のすぐ前だと、
+  // 並べた文字の一部がカットの中に入る。言葉の時刻がカットの外なら出さない
+  it('長さ 0 の言葉の時刻がカットの頭のすぐ前(辞書で長くした文字がカットの中へはみ出す)', () => {
+    for (const t0 of [2.17, 2.18, 2.183, 2.185, 2.188])
+      for (const lc of [4, 6, 8]) {
+        const a = plan(
+          [
+            [
+              { text: '今日は', start: 0.4, end: 1.0 },
+              { text: 'です', start: 1.1, end: 1.5 },
+              { text: 'ゆう', start: t0, end: t0 }
+            ],
+            [{ text: '配信', start: 3.0, end: 3.4 }]
+          ],
+          [
+            { start: 0, end: 1.62 },
+            { start: 2.19, end: 4 }
+          ],
+          lc,
+          YT
+        )
+        expect(a.map(flat).join(''), `${t0} ${lc} ${show(a)}`).toBe('今日はです配信')
+      }
+  })
 })
 
 /**
@@ -241,33 +313,34 @@ describe('隣の piece の辞書で長くした文字を、枚の範囲に入れ
     { text: 'ゆう', start: 1.46, end: 1.46 },
     { text: 'そう', start: 1.46, end: 1.46 }
   ]
-  it('「そう」を消しても、ほかの文字はそのまま', () => {
-    const a = ids(plan([words], sc04, 3, YT))
-    const s = a.find((t) => flat(t) === 'そう')
-    expect(s, show(a)).toBeDefined()
-    const out = mergeManualTelops(
-      a.filter((t) => t !== s),
-      plan([words], sc04, 3, YT),
-      new Set([autoTelopKey(s!)!])
-    )
-    expect(out.map(flat).join(''), show(out)).toBe(`です${ytFull}`)
+  // 枚の分け方は1行の長さで変わる(0.3 秒に満たない真ん中の枚は出ない)。「そう」の入った枚を消す・直しても、
+  // ほかの枚はそのまま
+  it('「そう」の枚を消す・直しても、ほかの枚はそのまま', () => {
+    for (const lc of [3, 4, 5, 6]) {
+      const a = ids(plan([words], sc04, lc, YT))
+      const s = a.find((t) => flat(t).endsWith('そう'))
+      expect(s, `${lc} ${show(a)}`).toBeDefined()
+      expectOrdered(a as Auto[], `${lc}`)
+      const del = mergeManualTelops(
+        a.filter((t) => t !== s),
+        plan([words], sc04, lc, YT),
+        new Set([autoTelopKey(s!)!])
+      )
+      expect(show(del), `${lc} 消す`).toBe(show(a.filter((t) => t !== s)))
+      const tl = a.map((t) => (t === s ? { ...t, text: 'E', edited: true } : t))
+      const ed = mergeManualTelops(
+        tl,
+        plan([words], sc04, lc, YT),
+        new Set(),
+        rememberEditedTelops(tl, undefined)
+      )
+      expect(ed.map((t) => (t.edited ? `[${t.text}]` : flat(t))).join(' | '), `${lc} 直す`).toBe(
+        tl.map((t) => (t.edited ? `[${t.text}]` : flat(t))).join(' | ')
+      )
+    }
   })
 
-  it('「そう」を直しても、ほかの文字はそのまま', () => {
-    const a = ids(plan([words], sc04, 3, YT))
-    const tl = a.map((t) => (flat(t) === 'そう' ? { ...t, text: 'E', edited: true } : t))
-    const out = mergeManualTelops(
-      tl,
-      plan([words], sc04, 3, YT),
-      new Set(),
-      rememberEditedTelops(tl, undefined)
-    )
-    expect(out.map((t) => (t.edited ? `[${t.text}]` : flat(t))).join(''), show(out)).toBe(
-      `です${ytFull}[E]`
-    )
-  })
-
-  it('「そう」の枚の終わりがカットで落ちても、「そう」を消してほかの文字はそのまま', () => {
+  it('「そう」の枚の終わりがカットで落ちても、「そう」を消してほかの枚はそのまま', () => {
     const cut = [
       { start: 0, end: 2.0 },
       { start: 3, end: 5 }
@@ -281,13 +354,20 @@ describe('隣の piece の辞書で長くした文字を、枚の範囲に入れ
       plan([words], cut, 3, YT),
       new Set([autoTelopKey(s!)!])
     )
-    expect(out.map(flat).join(''), show(out)).toBe(`です${ytFull}`)
+    expect(show(out)).toBe(show(a.filter((t) => t !== s)))
   })
 
   it('どの1行の長さでも、枚の範囲がほかの枚の文字の時刻を含まない', () => {
     for (const lc of [2, 3, 4, 5, 6, 8]) {
       const u = { id: 'u0', text: 'ですゆうそう', words, sourceStart: 0.62, sourceEnd: 1.46 }
       const chunks = utteranceToTelopChunks(u as never, { maxLineChars: lc, dictionary: YT })
+      // 枚の頭は時刻順で、どの枚も次の枚の頭までに終わる(辞書で長くした長さ 0 の言葉の後ろの枚の頭が、次の
+      // 言葉の頭より後ろになると、前の枚の終わりがそこまで延びて次の枚に重なっていた)
+      chunks.forEach((c, k) => {
+        expect(c.sourceEnd, `${lc} ${c.text}`).toBeGreaterThanOrEqual(c.sourceStart)
+        if (k > 0)
+          expect(c.sourceStart, `${lc} ${c.text}`).toBeGreaterThanOrEqual(chunks[k - 1].sourceEnd)
+      })
       chunks.forEach((c, k) => {
         const [lo, hi] = c.range!.map((x) => Number(x.toFixed(3)))
         for (const t of chunks.filter((_, j) => j !== k).flatMap((x) => x.times ?? []))
@@ -312,7 +392,9 @@ function rng(seed: number): () => number {
  * 性質(乱択): 短い発話・長さ 0 の言葉・辞書で長くした言葉・1行の短い長さ・ランダムなカットで
  * - 枚の頭が時刻順で、枚が重ならない(声の重ならない発話だけ)。同じ発話の枚は何枚目かの順
  * - カットの外の言葉の文字が出ない(枚の置かれた区間で話していない言葉の文字)
- * - 声のある言葉(区間の中で話し終える)は、その発話の区間の中の声が 0.3 秒以上なら消えない
+ * - 声のある言葉(区間の中で話し終える)は、声が十分あれば消えない(0.3 秒に満たない枚は出さないので、
+ *   1文字あたり 0.3 秒以上なら1文字も欠けない・0.3 秒 ×(行数 + 1)以上なら丸ごとは消えない)
+ * - 1行が1行の文字数を超えない(第63回の監査 3: まとめた枚の1行が文字数を大きく超えていた)
  * - どの枚も 0.3 秒以上(次の発言の頭で終える枚を除く)
  * - 1枚を消す・直して作り直しても、ほかの枚の文字はそのまま
  * 言葉は1文字ずつどれも違う漢字(辞書で直した後の文字も違う字)と言いよどみ。試す数は `TELOP_R62_SEEDS`(既定 1500)
@@ -322,6 +404,7 @@ describe('短い枚の性質(乱択)', () => {
     const N = Number(process.env.TELOP_R62_SEEDS ?? 1500)
     const fails: string[] = []
     let checkedVoiced = 0
+    let checkedWhole = 0
     let roundTrips = 0
     let roundTripSkipped = 0
     const ONLY = Number(process.env.TELOP_R62_SEED ?? 0)
@@ -422,7 +505,11 @@ describe('短い枚の性質(乱択)', () => {
           if (!ok) fails.push(`カットの外の「${c}」 ${flat(x)} ${tag}`)
         }
       }
-      // まとめた枚も、文字ごとの話している時刻を持つ(その文字の言葉の時刻の近く。長さ 0 の言葉の文字は 0.01 秒おきに並べる)
+      // 1行の文字数を超えない
+      for (const x of a)
+        for (const line of x.text.split('\n'))
+          if ([...line].length > lc) fails.push(`1行が長い「${line}」 ${tag}`)
+      // どの枚も、文字ごとの話している時刻を持つ(その文字の言葉の時刻の近く。長さ 0 の言葉の文字は 0.01 秒おきに並べる)
       for (const x of a) {
         const times = x.autoSource?.times
         const cs = [...flat(x)]
@@ -439,7 +526,7 @@ describe('短い枚の性質(乱択)', () => {
             fails.push(`文字の時刻 ${c} ${times[k]} ${tag}`)
         })
       }
-      // 1枚を消す・直して作り直しても、ほかの枚の文字はそのまま(まとめた枚の元の部分が正しい)
+      // 1枚を消す・直して作り直しても、ほかの枚の文字はそのまま(枚の元の部分が正しい)
       if (a.length > 0) {
         const tl = ids(a)
         const S = tl[Math.floor(r() * tl.length)] as TextOverlay & WithAutoSource
@@ -490,17 +577,34 @@ describe('短い枚の性質(乱択)', () => {
             Math.min(...ws.map((w) => Math.max(w.start, sp.start)))
           if (extent < 0.3 + 1e-6) continue
           for (const w of ws) {
-            if (w.end - w.start < 0.05 || w.start < sp.start || w.end > sp.end) continue
+            // 0.3 秒に満たない枚は出さない(第63回の、短い枚を隣の枚にまとめる仕組みはやめた)。辞書で長くした
+            // 言葉・枚の境目で分かれた言葉は、一部の文字の枚が 0.3 秒に満たず出ないことがある(既知の制限)。
+            // 声が十分ある言葉は丸ごとは消えない、1文字あたり 0.3 秒以上の言葉は1文字も欠けない、を確かめる
+            if (w.end - w.start < 0.3 || w.start < sp.start || w.end > sp.end) continue
             checkedVoiced++
+            const shown = shownOf.get(w)!
             // 枚の境目で言葉が分かれて辞書が当たらなければ、元の文字のまま出る
-            const missing = shownOf.get(w)!.filter((c) => !seen.has(c))
-            if (missing.length > 0 && [...w.text].some((c) => !seen.has(c)))
-              fails.push(`消えた「${w.text}」(${missing.join('')}) ${tag}`)
+            const missing = shown.filter((c) => !seen.has(c))
+            const whole = w.end - w.start >= 0.3 * shown.length
+            if (whole && missing.length > 0 && [...w.text].some((c) => !seen.has(c)))
+              fails.push(`欠けた「${w.text}」(${missing.join('')}) ${tag}`)
+            // 辞書で長くした言葉は何枚にも分かれ、枚の境目でも分かれるので、丸ごと消えないのは声が
+            // 0.3 秒 ×(行数 + 1)以上あるとき(どれかの枚に 0.3 秒以上の声が入る)
+            const lines = Math.ceil(shown.length / lc)
+            if (
+              w.end - w.start >= 0.3 * (lines + 1) &&
+              missing.length === shown.length &&
+              [...w.text].every((c) => !seen.has(c))
+            )
+              fails.push(`消えた「${w.text}」 ${tag}`)
+            if (whole) checkedWhole++
           }
         }
     }
     if (process.env.TELOP_R62_PRINT)
-      console.log(`round trips ${roundTrips} skipped ${roundTripSkipped}`)
+      console.log(
+        `round trips ${roundTrips} skipped ${roundTripSkipped} voiced ${checkedVoiced} whole ${checkedWhole}`
+      )
     if (fails.length > 0)
       console.log(
         `${fails.length} fails\n${fails.slice(0, Number(process.env.TELOP_R62_PRINT ?? 8)).join('\n')}`
