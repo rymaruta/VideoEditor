@@ -28,7 +28,7 @@ import {
 import type { AspectRatio } from '@shared/types'
 import type { ShowStyle } from '@shared/style/showStyle'
 import type { Project, TextOverlay, TextStyle } from '@shared/types'
-import { toCommon, type MulticamInfo } from '@shared/sync/multicam'
+import { toCommon, toSource, type MulticamInfo } from '@shared/sync/multicam'
 import {
   buildScenes,
   demoteIndiscriminateHighlights,
@@ -53,7 +53,12 @@ import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/
 import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { mixResidual } from '@shared/ingest/tracks'
-import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
+import {
+  clipTelopChunkText,
+  settleTelopTimes,
+  utteranceToTelopChunks
+} from '@shared/telop/fromTranscript'
+import type { WithAutoSource } from '@shared/telop/manual'
 import {
   speechLook,
   speechTelopStyle,
@@ -426,25 +431,42 @@ export function planRoughCut(
     const f = fileOfAsset.get(u.assetId)
     if (!f) continue
     const def = styleForSpeaker(options.styles, u.speaker)
-    const chunks = utteranceToTelopChunks(u, {
+    const chunkOptions = {
       dictionary: options.dictionary,
       maxLineChars: options.style?.telopLineChars,
       minDurationSec: options.style?.telopMinSec
-    })
+    }
+    const chunks = utteranceToTelopChunks(u, chunkOptions)
     for (let ci = 0; ci < chunks.length; ci++) {
       const chunk = chunks[ci]
-      const start = roughTimelineAt(cut.spans, toCommon(f, chunk.sourceStart))
-      if (start === null) continue
-      // 終わりがカットで落ちた所に掛かるなら、その区間の終わりまで
+      const commonStart = toCommon(f, chunk.sourceStart)
       const commonEnd = toCommon(f, chunk.sourceEnd)
-      const span = cut.spans.find(
-        (sp) => start >= sp.timeline - 1e-6 && start < sp.timeline + (sp.end - sp.start)
-      )!
-      const end = span.timeline + (Math.min(commonEnd, span.end) - span.start)
-      if (end - start < 0.3) continue
+      // 枚の残る区間(長く残る所から)。頭がカットで落ちた枚を捨てると、ショートや詰めた場面の頭が
+      // 発話の途中から始まるとき、その声が字幕なしで流れていた(頭が落ちた枚は、残った所の頭から出す)
+      const placed = cut.spans
+        .map((sp) => ({ sp, kept: Math.min(commonEnd, sp.end) - Math.max(commonStart, sp.start) }))
+        .filter((x) => x.kept > 0)
+        .sort((a, b) => b.kept - a.kept)
+        .map(({ sp }) => {
+          const visStart = Math.max(commonStart, sp.start)
+          const visEnd = Math.min(commonEnd, sp.end)
+          const start = sp.timeline + (visStart - sp.start)
+          // 終わりがカットで落ちた所に掛かるなら、その区間の終わりまで
+          const end = sp.timeline + (visEnd - sp.start)
+          if (end - start < 0.3) return null
+          // 頭・終わりを落とした枚は、残った所で話している言葉だけにする(切れて聞こえない言葉を出さない)
+          const clipped = visStart > commonStart + 1e-6 || visEnd < commonEnd - 1e-6
+          const text = clipped
+            ? clipTelopChunkText(u, chunk, toSource(f, visStart), toSource(f, visEnd), chunkOptions)
+            : chunk.text
+          return text ? { span: sp, start, end, text } : null
+        })
+        .find((x) => x !== null)
+      if (!placed) continue
+      const { span, start, end, text } = placed
       const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
-      const telop: Omit<TextOverlay, 'id'> = {
-        text: chunk.text,
+      const telop: Omit<TextOverlay, 'id'> & WithAutoSource = {
+        text,
         startTime: start,
         endTime: end,
         style: speechTelopStyle(def ? def.style : look.style),
@@ -452,7 +474,9 @@ export function planRoughCut(
         speaker: u.speaker,
         source: 'auto',
         utteranceId: u.id,
-        utteranceChunk: ci
+        utteranceChunk: ci,
+        // 作ったときの元の部分(人の修正・消した印を、枚の分け方が変わっても同じ言葉の枚へ当てる)
+        autoSource: { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
       }
       telops.push(telop)
       voiceEnds.set(telop, voiceEnd)
@@ -581,8 +605,11 @@ export function effectOverlays(
   const out: Omit<TextOverlay, 'id'>[] = []
   // 画面の同じ場所に出るものだけ、前のテロップと間を空ける(左上の時刻と真ん中のツッコミは同時でよい)
   const laneEnd = new Map<string, number>()
+  // 人が消した演出テロップは置かない。置いた後で外す(`mergeManualTelops`)だけだと、ここで返したものから
+  // SE・CG を置いていたので、消したツッコミの効果音・CG が作り直すたびに鳴っていた
+  const dismissed = new Set(project.dismissedTelops ?? [])
   const placed = proposals
-    .filter((p) => chosen.has(p.id))
+    .filter((p) => chosen.has(p.id) && !dismissed.has(`e:${p.id}`))
     .map((p) => {
       const u = utterance.get(p.afterLineId)
       const f = u ? fileOf.get(u.assetId) : undefined
@@ -653,4 +680,19 @@ export function effectOverlays(
     else lastName = out[out.length - 1]
   }
   return out
+}
+
+/**
+ * 仮編集を当てた後の企画に置かれている自動テロップ(SE・CG を置く元)。
+ *
+ * 組んだだけのテロップ(人の修正を重ねる前)から SE・CG を置くと、人が消したテロップにも効果音・CG が
+ * 付き、直した文字も見ていなかった。当てた後の企画には、消したものは無く、直した文字・吹き出しにした
+ * 発言の外しも入っているので、そちらから取る(時刻も当てた後の本編のもの)
+ */
+export function placedAutoTelops(overlays: readonly TextOverlay[]): {
+  effects: TextOverlay[]
+  all: TextOverlay[]
+} {
+  const all = overlays.filter((o) => o.utteranceId || o.effectId)
+  return { effects: all.filter((o) => o.effectId), all }
 }

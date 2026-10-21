@@ -55,7 +55,8 @@ import {
   proposeEffects,
   scenesFor,
   hypeMomentsFor,
-  peakSpans
+  peakSpans,
+  placedAutoTelops
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPlacement'
 import {
@@ -1253,10 +1254,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       applied.multicam && applied.clips.length > 0
         ? spansOfClips(applied.clips, applied.multicam)
         : plan.cut.spans
-    const onLive = <T extends Omit<TextOverlay, 'id'>>(xs: readonly T[]): T[] =>
-      live === plan.cut.spans ? [...xs] : mapTelopsToTimeline(xs, plan.cut.spans, live)
-    const liveEffects = onLive(effectTelops)
-    await placeSounds(plan.selection.kept, live, liveEffects, [...onLive(telops), ...liveEffects])
+    // SE・CG は、当てた後の企画に置かれたテロップ(人が消したもの・吹き出しにした発言を除き、直した文字の
+    // まま)から置く。組んだだけのテロップから置くと、消したツッコミの効果音・CG が作り直すたびに付いていた
+    const placedTelops = placedAutoTelops(applied.textOverlays)
+    await placeSounds(plan.selection.kept, live, placedTelops.effects, placedTelops.all)
     log(
       `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${telops.length}`
     )

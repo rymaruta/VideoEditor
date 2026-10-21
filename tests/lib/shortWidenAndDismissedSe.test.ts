@@ -1,0 +1,180 @@
+import { describe, expect, it, vi } from 'vitest'
+vi.hoisted(() => {
+  const store = new Map<string, string>()
+  globalThis.localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+    key: () => null,
+    length: 0
+  }
+})
+import { buildShortProject } from '../../src/renderer/src/lib/gameShorts'
+import {
+  effectOverlays,
+  placedAutoTelops,
+  planRoughCut
+} from '../../src/renderer/src/lib/roughCutPlan'
+import { useProjectStore } from '@renderer/store/projectStore'
+import { planCg } from '@shared/finish/cg'
+import type { MulticamInfo } from '@shared/sync/multicam'
+import type { EffectProposal } from '@shared/telop/effects'
+import type { Project } from '@shared/types'
+import { TURN_RATE } from '@shared/diarize/micTurns'
+import { defaultTextStyle } from '@shared/textStyle'
+
+// 10 秒ごとに 8 秒の発話(1〜9, 11〜19, …)。言葉は 0.8 秒ごと
+const info: MulticamInfo = {
+  anchorSourceId: 'cam',
+  sources: [
+    { id: 'cam', name: '画面', kind: 'camera', cameraRole: 'screen' },
+    { id: 'a', name: 'A', kind: 'mic' }
+  ],
+  files: [
+    { assetId: 'C', sourceId: 'cam', start: 0, rate: 1, duration: 300 },
+    { assetId: 'MA', sourceId: 'a', start: 0, rate: 1, duration: 300 }
+  ]
+}
+const SYL = ['きょう', 'は', 'すごい', 'ボス', 'を', 'たおし', 'に', 'いき', 'ます', 'よ']
+const transcript = Array.from({ length: 25 }, (_, k) => {
+  const s = k * 10 + 1
+  const words = SYL.map((t, i) => ({
+    text: t + (i === 0 ? String(k) : ''),
+    start: s + i * 0.8,
+    end: s + i * 0.8 + 0.7
+  }))
+  return {
+    id: `u${k}`,
+    assetId: 'MA',
+    speaker: 'A',
+    sourceStart: s,
+    sourceEnd: s + 8,
+    text: words.map((w) => w.text).join(''),
+    words,
+    overlap: false
+  }
+})
+const activity = new Uint8Array(300 * TURN_RATE)
+for (const u of transcript) activity.fill(1, u.sourceStart * TURN_RATE, u.sourceEnd * TURN_RATE)
+const asset = (id: string, video: boolean): unknown => ({
+  id,
+  filePath: `/r/${id}`,
+  fileName: id,
+  duration: 300,
+  width: video ? 1920 : 0,
+  height: video ? 1080 : 0,
+  hasAudio: true,
+  hasVideo: video
+})
+const project = {
+  id: 'p',
+  name: 'p',
+  aspectRatio: '16:9',
+  assets: [asset('C', true), asset('MA', false)],
+  clips: [],
+  audioTracks: [],
+  videoOverlayTracks: [],
+  textOverlays: [],
+  transcript,
+  multicam: info
+} as unknown as Project
+const look = { style: defaultTextStyle() }
+
+describe('ゲーム実況のショート: 広げた端も発話の切れ目に合わせる', () => {
+  it('長さが足りずに広げても、発話の途中から始まらず・途中で終わらない', () => {
+    // 101〜109 秒(u10)だけでは 15 秒に届かないので広げる
+    const short = buildShortProject(
+      { project, info, hype: [], activity, styles: [], speechLook: look },
+      { start: 101, end: 109, strength: 10, peaks: 1 },
+      0
+    )
+    const first = short.clips[0]
+    const last = short.clips[short.clips.length - 1]
+    // u9(91〜99)・u11(111〜119)を丸ごと入れる(秒数だけで広げると 96.5〜113.5 だった)
+    expect(first.inPoint).toBeLessThanOrEqual(91 + 1e-6)
+    expect(last.outPoint).toBeGreaterThanOrEqual(119 - 1e-6)
+    const telops = [...short.textOverlays].sort((a, b) => a.startTime - b.startTime)
+    expect(telops[0].startTime).toBeLessThan(0.5)
+    expect(telops[telops.length - 1].text.replace(/\n/g, '')).toBe(transcript[11].text)
+  })
+})
+
+describe('仮編集: 頭・終わりがカットで落ちた発言テロップ', () => {
+  it('頭が落ちた枚は捨てずに残った所の頭から出し、文字は残った所の言葉だけにする', () => {
+    const plan = planRoughCut(
+      project,
+      info,
+      [{ id: 's', start: 96.5, end: 113.5, lines: [], speech: 0 }],
+      [{ sceneId: 's', score: 100, kind: 'highlight', reason: '' }],
+      activity,
+      {
+        targetSec: 0,
+        keep: { s: true },
+        styles: [],
+        speechLook: look,
+        kind: 'game',
+        policy: 'light'
+      }
+    )
+    const telops = [...plan.telops].sort((a, b) => a.startTime - b.startTime)
+    // 96.5 秒から始まる: u9 の「いきますよ」の声が字幕なしで流れていた
+    expect(telops[0].startTime).toBeLessThan(0.5)
+    expect(telops[0].text.replace(/\n/g, '')).toBe('いきますよ')
+    // 113.5 秒で終わる: u11 の切れた言葉(たおしにいきますよ)まで出ていた
+    const tail = telops[telops.length - 1].text.replace(/\n/g, '')
+    expect(tail.startsWith('きょう11')).toBe(true)
+    expect(tail).not.toContain('たおし')
+  })
+})
+
+describe('SE・CG は人が消した演出テロップに付けない', () => {
+  const P = useProjectStore
+  const camInfo = {
+    anchorSourceId: 'A',
+    sources: [{ id: 'A', name: 'A', kind: 'camera' as const }],
+    files: [{ assetId: 'camA', sourceId: 'A', start: 0, rate: 1, duration: 100 }]
+  }
+  const spans = [{ timeline: 0, start: 0, end: 60 }]
+  const cut = {
+    main: [{ assetId: 'camA', inPoint: 0, outPoint: 60, speed: 1 }],
+    audio: [],
+    duration: 60,
+    spans
+  }
+  const fx = (id: string, text: string, at: number): EffectProposal => ({
+    id,
+    afterLineId: '',
+    at,
+    kind: 'tsukkomi',
+    text,
+    confidence: 1,
+    reason: ''
+  })
+  const proposals = [fx('tk1', 'なんでやねん', 10), fx('tk2', 'うそやろ', 30)]
+  const chosen = new Set(['tk1', 'tk2'])
+
+  it('消した演出テロップは置かず、置いた後の企画から SE・CG の元を取る(直した文字のまま)', () => {
+    P.getState().newProject()
+    P.setState({ project: { ...P.getState().project, multicam: camInfo, clips: [] } as Project })
+    const first = effectOverlays(proposals, chosen, P.getState().project, camInfo, spans, [])
+    P.getState().applyRoughCut(cut, first)
+    const placed = P.getState().project.textOverlays
+    P.getState().removeTextOverlay(placed.find((t) => t.effectId === 'tk1')!.id)
+    const tk2 = P.getState().project.textOverlays.find((t) => t.effectId === 'tk2')!
+    P.getState().updateTextOverlay(tk2.id, { text: 'なんでやねん!' })
+
+    // 作り直し: 消したものは提案を選んだままでも置かない
+    const again = effectOverlays(proposals, chosen, P.getState().project, camInfo, spans, [])
+    expect(again.map((t) => t.effectId)).toEqual(['tk2'])
+    P.getState().applyRoughCut(cut, again)
+    const live = placedAutoTelops(P.getState().project.textOverlays)
+    expect(live.effects.map((t) => [t.effectId, t.text])).toEqual([['tk2', 'なんでやねん!']])
+    // CG は直した文字で当てる(消した tk1 の時刻 10 秒には置かない)
+    const cg = planCg(live.all, {
+      なんでやねん: [{ path: '/cg/x.png', name: 'x', duration: 0, still: true }]
+    })
+    expect(cg.map((c) => c.startTime)).toEqual([live.effects[0].startTime])
+    expect(live.effects[0].startTime).toBeGreaterThan(20)
+  })
+})

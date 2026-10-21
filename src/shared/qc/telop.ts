@@ -48,6 +48,19 @@ function visibleChars(text: string): number {
   return [...text.replace(/\s/g, '')].length
 }
 
+/**
+ * 言葉を探す形(改行・空白を落とす)。テロップは改行で「クソ\nゲー」のように言葉の途中で折れ、
+ * 読点は空白になるので、そのままの文で探すと確認する言葉・辞書の誤の表記を見逃していた。
+ * 英数字どうしの間の空白・改行は1つの空白として残す(「Good morning」を「Goodmorning」にして、
+ * 言葉の境目をまたいだ別の言葉に当てない)。探すのは1枚の中だけ(別のテロップどうしはつながない)
+ */
+function searchText(text: string): string {
+  const alnum = (c: string | undefined): boolean => c !== undefined && /[A-Za-z0-9]/.test(c)
+  return text.replace(/\s+/g, (ws: string, at: number, all: string) =>
+    alnum(all[at - 1]) && alnum(all[at + ws.length]) ? ' ' : ''
+  )
+}
+
 export function telopIssues(
   overlays: readonly TextOverlay[],
   ctx: Pick<TelopContext, 'measureText' | 'font'>,
@@ -88,7 +101,8 @@ export function telopIssues(
         message: `「${label}」は ${chars} 文字を ${shown.toFixed(1)} 秒しか出していません(読み切れない恐れ)`
       })
 
-    const hit = banned.filter((w) => text.includes(w))
+    const plain = searchText(text)
+    const hit = banned.filter((w) => plain.includes(searchText(w)))
     if (hit.length > 0)
       issues.push({
         ...base,
@@ -99,7 +113,12 @@ export function telopIssues(
       })
 
     // 正しい表記が誤の表記を含む(誤「ジョウド」→ 正「ジョウドガハマ」など)ときは、正しく書けていれば知らせない
-    const left = wrong.filter((d) => text.split(d.to).join('').includes(d.from))
+    const left = wrong.filter((d) =>
+      plain
+        .split(searchText(d.to) || '\u0000')
+        .join('')
+        .includes(searchText(d.from))
+    )
     if (left.length > 0)
       issues.push({
         ...base,

@@ -123,19 +123,24 @@ async function run(): Promise<void> {
     // 先読みが今の認識中に失敗しても「処理されない失敗」にしない(次の周の await で失敗として扱う)
     next?.catch(() => {})
     const r = await asr(audio, OPTIONS)
-    const words = (r.chunks ?? [])
+    // 片の頭の空白は、まとめた発話の文を作るまで残す(認識の片「Mine」「craft」を「Mine craft」と
+    // 空けないよう、空白のあった所だけ空ける。`splitGroupWords`)
+    const tokens = (r.chunks ?? [])
       .map((c) => ({
-        text: c.text.trim(),
+        text: c.text,
         start: group.start + c.timestamp[0],
         end: group.start + (c.timestamp[1] ?? c.timestamp[0])
       }))
-      .filter((w) => w.text.length > 0)
+      .filter((w) => w.text.trim().length > 0)
+    const words = tokens.map((w) => ({ ...w, text: w.text.trim() }))
     if (group.parts.length === 1)
       post({
         type: 'result',
         result: { id: group.parts[0].id, text: (r.text ?? '').trim(), words }
       })
-    else for (const part of splitGroupWords(group, words)) post({ type: 'result', result: part })
+    else
+      for (const part of splitGroupWords(group, tokens, true))
+        post({ type: 'result', result: part })
     done += group.parts.length
     post({ type: 'progress', done, total: input.jobs.length })
   }

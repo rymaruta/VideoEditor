@@ -17,6 +17,7 @@ import { PIP_MARGIN_RATIO } from '@shared/pipLayout'
 import type { CutOverrides } from '@shared/roughCut/overrides'
 import { mergeManualTelops } from '@shared/telop/manual'
 import type { DictionaryEntry } from '@shared/telop/polish'
+import { widenToLines } from '@shared/structure/hype'
 import { cameraRange, planRoughCut, timedLines } from './roughCutPlan'
 
 /**
@@ -91,30 +92,72 @@ export function buildShortProject(
   // 間を詰めると、選んだ区間より短くなる(黙っている所を落とすので)。下限に届かなければ、
   // 足りない分だけ区間を前後に広げて組み直す(数回まで。素材の端より先へは広げない)
   const range = cameraRange(info)
+  const lines = timedLines(input.project, info)
   let win = window
   let plan = planShort(input, win, window)
   const hadChosen = coversChosen(plan, window)
+  /** 上限に収まり、選んだ所が入る組み直しか(使えなければ null) */
+  const tryWindow = (next: ShortCandidate): ReturnType<typeof planRoughCut> | null => {
+    if (next.end - next.start > SHORT_MAX_WINDOW_SEC) return null
+    const nextPlan = planShort(input, next, window)
+    // 上限を超える・選んだ所が入らない組み直しは使わない(前の組み方のまま)
+    if (nextPlan.cut.duration > SHORT_MAX_SEC || (hadChosen && !coversChosen(nextPlan, window)))
+      return null
+    return nextPlan
+  }
   for (let i = 0; i < 8 && plan.cut.duration < SHORT_MIN_SEC; i++) {
     // 詰めた後に残る割合から、下限に届く区間の長さを見込む。一度に広げるのは少しずつ
     // (残りがほぼ無いと一度に 120 秒まで広げ、選んだ所の無い 100 秒のショートになっていた)
     const len = win.end - win.start
     const want = (len * SHORT_MIN_SEC) / Math.max(1, plan.cut.duration) + 2
     const extra = Math.min(SHORT_WIDEN_STEP_SEC, Math.max(2, want - len)) / 2
-    const next = {
-      ...win,
+    const rough = {
       start: Math.max(range.start, win.start - extra),
       end: Math.min(range.end, win.end + extra)
     }
-    if (next.start === win.start && next.end === win.end) break
-    if (next.end - next.start > SHORT_MAX_WINDOW_SEC) break
-    const nextPlan = planShort(input, next, window)
-    // 上限を超える・選んだ所が入らない組み直しは使わない(前の組み方のまま)
-    if (nextPlan.cut.duration > SHORT_MAX_SEC || (hadChosen && !coversChosen(nextPlan, window)))
-      break
+    // 広げた端も発話の切れ目へ寄せる(区間を選ぶときと同じ)。秒数だけで広げると、ショートが発話の
+    // 途中から始まり・途中で終わり、頭の声には字幕が無く、終わりの字幕は切れた言葉まで出ていた。
+    // 発話を丸ごと入れると上限を超えるなら、その発話の手前(内側の切れ目)までにする
+    const [oa, ob] = widenToLines(rough.start, rough.end, lines)
+    const outward = {
+      ...win,
+      start: Math.max(range.start, Math.min(win.start, oa)),
+      end: Math.min(range.end, Math.max(win.end, ob))
+    }
+    const inward = { ...win, ...inwardToLines(rough, win, lines) }
+    let next: ShortCandidate | null = null
+    let nextPlan: ReturnType<typeof planRoughCut> | null = null
+    for (const cand of [outward, inward]) {
+      if (cand.start >= win.start && cand.end <= win.end) continue
+      nextPlan = tryWindow(cand)
+      if (nextPlan) {
+        next = cand
+        break
+      }
+    }
+    if (!next || !nextPlan) break
     win = next
     plan = nextPlan
   }
   return shortProjectFromPlan(input, plan, index)
+}
+
+/**
+ * 広げた端が発話の途中なら、その発話の手前(広げる前の側の切れ目)まで戻す。ただし元の区間より内側へは
+ * 戻さない(元の端がその発話の途中なら、元の端のまま)
+ */
+function inwardToLines(
+  rough: { start: number; end: number },
+  win: { start: number; end: number },
+  lines: readonly { start: number; end: number }[]
+): { start: number; end: number } {
+  let start = rough.start
+  let end = rough.end
+  for (const l of lines) {
+    if (l.start < rough.start && l.end > rough.start) start = Math.max(start, l.end)
+    if (l.start < rough.end && l.end > rough.end) end = Math.min(end, l.start)
+  }
+  return { start: Math.min(win.start, start), end: Math.max(win.end, end) }
 }
 
 /** 区間1つの仮編集(縦型・軽く詰める) */

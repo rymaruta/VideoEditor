@@ -42,20 +42,32 @@ export function groupAsrJobs(
   return out
 }
 
-function joinWords(words: readonly AsrWord[]): string {
+/**
+ * 言葉をつないで発話の文にする。英数字どうしの間だけ空ける(日本語は詰める)。
+ *
+ * `rawTokens` は、音声認識の片を前の空白ごと渡したとき(`asrWorker`)。認識は英数字の言葉を細かい片
+ * (「Mine」「craft」、「15」「000」)で返すことがあり、英数字どうしの間をいつも空けると、文が
+ * 「Mine craft」「15 000円」になってテロップにも出ていた。片の頭に空白があった所(「 morning」)だけ空ける
+ */
+function joinWords(words: readonly AsrWord[], rawTokens: boolean): string {
   let s = ''
   for (const w of words) {
-    // 英数字どうしの間だけ空ける(日本語は詰める)
-    if (s && /[A-Za-z0-9]$/.test(s) && /^[A-Za-z0-9]/.test(w.text)) s += ' '
-    s += w.text
+    const t = w.text.trim()
+    const spaced = rawTokens ? /^\s/.test(w.text) : true
+    if (s && spaced && /[A-Za-z0-9]$/.test(s) && /^[A-Za-z0-9]/.test(t)) s += ' '
+    s += t
   }
   return s
 }
 
-/** まとめて認識した単語(素材の時刻)を、元の発話へ振り分ける */
+/**
+ * まとめて認識した単語(素材の時刻)を、元の発話へ振り分ける。
+ * `rawTokens` なら、単語は認識の片のまま(頭の空白を残したもの)。返す単語は空白を落とす
+ */
 export function splitGroupWords(
   group: GroupedJob,
-  words: readonly AsrWord[]
+  words: readonly AsrWord[],
+  rawTokens = false
 ): { id: string; text: string; words: AsrWord[] }[] {
   const buckets = group.parts.map(() => [] as AsrWord[])
   for (const w of words) {
@@ -71,5 +83,11 @@ export function splitGroupWords(
     })
     if (best >= 0) buckets[best].push(w)
   }
-  return group.parts.map((p, i) => ({ id: p.id, text: joinWords(buckets[i]), words: buckets[i] }))
+  return group.parts.map((p, i) => ({
+    id: p.id,
+    text: joinWords(buckets[i], rawTokens),
+    words: rawTokens
+      ? buckets[i].map((w) => ({ ...w, text: w.text.trim() })).filter((w) => w.text.length > 0)
+      : buckets[i]
+  }))
 }

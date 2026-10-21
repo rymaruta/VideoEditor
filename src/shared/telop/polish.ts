@@ -120,6 +120,10 @@ export function breakScore(chars: readonly string[], k: number): number {
   // 絵文字の組み合わせ(ZWJ・肌の色・異体字セレクタ)・後ろに付けた濁点の途中では切らない
   if (JOINS_PREVIOUS.test(next) || prev === '\u200d') return -Infinity
   if (NO_LINE_START.test(next) || NO_LINE_END.test(prev)) return -Infinity
+  // 数字の桁区切り・小数点(「2,800」「1.5」)の後では切らない。句読点の後として一番良い区切りになり、
+  // 「お会計は2,」/「800円」と分かれたうえ、行末のカンマは整えるときに落ちて「2」「800円」と出ていた
+  if (/[,.，．]/u.test(prev) && /[0-9０-９]/u.test(chars[k - 2] ?? '') && /[0-9０-９]/u.test(next))
+    return -Infinity
   if (PUNCT.test(prev)) return 3
   // 単語の途中(「カ / ラス」「で / すね」「み / たい」)では、ほかに区切れる所があれば切らない。
   // 実写の素材(12分の食べ歩き)では、テロップの境目・改行 248 か所のうち 45 か所が単語の途中だった
