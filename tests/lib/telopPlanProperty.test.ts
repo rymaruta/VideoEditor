@@ -48,6 +48,8 @@ const info: MulticamInfo = {
   ]
 }
 const FILLERS = ['えー、', 'あのー、', 'えっと、', 'まあ、', 'えーと、']
+/** 本当のかなの言葉(助詞・語尾など。言いよどみとして消さない) */
+const PARTICLES = ['は', 'を', 'です', 'ね', 'から', 'そうですね', 'まま', 'あと']
 const kanji = (s: string): string[] => [...s].filter((c) => /\p{Script=Han}/u.test(c))
 /** 相づち・言いよどみに似た本当の言葉(言いよどみとして消さない) */
 const REPLIES = ['そう', 'うん', 'ええ', 'あの', 'あと', 'まま', 'はい', 'えっ', 'そうそう']
@@ -95,7 +97,8 @@ function makeProject(r: () => number) {
           voice.set(c, [ws + ((we - ws) * i) / all.length, ws + ((we - ws) * (i + 1)) / all.length])
         )
       }
-      t += d + 0.02 + r() * (r() < 0.15 ? 1.2 : 0.2)
+      // 長さ 0 の言葉の次の言葉は、同じ時刻か 0.02 秒後に続くことが多い(文字を並べる余地が無い)
+      t += d === 0 && r() < 0.6 ? (r() < 0.5 ? 0 : 0.02) : d + 0.02 + r() * (r() < 0.15 ? 1.2 : 0.2)
     }
     for (let i = 0; i < n; i++) {
       if (r() < 0.15) {
@@ -116,6 +119,11 @@ function makeProject(r: () => number) {
       }
       if (r() < 0.25) w += r() < 0.5 ? '、' : '。'
       push(w, to)
+      // 助詞・語尾(かな)と、その後の文の途中の言いよどみ
+      if (r() < 0.15) {
+        push(PARTICLES[Math.floor(r() * PARTICLES.length)])
+        if (r() < 0.4) push(FILLERS[Math.floor(r() * FILLERS.length)])
+      }
     }
     t += 1 + r() * 2
     transcript.push({

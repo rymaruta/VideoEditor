@@ -84,6 +84,35 @@ import { textCanvasSize } from '@shared/resolution'
 import type { DictionaryEntry } from '@shared/telop/polish'
 
 /**
+ * 枚の元の部分の範囲(話している時刻 ± 余裕)。範囲の端の余裕に入る長さ 0 の言葉の頭の時刻は、
+ * この枚の文字がその時刻に無ければ含めない。前の版は長さ 0 の言葉の文字をみな言葉の頭の時刻にした
+ * ので、その時刻を含む範囲はその言葉を丸ごと当てる(`mergeManualTelops`)。余裕が次の枚の長さ 0 の
+ * 言葉の頭に届くと、「…亙亜ね」の枚を直したとき、同じ時刻の次の言葉「习乣」まで修正に取られて消えた
+ */
+function sourceRange(
+  lo: number,
+  hi: number,
+  times: readonly number[],
+  words: readonly { text: string; start: number; end: number }[]
+): { start: number; end: number } {
+  let start = Math.max(0, lo - AUTO_SOURCE_MARGIN)
+  let end = hi + AUTO_SOURCE_MARGIN
+  // 出している文字の時刻は必ず含める(同じ時刻の長さ 0 の言葉がこの枚にあれば、その頭は外せない)
+  const first = Math.min(...times)
+  const last = Math.max(...times)
+  for (const w of words) {
+    if (w.end - w.start > 1e-6 || w.text.trim() === '') continue
+    const zt = w.start
+    if (zt < start || zt > end) continue
+    if (zt >= hi - 1e-9 && last < zt - AUTO_SOURCE_MARGIN / 2)
+      end = Math.min(end, zt - AUTO_SOURCE_MARGIN / 2)
+    else if (zt <= lo + 1e-9 && first > zt + AUTO_SOURCE_MARGIN / 2)
+      start = Math.max(start, zt + AUTO_SOURCE_MARGIN / 2)
+  }
+  return { start, end }
+}
+
+/**
  * 仮編集(計画書 フェーズ2: 構成 → カット → アングルの切り替え)を、企画の文字起こしと同期結果から作る。
  * 計算は `@shared/structure` `@shared/cut` `@shared/angles` `@shared/roughCut`。ここはそれをつなぐだけ。
  */
@@ -474,7 +503,8 @@ export function planRoughCut(
                 spoken: chunk.spoken,
                 runs: chunk.runs,
                 durs: chunk.durs,
-                fill: chunk.fill
+                fill: chunk.fill,
+                zero: chunk.zero
               }
           return shown.text ? { span: sp, start, end, ...shown, clipped, visStart, visEnd } : null
         })
@@ -489,6 +519,7 @@ export function planRoughCut(
         runs,
         durs,
         fill,
+        zero,
         clipped,
         visStart,
         visEnd
@@ -514,15 +545,20 @@ export function planRoughCut(
           autoSource:
             times && times.length > 0
               ? {
-                  start: Math.max(0, (spoken?.[0] ?? Math.min(...times)) - AUTO_SOURCE_MARGIN),
-                  end: (spoken?.[1] ?? Math.max(...times)) + AUTO_SOURCE_MARGIN,
+                  ...sourceRange(
+                    spoken?.[0] ?? Math.min(...times),
+                    spoken?.[1] ?? Math.max(...times),
+                    times,
+                    u.words
+                  ),
                   text,
                   times,
                   offset,
                   ...(f.rate !== 1 ? { rate: f.rate } : {}),
                   ...(runs ? { runs } : {}),
                   ...(durs && durs.length === times.length ? { durs } : {}),
-                  ...(fill ? { fill } : {})
+                  ...(fill ? { fill } : {}),
+                  ...(zero ? { zero } : {})
                 }
               : clipped
                 ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }

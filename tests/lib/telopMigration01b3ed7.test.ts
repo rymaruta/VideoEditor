@@ -12,8 +12,25 @@ vi.hoisted(() => {
 })
 import * as NP from '../../src/renderer/src/lib/roughCutPlan'
 import * as NM from '@shared/telop/manual'
-import * as OP from './fixtures/telop01b3ed7/roughCutPlan'
-import * as OM from './fixtures/telop01b3ed7/manual'
+import * as OP1 from './fixtures/telop01b3ed7/roughCutPlan'
+import * as OM1 from './fixtures/telop01b3ed7/manual'
+import * as OP2 from './fixtures/telopdc65a0d/roughCutPlan'
+import * as OM2 from './fixtures/telopdc65a0d/manual'
+import * as OP3 from './fixtures/telopa322c86/roughCutPlan'
+import * as OM3 from './fixtures/telopa322c86/manual'
+/** 前の版の写し(保存した企画の形が版ごとに違う: 01b3ed7 は辞書の文字に1つの時刻、dc65a0d は言葉の
+ * 時刻の取り方の前、a322c86 は長さ 0 の言葉の文字をみな言葉の頭の時刻にした) */
+const VERSIONS = [
+  { ver: '01b3ed7', OP: OP1, OM: OM1 },
+  { ver: 'dc65a0d', OP: OP2, OM: OM2 },
+  { ver: 'a322c86', OP: OP3, OM: OM3 }
+] as const
+let OP: { planRoughCut: unknown } = OP1
+let OM: {
+  mergeManualTelops: unknown
+  rememberEditedTelops: unknown
+  normalizeAutoSource: (v: unknown) => unknown
+} = OM1
 let OLDNOW = false
 const planRoughCut = (...a: unknown[]): { telops: Omit<TextOverlay, 'id'>[] } =>
   (
@@ -91,6 +108,7 @@ const info: MulticamInfo = {
 }
 type Word = { text: string; start: number; end: number }
 const FILLERS = ['えー、', 'あのー、', 'えっと、', 'まあ、', 'えーと、']
+const REPLY_WORDS = ['はい、', 'そう', 'うん', 'あと', 'まま', 'は', 'ね', 'です']
 interface Gen {
   project: Project
   total: number
@@ -134,7 +152,18 @@ function makeProject(r: () => number): Gen {
         for (const c of [...w, ...to]) atom.set(c, [...w, ...to])
       }
       if (on('punct') && r() < 0.25) w += r() < 0.5 ? '、' : '。'
-      push(w, 1)
+      // 長さ 0 の言葉(Whisper でよく出る。次の言葉が同じ時刻か 0.02 秒後に続く)。前の版はこの言葉の
+      // 文字をみな言葉の頭の時刻にしたので、その範囲で覚えた修正・消した印を今の版で当て直す
+      if (on('zero') && r() < 0.12) {
+        words.push({ text: w, start: t, end: t })
+        t += r() < 0.5 ? 0 : 0.02
+      } else push(w, 1)
+      // 相づち・言いよどみに似た本当の言葉・助詞(かな。言いよどみとして消さない)
+      if (on('reply') && r() < 0.12) {
+        const kana = REPLY_WORDS[Math.floor(r() * REPLY_WORDS.length)]
+        if (r() < 0.4) words.push({ text: kana, start: t, end: t })
+        else push(kana, 1)
+      }
     }
     const u = {
       id: `u${k}`,
@@ -372,192 +401,210 @@ const expand = (p: Gen, cs: Iterable<string>): Set<string> => {
   return out
 }
 
-describe('前の版で保存した企画の作り直し(辞書で直した文字の範囲)', () => {
-  it('前の版のまま作り直すより、消したものが戻る・言葉が消える・修正の回数の誤りが増えない', () => {
-    const N = Number(process.env.TELOP_MIGRATE_SEEDS ?? 300)
-    const ONLY = process.env.TELOP_MIGRATE_SEED ? Number(process.env.TELOP_MIGRATE_SEED) : 0
-    const dbg = (...a: unknown[]): void => {
-      if (ONLY) console.log(...a)
-    }
-    let paired = 0
-    for (let seed = ONLY || 1; seed <= (ONLY || N); seed++) {
-      const r = rng(seed * 7919)
-      // 前の版で何回作り直してから開き直すか(1〜5 回)
-      SWITCH = 1 + (seed % 5)
-      const p = makeProject(r)
-      const m: Model = { edits: new Map(), dismissed: new Set(), ambiguous: new Set() }
-      let timeline: TextOverlay[] = []
-      let dismissed = new Set<string>()
-      let remembered: Record<string, EditedTelop> | undefined
-      let nextEdit = 0
-      const hist: {
-        timeline: TextOverlay[]
-        dismissed: Set<string>
-        remembered: typeof remembered
-        m: Model
-      }[] = []
-      for (let step = 0; step < 7; step++) {
-        OLDNOW = step < SWITCH
-        STEP = step
-        if (step === SWITCH) {
-          paired++
-          const ps = Math.floor(r() * 1e9)
-          OLDNOW = true
-          const plainOld = randomPlan(rng(ps), p)
-          const mergedOld = mergeManualTelops(timeline, plainOld, dismissed, remembered)
-          OLDNOW = false
-          const plainNew = randomPlan(rng(ps), p)
-          const mergedNew = mergeManualTelops(timeline, plainNew, dismissed, remembered)
-          if (ONLY) {
-            const f2 = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
-              ts
-                .map((t) => {
-                  const a = (
-                    t as never as {
-                      autoSource?: { start: number; end: number; times?: number[]; offset?: number }
-                    }
-                  ).autoSource
-                  return `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '/')}[${t.utteranceId}#${t.utteranceChunk} ${t.startTime.toFixed(3)}-${t.endTime.toFixed(3)} src=${a?.start.toFixed(3)}-${a?.end.toFixed(3)} times=${a?.times?.map((x) => x.toFixed(2)).join(',')}]`
-                })
-                .join('\n    ')
-            console.log(
-              `PAIRED existing:\n    ${f2(timeline)}\n  plainNew:\n    ${f2(plainNew)}\n  mergedNew:\n    ${f2(mergedNew)}\n  plainOld:\n    ${f2(plainOld)}\n  mergedOld:\n    ${f2(mergedOld)}\n  remembered=${JSON.stringify(remembered)}\n  dismissed=${[...dismissed].join(' ')}`
+for (const V of VERSIONS.filter(
+  (v) => !process.env.TELOP_MIGRATE_FROM || v.ver === process.env.TELOP_MIGRATE_FROM
+))
+  describe(`前の版(${V.ver})で保存した企画の作り直し(辞書・長さ 0 の言葉・相づち)`, () => {
+    it('前の版のまま作り直すより、消したものが戻る・言葉が消える・修正の回数の誤りが増えない', () => {
+      OP = V.OP
+      OM = V.OM
+      pairs.clear()
+      const N = Number(process.env.TELOP_MIGRATE_SEEDS ?? 300)
+      const ONLY = process.env.TELOP_MIGRATE_SEED ? Number(process.env.TELOP_MIGRATE_SEED) : 0
+      const dbg = (...a: unknown[]): void => {
+        if (ONLY) console.log(...a)
+      }
+      let paired = 0
+      for (let seed = ONLY || 1; seed <= (ONLY || N); seed++) {
+        const r = rng(seed * 7919)
+        // 前の版で何回作り直してから開き直すか(1〜5 回)
+        SWITCH = 1 + (seed % 5)
+        const p = makeProject(r)
+        const m: Model = { edits: new Map(), dismissed: new Set(), ambiguous: new Set() }
+        let timeline: TextOverlay[] = []
+        let dismissed = new Set<string>()
+        let remembered: Record<string, EditedTelop> | undefined
+        let nextEdit = 0
+        const hist: {
+          timeline: TextOverlay[]
+          dismissed: Set<string>
+          remembered: typeof remembered
+          m: Model
+        }[] = []
+        for (let step = 0; step < 7; step++) {
+          OLDNOW = step < SWITCH
+          STEP = step
+          if (step === SWITCH) {
+            paired++
+            const ps = Math.floor(r() * 1e9)
+            OLDNOW = true
+            const plainOld = randomPlan(rng(ps), p)
+            const mergedOld = mergeManualTelops(timeline, plainOld, dismissed, remembered)
+            OLDNOW = false
+            const plainNew = randomPlan(rng(ps), p)
+            const mergedNew = mergeManualTelops(timeline, plainNew, dismissed, remembered)
+            if (ONLY) {
+              const f2 = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
+                ts
+                  .map((t) => {
+                    const a = (
+                      t as never as {
+                        autoSource?: {
+                          start: number
+                          end: number
+                          times?: number[]
+                          offset?: number
+                        }
+                      }
+                    ).autoSource
+                    return `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '/')}[${t.utteranceId}#${t.utteranceChunk} ${t.startTime.toFixed(3)}-${t.endTime.toFixed(3)} src=${a?.start.toFixed(3)}-${a?.end.toFixed(3)} times=${a?.times?.map((x) => x.toFixed(2)).join(',')}]`
+                  })
+                  .join('\n    ')
+              console.log(
+                `PAIRED existing:\n    ${f2(timeline)}\n  plainNew:\n    ${f2(plainNew)}\n  mergedNew:\n    ${f2(mergedNew)}\n  plainOld:\n    ${f2(plainOld)}\n  mergedOld:\n    ${f2(mergedOld)}\n  remembered=${JSON.stringify(remembered)}\n  dismissed=${[...dismissed].join(' ')}`
+              )
+            }
+            PAIRED = true
+            const before = new Map([...pairs].map(([k, v]) => [k, v.length]))
+            PREFIX = 'OLD:'
+            check(mergedOld, plainOld, m, `seed${seed}/step${step}`)
+            PREFIX = 'NEW:'
+            check(mergedNew, plainNew, m, `seed${seed}/step${step}`)
+            PAIRED = false
+            for (const [k, v] of pairs)
+              if (k.startsWith('NEW:')) {
+                const o = 'OLD:' + k.slice(4)
+                const grewNew = v.length - (before.get(k) ?? 0)
+                const grewOld = (pairs.get(o)?.length ?? 0) - (before.get(o) ?? 0)
+                if (grewNew > 0 && grewOld === 0)
+                  pairs.set('ONLYNEW:' + k.slice(4), [
+                    ...(pairs.get('ONLYNEW:' + k.slice(4)) ?? []),
+                    `${v[v.length - 1]}\n      OLDMERGED=${mergedOld.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')}\n      dismissed=${[...dismissed].join(' ')} remembered=${Object.entries(
+                      remembered ?? {}
+                    )
+                      .map(([k2, v2]) => k2 + '=' + v2.text)
+                      .join(' ')}`
+                  ])
+              }
+            break
+          }
+          const plain = randomPlan(r, p)
+          const merged = mergeManualTelops(timeline, plain, dismissed, remembered)
+          remembered = rememberEditedTelops(timeline, remembered)
+          const fmt = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
+            ts
+              .map(
+                (t) =>
+                  `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '')}[${t.utteranceId}#${t.utteranceChunk} ${t.startTime.toFixed(2)}-${t.endTime.toFixed(2)} src=${(t as never as { autoSource?: { start: number; end: number } }).autoSource?.start.toFixed(3)}-${(t as never as { autoSource?: { start: number; end: number } }).autoSource?.end.toFixed(3)}]`
+              )
+              .join('\n    ')
+          dbg(
+            `--- step${step}\n  plain:\n    ${fmt(plain)}\n  merged:\n    ${fmt(merged)}\n  dismissed: ${[...dismissed].join(' ')}\n  remembered: ${Object.entries(
+              remembered ?? {}
+            )
+              .map(([k, v]) => k + '=' + v.text)
+              .join(
+                ' '
+              )}\n  model: edits=${[...m.edits].map(([k, v]) => k + ':' + [...v].join('')).join(' ')} dismissed=${[...m.dismissed].join('')}`
+          )
+          check(merged, plain, m, `seed${seed}/step${step}`)
+          if (r() < 0.3) {
+            const short = randomPlan(r, p)
+            check(
+              mergeManualTelops(timeline, short, dismissed, remembered),
+              short,
+              m,
+              `seed${seed}/step${step}/short`
             )
           }
-          PAIRED = true
-          const before = new Map([...pairs].map(([k, v]) => [k, v.length]))
-          PREFIX = 'OLD:'
-          check(mergedOld, plainOld, m, `seed${seed}/step${step}`)
-          PREFIX = 'NEW:'
-          check(mergedNew, plainNew, m, `seed${seed}/step${step}`)
-          PAIRED = false
-          for (const [k, v] of pairs)
-            if (k.startsWith('NEW:')) {
-              const o = 'OLD:' + k.slice(4)
-              const grewNew = v.length - (before.get(k) ?? 0)
-              const grewOld = (pairs.get(o)?.length ?? 0) - (before.get(o) ?? 0)
-              if (grewNew > 0 && grewOld === 0)
-                pairs.set('ONLYNEW:' + k.slice(4), [
-                  ...(pairs.get('ONLYNEW:' + k.slice(4)) ?? []),
-                  `${v[v.length - 1]}\n      OLDMERGED=${mergedOld.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')}\n      dismissed=${[...dismissed].join(' ')} remembered=${Object.entries(
-                    remembered ?? {}
-                  )
-                    .map(([k2, v2]) => k2 + '=' + v2.text)
-                    .join(' ')}`
-                ])
-            }
-          break
-        }
-        const plain = randomPlan(r, p)
-        const merged = mergeManualTelops(timeline, plain, dismissed, remembered)
-        remembered = rememberEditedTelops(timeline, remembered)
-        const fmt = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
-          ts
-            .map(
-              (t) =>
-                `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '')}[${t.utteranceId}#${t.utteranceChunk} ${t.startTime.toFixed(2)}-${t.endTime.toFixed(2)} src=${(t as never as { autoSource?: { start: number; end: number } }).autoSource?.start.toFixed(3)}-${(t as never as { autoSource?: { start: number; end: number } }).autoSource?.end.toFixed(3)}]`
-            )
-            .join('\n    ')
-        dbg(
-          `--- step${step}\n  plain:\n    ${fmt(plain)}\n  merged:\n    ${fmt(merged)}\n  dismissed: ${[...dismissed].join(' ')}\n  remembered: ${Object.entries(
-            remembered ?? {}
-          )
-            .map(([k, v]) => k + '=' + v.text)
-            .join(
-              ' '
-            )}\n  model: edits=${[...m.edits].map(([k, v]) => k + ':' + [...v].join('')).join(' ')} dismissed=${[...m.dismissed].join('')}`
-        )
-        check(merged, plain, m, `seed${seed}/step${step}`)
-        if (r() < 0.3) {
-          const short = randomPlan(r, p)
-          check(
-            mergeManualTelops(timeline, short, dismissed, remembered),
-            short,
-            m,
-            `seed${seed}/step${step}/short`
-          )
-        }
-        timeline = merged.map((o, i) => ({ ...o, id: `s${seed}-${step}-${i}` }))
-        ;({ timeline, dismissed, remembered } = saveLoad({
-          timeline,
-          dismissed: [...dismissed],
-          remembered
-        }) as never)
-        dismissed = new Set(dismissed as unknown as string[])
-        if (on('undo') && hist.length > 0 && r() < 0.15) {
-          const h = hist[Math.floor(r() * hist.length)]
-          dbg('  UNDO')
-          timeline = [...h.timeline]
-          dismissed = new Set(h.dismissed)
-          remembered = h.remembered
-          m.edits = new Map([...h.m.edits].map(([k, v]) => [k, new Set(v)]))
-          m.dismissed = new Set(h.m.dismissed)
-          m.ambiguous = new Set(h.m.ambiguous)
-        }
-        const actions = Math.floor(r() * 4)
-        for (let a = 0; a < actions && timeline.length > 0; a++) {
-          hist.push({
-            timeline: [...timeline],
-            dismissed: new Set(dismissed),
-            remembered,
-            m: {
-              edits: new Map([...m.edits].map(([k, v]) => [k, new Set(v)])),
-              dismissed: new Set(m.dismissed),
-              ambiguous: new Set(m.ambiguous)
-            }
-          })
-          const i = Math.floor(r() * timeline.length)
-          const t = timeline[i]
-          const words = t.edited
-            ? (m.edits.get(t.text) ?? new Set<string>())
-            : expand(p, kanji(t.text))
-          // 辞書で直す言葉の一部だけを出した枚: その言葉の残り・直した形の扱いは決められない
-          if (!t.edited) {
-            const shownChars = new Set(kanji(t.text))
-            for (const d of p.dict) {
-              const from = [...d.from]
-              const to = [...d.to]
-              const hit = [...from, ...to].some((c) => shownChars.has(c))
-              const whole =
-                to.every((c) => shownChars.has(c)) || from.every((c) => shownChars.has(c))
-              if (hit && !whole) for (const c of [...from, ...to]) m.ambiguous.add(c)
-            }
+          timeline = merged.map((o, i) => ({ ...o, id: `s${seed}-${step}-${i}` }))
+          ;({ timeline, dismissed, remembered } = saveLoad({
+            timeline,
+            dismissed: [...dismissed],
+            remembered
+          }) as never)
+          dismissed = new Set(dismissed as unknown as string[])
+          if (on('undo') && hist.length > 0 && r() < 0.15) {
+            const h = hist[Math.floor(r() * hist.length)]
+            dbg('  UNDO')
+            timeline = [...h.timeline]
+            dismissed = new Set(h.dismissed)
+            remembered = h.remembered
+            m.edits = new Map([...h.m.edits].map(([k, v]) => [k, new Set(v)]))
+            m.dismissed = new Set(h.m.dismissed)
+            m.ambiguous = new Set(h.m.ambiguous)
           }
-          const x = r()
-          dbg(`  action on ${t.text.replace(/\n/g, '')} key=${autoTelopKey(t)} x=${x.toFixed(2)}`)
-          if (x < 0.45) {
-            const text = `E${nextEdit++}` + 'x'.repeat(Math.floor(r() * 30))
-            if (t.edited) m.edits.delete(t.text)
-            m.edits.set(text, words)
-            const patch: Partial<TextOverlay> = { text, edited: true, words: undefined }
-            if (on('retime') && r() < 0.3) {
-              patch.endTime = t.endTime + r() * 2
-              patch.startTime = Math.max(0, t.startTime - r())
-            }
-            timeline[i] = { ...t, ...patch }
-          } else if (x < 0.55 && on('style')) {
-            // style-only edit: text stays → covered words keep appearing as this edited text
+          const actions = Math.floor(r() * 4)
+          for (let a = 0; a < actions && timeline.length > 0; a++) {
+            hist.push({
+              timeline: [...timeline],
+              dismissed: new Set(dismissed),
+              remembered,
+              m: {
+                edits: new Map([...m.edits].map(([k, v]) => [k, new Set(v)])),
+                dismissed: new Set(m.dismissed),
+                ambiguous: new Set(m.ambiguous)
+              }
+            })
+            const i = Math.floor(r() * timeline.length)
+            const t = timeline[i]
+            const words = t.edited
+              ? (m.edits.get(t.text) ?? new Set<string>())
+              : expand(p, kanji(t.text))
+            // 辞書で直す言葉の一部だけを出した枚: その言葉の残り・直した形の扱いは決められない
             if (!t.edited) {
-              m.edits.set(t.text, words)
+              const shownChars = new Set(kanji(t.text))
+              for (const d of p.dict) {
+                const from = [...d.from]
+                const to = [...d.to]
+                const hit = [...from, ...to].some((c) => shownChars.has(c))
+                const whole =
+                  to.every((c) => shownChars.has(c)) || from.every((c) => shownChars.has(c))
+                if (hit && !whole) for (const c of [...from, ...to]) m.ambiguous.add(c)
+              }
             }
-            timeline[i] = { ...t, style: { ...t.style, fontSize: 99 }, edited: true }
-          } else {
-            if (t.edited) m.edits.delete(t.text)
-            for (const w of words) m.dismissed.add(w)
-            dismissed.add(autoTelopKey(t)!)
-            remembered = rememberEditedTelops(timeline, remembered)
-            timeline = timeline.filter((_, k) => k !== i)
+            const x = r()
+            dbg(`  action on ${t.text.replace(/\n/g, '')} key=${autoTelopKey(t)} x=${x.toFixed(2)}`)
+            if (x < 0.45) {
+              const text = `E${nextEdit++}` + 'x'.repeat(Math.floor(r() * 30))
+              if (t.edited) m.edits.delete(t.text)
+              m.edits.set(text, words)
+              const patch: Partial<TextOverlay> = { text, edited: true, words: undefined }
+              if (on('retime') && r() < 0.3) {
+                patch.endTime = t.endTime + r() * 2
+                patch.startTime = Math.max(0, t.startTime - r())
+              }
+              timeline[i] = { ...t, ...patch }
+            } else if (x < 0.55 && on('style')) {
+              // style-only edit: text stays → covered words keep appearing as this edited text
+              // (同じ文の別の修正が既にある枚は飛ばす。この確かめ方は修正を文で見分けるため)
+              if (!t.edited && m.edits.has(t.text)) continue
+              if (!t.edited) {
+                m.edits.set(t.text, words)
+              }
+              timeline[i] = { ...t, style: { ...t.style, fontSize: 99 }, edited: true }
+            } else {
+              if (t.edited) m.edits.delete(t.text)
+              for (const w of words) m.dismissed.add(w)
+              dismissed.add(autoTelopKey(t)!)
+              remembered = rememberEditedTelops(timeline, remembered)
+              timeline = timeline.filter((_, k) => k !== i)
+            }
           }
         }
       }
-    }
-    // 前の版で保存した企画を開き直した作り直しで、前の版のまま作り直したときより悪くならない
-    const total = (k: string): number => pairs.get(k)?.length ?? 0
-    const kinds = ['d-resurrect', 'b-lost', 'c-edit-count']
-    const report = kinds.map((k) => `${k}: 前の版 ${total('OLD:' + k)} → 今 ${total('NEW:' + k)}`)
-    if (process.env.TELOP_MIGRATE_REPORT) console.log(report.join('\n'))
-    for (const k of kinds)
-      expect(total('NEW:' + k), report.join(' / ')).toBeLessThanOrEqual(total('OLD:' + k))
-    expect(paired).toBe(ONLY ? 1 : N)
-  }, 120000)
-})
+      // 前の版で保存した企画を開き直した作り直しで、前の版のまま作り直したときより悪くならない
+      const total = (k: string): number => pairs.get(k)?.length ?? 0
+      const kinds = ['d-resurrect', 'b-lost', 'c-edit-count']
+      const report = kinds.map((k) => `${k}: 前の版 ${total('OLD:' + k)} → 今 ${total('NEW:' + k)}`)
+      if (process.env.TELOP_MIGRATE_REPORT)
+        console.log(
+          [...report, ...kinds.flatMap((k) => (pairs.get('ONLYNEW:' + k) ?? []).slice(0, 3))].join(
+            '\n'
+          )
+        )
+      for (const k of kinds)
+        expect(total('NEW:' + k), report.join(' / ')).toBeLessThanOrEqual(total('OLD:' + k))
+      expect(paired).toBe(ONLY ? 1 : N)
+    }, 120000)
+  })
