@@ -18,6 +18,13 @@ export interface AutoTelopSource {
    * 範囲で新しい枚を切り分けるのに使う。無いもの(前の版)は、範囲の中に文字数で割り振る
    */
   times?: number[]
+  /**
+   * 作ったときのタイムラインの時刻への写し(タイムライン = offset + 素材の秒 / rate。rate は無ければ 1)。
+   * 直した・消した範囲で切り分けた枚の時刻を、話している時刻から決めるのに使う(文字数で割り振ると、
+   * ゆっくり話した言葉を直した枚が声より 0.7 秒早く消え、残りの枚が声より 0.8 秒早く出ていた)
+   */
+  offset?: number
+  rate?: number
 }
 
 /** 発言テロップに付ける、作ったときの元の部分(仮編集が付ける。無いのは前の版で作ったもの) */
@@ -38,13 +45,22 @@ export function normalizeAutoSource(raw: unknown): AutoTelopSource | undefined {
     Array.isArray(r.times) && r.times.every((t) => typeof t === 'number' && Number.isFinite(t))
       ? (r.times as number[])
       : undefined
-  return { start: r.start, end: r.end, text: r.text, ...(times ? { times: [...times] } : {}) }
+  const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x)
+  return {
+    start: r.start,
+    end: r.end,
+    text: r.text,
+    ...(times ? { times: [...times] } : {}),
+    ...(finite(r.offset) ? { offset: r.offset } : {}),
+    ...(finite(r.rate) && r.rate > 0 ? { rate: r.rate } : {})
+  }
 }
 
 /** 覚えておく人の修正(元の部分も覚える。無いのは前の版で覚えたもの) */
 type RememberedEdit = EditedTelop & WithAutoSource
 
-const spanLabel = (t: number): string => t.toFixed(3)
+// 負の時刻は鍵の読み取り(`keySpan`)で読めないので 0 にそろえる
+const spanLabel = (t: number): string => Math.max(0, t).toFixed(3)
 
 /**
  * 自動テロップの鍵。発言テロップは「発話+何枚目」に、作ったときの元の部分(素材の時刻)を添える。
@@ -108,6 +124,13 @@ interface Char {
   pos: number
   /** 話している時刻(素材の秒)。分からなければ null */
   src: number | null
+  /**
+   * この文字の受け持つ素材の時刻の範囲(隣の文字との真ん中まで。枚の端の文字は枚の範囲の端まで)。
+   * 切り分けた枚の範囲にする(真ん中の時刻だけにすると、辞書で直した言葉の後ろ半分が範囲から外れ、
+   * 消した言葉がカットを変えたときに直す前の形で戻っていた)
+   */
+  srcLo: number | null
+  srcHi: number | null
   /** タイムラインの頭・終わり(枚の時間を文字数で割り振る) */
   t0: number
   t1: number
@@ -126,18 +149,43 @@ function charsOf(n: Omit<TextOverlay, 'id'> & WithAutoSource): { chars: string[]
   })
   const L = pos.length
   const src = n.autoSource
-  const times =
-    src?.times && src.times.length === L
-      ? src.times
-      : src
-        ? pos.map((_, k) => src.start + ((src.end - src.start) * (k + 0.5)) / Math.max(1, L))
-        : null
+  const exact = src?.times && src.times.length === L ? src.times : null
+  const times = exact
+    ? exact
+    : src
+      ? pos.map((_, k) => src.start + ((src.end - src.start) * (k + 0.5)) / Math.max(1, L))
+      : null
   const d = n.endTime - n.startTime
+  // 話している時刻が分かれば、文字の頭・終わりのタイムラインの時刻もそこから決める(隣の文字との
+  // 真ん中を境にし、枚の頭・終わりの外へは出さない)。分からなければ枚の時間を文字数で割り振る
+  if (exact && src) {
+    const rate = src.rate && src.rate > 0 ? src.rate : 1
+    const toTl = (t: number): number =>
+      src.offset !== undefined ? src.offset + t / rate : n.startTime + (t - src.start) / rate
+    const clamp = (t: number): number => Math.min(n.endTime, Math.max(n.startTime, t))
+    const edge = (k: number): number =>
+      k <= 0 ? n.startTime : k >= L ? n.endTime : clamp(toTl((exact[k - 1] + exact[k]) / 2))
+    const edges = Array.from({ length: L + 1 }, (_, k) => edge(k))
+    for (let k = 1; k <= L; k++) edges[k] = Math.max(edges[k], edges[k - 1])
+    return {
+      chars,
+      vis: pos.map((p, k) => ({
+        pos: p,
+        src: exact[k],
+        srcLo: k === 0 ? Math.min(src.start, exact[0]) : (exact[k - 1] + exact[k]) / 2,
+        srcHi: k === L - 1 ? Math.max(src.end, exact[k]) : (exact[k] + exact[k + 1]) / 2,
+        t0: edges[k],
+        t1: edges[k + 1]
+      }))
+    }
+  }
   return {
     chars,
     vis: pos.map((p, k) => ({
       pos: p,
       src: times ? times[k] : null,
+      srcLo: src ? src.start + ((src.end - src.start) * k) / Math.max(1, L) : null,
+      srcHi: src ? src.start + ((src.end - src.start) * (k + 1)) / Math.max(1, L) : null,
       t0: n.startTime + (d * k) / Math.max(1, L),
       t1: n.startTime + (d * (k + 1)) / Math.max(1, L)
     }))
@@ -328,6 +376,8 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
         c.dropped = true
 
   const out: (T & WithAutoSource)[] = []
+  /** 出す枚ごとの、動かしてよい範囲(元の枚の頭〜終わり)と、切り分けて作った枚か */
+  const meta: { lo: number; hi: number; carved: boolean }[] = []
   const placed = new Map<
     EditEntry,
     { at: number; host: T & WithAutoSource; chars: Char[]; texts: string[]; wholeHost: boolean }
@@ -336,6 +386,7 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     const { n, chars, vis } = p
     if (vis.every((c) => !c.claim && !c.dropped)) {
       out.push(n)
+      meta.push({ lo: n.startTime, hi: n.endTime, carved: false })
       continue
     }
     let run: Char[] = []
@@ -358,14 +409,17 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
         ...(known
           ? {
               autoSource: {
-                start: Math.min(...known) - AUTO_SOURCE_MARGIN,
-                end: Math.max(...known) + AUTO_SOURCE_MARGIN,
+                start: first.srcLo ?? Math.min(...known) - AUTO_SOURCE_MARGIN,
+                end: last.srcHi ?? Math.max(...known) + AUTO_SOURCE_MARGIN,
                 text,
-                times: known
+                times: known,
+                ...(n.autoSource?.offset !== undefined ? { offset: n.autoSource.offset } : {}),
+                ...(n.autoSource?.rate !== undefined ? { rate: n.autoSource.rate } : {})
               }
             }
           : {})
       })
+      meta.push({ lo: n.startTime, hi: n.endTime, carved: true })
       run = []
     }
     for (const c of vis) {
@@ -377,6 +431,9 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
           got.chars.push(c)
           got.texts.push(chars[c.pos])
           if (got.host !== n) got.wholeHost = false
+          const m = meta[got.at]
+          m.lo = Math.min(m.lo, n.startTime)
+          m.hi = Math.max(m.hi, n.endTime)
         } else {
           placed.set(e, {
             at: out.length,
@@ -386,6 +443,7 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
             wholeHost: vis.every((v) => v.claim === e)
           })
           out.push(n) // 後で修正に置き換える
+          meta.push({ lo: n.startTime, hi: n.endTime, carved: true })
         }
       } else if (c.dropped) flush()
       else run.push(c)
@@ -414,8 +472,8 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
           }
         : known
           ? {
-              start: Math.min(...known) - AUTO_SOURCE_MARGIN,
-              end: Math.max(...known) + AUTO_SOURCE_MARGIN,
+              start: Math.min(...x.chars.map((c) => c.srcLo ?? c.src!)),
+              end: Math.max(...x.chars.map((c) => c.srcHi ?? c.src!)),
               text: x.texts.join(''),
               times: known
             }
@@ -428,10 +486,132 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     if (keepWords) {
       edited.startTime = x.host.startTime
       edited.endTime = x.host.endTime
+      meta[x.at].carved = false
     }
     out[x.at] = edited
   }
-  return out
+  return settleCarved(out, meta)
+}
+
+/** 切り分けた枚の最短の長さ(秒)。仮編集もこれより短い枚は出さない */
+export const MIN_CARVED_SEC = 0.3
+
+/**
+ * 切り分けて短くなった枚(直した・消した範囲の残りの数文字)を読める長さにする。7,000 回の作り直しで
+ * 0.3 秒未満の枚が 246 枚(最短 0.10 秒)あり、一瞬光って消えていた。言葉は落とさずに
+ * 1. 元の枚の範囲の中で、前後の空いている所へ延ばす
+ * 2. 足りなければ、前後の枚の余り(0.3 秒を超える分)をもらう
+ * 3. それでも足りない自動の枚は、続いている隣の自動の枚とつなぐ
+ */
+function settleCarved<T extends Omit<TextOverlay, 'id'> & WithAutoSource>(
+  items: T[],
+  meta: { lo: number; hi: number; carved: boolean }[]
+): T[] {
+  // 確認(終わり - 頭 < 0.3)に丸めの誤差で掛からないよう、ほんの少し長く
+  const MIN = MIN_CARVED_SEC + 1e-6
+  const order = items.map((_, i) => i).sort((a, b) => items[a].startTime - items[b].startTime)
+  let list = order.map((i) => ({ t: { ...items[i] }, m: meta[i] }))
+  const dur = (x: { t: T }): number => x.t.endTime - x.t.startTime
+  for (let i = 0; i < list.length; i++) {
+    const x = list[i]
+    if (!x.m.carved || dur(x) >= MIN_CARVED_SEC) continue
+    const prev = list[i - 1]
+    const next = list[i + 1]
+    const hiEnd = Math.min(x.m.hi, next ? next.t.startTime : Infinity)
+    x.t.endTime = Math.max(x.t.endTime, Math.min(hiEnd, x.t.startTime + MIN))
+    const loStart = Math.max(x.m.lo, prev ? prev.t.endTime : -Infinity)
+    x.t.startTime = Math.min(x.t.startTime, Math.max(loStart, x.t.endTime - MIN))
+    if (dur(x) < MIN_CARVED_SEC) {
+      // 続いている枚(隙間なく並ぶ)の境目をずらして、それぞれ 0.3 秒ずつにする。境目は、前の枚の
+      // 動かしてよい範囲の終わり・後の枚の範囲の頭を越えない(元の枚の外 = カットの向こうへ出さない)
+      let a = i
+      let z = i
+      while (a > 0 && Math.abs(list[a - 1].t.endTime - list[a].t.startTime) < 1e-6) a--
+      while (z < list.length - 1 && Math.abs(list[z].t.endTime - list[z + 1].t.startTime) < 1e-6)
+        z++
+      const block = list.slice(a, z + 1)
+      const n = block.length
+      const bounds = [block[0].t.startTime, ...block.map((y) => y.t.endTime)]
+      // 足りなければ、まとまり全体を前後の空いている所(元の枚の範囲の中)へ広げる
+      if (bounds[n] - bounds[0] < MIN * n) {
+        const before = a > 0 ? list[a - 1].t.endTime : -Infinity
+        bounds[0] = Math.min(bounds[0], Math.max(block[0].m.lo, before, bounds[n] - MIN * n))
+      }
+      if (bounds[n] - bounds[0] < MIN * n) {
+        const after = z < list.length - 1 ? list[z + 1].t.startTime : Infinity
+        bounds[n] = Math.max(bounds[n], Math.min(block[n - 1].m.hi, after, bounds[0] + MIN * n))
+      }
+      // 0.3 秒ずつ入りきらないなら、入る長さで等しく(長さ 0 の枚を残さない)
+      const fit = (target: number): number[] | null => {
+        // 後ろから、各境目の上限(後の枚がそれぞれ target 入り、前の枚の範囲の終わりを越えない)
+        const cap = [...bounds]
+        for (let k = n - 1; k >= 1; k--) cap[k] = Math.min(cap[k + 1] - target, block[k - 1].m.hi)
+        const next = [...bounds]
+        for (let k = 1; k < n; k++) {
+          const floor = Math.max(next[k - 1] + target, block[k].m.lo)
+          if (floor > cap[k] + 1e-9) return null
+          next[k] = Math.min(cap[k], Math.max(floor, bounds[k]))
+        }
+        return next
+      }
+      const total = bounds[n] - bounds[0]
+      const next = fit(MIN) ?? (total < MIN * n ? fit(total / n - 1e-9) : null)
+      if (next) {
+        block.forEach((y, k) => {
+          if (
+            Math.abs(y.t.startTime - next[k]) > 1e-9 ||
+            Math.abs(y.t.endTime - next[k + 1]) > 1e-9
+          )
+            y.m.carved = true
+          y.t.startTime = next[k]
+          y.t.endTime = next[k + 1]
+        })
+      }
+    }
+    if (dur(x) >= MIN_CARVED_SEC || x.t.edited) continue
+    // 続いている隣の自動の枚とつなぐ(同じ発話・話者。文字は前から順に)
+    const join = (a: { t: T; m: (typeof meta)[number] }, b: typeof a): typeof a => {
+      const sa = a.t.autoSource
+      const sb = b.t.autoSource
+      const text = `${a.t.text}${b.t.text}`
+      const times = sa?.times && sb?.times ? [...sa.times, ...sb.times] : undefined
+      return {
+        t: {
+          ...a.t,
+          text,
+          endTime: b.t.endTime,
+          words: a.t.words && b.t.words ? [...a.t.words, ...b.t.words] : undefined,
+          ...(sa && sb
+            ? {
+                autoSource: {
+                  ...sa,
+                  start: Math.min(sa.start, sb.start),
+                  end: Math.max(sa.end, sb.end),
+                  text,
+                  ...(times ? { times } : {})
+                }
+              }
+            : {})
+        },
+        m: { lo: Math.min(a.m.lo, b.m.lo), hi: Math.max(a.m.hi, b.m.hi), carved: true }
+      }
+    }
+    const joinable = (a: typeof x | undefined): boolean =>
+      !!a &&
+      !a.t.edited &&
+      a.t.speaker === x.t.speaker &&
+      Math.abs(
+        (a === prev ? a.t.endTime : a.t.startTime) - (a === prev ? x.t.startTime : x.t.endTime)
+      ) < 0.05
+    if (joinable(next) && (!joinable(prev) || dur(next) <= dur(prev))) {
+      list = [...list.slice(0, i), join(x, next!), ...list.slice(i + 2)]
+      i--
+    } else if (joinable(prev)) {
+      list = [...list.slice(0, i - 1), join(prev!, x), ...list.slice(i + 1)]
+      i -= 2
+    }
+  }
+  return list.map((x) => x.t)
 }
 
 /** 今あるテロップの人の修正を、覚えておいた修正に重ねる(新しい修正が勝つ) */
@@ -440,6 +620,14 @@ export function rememberEditedTelops(
   remembered: Readonly<Record<string, EditedTelop>> | undefined
 ): Record<string, EditedTelop> | undefined {
   const out: Record<string, EditedTelop> = { ...(remembered ?? {}) }
+  // 同じ範囲の鍵の索引(修正ごとに全部の鍵を見直すと、修正の数の二乗の手間になる)
+  const sameSpanId = (x: { utteranceId: string; start: number; end: number }): string =>
+    `${x.utteranceId}@${spanLabel(x.start)}-${spanLabel(x.end)}`
+  const bySpan = new Map<string, string[]>()
+  for (const k of Object.keys(out)) {
+    const x = keySpan(k)
+    if (x) bySpan.set(sameSpanId(x), [...(bySpan.get(sameSpanId(x)) ?? []), k])
+  }
   for (const o of existing) {
     const key = autoTelopKey(o)
     if (!key || !o.edited) continue
@@ -457,17 +645,11 @@ export function rememberEditedTelops(
     const base = baseKey(key)
     if (base !== key) delete out[base]
     const span = keySpan(key)
-    if (span)
-      for (const k of Object.keys(out)) {
-        const other = keySpan(k)
-        if (
-          other &&
-          other.utteranceId === span.utteranceId &&
-          spanLabel(other.start) === spanLabel(span.start) &&
-          spanLabel(other.end) === spanLabel(span.end)
-        )
-          delete out[k]
-      }
+    if (span) {
+      const id = sameSpanId(span)
+      for (const k of bySpan.get(id) ?? []) if (k !== key) delete out[k]
+      bySpan.set(id, [key])
+    }
     out[key] = rec
   }
   return Object.keys(out).length > 0 ? out : undefined

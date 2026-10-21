@@ -3,6 +3,8 @@ import {
   applyDictionary,
   balancedLineEnds,
   dictionaryNoCut,
+  dictionaryPattern,
+  FILLER,
   removeFillers,
   type DictionaryEntry
 } from './polish'
@@ -22,6 +24,16 @@ export interface TelopChunk {
   /** 素材の時刻 */
   sourceStart: number
   sourceEnd: number
+  /**
+   * 文(空白・改行を除く)の1文字ごとの、話している時刻(素材の秒)。言葉の時刻が無い発話では無い。
+   * 人が直した・消した範囲(元の発話の時刻)で、作り直した枚を切り分けるのに使う
+   */
+  times?: number[]
+  /**
+   * 出している文字を話している範囲(素材の秒。最初の文字の頭〜最後の文字の終わり。辞書で直した文字は
+   * 直す前の言葉全体)。人が直した・消した範囲として覚える
+   */
+  spoken?: [number, number]
 }
 
 export interface ChunkOptions {
@@ -97,8 +109,28 @@ function spacesFromText(words: readonly AsrWord[], text: string | undefined): bo
   return out
 }
 
+/**
+ * 文字単位の時刻の作り置き(発話ごと)。枚ごとに発話全体を数え直すと、長い発話(8,000 語)で
+ * 仮編集が 13 倍遅くなっていた(1枚ごとに発話の全文字を作り直す二乗の手間)
+ */
+const charTimesCache = new WeakMap<readonly AsrWord[], Map<string, TimedChar[]>>()
+
 /** 文字単位の時刻(言葉の時刻を文字数で按分する) */
 function charTimes(words: readonly AsrWord[], text?: string): TimedChar[] {
+  let byText = charTimesCache.get(words)
+  if (!byText) {
+    byText = new Map()
+    charTimesCache.set(words, byText)
+  }
+  const cacheKey = `${words.length}:${text ?? '\u0000'}`
+  const hit = byText.get(cacheKey)
+  if (hit) return hit
+  const made = makeCharTimes(words, text)
+  byText.set(cacheKey, made)
+  return made
+}
+
+function makeCharTimes(words: readonly AsrWord[], text?: string): TimedChar[] {
   const out: TimedChar[] = []
   const spaced = spacesFromText(words, text)
   words.forEach((w, wi) => {
@@ -138,6 +170,119 @@ function polishTelopText(text: string, options: ChunkOptions): string {
 }
 
 /**
+ * 文字ごとに、元の発話のどの文字(番号の範囲)から来たかを持つ文。UTF-16 の1単位ごとに持つ
+ * (正規表現の位置が UTF-16 の位置なので)
+ */
+interface Tracked {
+  text: string
+  span: [number, number][]
+}
+
+function tracked(chars: readonly string[], index: readonly number[]): Tracked {
+  let text = ''
+  const span: [number, number][] = []
+  chars.forEach((c, i) => {
+    text += c
+    for (let k = 0; k < c.length; k++) span.push([index[i], index[i] + 1])
+  })
+  return { text, span }
+}
+
+/**
+ * 出どころを追いながら置き換える。出どころは元の文字の位置(i 番目の文字が i〜i+1)。置き換えた文字は、
+ * 置き換えられた文字の範囲を前から順に等分して持つ(辞書で「丰丳丶」を「訁訂訃訄訅」に直すと、5 文字が
+ * 「丰丳丶」と言っている間を前から順に受け持つ)。置き換えた言葉が2枚に分かれても、2枚の範囲が重ならない
+ * (同じ時刻にすると、両方の枚を直したとき片方の修正が消えていた)
+ */
+function trackedReplace(
+  t: Tracked,
+  re: RegExp,
+  replacement: (m: RegExpMatchArray) => string
+): Tracked {
+  const g = re.global ? re : new RegExp(re.source, re.flags + 'g')
+  g.lastIndex = 0
+  let text = ''
+  const span: [number, number][] = []
+  let last = 0
+  for (const m of t.text.matchAll(g)) {
+    const at = m.index ?? 0
+    if (m[0].length === 0) continue
+    text += t.text.slice(last, at)
+    span.push(...t.span.slice(last, at))
+    const from = t.span.slice(at, at + m[0].length)
+    const u: [number, number] = [
+      Math.min(...from.map((x) => x[0])),
+      Math.max(...from.map((x) => x[1]))
+    ]
+    const r = replacement(m)
+    text += r
+    const cps = [...r]
+    cps.forEach((c, k) => {
+      const a = u[0] + ((u[1] - u[0]) * k) / cps.length
+      const b = u[0] + ((u[1] - u[0]) * (k + 1)) / cps.length
+      for (let x = 0; x < c.length; x++) span.push([a, b])
+    })
+    last = at + m[0].length
+  }
+  text += t.text.slice(last)
+  span.push(...t.span.slice(last))
+  return { text, span }
+}
+
+/** `polishTelopText` と同じ整えを、文字の出どころを追いながら行う(結果の文は同じ) */
+function polishTracked(t: Tracked, options: ChunkOptions): Tracked {
+  let body = t
+  if (options.removeFillers !== false) {
+    let prev = ''
+    while (body.text !== prev) {
+      prev = body.text
+      body = trackedReplace(body, FILLER, (m) => m[1] ?? '')
+    }
+    body = trackedReplace(body, /^[、,\s]+/u, () => '')
+    body = trackedReplace(body, /^\s+|\s+$/gu, () => '')
+  }
+  const dict = options.dictionary?.length ? dictionaryPattern(options.dictionary) : null
+  if (dict) body = trackedReplace(body, dict.pattern, (m) => dict.replace.get(m[0]) ?? m[0])
+  body = trackedReplace(body, /、\s*|,(?!\d)\s*|(?<!\d),\s*/g, () => ' ')
+  body = trackedReplace(body, /[。.]+$/u, () => '')
+  body = trackedReplace(body, /[。]\s*/g, () => ' ')
+  body = trackedReplace(body, /\s+/g, () => ' ')
+  body = trackedReplace(body, /^\s+|\s+$/gu, () => '')
+  return body
+}
+
+/** 整えた文の、空白・改行を除いた1文字ごとの、出どころの文字の頭〜終わり(素材の秒) */
+/** 元の文字の位置(i 番目の文字が i〜i+1)の時刻。`end` なら、ちょうど境目の位置を前の文字の終わりとする */
+function timeAtPos(timed: readonly TimedChar[], x: number, end: boolean): number {
+  const n = timed.length
+  let i = end ? Math.ceil(x) - 1 : Math.floor(x)
+  i = Math.max(0, Math.min(n - 1, i))
+  const c = timed[i]
+  const f = Math.max(0, Math.min(1, x - i))
+  return c.start + (c.end - c.start) * f
+}
+
+function visibleSpans(t: Tracked, timed: readonly TimedChar[]): [number, number][] {
+  const out: [number, number][] = []
+  let unit = 0
+  for (const c of t.text) {
+    if (!/\s/.test(c)) {
+      const [a, b] = t.span[unit]
+      out.push([timeAtPos(timed, a, false), timeAtPos(timed, b, true)])
+    }
+    unit += c.length
+  }
+  return out
+}
+
+const spokenOf = (spans: readonly [number, number][]): [number, number] | undefined =>
+  spans.length > 0
+    ? [Math.min(...spans.map((x) => x[0])), Math.max(...spans.map((x) => x[1]))]
+    : undefined
+
+const visibleCount = (text: string): number => [...text].filter((c) => !/\s/.test(c)).length
+
+/**
  * 枚の一部(素材の時刻 `from`〜`to`)だけが本編に残ったときの、その部分の言葉だけの文。
  *
  * 頭・終わりがカットで落ちた枚に元の文のまま出すと、聞こえない言葉まで出る(ショートの頭が発話の途中から
@@ -152,21 +297,46 @@ export function clipTelopChunkText(
   to: number,
   options: ChunkOptions = {}
 ): string {
-  if (u.words.length === 0) return chunk.text
+  return clipTelopChunk(u, chunk, from, to, options).text
+}
+
+/** `clipTelopChunkText` の文と、その1文字ごとの話している時刻(言葉の時刻が無ければ時刻なし) */
+export function clipTelopChunk(
+  u: Pick<TranscriptUtterance, 'text' | 'words'>,
+  chunk: TelopChunk,
+  from: number,
+  to: number,
+  options: ChunkOptions = {}
+): { text: string; times?: number[]; spoken?: [number, number] } {
+  if (u.words.length === 0) return { text: chunk.text }
   const timed = charTimes(u.words, u.text)
   const inside = (wi: number): boolean => {
     const w = u.words[wi]
     const mid = (w.start + w.end) / 2
     return mid >= from - 1e-6 && mid < to + 1e-6
   }
-  const kept = timed.filter(
-    (c) =>
+  const keep: number[] = []
+  timed.forEach((c, i) => {
+    if (
       c.start >= chunk.sourceStart - 1e-6 &&
       c.start < chunk.sourceEnd - 1e-6 &&
       (c.word < 0 || inside(c.word))
+    )
+      keep.push(i)
+  })
+  const polished = polishTracked(
+    tracked(
+      keep.map((i) => timed[i].ch),
+      keep
+    ),
+    options
   )
-  const polished = polishTelopText(kept.map((c) => c.ch).join(''), options)
-  return wrapTelopLines(polished, options.maxLineChars ?? 14).join('\n')
+  const spans = visibleSpans(polished, timed)
+  return {
+    text: wrapTelopLines(polished.text, options.maxLineChars ?? 14).join('\n'),
+    times: spans.map(([a, b]) => (a + b) / 2),
+    spoken: spokenOf(spans)
+  }
 }
 
 /**
@@ -184,39 +354,32 @@ export function telopCharTimes(
   chunk: TelopChunk,
   text: string,
   from = -Infinity,
-  to = Infinity
+  to = Infinity,
+  options: ChunkOptions = {}
 ): number[] | null {
   if (u.words.length === 0) return null
-  const timed = charTimes(u.words, u.text)
-  const inside = (wi: number): boolean => {
-    const w = u.words[wi]
-    const mid = (w.start + w.end) / 2
-    return mid >= from - 1e-6 && mid < to + 1e-6
-  }
-  const cand = timed.filter(
-    (c) =>
-      c.word >= 0 &&
-      !/\s/.test(c.ch) &&
-      c.start >= chunk.sourceStart - 1e-6 &&
-      c.start < chunk.sourceEnd - 1e-6 &&
-      inside(c.word)
+  const n = visibleCount(text)
+  if (from === -Infinity && to === Infinity && chunk.times?.length === n) return chunk.times
+  const clipped = clipTelopChunk(u, chunk, from, to, options)
+  if (clipped.times?.length === n) return clipped.times
+  // 文が合わない(手で作った枚など): 前から順に同じ文字へ合わせる(見つからない文字は直前の時刻)
+  const timed = charTimes(u.words, u.text).filter(
+    (c) => c.word >= 0 && c.start >= chunk.sourceStart - 1e-6 && c.start < chunk.sourceEnd - 1e-6
   )
-  if (cand.length === 0) return null
-  const mid = (k: number): number => (cand[k].start + cand[k].end) / 2
+  if (timed.length === 0) return null
   const out: number[] = []
   let j = 0
   for (const ch of [...text]) {
     if (/\s/.test(ch)) continue
     let k = -1
-    for (let x = j; x < Math.min(cand.length, j + 12); x++)
-      if (cand[x].ch === ch) {
+    for (let x = j; x < timed.length; x++)
+      if (timed[x].ch === ch) {
         k = x
         break
       }
-    if (k >= 0) {
-      out.push(mid(k))
-      j = k + 1
-    } else out.push(mid(Math.min(j, cand.length - 1)))
+    const at = k >= 0 ? k : Math.min(j, timed.length - 1)
+    out.push((timed[at].start + timed[at].end) / 2)
+    if (k >= 0) j = k + 1
   }
   return out
 }
@@ -248,6 +411,21 @@ export function utteranceToTelopChunks(
   for (const p of pieces) {
     // 言いよどみを除く・辞書で直すと長さが変わるので、整えた文で改行し直す
     const polished = polish(chars.slice(p.from, p.to).join(''))
+    // 1文字ごとの話している時刻(整えた文の文字が、元のどの文字から来たかを追って決める)
+    const spans =
+      timed.length > 0
+        ? visibleSpans(
+            polishTracked(
+              tracked(
+                chars.slice(p.from, p.to),
+                chars.slice(p.from, p.to).map((_, i) => p.from + i)
+              ),
+              options
+            ),
+            timed
+          )
+        : null
+    const times = spans ? spans.map(([a, b]) => (a + b) / 2) : null
     const lines = wrapTelopLines(polished, maxLine)
     const text = lines.join('\n')
     if (!text) continue
@@ -278,12 +456,25 @@ export function utteranceToTelopChunks(
     for (let k = 0; k < lines.length; k += maxLines) sheets.push(lines.slice(k, k + maxLines))
     const total = lines.reduce((t, l) => t + [...l].length, 0)
     let done = 0
+    let shown = 0
     for (const sheet of sheets) {
       const len = sheet.reduce((t, l) => t + [...l].length, 0)
       const a = start + ((end - start) * done) / Math.max(1, total)
       done += len
       const b = start + ((end - start) * done) / Math.max(1, total)
-      chunks.push({ text: sheet.join('\n'), sourceStart: a, sourceEnd: Math.max(b, a + minDur) })
+      const sheetText = sheet.join('\n')
+      const n = visibleCount(sheetText)
+      const ok = times !== null && times.length === visibleCount(text)
+      const sheetTimes = ok ? times.slice(shown, shown + n) : undefined
+      const sheetSpoken = ok && spans ? spokenOf(spans.slice(shown, shown + n)) : undefined
+      shown += n
+      chunks.push({
+        text: sheetText,
+        sourceStart: a,
+        sourceEnd: Math.max(b, a + minDur),
+        ...(sheetTimes ? { times: sheetTimes } : {}),
+        ...(sheetSpoken ? { spoken: sheetSpoken } : {})
+      })
     }
   }
   // 次のテロップに重ならないように(最低表示時間で伸ばした分を詰める)

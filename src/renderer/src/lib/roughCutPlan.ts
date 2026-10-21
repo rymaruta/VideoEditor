@@ -54,9 +54,8 @@ import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { mixResidual } from '@shared/ingest/tracks'
 import {
-  clipTelopChunkText,
+  clipTelopChunk,
   settleTelopTimes,
-  telopCharTimes,
   utteranceToTelopChunks
 } from '@shared/telop/fromTranscript'
 import { AUTO_SOURCE_MARGIN, type WithAutoSource } from '@shared/telop/manual'
@@ -458,18 +457,18 @@ export function planRoughCut(
           if (end - start < 0.3) return null
           // 頭・終わりを落とした枚は、残った所で話している言葉だけにする(切れて聞こえない言葉を出さない)
           const clipped = visStart > commonStart + 1e-6 || visEnd < commonEnd - 1e-6
-          const text = clipped
-            ? clipTelopChunkText(u, chunk, toSource(f, visStart), toSource(f, visEnd), chunkOptions)
-            : chunk.text
-          return text ? { span: sp, start, end, text, clipped, visStart, visEnd } : null
+          // 1文字ごとの話している時刻(人が直した・消した範囲で、作り直した枚を切り分ける)
+          const shown = clipped
+            ? clipTelopChunk(u, chunk, toSource(f, visStart), toSource(f, visEnd), chunkOptions)
+            : { text: chunk.text, times: chunk.times, spoken: chunk.spoken }
+          return shown.text ? { span: sp, start, end, ...shown, clipped, visStart, visEnd } : null
         })
         .filter((x) => x !== null)
-      for (const { span, start, end, text, clipped, visStart, visEnd } of placed) {
+      for (const { span, start, end, text, times, spoken, clipped, visStart, visEnd } of placed) {
         const voiceEnd = span.timeline + (Math.min(toCommon(f, u.sourceEnd), span.end) - span.start)
-        // 1文字ごとの話している時刻(人が直した・消した範囲で、作り直した枚を切り分ける)
-        const times = clipped
-          ? telopCharTimes(u, chunk, text, toSource(f, visStart), toSource(f, visEnd))
-          : telopCharTimes(u, chunk, text)
+        // 素材の時刻 → このタイムラインの時刻(タイムライン = offset + 素材の秒 / rate)。
+        // 直した・消した範囲で切り分けた枚の時刻を、文字数ではなく話している時刻から決めるのに使う
+        const offset = span.timeline - span.start + f.start
         const telop: Omit<TextOverlay, 'id'> & WithAutoSource = {
           text,
           startTime: start,
@@ -481,24 +480,22 @@ export function planRoughCut(
           utteranceId: u.id,
           utteranceChunk: ci,
           // 作ったときの元の部分(人の修正・消した印を、枚の分け方・カットが変わっても同じ言葉に当てる)。
-          // 頭・終わりを落とした枚・2つに分かれた枚は、出している言葉の範囲(片方だけ直す・消すことができ、
-          // 消した範囲に出していない言葉が入らない)
+          // 範囲は出している文字の話している時刻から取る。枚の時間(発話の頭へ寄せた・最低表示時間で
+          // 延ばした・辞書で行数を超えて文字数で割り振った)から取ると、隣の枚の文字まで範囲に入り、
+          // 消した枚の隣の言葉まで消えていた
           autoSource:
-            clipped && times && times.length > 0
+            times && times.length > 0
               ? {
-                  start: Math.min(...times) - AUTO_SOURCE_MARGIN,
-                  end: Math.max(...times) + AUTO_SOURCE_MARGIN,
+                  start: Math.max(0, (spoken?.[0] ?? Math.min(...times)) - AUTO_SOURCE_MARGIN),
+                  end: (spoken?.[1] ?? Math.max(...times)) + AUTO_SOURCE_MARGIN,
                   text,
-                  times
+                  times,
+                  offset,
+                  ...(f.rate !== 1 ? { rate: f.rate } : {})
                 }
               : clipped
                 ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
-                : {
-                    start: chunk.sourceStart,
-                    end: chunk.sourceEnd,
-                    text: chunk.text,
-                    ...(times ? { times } : {})
-                  }
+                : { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
         }
         telops.push(telop)
         voiceEnds.set(telop, voiceEnd)

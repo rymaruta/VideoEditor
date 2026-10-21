@@ -10,7 +10,7 @@
  * 言い換え・要約はしない(言葉を作らない)。
  */
 
-const FILLER =
+export const FILLER =
   /(^|[、,。\s])(?:え[ーぇ]+と|えっと|え[ーぇ]*っと|え[ーぇ]+(?=[、,\s])|あの[ーぉ]+|そ[のー]ー+|ま[あー]+(?=[、,\s])|う[ーん]+(?=[、,\s])|ん[ーっ]+(?=[、,\s])|あ[ーぁ]+(?=[、,\s]))[、,\s]*/gu
 
 export function removeFillers(text: string): string {
@@ -39,14 +39,21 @@ export interface DictionaryEntry {
  * 正しい書き方(置き換え先)がそのまま出てきたら、そこは触らない
  */
 export function applyDictionary(text: string, entries: readonly DictionaryEntry[]): string {
+  const d = dictionaryPattern(entries)
+  return d ? text.replace(d.pattern, (m) => d.replace.get(m) ?? m) : text
+}
+
+/** 辞書を当てる正規表現と置き換え(`applyDictionary` と、文字の出どころを追う整えで同じものを使う) */
+export function dictionaryPattern(
+  entries: readonly DictionaryEntry[]
+): { pattern: RegExp; replace: Map<string, string> } | null {
   const replace = new Map<string, string>()
   for (const e of entries) if (e.from && !replace.has(e.from)) replace.set(e.from, e.to)
-  if (replace.size === 0) return text
+  if (replace.size === 0) return null
   const keep = new Set(entries.map((e) => e.to).filter((t) => t && !replace.has(t)))
   const candidates = [...replace.keys(), ...keep].sort((a, b) => b.length - a.length)
   const escape = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const pattern = new RegExp(candidates.map(escape).join('|'), 'gu')
-  return text.replace(pattern, (m) => replace.get(m) ?? m)
+  return { pattern: new RegExp(candidates.map(escape).join('|'), 'gu'), replace }
 }
 
 /** 「誤 → 正」の行を読み込む(→ / => / タブ区切り。空行・# の行は飛ばす) */
