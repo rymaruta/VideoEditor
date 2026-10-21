@@ -16,7 +16,8 @@ import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
-import { withMp4Extension, withVeprojExtension, writeViaPartial } from './partialOutput'
+import { withMp4Extension, withVeprojExtension } from './partialOutput'
+import { projectSourcePaths, writeExportGuarded, type ProtectedPath } from './exportOutputGuard'
 import { basename, join } from 'path'
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
@@ -34,7 +35,7 @@ import {
   MEDIA_EXTENSIONS,
   VIDEO_EXTENSIONS
 } from '@shared/mediaExtensions'
-import { ensurePreviewProxy } from './previewProxyService'
+import { checkPreviewProxy, ensurePreviewProxy } from './previewProxyService'
 import { MediaJobQueue } from './mediaJobQueue'
 import { killLiveProcesses } from './liveProcesses'
 import { currentBusy, notifyDone, setBusy, type BusyState } from './busyState'
@@ -125,6 +126,11 @@ let hasUnsavedChanges = false
 /** 処理の途中でも閉じると決めた(保存の確認で戻ったら取り消す) */
 let quitWhileBusy = false
 let autosavePath = ''
+/**
+ * このセッションで保存・読み込みした企画ファイル。書き出し先がこれと同じなら止める
+ * (`exportOutputGuard`。main は「いま開いている企画のパス」を持っていないので、通ったものを覚える)
+ */
+const knownProjectPaths = new Set<string>()
 /** このセッションで自動保存を1回でも書いたか(前回のぶんを退避するのは最初の1回だけ) */
 let autosaveOverwrittenThisSession = false
 /**
@@ -546,10 +552,25 @@ async function runExport(
   payload: ExportPayload,
   onProgress: (percent: number, stage: string) => void
 ): Promise<{ success: boolean }> {
-  // 失敗・中止で、壊れた動画が完成品の名前で残らないように(`writeViaPartial`)
-  return writeViaPartial(payload.outputPath, (outputPath) =>
-    runExportTo({ ...payload, outputPath }, onProgress)
+  // 失敗・中止で、壊れた動画が完成品の名前で残らないように(`writeViaPartial`)。
+  // 書き出し先が素材・企画ファイル・自動保存なら、始める前に止める(最後の置き換えで
+  // 素材が書き出した動画に差し替わり、元の撮影データが消えていた。`exportOutputGuard`)
+  return writeExportGuarded(
+    payload.outputPath,
+    exportProtectedPaths(payload.project),
+    (outputPath) => runExportTo({ ...payload, outputPath }, onProgress)
   )
+}
+
+/** 書き出しで上書きしてはいけないファイル(企画の素材と、企画ファイル・自動保存) */
+function exportProtectedPaths(project: Project): ProtectedPath[] {
+  const out = projectSourcePaths(project)
+  for (const path of knownProjectPaths) out.push({ path, label: '企画ファイル' })
+  if (autosavePath) {
+    out.push({ path: autosavePath, label: '自動保存のファイル' })
+    out.push({ path: discardedPathFor(autosavePath), label: '退避した自動保存のファイル' })
+  }
+  return out
 }
 
 async function runExportTo(
@@ -665,6 +686,9 @@ app.whenReady().then(() => {
     ensurePreviewProxy(filePath, (percent) => {
       notifySender(event, IPC.previewProxyProgress, { assetId, percent })
     })
+  )
+  ipcMain.handle(IPC.checkPreviewProxy, (_e, filePath: string, proxyPath: string) =>
+    checkPreviewProxy(filePath, proxyPath)
   )
   ipcMain.handle(IPC.checkFilesExist, (_e, filePaths: string[]) =>
     filePaths.filter((p) => !existsSync(p))
@@ -792,9 +816,13 @@ app.whenReady().then(() => {
     if (!exists || errorMessage) throw describeOpenPathFailure(exists, errorMessage)
   })
   ipcMain.handle(IPC.saveProject, (_e, filePath: string, project: Project) => {
+    knownProjectPaths.add(filePath)
     saveProjectFile(filePath, project)
   })
-  ipcMain.handle(IPC.loadProject, (_e, filePath: string) => loadProjectFile(filePath))
+  ipcMain.handle(IPC.loadProject, (_e, filePath: string) => {
+    knownProjectPaths.add(filePath)
+    return loadProjectFile(filePath)
+  })
   ipcMain.handle(IPC.downloadAudioAsset, async (_e, url: string, suggestedName: string) =>
     downloadAudioAsset(url, suggestedName)
   )

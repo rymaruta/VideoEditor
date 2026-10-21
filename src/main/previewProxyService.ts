@@ -1,8 +1,16 @@
 import ffmpeg from 'fluent-ffmpeg'
 import { app } from 'electron'
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
-import { join } from 'path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'fs'
+import { basename, join } from 'path'
 import { describeFfmpegError } from './ffmpegError'
 import { isShuttingDown, trackUntilDone } from './liveProcesses'
 import { detectVideoEncoder } from './segmentRenderer'
@@ -95,17 +103,103 @@ function proxyDir(): string {
  * (or opening a saved project) reuses the existing proxy instead of transcoding again,
  * while a file that was edited in place still gets a fresh one.
  */
-function proxyPathFor(filePath: string, ext: 'mp4' | 'webm' = 'mp4'): string {
-  let stamp = ''
-  try {
-    const st = statSync(filePath)
-    // 同じ大きさ・同じ更新時刻のファイルへ差し替えても前の変換を使わないよう、中身の目印も足す
-    stamp = `${st.size}:${st.mtimeMs}:${contentFingerprint(filePath)}`
-  } catch {
-    stamp = ''
-  }
+function proxyPathFor(
+  filePath: string,
+  ext: 'mp4' | 'webm',
+  identity: ProxySourceIdentity | null
+): string {
+  // 同じ大きさ・同じ更新時刻のファイルへ差し替えても前の変換を使わないよう、中身の目印も足す
+  const stamp = identity ? `${identity.size}:${identity.mtimeMs}:${identity.fingerprint}` : ''
   const key = createHash('sha1').update(`${filePath}|${stamp}`).digest('hex').slice(0, 16)
   return join(proxyDir(), `${key}.${ext}`)
+}
+
+/**
+ * プロキシを作ったときの元ファイルの身元(大きさ・更新時刻・中身の目印)。
+ * プロキシの隣に `<プロキシ>.source.json` として残し、開いたときに今の元ファイルと比べる
+ * (`checkPreviewProxy`)
+ */
+export interface ProxySourceIdentity {
+  size: number
+  mtimeMs: number
+  fingerprint: string
+}
+
+/** 元ファイルの今の身元。読めなければ null */
+export function sourceIdentity(filePath: string): ProxySourceIdentity | null {
+  try {
+    const st = statSync(filePath)
+    return { size: st.size, mtimeMs: st.mtimeMs, fingerprint: contentFingerprint(filePath) }
+  } catch {
+    return null
+  }
+}
+
+function identityRecordPath(proxyPath: string): string {
+  return `${proxyPath}.source.json`
+}
+
+function writeIdentityRecord(proxyPath: string, identity: ProxySourceIdentity | null): void {
+  if (!identity) return
+  try {
+    writeFileSync(identityRecordPath(proxyPath), JSON.stringify(identity))
+  } catch {
+    // 記録できなくてもプロキシは使える。開いたときは名前での照合(下)に戻る
+  }
+}
+
+function readIdentityRecord(proxyPath: string): ProxySourceIdentity | null {
+  try {
+    const raw = JSON.parse(readFileSync(identityRecordPath(proxyPath), 'utf-8'))
+    if (
+      typeof raw?.size === 'number' &&
+      typeof raw?.mtimeMs === 'number' &&
+      typeof raw?.fingerprint === 'string'
+    )
+      return { size: raw.size, mtimeMs: raw.mtimeMs, fingerprint: raw.fingerprint }
+  } catch {
+    // 記録が無い(前の版で作ったプロキシ)・壊れている
+  }
+  return null
+}
+
+/**
+ * 保存されていたプロキシが、**今の**元ファイルから作ったものか。
+ *
+ * - `current`: 今の元ファイルと身元が一致する(そのまま使ってよい)
+ * - `stale`: 元ファイルが差し替わっている(大きさ・更新時刻・中身の目印のどれかが違う)
+ * - `unverified`: 身元の記録が無く、名前からも確かめられない(前の版で作ったプロキシ)
+ * - `sourceMissing`: 元ファイルが読めない(移動・削除。比べようが無いのでプロキシは外さない。
+ *   書き出しは別に「素材が見つからない」で止まる)
+ *
+ * 以前は `proxyPath` が再生できれば無条件に使っていたので、元ファイルを同じ名前で差し替えると
+ * **プレビューは古いプロキシ(前の撮影)のまま、書き出しは新しいファイル**を読み、
+ * 見えているものと違う動画が書き出されていた(実測: 2秒のテイクから作ったプロキシは、元を同じ名前の
+ * 4秒の別テイクに差し替えたあとも再生できるので、開き直してもプレビューは 2秒の前のテイクのまま、
+ * 書き出しは 4秒の新しいテイクを読んだ)。
+ *
+ * 記録の無い前の版のプロキシは、**名前で確かめる**: プロキシの名前は「パス・大きさ・更新時刻・
+ * 中身の目印」のハッシュなので、今の元ファイルから計算した名前と同じなら同じ元から作ったと言える
+ * (64KB×2 を読むだけで安い)。違えば、古い鍵の版で作ったか差し替わったかを見分けられないので
+ * `unverified` とし、画面側は差し替わったときと同じく作り直す(古い絵を見せ続けるより、
+ * 一度変換し直すほうを選ぶ)
+ */
+export function checkPreviewProxy(
+  filePath: string,
+  proxyPath: string
+): 'current' | 'stale' | 'unverified' | 'sourceMissing' {
+  const now = sourceIdentity(filePath)
+  if (!now) return 'sourceMissing'
+  const recorded = readIdentityRecord(proxyPath)
+  if (recorded)
+    return recorded.size === now.size &&
+      recorded.mtimeMs === now.mtimeMs &&
+      recorded.fingerprint === now.fingerprint
+      ? 'current'
+      : 'stale'
+  const name = basename(proxyPath)
+  const expected = [proxyPathFor(filePath, 'mp4', now), proxyPathFor(filePath, 'webm', now)]
+  return expected.some((p) => basename(p) === name) ? 'current' : 'unverified'
 }
 
 /** 透過(アルファ)を持つ画素の形式か(yuva420p・rgba・argb・gbrap・ya8 など) */
@@ -131,10 +225,13 @@ export function ensurePreviewProxy(
   filePath: string,
   onProgress?: (percent: number) => void
 ): Promise<string> {
-  const outPath = proxyPathFor(filePath)
+  // 変換に使う元ファイルの身元は、変換を始める前に1回だけ測る(名前の鍵とプロキシの隣の記録に同じ値を使う。
+  // 変換中に差し替えられたら、記録は前の身元のままなので、次に開いたとき `stale` になって作り直される)
+  const identity = sourceIdentity(filePath)
+  const outPath = proxyPathFor(filePath, 'mp4', identity)
   if (existsSync(outPath)) return Promise.resolve(outPath)
   // 透過を持つ素材(版面CG)は、透過を保てる VP9(WebM)で作る。H.264 にすると背景が黒く塗られる
-  const alphaPath = proxyPathFor(filePath, 'webm')
+  const alphaPath = proxyPathFor(filePath, 'webm', identity)
   if (existsSync(alphaPath)) return Promise.resolve(alphaPath)
   const running = inFlight.get(outPath)
   if (running) {
@@ -198,6 +295,7 @@ export function ensurePreviewProxy(
               .on('end', () => {
                 try {
                   renameSync(tmpPath, finalPath)
+                  writeIdentityRecord(finalPath, identity)
                   resolve(finalPath)
                 } catch (e) {
                   rmSync(tmpPath, { force: true })
@@ -275,6 +373,7 @@ export function ensurePreviewProxy(
               .on('end', () => {
                 try {
                   renameSync(tmpPath, outPath)
+                  writeIdentityRecord(outPath, identity)
                   resolve(outPath)
                 } catch (e) {
                   rmSync(tmpPath, { force: true })

@@ -72,6 +72,12 @@ const api = {
     ipcRenderer.invoke(IPC.scanLongFormWindows, filePath, duration, maxWindows, visualWeight),
   ensurePreviewProxy: (filePath: string, assetId: string): Promise<string> =>
     ipcRenderer.invoke(IPC.ensurePreviewProxy, filePath, assetId),
+  /** 保存されていたプロキシが今の元ファイルから作ったものか(`checkPreviewProxy`) */
+  checkPreviewProxy: (
+    filePath: string,
+    proxyPath: string
+  ): Promise<'current' | 'stale' | 'unverified' | 'sourceMissing'> =>
+    ipcRenderer.invoke(IPC.checkPreviewProxy, filePath, proxyPath),
   onPreviewProxyProgress: (
     callback: (payload: { assetId: string; percent: number }) => void
   ): (() => void) => {

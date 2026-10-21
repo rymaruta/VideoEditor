@@ -4,6 +4,7 @@ export const IPC = {
   probeMedia: 'media:probe',
   generateThumbnail: 'media:thumbnail',
   ensurePreviewProxy: 'media:ensurePreviewProxy',
+  checkPreviewProxy: 'media:checkPreviewProxy',
   previewProxyProgress: 'media:previewProxyProgress',
   generateFrame: 'media:frame',
   generateWaveform: 'media:waveform',

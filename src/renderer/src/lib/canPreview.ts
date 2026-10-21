@@ -62,7 +62,8 @@ export type LoadedPreviewPlan =
       audioNeedsFold: boolean
       /**
        * 先にプロキシの指定を外す(元ファイルで再生できるのに、実体の無いプロキシが残っている。
-       * 外さないと、変換している間・変換に失敗したあともプレビューが再生できなかった)
+       * 外さないと、変換している間・変換に失敗したあともプレビューが再生できなかった)。
+       * 元ファイルが差し替わって古くなったプロキシも外す(変換の間に前の撮影の絵を見せない)
        */
       clearStaleProxy?: boolean
     }
@@ -83,6 +84,12 @@ export type LoadedPreviewPlan =
  * - 元ファイルで再生できてプロキシの実体が無いなら、プロキシの指定を外す(外さないと
  *   プレビューは無いプロキシを読みにいき、再生できないままだった)
  *
+ * - プロキシが**今の元ファイルから作ったもの**でなければ(元ファイルを同じ名前で差し替えた)、
+ *   再生できても使わない。以前は再生できれば無条件に使っていたので、差し替えたあとも
+ *   **プレビューは前の撮影のプロキシ、書き出しは新しいファイル**を読み、見えているものと違う
+ *   動画が書き出されていた。確かめ方(記録の無い前の版のプロキシの扱いを含む)は main の
+ *   `checkPreviewProxy`。古いと分かったプロキシは先に外し、必要なら作り直す
+ *
  * 判定関数を引数で受け取るのは、実際に読み込ませる `canPreviewFile` が DOM を使うため
  * (試験では差し替える)。
  */
@@ -91,9 +98,21 @@ export async function planLoadedAssetPreview(
   canPreview: (filePath: string, expectVideo: boolean) => Promise<boolean>,
   probe: (
     filePath: string
-  ) => Promise<{ needsPreviewProxy: boolean; previewAudioNeedsFold?: boolean }>
+  ) => Promise<{ needsPreviewProxy: boolean; previewAudioNeedsFold?: boolean }>,
+  /** 保存されていたプロキシが、今の元ファイルから作ったものか(main の `checkPreviewProxy`) */
+  proxyIsCurrent: (filePath: string, proxyPath: string) => Promise<boolean>
 ): Promise<LoadedPreviewPlan> {
-  if (asset.proxyPath && (await canPreview(asset.proxyPath, asset.hasVideo))) return { kind: 'ok' }
+  let staleProxy = false
+  if (asset.proxyPath) {
+    try {
+      staleProxy = !(await proxyIsCurrent(asset.filePath, asset.proxyPath))
+    } catch {
+      // 確かめられなければ古いとみなす(前の撮影の絵を見せ続けるより、作り直すほうが安全)
+      staleProxy = true
+    }
+  }
+  if (asset.proxyPath && !staleProxy && (await canPreview(asset.proxyPath, asset.hasVideo)))
+    return { kind: 'ok' }
   if (await canPreview(asset.filePath, asset.hasVideo)) {
     let audioNeedsFold = false
     if (asset.hasAudio) {
@@ -117,7 +136,9 @@ export async function planLoadedAssetPreview(
     return {
       kind: 'build',
       codecSaysUnplayable: meta.needsPreviewProxy,
-      audioNeedsFold: meta.previewAudioNeedsFold ?? false
+      audioNeedsFold: meta.previewAudioNeedsFold ?? false,
+      // 古いプロキシは変換の間も見せない(前の撮影の絵を新しい素材として見せない)
+      ...(staleProxy ? { clearStaleProxy: true } : {})
     }
   } catch {
     return { kind: 'probeFailed' }

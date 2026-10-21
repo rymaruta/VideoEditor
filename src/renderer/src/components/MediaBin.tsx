@@ -158,9 +158,18 @@ export function MediaBin(): React.JSX.Element {
       // 結果を今の画面に書かない**(実測: 消えた素材を調べている最中に別のプロジェクトを
       // 開くと、開いたあとの画面に前のプロジェクトのメッセージが出た)。
       if (!stillCurrent()) return
-      const plan = await planLoadedAssetPreview(asset, canPreviewFile, (path) =>
-        // 尺は使わない(尺の無い素材を開くたびに全体を読まない)
-        window.api.probeMedia(path, { skipDurationScan: true })
+      const plan = await planLoadedAssetPreview(
+        asset,
+        canPreviewFile,
+        (path) =>
+          // 尺は使わない(尺の無い素材を開くたびに全体を読まない)
+          window.api.probeMedia(path, { skipDurationScan: true }),
+        // 元ファイルを同じ名前で差し替えていたら、前の撮影のプロキシは使わない。元ファイルが
+        // 見つからないときは比べようが無いのでそのまま(素材の欠けは別に知らせている)
+        async (filePath, proxyPath) =>
+          ['current', 'sourceMissing'].includes(
+            await window.api.checkPreviewProxy(filePath, proxyPath)
+          )
       )
       if (!stillCurrent()) return
       if (plan.kind === 'clearProxy') setAssetProxyPath(asset.id, undefined)

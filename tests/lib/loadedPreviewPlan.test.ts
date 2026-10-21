@@ -19,6 +19,9 @@ const playable =
   async (filePath: string): Promise<boolean> =>
     paths.includes(filePath)
 
+/** 保存されていたプロキシは今の元ファイルから作ったもの(差し替えていない) */
+const fresh = async (): Promise<boolean> => true
+
 const probeOf =
   (meta: { needsPreviewProxy: boolean; previewAudioNeedsFold?: boolean }) => async () =>
     meta
@@ -28,7 +31,8 @@ describe('planLoadedAssetPreview — 開いたプロジェクトの素材のプ�
     const plan = await planLoadedAssetPreview(
       asset({ proxyPath: '/cache/a.mp4' }),
       playable('/cache/a.mp4'),
-      probeOf({ needsPreviewProxy: true, previewAudioNeedsFold: true })
+      probeOf({ needsPreviewProxy: true, previewAudioNeedsFold: true }),
+      fresh
     )
     expect(plan).toEqual({ kind: 'ok' })
   })
@@ -38,7 +42,8 @@ describe('planLoadedAssetPreview — 開いたプロジェクトの素材のプ�
     const plan = await planLoadedAssetPreview(
       asset({ proxyPath: '/cache/gone.mp4' }),
       playable('/media/a.mp4'),
-      probeOf({ needsPreviewProxy: false })
+      probeOf({ needsPreviewProxy: false }),
+      fresh
     )
     expect(plan).toEqual({ kind: 'clearProxy' })
   })
@@ -47,7 +52,8 @@ describe('planLoadedAssetPreview — 開いたプロジェクトの素材のプ�
     const plan = await planLoadedAssetPreview(
       asset(),
       playable('/media/a.mp4'),
-      probeOf({ needsPreviewProxy: false, previewAudioNeedsFold: true })
+      probeOf({ needsPreviewProxy: false, previewAudioNeedsFold: true }),
+      fresh
     )
     expect(plan).toEqual({ kind: 'build', codecSaysUnplayable: false, audioNeedsFold: true })
   })
@@ -56,7 +62,8 @@ describe('planLoadedAssetPreview — 開いたプロジェクトの素材のプ�
     const plan = await planLoadedAssetPreview(
       asset({ proxyPath: '/cache/gone.mp4' }),
       playable('/media/a.mp4'),
-      probeOf({ needsPreviewProxy: false, previewAudioNeedsFold: true })
+      probeOf({ needsPreviewProxy: false, previewAudioNeedsFold: true }),
+      fresh
     )
     expect(plan).toEqual({
       kind: 'build',
@@ -73,13 +80,19 @@ describe('planLoadedAssetPreview — 開いたプロジェクトの素材のプ�
         playable('/media/a.mp4'),
         async () => {
           throw new Error('should not probe')
-        }
+        },
+        fresh
       )
     ).toEqual({ kind: 'ok' })
     expect(
-      await planLoadedAssetPreview(asset(), playable('/media/a.mp4'), async () => {
-        throw new Error('gone')
-      })
+      await planLoadedAssetPreview(
+        asset(),
+        playable('/media/a.mp4'),
+        async () => {
+          throw new Error('gone')
+        },
+        fresh
+      )
     ).toEqual({ kind: 'ok' })
   })
 
@@ -88,13 +101,75 @@ describe('planLoadedAssetPreview — 開いたプロジェクトの素材のプ�
       await planLoadedAssetPreview(
         asset({ proxyPath: '/cache/gone.mp4' }),
         playable(),
-        probeOf({ needsPreviewProxy: true })
+        probeOf({ needsPreviewProxy: true }),
+        fresh
       )
     ).toEqual({ kind: 'build', codecSaysUnplayable: true, audioNeedsFold: false })
     expect(
-      await planLoadedAssetPreview(asset(), playable(), async () => {
-        throw new Error('ENOENT')
-      })
+      await planLoadedAssetPreview(
+        asset(),
+        playable(),
+        async () => {
+          throw new Error('ENOENT')
+        },
+        fresh
+      )
     ).toEqual({ kind: 'probeFailed' })
+  })
+
+  // 【レグレッション】2026-10-21 元ファイルを同じ名前で差し替えると、保存されていたプロキシ
+  // (前の撮影)が再生できるので、そのままプレビューに使われていた。書き出しは新しいファイルを読むので、
+  // 見えているものと違う動画が書き出される。修正前はどちらも { kind: 'ok' } だった
+  describe('【レグレッション】元ファイルを差し替えたあとの古いプロキシ', () => {
+    const stale = async (): Promise<boolean> => false
+
+    it('元ファイルで再生できるなら、古いプロキシの指定を外して元ファイルで見せる', async () => {
+      const plan = await planLoadedAssetPreview(
+        asset({ proxyPath: '/cache/old.mp4' }),
+        playable('/cache/old.mp4', '/media/a.mp4'),
+        probeOf({ needsPreviewProxy: false }),
+        stale
+      )
+      expect(plan).toEqual({ kind: 'clearProxy' })
+    })
+
+    it('元ファイルで再生できない(HEVC)なら、古いプロキシを先に外して作り直す', async () => {
+      const plan = await planLoadedAssetPreview(
+        asset({ proxyPath: '/cache/old.mp4' }),
+        playable('/cache/old.mp4'),
+        probeOf({ needsPreviewProxy: true }),
+        stale
+      )
+      expect(plan).toEqual({
+        kind: 'build',
+        codecSaysUnplayable: true,
+        audioNeedsFold: false,
+        clearStaleProxy: true
+      })
+    })
+
+    it('確かめられなかった(main への問い合わせが失敗した)ときも、古いとみなす', async () => {
+      const plan = await planLoadedAssetPreview(
+        asset({ proxyPath: '/cache/old.mp4' }),
+        playable('/cache/old.mp4', '/media/a.mp4'),
+        probeOf({ needsPreviewProxy: false }),
+        async () => {
+          throw new Error('ipc')
+        }
+      )
+      expect(plan).toEqual({ kind: 'clearProxy' })
+    })
+
+    it('プロキシが無ければ問い合わせない', async () => {
+      const plan = await planLoadedAssetPreview(
+        asset(),
+        playable('/media/a.mp4'),
+        probeOf({ needsPreviewProxy: false }),
+        async () => {
+          throw new Error('should not check')
+        }
+      )
+      expect(plan).toEqual({ kind: 'ok' })
+    })
   })
 })
