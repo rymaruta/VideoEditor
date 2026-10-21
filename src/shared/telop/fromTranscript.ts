@@ -433,27 +433,57 @@ const spokenOf = (vis: readonly VisibleChar[]): [number, number] | undefined =>
 /**
  * 枚の元の部分の範囲(話している時刻 ± 人の修正の範囲の余裕)。この枚に無い前後の文字の話している時刻
  * (真ん中)は含めない(余裕を前後の文字との真ん中までに縮める)。長さ 0 の言葉の文字は詰めて並べるので、
- * 余裕だけ広げると枚の境目で分かれた言葉の隣の枚の文字まで範囲に入り、この枚を消すとその文字まで消えた
+ * 余裕だけ広げると枚の境目で分かれた言葉の隣の枚の文字まで範囲に入り、この枚を消すとその文字まで消えた。
+ *
+ * 縮めるのは、この枚の文字の話している範囲(頭〜終わり)の外だけ。辞書で直した文字は直す前の言葉全体を
+ * 受け持つので、文字の真ん中(「あいうえお」→「X」の 1.25 秒)から測って縮めると、元の言葉の頭の「あ」が
+ * 範囲から外れ、辞書を外して作り直すと直した・消した枚の隣に「あ」が出ていた。
+ * 前後の文字は、元の文字の並びの前後の文字と、同じ元の部分から分けた隣の枚の文字(`before`・`after`)。
+ * 元の文字の並びだけを見ると、辞書で長くして2枚に分けた言葉の隣の枚の文字(同じ元の言葉から作った
+ * 「ブ」「チ」)を見ずに範囲に入れ、片方の枚を消すともう片方の頭・終わりの文字まで消えていた
  */
 function rangeOf(
   vis: readonly VisibleChar[],
-  timed: readonly TimedChar[]
+  timed: readonly TimedChar[],
+  before?: VisibleChar,
+  after?: VisibleChar
 ): [number, number] | undefined {
   const sp = spokenOf(vis)
   if (!sp) return undefined
-  const center = (c: TimedChar): number => (c.start + c.end) / 2
-  const times = vis.map((v) => (v.lo + v.hi) / 2)
+  const center = (c: { start: number; end: number }): number => (c.start + c.end) / 2
+  const mid = (v: VisibleChar): number => (v.lo + v.hi) / 2
+  const times = vis.map(mid)
   const first = Math.min(...times)
   const last = Math.max(...times)
+  const prev: number[] = before ? [mid(before)] : []
+  const next: number[] = after ? [mid(after)] : []
   let i = Math.floor(Math.min(...vis.map((v) => v.a))) - 1
   while (i >= 0 && (timed[i].word < 0 || /\s/.test(timed[i].ch))) i--
+  if (i >= 0) prev.push(center(timed[i]))
   let j = Math.ceil(Math.max(...vis.map((v) => v.b)))
   while (j < timed.length && (timed[j].word < 0 || /\s/.test(timed[j].ch))) j++
+  if (j < timed.length) next.push(center(timed[j]))
   let start = Math.max(0, sp[0] - AUTO_SOURCE_MARGIN)
   let end = sp[1] + AUTO_SOURCE_MARGIN
-  if (i >= 0 && center(timed[i]) < first) start = Math.max(start, (center(timed[i]) + first) / 2)
-  if (j < timed.length && center(timed[j]) > last)
-    end = Math.min(end, (last + center(timed[j])) / 2)
+  // 前後の文字がこの枚の話している範囲の外なら範囲の端との真ん中まで、範囲に食い込んでいれば(言葉の
+  // 時刻が重なる)この枚の文字の真ん中との真ん中まで
+  for (const c of prev)
+    if (c < first) start = Math.max(start, (c + (c < sp[0] ? sp[0] : first)) / 2)
+  for (const c of next) if (c > last) end = Math.min(end, (c + (c > sp[1] ? sp[1] : last)) / 2)
+  // 消した印の鍵は範囲を 1/1000 秒に丸めて覚える(`autoTelopKey`)。丸めで隣の文字の時刻を越えるなら、
+  // この枚の文字の時刻を含むかぎり内側の 1/1000 秒に寄せる(辞書で長くした長さ 0 の言葉の文字は 0.0015 秒
+  // おきに並び、前の枚を消すと丸めた範囲に後ろの枚の頭の「チ」が入って消えていた)
+  const label = (t: number): number => Number(Math.max(0, t).toFixed(3))
+  const before0 = Math.max(...prev.filter((c) => c < first))
+  const after0 = Math.min(...next.filter((c) => c > last))
+  if (label(start) <= before0 + 1e-9) {
+    const s = Math.ceil(start * 1000 - 1e-6) / 1000
+    if (s > before0 + 1e-9 && s <= first) start = s
+  }
+  if (label(end) >= after0 - 1e-9) {
+    const e = Math.floor(end * 1000 + 1e-6) / 1000
+    if (e < after0 - 1e-9 && e >= last) end = e
+  }
   return [start, end]
 }
 
@@ -514,11 +544,16 @@ export function clipTelopChunk(
     const mid = (w.start + w.end) / 2
     return mid >= from - 1e-6 && mid < to + 1e-6
   }
-  const finish = (text: string, vis: VisibleChar[]): ReturnType<typeof clipTelopChunk> => ({
+  const finish = (
+    text: string,
+    vis: VisibleChar[],
+    before?: VisibleChar,
+    after?: VisibleChar
+  ): ReturnType<typeof clipTelopChunk> => ({
     text: wrapTelopLines(text, options.maxLineChars ?? 14).join('\n'),
     times: vis.map((v) => (v.lo + v.hi) / 2),
     spoken: spokenOf(vis),
-    range: rangeOf(vis, timed),
+    range: rangeOf(vis, timed, before, after),
     ...extrasOf(vis)
   })
   // 1枚に収まった枚は、これまでどおり枚の時刻の中の元の文字を選んで整え直す(文は前と同じ)。
@@ -549,9 +584,13 @@ export function clipTelopChunk(
         k++
       }
     }
+    const firstKept = keepVis.indexOf(true)
+    const lastKept = keepVis.lastIndexOf(true)
     return finish(
       text.replace(/\s+/g, ' ').trim(),
-      all.filter((_, i) => keepVis[i])
+      all.filter((_, i) => keepVis[i]),
+      all[firstKept - 1],
+      lastKept >= 0 ? all[lastKept + 1] : undefined
     )
   }
   // 枚の元の文字(何文字目から何文字目まで)から選ぶ。時刻の窓で選ぶと、音声認識の言葉の時刻が重なる
@@ -644,6 +683,8 @@ export function utteranceToTelopChunks(
   const timeAt = (i: number): number =>
     u.sourceStart + ((u.sourceEnd - u.sourceStart) * i) / Math.max(1, chars.length)
   const chunks: TelopChunk[] = []
+  /** 辞書で長くして何枚かに分けた枚の並び([最初の枚, 最後の枚の次]) */
+  const groups: [number, number][] = []
   for (const p of pieces) {
     // 言いよどみを除く・辞書で直すと長さが変わるので、整えた文で改行し直す
     const polished = polish(chars.slice(p.from, p.to).join(''))
@@ -713,6 +754,7 @@ export function utteranceToTelopChunks(
     const ok = vis !== null && times !== null && times.length === visibleCount(text)
     let done = 0
     let shown = 0
+    const base = chunks.length
     sheets.forEach((sheet, si) => {
       const len = sheet.reduce((t, l) => t + [...l].length, 0)
       const sheetText = sheet.join('\n')
@@ -726,7 +768,7 @@ export function utteranceToTelopChunks(
         a = si === 0 ? start : Math.max(start, sheetSpoken[0])
         b = si === sheets.length - 1 ? end : Math.max(a, sheetSpoken[1])
       }
-      const sheetRange = mine ? rangeOf(mine, timed) : undefined
+      const sheetRange = mine ? rangeOf(mine, timed, vis?.[shown - 1], vis?.[shown + n]) : undefined
       chunks.push({
         text: sheetText,
         sourceStart: a,
@@ -738,12 +780,60 @@ export function utteranceToTelopChunks(
       })
       shown += n
     })
+    if (chunks.length - base > 1) groups.push([base, chunks.length])
   }
+  spaceSheets(chunks, groups, minDur)
   // 次のテロップに重ならないように(最低表示時間で伸ばした分を詰める)
   for (let k = 0; k < chunks.length - 1; k++) {
     chunks[k].sourceEnd = Math.min(chunks[k].sourceEnd, chunks[k + 1].sourceStart)
   }
   return chunks
+}
+
+/** 辞書で長くして分けた枚を、少なくともこれだけ出す(秒。仮編集はこれより短い枚を捨てる) */
+const MIN_SHEET_SEC = 0.35
+/** 声のある枚の頭を動かしてよい長さ(秒。声より遅れて出すぎない・前の枚が声より早く消えすぎない) */
+const SHEET_SHIFT_SEC = 0.1
+
+/**
+ * 辞書で長くして何枚かに分けた枚の頭を、どの枚も `MIN_SHEET_SEC` は出るように空ける。枚の時刻はその枚の
+ * 文字を話している時刻から決めるので、長さ 0 の言葉を長くして3枚に分けると、真ん中の枚が 0.01 秒ほどしか
+ * 無く、仮編集で捨てられてその言葉が一度も出なかった。
+ * 足りない枚があるときだけ、後ろの枚の頭を早め、それでも足りなければ遅らせる(分けた枚に続く枚の頭も)。
+ * 声のある枚の頭は `SHEET_SHIFT_SEC` まで(遅らせると声に遅れ、早めると前の枚が声より早く消える)。
+ * 声の無い(長さ 0 の言葉だけの)枚の頭は、分けた最初の枚の頭より後ろで動かす。それでも入りきらない
+ * (声のある枚に挟まれて間が狭すぎる)ときは、入るだけ空ける
+ */
+function spaceSheets(
+  chunks: TelopChunk[],
+  groups: readonly [number, number][],
+  minDur: number
+): void {
+  const voiced = (c: TelopChunk | undefined): boolean =>
+    !!c?.spoken && c.spoken[1] - c.spoken[0] > 0.05
+  for (const [g0, g1] of groups) {
+    const k = g1 - g0
+    // 枚の頭(k 番目は続く枚の頭。無ければ動かさない)
+    const a = Array.from({ length: k + 1 }, (_, s) => chunks[g0 + s]?.sourceStart ?? Infinity)
+    if (a.slice(1).every((x, s) => x - a[s] >= MIN_SHEET_SEC)) continue
+    const lo = (s: number): number =>
+      Math.max(a[0], voiced(chunks[g0 + s - 1]) ? a[s] - SHEET_SHIFT_SEC : -Infinity)
+    const hi = (s: number): number =>
+      g0 + s >= chunks.length ? a[s] : voiced(chunks[g0 + s]) ? a[s] + SHEET_SHIFT_SEC : Infinity
+    const b = [...a]
+    for (let s = k - 1; s >= 1; s--)
+      b[s] = Math.max(lo(s), Math.min(a[s], b[s + 1] - MIN_SHEET_SEC))
+    for (let s = 1; s <= k; s++) b[s] = Math.min(hi(s), Math.max(b[s], b[s - 1] + MIN_SHEET_SEC))
+    // 足りないまま(間が狭い)なら、後ろから詰め直して頭の順を保つ
+    for (let s = k - 1; s >= 1; s--)
+      b[s] = Math.max(lo(s), Math.min(b[s], b[s + 1] - MIN_SHEET_SEC))
+    for (let s = 1; s <= k; s++) b[s] = Math.max(b[s], b[s - 1])
+    for (let s = 1; s <= k && g0 + s < chunks.length; s++) {
+      const c = chunks[g0 + s]
+      c.sourceStart = b[s]
+      c.sourceEnd = Math.max(c.sourceEnd, b[s] + minDur)
+    }
+  }
 }
 
 export interface SettleOptions {
