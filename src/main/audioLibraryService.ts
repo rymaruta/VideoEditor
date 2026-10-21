@@ -4,13 +4,18 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import https from 'https'
 import http from 'http'
+import { pipeline } from 'stream/promises'
 import { probeMedia } from './ffmpegService'
 
 const MAX_REDIRECTS = 5
 const DOWNLOAD_TIMEOUT_MS = 30000
+const TIMEOUT_MESSAGE = 'ダウンロードがタイムアウトしました'
+/** 本文の途中で接続が切れたとき。下の `KNOWN_CODES` の ECONNRESET と同じ文言にそろえる */
+const CONNECTION_DROPPED_MESSAGE = '通信が途中で切れました。もう一度お試しください。'
 
 function download(url: string, destPath: string, redirectsLeft = MAX_REDIRECTS): Promise<void> {
   return new Promise((resolve, reject) => {
+    let timedOut = false
     const client = url.startsWith('http://') ? http : https
     const req = client.get(url, (res) => {
       const status = res.statusCode ?? 0
@@ -30,14 +35,32 @@ function download(url: string, destPath: string, redirectsLeft = MAX_REDIRECTS):
         reject(new Error(`ダウンロードに失敗しました (HTTP ${status})`))
         return
       }
+      // **`res.pipe` では本文の途中で切れたことに誰も気づかない。** `pipe` は読み手の
+      // 'error'/'aborted' を書き手へ伝えないので、`finish` も `error` も来ず、Promise が
+      // 永久に決まらなかった(実測: 見出しのあと 1000バイトで配信元が切断すると、
+      // 3秒待っても決まらず、`UUID-曲名.mp3` が 1000バイトの断片のまま audio-library に残った。
+      // 30秒の停止検知も、応答が始まった後の切断では効いていなかった)。
+      // `pipeline` は両側の失敗を拾い、書き込み側を閉じてから失敗を返す。
       const fileStream = createWriteStream(destPath)
-      res.pipe(fileStream)
-      fileStream.on('finish', () => fileStream.close(() => resolve()))
-      fileStream.on('error', reject)
+      pipeline(res, fileStream)
+        .then(() => {
+          // 接続が素直に閉じただけだと、短いまま「書き終えた」で終わることがある。
+          // 足りないまま渡すと、途中で音が途切れた曲が完成品として素材に入る
+          const expected = Number(res.headers['content-length'])
+          const short = Number.isFinite(expected) && fileStream.bytesWritten !== expected
+          if (!res.complete || short) throw new Error(CONNECTION_DROPPED_MESSAGE)
+          resolve()
+        })
+        .catch((e: unknown) => {
+          // 止まったまま 30秒で切ったときは、切った結果の「途中で切れた」ではなく
+          // タイムアウトとして伝える(次の一手が違う: 回線の状態を確かめる)
+          reject(timedOut ? new Error(TIMEOUT_MESSAGE) : e)
+        })
     })
     req.on('error', reject)
     req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
-      req.destroy(new Error('ダウンロードがタイムアウトしました'))
+      timedOut = true
+      req.destroy(new Error(TIMEOUT_MESSAGE))
     })
   })
 }
@@ -59,7 +82,8 @@ const KNOWN_CODES: [RegExp, string][] = [
     /^(ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ENETDOWN)$/,
     '音源の配信元に接続できませんでした。インターネット接続を確認して、もう一度お試しください。'
   ],
-  [/^(ECONNRESET|EPIPE)$/, '通信が途中で切れました。もう一度お試しください。'],
+  // ERR_STREAM_PREMATURE_CLOSE は、本文を受け取っている途中で接続が閉じたときに `pipeline` が返す
+  [/^(ECONNRESET|EPIPE|ECONNABORTED|ERR_STREAM_PREMATURE_CLOSE)$/, CONNECTION_DROPPED_MESSAGE],
   [
     /^(ETIMEDOUT|ESOCKETTIMEDOUT)$/,
     '接続がタイムアウトしました。回線の状態を確かめて、もう一度お試しください。'

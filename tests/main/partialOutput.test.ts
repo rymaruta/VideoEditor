@@ -106,3 +106,22 @@ describe('withVeprojExtension', () => {
     expect(withVeprojExtension('/x/v1.2')).toBe('/x/v1.2.veproj')
   })
 })
+
+describe('書き出しの一時ファイル名の長さ', () => {
+  it('保存ダイアログが通す長い名前(上限 255バイト近く)でも、一時ファイルが上限を超えず書き出せる', async () => {
+    const d = work()
+    // 日本語 80文字 = 240バイト + `.mp4` = 244バイト(本来の名前は上限に収まる)
+    const out = join(d, `${'実'.repeat(80)}.mp4`)
+    const partialName = partialPathFor(out).split(/[\\/]/).pop()!
+    expect(Buffer.byteLength(partialName)).toBeLessThanOrEqual(64)
+    expect(extname(partialName)).toBe('.mp4')
+    await writeViaPartial(out, async (p) => writeFileSync(p, 'video'))
+    expect(readFileSync(out, 'utf8')).toBe('video')
+    expect(readdirSync(d)).toEqual([`${'実'.repeat(80)}.mp4`])
+  })
+
+  it('同じ保存先へ続けて頼んでも、一時ファイル名は毎回変わる', () => {
+    const out = join(work(), 'a.mp4')
+    expect(partialPathFor(out)).not.toBe(partialPathFor(out))
+  })
+})

@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { createHash } from 'crypto'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from 'fs'
-import { basename, join } from 'path'
+import { basename, dirname, join } from 'path'
 import { cachedEnvelope } from './audioPcm'
 import { trackUntilDone } from './liveProcesses'
 import { contentFingerprint } from './fileFingerprint'
@@ -62,16 +62,54 @@ export function trackPath(
   return join(outDir, `${stem}_${key}_track${index + 1}.m4a`)
 }
 
-async function extractOne(
+/**
+ * 作っている途中のトラック。同じ出力を同時に頼まれたら1回にまとめる
+ * (`ensurePreviewProxy` の `inFlight`・ノイズ除去の `runOne` と同じ考え方)。
+ *
+ * 収録フォルダの読み取りは、ダイアログを Esc で閉じて「新しい回」から同じフォルダを選び直すと
+ * **main 側で2本が重なって走る**(1本目は止まらない)。まとめずにいると2本の ffmpeg が
+ * 同じ一時ファイルへ書き、片方の後始末がもう片方の書きかけを消していた
+ * (実測: 2本目が `ENOENT: … rename '…_track1.m4a.partial.m4a'` で失敗し、
+ *  読み取りは「1本目だけを使う」側へ落ちた。名前を替える瞬間がずれれば、
+ *  **書きかけのファイルが完成品の名前に入り**、次からは `existsSync` だけで使い回される)。
+ */
+const inFlight = new Map<string, Promise<void>>()
+/** 一時ファイルの名前を実行ごとに変えるための連番(同じミリ秒に2本始まっても重ならない) */
+let partialSequence = 0
+
+function extractOne(
   ffmpegPath: string,
   video: string,
   stream: AudioStreamInfo,
   out: string
 ): Promise<void> {
-  if (existsSync(out)) return
+  if (existsSync(out)) return Promise.resolve()
+  const shared = inFlight.get(out)
+  if (shared) return shared
+  const task = extractOneUnshared(ffmpegPath, video, stream, out).finally(() => {
+    if (inFlight.get(out) === task) inFlight.delete(out)
+  })
+  inFlight.set(out, task)
+  return task
+}
+
+async function extractOneUnshared(
+  ffmpegPath: string,
+  video: string,
+  stream: AudioStreamInfo,
+  out: string
+): Promise<void> {
   mkdirSync(join(out, '..'), { recursive: true })
-  // 途中で止まったときに壊れたファイルを使わないよう、別名に書いてから名前を替える
-  const partial = `${out}.partial.m4a`
+  // 途中で止まったときに壊れたファイルを使わないよう、別名に書いてから名前を替える。
+  // 別名は**実行ごとに別**にする(ノイズ除去と同じ)。固定の名前だと、まとめ損ねた別の実行
+  // (別のプロセスなど)の書きかけを、こちらが完成品の名前へ替えたり消したりしてしまう。
+  // 完成品の名前の後ろへは足さず、同じフォルダに**長さの決まった**名前で置く
+  // (録画の名前が長いと、一時ファイルだけが1要素 255バイトの上限を先に超えるため。
+  //  企画の保存 `saveProjectFile` と同じ直し方)
+  const partial = join(
+    dirname(out),
+    `.track-${process.pid}-${Date.now()}-${partialSequence++}.partial.m4a`
+  )
   const codec = stream.codec === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '256k']
   try {
     await run(ffmpegPath, [
