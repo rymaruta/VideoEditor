@@ -2245,10 +2245,15 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 次の保存が前の企画のファイルを黙って上書きしていた)。id では見分けられないので番号で見る
       if (session !== undefined && session !== state.projectSession) return state
       if (state.project.id !== savedProject.id) return state
-      // ドラッグ・入力のまとまりの途中で保存したら、まとまりの始まりは「保存したものと違う」状態。
-      // 始めた所へ戻して離したとき、始まりの「保存済み」を戻すと、保存したものと違うのに未保存と
-      // 出ず、閉じても確かめず・自動保存もしなかった(画面は戻した値、ファイルは保存した値のまま)
-      if (coalesceStart) coalesceStart = { ...coalesceStart, isDirty: true }
+      // ドラッグ・入力のまとまりの途中で保存したら、まとまりの始まりが保存したものと同じかを測り直す。
+      // 始めた所へ戻して離したとき、始まりの「保存済み」をそのまま戻すと、保存したものと違うのに未保存と
+      // 出ず、閉じても確かめず・自動保存もしなかった(画面は戻した値、ファイルは保存した値のまま)。
+      // 逆に、始まりと同じものを保存していたなら(保存を始めてからドラッグした)、戻したら保存済み
+      if (coalesceStart)
+        coalesceStart = {
+          ...coalesceStart,
+          isDirty: !savedOrBackgroundOnly(coalesceStart.snapshot, savedProject)
+        }
       return {
         currentFilePath: filePath,
         // **ディスクに書いたのは `savedProject`。** 保存は IPC を跨ぐので、書いている

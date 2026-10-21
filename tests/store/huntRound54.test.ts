@@ -313,4 +313,17 @@ describe('ドラッグ・入力のまとまりの途中で保存してから、�
     st().setProjectName('g')
     expect(st().isDirty).toBe(true)
   })
+
+  it('保存を始めた後にドラッグし、保存した状態へ戻して離すと、保存済みのまま', () => {
+    savedProject()
+    const atSave = st().project
+    beginHistoryGesture('clipTrim:c1')
+    st().updateClipTrim('c1', 0, 6)
+    // ドラッグを始める前の状態(0〜4)の保存が、ドラッグの途中で書き終わる
+    st().markSaved('/x/p.veproj', atSave, st().projectSession)
+    st().updateClipTrim('c1', 0, 4)
+    endHistoryGesture()
+    expect(st().project.clips[0].outPoint).toBe(4)
+    expect(st().isDirty).toBe(false)
+  })
 })
