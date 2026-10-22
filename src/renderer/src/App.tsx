@@ -21,6 +21,8 @@ import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
 import { defaultBottomHeight } from './lib/layoutDefaults'
 import { WorkflowBar } from './components/WorkflowBar'
+import { PanelTabBar } from './components/PanelTabBar'
+import { storedPanelTab } from './lib/panelTabs'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { useProjectStore } from './store/projectStore'
@@ -117,8 +119,21 @@ const PUBLISH_TABS: TabDef[] = [
   }
 ]
 
+const ALL_TABS = [...EDIT_TABS, ...PUBLISH_TABS]
+
 /** メニューバーの「ウィンドウ」に並べる右側のパネル */
-const MENU_WINDOWS = [...EDIT_TABS, ...PUBLISH_TABS].map(({ id, label }) => ({ id, label }))
+const MENU_WINDOWS = ALL_TABS.map(({ id, label }) => ({ id, label }))
+
+/** 上段左のパネルで選んだタブ(次に開いたときもそのタブにする) */
+const PANEL_TAB_KEY = 've-panel-tab'
+
+function readStoredTab(): RightTab {
+  try {
+    return storedPanelTab(localStorage.getItem(PANEL_TAB_KEY), ALL_TABS, 'inspector') as RightTab
+  } catch {
+    return 'inspector'
+  }
+}
 
 /**
  * 画面の配置(Windows の編集ソフト・Premiere と同じ並び)。
@@ -199,7 +214,16 @@ interface ResizeDragState {
 }
 
 function App(): React.JSX.Element {
-  const [tab, setTab] = useState<PanelTab>('inspector')
+  const [tab, setTab] = useState<PanelTab>(readStoredTab)
+  // 選んだタブを覚える(ソースは素材を開いている間だけなので覚えない)
+  useEffect(() => {
+    if (tab === 'source') return
+    try {
+      localStorage.setItem(PANEL_TAB_KEY, tab)
+    } catch {
+      // 覚えられなくても今回は効く
+    }
+  }, [tab])
   const projectName = useProjectStore((s) => s.project.name)
   const isDirty = useProjectStore((s) => s.isDirty)
   const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
@@ -380,12 +404,21 @@ function App(): React.JSX.Element {
         {/* ===== 上段: パネル(タブ) / プログラムモニター ===== */}
         <div className="workspace-row" style={{ flex: 1 }}>
           <section className="frame frame-props" style={{ width: size.props }}>
-            <div className="panel-tabs" role="tablist" aria-label="パネル">
-              {sourceAssetId &&
-                tabButton({ id: 'source', label: 'ソース', description: '素材をソースで確認する' })}
-              {EDIT_TABS.map(tabButton)}
-              {PUBLISH_TABS.map(tabButton)}
-            </div>
+            {/* よく使うタブを表に、残りは「その他」に用途ごとにまとめる(1366 幅でも横に送らずに見つかる) */}
+            <PanelTabBar
+              tabs={ALL_TABS}
+              current={tab}
+              onSelect={(id) => setTab(id as PanelTab)}
+              leading={
+                sourceAssetId
+                  ? tabButton({
+                      id: 'source',
+                      label: 'ソース',
+                      description: '素材をソースで確認する'
+                    })
+                  : undefined
+              }
+            />
             {/* All tab panels stay mounted (hidden via CSS) rather than being unmounted on
                 switch, so an in-progress AI/API request (Gemini, VOICEVOX, YouTube, etc.) in
                 one tab keeps running and its result is still there when the user comes back,

@@ -194,6 +194,8 @@ interface PipelineState {
   /** 「このままでよい」とした要確認の印 */
   running: boolean
   screenOpen: boolean
+  /** 自動編集の画面の見せ方: 工程の全体か、確認(要確認の一覧を大きく)。上の帯の「自動編集」「確認」 */
+  screenView: 'auto' | 'review'
   /** 音声認識に使った計算装置(GPU / CPU) */
   asrDevice: AsrDevice | null
   /** 仕上がりの長さ(分)。0 なら決めない(不要な場面だけ落とす) */
@@ -266,6 +268,7 @@ interface PipelineState {
   makeShorts: (folder: string, options: ShortOptions) => Promise<string[]>
 
   setScreenOpen: (open: boolean) => void
+  setScreenView: (view: 'auto' | 'review') => void
   scanFolder: (root: string) => Promise<void>
   updateSource: (
     id: string,
@@ -1787,9 +1790,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     log: [],
     running: false,
     screenOpen: false,
+    screenView: 'auto',
 
     addLog: (text) => log(text),
     setScreenOpen: (open) => set({ screenOpen: open }),
+    setScreenView: (view) => set({ screenView: view }),
 
     resetResults: () => {
       activityCache = null

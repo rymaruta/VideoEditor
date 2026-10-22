@@ -721,3 +721,96 @@ textarea {
 .auto-edit-screen {
   inset: 46px 0 0 0;
 }
+
+/* ---------- 上段左のパネルのタブ: よく使うものを表に、残りは「その他」に(lib/panelTabs) ---------- */
+.panel-tabs-grouped {
+  overflow: hidden;
+  flex-wrap: nowrap;
+}
+.panel-tabs-grouped .panel-tab {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.panel-tab-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.panel-tab-more.open {
+  background-image: linear-gradient(180deg, #2a2f45, #20243a);
+  color: var(--ve-text);
+}
+/* 「その他」から選んだタブ: 表のタブの後ろに、琥珀の点を添えて */
+.panel-tab-more-current::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--ve-accent);
+  box-shadow: 0 0 8px rgba(255, 154, 43, 0.8);
+}
+.app-popover.panel-more-menu {
+  width: 300px;
+  padding: 6px;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.panel-more-group + .panel-more-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.1);
+}
+.panel-more-group-label {
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--ve-text-3);
+}
+.panel-more-item,
+.panel-more-item:hover:not(:disabled) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  height: auto;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background-image: none;
+  box-shadow: none;
+  text-align: left;
+}
+.panel-more-item:hover:not(:disabled),
+.panel-more-item:focus-visible {
+  background-color: #262b45;
+}
+.panel-more-item:focus-visible {
+  outline: 2px solid var(--ve-accent);
+  outline-offset: -2px;
+}
+.panel-more-item.current,
+.panel-more-item.current:hover:not(:disabled) {
+  background-image: linear-gradient(180deg, rgba(255, 178, 36, 0.16), rgba(255, 138, 31, 0.08));
+  box-shadow: inset 0 0 0 1px var(--ve-accent-line);
+}
+.panel-more-item-label {
+  font-size: 13px;
+  color: var(--ve-text);
+}
+.panel-more-item.current .panel-more-item-label {
+  color: var(--ve-accent-ink);
+}
+.panel-more-item-note {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ve-text-3);
+}

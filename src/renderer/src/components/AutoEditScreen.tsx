@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { sourceDuration } from '@shared/ingest/classify'
 import { usePipelineStore, STEPS, type StepStatus } from '../store/pipelineStore'
 import { onProjectSwitch, useProjectStore } from '../store/projectStore'
-import { useMenuCommand } from '../lib/menuCommands'
+import { emitMenuCommand, useMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
 import { buildRunReport, formatElapsed } from '../lib/runReport'
 import { loadEditXml } from '../lib/editXml'
@@ -29,6 +29,23 @@ import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 import { LocalAiRetry } from './LocalAiRetry'
 import { ShortsPanel } from './ShortsPanel'
 import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
+import { nextAction, type NextActionId } from '../lib/autoEditNext'
+import {
+  commonSpan,
+  formatDuration,
+  overallFraction,
+  sceneChips,
+  sceneTitle
+} from '../lib/autoEditView'
+import {
+  Chip,
+  FoundOverview,
+  KeepBand,
+  MetricCard,
+  NextActionCard,
+  SceneThumb,
+  StepIcon
+} from './AutoEditOverview'
 
 /**
  * 自動編集の画面(自動編集 > 自動編集の画面)。デザイン案の「AutoEdit」。
@@ -37,7 +54,7 @@ import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
  * 工程は裏で進むので、この画面を閉じて編集画面に戻っても止まらない。
  */
 
-type CenterTab = 'sources' | 'sync' | 'transcript' | 'structure' | 'effects' | 'log'
+type CenterTab = 'overview' | 'sources' | 'sync' | 'transcript' | 'structure' | 'effects' | 'log'
 
 const SOURCE_COLORS = ['#9ea7e0', '#7fb5d8', '#d8a77f', '#c49ee0', '#7fcf96', '#e0d27f', '#e08ab0']
 
@@ -47,10 +64,6 @@ function fileName(path: string): string {
 
 function pct(v: number): string {
   return Number.isFinite(v) ? `${Math.round(v * 100)}%` : '—'
-}
-
-function stepMark(state: StepStatus['state']): string {
-  return state === 'done' ? '✓' : state === 'error' ? '!' : ''
 }
 
 /** 工程ごとの残り時間の起点(段階が変わって進み具合が戻るたびに取り直す) */
@@ -92,6 +105,7 @@ interface SyncLane {
 export function AutoEditScreen(): React.JSX.Element | null {
   const open = usePipelineStore((s) => s.screenOpen)
   const setOpen = usePipelineStore((s) => s.setScreenOpen)
+  const view = usePipelineStore((s) => s.screenView)
   const steps = usePipelineStore((s) => s.steps)
   const sources = usePipelineStore((s) => s.sources)
   const report = usePipelineStore((s) => s.report)
@@ -127,7 +141,10 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const editNote = usePipelineStore((s) => s.editNote)
   const restored = usePipelineStore((s) => s.restored)
 
-  const [tab, setTab] = useState<CenterTab>('sync')
+  // 開いた直後は「全体」(次にやること・見つかったもの・構成の帯)
+  const [tab, setTab] = useState<CenterTab>('overview')
+  const reviewRef = useRef<HTMLUListElement>(null)
+  const [selectedScene, setSelectedScene] = useState<string | null>(null)
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
   const [reportSaved, setReportSaved] = useState<string | null>(null)
   const [comparison, setComparison] = useState<
@@ -145,7 +162,17 @@ export function AutoEditScreen(): React.JSX.Element | null {
   )
 
   useMenuCommand((id) => {
-    if (id === 'auto.screen') setOpen(true)
+    if (id === 'auto.screen') {
+      usePipelineStore.getState().setScreenView('auto')
+      setOpen(true)
+    }
+    // 上の帯の「確認」: この画面を確認の見せ方(要確認の一覧を大きく)で開き、一覧へ
+    if (id === 'auto.review') {
+      usePipelineStore.getState().setScreenView('review')
+      setOpen(true)
+      setReviewTab('open')
+      requestAnimationFrame(() => focusReview())
+    }
   })
 
   useEffect(() => {
@@ -168,10 +195,75 @@ export function AutoEditScreen(): React.JSX.Element | null {
     STEPS.reduce((t, s) => t + (steps[s.id].state === 'done' ? 100 : steps[s.id].percent), 0) /
     STEPS.length
   const current = STEPS.find((s) => steps[s.id].state === 'run')
+  const overallPct = Math.round(
+    overallFraction(
+      STEPS.map((st) => ({ state: steps[st.id].state, percent: steps[st.id].percent }))
+    ) * 100
+  )
+  const keptOf = (id: string): boolean => keep[id] ?? roughCut?.keptIds.includes(id) ?? false
+  const span = commonSpan(project)
+  const usedSources = sources.filter((x) => x.kind !== 'skip')
+  const action = nextAction({
+    hasScan: Boolean(scan),
+    cameras: usedSources.filter((x) => x.kind === 'camera').length,
+    mics: usedSources.filter((x) => x.kind === 'mic').length,
+    running,
+    steps: STEPS.map((st) => ({ id: st.id, label: st.label, ...steps[st.id] })),
+    scenes: scenes.length,
+    roughCut: roughCut ? { kept: roughCut.kept, duration: roughCut.duration } : null,
+    openIssues: openIssues.length
+  })
 
   const utterances = placedUtterances(project)
   const placedEffects = project.textOverlays.filter((o) => o.effectId).length
   const placementOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
+
+  /** 要確認の一覧の最初の項目(無ければ一覧のタブ)へフォーカスする */
+  function focusReview(): void {
+    const target =
+      reviewRef.current?.querySelector<HTMLElement>('.auto-edit-review-item button') ??
+      document.querySelector<HTMLElement>('.auto-edit-review [role="tab"]')
+    target?.focus()
+  }
+
+  function rebuild(): void {
+    // 前の版で保存した企画は、手で決めた残す/落とすが残っていない。押し間違いで場面が
+    // 入れ替わらないよう、作り直す前に確かめる
+    if (restored?.legacy && !confirm(LEGACY_REBUILD_CONFIRM)) return
+    void usePipelineStore.getState().rebuildRoughCut()
+  }
+
+  /** 「次にやること」のボタン */
+  function runAction(id: NextActionId): void {
+    switch (id) {
+      case 'newEpisode':
+        emitMenuCommand('file.newEpisode')
+        return
+      case 'start':
+      case 'retry':
+        void runPipeline()
+        return
+      case 'cancel':
+        cancel()
+        return
+      case 'rebuild':
+        rebuild()
+        return
+      case 'review':
+        usePipelineStore.getState().setScreenView('review')
+        setReviewTab('open')
+        focusReview()
+        return
+      case 'export':
+        setOpen(false)
+        emitMenuCommand('file.export')
+        return
+      case 'background':
+      case 'finish':
+        setOpen(false)
+        return
+    }
+  }
 
   /** 処理の記録(工程ごとの時間・PC の構成・ログ)をテキストに保存する */
   async function saveRunReport(): Promise<void> {
@@ -294,12 +386,12 @@ export function AutoEditScreen(): React.JSX.Element | null {
           }))
       : []
   // 同期の結果: 共通の時間軸
-  const span = Math.max(1, ...lanes.flatMap((l) => l.bars.map((b) => b.start + b.duration)))
+  const syncSpan = Math.max(1, ...lanes.flatMap((l) => l.bars.map((b) => b.start + b.duration)))
   // 目盛りは6本前後になる切りのよい間隔(10秒〜2時間)
   const tickStep =
-    [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200].find((v) => v >= span / 6) ?? 7200
+    [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200].find((v) => v >= syncSpan / 6) ?? 7200
   const ticks: number[] = []
-  for (let t = 0; t <= span; t += tickStep) ticks.push(t)
+  for (let t = 0; t <= syncSpan; t += tickStep) ticks.push(t)
   // 素材の整理: 読んだ収録フォルダが無ければ(開き直した企画)、企画に残る同期の情報の機材を並べる
   const projectSources =
     sources.length === 0 && project.multicam
@@ -316,9 +408,25 @@ export function AutoEditScreen(): React.JSX.Element | null {
       : []
 
   return (
-    <div className="auto-edit-screen" role="region" aria-label="自動編集">
+    <div
+      className={`auto-edit-screen ${view === 'review' ? 'review-mode' : ''}`}
+      role="region"
+      aria-label={view === 'review' ? '確認' : '自動編集'}
+    >
       <div className="auto-edit-header">
-        <span className="auto-edit-title">自動編集 — {projectName}</span>
+        <span className="auto-edit-title">
+          {view === 'review' ? '確認' : '自動編集'}
+          <span className="auto-edit-title-sub">{projectName}</span>
+        </span>
+        <span className={`auto-edit-badge ${action.kind}`}>
+          {running
+            ? `実行中 ${overallPct}%`
+            : action.kind === 'done'
+              ? '仮編集あり'
+              : action.kind === 'error'
+                ? '止まりました'
+                : `${doneCount} / ${STEPS.length} 工程`}
+        </span>
         <div className="dialog-footer-spacer" />
         <button className="small-button" onClick={() => setOpen(false)}>
           編集画面に戻る
@@ -330,9 +438,9 @@ export function AutoEditScreen(): React.JSX.Element | null {
         <section className="auto-edit-steps" aria-label="自動編集の工程">
           <div className="auto-edit-overall">
             <div className="auto-edit-overall-row">
-              <span>全体</span>
-              <span>
-                {doneCount} / {STEPS.length} 工程
+              <span className="auto-edit-overall-label">全体</span>
+              <span className="tc">
+                {overallPct}% · {doneCount} / {STEPS.length} 工程
               </span>
             </div>
             <div className="progress-bar">
@@ -365,7 +473,9 @@ export function AutoEditScreen(): React.JSX.Element | null {
               const st = steps[s.id]
               return (
                 <li key={s.id} className={`auto-edit-step ${s.id} ${st.state}`}>
-                  <span className="auto-edit-step-mark">{stepMark(st.state)}</span>
+                  <span className="auto-edit-step-mark">
+                    <StepIcon state={st.state} percent={st.percent} />
+                  </span>
                   <span className="auto-edit-step-body">
                     <span className="auto-edit-step-name">{s.label}</span>
                     {st.note && st.state !== 'run' && (
@@ -404,9 +514,10 @@ export function AutoEditScreen(): React.JSX.Element | null {
 
         {/* 今の工程の中身 */}
         <section className="auto-edit-center" aria-label="工程の中身">
-          <div className="panel-tabs" role="tablist">
+          <div className="panel-tabs" role="tablist" aria-label="工程の中身">
             {(
               [
+                ['overview', '全体'],
                 ['sources', '素材の整理'],
                 ['sync', '同期の結果'],
                 ['transcript', '文字起こし'],
@@ -426,6 +537,98 @@ export function AutoEditScreen(): React.JSX.Element | null {
               </button>
             ))}
           </div>
+
+          {tab === 'overview' && (
+            <div className="auto-edit-pane ae-overview">
+              <NextActionCard
+                action={action}
+                onAction={runAction}
+                disabled={(id) =>
+                  (id === 'rebuild' && (running || scenes.length === 0)) ||
+                  ((id === 'start' || id === 'retry') && (!scan || sources.length === 0))
+                }
+              />
+              {(running || doneCount > 0) && (
+                <div className="ae-metrics">
+                  <MetricCard
+                    label="工程"
+                    value={`${doneCount} / ${STEPS.length}`}
+                    unit={running ? `· ${overallPct}%` : undefined}
+                    tone="blue"
+                  />
+                  {scenes.length > 0 && (
+                    <MetricCard
+                      label="場面"
+                      value={scenes.length.toLocaleString()}
+                      unit={roughCut ? `· 残す ${roughCut.kept}` : undefined}
+                      tone="violet"
+                    />
+                  )}
+                  {roughCut && (
+                    <MetricCard
+                      label="仕上がり"
+                      value={formatDuration(roughCut.duration)}
+                      tone="green"
+                    />
+                  )}
+                  {(report || roughCut || scenes.length > 0) && (
+                    <MetricCard
+                      label="要確認"
+                      value={openIssues.length.toLocaleString()}
+                      unit="件"
+                      tone="amber"
+                    />
+                  )}
+                </div>
+              )}
+              {span > 0 && (
+                <FoundOverview
+                  project={project}
+                  span={span}
+                  transcribe={steps.transcribe}
+                  events={steps.events.state}
+                  scenes={scenes}
+                  keptOf={keptOf}
+                />
+              )}
+              {scenes.length > 0 && span > 0 && (
+                <section className="ae-card" aria-label="構成">
+                  <div className="ae-card-head">
+                    <span className="ae-card-title">構成</span>
+                    <span className="ae-muted">
+                      残す {scenes.filter((sc) => keptOf(sc.id)).length} · 落とす{' '}
+                      {scenes.filter((sc) => !keptOf(sc.id)).length}
+                      {judgeSource === 'heuristic' && ' · 判定は簡易の点数'}
+                      {judgeSource === 'ai' && ' · 判定は AI'}
+                    </span>
+                    <button
+                      type="button"
+                      className="small-button ae-card-link"
+                      onClick={() => setTab('structure')}
+                    >
+                      場面ごとの判定を見る
+                    </button>
+                  </div>
+                  <KeepBand
+                    scenes={scenes}
+                    span={span}
+                    judgements={judgements}
+                    keptOf={keptOf}
+                    selected={selectedScene}
+                    onSelect={(id) => {
+                      setSelectedScene(id)
+                      setTab('structure')
+                    }}
+                  />
+                  <div className="ae-band-legend" aria-hidden="true">
+                    <span className="ae-legend kept">残す</span>
+                    <span className="ae-legend highlight">見どころ</span>
+                    <span className="ae-legend dropped">落とす</span>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
 
           {tab === 'sources' && (
             <div className="auto-edit-pane">
@@ -524,8 +727,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
                               key={b.key}
                               className={`sync-bar ${b.method}`}
                               style={{
-                                left: `${(b.start / span) * 100}%`,
-                                width: `${Math.max(0.3, (b.duration / span) * 100)}%`,
+                                left: `${(b.start / syncSpan) * 100}%`,
+                                width: `${Math.max(0.3, (b.duration / syncSpan) * 100)}%`,
                                 background:
                                   b.method === 'audio'
                                     ? SOURCE_COLORS[i % SOURCE_COLORS.length]
@@ -544,7 +747,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                           <span
                             key={t}
                             className="sync-tick"
-                            style={{ left: `${(t / span) * 100}%` }}
+                            style={{ left: `${(t / syncSpan) * 100}%` }}
                           >
                             {formatTimecode(t, 30).slice(0, 8)}
                           </span>
@@ -754,12 +957,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 <button
                   className="small-button"
                   disabled={running || scenes.length === 0}
-                  onClick={() => {
-                    // 前の版で保存した企画は、手で決めた残す/落とすが残っていない。押し間違いで場面が
-                    // 入れ替わらないよう、作り直す前に確かめる
-                    if (restored?.legacy && !confirm(LEGACY_REBUILD_CONFIRM)) return
-                    void usePipelineStore.getState().rebuildRoughCut()
-                  }}
+                  onClick={rebuild}
                   title="残す/落とすと長さに合わせて、カット・アングル・発言テロップを作り直します(取り消しは Ctrl+Z)"
                 >
                   仮編集を作り直す
@@ -836,50 +1034,82 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     : '文字起こしが終わると、話のまとまり(場面)ごとに見どころ・不要を判定してここに並べます。'}
                 </p>
               ) : (
-                <ul className="structure-list">
-                  {scenes.map((sc) => {
-                    const j = judgements.find((x) => x.sceneId === sc.id)
-                    const kept = keep[sc.id] ?? roughCut?.keptIds.includes(sc.id) ?? false
-                    const manual = keep[sc.id] !== undefined
-                    return (
-                      <li key={sc.id} className={`structure-row ${kept ? 'kept' : 'dropped'}`}>
-                        <input
-                          type="checkbox"
-                          aria-label="残す"
-                          checked={kept}
-                          onChange={(e) =>
-                            usePipelineStore.getState().setKeep(sc.id, e.target.checked)
-                          }
-                        />
-                        <span className="mono form-note">
-                          {formatTimecode(sc.start, 30).slice(0, 8)}
-                          <br />
-                          {Math.round(sc.end - sc.start)}秒
-                        </span>
-                        <span className={`structure-kind ${j?.kind ?? 'normal'}`}>
-                          {j?.kind === 'highlight'
-                            ? '見どころ'
-                            : j?.kind === 'unneeded'
-                              ? '不要'
-                              : '普通'}
-                        </span>
-                        <span className="structure-score" title={`点数 ${j?.score ?? '-'}`}>
-                          <span style={{ width: `${j?.score ?? 0}%` }} />
-                        </span>
-                        <span className="structure-body">
-                          <span className="structure-title">
-                            {j?.title ??
-                              (sc.lines[0]
-                                ? `${sc.lines[0].speaker ?? ''}「${sc.lines[0].text.slice(0, 30)}」`
-                                : '(会話なし)')}
-                            {manual && <span className="transcript-tag">手で変更</span>}
+                <>
+                  {span > 0 && (
+                    <div className="structure-band">
+                      <KeepBand
+                        scenes={scenes}
+                        span={span}
+                        judgements={judgements}
+                        keptOf={keptOf}
+                        selected={selectedScene}
+                        onSelect={(id) => {
+                          setSelectedScene(id)
+                          document
+                            .getElementById(`structure-row-${id}`)
+                            ?.scrollIntoView({ block: 'nearest' })
+                        }}
+                      />
+                    </div>
+                  )}
+                  <ul className="structure-list">
+                    {scenes.map((sc) => {
+                      const j = judgements.find((x) => x.sceneId === sc.id)
+                      const kept = keptOf(sc.id)
+                      const manual = keep[sc.id] !== undefined
+                      return (
+                        <li
+                          key={sc.id}
+                          id={`structure-row-${sc.id}`}
+                          className={`structure-row ${kept ? 'kept' : 'dropped'} ${selectedScene === sc.id ? 'selected' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label="残す"
+                            checked={kept}
+                            onChange={(e) =>
+                              usePipelineStore.getState().setKeep(sc.id, e.target.checked)
+                            }
+                          />
+                          {span > 0 && (
+                            <SceneThumb
+                              project={project}
+                              at={(sc.start + sc.end) / 2}
+                              dim={!kept}
+                            />
+                          )}
+                          <span className="mono form-note">
+                            {formatTimecode(sc.start, 30).slice(0, 8)}
+                            <br />
+                            {Math.round(sc.end - sc.start)}秒
                           </span>
-                          <span className="form-note">{j?.reason}</span>
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ul>
+                          <span className={`structure-kind ${j?.kind ?? 'normal'}`}>
+                            {j?.kind === 'highlight'
+                              ? '見どころ'
+                              : j?.kind === 'unneeded'
+                                ? '不要'
+                                : '普通'}
+                          </span>
+                          <span className="structure-score" title={`点数 ${j?.score ?? '-'}`}>
+                            <span style={{ width: `${j?.score ?? 0}%` }} />
+                          </span>
+                          <span className="structure-body">
+                            <span className="structure-title">
+                              {sceneTitle(sc, j)}
+                              {manual && <span className="transcript-tag">手で変更</span>}
+                            </span>
+                            <span className="structure-chips">
+                              {sceneChips(sc, undefined, judgeSource, undefined).map((c) => (
+                                <Chip key={c.label} chip={c} />
+                              ))}
+                            </span>
+                            <span className="form-note structure-reason">{j?.reason}</span>
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </>
               )}
             </div>
           )}
@@ -995,7 +1225,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
               確認済み {doneIssues.length}
             </button>
           </div>
-          <ul className="auto-edit-review-list">
+          <ul className="auto-edit-review-list" ref={reviewRef}>
             {(reviewTab === 'open' ? openIssues : doneIssues).map((d) => {
               const key = d.key
               return (

@@ -17,8 +17,8 @@ const platform = (typeof window !== 'undefined' && window.api?.platform) || ''
  * 画面上部の帯(Graphite 2 のヘッダー)。作業の流れを左から右へ並べ、今いる所に印を付ける。
  *
  * 入口は**今のアプリにある画面・操作**だけにつなぐ(無い画面への入口は作らない):
- * - 自動編集 / 確認 → 自動編集の画面(メニューの「自動編集の画面」と同じ)。確認の件数は
- *   ステータスバーの「要確認」と同じ数
+ * - 自動編集 → 自動編集の画面(メニューの「自動編集の画面」と同じ)。画面は帯の下に重なる
+ * - 確認 → 自動編集の画面の要確認の一覧へ(最初の項目にフォーカス)。件数はステータスバーの「要確認」と同じ数
  * - 編集 → この画面(上段左のパネルをインスペクタへ戻す)
  * - テロップ → 上段左のパネルをテロップへ(メニューの「ウィンドウ > テキスト」と同じ)
  * - 書き出し → 書き出しの窓(メニューの「書き出し…」と同じ)
@@ -101,7 +101,10 @@ export function WorkflowBar({
     }
   }, [showMenuButton])
   // 自動編集の画面を開いている間は、帯の「自動編集」を今いる所にする(画面は帯の下に重なる)
-  const autoOpen = usePipelineStore((s) => s.screenOpen)
+  const screenOpen = usePipelineStore((s) => s.screenOpen)
+  const reviewView = usePipelineStore((s) => s.screenView === 'review')
+  const autoOpen = screenOpen && !reviewView
+  const reviewOpen = screenOpen && reviewView
   const closeAutoEdit = (): void => usePipelineStore.getState().setScreenOpen(false)
   const openAutoEdit = (): void => emitMenuCommand('auto.screen')
   const openExport = (e: React.MouseEvent<HTMLElement>): void => {
@@ -164,7 +167,13 @@ export function WorkflowBar({
           {autoOpen && <span className="workflow-step-dot" aria-hidden="true" />}
           自動編集
         </button>
-        <button type="button" className="workflow-step" onClick={openAutoEdit}>
+        <button
+          type="button"
+          className={`workflow-step ${reviewOpen ? 'current' : ''}`}
+          aria-current={reviewOpen ? 'page' : undefined}
+          onClick={() => emitMenuCommand('auto.review')}
+        >
+          {reviewOpen && <span className="workflow-step-dot" aria-hidden="true" />}
           確認
           {reviewCount > 0 && (
             <span className="workflow-step-count">{reviewCount.toLocaleString()}</span>
@@ -172,26 +181,26 @@ export function WorkflowBar({
         </button>
         <button
           type="button"
-          className={`workflow-step ${telopOpen || autoOpen ? '' : 'current'}`}
-          aria-current={telopOpen || autoOpen ? undefined : 'page'}
+          className={`workflow-step ${telopOpen || screenOpen ? '' : 'current'}`}
+          aria-current={telopOpen || screenOpen ? undefined : 'page'}
           onClick={() => {
             closeAutoEdit()
             onEdit()
           }}
         >
-          {!telopOpen && !autoOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          {!telopOpen && !screenOpen && <span className="workflow-step-dot" aria-hidden="true" />}
           編集
         </button>
         <button
           type="button"
-          className={`workflow-step ${telopOpen && !autoOpen ? 'current' : ''}`}
-          aria-current={telopOpen && !autoOpen ? 'page' : undefined}
+          className={`workflow-step ${telopOpen && !screenOpen ? 'current' : ''}`}
+          aria-current={telopOpen && !screenOpen ? 'page' : undefined}
           onClick={() => {
             closeAutoEdit()
             onTelop()
           }}
         >
-          {telopOpen && !autoOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          {telopOpen && !screenOpen && <span className="workflow-step-dot" aria-hidden="true" />}
           テロップ
         </button>
         <button type="button" className="workflow-step" onClick={openExport}>

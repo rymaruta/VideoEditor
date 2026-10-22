@@ -1,0 +1,207 @@
+/**
+ * 自動編集の画面(Graphite 3 の「進み具合」「構成を決める」)に出すものを、企画と工程の
+ * 状態から組み立てる純関数。**実際にあるデータだけ**を返す(無いものは空)。
+ */
+import type { Project } from '@shared/types'
+import type { Scene, SceneJudgement } from '@shared/structure/scenes'
+import { CHEER_THRESHOLD, LAUGH_THRESHOLD } from '@shared/events/audioEvents'
+
+export type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
+
+export interface Range {
+  start: number
+  end: number
+}
+
+/** 秒を m:ss(1 時間を超えたら h:mm:ss)に */
+export function formatDuration(sec: number): string {
+  const s = Math.max(0, Math.round(sec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}
+
+/** 全体の進み具合(0〜1)。済んだ・省いた工程は 1、進行中は その割合 */
+export function overallFraction(steps: readonly { state: StepState; percent: number }[]): number {
+  if (steps.length === 0) return 0
+  const sum = steps.reduce(
+    (t, s) =>
+      t +
+      (s.state === 'done' || s.state === 'skipped'
+        ? 1
+        : s.state === 'run'
+          ? Math.min(1, Math.max(0, s.percent / 100))
+          : 0),
+    0
+  )
+  return sum / steps.length
+}
+
+/** 重なり・接した区間をまとめ、時刻順に並べる */
+export function mergeRanges(ranges: readonly Range[], joinGap = 0): Range[] {
+  const sorted = ranges.filter((r) => r.end > r.start).sort((a, b) => a.start - b.start)
+  const out: Range[] = []
+  for (const r of sorted) {
+    const last = out[out.length - 1]
+    if (last && r.start <= last.end + joinGap) last.end = Math.max(last.end, r.end)
+    else out.push({ start: r.start, end: r.end })
+  }
+  return out
+}
+
+/** 収録の全体の長さ(共通の時刻)。同期の情報が無ければ 0 */
+export function commonSpan(project: Project): number {
+  const files = project.multicam?.files ?? []
+  return files.reduce((m, f) => Math.max(m, f.start + f.duration / (f.rate || 1)), 0)
+}
+
+/** 機材ごとの録画のある区間(共通の時刻)。同期の情報から */
+export function sourceLanes(project: Project): { id: string; name: string; ranges: Range[] }[] {
+  const info = project.multicam
+  if (!info) return []
+  return info.sources
+    .map((src) => ({
+      id: src.id,
+      name: src.name,
+      ranges: mergeRanges(
+        info.files
+          .filter((f) => f.sourceId === src.id)
+          .map((f) => ({ start: f.start, end: f.start + f.duration / (f.rate || 1) })),
+        0.5
+      )
+    }))
+    .filter((l) => l.ranges.length > 0)
+}
+
+/** 話者ごとの話している区間(共通の時刻)。文字起こしと同期の情報から。話者の分からない発話は外す */
+export function speakerLanes(project: Project): { speaker: string; ranges: Range[] }[] {
+  const info = project.multicam
+  const transcript = project.transcript ?? []
+  if (!info || transcript.length === 0) return []
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const by = new Map<string, Range[]>()
+  for (const u of transcript) {
+    if (!u.speaker) continue
+    const f = fileOf.get(u.assetId)
+    if (!f) continue
+    const rate = f.rate || 1
+    const list = by.get(u.speaker) ?? []
+    list.push({ start: f.start + u.sourceStart / rate, end: f.start + u.sourceEnd / rate })
+    by.set(u.speaker, list)
+  }
+  return (
+    [...by.entries()]
+      .map(([speaker, ranges]) => ({ speaker, ranges: mergeRanges(ranges, 1) }))
+      // 長さの無い発話だけの話者は並べない(帯が無く、並べ替えで落ちる)
+      .filter((l) => l.ranges.length > 0)
+      .sort((a, b) => a.ranges[0].start - b.ranges[0].start)
+  )
+}
+
+/** 笑い・歓声を検出した区間(共通の時刻) */
+export function eventRanges(project: Project): { laugh: Range[]; cheer: Range[] } {
+  const windows = project.audioEvents ?? []
+  return {
+    laugh: mergeRanges(
+      windows.filter((w) => w.laugh > LAUGH_THRESHOLD).map((w) => ({ start: w.start, end: w.end }))
+    ),
+    cheer: mergeRanges(
+      windows.filter((w) => w.cheer > CHEER_THRESHOLD).map((w) => ({ start: w.start, end: w.end }))
+    )
+  }
+}
+
+/** 場面のうち、誰かが話している割合(0〜1) */
+export function speechRatio(scene: Scene): number {
+  const len = scene.end - scene.start
+  return len > 0 ? Math.min(1, Math.max(0, scene.speech / len)) : 0
+}
+
+export type ChipTone = 'accent' | 'ok' | 'auto' | 'neutral' | 'word'
+
+export interface SceneChip {
+  label: string
+  tone: ChipTone
+  /** 手で決めた印(琥珀の枠を付ける) */
+  manual?: boolean
+}
+
+/**
+ * 場面に添える理由の印(デザインの「理由と状態の印」)。笑い・歓声・盛り上がり・発話の割合・
+ * 自動の判定・手で決めたかを、データのあるものだけ並べる
+ */
+export function sceneChips(
+  scene: Scene,
+  judgement: SceneJudgement | undefined,
+  judgeSource: 'ai' | 'heuristic' | null,
+  manual: boolean | undefined
+): SceneChip[] {
+  const chips: SceneChip[] = []
+  if (scene.laughs) chips.push({ label: `笑い ${scene.laughs}`, tone: 'accent' })
+  if (scene.cheers) chips.push({ label: `歓声 ${scene.cheers}`, tone: 'accent' })
+  if (scene.hype) chips.push({ label: `盛り上がり ${scene.hype}`, tone: 'accent' })
+  const ratio = speechRatio(scene)
+  chips.push({ label: `発話 ${Math.round(ratio * 100)}%`, tone: ratio >= 0.5 ? 'ok' : 'neutral' })
+  if (judgement?.kind === 'highlight')
+    chips.push({ label: judgeSource === 'ai' ? 'AI · 見どころ' : '見どころ', tone: 'auto' })
+  else if (judgement?.kind === 'unneeded')
+    chips.push({ label: judgeSource === 'ai' ? 'AI · 不要' : '不要', tone: 'neutral' })
+  if (manual === true) chips.push({ label: '手で残す', tone: 'accent', manual: true })
+  else if (manual === false) chips.push({ label: '手で落とす', tone: 'neutral', manual: true })
+  return chips
+}
+
+/** 場面の見出し: AI の見出し、無ければ最初の発言 */
+export function sceneTitle(scene: Scene, judgement: SceneJudgement | undefined): string {
+  if (judgement?.title) return judgement.title
+  const first = scene.lines[0]
+  if (!first) return '(会話なし)'
+  return `${first.speaker ?? ''}「${first.text.slice(0, 30)}」`
+}
+
+/** 場面で話している人の数 */
+export function speakerCount(scene: Scene): number {
+  return new Set(scene.lines.map((l) => l.speaker).filter(Boolean)).size
+}
+
+/**
+ * 場面の絵(サムネイル)を取る素材と時刻。共通の時刻 `t` を録っているカメラのうち、
+ * 基準の機材を先に、無ければ最初に見つかったカメラ。カメラが無ければ null
+ */
+export function frameSourceAt(
+  project: Project,
+  t: number
+): { filePath: string; at: number } | null {
+  const info = project.multicam
+  if (!info) return null
+  const cameras = info.sources.filter((s) => s.kind === 'camera')
+  cameras.sort(
+    (a, b) => Number(b.id === info.anchorSourceId) - Number(a.id === info.anchorSourceId)
+  )
+  for (const cam of cameras) {
+    for (const f of info.files) {
+      if (f.sourceId !== cam.id) continue
+      const rate = f.rate || 1
+      if (t < f.start || t >= f.start + f.duration / rate) continue
+      const asset = project.assets.find((a) => a.id === f.assetId)
+      if (!asset?.hasVideo) continue
+      return { filePath: asset.filePath, at: (t - f.start) * rate }
+    }
+  }
+  return null
+}
+
+/** 場面の帯の色(Graphite 3。残す場面に順に当てる) */
+export const SCENE_BAND_COLORS = ['#6b7cff', '#ff5fa2', '#a77bff', '#2ed3b7'] as const
+
+/** 残す場面の何番目か(落とす場面は null)。帯の色を順に当てるのに使う */
+export function keptOrder(
+  scenes: readonly { id: string }[],
+  keptOf: (id: string) => boolean
+): Map<string, number | null> {
+  const out = new Map<string, number | null>()
+  let n = 0
+  for (const sc of scenes) out.set(sc.id, keptOf(sc.id) ? n++ : null)
+  return out
+}

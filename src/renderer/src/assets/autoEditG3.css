@@ -1,0 +1,853 @@
+/* =====================================================================
+   自動編集の画面(と確認の一覧)の Graphite 3 の見た目。graphite3.css の後に読み込む(main.tsx)。
+   地は編集画面と同じ(紫・青緑の淡い光)、列は浮いたカードのパネル、工程は形と色の印、
+   次にやることは琥珀の主ボタン 1 つ、構成は場面の帯(4 色)と理由の印。
+   ===================================================================== */
+
+.auto-edit-screen {
+  font-size: 13px;
+  background:
+    radial-gradient(900px 520px at 8% -8%, rgba(124, 92, 255, 0.14), transparent 62%),
+    radial-gradient(900px 600px at 100% 110%, rgba(0, 190, 170, 0.09), transparent 60%),
+    radial-gradient(1400px 600px at 50% -20%, #151a2a 0%, #090a10 62%), var(--ve-bg);
+}
+
+/* ---------- 見出しの帯(上の帯の下の細い帯) ---------- */
+.auto-edit-header {
+  height: 40px;
+  padding: 0 12px 0 16px;
+  gap: 12px;
+  border-bottom: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+}
+.auto-edit-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ve-text);
+}
+.auto-edit-title-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ve-text-3);
+}
+.auto-edit-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--ve-text-2);
+  box-shadow: inset 0 0 0 1px var(--ve-line-control);
+}
+.auto-edit-badge.running {
+  color: var(--ve-accent-ink);
+  background: rgba(255, 178, 36, 0.1);
+  box-shadow: inset 0 0 0 1px var(--ve-accent-line);
+}
+.auto-edit-badge.done {
+  color: var(--ve-ok-ink);
+  background: rgba(76, 195, 138, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.35);
+}
+.auto-edit-badge.error {
+  color: var(--ve-danger-ink);
+  background: var(--ve-danger-soft);
+  box-shadow: inset 0 0 0 1px var(--ve-danger-line);
+}
+
+/* ---------- 3 つの列(浮いたカード) ---------- */
+.auto-edit-body {
+  grid-template-columns: 300px minmax(0, 1fr) 360px;
+  gap: 6px;
+  padding: 6px;
+}
+.auto-edit-body > section {
+  background: var(--ve-panel-fill);
+  border-radius: 12px;
+  box-shadow: var(--ve-panel-shadow);
+}
+.auto-edit-body .panel-tabs {
+  flex-shrink: 0;
+}
+
+/* ---------- 左: 工程 ---------- */
+.auto-edit-overall {
+  gap: 8px;
+  padding: 14px 16px 12px;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+}
+.auto-edit-overall-row {
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--ve-text-2);
+}
+.auto-edit-overall-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--ve-text-3);
+}
+.auto-edit-overall .progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #0b0d16;
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+}
+.auto-edit-overall .progress-bar-fill {
+  top: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ve-accent-fill);
+  box-shadow: 0 0 12px rgba(255, 150, 40, 0.45);
+}
+.auto-edit-step-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+.auto-edit-step {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 7px 10px;
+  border-left: 0;
+  border-radius: 8px;
+}
+.auto-edit-step.run {
+  background: linear-gradient(90deg, rgba(255, 178, 36, 0.14), rgba(255, 138, 31, 0.03));
+  box-shadow: inset 0 0 0 1px rgba(255, 178, 36, 0.28);
+}
+.auto-edit-step.error {
+  background: linear-gradient(90deg, rgba(255, 107, 94, 0.14), transparent);
+}
+/* 印は形でも分ける(AutoEditOverview の StepIcon)。古い丸い枠は消す */
+.auto-edit-step-mark,
+.auto-edit-step.done .auto-edit-step-mark,
+.auto-edit-step.run .auto-edit-step-mark,
+.auto-edit-step.error .auto-edit-step-mark {
+  width: 18px;
+  height: 18px;
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.auto-edit-step-name {
+  color: var(--ve-text);
+}
+.auto-edit-step.wait .auto-edit-step-name,
+.auto-edit-step.skipped .auto-edit-step-name {
+  color: var(--ve-text-2);
+}
+.auto-edit-step-note,
+.auto-edit-step-state {
+  font-size: 11.5px;
+  color: var(--ve-text-3);
+}
+.auto-edit-step.done .auto-edit-step-state {
+  color: var(--ve-ok-ink);
+}
+.auto-edit-step-state {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.auto-edit-restored {
+  margin: 10px 10px 4px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 12px;
+  color: var(--ve-text-2);
+  background: linear-gradient(135deg, rgba(150, 110, 255, 0.16), rgba(80, 160, 255, 0.06));
+  box-shadow: inset 0 0 0 1px rgba(185, 156, 255, 0.3);
+  flex-shrink: 0;
+  max-height: 22vh;
+  overflow-y: auto;
+}
+/* 工程の一覧に高さを譲る(下の案内とボタンは詰めて置く) */
+.auto-edit-steps .dialog-footer-spacer {
+  display: none;
+}
+.auto-edit-steps .auto-edit-next,
+.auto-edit-steps .auto-edit-step-actions,
+.auto-edit-steps .auto-edit-overall {
+  flex-shrink: 0;
+}
+.auto-edit-restored p {
+  color: #e4daff;
+}
+.auto-edit-next {
+  margin: 8px 16px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.auto-edit-step-actions {
+  padding: 10px 12px;
+  border-top: 0;
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+}
+
+/* ---------- 中央: 中身 ---------- */
+.auto-edit-pane {
+  padding: 14px 16px;
+}
+.ae-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 次にやること(大きな主ボタン 1 つ) */
+.ae-next {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background:
+    radial-gradient(420px 160px at 0% 0%, rgba(255, 178, 36, 0.12), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 178, 36, 0.26),
+    0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.ae-next.done {
+  background:
+    radial-gradient(420px 160px at 0% 0%, rgba(76, 195, 138, 0.14), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
+  box-shadow:
+    inset 0 0 0 1px rgba(76, 195, 138, 0.3),
+    0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.ae-next.error {
+  background:
+    radial-gradient(420px 160px at 0% 0%, rgba(255, 107, 94, 0.14), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
+  box-shadow:
+    inset 0 0 0 1px var(--ve-danger-line),
+    0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.ae-next-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ve-on-accent);
+  background: var(--ve-accent-fill);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 6px 18px rgba(255, 140, 30, 0.3);
+}
+.ae-next.done .ae-next-icon {
+  color: #04140c;
+  background: linear-gradient(145deg, #7de3b1, #2ebd7a);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 6px 18px rgba(46, 189, 122, 0.3);
+}
+.ae-next.error .ae-next-icon {
+  color: #1c0604;
+  background: linear-gradient(145deg, #ffb0a6, #ff6b5e);
+  box-shadow: 0 6px 18px rgba(255, 107, 94, 0.3);
+}
+.ae-next.running .ae-next-icon svg {
+  animation: ae-spin 1.4s linear infinite;
+}
+@keyframes ae-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ae-next.running .ae-next-icon svg {
+    animation: none;
+  }
+}
+.ae-next-body {
+  min-width: 0;
+}
+.ae-next-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ve-text);
+}
+.ae-next-detail {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ve-text-2);
+}
+.ae-next-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 180px;
+}
+.ae-next-primary {
+  height: 40px;
+  padding: 0 20px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 9px;
+  white-space: nowrap;
+}
+.ae-next-secondary {
+  height: 30px;
+  white-space: nowrap;
+}
+
+/* 数値のカード */
+.ae-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+.ae-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.15));
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+}
+.ae-metric-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.ae-metric.blue .ae-metric-label {
+  color: #9fb4ff;
+}
+.ae-metric.green .ae-metric-label {
+  color: #7ff0bf;
+}
+.ae-metric.amber .ae-metric-label {
+  color: #ffc07a;
+}
+.ae-metric.violet .ae-metric-label {
+  color: #cdb9ff;
+}
+.ae-metric-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ve-text);
+  white-space: nowrap;
+}
+.ae-metric-unit {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ve-text-3);
+}
+
+/* カード(見つかったもの・構成) */
+.ae-card {
+  padding: 12px 14px 14px;
+  border-radius: 10px;
+  background: rgba(8, 10, 18, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+}
+.ae-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.ae-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ve-text);
+}
+.ae-muted {
+  font-size: 12px;
+  color: var(--ve-text-3);
+}
+.ae-card-link {
+  margin-left: auto;
+}
+
+/* 見つかったもの: 見出し | 帯 */
+.ae-found {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 12px;
+}
+.ae-found-label {
+  font-size: 12px;
+  color: var(--ve-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ae-found-label.pending {
+  color: var(--ve-text-3);
+}
+.ae-ruler {
+  position: relative;
+  height: 16px;
+  font-size: 10.5px;
+  color: var(--ve-text-3);
+}
+.ae-ruler > span {
+  position: absolute;
+  top: 0;
+  padding-left: 3px;
+  border-left: 1px solid var(--ve-line-field);
+  white-space: nowrap;
+}
+.ae-ruler > .ae-ruler-end {
+  left: auto !important;
+  right: 0;
+  border-left: 0;
+  border-right: 1px solid var(--ve-line-field);
+  padding: 0 3px 0 0;
+}
+.ae-lane {
+  position: relative;
+  height: 16px;
+  border-radius: 4px;
+  background: #0b0d16;
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.08);
+  overflow: hidden;
+}
+.ae-lane.thin {
+  height: 7px;
+  border-radius: 3px;
+}
+.ae-lane-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ae-lane.pending {
+  background:
+    repeating-linear-gradient(135deg, transparent 0 6px, rgba(255, 255, 255, 0.035) 6px 12px),
+    #0b0d16;
+}
+.ae-mark {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 3px;
+  background: #3d6bff;
+}
+.ae-lane.thin .ae-mark {
+  top: 1px;
+  bottom: 1px;
+}
+.ae-mark.camera {
+  background: linear-gradient(90deg, #3d6bff, #5b8cff);
+}
+.ae-mark.mic {
+  background: linear-gradient(90deg, #22b07a, #2ee59a);
+}
+.ae-mark.progress {
+  background: linear-gradient(90deg, rgba(167, 123, 255, 0.55), #a77bff);
+}
+.ae-mark.laugh {
+  background: #ffb224;
+}
+.ae-mark.cheer {
+  background: #ff5fa2;
+}
+.ae-mark.scene.kept {
+  background: #6b7cff;
+}
+.ae-mark.scene.dropped {
+  background: rgba(142, 148, 157, 0.25);
+}
+
+/* 構成の帯: 残す場面は順に 4 色、見どころは琥珀の印、落とす場面は縞 */
+.ae-band {
+  position: relative;
+  height: 30px;
+  border-radius: 6px;
+  background: #0b0d16;
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+}
+.ae-band-seg {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ae-band-seg.kept {
+  background: linear-gradient(180deg, var(--seg), color-mix(in srgb, var(--seg) 60%, #0b0d16));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.ae-band-seg.dropped {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(142, 148, 157, 0.18) 0 4px,
+    rgba(142, 148, 157, 0.06) 4px 8px
+  );
+}
+.ae-band-seg.highlight::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -6px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  transform: rotate(45deg);
+  background: var(--ve-accent);
+  box-shadow: 0 0 0 2px #0b0d16;
+}
+.ae-band-seg.selected {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 14px rgba(255, 255, 255, 0.35);
+  z-index: 1;
+}
+.ae-band-seg:hover {
+  filter: brightness(1.2);
+}
+.ae-band-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ve-text-3);
+}
+.ae-legend::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: 0;
+}
+.ae-legend.kept::before {
+  background: linear-gradient(90deg, #6b7cff 25%, #ff5fa2 25% 50%, #a77bff 50% 75%, #2ed3b7 75%);
+}
+.ae-legend.highlight::before {
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  background: var(--ve-accent);
+}
+.ae-legend.dropped::before {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(142, 148, 157, 0.5) 0 2px,
+    rgba(142, 148, 157, 0.15) 2px 4px
+  );
+}
+
+/* 場面の絵 */
+.ae-thumb {
+  width: 64px;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0b0d16;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.ae-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ae-thumb.dim img {
+  opacity: 0.4;
+  filter: grayscale(0.6);
+}
+
+/* 理由と状態の印(チップ) */
+.ae-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--ve-text-2);
+  box-shadow: inset 0 0 0 1px #2a2f45;
+}
+.ae-chip.accent {
+  color: #ffd27a;
+  background: rgba(255, 178, 36, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 178, 36, 0.32);
+}
+.ae-chip.ok {
+  color: var(--ve-ok-ink);
+  background: rgba(76, 195, 138, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.3);
+}
+.ae-chip.auto {
+  color: var(--ve-auto-ink);
+  background: rgba(183, 156, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(183, 156, 255, 0.34);
+}
+.ae-chip.manual {
+  box-shadow: inset 0 0 0 1.5px var(--ve-accent);
+}
+
+/* ---------- 構成の一覧 ---------- */
+.structure-controls {
+  gap: 8px 14px;
+  padding: 12px 16px;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+}
+.structure-controls label {
+  color: var(--ve-text-2);
+}
+.structure-summary {
+  padding: 8px 16px;
+  border-bottom: 0;
+  font-size: 12px;
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+}
+.structure-band {
+  padding: 12px 16px 10px;
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+}
+.structure-list {
+  padding: 4px 6px 8px;
+}
+.structure-row {
+  grid-template-columns: 18px 64px 64px 58px 70px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 0;
+  border-radius: 8px;
+}
+/* 絵の無い企画(同期の情報が無い)は、元の並び */
+.structure-row:not(:has(.ae-thumb)) {
+  grid-template-columns: 18px 64px 58px 70px minmax(0, 1fr);
+}
+.structure-row + .structure-row {
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.06);
+}
+.structure-row:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+.structure-row.selected {
+  background: linear-gradient(90deg, rgba(255, 178, 36, 0.1), transparent 70%);
+  box-shadow: inset 0 0 0 1px var(--ve-accent-line);
+}
+.structure-row.dropped .structure-body,
+.structure-row.dropped .structure-kind {
+  opacity: 0.62;
+}
+.structure-kind {
+  padding: 2px 0;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: var(--ve-text-2);
+  background: #1a1e30;
+}
+.structure-kind.highlight {
+  color: var(--ve-on-accent);
+  background: var(--ve-accent-fill);
+  font-weight: 700;
+}
+.structure-kind.unneeded {
+  color: var(--ve-text-3);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px #2a2f45;
+}
+.structure-score {
+  height: 6px;
+  background: #0b0d16;
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.08);
+}
+.structure-score span {
+  background: linear-gradient(90deg, #7c5cff, #b79cff);
+  border-radius: 3px;
+}
+.structure-title {
+  color: var(--ve-text);
+  font-weight: 700;
+}
+.structure-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0;
+}
+.structure-reason {
+  line-height: 1.5;
+}
+
+/* ---------- 同期の結果・素材の整理・文字起こし・ログ ---------- */
+.sync-lane-track {
+  height: 24px;
+  border-radius: 5px;
+  background: #0b0d16;
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.08);
+}
+.sync-bar {
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.sync-lane-name {
+  color: var(--ve-text-2);
+}
+.auto-edit-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  border-top: 0;
+  padding-top: 0;
+}
+.auto-edit-stat {
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.15));
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+}
+.auto-edit-stat > span:last-child {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+}
+.auto-edit-table th {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ve-text-3);
+  border-bottom-color: rgba(150, 165, 255, 0.1);
+}
+.auto-edit-table td {
+  border-bottom-color: rgba(150, 165, 255, 0.06);
+}
+.transcript-head {
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+}
+.transcript-row {
+  border-bottom-color: rgba(150, 165, 255, 0.06);
+}
+.transcript-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.auto-edit-log {
+  font-size: 12px;
+  color: var(--ve-text-2);
+}
+
+/* ---------- 右: 要確認(確認の一覧) ---------- */
+.auto-edit-review-list {
+  padding: 6px;
+}
+.auto-edit-review-item {
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border-bottom: 0;
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.12));
+  box-shadow:
+    inset 3px 0 0 var(--ve-accent),
+    inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+}
+.auto-edit-review-item p {
+  color: var(--ve-text);
+  font-size: 12.5px;
+}
+.auto-edit-review-meta {
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--ve-text-3);
+}
+.auto-edit-review-kind {
+  display: inline-flex;
+  align-items: center;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 10px;
+  color: #ffd27a;
+  background: rgba(255, 178, 36, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 178, 36, 0.32);
+}
+.auto-edit-review-empty {
+  margin: 6px;
+  padding: 18px 14px;
+  border-radius: 9px;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+}
+
+/* ---------- 低い・狭い窓(1366×768) ---------- */
+@media (max-width: 1500px) {
+  .auto-edit-body {
+    grid-template-columns: 250px minmax(0, 1fr) 300px;
+  }
+  .ae-next {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .ae-next-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+}
+@media (max-height: 899px) {
+  .ae-next {
+    padding: 14px 16px;
+    gap: 12px;
+  }
+  .ae-next-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .ae-next-title {
+    font-size: 15px;
+  }
+  .ae-metric {
+    padding: 8px 10px;
+  }
+  .ae-metric-value {
+    font-size: 17px;
+  }
+  .auto-edit-step {
+    padding: 5px 10px;
+  }
+  .auto-edit-overall {
+    padding: 10px 14px;
+  }
+}
+
+/* ---------- 確認の見せ方(上の帯の「確認」): 要確認の一覧を広く、琥珀の輪で ---------- */
+.auto-edit-screen.review-mode .auto-edit-body {
+  grid-template-columns: 260px minmax(0, 1fr) minmax(420px, 42%);
+}
+.auto-edit-screen.review-mode .auto-edit-review {
+  box-shadow:
+    var(--ve-panel-shadow),
+    inset 0 0 0 1px var(--ve-accent-line),
+    0 0 24px rgba(255, 160, 40, 0.08);
+}
+.auto-edit-screen.review-mode .auto-edit-review-item {
+  padding: 12px 14px;
+}
+.auto-edit-screen.review-mode .auto-edit-review-item p {
+  font-size: 13.5px;
+}
+@media (max-width: 1500px) {
+  .auto-edit-screen.review-mode .auto-edit-body {
+    grid-template-columns: 230px minmax(0, 1fr) minmax(380px, 42%);
+  }
+}
