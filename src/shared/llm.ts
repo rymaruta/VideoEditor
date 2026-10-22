@@ -32,6 +32,9 @@ export type LlmWorkerMessage =
 /**
  * GPU のメモリの量で、使うモデルを決める(4bit 量子化)。
  * 文字起こしのモデル(約3GB)と同時に載っても余裕がある大きさにする。
+ * GPU が無い PC は CPU 用の 1.5B(約1.1GB。CPU だけで読み込めた大きさ)。3B 以上は CPU だけでは
+ * 読み込み中に落ちた(`CPU_SAFE_MODEL_GB`)。1.5B は判定の質が下がり、答えの形が崩れることもあるが、
+ * 崩れた答えは出力の検査で捨てて、その場面・提案は簡易の判定で続ける(roughCutPlan)。
  */
 export const LOCAL_MODELS = [
   {
@@ -49,7 +52,19 @@ export const LOCAL_MODELS = [
   { minVramGb: 0, uri: 'hf:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M', label: 'Qwen2.5 7B', sizeGb: 4.7 }
 ] as const
 
-export function chooseLocalModel(vramGb: number): (typeof LOCAL_MODELS)[number] {
+/** GPU が無い PC のモデル(Qwen2.5 1.5B Instruct・Q4_K_M・1,117,320,736 バイト。Apache-2.0) */
+export const CPU_LOCAL_MODEL = {
+  minVramGb: 0,
+  uri: 'hf:Qwen/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M',
+  label: 'Qwen2.5 1.5B',
+  sizeGb: 1.1
+} as const
+
+export type LocalModel = (typeof LOCAL_MODELS)[number] | typeof CPU_LOCAL_MODEL
+
+/** 使うモデル。`hasGpu` が false(GPU が無い)なら CPU 用の 1.5B */
+export function chooseLocalModel(vramGb: number, hasGpu = true): LocalModel {
+  if (!hasGpu) return CPU_LOCAL_MODEL
   return LOCAL_MODELS.find((m) => vramGb >= m.minVramGb) ?? LOCAL_MODELS[LOCAL_MODELS.length - 1]
 }
 

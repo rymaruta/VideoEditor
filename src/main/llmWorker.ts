@@ -41,7 +41,8 @@ childMain<WorkerInput>(async (input, send) => {
   const llama = await getLlama({ gpu: 'auto' })
   const vramState = llama.gpu ? await llama.getVramState() : null
   const vram = vramState ? vramState.total / GB : 0
-  const choice = chooseLocalModel(vram)
+  // GPU が無ければ CPU 用の 1.5B(CPU だけで読み込めた大きさ)
+  const choice = chooseLocalModel(vram, Boolean(llama.gpu))
   const uri = input.modelUri ?? choice.uri
   const label = input.modelUri ? uri.replace(/^hf:/, '') : choice.label
   // 前に同じ環境(版・GPU・メモリ)で読み込めなかった(読み込み中に落ちた)モデルは試さない

@@ -74,11 +74,11 @@ export const MODELS = [
     source: 'https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593'
   },
   {
-    name: 'Qwen2.5 7B / 14B Instruct(このPCの AI。GGUF 4bit)',
+    name: 'Qwen2.5 1.5B / 7B / 14B Instruct(このPCの AI。GGUF 4bit。GPU の無い PC は 1.5B)',
     bundled: false,
     license: 'Apache-2.0(Qwen)',
     source:
-      'https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF , https://huggingface.co/Qwen/Qwen2.5-14B-Instruct-GGUF'
+      'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF , https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF , https://huggingface.co/Qwen/Qwen2.5-14B-Instruct-GGUF'
   }
 ]
 
