@@ -133,6 +133,9 @@ let secretsReady: Promise<void> = Promise.resolve()
 /** 鍵を保存する。暗号化できれば main、できなければ今までどおり localStorage */
 function persistSecret(name: SecretName, value: string): void {
   touchedSecrets.add(name)
+  // 入れ直したら「保存ファイルが壊れていた」の知らせは消す
+  if (useSettingsStore.getState().secretsFileNote)
+    useSettingsStore.setState({ secretsFileNote: '' })
   // 入れ直したら「読めなかった」の知らせは消す
   if (useSettingsStore.getState().unreadableKeys.includes(name))
     useSettingsStore.setState((s) => ({
@@ -289,6 +292,8 @@ interface SettingsState {
   unreadableCause: 'decrypt' | 'unavailable' | null
   /** 鍵の保存ファイルが壊れていたときの一文(無ければ空) */
   secretsFileNote: string
+  /** 鍵の保存ファイルにこの版では書けないときの一文(新しい版のファイル・読めないファイル。無ければ空) */
+  secretsFileProblemNote: string
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -599,6 +604,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   unreadableKeys: [],
   unreadableCause: null,
   secretsFileNote: '',
+  secretsFileProblemNote: '',
   loadEnvApiKeys: async () => {
     // 暗号化して保存した鍵を読み終えてから(後から読んだ鍵で .env の値を上書きしない)
     await secretsReady
@@ -643,6 +649,14 @@ sendAsrLanguage(useSettingsStore.getState().asrLanguage)
  * (移せたものだけ消す)。暗号化が使えない PC では今までどおり localStorage を使う。
  */
 /** 保存ファイルが壊れていたときの一文 */
+function fileProblemNote(snapshot: SecretsSnapshot | null): string {
+  if (snapshot?.fileProblem === 'newer')
+    return 'API キーの保存ファイルが新しい版のものなので、この版では暗号化して保存できません(入れた鍵はこの版の設定に平文で置きます)。'
+  if (snapshot?.fileProblem === 'io')
+    return 'API キーの保存ファイルを読めませんでした(権限などを確かめてください)。入れた鍵はこの版の設定に平文で置きます。'
+  return ''
+}
+
 function corruptNote(snapshot: SecretsSnapshot | null): string {
   if (!snapshot?.corrupt) return ''
   const where = snapshot.corrupt.backup
@@ -667,7 +681,8 @@ async function initSecureKeys(api: SecretsApi): Promise<void> {
       // この起動の localStorage に値があればそれを使っているので知らせない
       unreadableKeys: (snapshot?.unreadable ?? []).filter((n) => !s[n] && !touchedSecrets.has(n)),
       unreadableCause: snapshot?.unreadableCause ?? null,
-      secretsFileNote: corruptNote(snapshot)
+      secretsFileNote: corruptNote(snapshot),
+      secretsFileProblemNote: fileProblemNote(snapshot)
     }))
     return
   }
@@ -724,7 +739,8 @@ async function initSecureKeys(api: SecretsApi): Promise<void> {
       keyStorageNote: '',
       unreadableKeys: [...unreadable].filter((n) => !touchedSecrets.has(n)),
       unreadableCause: unreadable.size > 0 ? (snapshot.unreadableCause ?? 'decrypt') : null,
-      secretsFileNote: corruptNote(snapshot)
+      secretsFileNote: corruptNote(snapshot),
+      secretsFileProblemNote: fileProblemNote(snapshot)
     }
   })
 }

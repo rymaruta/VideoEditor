@@ -1,5 +1,13 @@
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
-import { basename } from 'path'
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from 'fs'
+import { basename, dirname, join } from 'path'
 import {
   isSecretName,
   MAX_SECRET_LENGTH,
@@ -16,11 +24,13 @@ import {
  *   今までどおり localStorage に置き、保存してある鍵を「この起動では読めない」と知らせる
  * - 復号できない値(別の PC から移した・OS の鍵が変わった)は**黙って空にしない**。ファイルには残し
  *   (OS の鍵が戻れば読める)、画面へ `unreadable` で知らせる。入れ直して上書きするときは、上書き前の
- *   暗号文を `secrets.json.prev` に残す(1文字打っただけで消えない)
- * - 読めない(壊れた・secrets がオブジェクトでない)ファイルは `secrets.json.broken` に移して残し
- *   (既にあれば `.broken.1` …。上書きしない)、画面へ `corrupt` で知らせる
- * - 知らない名前の鍵(新しい版が足したもの)は書き戻すときにそのまま残す。`version` が 1 より新しい
- *   ファイルには書かない(形が違うかもしれない)
+ *   暗号文を `secrets.json.prev` に残す(壊れた .prev は上書きせず .prev.1 …へ)
+ * - 読めない(JSON として壊れた・secrets がオブジェクトでない)ファイルは `secrets.json.broken` に移して
+ *   残し(既にあれば `.broken.1` …。上書きしない。古いものは新しい5個だけ残す)、画面へ `corrupt` で知らせる
+ * - `version` が 1 より新しいファイル(新しい版が作った)は壊れたものと扱わず、読める範囲だけ使い、
+ *   移さず書かない(画面へ `fileProblem: 'newer'`)。権限が無いなどの入出力の失敗も壊れたものと分け、
+ *   移さず書かない(`fileProblem: 'io'`)
+ * - 知らない名前の鍵(新しい版が足したもの)は書き戻すときにそのまま残す
  * - 書くときは一時ファイルに書いてから置き換える(途中で落ちても前の内容が残る)
  */
 
@@ -38,7 +48,28 @@ interface SecretFile {
   secrets: Record<string, string>
 }
 
-type ReadResult = { state: 'ok'; file: SecretFile } | { state: 'missing' } | { state: 'corrupt' }
+type ReadResult =
+  { state: 'ok'; file: SecretFile } | { state: 'missing' } | { state: 'corrupt' } | { state: 'io' }
+
+/** 残す .broken の数 */
+const KEEP_BROKEN = 5
+
+/** JSON を読む。`missing`・`io`(読めない)・`corrupt`(JSON でない)を分ける */
+function readJsonFile(
+  path: string
+): { state: 'ok'; data: unknown } | { state: 'missing' | 'io' | 'corrupt' } {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf-8')
+  } catch (e) {
+    return (e as NodeJS.ErrnoException)?.code === 'ENOENT' ? { state: 'missing' } : { state: 'io' }
+  }
+  try {
+    return { state: 'ok', data: JSON.parse(text) as unknown }
+  } catch {
+    return { state: 'corrupt' }
+  }
+}
 
 export class SecretStore {
   constructor(
@@ -55,39 +86,58 @@ export class SecretStore {
   }
 
   private readFile(): ReadResult {
-    if (!existsSync(this.path)) return { state: 'missing' }
-    try {
-      const raw = JSON.parse(readFileSync(this.path, 'utf-8')) as {
-        version?: unknown
-        secrets?: unknown
-      }
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { state: 'corrupt' }
-      const secretsRaw = raw.secrets ?? {}
-      if (typeof secretsRaw !== 'object' || secretsRaw === null || Array.isArray(secretsRaw))
-        return { state: 'corrupt' }
-      const secrets: Record<string, string> = {}
+    const read = readJsonFile(this.path)
+    if (read.state !== 'ok') return { state: read.state }
+    const raw = read.data as { version?: unknown; secrets?: unknown } | null
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { state: 'corrupt' }
+    const version = typeof raw.version === 'number' ? raw.version : 1
+    const secretsRaw = raw.secrets ?? {}
+    const isObject =
+      typeof secretsRaw === 'object' && secretsRaw !== null && !Array.isArray(secretsRaw)
+    // 新しい版の形は壊れたものと扱わない(読める範囲だけ使う)
+    if (!isObject && version <= 1) return { state: 'corrupt' }
+    const secrets: Record<string, string> = {}
+    if (isObject)
       for (const [k, v] of Object.entries(secretsRaw as Record<string, unknown>))
         if (typeof v === 'string' && k !== '__proto__') secrets[k] = v
-      const version = typeof raw.version === 'number' ? raw.version : 1
-      return { state: 'ok', file: { version, secrets } }
-    } catch {
-      return { state: 'corrupt' }
-    }
+    return { state: 'ok', file: { version, secrets } }
   }
 
-  /** 壊れたファイルを、上書きしない名前に移す。移した先の名前 */
-  private setAsideCorrupt(): string | undefined {
+  /** `base` か、それが既にあれば `base.1` `base.2` …のうち、まだ無い名前 */
+  private freeName(base: string): string | undefined {
     for (let i = 0; i < 1000; i++) {
-      const target = `${this.path}.broken${i === 0 ? '' : `.${i}`}`
-      if (existsSync(target)) continue
-      try {
-        renameSync(this.path, target)
-        return basename(target)
-      } catch {
-        return undefined
-      }
+      const target = i === 0 ? base : `${base}.${i}`
+      if (!existsSync(target)) return target
     }
     return undefined
+  }
+
+  /** 壊れたファイルを、上書きしない名前に移す(古い .broken は新しい5個だけ残す)。移した先の名前 */
+  private setAsideCorrupt(): string | undefined {
+    const target = this.freeName(`${this.path}.broken`)
+    if (!target) return undefined
+    try {
+      renameSync(this.path, target)
+    } catch {
+      return undefined
+    }
+    this.pruneBroken()
+    return basename(target)
+  }
+
+  private pruneBroken(): void {
+    try {
+      const dir = dirname(this.path)
+      const prefix = `${basename(this.path)}.broken`
+      const files = readdirSync(dir)
+        .filter((f) => f === prefix || /^\.\d+$/.test(f.slice(prefix.length)))
+        .filter((f) => f.startsWith(prefix))
+        .map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.t - a.t || b.f.localeCompare(a.f, undefined, { numeric: true }))
+      for (const { f } of files.slice(KEEP_BROKEN)) unlinkSync(join(dir, f))
+    } catch {
+      // 片付けられなくても次の機会に
+    }
   }
 
   private writeJson(path: string, data: unknown): void {
@@ -114,22 +164,28 @@ export class SecretStore {
     }
   }
 
-  /** 復号できない暗号文を上書きする前に、secrets.json.prev に残す(先に残したものは消さない) */
+  /**
+   * 復号できない暗号文を上書きする前に、secrets.json.prev に残す(先に残したものは消さない)。
+   * .prev が壊れている・読めないときは上書きせず、.prev.1 …の空いた名前に残す
+   */
   private keepPrevious(name: SecretName, enc: string): void {
-    const prevPath = `${this.path}.prev`
-    let prev: Record<string, string> = {}
-    try {
-      if (existsSync(prevPath)) {
-        const raw = JSON.parse(readFileSync(prevPath, 'utf-8')) as { secrets?: unknown }
-        if (raw && typeof raw.secrets === 'object' && raw.secrets !== null)
-          prev = { ...(raw.secrets as Record<string, string>) }
+    const base = `${this.path}.prev`
+    for (let i = 0; i < 1000; i++) {
+      const target = i === 0 ? base : `${base}.${i}`
+      const read = readJsonFile(target)
+      if (read.state === 'missing') {
+        this.writeJson(target, { version: 1, secrets: { [name]: enc } })
+        return
       }
-    } catch {
-      prev = {}
+      if (read.state !== 'ok') continue
+      const raw = read.data as { secrets?: unknown } | null
+      if (!raw || typeof raw.secrets !== 'object' || raw.secrets === null) continue
+      const prev = { ...(raw.secrets as Record<string, string>) }
+      if (prev[name]) return
+      prev[name] = enc
+      this.writeJson(target, { version: 1, secrets: prev })
+      return
     }
-    if (prev[name]) return
-    prev[name] = enc
-    this.writeJson(prevPath, { version: 1, secrets: prev })
   }
 
   /** 起動時の状態と、復号できた鍵・読めなかった鍵 */
@@ -137,8 +193,18 @@ export class SecretStore {
     const read = this.readFile()
     let corrupt: SecretsSnapshot['corrupt']
     if (read.state === 'corrupt') corrupt = { backup: this.setAsideCorrupt() ?? '' }
+    const fileProblem: SecretsSnapshot['fileProblem'] =
+      read.state === 'io'
+        ? 'io'
+        : read.state === 'ok' && read.file.version > 1
+          ? 'newer'
+          : undefined
     const secrets = read.state === 'ok' ? read.file.secrets : {}
     const stored = SECRET_NAMES.filter((n) => Boolean(secrets[n]))
+    const extra = {
+      ...(corrupt ? { corrupt } : {}),
+      ...(fileProblem ? { fileProblem } : {})
+    }
     if (!this.available()) {
       let reason: string | undefined
       try {
@@ -154,7 +220,7 @@ export class SecretStore {
         ...(stored.length > 0
           ? { unreadable: stored, unreadableCause: 'unavailable' as const }
           : {}),
-        ...(corrupt ? { corrupt } : {})
+        ...extra
       }
     }
     const values: SecretsSnapshot['values'] = {}
@@ -170,7 +236,7 @@ export class SecretStore {
       available: true,
       values,
       ...(unreadable.length > 0 ? { unreadable, unreadableCause: 'decrypt' as const } : {}),
-      ...(corrupt ? { corrupt } : {})
+      ...extra
     }
   }
 
@@ -182,6 +248,8 @@ export class SecretStore {
     if (!this.available()) return false
     try {
       let read = this.readFile()
+      // 読めない(権限など)ファイルは上書きしない
+      if (read.state === 'io') return false
       if (read.state === 'corrupt') {
         if (this.setAsideCorrupt() === undefined) return false
         read = { state: 'missing' }

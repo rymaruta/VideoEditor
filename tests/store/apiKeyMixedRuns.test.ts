@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
@@ -241,5 +249,94 @@ describe('保存ファイルの形(再監査)', () => {
     writeFileSync(file, newer)
     expect(new SecretStore(file, cipher).set('youtubeApiKey', 'y')).toBe(false)
     expect(readFileSync(file, 'utf-8')).toBe(newer)
+  })
+})
+
+describe('保存ファイル: 新しい版・読めない・.prev・.broken(3回目の監査)', () => {
+  const enc = (t: string): string => Buffer.from(`pc1:${t}`).toString('base64')
+
+  it('新しい版(version 2)のファイルは、形が違っても .broken へ移さず、書かず、欄で知らせる', async () => {
+    const file = join(dir, 'v2-array.json')
+    cipher.on = true
+    cipher.key = 'pc1'
+    const body = JSON.stringify({ version: 2, secrets: [{ name: 'geminiApiKey', enc: 'x' }] })
+    writeFileSync(file, body)
+    const snap = new SecretStore(file, cipher).load()
+    expect(snap.corrupt).toBeUndefined()
+    expect(snap.fileProblem).toBe('newer')
+    expect(existsSync(`${file}.broken`)).toBe(false)
+    expect(readFileSync(file, 'utf-8')).toBe(body)
+    const s = await boot(new Map(), file)
+    expect(s.getState().secretsFileProblemNote).toContain('新しい版')
+    expect(s.getState().secretsFileProblemNote).toContain('暗号化して保存できません')
+  })
+
+  it('新しい版のファイルでも、読める鍵は使い、上書きしない(入れた鍵は平文に置く)', async () => {
+    const file = join(dir, 'v2-obj.json')
+    cipher.on = true
+    cipher.key = 'pc1'
+    const body = JSON.stringify({ version: 2, secrets: { geminiApiKey: enc('AIza-v2') } })
+    writeFileSync(file, body)
+    const storage = new Map<string, string>()
+    const s = await boot(storage, file)
+    expect(s.getState().geminiApiKey).toBe('AIza-v2')
+    s.getState().setGeminiApiKey('AIza-typed')
+    await settle()
+    expect(readFileSync(file, 'utf-8')).toBe(body)
+    expect(storage.get('ve-gemini-api-key')).toBe('AIza-typed')
+  })
+
+  it('読めない(権限など)ファイルは壊れたものと分け、移さず書かない', () => {
+    const file = join(dir, 'io-dir.json')
+    mkdirSync(file)
+    cipher.on = true
+    const store = new SecretStore(file, cipher)
+    const snap = store.load()
+    expect(snap.fileProblem).toBe('io')
+    expect(snap.corrupt).toBeUndefined()
+    expect(existsSync(`${file}.broken`)).toBe(false)
+    expect(store.set('geminiApiKey', 'x')).toBe(false)
+  })
+
+  it('.prev が壊れていても上書きせず、.prev.1 に残す', () => {
+    const file = join(dir, 'prev-broken.json')
+    cipher.on = true
+    cipher.key = 'pc2'
+    writeFileSync(file, JSON.stringify({ version: 1, secrets: { geminiApiKey: enc('G') } }))
+    const broken = '{"version":1,"secrets":{"youtubeApiKey":"PREVY"'
+    writeFileSync(`${file}.prev`, broken)
+    expect(new SecretStore(file, cipher).set('geminiApiKey', 'new')).toBe(true)
+    expect(readFileSync(`${file}.prev`, 'utf-8')).toBe(broken)
+    const kept = JSON.parse(readFileSync(`${file}.prev.1`, 'utf-8')) as {
+      secrets: Record<string, string>
+    }
+    expect(kept.secrets.geminiApiKey).toBe(enc('G'))
+    cipher.key = 'pc1'
+  })
+
+  it('.broken は新しい5個だけ残す', () => {
+    const sub = join(dir, 'brokens')
+    mkdirSync(sub)
+    const file = join(sub, 'secrets.json')
+    cipher.on = true
+    for (let i = 0; i < 8; i++) {
+      writeFileSync(file, `{broken ${i}`)
+      new SecretStore(file, cipher).load()
+    }
+    const left = readdirSync(sub).filter((f) => f.startsWith('secrets.json.broken'))
+    expect(left).toHaveLength(5)
+    const texts = left.map((f) => readFileSync(join(sub, f), 'utf-8'))
+    expect(texts).toContain('{broken 7')
+    expect(texts).not.toContain('{broken 0')
+  })
+
+  it('「保存ファイルが壊れていた」は、鍵を入れ直したら消す', async () => {
+    const file = join(dir, 'note-clear.json')
+    writeFileSync(file, '{oops')
+    cipher.on = true
+    const s = await boot(new Map(), file)
+    expect(s.getState().secretsFileNote).toContain('壊れていた')
+    s.getState().setGeminiApiKey('AIza-again')
+    expect(s.getState().secretsFileNote).toBe('')
   })
 })

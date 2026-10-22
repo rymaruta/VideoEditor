@@ -47,6 +47,11 @@ export interface SecretsSnapshot {
   unreadableCause?: 'decrypt' | 'unavailable'
   /** 保存ファイルが壊れていた(`backup` の名前に移して残した)。鍵は入れ直しが要る */
   corrupt?: { backup: string }
+  /**
+   * 保存ファイルはあるが、この版では書けない。`newer`: 新しい版が作ったファイル(読める範囲だけ使う)。
+   * `io`: 権限が無いなどで読めない。どちらもファイルは移さず、入れた鍵はこの起動の間 平文で置く
+   */
+  fileProblem?: 'newer' | 'io'
 }
 
 /** 「利用者が消した」印の localStorage の名前(触っていないのとを区別する) */
