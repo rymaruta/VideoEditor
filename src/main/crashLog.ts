@@ -40,7 +40,19 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** 記録に書く前に、利用者名・鍵らしい値を伏せる */
+/**
+ * 記録に書く前に、利用者名・鍵らしい値を伏せる。
+ *
+ * - ホームフォルダ → `~`
+ * - `名前: 値` の形(JSON・JS のオブジェクト・HTTP のヘッダ。名前はクォートなし・'…'・"…"・
+ *   文字列に入った \"…\" のどれも)で、名前が鍵らしいもの(apiKey・x-goog-api-key・sessionToken・
+ *   client_secret・password・Authorization・Cookie など。前に何が付いてもよい)の値
+ * - `名前=値` の形(URL の ?key= / #access_token=、%3D で符号化されたもの、環境変数の
+ *   GEMINI_API_KEY=… など)
+ * - Bearer の後ろ、JWT・Google の API キー(AIza…)・OAuth(ya29.…)・sk-…・ghp_… の形
+ *
+ * 正規表現は入れ子の繰り返しを使わず、値の終わりは手で数える(長い入力でも時間が伸びない)。
+ */
 export function sanitizeLogText(text: string, home?: string): string {
   let out = text
   if (home && home.length > 1) {
@@ -48,67 +60,99 @@ export function sanitizeLogText(text: string, home?: string): string {
     const variants = new Set([home, home.replace(/\\/g, '/'), home.replace(/\//g, '\\')])
     // `/home/al` が `/home/alice` の頭に当たらないよう、区切り・終わりの前だけ
     for (const v of variants)
-      out = out.replace(new RegExp(`${escapeRegExp(v)}(?=$|[\\\\/\\s"'():,;])`, 'gim'), '~')
+      out = out.replace(new RegExp(`${escapeRegExp(v)}(?=$|[\\\\/\\s"'():,;#])`, 'gim'), '~')
   }
+  out = redactNamedValues(out)
   return (
     out
-      // JSON の鍵らしい項目("apiKey": "…"。文字列の中に入った \"token\":\"…\" も)
-      .replace(
-        new RegExp(
-          `(\\\\?"(?:${SECRET_FIELDS})\\\\?"\\s*:\\s*)(\\\\?")(?:[^"\\\\]|\\\\(?!")|\\\\")*?\\2`,
-          'gi'
-        ),
-        '$1$2***$2'
-      )
-      // URL・設定の書き方の鍵(Gemini の ?key=、Jamendo の client_id=、Freesound の token=、
-      // client_secret= / signature= / password= など)
-      .replace(new RegExp(`((?:^|[?&\\s;,])(?:${SECRET_PARAMS})=)[^&\\s"',;)]+`, 'gim'), '$1***')
-      // Authorization の値(Bearer / Token / Basic の後ろも)
-      .replace(
-        /(Authorization["']?\s*[:=]\s*["']?)(?:(?:Bearer|Token|Basic)\s+)?[^\s"',;]+/gi,
-        '$1***'
-      )
-      // 先頭・途中の Bearer トークン
-      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer ***')
-      // Google の API キーの形
-      .replace(/AIza[0-9A-Za-z_-]{20,}/g, 'AIza***')
+      // `名前=値`(URL・フォーム・環境変数)
+      .replace(PARAM_PATTERN, '$1***')
+      // Bearer の後ろ
+      .replace(/\bbearer[ \t]+[A-Za-z0-9._~+/=-]+/gi, 'Bearer ***')
+      // 鍵の形
+      .replace(/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*/g, 'eyJ***')
+      .replace(/AIza[0-9A-Za-z_-]{10,}/g, 'AIza***')
+      .replace(/\bya29\.[A-Za-z0-9_-]+/g, 'ya29.***')
+      .replace(/\bsk-[A-Za-z0-9_-]{10,}/g, 'sk-***')
+      .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}/g, 'gh_***')
   )
 }
 
-/** JSON で値を伏せる項目の名前(大文字小文字は問わない) */
-const SECRET_FIELDS = [
-  'authorization',
-  '(?:x-)?api[-_]?key',
-  '[a-z]*apikey',
-  '[a-z]*clientid',
+/** 値を伏せる名前(この前に何が付いてもよい: GEMINI_API_KEY・sessionToken・X-Goog-Api-Key など) */
+const SECRET_NAME = [
+  'api[-_]?key',
+  'key',
   'client[-_]?id',
   'client[-_]?secret',
   'token',
-  'access[-_]?token',
-  'refresh[-_]?token',
-  'id[-_]?token',
   'secret',
   'password',
   'passwd',
   'signature',
-  'key'
+  'sig',
+  'credentials?',
+  'authorization',
+  'cookie'
 ].join('|')
 
-/** URL・設定の `名前=値` で値を伏せる名前 */
-const SECRET_PARAMS = [
-  'key',
-  '(?:x-)?api[-_]?key',
-  'client[-_]?id',
-  'client[-_]?secret',
-  'token',
-  'access[-_]?token',
-  'refresh[-_]?token',
-  'signature',
-  'sig',
-  'password',
-  'passwd',
-  'secret'
-].join('|')
+/** `名前: 値` の名前の部分(この後ろから値を手で読む) */
+const NAMED_VALUE = new RegExp(
+  `(?<![A-Za-z0-9_$-])(\\\\*["']?)[A-Za-z0-9_$-]*?(?:${SECRET_NAME})\\1[ \\t]*:[ \\t]*`,
+  'gi'
+)
+
+/** `名前=値`。区切りの後(URL の ? & # / ; 、%3F %26、空白・行頭など)の名前だけ */
+const PARAM_PATTERN = new RegExp(
+  `((?:^|[?&\\s;,/#(:"'\\[{]|%3F|%26)[A-Za-z0-9_-]*?(?:${SECRET_NAME})(?:=|%3D)["']?)(?:(?!%26)[^&\\s"',;)#])+`,
+  'gim'
+)
+
+/** 値の終わり(`start` は値の始まり)。クォートで囲まれていればその終わりまで、なければ区切りまで */
+function valueEnd(s: string, start: number, name: string): { end: number; quote: string } {
+  let i = start
+  while (s[i] === '\\') i++
+  const q = s[i]
+  if (q === '"' || q === "'") {
+    const depth = i - start
+    // 同じ深さのクォート(前の \ の数が同じもの)で終わる。それより多い \ の付いたものは中身
+    for (let j = i + 1; j < s.length; j++) {
+      if (s[j] !== q) continue
+      let k = 0
+      while (j - 1 - k > i && s[j - 1 - k] === '\\') k++
+      if (k === depth) return { end: j + 1, quote: s.slice(start, i + 1) }
+    }
+    return { end: s.length, quote: s.slice(start, i + 1) }
+  }
+  if (i > start) return { end: start, quote: '' }
+  // Cookie は行の終わりまで(SID=…; HSID=… と続く)
+  if (/cookie$/i.test(name)) {
+    const nl = s.indexOf('\n', start)
+    return { end: nl < 0 ? s.length : nl, quote: '' }
+  }
+  let j = start
+  // Authorization: Bearer / Token / Basic の後ろの値まで
+  const scheme = /^(?:bearer|token|basic|digest)[ \t]+/i.exec(s.slice(start, start + 16))
+  if (scheme) j += scheme[0].length
+  while (j < s.length && !/[\s,;}\])"']/.test(s[j])) j++
+  return { end: j, quote: '' }
+}
+
+function redactNamedValues(s: string): string {
+  const parts: string[] = []
+  let last = 0
+  NAMED_VALUE.lastIndex = 0
+  for (let m = NAMED_VALUE.exec(s); m; m = NAMED_VALUE.exec(s)) {
+    const start = m.index + m[0].length
+    const name = m[0].replace(/[\\"'\s:]/g, '')
+    const { end, quote } = valueEnd(s, start, name)
+    if (end <= start) continue
+    parts.push(s.slice(last, start), quote ? `${quote}***${quote}` : '***')
+    last = end
+    NAMED_VALUE.lastIndex = Math.max(end, NAMED_VALUE.lastIndex)
+  }
+  parts.push(s.slice(last))
+  return parts.join('')
+}
 
 /** 例外・拒否の理由を文字にする(名前・メッセージ・スタックの先頭) */
 export function describeError(e: unknown): string {
