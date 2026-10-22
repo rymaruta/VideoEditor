@@ -67,9 +67,10 @@ function openDocWindow(file: string, title: string, parent?: BrowserWindow | nul
   win.on('page-title-updated', (e) => e.preventDefault())
   // 同じ文書の中の移動(目次のリンク)だけ許す。https のリンクは既定のブラウザで開く(docNavigation)
   const follow = (url: string): boolean => {
-    const action = docNavigation(url, path)
-    if (action === 'external') void shell.openExternal(url)
-    return action === 'allow'
+    const nav = docNavigation(url, path)
+    // https(http は https に上げたもの)だけ外のブラウザで開く
+    if (nav.action === 'external') void shell.openExternal(nav.url)
+    return nav.action === 'allow'
   }
   win.webContents.setWindowOpenHandler(({ url }) => {
     follow(url)
