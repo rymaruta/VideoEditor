@@ -1,37 +1,46 @@
 @import './base.css';
 
 :root {
-  /* ===== Graphite 2(デザインの決まり。名前は --ve-*) =====
-     絵が主役。地は無彩に近い炭色、確かめるべき所だけを琥珀で灯す。
-     琥珀は「人の番」(主ボタン・確認の印・選択中の枠・オンの切り替え)だけに使う。 */
+  /* ===== Graphite 3(デザインの決まり。名前は --ve-*) =====
+     深い紺〜紫の地に、浮いたカードのパネル。主の操作・人の番・選択だけを琥珀で灯す。
+     値は design3(Graphite 3)の手本から。文字はどの面の上でも 4.5:1 以上。 */
   /* 地と面 — 奥から手前へ */
-  --ve-well: #090a0b; /* モニターの周り */
-  --ve-bg: #0c0d0f; /* 地 */
-  --ve-panel: #121418; /* パネル */
-  --ve-field: #181b20; /* 入力欄・カード */
-  --ve-raised: #20242a; /* 浮き上がり・押下・ふつうのボタン */
-  --ve-raised-hover: #272c33;
-  --ve-line: #1c1f24; /* 区切り線 */
-  --ve-line-field: #2a2f36; /* 入力欄の線 */
-  --ve-line-control: #2e333b; /* ボタンの線 */
-  --ve-line-control-hover: #3a4049;
-  --ve-line-strong: #4a5059; /* チェックの枠など */
-  /* 文字 — どの面の上でも 4.5:1 以上(#8A8F97 はパネルの上で 5.4:1。これより暗い灰色は使わない) */
-  --ve-text: #eceae6;
-  --ve-text-2: #a9adb4;
-  --ve-text-3: #8a8f97;
+  --ve-well: #04050a; /* モニターの周り */
+  --ve-bg: #07080c; /* 地 */
+  --ve-panel: #121426; /* パネル(カードの中ほどの色) */
+  --ve-panel-top: #1a1d33; /* パネルの上端 */
+  --ve-panel-bottom: #0f1120; /* パネルの下端 */
+  --ve-panel-fill: linear-gradient(180deg, #1a1d33 0%, #121426 55%, #0f1120 100%);
+  --ve-panel-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px rgba(150, 165, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.6), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --ve-field: #0d0f18; /* 入力欄・カード */
+  --ve-raised: #22263d; /* 浮き上がり・押下・ふつうのボタン */
+  --ve-raised-fill: linear-gradient(180deg, #2a2f45, #20243a);
+  --ve-raised-hover: #2a2f45;
+  --ve-line: #1c2033; /* 区切り線(淡い青紫) */
+  --ve-line-field: #2a2f48; /* 入力欄の線 */
+  --ve-line-control: #2e3350; /* ボタンの線 */
+  --ve-line-control-hover: #3c4266;
+  --ve-line-strong: #4a5070; /* チェックの枠など */
+  /* 文字(#8E949D はパネルの上端 #1A1D33 でも 5.4:1。これより暗い灰色の文字は使わない) */
+  --ve-text: #edeef0;
+  --ve-text-2: #a6abb3;
+  --ve-text-3: #8e949d;
   /* 意味の色 — 塗り・淡い地・その上の文字 */
-  --ve-accent: #f5a524;
-  --ve-accent-hover: #ffb84a;
-  --ve-accent-press: #d98e14;
-  --ve-accent-soft: #2a2113;
-  --ve-accent-ink: #f7c46a;
-  --ve-accent-line: #5a4520;
-  --ve-on-accent: #1a1205; /* 琥珀の上の文字 */
-  --ve-playhead: #ff5a4e; /* 再生位置だけ。ほかに使わない */
+  --ve-accent: #ffb224;
+  --ve-accent-fill: linear-gradient(135deg, #ffd25c 0%, #ffa62b 55%, #ff7a1f 100%);
+  --ve-accent-hover: #ffc04a;
+  --ve-accent-press: #f08a1c;
+  --ve-accent-soft: #2b2312;
+  --ve-accent-ink: #ffcb6b;
+  --ve-accent-line: rgba(255, 178, 36, 0.38);
+  --ve-accent-glow: 0 6px 22px rgba(255, 140, 30, 0.35);
+  --ve-on-accent: #1c1004; /* 琥珀の上の文字(いちばん明るい所でも 7:1) */
+  --ve-playhead: #ff4d55; /* 再生位置だけ(#FF6A4D → #FF3D5E の光) */
   --ve-ok: #4cc38a;
   --ve-ok-soft: #12291f;
-  --ve-ok-ink: #8fe0b8;
+  --ve-ok-ink: #7de3b1;
   --ve-danger: #ff6b5e;
   --ve-danger-soft: #301714;
   --ve-danger-ink: #ffa49b;
@@ -123,11 +132,11 @@
   --radius-sm: var(--ve-radius-control);
   --shadow-panel: none;
   --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--ve-line-control);
-  /* UI は IBM Plex Sans JP、数字・時刻は IBM Plex Mono(どちらも同梱。uiFonts.css) */
+  /* 英数字は Geist、数字・時刻は Geist Mono(uiFonts.css)、和文は Noto Sans JP(telopFonts.css) */
   --font-sans:
-    'IBM Plex Sans JP', 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', 'Hiragino Kaku Gothic ProN',
-    system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', 'Consolas', 'Cascadia Mono', 'Menlo', monospace;
+    'Geist Sans', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI',
+    'Hiragino Kaku Gothic ProN', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'Consolas', 'Cascadia Mono', 'Menlo', monospace;
 
   --color-background: var(--bg);
   --color-text: var(--text-1);

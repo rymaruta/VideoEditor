@@ -1,0 +1,613 @@
+/* =====================================================================
+   Graphite 3(design3 の手本)の見た目。main.css の後に読み込む(main.tsx)。
+   地・パネル・文字・ボタン・上の帯・モニター・インスペクタ・素材の格子。
+   タイムラインの見た目は timelineG3.css(別の担当)が持つので、ここでは触らない。
+   ===================================================================== */
+
+/* ---------- 地と文字 ---------- */
+body {
+  font-family: var(--font-sans);
+  line-height: 1.45;
+  background:
+    radial-gradient(900px 520px at 8% -8%, rgba(124, 92, 255, 0.16), transparent 62%),
+    radial-gradient(900px 600px at 100% 110%, rgba(0, 190, 170, 0.1), transparent 60%),
+    radial-gradient(1400px 600px at 50% -20%, #151a2a 0%, #090a10 62%), var(--ve-bg);
+  background-attachment: fixed;
+}
+.app-shell {
+  background: transparent;
+}
+code,
+kbd,
+.tc,
+.mono,
+.time-label,
+input[type='number'] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- ボタン ---------- */
+button {
+  background-color: transparent;
+  background-image: var(--ve-raised-fill);
+  border-color: var(--ve-line-control);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+button:hover:not(:disabled) {
+  background-image: linear-gradient(180deg, #32385a, #262b45);
+  border-color: var(--ve-line-control-hover);
+}
+button:active:not(:disabled) {
+  background-image: none;
+  background-color: var(--ve-field);
+}
+.primary-button,
+.primary-button:hover:not(:disabled),
+.primary-button:active:not(:disabled) {
+  background-color: var(--ve-accent);
+  background-image: var(--ve-accent-fill);
+  border-color: transparent;
+  color: var(--ve-on-accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    var(--ve-accent-glow);
+}
+.primary-button:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.primary-button:active:not(:disabled) {
+  filter: brightness(0.94);
+}
+/* 素材の読み込みは控えめのまま(main.css の .media-import-buttons と同じ考え) */
+.media-import-buttons .primary-button,
+.media-import-buttons .primary-button:hover:not(:disabled) {
+  background-image: var(--ve-raised-fill);
+  color: var(--ve-text);
+  border-color: var(--ve-line-control);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  filter: none;
+}
+.danger,
+.danger:hover:not(:disabled) {
+  background-image: none;
+}
+/* 道具のボタン(地も枠も持たず、オンは琥珀の淡い地と輪) */
+.icon-button {
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ve-text-2);
+}
+.icon-button:hover:not(:disabled) {
+  background-image: none;
+  background-color: #1e2236;
+  border-color: transparent;
+  color: var(--ve-text);
+}
+.icon-button.active,
+.icon-button.active:hover:not(:disabled),
+.icon-button[aria-pressed='true'] {
+  background-color: transparent;
+  background-image: linear-gradient(180deg, rgba(255, 178, 36, 0.2), rgba(255, 138, 31, 0.1));
+  border-color: transparent;
+  color: var(--ve-accent-ink);
+  box-shadow:
+    inset 0 0 0 1px var(--ve-accent-line),
+    0 0 12px rgba(255, 160, 40, 0.12);
+}
+.toggle-chip.active {
+  background-image: var(--ve-accent-fill);
+}
+input,
+select,
+textarea {
+  background-color: rgba(8, 10, 18, 0.7);
+  border-color: rgba(150, 165, 255, 0.14);
+}
+
+/* ---------- 上の帯 ---------- */
+.workflow-bar {
+  height: 46px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 138, 31, 0.07),
+    rgba(124, 92, 255, 0.07) 50%,
+    rgba(0, 190, 170, 0.05)
+  );
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.1);
+}
+.workflow-bar-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1c1404;
+  background: linear-gradient(145deg, #ffd25c, #ff7a1f 70%, #e8459b);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 2px 8px rgba(240, 138, 28, 0.25);
+}
+.workflow-bar-name {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+.workflow-bar-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--ve-text-3);
+}
+.workflow-bar-saved-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ve-ok);
+  box-shadow: 0 0 0 3px rgba(76, 195, 138, 0.15);
+}
+.workflow-bar-saved.dirty {
+  color: var(--ve-accent-ink);
+}
+.workflow-bar-saved.dirty .workflow-bar-saved-dot {
+  background: var(--ve-accent);
+  box-shadow: 0 0 0 3px rgba(255, 178, 36, 0.16);
+}
+.workflow-steps {
+  border-radius: 10px;
+  background: #0d0f16;
+  box-shadow: inset 0 0 0 1px #1c1f2e;
+}
+.workflow-step {
+  height: 30px;
+  border-radius: 7px;
+  background-image: none;
+  box-shadow: none;
+  font-size: 13px;
+}
+.workflow-step:hover:not(:disabled) {
+  background-image: none;
+  background-color: #171a26;
+}
+.workflow-step.current,
+.workflow-step.current:hover:not(:disabled) {
+  background-image: linear-gradient(180deg, #2e3350, #22263d);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.workflow-step-dot {
+  box-shadow: 0 0 10px #ff9a2b;
+}
+.workflow-step-count {
+  background: rgba(255, 178, 36, 0.14);
+}
+.workflow-icon {
+  width: 30px;
+  height: 30px;
+}
+.workflow-bar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: #23273a;
+}
+.workflow-export {
+  height: 32px;
+  border-radius: 8px;
+}
+
+/* ---------- 枠(浮いたカードのパネル) ---------- */
+.workspace {
+  padding: 6px 6px 0;
+}
+.split-handle.split-col {
+  width: 6px;
+}
+.split-handle.split-row {
+  height: 6px;
+}
+.split-handle:hover,
+.split-handle.active {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ve-line-strong);
+  border-radius: 3px;
+}
+.frame {
+  background: var(--ve-panel-fill);
+  border-radius: 12px;
+  box-shadow: var(--ve-panel-shadow);
+}
+.frame-monitor {
+  background: var(--ve-panel-fill);
+}
+/* パネルの見出し: 36px のごく薄い明るさの帯 */
+.panel-tabs {
+  height: 36px;
+  padding: 0 8px;
+  gap: 4px;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
+}
+.panel-tab {
+  height: 26px;
+  background-image: none;
+  box-shadow: none;
+  color: #8e949d;
+}
+.panel-tab:hover:not(:disabled):not(.active) {
+  background-image: none;
+  background-color: #1a1d2c;
+}
+.panel-tab.active {
+  background-color: transparent;
+  background-image: linear-gradient(180deg, #2a2f45, #20243a);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: var(--ve-text);
+}
+.media-bin-tab,
+.media-bin-tab:hover:not(:disabled) {
+  background-image: none;
+  box-shadow: none;
+}
+
+/* ステータスバー */
+.status-bar {
+  background: transparent;
+  border-top: 0;
+  margin-top: 2px;
+  color: var(--ve-text-3);
+}
+
+/* 浮く窓 */
+.modal,
+.export-dialog,
+.telop-style-dialog,
+.new-episode-dialog,
+.look-picker {
+  background: var(--ve-panel-fill);
+  border-color: rgba(150, 165, 255, 0.14);
+  box-shadow: var(--ve-panel-shadow);
+}
+.dialog-titlebar,
+.dialog-footer,
+.auto-edit-header {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
+}
+.clip-context-menu,
+.app-popover,
+.color-popover,
+.recent-projects-list {
+  background: linear-gradient(180deg, #23273f, #1a1d31);
+  border-color: rgba(150, 165, 255, 0.16);
+}
+
+/* ---------- モニター ---------- */
+/* 周りは暗く、淡い色の光(映像を邪魔しない程度) */
+.frame-monitor .preview-frame-wrapper {
+  background:
+    radial-gradient(60% 55% at 45% 58%, rgba(120, 170, 90, 0.14), transparent 70%),
+    radial-gradient(40% 40% at 72% 38%, rgba(70, 130, 220, 0.12), transparent 70%),
+    radial-gradient(30% 35% at 20% 80%, rgba(255, 90, 160, 0.06), transparent 70%), var(--ve-well);
+}
+.preview-frame {
+  border-radius: 0;
+  box-shadow:
+    0 0 0 1px #16191e,
+    0 30px 80px rgba(0, 0, 0, 0.6);
+}
+/* 安全枠(動きの安全 5%・文字の安全 10%) */
+.preview-safe-frame {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+}
+.preview-safe-frame.action {
+  inset: 5%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+.preview-safe-frame.title {
+  inset: 10%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+/* 選んだテロップ: 琥珀の枠と「T1 · 話者」の札 */
+.overlay-text.overlay-hitbox-only.selected {
+  box-shadow: 0 0 0 1.5px var(--ve-accent);
+  border-radius: 3px;
+}
+.overlay-text.overlay-hitbox-only .overlay-selected-tag {
+  position: absolute;
+  left: -1px;
+  bottom: 100%;
+  margin-bottom: 3px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  color: var(--ve-on-accent) !important;
+  background: var(--ve-accent) !important;
+}
+/* 時刻とトランスポート */
+.frame-monitor .preview-controls {
+  padding: 8px 14px 10px;
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+}
+.preview-player .time-label.current {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ve-text);
+}
+.preview-player .time-label.total,
+.preview-player .time-label.export-total {
+  font-size: 12px;
+  color: var(--ve-text-3);
+}
+.scrub-track {
+  background: #1e2236;
+}
+.scrub-fill {
+  background: linear-gradient(90deg, #ff6a4d, #ff3d5e);
+}
+.play-button,
+.play-button:hover:not(:disabled) {
+  width: 42px;
+  height: 42px;
+  background-color: #e9ebee;
+  background-image: linear-gradient(180deg, #f4f5f7, #d9dce1);
+  color: #0a0b0d;
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- インスペクタ(テロップを選んだとき) ---------- */
+.telop-insp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.telop-insp-icon {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffe0ee;
+  background: linear-gradient(145deg, #b0287a, #5a1240);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 4px 14px rgba(200, 40, 120, 0.35);
+}
+.telop-insp-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.telop-insp-kind {
+  font-weight: 600;
+}
+.telop-insp-sub {
+  font-size: 12px;
+  color: var(--ve-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.telop-insp-speaker {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--ve-text);
+  background: color-mix(in srgb, var(--spk) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--spk) 50%, transparent);
+}
+.telop-insp-speaker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--spk);
+  box-shadow: 0 0 8px var(--spk);
+}
+.telop-insp-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.telop-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.15));
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+}
+.telop-metric-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.telop-metric.shown .telop-metric-label {
+  color: #9fb4ff;
+}
+.telop-metric.speed .telop-metric-label {
+  color: #7ff0bf;
+}
+.telop-metric.chars .telop-metric-label {
+  color: #ffc07a;
+}
+.telop-metric-value {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.telop-metric.speed .telop-metric-value {
+  color: var(--ve-ok-ink);
+}
+.telop-metric.speed.fast .telop-metric-value {
+  color: var(--ve-accent-ink);
+}
+.telop-metric-unit {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ve-text-3);
+}
+.telop-inspector .prop-text textarea {
+  background: #0d0f16;
+  border-radius: 9px;
+  font-family: 'Noto Sans JP', var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.7;
+}
+
+/* ---------- 素材の格子 ---------- */
+.media-list.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 12px 10px;
+  padding: 4px 2px;
+  align-content: start;
+}
+.media-list.media-grid .empty-state {
+  grid-column: 1 / -1;
+}
+.media-row.media-tile {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'thumb thumb'
+    'name res';
+  row-gap: 6px;
+  column-gap: 6px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+}
+.media-row.media-tile:hover {
+  background: transparent;
+}
+.media-row.media-tile:hover .media-tile-thumb {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.media-row.media-tile.in-source,
+.media-row.media-tile.menu-open {
+  background: transparent;
+  box-shadow: none;
+}
+.media-row.media-tile.in-source .media-tile-thumb,
+.media-row.media-tile.menu-open .media-tile-thumb {
+  box-shadow: 0 0 0 1.5px var(--ve-accent);
+}
+.media-tile .media-kind,
+.media-tile .media-col-dur {
+  display: none;
+}
+.media-tile .media-col-name {
+  grid-area: name;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.media-tile .media-col-res {
+  grid-area: res;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--ve-text-3);
+}
+.media-tile-thumb {
+  grid-area: thumb;
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: visible;
+  background: #0b0d14;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.media-tile-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 6px;
+}
+.media-tile-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ve-text-3);
+}
+.media-tile-dur {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ve-text);
+  background: rgba(10, 11, 13, 0.78);
+}
+.media-tile-used {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ve-accent-fill);
+}
+.media-tile .media-row-progress {
+  bottom: 22px;
+}
+.media-row.media-tile.missing .media-tile-thumb {
+  box-shadow: 0 0 0 1px var(--ve-danger-line);
+}
+
+/* 素材パネルの見出しのボタンは折り返さない(格子の切り替えを足して狭くなった) */
+.media-import-buttons {
+  flex-shrink: 0;
+}
+.media-import-buttons button {
+  white-space: nowrap;
+}
+.media-bin .panel-header {
+  gap: 6px;
+}
+.media-bin .media-bin-tabs {
+  min-width: 0;
+  overflow: hidden;
+}
+.media-bin .media-import-buttons {
+  gap: 2px;
+}

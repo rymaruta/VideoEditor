@@ -804,6 +804,7 @@ export function PreviewPlayer(): React.JSX.Element {
   const seekTo = useProjectStore((s) => s.seekTo)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const selectOverlay = useProjectStore((s) => s.selectOverlay)
+  const selectedOverlayId = useProjectStore((s) => s.selectedOverlayId)
   const exportResolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
 
   // いま映している方の再生要素(2つのうちどちらか。理由は previewStandby)
@@ -1524,10 +1525,11 @@ export function PreviewPlayer(): React.JSX.Element {
                 frameWidth
               )
               if (!hitStyle) return null
+              const selected = selectedOverlayId === o.id
               return (
                 <div
                   key={o.id}
-                  className="overlay-text overlay-hitbox-only"
+                  className={`overlay-text overlay-hitbox-only ${selected ? 'selected' : ''}`}
                   style={hitStyle}
                   onMouseDown={(e) => {
                     e.preventDefault()
@@ -1550,7 +1552,14 @@ export function PreviewPlayer(): React.JSX.Element {
                       moved: false
                     })
                   }}
-                />
+                >
+                  {/* 選んだテロップには琥珀の枠と札(どのトラック・誰の発言か) */}
+                  {selected && (
+                    <span className="overlay-selected-tag">
+                      T1{o.speaker ? ` · ${o.speaker}` : ''}
+                    </span>
+                  )}
+                </div>
               )
             })}
             {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
@@ -1558,6 +1567,13 @@ export function PreviewPlayer(): React.JSX.Element {
               <div className="shorts-safe-area" style={shortsSafeAreaInset()}>
                 <span className="shorts-safe-area-label">セーフエリア</span>
               </div>
+            )}
+            {/* 横長の安全枠(放送の目安: 動きの安全 5%・文字の安全 10%)。画面だけの線で、書き出しには写らない */}
+            {showSafeArea && project.aspectRatio !== '9:16' && activeSrc && (
+              <>
+                <div className="preview-safe-frame action" aria-hidden="true" />
+                <div className="preview-safe-frame title" aria-hidden="true" />
+              </>
             )}
             {project.audioTracks.flatMap((track) =>
               track.clips
@@ -1627,23 +1643,26 @@ export function PreviewPlayer(): React.JSX.Element {
           <div className="preview-transport-row">
             <div className="transport-side transport-side-left">
               {project.aspectRatio === '9:16' && (
-                <>
-                  <button
-                    className={`icon-button ${showShortsUi ? 'active' : ''}`}
-                    title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
-                    onClick={() => setShowShortsUi((v) => !v)}
-                  >
-                    <YoutubeIcon width={14} height={14} />
-                  </button>
-                  <button
-                    className={`icon-button ${showSafeArea ? 'active' : ''}`}
-                    title="セーフエリアの目安線を表示(この線の外はYouTubeのUIに隠れやすい範囲です。線は画面だけのもので、書き出しには写りません)"
-                    onClick={() => setShowSafeArea((v) => !v)}
-                  >
-                    <TargetIcon width={14} height={14} />
-                  </button>
-                </>
+                <button
+                  className={`icon-button ${showShortsUi ? 'active' : ''}`}
+                  title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
+                  onClick={() => setShowShortsUi((v) => !v)}
+                >
+                  <YoutubeIcon width={14} height={14} />
+                </button>
               )}
+              <button
+                className={`icon-button ${showSafeArea ? 'active' : ''}`}
+                aria-pressed={showSafeArea}
+                title={
+                  project.aspectRatio === '9:16'
+                    ? 'セーフエリアの目安線を表示(この線の外はYouTubeのUIに隠れやすい範囲です。線は画面だけのもので、書き出しには写りません)'
+                    : '安全枠を表示(外側が動きの安全 5%・内側が文字の安全 10% の目安。線は画面だけのもので、書き出しには写りません)'
+                }
+                onClick={() => setShowSafeArea((v) => !v)}
+              >
+                <TargetIcon width={14} height={14} />
+              </button>
             </div>
             <div className="transport-center">
               <button

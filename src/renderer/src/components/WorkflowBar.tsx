@@ -1,6 +1,8 @@
 import { useProjectStore } from '../store/projectStore'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
+import { isModalOpen } from '../lib/useKeyboardShortcuts'
+import { RedoIcon, UndoIcon, UploadIcon } from './icons'
 
 /**
  * 画面上部の帯(Graphite 2 のヘッダー)。作業の流れを左から右へ並べ、今いる所に印を付ける。
@@ -26,35 +28,32 @@ export function WorkflowBar({
   const projectName = useProjectStore((s) => s.project.name)
   const isDirty = useProjectStore((s) => s.isDirty)
   const reviewCount = useReviewItems().open.length
+  const canUndo = useProjectStore((s) => s.past.length > 0)
+  const canRedo = useProjectStore((s) => s.future.length > 0)
+  // メニューの「元に戻す / やり直す」と同じ(ダイアログの上では何もしない)
+  const undo = (): void => {
+    if (!isModalOpen()) useProjectStore.getState().undo()
+  }
+  const redo = (): void => {
+    if (!isModalOpen()) useProjectStore.getState().redo()
+  }
   const openAutoEdit = (): void => emitMenuCommand('auto.screen')
   const openExport = (): void => emitMenuCommand('file.export')
   return (
     <header className="workflow-bar">
       <div className="workflow-bar-project">
-        <svg
-          className="workflow-bar-logo"
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <rect
-            x="2.5"
-            y="4.5"
-            width="19"
-            height="15"
-            rx="3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          />
-          <circle cx="17.5" cy="8.5" r="1.6" fill="currentColor" />
-          <path d="M9.5 9.2v5.6l4.6-2.8z" fill="var(--ve-text)" />
-        </svg>
+        <span className="workflow-bar-logo" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24">
+            <path d="M7 4.5v15l12.5-7.5z" fill="currentColor" />
+          </svg>
+        </span>
         <span className="workflow-bar-name" title={projectName}>
           {projectName}
         </span>
-        {isDirty && <span className="dirty-dot" aria-label="未保存の変更あり" />}
+        <span className={`workflow-bar-saved ${isDirty ? 'dirty' : ''}`}>
+          <span className="workflow-bar-saved-dot" aria-hidden="true" />
+          {isDirty ? '未保存の変更あり' : '保存済み'}
+        </span>
       </div>
       <nav className="workflow-steps" aria-label="作業の流れ">
         <button type="button" className="workflow-step" onClick={openAutoEdit}>
@@ -89,7 +88,29 @@ export function WorkflowBar({
         </button>
       </nav>
       <div className="workflow-bar-actions">
+        <button
+          type="button"
+          className="icon-button workflow-icon"
+          title="元に戻す (Ctrl+Z)"
+          aria-label="元に戻す"
+          disabled={!canUndo}
+          onClick={undo}
+        >
+          <UndoIcon width={16} height={16} />
+        </button>
+        <button
+          type="button"
+          className="icon-button workflow-icon"
+          title="やり直す (Ctrl+Shift+Z)"
+          aria-label="やり直す"
+          disabled={!canRedo}
+          onClick={redo}
+        >
+          <RedoIcon width={16} height={16} />
+        </button>
+        <span className="workflow-bar-sep" aria-hidden="true" />
         <button type="button" className="primary-button workflow-export" onClick={openExport}>
+          <UploadIcon width={15} height={15} />
           書き出す
           <span className="workflow-export-key tc">Ctrl+M</span>
         </button>

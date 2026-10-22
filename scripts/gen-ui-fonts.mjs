@@ -1,13 +1,13 @@
-// 画面(UI)用の同梱フォントの @font-face を作る(Graphite 2 の決まり: 和文は IBM Plex Sans JP、
-// 数字・時刻は IBM Plex Mono)。日本語の全グリフは大きいので、使う太さだけにする。
+// 画面(UI)用の同梱フォントの @font-face を作る(Graphite 3 の決まり: 英数字は Geist、
+// 数字・時刻は Geist Mono。和文はテロップ用に同梱済みの Noto Sans JP を使う)。使う太さだけにする。
 // woff2 だけ・キリル/ギリシャ/ベトナム語は除く(テロップ用の gen-telop-fonts.mjs と同じ作り)。
 // フォントは unicode-range で分かれているので、画面に出た字の分だけが読み込まれる。
 // 使い方: node scripts/gen-ui-fonts.mjs
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const FONTS = [
-  ['ibm-plex-sans-jp', [400, 500, 600, 700]],
-  ['ibm-plex-mono', [400, 500, 600]]
+  ['geist-sans', [400, 500, 600, 700]],
+  ['geist-mono', [400, 500, 600]]
 ]
 const out = [
   '/* scripts/gen-ui-fonts.mjs が作る。手で直さない。フォントはすべて SIL Open Font License */'

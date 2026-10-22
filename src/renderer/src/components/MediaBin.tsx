@@ -19,7 +19,25 @@ import { HighlightModal } from './HighlightModal'
 import { RoughCutModal } from './RoughCutModal'
 import { AutoEditModal } from './AutoEditModal'
 import { LongFormShortModal } from './LongFormShortModal'
-import { UploadIcon, ClapperboardIcon, MusicIcon, AlertTriangleIcon } from './icons'
+import {
+  UploadIcon,
+  ClapperboardIcon,
+  MusicIcon,
+  AlertTriangleIcon,
+  ImageIcon,
+  LayersIcon
+} from './icons'
+
+/** 素材の並べ方(格子 / 一覧)。この PC に覚える */
+const MEDIA_LAYOUT_KEY = 've-media-layout'
+
+function readMediaLayout(): 'grid' | 'list' {
+  try {
+    return localStorage.getItem(MEDIA_LAYOUT_KEY) === 'list' ? 'list' : 'grid'
+  } catch {
+    return 'grid'
+  }
+}
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -48,6 +66,21 @@ export function MediaBin(): React.JSX.Element {
   const textOverlays = useProjectStore((s) => s.project.textOverlays)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
   const setDraggingAssetId = useProjectStore((s) => s.setDraggingAssetId)
+  const [layout, setLayoutState] = useState<'grid' | 'list'>(readMediaLayout)
+  const setLayout = (next: 'grid' | 'list'): void => {
+    setLayoutState(next)
+    try {
+      localStorage.setItem(MEDIA_LAYOUT_KEY, next)
+    } catch {
+      // 覚えられなくても今回の並べ方は効く
+    }
+  }
+  // タイムラインで使っている素材(格子の「使用中」の帯)
+  const usedAssetIds = new Set([
+    ...mainClips.map((c) => c.assetId),
+    ...audioTracks.flatMap((t) => t.clips.map((c) => c.assetId)),
+    ...videoOverlayTracks.flatMap((t) => t.clips.map((c) => c.assetId))
+  ])
   const [importing, setImporting] = useState(false)
   const importingRef = useRef(false)
   /** 取り込みの途中に来て入れなかったファイルがあったか(終わったときの知らせが上書きしないように) */
@@ -634,6 +667,20 @@ export function MediaBin(): React.JSX.Element {
           </button>
         </div>
         <div className="media-import-buttons">
+          {view === 'project' && (
+            <button
+              className="icon-button"
+              aria-pressed={layout === 'grid'}
+              title={layout === 'grid' ? '一覧で表示' : '格子(サムネイル)で表示'}
+              onClick={() => setLayout(layout === 'grid' ? 'list' : 'grid')}
+            >
+              {layout === 'grid' ? (
+                <LayersIcon width={14} height={14} />
+              ) : (
+                <ImageIcon width={14} height={14} />
+              )}
+            </button>
+          )}
           <button className="primary-button" onClick={handleImportVideo} disabled={importing}>
             <UploadIcon width={14} height={14} />
             動画
@@ -662,7 +709,7 @@ export function MediaBin(): React.JSX.Element {
           {/* 自動編集(AIおまかせ・ラフカット・長尺からショート)はメニューバーの「自動編集」から開く */}
           {importing && <p className="hint-text">読み込み中...</p>}
           {error && <p className="error-text">{error}</p>}
-          <div className="media-list">
+          <div className={`media-list ${layout === 'grid' ? 'media-grid' : ''}`}>
             {assets.length === 0 && (
               <div className="empty-state">
                 <ClapperboardIcon width={28} height={28} />
@@ -670,7 +717,7 @@ export function MediaBin(): React.JSX.Element {
                 <p className="hint-text">ファイルをこのウィンドウにドロップしても追加できます</p>
               </div>
             )}
-            {assets.length > 0 && (
+            {assets.length > 0 && layout === 'list' && (
               <div className="media-list-head" aria-hidden>
                 <span className="media-col-name">名前</span>
                 <span className="media-col-dur">デュレーション</span>
@@ -685,7 +732,7 @@ export function MediaBin(): React.JSX.Element {
               return (
                 <div
                   key={asset.id}
-                  className={`media-row ${isMissing ? 'missing' : ''} ${
+                  className={`media-row ${layout === 'grid' ? 'media-tile' : ''} ${isMissing ? 'missing' : ''} ${
                     sourceAssetId === asset.id ? 'in-source' : ''
                   } ${assetMenu?.asset.id === asset.id ? 'menu-open' : ''}`}
                   onDoubleClick={() => !isMissing && openInSourceViewer(asset.id)}
@@ -708,6 +755,25 @@ export function MediaBin(): React.JSX.Element {
                   }}
                   onDragEnd={() => setDraggingAssetId(null)}
                 >
+                  {layout === 'grid' && (
+                    <span className="media-tile-thumb" aria-hidden>
+                      {asset.thumbnailDataUrl ? (
+                        <img src={asset.thumbnailDataUrl} alt="" draggable={false} />
+                      ) : (
+                        <span className="media-tile-icon">
+                          {asset.hasVideo ? (
+                            <ClapperboardIcon width={20} height={20} />
+                          ) : (
+                            <MusicIcon width={20} height={20} />
+                          )}
+                        </span>
+                      )}
+                      <span className="media-tile-dur tc">
+                        {formatTimecode(asset.duration, asset.fps || 30)}
+                      </span>
+                      {usedAssetIds.has(asset.id) && <span className="media-tile-used" />}
+                    </span>
+                  )}
                   <span
                     className={`media-kind ${asset.hasVideo ? 'video' : 'audio'}`}
                     aria-hidden
@@ -735,7 +801,13 @@ export function MediaBin(): React.JSX.Element {
                     {formatTimecode(asset.duration, asset.fps || 30)}
                   </span>
                   <span className="media-col-res">
-                    {asset.hasVideo ? `${asset.width}×${asset.height}` : '音声'}
+                    {layout === 'grid'
+                      ? usedAssetIds.has(asset.id)
+                        ? '使用中'
+                        : ''
+                      : asset.hasVideo
+                        ? `${asset.width}×${asset.height}`
+                        : '音声'}
                   </span>
                   {proxyProgress[asset.id] !== undefined && (
                     <span

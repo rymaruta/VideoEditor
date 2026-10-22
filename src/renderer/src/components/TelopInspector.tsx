@@ -12,6 +12,12 @@ import { TelopLookPicker, type LookItem } from './TelopLookGallery'
 import { LookTransfer } from './LookTransfer'
 import { applyLook, styleForSpeaker } from '@shared/telop/styles'
 import { DraftNumber } from './DraftNumber'
+import { stripTelopMarkup } from '@shared/telop/render'
+import { TypeIcon } from './icons'
+import { formatTimecode } from '../lib/timelineRuler'
+
+/** 読みやすい速さの上限(字/秒)。これを超えたら注意の色にする */
+const READABLE_CPS = 8
 
 /**
  * 選んだテロップ1本の設定。並びは
@@ -112,8 +118,67 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
     setPresetName(null)
   }
 
+  // 見出しと数値のカード(どれも今のテロップから数える)
+  const order = [...project.textOverlays].sort((a, b) => a.startTime - b.startTime)
+  const nth = order.findIndex((x) => x.id === o.id) + 1
+  const plain = stripTelopMarkup(o.text)
+  const chars = plain.replace(/\s/g, '').length
+  const longestLine = Math.max(0, ...plain.split('\n').map((l) => l.trim().length))
+  const shownSec = Math.max(0, o.endTime - o.startTime)
+  const cps = shownSec > 0 ? chars / shownSec : 0
+  const kindLabel = o.effectId ? '演出テロップ' : o.source === 'auto' ? '発言テロップ' : 'テロップ'
+
   return (
     <div className="telop-inspector">
+      <div className="telop-insp-head">
+        <span className="telop-insp-icon" aria-hidden="true">
+          <TypeIcon width={15} height={15} />
+        </span>
+        <span className="telop-insp-title">
+          <span className="telop-insp-kind">{kindLabel}</span>
+          <span className="telop-insp-sub">
+            T1 · {order.length} 枚のうち {nth} 枚目 ·{' '}
+            <span className="tc">
+              {formatTimecode(o.startTime, 30)} → {formatTimecode(o.endTime, 30)}
+            </span>
+          </span>
+        </span>
+        {o.speaker && (
+          <span
+            className="telop-insp-speaker"
+            style={{ '--spk': speakerColor(o.speaker) } as React.CSSProperties}
+          >
+            <span className="telop-insp-speaker-dot" aria-hidden="true" />
+            {o.speaker}
+          </span>
+        )}
+      </div>
+      <div className="telop-insp-metrics" aria-label="数値">
+        <div className="telop-metric shown">
+          <span className="telop-metric-label">表示</span>
+          <span className="telop-metric-value tc">
+            {shownSec.toFixed(1)}
+            <span className="telop-metric-unit"> 秒</span>
+          </span>
+        </div>
+        <div
+          className={`telop-metric speed ${cps > READABLE_CPS ? 'fast' : ''}`}
+          title={`読みやすい速さの目安は ${READABLE_CPS} 字/秒まで`}
+        >
+          <span className="telop-metric-label">読む速さ</span>
+          <span className="telop-metric-value tc">
+            {cps.toFixed(1)}
+            <span className="telop-metric-unit"> 字/秒</span>
+          </span>
+        </div>
+        <div className="telop-metric chars">
+          <span className="telop-metric-label">字数</span>
+          <span className="telop-metric-value tc">
+            {chars}
+            <span className="telop-metric-unit"> · 最長の行 {longestLine}</span>
+          </span>
+        </div>
+      </div>
       <div className="prop-text">
         <label htmlFor={`${uid}-text`} className="prop-label">
           本文

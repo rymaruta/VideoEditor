@@ -145,8 +145,8 @@ const MIN_MONITOR_WIDTH = 360
 const MIN_TIMELINE_WIDTH = 420
 const MIN_BOTTOM_HEIGHT = 180
 const MIN_TOP_HEIGHT = 220
-/** 枠・境目・上の帯(作業の流れ 44px)・ステータスバーなど、パネル以外が使う高さ */
-const CHROME_HEIGHT = 104
+/** 枠・境目・上の帯(作業の流れ 46px)・ステータスバーなど、パネル以外が使う高さ */
+const CHROME_HEIGHT = 112
 
 function readStoredSize(key: string, fallback: number): number {
   try {
