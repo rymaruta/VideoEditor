@@ -70,7 +70,24 @@ export interface AutoEditDecisions {
    */
   carriedTelops?: Omit<TextOverlay, 'id'>[]
   sync?: SyncSummary
+  /**
+   * 範囲だけ自動編集した所(共通の時刻。新しいものが後ろ)。全体を作り直すと、ここも作り直されることを
+   * 作り直す前に知らせる(残したい所はロックする)。全体を作り直したら空にする
+   */
+  rangeRuns?: RangeRun[]
 }
+
+/** 範囲だけ自動編集した1回 */
+export interface RangeRun {
+  /** 共通の時刻の窓 */
+  start: number
+  end: number
+  /** 当てた時(ms) */
+  at: number
+}
+
+/** 覚えておく範囲の自動編集の回数 */
+export const RANGE_RUNS_MAX = 20
 
 /** 覚えておく作り直しの回数(取り消しで戻れる回数よりは少ないが、普段の行き来には足りる) */
 export const BUILT_KEPT_MAX = 20
@@ -188,6 +205,15 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     ? judgementsOf(raw.planJudgements)
     : undefined
   const sync = syncOf(raw.sync)
+  const rangeRuns = Array.isArray(raw.rangeRuns)
+    ? raw.rangeRuns
+        .filter(
+          (r): r is Record<string, unknown> =>
+            isObj(r) && num(r.start) && num(r.end) && r.end > r.start && num(r.at)
+        )
+        .map((r) => ({ start: r.start as number, end: r.end as number, at: r.at as number }))
+        .slice(-RANGE_RUNS_MAX)
+    : []
   return {
     ...(raw.kind === 'location' || raw.kind === 'game' ? { kind: raw.kind } : {}),
     ...(hype ? { hype } : {}),
@@ -208,6 +234,7 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     effectChosen,
     ...(raw.effectsAsked === true ? { effectsAsked: true } : {}),
     ...(carriedTelops.length > 0 ? { carriedTelops } : {}),
-    ...(sync ? { sync } : {})
+    ...(sync ? { sync } : {}),
+    ...(rangeRuns.length > 0 ? { rangeRuns } : {})
   }
 }

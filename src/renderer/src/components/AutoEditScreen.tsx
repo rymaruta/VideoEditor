@@ -28,6 +28,10 @@ import {
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 import { LocalAiRetry } from './LocalAiRetry'
 import { ShortsPanel } from './ShortsPanel'
+import './rangeAutoEdit.css'
+import { requestRangeAutoEdit } from '../lib/timelineRange'
+import { spansOfClips } from '@shared/roughCut/overrides'
+import { timelineRangeOf } from '@shared/finish/sound'
 import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
 import { nextAction, RESTART_CONFIRM, type NextActionId } from '../lib/autoEditNext'
 import {
@@ -140,6 +144,9 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const editNote = usePipelineStore((s) => s.editNote)
   const restored = usePipelineStore((s) => s.restored)
+  const rangeRuns = usePipelineStore((s) => s.rangeRuns)
+  /** 「選んだ場面だけ作り直す」に選んだ場面 */
+  const [pickedScenes, setPickedScenes] = useState<ReadonlySet<string>>(new Set())
 
   // 開いた直後は「全体」(次にやること・見つかったもの・構成の帯)
   const [tab, setTab] = useState<CenterTab>('overview')
@@ -231,6 +238,14 @@ export function AutoEditScreen(): React.JSX.Element | null {
     // 前の版で保存した企画は、手で決めた残す/落とすが残っていない。押し間違いで場面が
     // 入れ替わらないよう、作り直す前に確かめる
     if (restored?.legacy && !confirm(LEGACY_REBUILD_CONFIRM)) return
+    // 範囲だけ自動編集した所も、全体の作り直しで作り直される
+    if (
+      rangeRuns.length > 0 &&
+      !confirm(
+        `範囲だけ自動編集した所 ${rangeRuns.length} か所も、全体の作り直しで作り直されます(残したい所はロックしてください)。\n\n作り直しますか?`
+      )
+    )
+      return
     void usePipelineStore.getState().rebuildRoughCut()
   }
 
@@ -974,6 +989,34 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 </button>
                 <button
                   className="small-button"
+                  disabled={running || pickedScenes.size === 0 || !project.multicam}
+                  onClick={() => {
+                    const info = project.multicam
+                    if (!info) return
+                    const spans = spansOfClips(project.clips, info)
+                    const ranges = scenes
+                      .filter((sc) => pickedScenes.has(sc.id))
+                      .map((sc) => timelineRangeOf(spans, sc.start, sc.end))
+                      .filter((r): r is { start: number; end: number } => r !== null)
+                    if (ranges.length === 0) {
+                      alert(
+                        '選んだ場面は、今の本編にありません(落とした場面は「残す」にして作り直してください)'
+                      )
+                      return
+                    }
+                    // 本編の上で範囲を確かめながら当てるので、自動編集の画面は閉じる
+                    usePipelineStore.getState().setScreenOpen(false)
+                    requestRangeAutoEdit({
+                      start: Math.min(...ranges.map((r) => r.start)),
+                      end: Math.max(...ranges.map((r) => r.end))
+                    })
+                  }}
+                  title="一覧で「範囲」に印を付けた場面の所(今の本編の位置)だけを、自動編集で作り直します。ほかの所はそのままです"
+                >
+                  選んだ場面だけ作り直す{pickedScenes.size > 0 ? `(${pickedScenes.size})` : ''}
+                </button>
+                <button
+                  className="small-button"
                   disabled={!project.multicam || project.clips.length === 0}
                   onClick={() => void compareWithHuman()}
                   title="人が仕上げた完成版(Premiere の XML)と、残した区間・カット点・アングルがどれだけ一致するかを測ります"
@@ -981,6 +1024,27 @@ export function AutoEditScreen(): React.JSX.Element | null {
                   人の完成版と比べる…
                 </button>
               </div>
+              {(project.autoEditLocks?.length ?? 0) > 0 && (
+                <div className="auto-edit-locks" aria-label="自動編集で触らない範囲">
+                  <span>自動編集で触らない範囲(ロック):</span>
+                  {project.autoEditLocks!.map((l) => (
+                    <span key={l.id} className="lock-chip">
+                      {formatTimecode(l.start, 30).slice(0, 8)}〜
+                      {formatTimecode(l.end, 30).slice(0, 8)}
+                      <button
+                        className="small-button"
+                        title="このロックを外す(全体の作り直しで作り直せるようにする。取り消しは Ctrl+Z)"
+                        onClick={() => useProjectStore.getState().removeAutoEditLock(l.id)}
+                      >
+                        外す
+                      </button>
+                    </span>
+                  ))}
+                  <span className="form-note">
+                    全体の作り直しでも、この中は今のまま残ります(収録の時刻)
+                  </span>
+                </div>
+              )}
               <ShortsPanel disabled={running || scenes.length === 0} />
               {comparison && (
                 <div className="structure-compare" aria-label="人の完成版との比較">
@@ -1073,6 +1137,21 @@ export function AutoEditScreen(): React.JSX.Element | null {
                           id={`structure-row-${sc.id}`}
                           className={`structure-row ${kept ? 'kept' : 'dropped'} ${selectedScene === sc.id ? 'selected' : ''}`}
                         >
+                          <input
+                            type="checkbox"
+                            className="structure-pick"
+                            aria-label="この場面だけ作り直す範囲に入れる"
+                            title="「選んだ場面だけ作り直す」の範囲に入れる"
+                            checked={pickedScenes.has(sc.id)}
+                            onChange={(e) =>
+                              setPickedScenes((prev) => {
+                                const next = new Set(prev)
+                                if (e.target.checked) next.add(sc.id)
+                                else next.delete(sc.id)
+                                return next
+                              })
+                            }
+                          />
                           <input
                             type="checkbox"
                             aria-label="残す"

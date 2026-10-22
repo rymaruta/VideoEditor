@@ -25,6 +25,7 @@ export type MenuCommand =
   | 'file.export'
   | 'edit.undo'
   | 'edit.redo'
+  | 'edit.rangeAutoEdit'
   | 'clip.split'
   | 'clip.delete'
   | 'clip.copy'
@@ -195,7 +196,10 @@ export function buildMenuTemplate(
         { label: '切り取り', role: 'cut' },
         { label: 'コピー', role: 'copy' },
         { label: '貼り付け', role: 'paste' },
-        { label: 'すべて選択', role: 'selectAll' }
+        { label: 'すべて選択', role: 'selectAll' },
+        SEP,
+        // 範囲はイン点・アウト点、ルーラーの Shift+ドラッグ、本編の複数選択で決める(ショートカットは付けない)
+        { label: '選んだ範囲を自動編集…', id: 'edit.rangeAutoEdit' }
       ]
     },
     {
