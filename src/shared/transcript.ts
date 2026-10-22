@@ -73,8 +73,10 @@ const HALLUCINATIONS = [
  *   2 種類以上の文字の言葉で、2〜4 文字は 10 回、5〜10 文字は 6 回、11 文字以上(文)は 4 回以上続いたもの。
  *   1 文字の繰り返し(叫び「うわああああ」・笑い「はははは」・伸ばす「えーーーー」)は人の声なので数えない
  * - 時刻が分かり、その所の話す速さが極端に遅い(1 秒に 1.5 文字未満が 3 秒以上)とき: 2 文字以上の言葉は
- *   3 回、1 文字は 5 回以上続けば作り話(「2分間2分間2分間2分間」を 10 秒・「んんんんん…」を 20 秒)。
- *   人が繰り返して言う言葉(「はいはいはい」「やばいやばいやばい」・笑い)は話す速さで言うので数えない
+ *   4 回、1 文字は 8 回以上(1 秒に 1 文字未満)続けば作り話(「2分間2分間2分間2分間」を 10 秒・
+ *   「んんんんん…」を 20 秒)。人が繰り返して言う言葉(「はいはいはい」「やばいやばいやばい」・笑い)は
+ *   話す速さで言うので数えない。ゆっくり言う短い返事(「はい。はい。はい。」)・終わりの分からない片の長さは
+ *   遅さに使わない(`slowLoop`)
  */
 const MAX_UNIT = 40
 /** 繰り返しが発話のこれだけを占めたら、暴走とみなして捨てる */
@@ -146,9 +148,37 @@ function strictLoop(unit: readonly string[], repeats: number): boolean {
   return repeats >= (L <= 4 ? 10 : L <= 10 ? 6 : 4)
 }
 
-/** 速さを見たときの、少ない回数の繰り返し */
-function slowLoop(unit: readonly string[], repeats: number): boolean {
-  return repeats >= (new Set(unit).size < 2 ? 5 : 3)
+/**
+ * 人がよく繰り返す短い返事・相づち。ゆっくり間を空けて言う(「はい。……はい。……はい。」)ので、
+ * 遅さでは作り話と見分けられない。遅さでの判定から外す(文字だけの判定 `strictLoop` は掛ける)
+ */
+const SHORT_REPLIES = new Set([
+  'はい',
+  'うん',
+  'ええ',
+  'そう',
+  'いや',
+  'ああ',
+  'おう',
+  'yes',
+  'no',
+  'ok',
+  'okay',
+  'yeah'
+])
+/** 1 文字の繰り返しを遅さで捨てるときの、さらに遅い速さ(1 秒の文字数)。歌の「ラララ」・数えるのを残す */
+const SLOW_SINGLE_CHARS_PER_SEC = 1
+
+/**
+ * 速さを見たときの、少ない回数の繰り返し。本当にゆっくり繰り返して言う言葉(「はい。はい。はい。」・
+ * 間を空けた相づち「うん」3つ・数える「1、1、1、1、1」・歌の「ラララ ラララ」)を消さないよう、
+ * 2 文字以上の言葉は 4 回以上(「2分間」×4)、1 文字は 8 回以上かつ 1 秒に 1 文字未満
+ * (「んんんんんんんんんんん」を 20 秒)を求め、よく言う短い返事は数えない
+ */
+function slowLoop(unit: readonly string[], repeats: number, charsPerSec: number): boolean {
+  if (new Set(unit).size < 2) return repeats >= 8 && charsPerSec < SLOW_SINGLE_CHARS_PER_SEC
+  if (SHORT_REPLIES.has(unit.join(''))) return false
+  return repeats >= 4
 }
 
 function repetitionLoopLength(t: string): number {
@@ -177,6 +207,11 @@ export interface TimedText {
   start: number
   end: number
   words?: readonly { start: number; end: number; text?: string }[]
+  /**
+   * 終わりの時刻が認識から返らず、推し量った値(区間の終わりまで伸ばした等)か。推し量った長さは
+   * 話す速さの判定(遅すぎる繰り返し)に使わない(区間の終わりまで伸びた「はい、はい、はい」を捨てていた)
+   */
+  endUnknown?: boolean
 }
 
 /** 言葉の時刻の幅(頭から終わり)と、言葉の長さの合計 */
@@ -239,7 +274,8 @@ function loopsAcross(
   const sec: number[] = []
   for (const i of group) {
     const cs = normalizedChars(items[i].text)
-    const per = cs.length > 0 ? spans(items[i]).spoken / cs.length : 0
+    // 終わりの分からない片の長さは数えない(遅さの判定で、その片の文字は時間を取らないものとする)
+    const per = cs.length > 0 && !items[i].endUnknown ? spans(items[i]).spoken / cs.length : 0
     for (const c of cs) {
       chars.push(c)
       owner.push(i)
@@ -252,7 +288,11 @@ function loopsAcross(
   const loops = findLoops(chars, (unit, repeats, from, to) => {
     if (strictLoop(unit, repeats)) return true
     const d = prefix[to] - prefix[from]
-    return d >= SLOW_MIN_SEC && to - from < SLOW_CHARS_PER_SEC * d && slowLoop(unit, repeats)
+    return (
+      d >= SLOW_MIN_SEC &&
+      to - from < SLOW_CHARS_PER_SEC * d &&
+      slowLoop(unit, repeats, (to - from) / d)
+    )
   })
   if (loops.length === 0) return
   const covered = new Map<number, number>()

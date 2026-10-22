@@ -919,21 +919,27 @@ export function probeSourceVideo(filePath: string): Promise<SourceVideoInfo | un
  * 素材の映像の頭に掛けるフィルタ(インターレースの解除・HDR のトーンマッピング。末尾は `,`)。
  * SDR・プログレッシブの素材は空文字(理由は `sourceVideoFilter`)
  */
-export async function sourceVideoFilterFor(filePath: string): Promise<string> {
+export async function sourceVideoFilterFor(
+  filePath: string,
+  /** 出力(プロキシ)の枠。HDR の素材はトーンマッピングの前にこの枠を覆う大きさまで縮める */
+  fit?: { w: number; h: number }
+): Promise<string> {
   const info = await probeSourceVideo(filePath)
   if (!info) return ''
   const zscale = isHdrTransfer(info.colorTransfer)
     ? (await ffmpegFilterNames()).has('zscale')
     : false
-  return sourceVideoFilter(info, { zscale })
+  return sourceVideoFilter(info, { zscale, fit })
 }
 
 /** 映像として使う素材のうち、頭にフィルタが要るもののパス → フィルタ。HDR の素材があるかも返す */
 export async function sourceVideoFilters(
-  paths: Iterable<string>
+  paths: Iterable<string>,
+  /** 出力の枠(`sourceVideoFilterFor`) */
+  fit?: { w: number; h: number }
 ): Promise<{ filters: Map<string, string>; hasHdr: boolean }> {
   const list = [...new Set(paths)]
-  const found = await Promise.all(list.map((p) => sourceVideoFilterFor(p)))
+  const found = await Promise.all(list.map((p) => sourceVideoFilterFor(p, fit)))
   const infos = await Promise.all(list.map((p) => probeSourceVideo(p)))
   const filters = new Map<string, string>()
   list.forEach((p, i) => {
@@ -1122,7 +1128,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         .map((c) => assetById.get(c.assetId))
     ]
       .filter((a): a is MediaAsset => !!a && a.hasVideo && !a.still)
-      .map((a) => a.filePath)
+      .map((a) => a.filePath),
+    // HDR の素材は出力の大きさまで縮めてからトーンマッピングする(4K のまま掛けると重い)
+    { w, h }
   )
   // テロップの折り返し幅は**見積もりではなく実測**で決める。libass に1度描かせて
   // 全角の送り幅を測る(結果はフォントごとに使い回すので、2回目以降は測らない)。
@@ -1809,6 +1817,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
   // linear(一定ゲイン)で掛ける。測定に失敗したとき(解析不能・全編無音の -inf など)は
   // 従来の1パスへ落とす——正規化の精度のために書き出し自体を失敗させない。
   let measured: LoudnessMeasurement | null = null
+  /** 測定パス(何も掛けない1回目)が、音声が全編デジタルの無音だと答えたか(`loudnormMeasuredSilence`) */
+  let silentAudio = false
   /** 書き出しと同じ音声グラフに `extra` を掛けた後の大きさを測る(映像は作らない) */
   const measurePass = (extra: string): Promise<LoudnessMeasurement | null> =>
     new Promise<LoudnessMeasurement | null>((resolveMeasure) => {
@@ -1848,7 +1858,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           })
           .on('end', () => {
             cleanup()
-            resolveMeasure(parseLoudnormMeasurement(stderrTail.join('\n')))
+            const tail = stderrTail.join('\n')
+            if (extra === '' && loudnormMeasuredSilence(tail)) silentAudio = true
+            resolveMeasure(parseLoudnormMeasurement(tail))
           })
           .run()
         currentExportCommand = command
@@ -1919,8 +1931,10 @@ export async function exportProject(options: ExportOptions): Promise<void> {
     })
   /** 音量の正規化の掛け方(loudnorm か、一定のゲイン + リミッタ)。正規化しなければ null */
   let loudnessFilter: string | null = null
-  if (loudnessNormalization) {
-    measured = await measurePass('')
+  if (loudnessNormalization) measured = await measurePass('')
+  // 音声が全編無音(音声の無い企画)なら正規化しない。無音の音声のまま書き出す
+  const normalizeLoudness = loudnessNormalization && !silentAudio
+  if (normalizeLoudness) {
     const target = options.loudnessTarget ?? 'web'
     const plan =
       !exportCancelRequested && measured && needsLimitedGain(target, measured)
@@ -1940,6 +1954,13 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           measured ? LOUDNESS_TARGETS[target].integrated - measured.inputI : null,
           (f) => (exportCancelRequested ? Promise.resolve(null) : encodedPass(f))
         )
+    currentExportCommand = null
+    if (exportCancelRequested) {
+      exportInProgress = false
+      throw new Error('EXPORT_CANCELED')
+    }
+  }
+  if (loudnessNormalization && !normalizeLoudness) {
     currentExportCommand = null
     if (exportCancelRequested) {
       exportInProgress = false
@@ -1988,7 +2009,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       let audioLabel = built.audioLabel
       assDir = built.assDir
 
-      if (loudnessNormalization) {
+      if (normalizeLoudness) {
         // loudnorm は内部を 192kHz で回すため、後ろを固定しないと**出力が 96kHz になる**
         // (実測: 48kHz の素材が 96kHz で書き出されていた)。既定でONなので既定のまま
         // 書き出すと必ず踏む。ここでも形式を戻す。
@@ -2116,6 +2137,22 @@ export function parseLoudnormMeasurement(stderr: string): LoudnessMeasurement | 
     return Object.values(m).every(Number.isFinite) ? m : null
   } catch {
     return null
+  }
+}
+
+/**
+ * loudnorm の測定が「全編がデジタルの無音」(`"input_i" : "-inf"`)と答えたか。
+ * 無音に loudnorm を掛けると NaN を出し、AAC が `Invalid argument` で止まって書き出しが失敗する
+ * (音声の無い企画で正規化を ON にすると必ず踏んだ)。無音なら正規化を飛ばし、無音の音声のまま書き出す
+ */
+export function loudnormMeasuredSilence(stderr: string): boolean {
+  const blocks = stderr.match(/\{[^{}]*"input_i"[^{}]*\}/g)
+  if (!blocks || blocks.length === 0) return false
+  try {
+    const obj = JSON.parse(blocks[blocks.length - 1]) as Record<string, unknown>
+    return String(obj.input_i).trim() === '-inf'
+  } catch {
+    return false
   }
 }
 

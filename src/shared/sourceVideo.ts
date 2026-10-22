@@ -54,10 +54,18 @@ function zscaleMatrix(space: string | undefined): string {
  *   同じ曲線の表引きで近似する(`hdrToSdrLutFilter`)
  *
  * SDR・プログレッシブの素材は空文字(今までの書き出しを1バイトも変えない)
+ *
+ * `fit` を渡すと、HDR の素材はトーンマッピングの前にその枠を覆う大きさまで縮める(`hdrFitScaleFilter`)。
+ * トーンマッピングは画素ごとの浮動小数の計算で、4K のまま掛けると重い
+ * (実測 4K30 10bit HLG 1 秒・2 スレッド: 縮小だけ 0.46 秒、zscale の経路 5.6 秒、表引きの経路 3.0 秒)
  */
 export function sourceVideoFilter(
   info: SourceVideoInfo | undefined,
-  options: { zscale: boolean }
+  options: {
+    zscale: boolean
+    /** 出力(プロキシ)の枠。HDR の素材をトーンマッピングの前にこの枠を覆う大きさまで縮める */
+    fit?: { w: number; h: number }
+  }
 ): string {
   if (!info) return ''
   const parts: string[] = []
@@ -65,6 +73,8 @@ export function sourceVideoFilter(
     parts.push('bwdif=mode=send_frame:parity=auto:deint=all')
   }
   if (isHdrTransfer(info.colorTransfer)) {
+    // インターレースの解除の後(縮めるとフィールドが混ざる)、トーンマッピングの前に縮める
+    if (options.fit) parts.push(hdrFitScaleFilter(options.fit.w, options.fit.h))
     if (options.zscale) {
       const rin = info.colorRange === 'pc' ? 'full' : 'limited'
       parts.push(
@@ -81,6 +91,20 @@ export function sourceVideoFilter(
     }
   }
   return parts.length > 0 ? `${parts.join(',')},` : ''
+}
+
+/**
+ * w×h の枠を覆う大きさ(縦横比は保つ。枠からはみ出す側は残す)まで縮める。素材のほうが小さければ
+ * そのまま(大きくはしない)。後ろの枠へ収める処理(収める・切り抜く・ぼかし背景)はどれも、
+ * 枠を覆う大きさがあれば絵が細かいまま作れる。高さだけを決めたいとき(プロキシ)は w を 2 にする
+ */
+export function hdrFitScaleFilter(w: number, h: number): string {
+  const W = Math.max(2, Math.round(w))
+  const H = Math.max(2, Math.round(h))
+  return (
+    `scale=w=min(iw\\,${W}):h=min(ih\\,${H}):` +
+    'force_original_aspect_ratio=increase:force_divisible_by=2'
+  )
 }
 
 /** 式に入れる数(指数表記を出さない) */

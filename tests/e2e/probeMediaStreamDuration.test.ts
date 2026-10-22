@@ -52,6 +52,26 @@ describe('mediaDurationSeconds — 映像・音声のストリームの長さ', 
     ).toBeCloseTo(180, 6)
   })
 
+  it('MP4・MOV のストリームの長さは時刻 0 からの値(遅れて始まる音声の遅れを二重に足さない)', () => {
+    // 同梱の ffprobe の実際の値: 音声を 1.5 秒遅らせ、字幕を 30 秒まで付けた MP4
+    const mov = 'mov,mp4,m4a,3gp,3g2,mj2'
+    expect(
+      mediaDurationSeconds({ duration: '30', start_time: '0', format_name: mov }, [
+        { codec_type: 'video', duration: '5.5', start_time: '0' },
+        { codec_type: 'audio', duration: '5.5', start_time: '1.476009' },
+        { codec_type: 'subtitle', duration: '30', start_time: '0' }
+      ])
+    ).toBeCloseTo(5.5, 6)
+    // 音声が映像より後まで続くなら、音声の終わり(6.5 秒)
+    expect(
+      mediaDurationSeconds({ duration: '30', start_time: '0', format_name: mov }, [
+        { codec_type: 'video', duration: '5.5', start_time: '0' },
+        { codec_type: 'audio', duration: '6.5', start_time: '1.476009' },
+        { codec_type: 'subtitle', duration: '30', start_time: '0' }
+      ])
+    ).toBeCloseTo(6.5, 6)
+  })
+
   it('映像・音声だけの素材・ストリームの長さが分からない素材は、これまでどおり入れ物の長さ', () => {
     expect(
       mediaDurationSeconds({ duration: '12.5' }, [
@@ -122,6 +142,48 @@ describe.skipIf(!existsSync(ffmpegPath))(
       expect(all).toHaveLength(1)
       expect(all[0].duration).toBeGreaterThan(1.9)
       expect(all[0].duration).toBeLessThan(2.2)
+    })
+
+    it('音声が 1.5 秒遅れて始まる MP4(字幕付き)を、映像の長さ(5.5 秒)で読む', async () => {
+      const srt = join(work, 'cue-late.srt')
+      writeFileSync(
+        srt,
+        '1\n00:00:00,000 --> 00:00:01,000\nhi\n\n2\n00:00:29,000 --> 00:00:30,000\nend\n'
+      )
+      const file = join(work, 'late-audio.mp4')
+      execFileSync(ffmpegPath, [
+        '-y',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=s=64x36:r=10:d=5.5',
+        '-itsoffset',
+        '1.5',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=f=440:d=4',
+        '-i',
+        srt,
+        '-map',
+        '0',
+        '-map',
+        '1',
+        '-map',
+        '2',
+        '-c:v',
+        'libx264',
+        '-c:a',
+        'aac',
+        '-c:s',
+        'mov_text',
+        file
+      ])
+      const probed = await probeMedia(file)
+      expect(probed.duration).toBeGreaterThan(5.4)
+      expect(probed.duration).toBeLessThan(5.6)
     })
   }
 )

@@ -2,11 +2,12 @@ import { parentPort, workerData } from 'worker_threads'
 import { cachedEnvelope, readWindow } from './audioPcm'
 import {
   isReliableMatch,
-  matchWholeFile,
+  matchWholeFileBoth,
   matchWithDrift,
   type FeatureMatch,
   onsetFeature,
-  refineOffset
+  refineOffset,
+  type SyncFeatures
 } from '@shared/sync/correlate'
 import { craigSessionEdges, solvePlacements } from '@shared/sync/solve'
 import { craigSpeakerName } from '@shared/ingest/tracks'
@@ -68,15 +69,19 @@ const DECODE_PARALLEL = 3
  * 音の無い素材(映像だけのファイル)は ffmpeg が失敗する。1本のために同期全体を止めないよう、
  * 空の包絡線にして続ける(照らし合わせでは一致なしになり、録画時刻で置くか未同期のまま残る)
  */
-async function envelopeOf(f: SyncInputFile): Promise<Float32Array> {
+async function featuresOf(f: SyncInputFile): Promise<SyncFeatures> {
   try {
-    // 声の帯域に絞った包絡線で比べる(録音機ごとの低域カットなどの違いに強くする。SYNC_BAND_HZ)
-    return await cachedEnvelope(input.ffmpegPath, input.cacheDir, f, { band: true })
+    // 声の帯域に絞った包絡線(録音機ごとの低域カットなどの違いに強い。SYNC_BAND_HZ)と、絞らない包絡線
+    // (共通の音が低音だけの素材に要る)の両方で比べる。1回の読み込みで両方がキャッシュに入る
+    const band = await cachedEnvelope(input.ffmpegPath, input.cacheDir, f, { band: true })
+    const plain = await cachedEnvelope(input.ffmpegPath, input.cacheDir, f)
+    return { band: onsetFeature(band), plain: onsetFeature(plain) }
   } catch (e) {
     console.warn(
       `[sync] 音を読めないので照らし合わせから外します: ${f.path}: ${e instanceof Error ? e.message : String(e)}`
     )
-    return new Float32Array(0)
+    const empty = onsetFeature(new Float32Array(0))
+    return { band: empty, plain: empty }
   }
 }
 
@@ -144,11 +149,14 @@ function orphanCameraPairs(
 async function matchPair(
   a: SyncInputFile,
   b: SyncInputFile,
-  envelopes: Map<string, Float32Array>
+  envelopes: Map<string, SyncFeatures>
 ): Promise<SyncPairResult | null> {
-  const ea = envelopes.get(a.id)!
-  const eb = envelopes.get(b.id)!
-  let m: FeatureMatch | null = matchWholeFile(ea, eb)
+  const whole = matchWholeFileBoth(envelopes.get(a.id)!, envelopes.get(b.id)!)
+  // 時計のずれの合わせ直しも、丸ごとで良かったほう(帯域を絞った・絞らない)の特徴で行う
+  const kind = whole?.band === false ? 'plain' : 'band'
+  const ea = envelopes.get(a.id)![kind]
+  const eb = envelopes.get(b.id)![kind]
+  let m: FeatureMatch | null = whole?.match ?? null
   let reliable = m ? isReliableMatch(m) : false
   // 丸ごとでは合わない長い2本は、時計のずれで山がつぶれていることがある。窓ごとに合わせ直す
   if (!reliable) {
@@ -253,13 +261,13 @@ async function matchPair(
 async function run(): Promise<void> {
   const t0 = Date.now()
   const files = input.files
-  const envelopes = new Map<string, Float32Array>()
+  const envelopes = new Map<string, SyncFeatures>()
   let done = 0
   const queue = [...files]
   await Promise.all(
     Array.from({ length: Math.min(DECODE_PARALLEL, queue.length) }, async () => {
       for (let f = queue.shift(); f; f = queue.shift()) {
-        envelopes.set(f.id, onsetFeature(await envelopeOf(f)))
+        envelopes.set(f.id, await featuresOf(f))
         done++
         post({
           type: 'progress',

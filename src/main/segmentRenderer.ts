@@ -40,6 +40,7 @@ import {
   crfForQuality,
   ffmpegPath,
   ffSeconds,
+  loudnormMeasuredSilence,
   parseLoudnormMeasurement,
   probeAudioChannels,
   sourceVideoFilters,
@@ -408,7 +409,9 @@ export async function exportSequenceSegmented(
         .flatMap((t) => t.items)
         .map((i) => ('assetId' in i ? assetsById.get(i.assetId) : undefined))
         .filter((a): a is MediaAsset => !!a && a.hasVideo && !a.still)
-        .map((a) => a.filePath)
+        .map((a) => a.filePath),
+      // HDR の素材は出力の大きさまで縮めてからトーンマッピングする(4K のまま掛けると重い)
+      { w: seq.width, h: seq.height }
     )
 
     // テロップ: 画面のプロセスが描いた層があればそれを使う(画面と同じ絵になる)。
@@ -566,6 +569,8 @@ export async function exportSequenceSegmented(
     )
 
     let measured: LoudnessMeasurement | null = null
+    /** 何も掛けない1回目の測定が、音が全編デジタルの無音だと答えたか(`loudnormMeasuredSilence`) */
+    let silentAudio = false
     /** 音全体に `filter` を掛けた後の大きさを測る */
     const measureWith = async (filter: string): Promise<LoudnessMeasurement | null> => {
       const { stderr } = await runFfmpeg(
@@ -582,6 +587,7 @@ export async function exportSequenceSegmented(
         ],
         signal
       )
+      if (filter === '' && loudnormMeasuredSilence(stderr)) silentAudio = true
       return parseLoudnormMeasurement(stderr)
     }
     if (options.loudnessNormalization) {
@@ -589,7 +595,8 @@ export async function exportSequenceSegmented(
       measured = await measureWith('')
     }
     const audioFilter: string[] = []
-    if (options.loudnessNormalization) {
+    // 音が全編無音(音声の無い企画)なら正規化しない(無音に loudnorm を掛けると AAC が止まる)
+    if (options.loudnessNormalization && !silentAudio) {
       // 2パス目の掛け方は v1 の書き出しと同じ(理由もそちらのコメント)
       const target = options.loudnessTarget ?? 'web'
       const plan =

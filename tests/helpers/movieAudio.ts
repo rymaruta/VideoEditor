@@ -80,3 +80,45 @@ export function rerecord(x: Float32Array, gain: number, noise: number, seed: num
   const r = rng(seed)
   return x.map((v) => v * gain + noise * (r() * 2 - 1))
 }
+
+/** クラブ・ライブの低音のようなもの: キック(45〜75Hz。0.4〜0.65 秒おき)。打面のクリックの強さは `click` */
+export function club(
+  seconds: number,
+  seed: number,
+  click: number,
+  sampleRate: number
+): Float32Array {
+  const r = rng(seed)
+  const n = Math.round(seconds * sampleRate)
+  const out = new Float32Array(n)
+  for (let t = 0.2; t < seconds; t += 0.4 + r() * 0.25) {
+    const amp = 0.6 * (0.6 + 0.4 * r())
+    const f = 45 + r() * 30
+    const k0 = Math.round(t * sampleRate)
+    for (let i = 0; i < 0.4 * sampleRate && k0 + i < n; i++) {
+      const env = Math.min(1, i / (0.005 * sampleRate)) * Math.exp(-i / sampleRate / 0.15)
+      out[k0 + i] += amp * env * Math.sin((2 * Math.PI * f * i) / sampleRate)
+      if (i < 0.01 * sampleRate)
+        out[k0 + i] += click * amp * (r() * 2 - 1) * (1 - i / (0.01 * sampleRate))
+    }
+  }
+  return out
+}
+
+/** マイクごとに違う会場のざわめき(300〜2500Hz。大きさ lo〜hi でゆっくり変わる)を足す */
+export function crowd(
+  x: Float32Array,
+  seed: number,
+  lo: number,
+  hi: number,
+  sampleRate: number
+): Float32Array {
+  const r = rng(seed)
+  const bp = new BandPass(sampleRate, [300, 2500])
+  const block = Math.round(sampleRate / 10)
+  let level = (lo + hi) / 2
+  return x.map((v, i) => {
+    if (i % block === 0) level = Math.min(hi, Math.max(lo, level * (0.8 + 0.4 * r())))
+    return v + level * 3 * bp.step(r() * 2 - 1)
+  })
+}

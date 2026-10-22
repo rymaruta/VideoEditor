@@ -140,11 +140,11 @@ export async function transcribeRange(
     const text = result.text?.trim()
     if (!text) return []
     return fitSegmentsToRange(
-      [{ start: rangeStart, end: rangeEnd, text }],
+      [{ start: rangeStart, end: rangeEnd, text, endUnknown: true }],
       rangeStart,
       rangeEnd,
       quietIn(audio, rangeStart)
-    )
+    ).map(withoutEndUnknown)
   }
 
   return fitSegmentsToRange(
@@ -152,13 +152,27 @@ export async function transcribeRange(
       .map((chunk) => ({
         start: rangeStart + chunk.timestamp[0],
         end: rangeStart + (chunk.timestamp[1] ?? rangeEnd - rangeStart),
-        text: chunk.text.trim()
+        text: chunk.text.trim(),
+        // 終わりが返らない区切りは区間の終わりまで伸ばす。伸ばした長さは話す速さの判定に使わせない
+        endUnknown: chunk.timestamp[1] == null
       }))
       .filter((seg) => seg.text.length > 0),
     rangeStart,
     rangeEnd,
     quietIn(audio, rangeStart)
-  )
+  ).map(withoutEndUnknown)
+}
+
+/** 判定に使った印(終わりが推し量った値か)を、返す区切りから外す */
+function withoutEndUnknown<T extends { endUnknown?: boolean }>(seg: T): Omit<T, 'endUnknown'> {
+  const out = { ...seg }
+  delete out.endUnknown
+  return out
+}
+
+/** 終わりの返らない言葉に与える長さ(秒): 1 文字 0.12 秒、0.3〜1.5 秒 */
+function estimatedWordSeconds(text: string): number {
+  return Math.min(1.5, Math.max(0.3, [...text.trim()].length * 0.12))
 }
 
 /** 声があるかを見る細かさ(16kHz で 20ms) */
@@ -284,12 +298,24 @@ export async function transcribeWordsRange(
     chunk_length_s: 30
   })
 
+  const length = rangeEnd - rangeStart
   const words = spaceSegmentStarts(result.chunks ?? [])
-    .map((c) => ({
-      raw: c.text,
-      start: rangeStart + c.timestamp[0],
-      end: rangeStart + (c.timestamp[1] ?? c.timestamp[0])
-    }))
+    .map((c, i, all) => {
+      // 終わりが返らない言葉(多くは最後の言葉)は、長さ 0 にすると長さ 0 の区切りとして捨てられる
+      // (間を空けて言った最後の「はい」が消えていた)。言葉の文字数から見積もり、次の言葉の頭・区間の終わりで止める
+      const next = all[i + 1]?.timestamp[0]
+      const end =
+        c.timestamp[1] ??
+        Math.max(
+          c.timestamp[0],
+          Math.min(
+            c.timestamp[0] + estimatedWordSeconds(c.text),
+            next !== undefined && next > c.timestamp[0] ? next : Infinity,
+            length
+          )
+        )
+      return { raw: c.text, start: rangeStart + c.timestamp[0], end: rangeStart + end }
+    })
     .filter((w) => w.raw.trim().length > 0)
 
   if (words.length === 0) return []

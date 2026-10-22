@@ -258,7 +258,8 @@ export function ensurePreviewProxy(
   const task = Promise.all([
     probeStreams(filePath),
     detectVideoEncoder(),
-    sourceVideoFilterFor(filePath),
+    // HDR の素材はプロキシの高さ(540)まで縮めてからトーンマッピングする(4K のまま掛けると重い)
+    sourceVideoFilterFor(filePath, { w: 2, h: 540 }),
     probeSourceVideo(filePath)
   ])
     .then(

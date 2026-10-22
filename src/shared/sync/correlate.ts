@@ -252,6 +252,37 @@ export function matchWholeFile(a: Float32Array, b: Float32Array): FeatureMatch |
   return m
 }
 
+/** 同期に使う、1本の素材の2通りの特徴(onsetFeature)。声の帯域に絞ったものと、絞らないもの */
+export interface SyncFeatures {
+  band: Float32Array
+  plain: Float32Array
+}
+
+/**
+ * 声の帯域に絞った特徴と絞らない特徴の両方で丸ごと照らし合わせ、良いほうを返す(`band`: どちらを使ったか)。
+ *
+ * 帯域を絞ると、片方の録音機の低域カットに強くなる(SYNC_BAND_HZ)。一方で、共通の音が低音だけの素材
+ * (クラブ・ライブ・イベントのキック。会場のざわめきはマイクごとに違う)では、絞ると共通の立ち上がりが
+ * 消えて合わなくなる(実測: 絞らなければ 15.000 秒・確からしさ 92、絞ると 確からしさ 4 で誤った位置)。
+ * どちらにも同じ基準(`isReliableMatch`・短い重なりの抜け具合)を掛け、基準を満たすものの中から
+ * 確からしさの高いほうを取る。どちらも満たさなければ、確からしさの高いほう(時計のずれの合わせ直しに使う)
+ */
+export function matchWholeFileBoth(
+  a: SyncFeatures,
+  b: SyncFeatures
+): { match: FeatureMatch; band: boolean } | null {
+  const band = matchWholeFile(a.band, b.band)
+  const plain = matchWholeFile(a.plain, b.plain)
+  const candidates = [
+    ...(band ? [{ match: band, band: true }] : []),
+    ...(plain ? [{ match: plain, band: false }] : [])
+  ]
+  if (candidates.length === 0) return null
+  const reliable = candidates.filter((c) => isReliableMatch(c.match))
+  const pool = reliable.length > 0 ? reliable : candidates
+  return pool.reduce((x, y) => (y.match.confidence > x.match.confidence ? y : x))
+}
+
 /** 窓ごとの合わせで受ける時計のずれの上限(±0.2%。現実の録音機は ±0.01% 前後) */
 const MAX_DRIFT = 2e-3
 
