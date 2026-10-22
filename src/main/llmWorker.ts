@@ -1,9 +1,10 @@
 import { childMain } from './childMain'
 import { statSync } from 'fs'
-import { freemem } from 'os'
+import { totalmem } from 'os'
 import {
   chooseLocalModel,
   judgeLocalModelLoad,
+  skippedModelMessage,
   type LlmRequest,
   type LlmWorkerMessage
 } from '@shared/llm'
@@ -16,8 +17,8 @@ const GB = 1024 ** 3
  * 出力は JSON スキーマから作った文法で縛るので、形の崩れた答えは出ない。
  *
  * 読み込みは別プロセス(utilityProcess)なので、ここで落ちてもアプリ本体は落ちない(llmService が理由を
- * 返し、呼び出し側は簡易の点数で続ける)。それでも落ちると待たせた上に理由が分かりにくいので、
- * GPU が無い・メモリが足りないときは読み込む前に止める(`judgeLocalModelLoad`)。
+ * 返し、そのモデルを覚えて次から試さない。呼び出し側は場面に合わせて簡易の判定で続ける)。
+ * 読み込む前に止めるのは、確実に読み込めないときだけ(`judgeLocalModelLoad`)。
  */
 
 interface WorkerInput {
@@ -25,6 +26,8 @@ interface WorkerInput {
   cacheDir: string
   /** 指定があればこのモデル(テスト・設定用) */
   modelUri?: string
+  /** 前にこのPCで読み込めなかったモデル(試さない) */
+  skipModels?: string[]
 }
 
 childMain<WorkerInput>(async (input, send) => {
@@ -37,14 +40,16 @@ childMain<WorkerInput>(async (input, send) => {
   const choice = chooseLocalModel(vram)
   const uri = input.modelUri ?? choice.uri
   const label = input.modelUri ? uri.replace(/^hf:/, '') : choice.label
-  // 読み込んで落ちる前に、GPU とメモリで足りるかを確かめる(足りなければ読み込まず、理由を返す。
-  // 呼び出し側は簡易の点数で続ける)。決まったモデルはダウンロードの前にも確かめる(使えない大きな
-  // モデルを落とさない)
+  // 前にこのPCで読み込めなかった(読み込み中に落ちた)モデルは試さない(llmService が覚えている)
+  if (input.skipModels?.includes(uri)) throw new Error(skippedModelMessage(label))
+  // 確実に読み込めない(PC と GPU のメモリを合わせてもモデルより小さい)ときだけ、読み込む前に止める。
+  // それ以外は試す(別プロセスなので、落ちても本体は落ちない)。決まったモデルはダウンロードの前に確かめる
   const ensureLoadable = (modelGb: number): void => {
     const decision = judgeLocalModelLoad({
       gpu: llama.gpu,
-      vramFreeGb: vramState ? vramState.free / GB : 0,
-      ramFreeGb: freemem() / GB,
+      vramTotalGb: vram,
+      unifiedMemory: (vramState?.unifiedSize ?? 0) > 0,
+      ramTotalGb: totalmem() / GB,
       modelGb,
       modelLabel: label
     })
@@ -68,13 +73,16 @@ childMain<WorkerInput>(async (input, send) => {
   post({
     type: 'device',
     device: (llama.gpu || 'cpu') as 'cuda' | 'vulkan' | 'metal' | 'cpu',
-    model: label
+    model: label,
+    uri
   })
   post({ type: 'status', stage: 'load', percent: 50, note: 'AI のモデルを読み込み中' })
   const model = await llama.loadModel({ modelPath })
   const context = await model.createContext({
     contextSize: Math.min(16384, model.trainContextSize)
   })
+  // 読み込み終わり(この後に落ちても、読み込めないモデルとしては覚えない)
+  post({ type: 'status', stage: 'load', percent: 100, note: 'AI の準備ができました' })
   const results: (unknown | null)[] = []
   for (let i = 0; i < input.requests.length; i++) {
     const req = input.requests[i]

@@ -16,7 +16,13 @@ export interface LlmRequest {
 
 export type LlmWorkerMessage =
   | { type: 'status'; stage: 'download' | 'load'; percent: number; note: string }
-  | { type: 'device'; device: 'cuda' | 'vulkan' | 'metal' | 'cpu'; model: string }
+  | {
+      type: 'device'
+      device: 'cuda' | 'vulkan' | 'metal' | 'cpu'
+      model: string
+      /** 読み込むモデルの URI(読み込みの途中で落ちたら、これを記録して次から試さない) */
+      uri?: string
+    }
   | { type: 'progress'; done: number; total: number }
   | { type: 'done'; results: (unknown | null)[] }
   | { type: 'error'; message: string }
@@ -45,23 +51,18 @@ export function chooseLocalModel(vramGb: number): (typeof LOCAL_MODELS)[number] 
   return LOCAL_MODELS.find((m) => vramGb >= m.minVramGb) ?? LOCAL_MODELS[LOCAL_MODELS.length - 1]
 }
 
-/**
- * GPU に載らずに CPU 側のメモリへ1度に確保してよい、モデルの重みの大きさ(GB)。
- * CPU だけで動かすと、3B(約2GB)以上の読み込みで Electron のメモリ確保(PartitionAlloc)の上限に当たり、
- * 解析のプロセスが落ちた(Linux で確認)。1.5B(約1GB)は読み込めた。
- */
-export const CPU_SAFE_MODEL_GB = 1.5
-
-/** 読み込みのほかに要るメモリの余裕(文脈の領域・作業用。GB) */
-const RAM_MARGIN_GB = 1
+/** 読み込みのほかに要るメモリの余裕(文脈の領域・OS・画面。GB) */
+const MEMORY_MARGIN_GB = 1
 
 export interface LocalModelLoadEnv {
   /** node-llama-cpp が選んだ GPU(`cuda` `vulkan` `metal`)。無ければ false */
   gpu: string | false
-  /** GPU の空きメモリ(GB。GPU が無ければ 0) */
-  vramFreeGb: number
-  /** PC の空きメモリ(GB) */
-  ramFreeGb: number
+  /** GPU のメモリの総量(GB。GPU が無ければ 0) */
+  vramTotalGb: number
+  /** GPU のメモリが PC のメモリと同じもの(Apple Silicon など)。二重に数えない */
+  unifiedMemory: boolean
+  /** PC の物理メモリの総量(GB) */
+  ramTotalGb: number
   /** モデルの大きさ(GB) */
   modelGb: number
   /** 画面に出すモデルの名前 */
@@ -70,31 +71,43 @@ export interface LocalModelLoadEnv {
 
 export type LocalModelLoadDecision = { ok: true } | { ok: false; reason: string }
 
-const FALLBACK_HINT = '簡易の点数で続けます。GPU のあるPCで使うか、AI に Gemini を選んでください'
-
 /**
- * このPCの AI のモデルを読み込んでよいか(読み込んで落ちる前に止める)。
- * GPU に載りきらない分は CPU 側に置かれるので、その大きさが `CPU_SAFE_MODEL_GB` を超えるなら読み込まない。
- * 空きメモリが足りないときも読み込まない。理由は利用者に出す一文。
+ * このPCの AI のモデルを、読み込む前に止めるか。**確実に読み込めないときだけ止める。**
+ *
+ * 読み込みは別プロセス(utilityProcess)なので、落ちてもアプリ本体は落ちない。そこで、空きメモリ
+ * (macOS の `os.freemem()` は空きを小さく返す)や「GPU が無い」だけで止めず、まず試す。落ちたら
+ * そのモデルを覚え、次からは試さない(`llmLoadFailures`。利用者が「もう一度試す」で試し直せる)。
+ * 止めるのは、PC の物理メモリと GPU のメモリを合わせてもモデルより明らかに小さいときだけ。
+ * 理由は場面を問わない一文(「簡易の点数で…」などの続きは呼び出し側が場面に合わせて付ける)。
  */
 export function judgeLocalModelLoad(env: LocalModelLoadEnv): LocalModelLoadDecision {
   const gb = (n: number): string => `${Math.max(0, n).toFixed(1)}GB`
-  const onGpu = Boolean(env.gpu)
-  // GPU のメモリは少し余らせて見る(ほかの処理・画面も使う)
-  const cpuPartGb = onGpu ? Math.max(0, env.modelGb - env.vramFreeGb * 0.9) : env.modelGb
-  if (cpuPartGb > CPU_SAFE_MODEL_GB) {
+  const capacityGb =
+    env.ramTotalGb + (env.gpu && !env.unifiedMemory ? Math.max(0, env.vramTotalGb) : 0)
+  if (capacityGb < env.modelGb + MEMORY_MARGIN_GB) {
     return {
       ok: false,
-      reason: onGpu
-        ? `GPU の空きメモリ(${gb(env.vramFreeGb)})が ${env.modelLabel}(約${gb(env.modelGb)})に足りず、このPCの AI を読み込むと落ちるおそれがあるため、${FALLBACK_HINT}`
-        : `GPU が見つからず、CPU だけで ${env.modelLabel}(約${gb(env.modelGb)})を読み込むと落ちるおそれがあるため、${FALLBACK_HINT}`
-    }
-  }
-  if (env.ramFreeGb < cpuPartGb + RAM_MARGIN_GB) {
-    return {
-      ok: false,
-      reason: `PC の空きメモリ(${gb(env.ramFreeGb)})が足りず、このPCの AI(${env.modelLabel})を読み込めないため、簡易の点数で続けます。ほかのアプリを閉じるか、AI に Gemini を選んでください`
+      reason: `このPCのメモリ(${gb(capacityGb)})が AI のモデル(${env.modelLabel}・約${gb(env.modelGb)})より小さく、読み込めません`
     }
   }
   return { ok: true }
+}
+
+/** 前に読み込めなかったモデルを、今回は試さないときの一文 */
+export function skippedModelMessage(modelLabel: string): string {
+  return `このPCでは前回 AI(${modelLabel})を読み込めなかったので、今回は使いません(「このPCの AI をもう一度試す」で試し直せます)`
+}
+
+/** 読み込みの途中で解析のプロセスが落ちたときの一文 */
+export function loadCrashedMessage(modelLabel: string): string {
+  return `このPCでは AI(${modelLabel})を読み込めませんでした(次からはこのモデルを試しません)`
+}
+
+/** 読み込めなかったモデルの記録(userData/llm-load-failures.json) */
+export interface LlmLoadFailure {
+  /** モデルの URI(`hf:…`) */
+  uri: string
+  label: string
+  /** 記録した時刻(ISO) */
+  at: string
 }
