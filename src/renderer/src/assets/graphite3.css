@@ -9,9 +9,13 @@ body {
   font-family: var(--ve-font-sans);
   line-height: 1.45;
   background:
-    radial-gradient(900px 520px at 8% -8%, rgba(124, 92, 255, 0.16), transparent 62%),
+    radial-gradient(
+      900px 520px at 8% -8%,
+      color-mix(in srgb, var(--ve-violet) 16%, transparent),
+      transparent 62%
+    ),
     radial-gradient(900px 600px at 100% 110%, rgba(0, 190, 170, 0.1), transparent 60%),
-    radial-gradient(1400px 600px at 50% -20%, #151a2a 0%, #090a10 62%), var(--ve-bg);
+    radial-gradient(1400px 600px at 50% -20%, #151a2a 0%, var(--ve-bg) 62%), var(--ve-bg);
   background-attachment: fixed;
 }
 .app-shell {
@@ -32,7 +36,7 @@ button {
   background-color: transparent;
   background-image: var(--ve-surface-3-fill);
   border-color: var(--ve-border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--ve-shadow-control);
 }
 button:hover:not(:disabled) {
   background-image: linear-gradient(180deg, #32385a, #262b45);
@@ -84,7 +88,7 @@ button.icon-button:disabled {
   background-image: var(--ve-surface-3-fill);
   color: var(--ve-text-1);
   border-color: var(--ve-border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--ve-shadow-control);
   filter: none;
 }
 .danger,
@@ -100,7 +104,7 @@ button.icon-button:disabled {
 }
 .icon-button:hover:not(:disabled) {
   background-image: none;
-  background-color: #1e2236;
+  background-color: var(--ve-surface-3-press);
   border-color: transparent;
   color: var(--ve-text-1);
 }
@@ -108,7 +112,11 @@ button.icon-button:disabled {
 .icon-button.active:hover:not(:disabled),
 .icon-button[aria-pressed='true'] {
   background-color: transparent;
-  background-image: linear-gradient(180deg, rgba(255, 178, 36, 0.2), rgba(255, 138, 31, 0.1));
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-primary) 20%, transparent),
+    color-mix(in srgb, var(--ve-primary-warm) 10%, transparent)
+  );
   border-color: transparent;
   color: var(--ve-primary-ink);
   box-shadow:
@@ -121,8 +129,8 @@ button.icon-button:disabled {
 input,
 select,
 textarea {
-  background-color: rgba(8, 10, 18, 0.7);
-  border-color: rgba(150, 165, 255, 0.14);
+  background-color: color-mix(in srgb, var(--ve-surface-sunken) 70%, transparent);
+  border-color: color-mix(in srgb, var(--ve-edge) 14%, transparent);
 }
 
 /* ---------- 上の帯 ---------- */
@@ -130,24 +138,24 @@ textarea {
   height: 46px;
   background: linear-gradient(
     90deg,
-    rgba(255, 138, 31, 0.07),
-    rgba(124, 92, 255, 0.07) 50%,
+    color-mix(in srgb, var(--ve-primary-warm) 7%, transparent),
+    color-mix(in srgb, var(--ve-violet) 7%, transparent) 50%,
     rgba(0, 190, 170, 0.05)
   );
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.1);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .workflow-bar-logo {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--ve-radius-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #1c1404;
   background: linear-gradient(145deg, #ffd25c, #ff7a1f 70%, #e8459b);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 2px 8px rgba(240, 138, 28, 0.25);
+    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 35%, transparent),
+    0 2px 8px color-mix(in srgb, var(--ve-primary-press) 25%, transparent);
 }
 .workflow-bar-name {
   font-size: var(--ve-fs-13);
@@ -164,25 +172,25 @@ textarea {
 .workflow-bar-saved-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--ve-radius-round);
   background: var(--ve-success);
-  box-shadow: 0 0 0 3px rgba(76, 195, 138, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ve-success) 15%, transparent);
 }
 .workflow-bar-saved.dirty {
   color: var(--ve-primary-ink);
 }
 .workflow-bar-saved.dirty .workflow-bar-saved-dot {
   background: var(--ve-primary);
-  box-shadow: 0 0 0 3px rgba(255, 178, 36, 0.16);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ve-primary) 16%, transparent);
 }
 .workflow-steps {
-  border-radius: 10px;
-  background: #0d0f16;
-  box-shadow: inset 0 0 0 1px #1c1f2e;
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--ve-border-subtle);
 }
 .workflow-step {
   height: 30px;
-  border-radius: 7px;
+  border-radius: var(--ve-radius-md);
   background-image: none;
   box-shadow: none;
   font-size: var(--ve-fs-13);
@@ -193,17 +201,17 @@ textarea {
 }
 .workflow-step.current,
 .workflow-step.current:hover:not(:disabled) {
-  background-image: linear-gradient(180deg, #2e3350, #22263d);
-  color: #fff;
+  background-image: linear-gradient(180deg, var(--ve-border), var(--ve-surface-3));
+  color: var(--ve-white);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 1px 2px rgba(0, 0, 0, 0.4);
+    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 6%, transparent),
+    var(--ve-drop-sm);
 }
 .workflow-step-dot {
   box-shadow: 0 0 10px #ff9a2b;
 }
 .workflow-step-count {
-  background: rgba(255, 178, 36, 0.14);
+  background: color-mix(in srgb, var(--ve-primary) 14%, transparent);
 }
 .workflow-icon {
   width: 30px;
@@ -213,11 +221,11 @@ textarea {
   width: 1px;
   height: 18px;
   margin: 0 6px;
-  background: #23273a;
+  background: var(--ve-surface-3);
 }
 .workflow-export {
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--ve-radius-md);
 }
 
 /* ---------- 枠(浮いたカードのパネル) ---------- */
@@ -234,11 +242,11 @@ textarea {
 .split-handle.active {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--ve-border-strong);
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
 }
 .frame {
   background: var(--ve-surface-1-fill);
-  border-radius: 12px;
+  border-radius: var(--ve-radius-xl);
   box-shadow: var(--ve-shadow-panel);
 }
 .frame-monitor {
@@ -250,8 +258,12 @@ textarea {
   padding: 0 6px;
   gap: 1px;
   border-bottom: 0;
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 2.5%, transparent),
+    transparent
+  );
 }
 .panel-tab {
   height: 26px;
@@ -260,7 +272,7 @@ textarea {
   font-size: var(--ve-fs-12);
   background-image: none;
   box-shadow: none;
-  color: #8e949d;
+  color: var(--ve-text-3);
 }
 .panel-tab:hover:not(:disabled):not(.active) {
   background-image: none;
@@ -268,8 +280,8 @@ textarea {
 }
 .panel-tab.active {
   background-color: transparent;
-  background-image: linear-gradient(180deg, #2a2f45, #20243a);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background-image: linear-gradient(180deg, var(--ve-surface-3-hover), var(--ve-surface-3));
+  box-shadow: var(--ve-shadow-control);
   color: var(--ve-text-1);
 }
 .media-bin-tab,
@@ -293,20 +305,24 @@ textarea {
 .new-episode-dialog,
 .look-picker {
   background: var(--ve-surface-1-fill);
-  border-color: rgba(150, 165, 255, 0.14);
+  border-color: color-mix(in srgb, var(--ve-edge) 14%, transparent);
   box-shadow: var(--ve-shadow-panel);
 }
 .dialog-titlebar,
 .dialog-footer,
 .auto-edit-header {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 2.5%, transparent),
+    transparent
+  );
 }
 .clip-context-menu,
 .app-popover,
 .color-popover,
 .recent-projects-list {
-  background: linear-gradient(180deg, #23273f, #1a1d31);
-  border-color: rgba(150, 165, 255, 0.16);
+  background: linear-gradient(180deg, var(--ve-surface-3), var(--ve-surface-3-press));
+  border-color: color-mix(in srgb, var(--ve-edge) 16%, transparent);
 }
 
 /* ---------- モニター ---------- */
@@ -321,7 +337,7 @@ textarea {
   border-radius: 0;
   box-shadow:
     0 0 0 1px #16191e,
-    0 30px 80px rgba(0, 0, 0, 0.6);
+    var(--ve-drop-lg);
 }
 /* 安全枠(動きの安全 5%・文字の安全 10%) */
 .preview-safe-frame {
@@ -331,16 +347,16 @@ textarea {
 }
 .preview-safe-frame.action {
   inset: 5%;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-white) 16%, transparent);
 }
 .preview-safe-frame.title {
   inset: 10%;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-white) 9%, transparent);
 }
 /* 選んだテロップ: 琥珀の枠と「T1 · 話者」の札 */
 .overlay-text.overlay-hitbox-only.selected {
   box-shadow: 0 0 0 1.5px var(--ve-primary);
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
 }
 .overlay-text.overlay-hitbox-only .overlay-selected-tag {
   position: absolute;
@@ -348,7 +364,7 @@ textarea {
   bottom: 100%;
   margin-bottom: 3px;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
   font-family: var(--ve-font-sans);
   font-size: var(--ve-fs-11);
   font-weight: 700; /* 和文は同梱の 700 に寄せる(600 は無い太さ) */
@@ -361,7 +377,7 @@ textarea {
 /* 時刻とトランスポート */
 .frame-monitor .preview-controls {
   padding: 8px 14px 10px;
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .preview-player .time-label.current {
   font-size: var(--ve-fs-24);
@@ -375,22 +391,22 @@ textarea {
   color: var(--ve-text-3);
 }
 .scrub-track {
-  background: #1e2236;
+  background: var(--ve-surface-3-press);
 }
 .scrub-fill {
-  background: linear-gradient(90deg, #ff6a4d, #ff3d5e);
+  background: var(--ve-playhead-fill-h);
 }
 .play-button,
 .play-button:hover:not(:disabled) {
   width: 42px;
   height: 42px;
-  background-color: #e9ebee;
-  background-image: linear-gradient(180deg, #f4f5f7, #d9dce1);
-  color: #0a0b0d;
+  background-color: var(--ve-text-1);
+  background-image: linear-gradient(180deg, var(--ve-text-1), #d9dce1);
+  color: var(--ve-bg);
   border-color: transparent;
   box-shadow:
-    inset 0 1px 0 #fff,
-    0 2px 10px rgba(0, 0, 0, 0.5);
+    inset 0 1px 0 var(--ve-white),
+    var(--ve-drop-sm);
 }
 
 /* ---------- インスペクタ(テロップを選んだとき) ---------- */
@@ -404,14 +420,14 @@ textarea {
   width: 30px;
   height: 30px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: var(--ve-radius-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #ffe0ee;
   background: linear-gradient(145deg, #b0287a, #5a1240);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 20%, transparent),
     0 4px 14px rgba(200, 40, 120, 0.35);
 }
 .telop-insp-title {
@@ -438,7 +454,7 @@ textarea {
   gap: 6px;
   height: 24px;
   padding: 0 9px;
-  border-radius: 12px;
+  border-radius: var(--ve-radius-xl);
   font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   background: color-mix(in srgb, var(--spk) 22%, transparent);
@@ -447,7 +463,7 @@ textarea {
 .telop-insp-speaker-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--ve-radius-round);
   background: var(--spk);
   box-shadow: 0 0 8px var(--spk);
 }
@@ -471,7 +487,7 @@ textarea {
   width: 100%;
   margin-bottom: 6px;
   padding: 3px 6px;
-  border-radius: 6px;
+  border-radius: var(--ve-radius-md);
   font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   cursor: pointer;
@@ -489,9 +505,13 @@ textarea {
   gap: 2px;
   min-width: 0;
   padding: 8px 10px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.15));
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+  border-radius: var(--ve-radius-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 4%, transparent),
+    color-mix(in srgb, var(--ve-black) 15%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 12%, transparent);
 }
 .telop-metric-label {
   font-size: var(--ve-fs-11);
@@ -526,8 +546,8 @@ textarea {
   color: var(--ve-text-3);
 }
 .telop-inspector .prop-text textarea {
-  background: #0d0f16;
-  border-radius: 9px;
+  background: var(--ve-surface-sunken);
+  border-radius: var(--ve-radius-lg);
   font-family: 'Noto Sans JP', var(--ve-font-sans);
   font-size: var(--ve-fs-14);
   /* 同梱の Noto Sans JP は 400・700・900。500 は無い太さなので 400 に寄せる */
@@ -558,13 +578,13 @@ textarea {
   padding: 0;
   border: 0;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--ve-radius-md);
 }
 .media-row.media-tile:hover {
   background: transparent;
 }
 .media-row.media-tile:hover .media-tile-thumb {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ve-white) 18%, transparent);
 }
 .media-row.media-tile.in-source,
 .media-row.media-tile.menu-open {
@@ -595,17 +615,17 @@ textarea {
   position: relative;
   display: block;
   aspect-ratio: 16 / 9;
-  border-radius: 6px;
+  border-radius: var(--ve-radius-md);
   overflow: visible;
-  background: #0b0d14;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  background: var(--ve-surface-sunken);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ve-white) 6%, transparent);
 }
 .media-tile-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-  border-radius: 6px;
+  border-radius: var(--ve-radius-md);
 }
 .media-tile-icon {
   position: absolute;
@@ -620,11 +640,11 @@ textarea {
   right: 5px;
   bottom: 5px;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--ve-radius-sm);
   font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-1);
-  background: rgba(10, 11, 13, 0.78);
+  background: color-mix(in srgb, var(--ve-bg) 78%, transparent);
 }
 .media-tile-used {
   position: absolute;
@@ -632,7 +652,7 @@ textarea {
   right: 0;
   bottom: -3px;
   height: 3px;
-  border-radius: 2px;
+  border-radius: var(--ve-radius-xs);
   background: var(--ve-primary-fill);
 }
 .media-tile .media-row-progress {
@@ -702,11 +722,11 @@ textarea {
   padding-right: calc(12px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
   /* 右端(重ねたボタンの下)は、ボタンの地の色(#0b121a)へ寄せて継ぎ目を見せない */
   background:
-    linear-gradient(90deg, transparent calc(100% - 220px), #0b121a),
+    linear-gradient(90deg, transparent calc(100% - 220px), var(--ve-surface-sunken)),
     linear-gradient(
       90deg,
-      rgba(255, 138, 31, 0.07),
-      rgba(124, 92, 255, 0.07) 50%,
+      color-mix(in srgb, var(--ve-primary-warm) 7%, transparent),
+      color-mix(in srgb, var(--ve-violet) 7%, transparent) 50%,
       rgba(0, 190, 170, 0.05)
     );
 }
@@ -777,23 +797,23 @@ textarea {
   height: 5px;
   margin-right: 6px;
   vertical-align: middle;
-  border-radius: 50%;
+  border-radius: var(--ve-radius-round);
   background: var(--ve-primary);
   box-shadow: 0 0 8px rgba(255, 154, 43, 0.8);
 }
 .app-popover.panel-more-menu {
   width: 300px;
   padding: 6px;
-  border-radius: 10px;
+  border-radius: var(--ve-radius-lg);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 0 0 1px rgba(0, 0, 0, 0.6),
-    0 16px 40px rgba(0, 0, 0, 0.55);
+    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 6%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--ve-black) 60%, transparent),
+    var(--ve-drop-lg);
 }
 .panel-more-group + .panel-more-group {
   margin-top: 4px;
   padding-top: 4px;
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.1);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .panel-more-group-label {
   padding: 4px 8px 2px;
@@ -812,7 +832,7 @@ textarea {
   height: auto;
   padding: 6px 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--ve-radius-md);
   background-image: none;
   box-shadow: none;
   text-align: left;
@@ -827,7 +847,11 @@ textarea {
 }
 .panel-more-item.current,
 .panel-more-item.current:hover:not(:disabled) {
-  background-image: linear-gradient(180deg, rgba(255, 178, 36, 0.16), rgba(255, 138, 31, 0.08));
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-primary) 16%, transparent),
+    color-mix(in srgb, var(--ve-primary-warm) 8%, transparent)
+  );
   box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
 .panel-more-item-label {
@@ -846,7 +870,7 @@ textarea {
 /* ---------- テロップの一覧(上の帯の「テロップ」で開く左のパネル) ---------- */
 .telop-list-pane {
   border-right: 0;
-  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .telop-list-head {
   height: 36px;
@@ -859,14 +883,18 @@ textarea {
 .telop-row {
   height: 28px;
   margin: 1px 0;
-  border-radius: 6px;
+  border-radius: var(--ve-radius-md);
   font-size: var(--ve-fs-13);
 }
 .telop-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--ve-white) 4%, transparent);
 }
 .telop-row.selected {
-  background: linear-gradient(90deg, rgba(255, 178, 36, 0.16), rgba(255, 138, 31, 0.04));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ve-primary) 16%, transparent),
+    color-mix(in srgb, var(--ve-primary-warm) 4%, transparent)
+  );
   box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
 .telop-row-tc {
@@ -875,7 +903,7 @@ textarea {
 .telop-list-paging,
 .telop-list-foot {
   border-top: 0;
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
   color: var(--ve-text-2);
 }
 
@@ -918,7 +946,7 @@ textarea {
   right: var(--ve-space-2);
   bottom: 0;
   height: 2px;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--ve-radius-xs) var(--ve-radius-xs) 0 0;
   background: transparent;
   transition: background-color var(--ve-dur-base) var(--ve-ease-out);
 }

@@ -174,9 +174,13 @@
   padding: 18px 18px 16px;
   border-right: 0;
   background:
-    radial-gradient(360px 220px at 0% 0%, rgba(124, 92, 255, 0.12), transparent 70%),
-    rgba(8, 10, 18, 0.45);
-  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.1);
+    radial-gradient(
+      360px 220px at 0% 0%,
+      color-mix(in srgb, var(--ve-violet) 12%, transparent),
+      transparent 70%
+    ),
+    color-mix(in srgb, var(--ve-surface-sunken) 45%, transparent);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .export-dialog-section {
   font-size: var(--ve-fs-11);
@@ -186,10 +190,14 @@
 }
 .export-dialog-summary dl {
   gap: 0;
-  border-radius: 10px;
+  border-radius: var(--ve-radius-lg);
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.15));
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 3.5%, transparent),
+    color-mix(in srgb, var(--ve-black) 15%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 12%, transparent);
 }
 .export-dialog-summary dl > div {
   grid-template-columns: 76px minmax(0, 1fr);
@@ -198,7 +206,7 @@
   font-size: var(--ve-fs-13);
 }
 .export-dialog-summary dl > div + div {
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .export-dialog-summary dt {
   color: var(--ve-text-3);
@@ -211,7 +219,11 @@
   grid-template-columns: 1fr;
   gap: 2px;
   padding: 12px 12px 10px;
-  background: linear-gradient(135deg, rgba(255, 178, 36, 0.1), transparent 70%);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ve-primary) 10%, transparent),
+    transparent 70%
+  );
 }
 .export-dialog-summary dl > div:first-child dt {
   font-size: var(--ve-fs-11);
@@ -237,7 +249,7 @@
 }
 .form-row select {
   height: 30px;
-  border-radius: 7px;
+  border-radius: var(--ve-radius-md);
 }
 .form-value {
   color: var(--ve-text-1);
@@ -254,17 +266,25 @@
   gap: 10px;
   padding: 10px 12px;
   border: 0;
-  border-radius: 9px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.12));
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+  border-radius: var(--ve-radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 3%, transparent),
+    color-mix(in srgb, var(--ve-black) 12%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 12%, transparent);
   transition: box-shadow var(--ve-dur-fast) var(--ve-ease-out);
 }
 .choice:hover {
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.24);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 24%, transparent);
 }
 .choice:has(input:checked) {
   border: 0;
-  background: linear-gradient(135deg, rgba(255, 178, 36, 0.16), rgba(255, 122, 31, 0.05));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ve-primary) 16%, transparent),
+    rgba(255, 122, 31, 0.05)
+  );
   box-shadow:
     inset 0 0 0 1px var(--ve-primary-line),
     0 0 18px rgba(255, 160, 40, 0.08);
@@ -285,12 +305,12 @@
   margin-top: 8px;
   padding: 12px;
   border-top: 0;
-  border-radius: 10px;
-  background: rgba(8, 10, 18, 0.45);
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+  border-radius: var(--ve-radius-lg);
+  background: color-mix(in srgb, var(--ve-surface-sunken) 45%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .export-queue-item {
-  border-bottom-color: rgba(150, 165, 255, 0.08);
+  border-bottom-color: color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .export-queue-item.done .export-queue-status {
   color: var(--ve-success-ink);
@@ -319,7 +339,7 @@
   bottom: var(--ve-space-3);
   height: 4px;
   max-width: calc(100% - var(--ve-space-6));
-  border-radius: 2px;
+  border-radius: var(--ve-radius-xs);
   background: var(--ve-primary-fill);
   box-shadow: none;
 }
@@ -332,9 +352,13 @@
 .export-done {
   margin-top: 0;
   padding: 12px 14px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(76, 195, 138, 0.16), rgba(76, 195, 138, 0.04));
-  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.35);
+  border-radius: var(--ve-radius-lg);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ve-success) 16%, transparent),
+    color-mix(in srgb, var(--ve-success) 4%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-success) 35%, transparent);
 }
 .export-done .success-text {
   display: flex;
@@ -352,11 +376,11 @@
   flex: none;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--ve-radius-round);
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6.5 12.5 3.5 3.5 7.5-8' fill='none' stroke='%2304140c' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
       center / 14px no-repeat,
-    linear-gradient(145deg, #7de3b1, #2ebd7a);
+    linear-gradient(145deg, var(--ve-success-ink), #2ebd7a);
 }
 .export-done-actions {
   margin-top: 10px;
@@ -366,8 +390,8 @@
 .export-qc {
   padding: 12px 18px 12px;
   border-top: 0;
-  background: rgba(8, 10, 18, 0.4);
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.1);
+  background: color-mix(in srgb, var(--ve-surface-sunken) 40%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .export-qc-head {
   gap: 10px;
@@ -381,16 +405,16 @@
   align-items: center;
   height: 22px;
   padding: 0 10px;
-  border-radius: 11px;
+  border-radius: var(--ve-radius-xl);
   font-size: var(--ve-fs-12);
   font-weight: var(--ve-fw-semibold);
 }
 .export-qc-summary.ok {
-  background: rgba(76, 195, 138, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.35);
+  background: color-mix(in srgb, var(--ve-success) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-success) 35%, transparent);
 }
 .export-qc-summary.warn {
-  background: rgba(255, 178, 36, 0.12);
+  background: color-mix(in srgb, var(--ve-primary) 12%, transparent);
   box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
 .export-qc-summary.error {
@@ -413,9 +437,9 @@
   height: auto;
   padding: 6px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--ve-radius-md);
   background-image: none;
-  background-color: rgba(255, 255, 255, 0.025);
+  background-color: color-mix(in srgb, var(--ve-white) 2.5%, transparent);
   box-shadow: inset 3px 0 0 var(--ve-primary);
 }
 .export-qc-item.error,
@@ -423,7 +447,7 @@
   box-shadow: inset 3px 0 0 var(--ve-danger);
 }
 .export-qc-item:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: color-mix(in srgb, var(--ve-white) 6%, transparent);
 }
 .export-qc-time {
   font-family: var(--ve-font-mono);
@@ -441,8 +465,8 @@
 /* ---------- テロップスタイルの管理 ---------- */
 .telop-style-list-pane {
   border-right: 0;
-  background: rgba(8, 10, 18, 0.45);
-  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.1);
+  background: color-mix(in srgb, var(--ve-surface-sunken) 45%, transparent);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .telop-style-list {
   padding: 2px 6px 6px;
@@ -450,21 +474,25 @@
 .telop-style-item {
   margin: 2px 0;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--ve-radius-md);
 }
 .telop-style-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--ve-white) 4%, transparent);
 }
 .telop-style-item.selected {
-  background: linear-gradient(90deg, rgba(255, 178, 36, 0.16), rgba(255, 138, 31, 0.04));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ve-primary) 16%, transparent),
+    color-mix(in srgb, var(--ve-primary-warm) 4%, transparent)
+  );
   box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
 .telop-style-glyph {
   width: 32px;
   height: 32px;
-  border-radius: 7px;
-  background: linear-gradient(180deg, #2a2f45, #1a1d31);
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.14);
+  border-radius: var(--ve-radius-md);
+  background: linear-gradient(180deg, var(--ve-surface-3-hover), var(--ve-surface-3-press));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 14%, transparent);
 }
 .telop-style-name {
   font-size: var(--ve-fs-13);
@@ -476,22 +504,22 @@
 }
 .telop-style-list-actions {
   border-top: 0;
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .telop-style-sample-pane {
   padding: 16px 18px;
   border-right: 0;
-  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.1);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 /* 見本は暗い枠の中に(モニターと同じ淡い光) */
 .telop-style-sample {
-  border-radius: 8px;
+  border-radius: var(--ve-radius-md);
   background:
     radial-gradient(60% 55% at 45% 58%, rgba(120, 170, 90, 0.1), transparent 70%),
     radial-gradient(40% 40% at 72% 38%, rgba(70, 130, 220, 0.1), transparent 70%), var(--ve-well);
   box-shadow:
     0 0 0 1px #16191e,
-    0 12px 32px rgba(0, 0, 0, 0.45);
+    var(--ve-drop-md);
 }
 .telop-style-sample-controls label {
   color: var(--ve-text-2);

@@ -11,7 +11,7 @@
   color: var(--ve-primary-ink);
   background: var(--ve-primary-soft);
   border: 1px solid var(--ve-primary-line);
-  border-radius: 999px;
+  border-radius: var(--ve-radius-pill);
   padding: 1px 8px;
 }
 .shortcut-help-grid {
@@ -78,7 +78,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(150, 165, 255, 0.16);
+  background: color-mix(in srgb, var(--ve-edge) 16%, transparent);
   pointer-events: none;
 }
 .timeline-panel .g3-ruler-inout.in-edge {

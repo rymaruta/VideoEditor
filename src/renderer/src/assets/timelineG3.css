@@ -8,48 +8,52 @@
    ===================================================================== */
 
 .timeline-panel {
-  --g3-select-glow: 0 0 0 3px rgba(245, 165, 36, 0.18), 0 0 14px rgba(245, 165, 36, 0.22);
+  --g3-select-glow: var(--ve-selection-glow);
 }
 
 /* 種類の色(--g3-k: 見出しの印、--g3-tint: レーンに敷く色) */
 .timeline-panel [data-g3-kind='video'] {
-  --g3-k: #5b8cff;
-  --g3-tint: #3d6bff;
+  --g3-k: var(--ve-track-video);
+  --g3-tint: var(--ve-track-video-tint);
 }
 .timeline-panel [data-g3-kind='overlay'] {
-  --g3-k: #22d3e6;
-  --g3-tint: #22d3e6;
+  --g3-k: var(--ve-track-overlay);
+  --g3-tint: var(--ve-track-overlay);
 }
 .timeline-panel [data-g3-kind='telop'] {
-  --g3-k: #ff5fa2;
-  --g3-tint: #ff5fa2;
+  --g3-k: var(--ve-track-telop);
+  --g3-tint: var(--ve-track-telop);
 }
 .timeline-panel [data-g3-kind='dialog'] {
-  --g3-k: #2ee59a;
-  --g3-tint: #2ee59a;
+  --g3-k: var(--ve-track-dialog);
+  --g3-tint: var(--ve-track-dialog);
 }
 .timeline-panel [data-g3-kind='bgm'] {
-  --g3-k: #9a7bff;
-  --g3-tint: #9a7bff;
+  --g3-k: var(--ve-track-music);
+  --g3-tint: var(--ve-track-music);
 }
 .timeline-panel [data-g3-kind='se'] {
-  --g3-k: #ff8f3d;
-  --g3-tint: #ff8f3d;
+  --g3-k: var(--ve-track-se);
+  --g3-tint: var(--ve-track-se);
 }
 
 /* ---------- 見出しの列 ---------- */
 .timeline-panel .track-labels-col {
-  background: linear-gradient(90deg, #181b30, #13152a);
-  border-right: 1px solid #1c1f25;
+  background: var(--ve-track-labels-fill);
+  border-right: 1px solid var(--ve-border-subtle);
 }
 .timeline-panel .track-label {
   border-bottom-color: var(--ve-border-subtle);
-  color: #e3e5e8;
+  color: var(--ve-track-label-ink);
   font-size: var(--ve-fs-12);
 }
 .timeline-panel .track-label[data-g3-kind] .track-tag {
-  background: linear-gradient(135deg, var(--g3-k), color-mix(in srgb, var(--g3-k) 78%, #ffffff));
-  color: #0a0b12;
+  background: linear-gradient(
+    135deg,
+    var(--g3-k),
+    color-mix(in srgb, var(--g3-k) 78%, var(--ve-white))
+  );
+  color: var(--ve-track-tag-ink);
   box-shadow: 0 0 10px color-mix(in srgb, var(--g3-k) 33%, transparent);
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-10);
@@ -64,7 +68,7 @@
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-16);
   font-weight: 600;
-  color: #ffcb6b;
+  color: var(--ve-primary-ink);
   letter-spacing: 0;
 }
 .timeline-panel .zoom-label {
@@ -95,7 +99,7 @@
 
 /* ---------- レーン ---------- */
 .timeline-panel .track-lanes-col {
-  background: linear-gradient(180deg, rgba(9, 11, 18, 0.85), rgba(7, 8, 13, 0.9));
+  background: var(--ve-track-lanes-fill);
 }
 .timeline-panel .track-lane {
   border-bottom-color: var(--ve-border-subtle);
@@ -120,8 +124,8 @@
 
 /* ---------- 目盛りの帯 ---------- */
 .timeline-panel .timeline-ruler {
-  background-color: #0f1114;
-  background-image: linear-gradient(90deg, #2a2f37 1px, transparent 1px);
+  background-color: var(--ve-ruler-bg);
+  background-image: linear-gradient(90deg, var(--ve-ruler-tick-minor) 1px, transparent 1px);
   background-size: var(--g3-minor, 8px) 6px;
   background-repeat: repeat-x;
   background-position: 0 100%;
@@ -132,7 +136,7 @@
   padding: 2px 0 0 4px;
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-10);
-  color: #8a9099;
+  color: var(--ve-ruler-ink);
 }
 .timeline-panel .timeline-ruler-tick::before {
   content: '';
@@ -141,14 +145,14 @@
   bottom: 0;
   width: 1px;
   height: 15px;
-  background: #3a3f48;
+  background: var(--ve-ruler-tick);
 }
 /* 選んでいるものの範囲(イン〜アウト) */
 .timeline-panel .g3-ruler-range {
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(245, 165, 36, 0.12);
+  background: var(--ve-selection-range);
   box-shadow:
     inset 1px 0 0 var(--ve-primary),
     inset -1px 0 0 var(--ve-primary);
@@ -163,7 +167,7 @@
   margin-left: -4.5px;
   transform: rotate(45deg);
   background: var(--ve-primary);
-  box-shadow: 0 0 0 2px #101215;
+  box-shadow: 0 0 0 2px var(--ve-ruler-bg);
   z-index: 1;
 }
 
@@ -178,7 +182,7 @@
   position: absolute;
   top: 3px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
   padding-left: 7px;
   background: linear-gradient(
     90deg,
@@ -189,7 +193,7 @@
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-10);
   line-height: 16px;
-  color: #c9cce0;
+  color: var(--ve-scene-ink);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -199,7 +203,7 @@
     color-mix(in srgb, var(--g3-hue) 33%, transparent),
     color-mix(in srgb, var(--g3-hue) 9%, transparent)
   );
-  color: #ffffff;
+  color: var(--ve-white);
 }
 .timeline-panel .track-lanes-col.g3-has-scenes .timeline-playhead {
   top: -54px;
@@ -207,14 +211,14 @@
 
 /* ---------- 再生位置 ---------- */
 .timeline-panel .timeline-playhead {
-  background: linear-gradient(180deg, #ff6a4d, #ff3d5e 400px);
-  box-shadow: 0 0 14px rgba(255, 70, 80, 0.6);
+  background: var(--ve-playhead-fill);
+  box-shadow: var(--ve-playhead-glow);
   z-index: 5;
 }
 .timeline-panel .timeline-playhead-handle {
   width: 16px;
   height: 16px;
-  background: #ff4d3a;
+  background: var(--ve-playhead);
 }
 
 /* ---------- クリップ共通: 枠は上に重ねて描く(中のコマ・波形に隠れない) ---------- */
@@ -254,17 +258,17 @@
   padding: 0 5px;
   gap: 5px;
   align-items: flex-start;
-  background: #14213f;
+  background: var(--ve-track-video-body);
   box-shadow: none;
-  color: #f2f5ff;
-  --g3-ring: rgba(120, 160, 255, 0.3);
-  --g3-wave-peak: #2e4bb8;
-  --g3-wave-rms: #9db8ff;
+  color: var(--ve-track-video-body-ink);
+  --g3-ring: var(--ve-track-video-ring);
+  --g3-wave-peak: var(--ve-track-video-wave-peak);
+  --g3-wave-rms: var(--ve-track-video-wave-rms);
 }
 .timeline-panel .timeline-clip.selected,
 .timeline-panel .timeline-clip.trimming {
-  background: #14213f;
-  color: #ffffff;
+  background: var(--ve-track-video-body);
+  color: var(--ve-white);
 }
 .timeline-panel .g3-clip-head {
   position: absolute;
@@ -273,7 +277,7 @@
   top: 0;
   height: 14px;
   /* 文字(#F2F5FF)が 4.5:1 以上になる青から始める(#3D6BFF の上では 4.06:1 だった) */
-  background: linear-gradient(90deg, #335ce6, #2b4fd6 60%, #3a3ac9);
+  background: var(--ve-track-video-head);
   pointer-events: none;
 }
 .timeline-panel .g3-clip-frames {
@@ -297,7 +301,7 @@
   height: 14px;
   padding: 0 3px;
   border-radius: 0;
-  background: rgba(10, 14, 40, 0.35);
+  background: var(--ve-track-video-index);
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-10);
   font-weight: 500;
@@ -306,49 +310,49 @@
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-11);
   line-height: 14px;
-  color: #f2f5ff;
+  color: var(--ve-track-video-body-ink);
 }
 .timeline-panel .timeline-clip .timeline-mismatch-icon {
   height: 14px;
   display: inline-flex;
   align-items: center;
-  color: #ffe3a8;
+  color: var(--ve-track-video-warn-ink);
 }
 /* 本編の音は下に細く(コマを隠さない) */
 .timeline-panel .timeline-clip .timeline-clip-waveform {
   top: auto;
   bottom: 0;
   height: 40%;
-  background: linear-gradient(180deg, transparent, rgba(8, 12, 30, 0.7));
+  background: var(--ve-track-video-wave-shade);
 }
 
 /* ---------- テロップ(話者の色) ---------- */
 .timeline-panel .timeline-caption-clip {
-  --g3-spk: #555555;
+  --g3-spk: var(--ve-track-telop-speaker-none);
   border: 0;
   padding: 0 6px 0 9px;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--g3-spk) 48%, #0b0c14),
-    color-mix(in srgb, var(--g3-spk) 26%, #0b0c14)
+    color-mix(in srgb, var(--g3-spk) 48%, var(--ve-track-telop-base)),
+    color-mix(in srgb, var(--g3-spk) 26%, var(--ve-track-telop-base))
   );
   box-shadow:
     inset 3px 0 0 var(--g3-spk),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-  color: #f3f4f6;
+    inset 0 0 0 1px color-mix(in srgb, var(--ve-white) 8%, transparent);
+  color: var(--ve-track-telop-body-ink);
   font-size: var(--ve-fs-11);
 }
 .timeline-panel .timeline-caption-clip.selected {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--g3-spk) 56%, #0b0c14),
-    color-mix(in srgb, var(--g3-spk) 32%, #0b0c14)
+    color-mix(in srgb, var(--g3-spk) 56%, var(--ve-track-telop-base)),
+    color-mix(in srgb, var(--g3-spk) 32%, var(--ve-track-telop-base))
   );
   box-shadow:
     inset 0 0 0 1.5px var(--ve-primary),
     inset 4px 0 0 var(--g3-spk),
     var(--g3-select-glow);
-  color: #ffffff;
+  color: var(--ve-white);
   z-index: 4;
 }
 .timeline-panel .timeline-caption-clip.auto::before {
@@ -365,31 +369,31 @@
   box-shadow: none;
 }
 .timeline-panel .timeline-tracks .audio-lane[data-g3-kind='dialog'] .timeline-audio-clip {
-  background: linear-gradient(180deg, #0f3b2c, #0a2a20);
-  color: #a6f0cb;
-  --g3-ring: rgba(92, 242, 176, 0.22);
-  --g3-wave-peak: #1e7a55;
-  --g3-wave-rms: #5cf2b0;
+  background: var(--ve-track-dialog-body);
+  color: var(--ve-track-dialog-body-ink);
+  --g3-ring: var(--ve-track-dialog-ring);
+  --g3-wave-peak: var(--ve-track-dialog-wave-peak);
+  --g3-wave-rms: var(--ve-track-dialog-wave-rms);
 }
 .timeline-panel .timeline-tracks .audio-lane[data-g3-kind='bgm'] .timeline-audio-clip {
-  background: linear-gradient(180deg, #2c1f66, #1c1546);
-  color: #d6ccff;
-  --g3-ring: rgba(185, 166, 255, 0.26);
-  --g3-wave-peak: #4d3bb0;
-  --g3-wave-rms: #b9a6ff;
+  background: var(--ve-track-music-body);
+  color: var(--ve-track-music-body-ink);
+  --g3-ring: var(--ve-track-music-ring);
+  --g3-wave-peak: var(--ve-track-music-wave-peak);
+  --g3-wave-rms: var(--ve-track-music-wave-rms);
 }
 .timeline-panel .timeline-tracks .audio-lane[data-g3-kind='se'] .timeline-audio-clip {
-  background: linear-gradient(180deg, #7a3410, #4e2009);
-  color: #ffd0a6;
-  --g3-ring: rgba(255, 143, 61, 0.45);
-  --g3-wave-peak: #a64a14;
-  --g3-wave-rms: #ffa25c;
+  background: var(--ve-track-se-body);
+  color: var(--ve-track-se-body-ink);
+  --g3-ring: var(--ve-track-se-ring);
+  --g3-wave-peak: var(--ve-track-se-wave-peak);
+  --g3-wave-rms: var(--ve-track-se-wave-rms);
 }
 .timeline-panel .timeline-audio-clip-label {
   font-size: var(--ve-fs-10);
   text-shadow:
-    0 0 3px rgba(0, 0, 0, 0.8),
-    0 0 3px rgba(0, 0, 0, 0.8);
+    0 0 3px color-mix(in srgb, var(--ve-black) 80%, transparent),
+    0 0 3px color-mix(in srgb, var(--ve-black) 80%, transparent);
 }
 .timeline-panel .timeline-clip-waveform {
   opacity: 1;
@@ -405,7 +409,7 @@
   width: 5px;
   height: 5px;
   margin: 7px 4px 0 0;
-  border-radius: 50%;
+  border-radius: var(--ve-radius-round);
   background: var(--ve-auto);
 }
 
@@ -414,9 +418,9 @@
   top: 3px;
   bottom: 3px;
   border: 0;
-  background: linear-gradient(90deg, #0d7484, #0a4b57);
+  background: var(--ve-track-overlay-body);
   box-shadow: none;
-  color: #d8fbff;
+  color: var(--ve-track-overlay-body-ink);
   font-size: var(--ve-fs-10);
-  --g3-ring: rgba(51, 214, 232, 0.45);
+  --g3-ring: var(--ve-track-overlay-ring);
 }

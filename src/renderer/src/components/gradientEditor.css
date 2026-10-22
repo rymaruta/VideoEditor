@@ -21,8 +21,8 @@
   display: inline-block;
   width: 12px;
   height: 12px;
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: var(--ve-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--ve-white) 35%, transparent);
 }
 .grad-name-form {
   display: inline-flex;
@@ -52,10 +52,10 @@
   height: 16px;
   padding: 0;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--ve-radius-round);
   font-size: var(--ve-fs-10);
   line-height: 16px;
-  color: #fff;
+  color: var(--ve-white);
   background: #555b66;
   cursor: pointer;
   opacity: 0;

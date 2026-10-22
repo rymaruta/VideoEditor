@@ -7,9 +7,13 @@
 .auto-edit-screen {
   font-size: var(--ve-fs-13);
   background:
-    radial-gradient(900px 520px at 8% -8%, rgba(124, 92, 255, 0.14), transparent 62%),
+    radial-gradient(
+      900px 520px at 8% -8%,
+      color-mix(in srgb, var(--ve-violet) 14%, transparent),
+      transparent 62%
+    ),
     radial-gradient(900px 600px at 100% 110%, rgba(0, 190, 170, 0.09), transparent 60%),
-    radial-gradient(1400px 600px at 50% -20%, #151a2a 0%, #090a10 62%), var(--ve-bg);
+    radial-gradient(1400px 600px at 50% -20%, #151a2a 0%, var(--ve-bg) 62%), var(--ve-bg);
 }
 
 /* ---------- 見出しの帯(上の帯の下の細い帯) ---------- */
@@ -18,8 +22,12 @@
   padding: 0 12px 0 16px;
   gap: 12px;
   border-bottom: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 2%, transparent),
+    transparent
+  );
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .auto-edit-title {
   display: inline-flex;
@@ -39,7 +47,7 @@
   align-items: center;
   height: 22px;
   padding: 0 9px;
-  border-radius: 11px;
+  border-radius: var(--ve-radius-xl);
   font-size: var(--ve-fs-12);
   font-family: var(--ve-font-mono);
   color: var(--ve-text-2);
@@ -47,13 +55,13 @@
 }
 .auto-edit-badge.running {
   color: var(--ve-primary-ink);
-  background: rgba(255, 178, 36, 0.1);
+  background: color-mix(in srgb, var(--ve-primary) 10%, transparent);
   box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
 .auto-edit-badge.done {
   color: var(--ve-success-ink);
-  background: rgba(76, 195, 138, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.35);
+  background: color-mix(in srgb, var(--ve-success) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-success) 35%, transparent);
 }
 .auto-edit-badge.error {
   color: var(--ve-danger-ink);
@@ -69,7 +77,7 @@
 }
 .auto-edit-body > section {
   background: var(--ve-surface-1-fill);
-  border-radius: 12px;
+  border-radius: var(--ve-radius-xl);
   box-shadow: var(--ve-shadow-panel);
 }
 .auto-edit-body .panel-tabs {
@@ -81,7 +89,7 @@
   gap: 8px;
   padding: 14px 16px 12px;
   border-bottom: 0;
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .auto-edit-overall-row {
   align-items: baseline;
@@ -96,15 +104,15 @@
 }
 .auto-edit-overall .progress-bar {
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
   overflow: hidden;
-  background: #0b0d16;
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+  background: var(--ve-surface-sunken);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .auto-edit-overall .progress-bar-fill {
   top: 0;
   height: 100%;
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
   background: var(--ve-primary-fill);
   box-shadow: none;
 }
@@ -119,14 +127,22 @@
   gap: 10px;
   padding: 7px 10px;
   border-left: 0;
-  border-radius: 8px;
+  border-radius: var(--ve-radius-md);
 }
 .auto-edit-step.run {
-  background: linear-gradient(90deg, rgba(255, 178, 36, 0.14), rgba(255, 138, 31, 0.03));
-  box-shadow: inset 0 0 0 1px rgba(255, 178, 36, 0.28);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ve-primary) 14%, transparent),
+    color-mix(in srgb, var(--ve-primary-warm) 3%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-primary) 28%, transparent);
 }
 .auto-edit-step.error {
-  background: linear-gradient(90deg, rgba(255, 107, 94, 0.14), transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ve-danger) 14%, transparent),
+    transparent
+  );
 }
 /* 印は形でも分ける(AutoEditOverview の StepIcon)。古い丸い枠は消す */
 .auto-edit-step-mark,
@@ -163,11 +179,11 @@
   margin: 10px 10px 4px;
   padding: 10px 12px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--ve-radius-lg);
   font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   background: linear-gradient(135deg, rgba(150, 110, 255, 0.16), rgba(80, 160, 255, 0.06));
-  box-shadow: inset 0 0 0 1px rgba(185, 156, 255, 0.3);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-auto) 30%, transparent);
   flex-shrink: 0;
   max-height: 22vh;
   overflow-y: auto;
@@ -192,7 +208,7 @@
 .auto-edit-step-actions {
   padding: 10px 12px;
   border-top: 0;
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 
 /* ---------- 中央: 中身 ---------- */
@@ -212,54 +228,78 @@
   align-items: center;
   gap: 16px;
   padding: 18px 20px;
-  border-radius: 12px;
+  border-radius: var(--ve-radius-xl);
   background:
-    radial-gradient(420px 160px at 0% 0%, rgba(255, 178, 36, 0.12), transparent 70%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
+    radial-gradient(
+      420px 160px at 0% 0%,
+      color-mix(in srgb, var(--ve-primary) 12%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ve-white) 3.5%, transparent),
+      color-mix(in srgb, var(--ve-black) 18%, transparent)
+    );
   box-shadow:
-    inset 0 0 0 1px rgba(255, 178, 36, 0.26),
-    0 10px 30px rgba(0, 0, 0, 0.35);
+    inset 0 0 0 1px color-mix(in srgb, var(--ve-primary) 26%, transparent),
+    var(--ve-drop-md);
 }
 .ae-next.done {
   background:
-    radial-gradient(420px 160px at 0% 0%, rgba(76, 195, 138, 0.14), transparent 70%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
+    radial-gradient(
+      420px 160px at 0% 0%,
+      color-mix(in srgb, var(--ve-success) 14%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ve-white) 3.5%, transparent),
+      color-mix(in srgb, var(--ve-black) 18%, transparent)
+    );
   box-shadow:
-    inset 0 0 0 1px rgba(76, 195, 138, 0.3),
-    0 10px 30px rgba(0, 0, 0, 0.35);
+    inset 0 0 0 1px color-mix(in srgb, var(--ve-success) 30%, transparent),
+    var(--ve-drop-md);
 }
 .ae-next.error {
   background:
-    radial-gradient(420px 160px at 0% 0%, rgba(255, 107, 94, 0.14), transparent 70%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
+    radial-gradient(
+      420px 160px at 0% 0%,
+      color-mix(in srgb, var(--ve-danger) 14%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ve-white) 3.5%, transparent),
+      color-mix(in srgb, var(--ve-black) 18%, transparent)
+    );
   box-shadow:
     inset 0 0 0 1px var(--ve-danger-line),
-    0 10px 30px rgba(0, 0, 0, 0.35);
+    var(--ve-drop-md);
 }
 .ae-next-icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--ve-radius-xl);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--ve-text-on-primary);
   background: var(--ve-primary-fill);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    0 4px 12px rgba(0, 0, 0, 0.35);
+    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 40%, transparent),
+    var(--ve-drop-sm);
 }
 .ae-next.done .ae-next-icon {
   color: #04140c;
-  background: linear-gradient(145deg, #7de3b1, #2ebd7a);
+  background: linear-gradient(145deg, var(--ve-success-ink), #2ebd7a);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 4px 12px rgba(0, 0, 0, 0.35);
+    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 35%, transparent),
+    var(--ve-drop-sm);
 }
 .ae-next.error .ae-next-icon {
   color: #1c0604;
-  background: linear-gradient(145deg, #ffb0a6, #ff6b5e);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  background: linear-gradient(145deg, #ffb0a6, var(--ve-danger));
+  box-shadow: var(--ve-drop-sm);
 }
 .ae-next.running .ae-next-icon svg {
   animation: ae-spin 1.4s linear infinite;
@@ -302,7 +342,7 @@
   padding: 0 20px;
   font-size: var(--ve-fs-14);
   font-weight: var(--ve-fw-semibold);
-  border-radius: 9px;
+  border-radius: var(--ve-radius-lg);
   white-space: nowrap;
 }
 .ae-next-secondary {
@@ -321,9 +361,13 @@
   flex-direction: column;
   gap: 2px;
   padding: 10px 12px;
-  border-radius: 9px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.15));
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+  border-radius: var(--ve-radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 4%, transparent),
+    color-mix(in srgb, var(--ve-black) 15%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 12%, transparent);
 }
 .ae-metric-label {
   font-size: var(--ve-fs-11);
@@ -340,7 +384,7 @@
   color: #ffc07a;
 }
 .ae-metric.violet .ae-metric-label {
-  color: #cdb9ff;
+  color: var(--ve-auto-ink);
 }
 .ae-metric-value {
   font-size: var(--ve-fs-20);
@@ -357,9 +401,9 @@
 /* カード(見つかったもの・構成) */
 .ae-card {
   padding: 12px 14px 14px;
-  border-radius: 10px;
-  background: rgba(8, 10, 18, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+  border-radius: var(--ve-radius-lg);
+  background: color-mix(in srgb, var(--ve-surface-sunken) 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .ae-card-head {
   display: flex;
@@ -420,14 +464,14 @@
 .ae-lane {
   position: relative;
   height: 16px;
-  border-radius: 4px;
-  background: #0b0d16;
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.08);
+  border-radius: var(--ve-radius-sm);
+  background: var(--ve-surface-sunken);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 8%, transparent);
   overflow: hidden;
 }
 .ae-lane.thin {
   height: 7px;
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
 }
 .ae-lane-stack {
   display: flex;
@@ -436,66 +480,74 @@
 }
 .ae-lane.pending {
   background:
-    repeating-linear-gradient(135deg, transparent 0 6px, rgba(255, 255, 255, 0.035) 6px 12px),
-    #0b0d16;
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 6px,
+      color-mix(in srgb, var(--ve-white) 3.5%, transparent) 6px 12px
+    ),
+    var(--ve-surface-sunken);
 }
 .ae-mark {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  border-radius: 3px;
-  background: #3d6bff;
+  border-radius: var(--ve-radius-sm);
+  background: var(--ve-track-video-tint);
 }
 .ae-lane.thin .ae-mark {
   top: 1px;
   bottom: 1px;
 }
 .ae-mark.camera {
-  background: linear-gradient(90deg, #3d6bff, #5b8cff);
+  background: linear-gradient(90deg, var(--ve-track-video-tint), var(--ve-track-video));
 }
 .ae-mark.mic {
-  background: linear-gradient(90deg, #22b07a, #2ee59a);
+  background: linear-gradient(90deg, #22b07a, var(--ve-track-dialog));
 }
 .ae-mark.progress {
   background: linear-gradient(90deg, rgba(167, 123, 255, 0.55), #a77bff);
 }
 .ae-mark.laugh {
-  background: #ffb224;
+  background: var(--ve-primary);
 }
 .ae-mark.cheer {
-  background: #ff5fa2;
+  background: var(--ve-track-telop);
 }
 .ae-mark.scene.kept {
   background: #6b7cff;
 }
 .ae-mark.scene.dropped {
-  background: rgba(142, 148, 157, 0.25);
+  background: color-mix(in srgb, var(--ve-text-3) 25%, transparent);
 }
 
 /* 構成の帯: 残す場面は順に 4 色、見どころは琥珀の印、落とす場面は縞 */
 .ae-band {
   position: relative;
   height: 30px;
-  border-radius: 6px;
-  background: #0b0d16;
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-sunken);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .ae-band-seg {
   position: absolute;
   top: 3px;
   bottom: 3px;
-  border-radius: 3px;
+  border-radius: var(--ve-radius-sm);
   cursor: pointer;
 }
 .ae-band-seg.kept {
-  background: linear-gradient(180deg, var(--seg), color-mix(in srgb, var(--seg) 60%, #0b0d16));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  background: linear-gradient(
+    180deg,
+    var(--seg),
+    color-mix(in srgb, var(--seg) 60%, var(--ve-surface-sunken))
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-white) 18%, transparent);
 }
 .ae-band-seg.dropped {
   background: repeating-linear-gradient(
     135deg,
-    rgba(142, 148, 157, 0.18) 0 4px,
-    rgba(142, 148, 157, 0.06) 4px 8px
+    color-mix(in srgb, var(--ve-text-3) 18%, transparent) 0 4px,
+    color-mix(in srgb, var(--ve-text-3) 6%, transparent) 4px 8px
   );
 }
 .ae-band-seg.highlight::after {
@@ -508,12 +560,12 @@
   margin-left: -3.5px;
   transform: rotate(45deg);
   background: var(--ve-primary);
-  box-shadow: 0 0 0 2px #0b0d16;
+  box-shadow: 0 0 0 2px var(--ve-surface-sunken);
 }
 .ae-band-seg.selected {
   box-shadow:
-    0 0 0 2px #fff,
-    0 0 14px rgba(255, 255, 255, 0.35);
+    0 0 0 2px var(--ve-white),
+    0 0 14px color-mix(in srgb, var(--ve-white) 35%, transparent);
   z-index: 1;
 }
 .ae-band-seg:hover {
@@ -532,11 +584,17 @@
   width: 12px;
   height: 8px;
   margin-right: 6px;
-  border-radius: 2px;
+  border-radius: var(--ve-radius-xs);
   vertical-align: 0;
 }
 .ae-legend.kept::before {
-  background: linear-gradient(90deg, #6b7cff 25%, #ff5fa2 25% 50%, #a77bff 50% 75%, #2ed3b7 75%);
+  background: linear-gradient(
+    90deg,
+    #6b7cff 25%,
+    var(--ve-track-telop) 25% 50%,
+    #a77bff 50% 75%,
+    #2ed3b7 75%
+  );
 }
 .ae-legend.highlight::before {
   width: 7px;
@@ -547,8 +605,8 @@
 .ae-legend.dropped::before {
   background: repeating-linear-gradient(
     135deg,
-    rgba(142, 148, 157, 0.5) 0 2px,
-    rgba(142, 148, 157, 0.15) 2px 4px
+    color-mix(in srgb, var(--ve-text-3) 50%, transparent) 0 2px,
+    color-mix(in srgb, var(--ve-text-3) 15%, transparent) 2px 4px
   );
 }
 
@@ -556,10 +614,10 @@
 .ae-thumb {
   width: 64px;
   aspect-ratio: 16 / 9;
-  border-radius: 4px;
+  border-radius: var(--ve-radius-sm);
   overflow: hidden;
-  background: #0b0d16;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  background: var(--ve-surface-sunken);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ve-white) 6%, transparent);
 }
 .ae-thumb img {
   width: 100%;
@@ -578,26 +636,26 @@
   align-items: center;
   height: 19px;
   padding: 0 7px;
-  border-radius: 10px;
+  border-radius: var(--ve-radius-lg);
   font-size: var(--ve-fs-11);
   white-space: nowrap;
   color: var(--ve-text-2);
-  box-shadow: inset 0 0 0 1px #2a2f45;
+  box-shadow: inset 0 0 0 1px var(--ve-surface-3-hover);
 }
 .ae-chip.accent {
   color: #ffd27a;
-  background: rgba(255, 178, 36, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(255, 178, 36, 0.32);
+  background: color-mix(in srgb, var(--ve-primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-primary) 32%, transparent);
 }
 .ae-chip.ok {
   color: var(--ve-success-ink);
-  background: rgba(76, 195, 138, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.3);
+  background: color-mix(in srgb, var(--ve-success) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-success) 30%, transparent);
 }
 .ae-chip.auto {
   color: var(--ve-auto-ink);
-  background: rgba(183, 156, 255, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(183, 156, 255, 0.34);
+  background: color-mix(in srgb, var(--ve-auto) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-auto) 34%, transparent);
 }
 .ae-chip.manual {
   box-shadow: inset 0 0 0 1.5px var(--ve-primary);
@@ -608,7 +666,7 @@
   gap: 8px 14px;
   padding: 12px 16px;
   border-bottom: 0;
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .structure-controls label {
   color: var(--ve-text-2);
@@ -617,11 +675,11 @@
   padding: 8px 16px;
   border-bottom: 0;
   font-size: var(--ve-fs-12);
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .structure-band {
   padding: 12px 16px 10px;
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .structure-list {
   padding: 4px 6px 8px;
@@ -631,28 +689,32 @@
   gap: 12px;
   padding: 8px 10px;
   border-bottom: 0;
-  border-radius: 8px;
+  border-radius: var(--ve-radius-md);
 }
 /* 絵の無い企画(同期の情報が無い)は、元の並び */
 .structure-row:not(:has(.ae-thumb)) {
   grid-template-columns: 18px 64px 58px 70px minmax(0, 1fr);
 }
 .structure-row + .structure-row {
-  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.06);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 6%, transparent);
 }
 .structure-row:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: color-mix(in srgb, var(--ve-white) 2.5%, transparent);
 }
 .structure-row.selected {
-  background: linear-gradient(90deg, rgba(255, 178, 36, 0.1), transparent 70%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ve-primary) 10%, transparent),
+    transparent 70%
+  );
   box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
 .structure-kind {
   padding: 2px 0;
-  border-radius: 5px;
+  border-radius: var(--ve-radius-sm);
   font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
-  background: #1a1e30;
+  background: var(--ve-border-subtle);
 }
 .structure-kind.highlight {
   color: var(--ve-text-on-primary);
@@ -662,16 +724,16 @@
 .structure-kind.unneeded {
   color: var(--ve-text-3);
   background: transparent;
-  box-shadow: inset 0 0 0 1px #2a2f45;
+  box-shadow: inset 0 0 0 1px var(--ve-surface-3-hover);
 }
 .structure-score {
   height: 6px;
-  background: #0b0d16;
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.08);
+  background: var(--ve-surface-sunken);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .structure-score span {
-  background: linear-gradient(90deg, #7c5cff, #b79cff);
-  border-radius: 3px;
+  background: linear-gradient(90deg, var(--ve-violet), var(--ve-auto));
+  border-radius: var(--ve-radius-sm);
 }
 .structure-title {
   color: var(--ve-text-1);
@@ -690,13 +752,13 @@
 /* ---------- 同期の結果・素材の整理・文字起こし・ログ ---------- */
 .sync-lane-track {
   height: 24px;
-  border-radius: 5px;
-  background: #0b0d16;
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.08);
+  border-radius: var(--ve-radius-sm);
+  background: var(--ve-surface-sunken);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .sync-bar {
-  border-radius: 3px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  border-radius: var(--ve-radius-sm);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-white) 18%, transparent);
 }
 .sync-lane-name {
   color: var(--ve-text-2);
@@ -710,9 +772,13 @@
 }
 .auto-edit-stat {
   padding: 10px 12px;
-  border-radius: 9px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.15));
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+  border-radius: var(--ve-radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 4%, transparent),
+    color-mix(in srgb, var(--ve-black) 15%, transparent)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 12%, transparent);
 }
 .auto-edit-stat > span:last-child {
   font-family: var(--ve-font-mono);
@@ -724,20 +790,20 @@
   font-weight: var(--ve-fw-semibold);
   letter-spacing: 0.06em;
   color: var(--ve-text-3);
-  border-bottom-color: rgba(150, 165, 255, 0.1);
+  border-bottom-color: color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .auto-edit-table td {
-  border-bottom-color: rgba(150, 165, 255, 0.06);
+  border-bottom-color: color-mix(in srgb, var(--ve-edge) 6%, transparent);
 }
 .transcript-head {
   border-bottom: 0;
-  box-shadow: inset 0 -1px 0 rgba(150, 165, 255, 0.08);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .transcript-row {
-  border-bottom-color: rgba(150, 165, 255, 0.06);
+  border-bottom-color: color-mix(in srgb, var(--ve-edge) 6%, transparent);
 }
 .transcript-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--ve-white) 3%, transparent);
 }
 .auto-edit-log {
   font-size: var(--ve-fs-12);
@@ -752,11 +818,15 @@
   margin-bottom: 6px;
   padding: 10px 12px;
   border-bottom: 0;
-  border-radius: 9px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.12));
+  border-radius: var(--ve-radius-lg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ve-white) 3.5%, transparent),
+    color-mix(in srgb, var(--ve-black) 12%, transparent)
+  );
   box-shadow:
     inset 3px 0 0 var(--ve-primary),
-    inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+    inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .auto-edit-review-item p {
   color: var(--ve-text-1);
@@ -772,17 +842,17 @@
   align-items: center;
   height: 19px;
   padding: 0 7px;
-  border-radius: 10px;
+  border-radius: var(--ve-radius-lg);
   color: #ffd27a;
-  background: rgba(255, 178, 36, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(255, 178, 36, 0.32);
+  background: color-mix(in srgb, var(--ve-primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-primary) 32%, transparent);
 }
 .auto-edit-review-empty {
   margin: 6px;
   padding: 18px 14px;
-  border-radius: 9px;
+  border-radius: var(--ve-radius-lg);
   text-align: center;
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 
 /* ---------- 低い・狭い窓(1366×768) ---------- */
