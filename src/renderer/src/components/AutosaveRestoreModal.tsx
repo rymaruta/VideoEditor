@@ -73,13 +73,11 @@ export function AutosaveRestoreModal(): React.JSX.Element | null {
           onClose={() => !busy && clearPending()}
           closeDisabled={busy}
         />
-        <p className="hint-text">
+        <p className="dialog-lead">
           前回、保存せずに終了した可能性があります(自動保存: {formatTimestamp(pending.mtimeMs)})。
         </p>
         <p className="hint-text">
-          「あとで決める」を選ぶと今は何もしません。「破棄する」を選んでも中身は消さずに
-          取っておきます。どちらの場合も、上部バーの「破棄した自動保存データを戻す」から
-          あとで復元できます。
+          「あとで決める」を選ぶと今は何もしません。「破棄する」を選んでも中身は消さずに取っておきます。どちらの場合も、上部バーの「破棄した自動保存データを戻す」からあとで復元できます。
         </p>
         {error && <p className="error-text">{error}</p>}
         <div className="modal-actions">

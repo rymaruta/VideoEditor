@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import type { SecretName } from '@shared/secrets'
 import { useSettingsStore } from '../store/settingsStore'
 import { keyStorageNotes } from '../lib/keyStorageNotes'
+import { AlertTriangleIcon } from './icons'
 
 /**
  * API キーの欄の下に出す知らせ(中身は `keyStorageNotes`)。
@@ -29,13 +30,28 @@ export function KeyStorageNote({ names }: { names: readonly SecretName[] }): Rea
     names
   )
   if (notes.length === 0) return null
+  // 「暗号化して保存できない」の知らせは 4 つのパネル(投稿準備・YouTube・ゲームトレンド・音源)の鍵の欄に
+  // 同じ長い文で出ていた。1 行の要点にし、開けば全文を読めるようにする(中身は変えない)
+  const plain = keyStorage === 'plain' ? notes[notes.length - 1] : null
   return (
     <>
-      {notes.map((n) => (
-        <p key={n} className="hint-text">
-          {n}
-        </p>
-      ))}
+      {notes
+        .filter((n) => n !== plain)
+        .map((n) => (
+          <p key={n} className="key-note" role="note">
+            <AlertTriangleIcon width={12} height={12} />
+            <span>{n}</span>
+          </p>
+        ))}
+      {plain && (
+        <div className="key-note" role="note">
+          <AlertTriangleIcon width={12} height={12} />
+          <details>
+            <summary>API キーは暗号化せずに保存します</summary>
+            <p>{plain}</p>
+          </details>
+        </div>
+      )}
     </>
   )
 }

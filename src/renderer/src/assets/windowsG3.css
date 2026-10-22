@@ -1,0 +1,325 @@
+/* =====================================================================
+   窓の中身と右のパネルの中身を tokens.css の決まりへ寄せる(dialogsG3.css の後に読み込む)。
+   - 操作の高さは 24 か 28 に固定(既定 28、詰めた所 24。トラックの見出しの中だけ 20)
+   - 窓の幅は 440 / 560 / 800。中の文は本文 13・補足 12、欄の名前はラベル 12/500
+   - 進み具合の棒は、空のときも入力欄に見えないよう「字 + 4px の溝」
+   ===================================================================== */
+
+/* ---------- 入力欄・選択の高さ(#11) ---------- */
+/* 詳細度は (0,0,1) のまま(下の「詰めた所」の指定が勝つように) */
+select,
+input:where(
+  :not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not(
+      [type='file']
+    )
+) {
+  box-sizing: border-box;
+  height: var(--ve-control-md);
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: normal;
+}
+input[type='color'] {
+  box-sizing: border-box;
+  height: var(--ve-control-md);
+}
+/* 詰めた所は 24: インスペクタの行・自動編集の構成の欄・テロップの一覧の道具・名前の欄 */
+.prop-control select,
+.prop-control input[type='text'],
+.prop-control input[type='number'],
+.prop-control input[type='color'],
+.structure-controls select,
+.structure-controls input[type='number'],
+.structure-note input,
+select.telop-kind-add,
+.telop-find input[type='search'],
+.telop-find input[type='text'],
+.section-preset-name input,
+.look-search input,
+.grad-name-form input,
+.beat-grid-field input,
+.status-bar .project-name-input,
+.project-name-input,
+.overlay-item-row input[type='number'],
+.overlay-shift-row input[type='number'],
+.overlay-bulk-row input[type='number'],
+.inspector-field input[type='number'],
+.audio-clip-inspector input,
+.caption-candidate input[type='text'],
+.keyword-se-add-row select,
+.keyword-se-add-row input,
+.timeline-panel .timeline-actions select {
+  height: var(--ve-control-sm);
+}
+/* ダイアログの中の欄は 28 */
+.form-row select,
+.dialog-footer select,
+.dialog-footer input[type='text'],
+.export-dialog select,
+.export-dialog input[type='text'],
+.telop-style-dialog select,
+.telop-style-dialog input[type='text'],
+.telop-style-dialog select.telop-style-export,
+.new-episode-dialog select,
+.new-episode-dialog input[type='text'],
+.library-toolbar select {
+  height: var(--ve-control-md);
+}
+/* トラックの見出しの中だけ 20 */
+.track-label-controls select {
+  height: var(--ve-control-xs);
+  font-size: var(--ve-fs-11);
+}
+/* 枠の中の select(.inline-select)は枠が操作の高さを持つ */
+.inline-select select {
+  height: auto;
+}
+/* 無効は薄くせず、無効の文字の色で(読める 3:1 以上を保つ) */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 1;
+  color: var(--ve-text-disabled);
+  border-color: var(--ve-border-subtle);
+}
+
+/* ---------- チェック(#15)は 16px・枠は border-strong(3:1)、字との間 8 ---------- */
+.checkbox-label input[type='checkbox'],
+.telop-find-loose input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+}
+.checkbox-label,
+.trim-field .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+}
+
+/* ---------- 窓の幅と中身 ---------- */
+.modal {
+  width: 440px;
+}
+.modal.trim-modal,
+.modal.long-form-modal,
+.modal.roughcut-modal,
+.modal.text-edit-modal,
+.modal.keyword-se-modal {
+  width: 560px;
+  max-width: 90vw;
+}
+.modal.autoedit-modal {
+  width: 800px;
+  max-width: 90vw;
+}
+/* 中の文: 主な知らせは本文、補足は補足の灰 */
+.modal .dialog-lead {
+  margin-bottom: var(--ve-space-2);
+  font: var(--ve-type-body);
+  color: var(--ve-text-1);
+}
+.modal > .hint-text + .hint-text {
+  margin-top: var(--ve-space-1);
+}
+.modal > .hint-text,
+.modal > .error-text {
+  margin-bottom: var(--ve-space-2);
+}
+/* 欄の名前(開始・言語・感度など)はラベルの段 */
+.modal .trim-field > label:not(.checkbox-label),
+.modal .highlight-sensitivity-row label,
+.modal .long-form-modal label > span:first-child {
+  font: var(--ve-type-label);
+  color: var(--ve-text-2);
+}
+.modal .trim-field {
+  margin-bottom: var(--ve-space-3);
+}
+.modal .trim-field select {
+  min-width: 160px;
+}
+.modal .checkbox-label {
+  margin-bottom: var(--ve-space-2);
+  font: var(--ve-type-body);
+  color: var(--ve-text-1);
+}
+/* トリム: 要約と「クロップして…」の間を空ける(間が 0 だった) */
+.trim-summary {
+  margin-bottom: var(--ve-space-3);
+}
+.smart-crop-field {
+  margin-top: var(--ve-space-3);
+  padding-top: var(--ve-space-3);
+  box-shadow: inset 0 1px 0 var(--ve-border-subtle);
+}
+.smart-crop-field .overlay-item-row {
+  gap: var(--ve-gap-actions);
+  margin-top: var(--ve-space-2);
+}
+/* 候補の一覧(無音・フィラー・自動テロップ): くぼみの地の行、行の高さ 28 */
+.silence-range-list {
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-1);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-sunken);
+}
+.silence-range-item,
+.caption-candidate {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  min-height: var(--ve-control-md);
+  padding: 0 var(--ve-space-2);
+  border-radius: var(--ve-radius-md);
+  font: var(--ve-type-body);
+}
+.silence-range-item:hover,
+.caption-candidate:hover {
+  background: var(--ve-surface-1);
+}
+.silence-clip-name {
+  font: var(--ve-type-label);
+  color: var(--ve-text-2);
+}
+/* ハイライトの一覧(点数の棒は情報の色ではなく主の淡い色) */
+.highlight-item-time {
+  font: var(--ve-type-timecode);
+}
+/* 進行中の知らせ(…中)は回るアイコンの代わりに情報の色の字 */
+.modal .detect-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  color: var(--ve-info-ink);
+}
+
+/* ---------- 進み具合の棒(次点): 字 + 4px の溝。0% でも入力欄に見えない ---------- */
+.progress-bar {
+  position: relative;
+  display: block;
+  height: auto;
+  margin-top: var(--ve-space-3);
+  padding: var(--ve-space-2) var(--ve-space-3) calc(var(--ve-space-2) + 8px);
+  overflow: hidden;
+  border-radius: var(--ve-radius-lg);
+  background:
+    linear-gradient(var(--ve-surface-sunken), var(--ve-surface-sunken)) var(--ve-space-3)
+      calc(100% - var(--ve-space-2)) / calc(100% - var(--ve-space-6)) 4px no-repeat,
+    var(--ve-surface-1);
+  box-shadow: inset 0 0 0 1px var(--ve-border-subtle);
+}
+.progress-bar-fill {
+  top: auto;
+  left: var(--ve-space-3);
+  bottom: var(--ve-space-2);
+  height: 4px;
+  max-width: calc(100% - var(--ve-space-6));
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-primary);
+}
+.progress-bar span {
+  display: block;
+  font: var(--ve-type-label);
+  color: var(--ve-text-1);
+  text-shadow: none;
+}
+.media-proxy-bar {
+  height: 4px;
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-surface-sunken);
+}
+
+/* ---------- 右のパネルの中身(ボイス・サムネ・投稿準備・YouTube・ゲームトレンド) ---------- */
+.narration-panel,
+.thumbnail-panel,
+.metadata-panel,
+.youtube-panel,
+.game-trend-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-gap-field);
+}
+.narration-panel > *,
+.thumbnail-panel > *,
+.metadata-panel > *,
+.youtube-panel > *,
+.game-trend-panel > * {
+  flex-shrink: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+/* 欄の名前 */
+.youtube-field > label,
+.youtube-field > span:first-child,
+.metadata-panel .export-field > span:first-child,
+.narration-panel .export-field > span:first-child,
+.thumbnail-panel .export-field > span:first-child,
+.game-trend-panel .export-field > span:first-child,
+.panel-field-label {
+  font: var(--ve-type-label);
+  color: var(--ve-text-2);
+}
+/* 節の見出し(結果のまとまり) */
+.metadata-panel h3,
+.game-trend-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-gap-icon);
+  margin: 0 0 var(--ve-space-2);
+  font: var(--ve-type-subhead);
+  color: var(--ve-text-1);
+}
+/* パネルの中の大きな操作(生成・分析)は 32 の高さで幅いっぱい */
+.metadata-panel > .primary-button,
+.game-trend-panel > .primary-button,
+.narration-panel .narration-generate,
+.thumbnail-panel .thumbnail-download {
+  width: 100%;
+  height: var(--ve-control-lg);
+  justify-content: center;
+}
+/* 複数行の欄 */
+.metadata-context-input,
+.metadata-description-input,
+.game-trend-chat-input,
+.thumbnail-text-input {
+  width: 100%;
+  font: var(--ve-type-body);
+  resize: vertical;
+}
+
+/* ---------- API キーの保存の注意(次点: 4 つのパネルで同じ長い文 → 1 行 + 開けば全文) ---------- */
+.key-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ve-gap-icon);
+  font: var(--ve-type-caption);
+  color: var(--ve-text-2);
+}
+.key-note > .ve-icon {
+  margin-top: 2px;
+  color: var(--ve-warning);
+}
+.key-note details summary {
+  cursor: pointer;
+  color: var(--ve-text-2);
+}
+.key-note details summary:hover {
+  color: var(--ve-text-1);
+}
+.key-note details p {
+  margin-top: var(--ve-space-1);
+  color: var(--ve-text-3);
+}
+
+/* サムネイル: 生成の 2 つは縦に並べて 1 行の字に(狭いパネルで主ボタンの字が 2 行に折れていた) */
+.thumbnail-generate-buttons {
+  flex-direction: column;
+  gap: var(--ve-gap-actions);
+}
+.thumbnail-generate-buttons > button {
+  width: 100%;
+  height: var(--ve-control-lg);
+  justify-content: center;
+  white-space: nowrap;
+}

@@ -81,7 +81,7 @@ export function TrimModal({
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
       <div
-        className="modal"
+        className="modal trim-modal"
         role="dialog"
         aria-modal="true"
         aria-label={`クリップをトリム: ${asset.fileName}`}
@@ -163,12 +163,12 @@ export function TrimModal({
               クロップして画面いっぱいに表示(黒帯なし)
             </label>
             <p className="hint-text">
-              プロジェクトのアスペクト比と異なるため、有効にすると余白なしで表示されますが、映像の左右(または上下)が切り取られます。
+              プロジェクトの縦横比と異なるため、有効にすると余白なしで表示されますが、映像の左右(または上下)が切り取られます。
             </p>
             {fillCrop && (
               <div className="overlay-item-row">
                 <button onClick={handleDetectCrop} disabled={detecting}>
-                  {detecting ? '被写体を検出中...' : '被写体を自動検出してクロップ位置を調整'}
+                  {detecting ? '被写体を検出中…' : '被写体を自動検出してクロップ位置を調整'}
                 </button>
                 <button
                   className="small-button"

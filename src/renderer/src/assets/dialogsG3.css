@@ -37,6 +37,7 @@
 }
 .dialog-title {
   min-width: 0;
+  font: var(--ve-type-title);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
