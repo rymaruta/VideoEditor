@@ -281,7 +281,7 @@ export function PresetPanel(): React.JSX.Element {
                 disabled={busyId === preset.id}
                 onClick={() => handleAddSe(preset)}
               >
-                {busyId === preset.id ? '...' : <PlusIcon width={14} height={14} />}
+                {busyId === preset.id ? '…' : <PlusIcon width={14} height={14} />}
               </button>
               <button
                 className="icon-button danger"

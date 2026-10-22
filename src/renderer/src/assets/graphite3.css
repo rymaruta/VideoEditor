@@ -1125,6 +1125,14 @@ textarea {
 .video-transport .scrub-track {
   position: relative;
   overflow: visible;
+  /* 窓の面2の上でも溝が見えるように(非文字のコントラスト 3:1 以上) */
+  background: var(--ve-border-strong);
+}
+/* 細い溝でも押しやすいよう、上下に透明の当たり判定を足す */
+.video-transport .scrub-track::before {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--ve-space-2)) 0;
 }
 .video-transport .scrub-track:focus-visible {
   outline: var(--ve-focus-outline);
