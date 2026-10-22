@@ -22,10 +22,15 @@ import { sequenceDurationFrames } from '../sequence/segmentPlan'
  *   `out - in == end - start` のまま、`Time Remap` の効果に速さ(%)を書く(FCP7 の仕様:
  *   「速さを変えるとクリップの duration が変わる」。素材の位置は graphdict のキーフレームが持つ)。
  * - `out`・`end` は「含まない」終わり(FCP7 は out/end を 1 始まりで数える = 0 始まりの排他の終わり)。
- * - 繋ぎ(クロスフェード)は、2 本のクリップを**切れ目(繋ぎの真ん中)で突き合わせ**、その上に
- *   `transitionitem`(alignment=center)を置く。繋ぎに接する側の start/end は Premiere と同じく -1
- *   (長さは in/out から決まる)。のりしろは素材の外側(ハンドル)から取る。
+ * - 繋ぎ(クロスフェード)は Apple の仕様の Listing 3-17 の形: 2 本とも**繋ぎののりしろを含んだ**
+ *   in/out を書き(v2 の重なりのまま)、繋ぎに接する側の start/end を -1(in/out から計算させる)、
+ *   `transitionitem` は重なりの区間そのもの(alignment=center)。
+ *   例(仕様): 前 in74 out227 start0 end-1、繋ぎ 123–153、後 in36 out156 start-1 end243。
+ * - 音声はステレオなら Premiere・FCP7 の形(Listing 3-15/3-16)で 2 本のトラックに分ける
+ *   (sourcetrack 1/2、outputchannelindex 1/2、currentExplodedTrackIndex、groupindex で対、
+ *   映像と L・R を相互にリンク)。モノラルの素材は 1 本(channelcount 1)。
  * - 素材のパスは `file://localhost/` + 1 区切りずつ百分率符号化(RFC 2396。日本語・空白・#・% も)。
+ *   綴りは OS から得たまま(NFC/NFD をそろえると、その綴りでない OS で素材が見つからなくなる)。
  *   Windows のドライブは Premiere と同じく `C%3a`。
  * - ファイルの定義(`<file id>`)は文書の中で最初に出たときだけ中身を書き、2 回目からは id だけ。
  */
@@ -115,7 +120,7 @@ export function xmlEscape(s: string): string {
  * 区切りの間は UTF-8 の百分率符号化(日本語・空白・#・%・?・& など)。
  */
 export function fileUrl(path: string): string {
-  const enc = (seg: string): string => encodeURIComponent(seg.normalize('NFC'))
+  const enc = (seg: string): string => encodeURIComponent(seg)
   const p = path.replace(/\\/g, '/')
   if (/^\/\/[^/]/.test(p)) {
     const [host, ...rest] = p.slice(2).split('/')
@@ -163,6 +168,8 @@ export interface PremiereXmlOptions {
   markers?: readonly PremiereMarker[]
   /** 見た目どおりのテロップを、映像トラックの一番上に置く */
   telopMedia?: { width: number; height: number; clips: readonly PremiereOverlayClip[] }
+  /** 素材の音声のチャンネル数(素材の ID → 数)。分からない素材はステレオとして書く */
+  audioChannels?: ReadonlyMap<string, number>
 }
 
 export interface PremiereXmlResult {
@@ -205,29 +212,39 @@ interface Placed {
   fadeIn?: number
   fadeOut?: number
   level?: number
+  /** ステレオの音声: R のトラック(2 本目)に置く同じクリップの id */
+  pairId?: string
   links: string[]
 }
 
 interface TrackPlan {
   kind: 'video' | 'audio'
   enabled: boolean
+  /** 音声のトラックのチャンネル数(2 は L・R の 2 本の <track> に分けて書く) */
+  channels?: 1 | 2
   clips: Placed[]
 }
 
+/** 重なりを別のトラックへ逃がす回数の上限(壊れた並びで止まらないように) */
+const MAX_OVERFLOW_TRACKS = 64
+
+type TransitionKind = SequenceTransition['type'] | 'audio'
+
 /**
- * 1 本のトラックのアイテムを、FCP7 の形(重ならない・繋ぎは切れ目で突き合わせ)に並べる。
- * 重なっているのに繋ぎとして扱えない物は `overflow` に返す(別のトラックへ置く)
+ * 1 本のトラックのアイテムを、FCP7 の形に並べる。位置は v2 のまま(繋ぎの重なりも詰めない。
+ * Apple の Listing 3-17 のとおり、繋ぎに接するクリップの in/out はのりしろを含む)。
+ * 重なっているのに繋ぎとして扱えない物(繋ぎの印が無い・前の物を丸ごと覆う・前の繋ぎと重なる)は
+ * `overflow` に返す(別のトラックへ置く)
  */
 function arrange<T extends { startFrame: number; durationFrames: number }>(
   items: readonly T[],
-  isTransition: (prev: T, item: T) => SequenceTransition['type'] | 'audio' | null
+  isTransition: (prev: T, item: T) => TransitionKind | null
 ): {
   placed: {
     item: T
     start: number
     end: number
-    shift: number
-    transition?: { start: number; end: number; type: SequenceTransition['type'] | 'audio' }
+    transition?: { start: number; end: number; type: TransitionKind }
   }[]
   overflow: T[]
 } {
@@ -236,8 +253,7 @@ function arrange<T extends { startFrame: number; durationFrames: number }>(
     item: T
     start: number
     end: number
-    shift: number
-    transition?: { start: number; end: number; type: SequenceTransition['type'] | 'audio' }
+    transition?: { start: number; end: number; type: TransitionKind }
   }[] = []
   const overflow: T[] = []
   for (const item of sorted) {
@@ -246,24 +262,15 @@ function arrange<T extends { startFrame: number; durationFrames: number }>(
     if (end <= start) continue
     const prev = placed[placed.length - 1]
     if (!prev || prev.end <= start) {
-      placed.push({ item, start, end, shift: 0 })
+      placed.push({ item, start, end })
       continue
     }
     const type = isTransition(prev.item, item)
-    // 繋ぎにできるのは、前のクリップの頭より後ろで重なり、このクリップの終わりより前に前のが終わるときだけ
-    if (type && prev.end < end && start > prev.start) {
-      const tStart = start
-      const tEnd = prev.end
-      let cut = tStart + Math.floor((tEnd - tStart) / 2)
-      cut = Math.min(end - 1, Math.max(prev.start + 1, cut))
-      prev.end = cut
-      placed.push({
-        item,
-        start: cut,
-        end,
-        shift: cut - start,
-        transition: { start: tStart, end: tEnd, type }
-      })
+    // 繋ぎにできるのは、前の物の頭より後ろで重なり、前の物がこの物の終わりより前に終わり、
+    // 前の物の頭の繋ぎ(あれば)とも重ならないときだけ(FCP7 は 1 つの所に繋ぎ 1 つ)
+    const prevHeadEnd = prev.transition ? prev.transition.end : prev.start
+    if (type && prev.end < end && start > prev.start && start >= prevHeadEnd) {
+      placed.push({ item, start, end, transition: { start, end: prev.end, type } })
       continue
     }
     overflow.push(item)
@@ -297,7 +304,13 @@ export function buildPremiereXml(
   const addVideoTrack = (enabled: boolean, items: MediaItem[]): void => {
     let pending = items
     let guard = 0
-    while (pending.length > 0 && guard++ < 64) {
+    while (pending.length > 0) {
+      if (guard++ >= MAX_OVERFLOW_TRACKS) {
+        warnings.add(
+          `重なりが多すぎて置けない映像のクリップが ${pending.length} 本あります(XML に入れていません)`
+        )
+        break
+      }
       const { placed, overflow } = arrange(pending, (_p, it) =>
         it.transitionIn && it.transitionIn.durationFrames > 0 ? it.transitionIn.type : null
       )
@@ -314,7 +327,7 @@ export function buildPremiereXml(
           clipIndex: i + 1,
           start: p.start,
           end: p.end,
-          inF: (still ? 0 : Math.round((p.item.sourceIn * fps) / speed)) + p.shift,
+          inF: still ? 0 : Math.round((p.item.sourceIn * fps) / speed),
           headTransition: p.transition !== undefined,
           tailTransition: false,
           source: { kind: 'media', item: p.item },
@@ -372,15 +385,28 @@ export function buildPremiereXml(
   }
 
   // --- 音声 ---
+  // ステレオは L・R の 2 本の <track> になるので、トラックの番号は書くときの本数で数える
   const audioPlans: TrackPlan[] = []
-  const addAudioTrack = (track: SequenceAudioTrack, items: AudioItem[]): void => {
+  let audioTrackCount = 0
+  const channelsOf = (assetId: string): number => {
+    const n = options.audioChannels?.get(assetId)
+    return n !== undefined && Number.isFinite(n) && n >= 1 ? Math.floor(n) : 2
+  }
+  const addAudioPlans = (track: SequenceAudioTrack, items: AudioItem[], channels: 1 | 2): void => {
     let pending = items
     let guard = 0
-    while (pending.length > 0 && guard++ < 64) {
+    while (pending.length > 0) {
+      if (guard++ >= MAX_OVERFLOW_TRACKS) {
+        warnings.add(
+          `重なりが多すぎて置けない音声のクリップが ${pending.length} 本あります(XML に入れていません)`
+        )
+        break
+      }
       // 同じトラックの中で重なるのは繋ぎ(本編の音のクロスフェード)だけ。クロスフェードにする
       const { placed, overflow } = arrange(pending, () => 'audio')
-      const trackIndex = audioPlans.length + 1
-      const plan: TrackPlan = { kind: 'audio', enabled: !track.muted, clips: [] }
+      const trackIndex = audioTrackCount + 1
+      audioTrackCount += channels
+      const plan: TrackPlan = { kind: 'audio', enabled: !track.muted, channels, clips: [] }
       placed.forEach((p, i) => {
         const speed = p.item.speed > 0 ? p.item.speed : 1
         const pc: Placed = {
@@ -390,7 +416,7 @@ export function buildPremiereXml(
           clipIndex: i + 1,
           start: p.start,
           end: p.end,
-          inF: Math.round((p.item.sourceIn * fps) / speed) + p.shift,
+          inF: Math.round((p.item.sourceIn * fps) / speed),
           headTransition: p.transition !== undefined,
           tailTransition: false,
           source: { kind: 'audio', item: p.item },
@@ -398,6 +424,7 @@ export function buildPremiereXml(
           level: clampLevel((p.item.volume ?? 1) * (track.volume ?? 1)),
           ...(p.item.fadeInFrames ? { fadeIn: p.item.fadeInFrames } : {}),
           ...(p.item.fadeOutFrames ? { fadeOut: p.item.fadeOutFrames } : {}),
+          ...(channels === 2 ? { pairId: newId() } : {}),
           links: []
         }
         if (p.transition) plan.clips[plan.clips.length - 1].tailTransition = true
@@ -406,12 +433,17 @@ export function buildPremiereXml(
       audioPlans.push(plan)
       pending = overflow
     }
-    if (track.duckingEnabled)
-      warnings.add('ダッキング(声に合わせて BGM を下げる)は XML に入りません。BGM は一定の音量です')
   }
   for (const track of seq.audioTracks) {
     const items = track.items.filter((i) => assets.has(i.assetId))
-    if (items.length > 0) addAudioTrack(track, items)
+    if (items.length === 0) continue
+    // モノラルの素材とステレオの素材は別のトラックに(Premiere のトラックはチャンネルの形を 1 つ持つ)
+    const stereo = items.filter((i) => channelsOf(i.assetId) >= 2)
+    const mono = items.filter((i) => channelsOf(i.assetId) < 2)
+    if (stereo.length > 0) addAudioPlans(track, stereo, 2)
+    if (mono.length > 0) addAudioPlans(track, mono, 1)
+    if (track.duckingEnabled)
+      warnings.add('ダッキング(声に合わせて BGM を下げる)は XML に入りません。BGM は一定の音量です')
   }
 
   // 片側のフェード: 隣のクリップと突き合わせている側・繋ぎのある側には置けない(FCP7 は1つの切れ目に繋ぎ1つ)
@@ -420,11 +452,11 @@ export function buildPremiereXml(
       const prev = plan.clips[i - 1]
       const next = plan.clips[i + 1]
       const len = c.end - c.start
-      if (c.fadeIn && (c.headTransition || (prev && prev.end === c.start))) {
+      if (c.fadeIn && (c.headTransition || (prev && prev.end >= c.start))) {
         delete c.fadeIn
         warnings.add('隣のクリップと接しているフェードの一部は XML に入れていません')
       }
-      if (c.fadeOut && (c.tailTransition || (next && next.start === c.end))) {
+      if (c.fadeOut && (c.tailTransition || (next && next.start <= c.end))) {
         delete c.fadeOut
         warnings.add('隣のクリップと接しているフェードの一部は XML に入れていません')
       }
@@ -446,8 +478,8 @@ export function buildPremiereXml(
       if (a.source.kind !== 'audio' || !a.source.item.linkedItemId) continue
       const v = placedByItem.get(a.source.item.linkedItemId)
       if (!v || v.start !== a.start || v.end !== a.end) continue
-      if (v.links.length === 0) v.links.push(v.id)
-      v.links.push(a.id)
+      if (v.links.length > 0) continue // 1 本の映像に付ける音は 1 組だけ
+      v.links.push(v.id, a.id, ...(a.pairId ? [a.pairId] : []))
       a.links = v.links
     }
   }
@@ -495,6 +527,7 @@ export function buildPremiereXml(
     let height: number
     let hasVideo: boolean
     let hasAudio: boolean
+    let channels = 2
     if (c.source.kind === 'overlay') {
       const o = c.source.clip
       path = o.path
@@ -516,6 +549,7 @@ export function buildPremiereXml(
       height = a.height || seq.height
       hasVideo = a.hasVideo !== false && (a.width > 0 || still)
       hasAudio = a.hasAudio && !still
+      channels = channelsOf(a.id)
     }
     const lines = [
       `${ind}<file id="${id}">`,
@@ -541,7 +575,7 @@ export function buildPremiereXml(
       lines.push(
         `${ind}    <audio>`,
         audioSample(`${ind}      `),
-        `${ind}      <channelcount>2</channelcount>`,
+        `${ind}      <channelcount>${channels}</channelcount>`,
         `${ind}    </audio>`
       )
     lines.push(`${ind}  </media>`, `${ind}</file>`)
@@ -560,9 +594,29 @@ export function buildPremiereXml(
 
   const timeRemapXml = (c: Placed, speed: number, clipFrames: number, ind: string): string => {
     const len = c.end - c.start
-    const media = (f: number): string => String(Math.round(f * speed * 1000) / 1000)
-    const kf = (when: number, value: string, flag: string): string =>
-      `${ind}      <keyframe>\n${ind}        <when>${when}</when>\n${ind}        <value>${value}</value>\n${ind}        <speedvirtualkf>TRUE</speedvirtualkf>\n${ind}        <${flag}>TRUE</${flag}>\n${ind}      </keyframe>`
+    // value は素材の位置を**素材のレートのフレーム**で(when はクリップの時間のフレーム)
+    const a = c.source.kind === 'overlay' ? undefined : assets.get(c.source.item.assetId)
+    const mediaFps = a && a.fps > 0 ? fcpRateValue(fcpRateOfNumber(a.fps)) : fps
+    const media = (f: number): string =>
+      String(Math.round(((f * speed) / fps) * mediaFps * 1000) / 1000)
+    const kf = (when: number, flags: string[]): string =>
+      [
+        `${ind}      <keyframe>`,
+        `${ind}        <when>${when}</when>`,
+        `${ind}        <value>${media(when)}</value>`,
+        `${ind}        <speedvirtualkf>TRUE</speedvirtualkf>`,
+        ...flags.map((f) => `${ind}        <${f}>TRUE</${f}>`),
+        `${ind}      </keyframe>`
+      ].join('\n')
+    // FCP7 の仕様: 最初は when 0、最後は when = クリップの長さ。同じ when のキーは 1 つにまとめる
+    const keys = new Map<number, string[]>()
+    const add = (when: number, flag: string): void => {
+      keys.set(when, [...(keys.get(when) ?? []), flag])
+    }
+    add(0, 'speedkfstart')
+    add(c.inF, 'speedkfin')
+    add(c.inF + len, 'speedkfout')
+    add(clipFrames, 'speedkfend')
     return [
       `${ind}<filter>`,
       `${ind}  <effect>`,
@@ -590,11 +644,7 @@ export function buildPremiereXml(
       `${ind}    <parameter authoringApp="PremierePro">`,
       `${ind}      <parameterid>graphdict</parameterid>`,
       `${ind}      <name>graphdict</name>`,
-      // FCP7 の仕様: when はクリップの中の位置、value は素材の位置。最初は when 0、最後は when = クリップの長さ
-      kf(0, '0', 'speedkfstart'),
-      kf(c.inF, media(c.inF), 'speedkfin'),
-      kf(c.inF + len, media(c.inF + len), 'speedkfout'),
-      kf(clipFrames, media(clipFrames), 'speedkfend'),
+      ...[...keys.entries()].sort((x, y) => x[0] - y[0]).map(([when, flags]) => kf(when, flags)),
       `${ind}    </parameter>`,
       `${ind}  </effect>`,
       `${ind}</filter>`
@@ -755,11 +805,23 @@ export function buildPremiereXml(
     return lines.join('\n')
   }
 
-  const placedById = new Map<string, Placed>()
+  /** リンクに書く、クリップの居場所(ステレオの R の写しも含む) */
+  const linkInfo = new Map<
+    string,
+    { kind: 'video' | 'audio'; trackIndex: number; clipIndex: number }
+  >()
   for (const plan of [...videoPlans, ...audioPlans])
-    for (const c of plan.clips) placedById.set(c.id, c)
+    for (const c of plan.clips) {
+      linkInfo.set(c.id, { kind: c.kind, trackIndex: c.trackIndex, clipIndex: c.clipIndex })
+      if (c.pairId)
+        linkInfo.set(c.pairId, {
+          kind: 'audio',
+          trackIndex: c.trackIndex + 1,
+          clipIndex: c.clipIndex
+        })
+    }
 
-  const clipXml = (c: Placed, ind: string): string => {
+  const clipXml = (c: Placed, ind: string, side = 0): string => {
     const len = c.end - c.start
     let name: string
     let speed = 1
@@ -782,7 +844,7 @@ export function buildPremiereXml(
     }
     clipFrames = Math.max(clipFrames, c.inF + len)
     const lines = [
-      `${ind}<clipitem id="${c.id}">`,
+      `${ind}<clipitem id="${side === 1 && c.pairId ? c.pairId : c.id}">`,
       `${ind}  <name>${xmlEscape(name)}</name>`,
       `${ind}  <enabled>TRUE</enabled>`,
       `${ind}  <duration>${clipFrames}</duration>`,
@@ -798,7 +860,7 @@ export function buildPremiereXml(
       lines.push(
         `${ind}  <sourcetrack>`,
         `${ind}    <mediatype>audio</mediatype>`,
-        `${ind}    <trackindex>1</trackindex>`,
+        `${ind}    <trackindex>${side + 1}</trackindex>`,
         `${ind}  </sourcetrack>`
       )
     if (Math.abs(speed - 1) > 1e-9) lines.push(timeRemapXml(c, speed, clipFrames, `${ind}  `))
@@ -809,11 +871,11 @@ export function buildPremiereXml(
     if (c.kind === 'audio' && c.level !== undefined && Math.abs(c.level - 1) > 1e-9)
       lines.push(levelXml(c.level, `${ind}  `))
     for (const id of c.links) {
-      const l = placedById.get(id)
+      const l = linkInfo.get(id)
       if (!l) continue
       lines.push(
         `${ind}  <link>`,
-        `${ind}    <linkclipref>${l.id}</linkclipref>`,
+        `${ind}    <linkclipref>${id}</linkclipref>`,
         `${ind}    <mediatype>${l.kind}</mediatype>`,
         `${ind}    <trackindex>${l.trackIndex}</trackindex>`,
         `${ind}    <clipindex>${l.clipIndex}</clipindex>`,
@@ -825,8 +887,13 @@ export function buildPremiereXml(
     return lines.join('\n')
   }
 
-  const trackXml = (plan: TrackPlan, ind: string): string => {
-    const attr = plan.kind === 'audio' ? ' premiereTrackType="Stereo"' : ''
+  const trackXml = (plan: TrackPlan, ind: string, side = 0): string => {
+    const attr =
+      plan.kind !== 'audio'
+        ? ''
+        : plan.channels === 2
+          ? ` currentExplodedTrackIndex="${side}" totalExplodedTrackCount="2" premiereTrackType="Stereo"`
+          : ' premiereTrackType="Mono"'
     const lines = [`${ind}<track${attr}>`]
     for (const c of plan.clips) {
       if (c.transitionBefore)
@@ -841,7 +908,7 @@ export function buildPremiereXml(
         )
       if (c.fadeIn)
         lines.push(transitionXml(c.start, c.start + c.fadeIn, 'audio', 'start-black', `${ind}  `))
-      lines.push(clipXml(c, `${ind}  `))
+      lines.push(clipXml(c, `${ind}  `, side))
       if (c.fadeOut)
         lines.push(transitionXml(c.end - c.fadeOut, c.end, 'audio', 'end-black', `${ind}  `))
     }
@@ -849,7 +916,9 @@ export function buildPremiereXml(
       `${ind}  <enabled>${plan.enabled ? 'TRUE' : 'FALSE'}</enabled>`,
       `${ind}  <locked>FALSE</locked>`
     )
-    if (plan.kind === 'audio') lines.push(`${ind}  <outputchannelindex>1</outputchannelindex>`)
+    // ステレオは L を出力 1、R を出力 2 へ。モノラルは出力を決めない(片側に寄せない)
+    if (plan.kind === 'audio' && plan.channels === 2)
+      lines.push(`${ind}  <outputchannelindex>${side + 1}</outputchannelindex>`)
     lines.push(`${ind}</track>`)
     return lines.join('\n')
   }
@@ -920,7 +989,10 @@ export function buildPremiereXml(
     ),
     `${ind}    </outputs>`
   )
-  for (const plan of audioPlans) out.push(trackXml(plan, `${ind}    `))
+  for (const plan of audioPlans) {
+    out.push(trackXml(plan, `${ind}    `, 0))
+    if (plan.channels === 2) out.push(trackXml(plan, `${ind}    `, 1))
+  }
   out.push(`${ind}  </audio>`, `${ind}</media>`)
   for (const m of markers) out.push(markerXml(m, ind))
   out.push('  </sequence>', '</xmeml>', '')
@@ -930,9 +1002,9 @@ export function buildPremiereXml(
     warnings: [...warnings],
     stats: {
       videoClips: videoPlans.reduce((n, p) => n + p.clips.length, 0),
-      audioClips: audioPlans.reduce((n, p) => n + p.clips.length, 0),
+      audioClips: audioPlans.reduce((n, p) => n + p.clips.length * (p.channels ?? 1), 0),
       videoTracks: videoPlans.length,
-      audioTracks: audioPlans.length,
+      audioTracks: audioTrackCount,
       markers: markers.length,
       durationFrames: duration
     }

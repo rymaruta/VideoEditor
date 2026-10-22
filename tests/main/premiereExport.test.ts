@@ -1,11 +1,15 @@
 import { execFileSync } from 'child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { DOMParser } from '@xmldom/xmldom'
 import { ffmpegPath, ffprobePath } from '@main/ffmpegService'
-import { exportPremiereXml, type PremiereExportPayload } from '@main/premiereExportService'
+import {
+  existingPremiereSidecars,
+  exportPremiereXml,
+  type PremiereExportPayload
+} from '@main/premiereExportService'
 import { appendTelopLayerImages, beginTelopLayer, withTelopLayer } from '@main/telopLayerStage'
 import { readFcp7, type XmlElement } from '@shared/import/fcp7'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
@@ -186,5 +190,82 @@ describe('exportPremiereXml(main)', () => {
       '-'
     ])
     expect(alpha[0]).toBe(0)
+  })
+
+  it('並べて書くものが既にあれば一覧に出る(保存先を選ぶときの確認に使う)', () => {
+    const xml = join(work, 'text.xml')
+    expect(existingPremiereSidecars(xml)).toEqual([join(work, 'text.srt')])
+  })
+
+  it('透過 PNG: 前回の余り(今回より多かった telop_*.png)は消し、ほかのファイルは残す', async () => {
+    const dir = join(work, 'png2_telop')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'telop_000009.png'), 'old')
+    writeFileSync(join(dir, 'memo.txt'), 'keep')
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), work, 'png'),
+      outputPath: join(work, 'png2.xml'),
+      telopLayer: layer
+    }
+    await withTelopLayer(layer, () =>
+      exportPremiereXml(payload, payload.outputPath, { ffmpegPath })
+    )
+    expect(readdirSync(dir).sort()).toEqual(['memo.txt', 'telop_000001.png', 'telop_000002.png'])
+  })
+
+  it('透過 PNG: 中止すると写すのをやめる', async () => {
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), work, 'png'),
+      outputPath: join(work, 'png3.xml'),
+      telopLayer: layer
+    }
+    const ac = new AbortController()
+    ac.abort()
+    await expect(
+      withTelopLayer(layer, () =>
+        exportPremiereXml(payload, payload.outputPath, { ffmpegPath, signal: ac.signal })
+      )
+    ).rejects.toThrow('EXPORT_CANCELED')
+    expect(existsSync(payload.outputPath)).toBe(false)
+  })
+
+  it('ProRes 4444: 空きが足りなければ書き始める前に止める', async () => {
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), work, 'prores'),
+      outputPath: join(work, 'full.xml'),
+      telopLayer: layer
+    }
+    await expect(
+      withTelopLayer(layer, () =>
+        exportPremiereXml(payload, payload.outputPath, { ffmpegPath, freeBytes: () => 1024 })
+      )
+    ).rejects.toThrow(/空き/)
+    expect(existsSync(join(work, 'full_telop.mov'))).toBe(false)
+  })
+
+  it('音声のチャンネル数を調べ、モノラルの素材は 1 本のトラックに', async () => {
+    const p = project()
+    p.audioTracks = [
+      {
+        id: 'na',
+        name: 'ナレーション',
+        muted: false,
+        volume: 1,
+        duckingEnabled: false,
+        clips: [{ id: 'n1', assetId: 'a', startTime: 0, inPoint: 0, outPoint: 1 }]
+      }
+    ]
+    const payload = { ...base(p, work, 'text'), outputPath: join(work, 'mono.xml') }
+    await exportPremiereXml(payload, payload.outputPath, {
+      ffmpegPath,
+      probeChannels: async () => 1
+    })
+    const xml = readFileSync(payload.outputPath, 'utf-8')
+    expect(xml).toContain('premiereTrackType="Mono"')
+    expect(xml).not.toContain('currentExplodedTrackIndex')
+    expect(xml).toContain('<channelcount>1</channelcount>')
   })
 })

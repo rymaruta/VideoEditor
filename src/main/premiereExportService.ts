@@ -1,5 +1,15 @@
 import { spawn } from 'child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statfsSync,
+  writeFileSync
+} from 'fs'
+import { copyFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, join } from 'path'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
@@ -32,6 +42,47 @@ export interface PremiereExportDeps {
   ffmpegPath: string
   onProgress?: (percent: number, stage: string) => void
   signal?: AbortSignal
+  /** 素材の音声のチャンネル数を調べる(無ければステレオとして書く) */
+  probeChannels?: (filePath: string) => Promise<number | undefined>
+  /** 書き出し先の空き容量(バイト)。試験で差し替える */
+  freeBytes?: (dir: string) => number
+}
+
+/** 透過の PNG を写すとき、何枚ごとに中止を見て進み具合を出すか */
+const COPY_BATCH = 32
+
+/**
+ * ProRes 4444(透過)の大きさの見積もり(1 画素・1 フレームあたりのバイト)。テロップの出ていない
+ * 透明のフレームが大半でも 1 フレームずつ書くので、尺に比例する(実測: 1080p・3 時間で約 12GB =
+ * 0.018。余裕を見て 0.025)
+ */
+const PRORES_BYTES_PER_PIXEL_FRAME = 0.025
+
+/** 並べて書くファイル・フォルダ(XML の名前から決まる) */
+export function premiereSidecarPaths(xmlPath: string): {
+  srt: string
+  telopDir: string
+  telopMov: string
+} {
+  const base = premiereSidecarBase(xmlPath)
+  return { srt: `${base}.srt`, telopDir: `${base}_telop`, telopMov: `${base}_telop.mov` }
+}
+
+/** 並べて書くもののうち、もうあるもの(上書きしてよいか確かめるのに使う) */
+export function existingPremiereSidecars(xmlPath: string): string[] {
+  const p = premiereSidecarPaths(xmlPath)
+  return [p.srt, p.telopDir, p.telopMov].filter((x) => existsSync(x))
+}
+
+/** 前回の書き出しの PNG(この書き出しが付ける名前のものだけ)を消す */
+function clearOldTelopPngs(dir: string): void {
+  for (const name of readdirSync(dir))
+    if (/^telop_\d{6}\.png$/.test(name)) rmSync(join(dir, name), { force: true })
+}
+
+function defaultFreeBytes(dir: string): number {
+  const st = statfsSync(dir)
+  return Number(st.bavail) * Number(st.bsize)
 }
 
 /** 書き出し先の名前から、並べて書くファイルの頭(拡張子を除いた所) */
@@ -90,7 +141,8 @@ export async function exportPremiereXml(
   const fps = v2.sequence.fps
   const total = sequenceDurationFrames(v2.sequence)
   const base = premiereSidecarBase(payload.outputPath)
-  const srtPath = `${base}.srt`
+  const sidecars = premiereSidecarPaths(payload.outputPath)
+  const srtPath = sidecars.srt
   const markers = premiereMarkers(payload.project, v2, {
     telops: payload.telopMarkers !== false,
     reviews: payload.reviews
@@ -107,26 +159,25 @@ export async function exportPremiereXml(
       const imagePaths = materializeTelopLayer(layer, () => scratch)?.imagePaths ?? []
       if (payload.telopMode === 'png') {
         // フォルダの名前は ASCII の決まった後ろ(素材のフォルダに日本語があっても、PNG の名前は短く)
-        const dir = `${base}_telop`
+        const dir = sidecars.telopDir
         mkdirSync(dir, { recursive: true })
+        // 前回の余り(今回より枚数の多かった書き出しの PNG)を残さない。上書きは保存先を選ぶときに確かめてある
+        clearOldTelopPngs(dir)
         telopPath = dir
+        // 先に並べ方と写す画像を決め、写すのは後でまとめて(非同期・中止が効くように)
         const copied = new Map<number, string>()
+        const copies: { src: string; dst: string }[] = []
         const clips: PremiereOverlayClip[] = []
         const runs = [...layer.runs].sort((a, b) => a.startFrame - b.startFrame)
-        let done = 0
         for (const r of runs) {
-          if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
-          done++
           if (r.image <= 0 || r.endFrame <= r.startFrame) continue
           let path = copied.get(r.image)
           if (!path) {
             const src = imagePaths[r.image]
             if (!src) throw new Error('テロップの層の画像が見つかりません')
             path = join(dir, `telop_${String(copied.size + 1).padStart(6, '0')}.png`)
-            copyFileSync(src, path)
+            copies.push({ src, dst: path })
             copied.set(r.image, path)
-            if (copied.size % 200 === 0)
-              progress((done / runs.length) * 90, `テロップの画像を書き出し中(${copied.size} 枚)`)
           }
           const last = clips[clips.length - 1]
           // 同じ画像が続く区間は 1 本にまとめる
@@ -140,11 +191,29 @@ export async function exportPremiereXml(
               still: true
             })
         }
+        for (let i = 0; i < copies.length; i += COPY_BATCH) {
+          if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
+          await Promise.all(copies.slice(i, i + COPY_BATCH).map((c) => copyFile(c.src, c.dst)))
+          const n = Math.min(copies.length, i + COPY_BATCH)
+          progress((n / copies.length) * 90, `テロップの画像を書き出し中(${n}/${copies.length} 枚)`)
+        }
+        if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
         telopMedia = { width: layer.width, height: layer.height, clips }
       } else {
-        const movPath = `${base}_telop.mov`
+        const movPath = sidecars.telopMov
         const list = telopConcatList(layer.runs, imagePaths, 0, total, fps)
         if (list) {
+          // 尺に比例して大きくなる(1080p・3 時間で約 12GB)。書き始める前に空きを確かめる
+          const need = Math.ceil(
+            total * layer.width * layer.height * PRORES_BYTES_PER_PIXEL_FRAME + 256 * 1024 * 1024
+          )
+          const free = (deps.freeBytes ?? defaultFreeBytes)(dirname(movPath))
+          if (free < need)
+            throw new Error(
+              `テロップの ProRes 4444 には約 ${(need / 1024 ** 3).toFixed(1)}GB 必要ですが、` +
+                `書き出し先の空きは ${(free / 1024 ** 3).toFixed(1)}GB です。` +
+                '空きを作るか、「透過 PNG」か「文字だけ」を選んでください'
+            )
           const listPath = join(scratch, 'telop.ffconcat')
           writeFileSync(listPath, list, 'utf-8')
           progress(5, 'テロップを ProRes 4444(透過)に書き出し中')
@@ -205,7 +274,21 @@ export async function exportPremiereXml(
   }
 
   progress(95, 'XML を書き出し中')
+  // 音声のチャンネル数(モノラルは 1 本、ステレオは L・R の 2 本のトラックに書く)
+  const audioChannels = new Map<string, number>()
+  if (deps.probeChannels) {
+    const used = new Set(v2.sequence.audioTracks.flatMap((t) => t.items.map((i) => i.assetId)))
+    const assets = v2.assets.filter((a) => used.has(a.id) && a.hasAudio)
+    const counts = await Promise.all(
+      assets.map((a) => deps.probeChannels!(a.filePath).catch(() => undefined))
+    )
+    assets.forEach((a, i) => {
+      const n = counts[i]
+      if (n !== undefined) audioChannels.set(a.id, n)
+    })
+  }
   const result = buildPremiereXml(v2, {
+    audioChannels,
     name: payload.project.name || safeFileBaseName(basename(base)),
     dropFrame: payload.dropFrame !== false,
     markers,

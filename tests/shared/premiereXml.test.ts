@@ -184,7 +184,7 @@ describe('buildPremiereXml — 書いた XML を FCP7 の読み込みで読み�
     expect(fr(seq.duration, fps)).toBe(stats.durationFrames)
   })
 
-  it('本編: カット・アングル・位置・in/out・速さ(繋ぎは真ん中で突き合わせ)', () => {
+  it('本編: カット・アングル・位置・in/out・速さ(繋ぎはのりしろを含んだまま)', () => {
     const main = v2.sequence.videoTracks[0].items as MediaItem[]
     const got = seq.video[0]
     expect(got.map((c) => c.fileName)).toEqual([
@@ -193,21 +193,13 @@ describe('buildPremiereXml — 書いた XML を FCP7 の読み込みで読み�
       'camA.mp4',
       '100% 完成.MP4'
     ])
-    // 期待値を v2 から作る: 繋ぎのある所は切れ目 = 繋ぎの頭 + 長さの半分
+    // 期待値は v2 そのもの(Listing 3-17: 繋ぎに接するクリップも、のりしろを含んだ in/out・位置)
     const expected = main.map((it) => ({
       start: it.startFrame,
       end: it.startFrame + it.durationFrames,
       sourceIn: it.sourceIn,
       speed: it.speed
     }))
-    for (let i = 1; i < main.length; i++) {
-      const t = main[i].transitionIn
-      if (!t) continue
-      const cut = main[i].startFrame + Math.floor(t.durationFrames / 2)
-      expected[i - 1].end = cut
-      expected[i].sourceIn += ((cut - main[i].startFrame) / fps) * main[i].speed
-      expected[i].start = cut
-    }
     got.forEach((c, i) => {
       expect(fr(c.start, fps)).toBe(expected[i].start)
       expect(fr(c.end, fps)).toBe(expected[i].end)
@@ -310,7 +302,7 @@ describe('buildPremiereXml — 書いた XML を FCP7 の読み込みで読み�
       expect(check.stderr).toBe('')
       expect(check.status).toBe(0)
       // Apple の DTD(「Final Cut Pro XML Interchange Format」付録 A の Listing A-4)は同梱しない。
-      // 置いたときだけ検査する。Premiere の拡張(authoringApp・premiereTrackType・numOutputChannels。
+      // 置いたときだけ検査する。Premiere の拡張(authoringApp・premiereTrackType・numOutputChannels・currentExplodedTrackIndex 等。
       // Premiere 自身が書き出す形)だけは DTD に無いので除く
       const dtd = process.env.XMEML_DTD
       if (!dtd) return
@@ -320,7 +312,7 @@ describe('buildPremiereXml — 書いた XML を FCP7 の読み込みで読み�
         .filter((l) => /: (validity )?error/.test(l) || /does not follow|No declaration/.test(l))
         .filter(
           (l) =>
-            !/authoringApp|premiereTrackType|numOutputChannels/.test(l) &&
+            !/authoringApp|premiereTrackType|numOutputChannels|ExplodedTrack/.test(l) &&
             !/does not validate/.test(l)
         )
       expect(errors).toEqual([])
@@ -342,9 +334,246 @@ describe('buildPremiereXml — 書いた XML を FCP7 の読み込みで読み�
       expect(v('out')).toBeLessThanOrEqual(v('duration'))
       expect(v('in')).toBeGreaterThanOrEqual(0)
     }
-    for (const t of [...seq.video, ...seq.audio])
-      for (let i = 1; i < t.length; i++)
-        expect(t[i].start).toBeGreaterThanOrEqual(t[i - 1].end - 1e-9)
+    // トラックの中で重なるのは繋ぎ(transitionitem)の区間だけ
+    const tracks = doc.getElementsByTagName('track')
+    for (let ti = 0; ti < tracks.length; ti++) {
+      const tr = tracks[ti]
+      const spans: [number, number][] = []
+      const fill = readFcp7Spans(tr)
+      for (const t of fill.transitions) spans.push(t)
+      for (let i = 1; i < fill.clips.length; i++) {
+        const [, pe] = fill.clips[i - 1]
+        const [ns] = fill.clips[i]
+        if (ns < pe) expect(spans).toContainEqual([ns, pe])
+      }
+    }
+  })
+})
+
+/** トラックの中のクリップの [始まり, 終わり](-1 は in/out から補う)と繋ぎの区間 */
+function readFcp7Spans(track: Element): {
+  clips: [number, number][]
+  transitions: [number, number][]
+} {
+  const clips: [number, number][] = []
+  const transitions: [number, number][] = []
+  const val = (el: Element, t: string): number => Number(el.getElementsByTagName(t)[0].textContent)
+  let last = 0
+  for (let i = 0; i < track.childNodes.length; i++) {
+    const n = track.childNodes[i] as Element
+    if (n.nodeType !== 1) continue
+    if (n.tagName === 'transitionitem') transitions.push([val(n, 'start'), val(n, 'end')])
+    if (n.tagName !== 'clipitem') continue
+    const len = val(n, 'out') - val(n, 'in')
+    let s0 = val(n, 'start')
+    const e0 = val(n, 'end')
+    if (s0 < 0) s0 = e0 >= 0 ? e0 - len : last
+    const e = e0 >= 0 ? e0 : s0 + len
+    clips.push([s0, e])
+    last = e
+  }
+  return { clips, transitions }
+}
+
+/** Apple の Listing 3-17 と同じ並び(30fps): 前 0–153(素材 74–227)、後 123–243(素材 36–156)、繋ぎ 123–153 */
+function listing317(): ProjectV2 {
+  const media = (
+    id: string,
+    start: number,
+    dur: number,
+    srcFrame: number,
+    t?: number
+  ): MediaItem => ({
+    kind: 'media',
+    id,
+    assetId: id === 'v1' ? 'bloomies' : 'jeremy',
+    startFrame: start,
+    durationFrames: dur,
+    sourceIn: srcFrame / 30,
+    speed: 1,
+    origin: 'manual',
+    placement: { kind: 'frame', fit: 'contain' },
+    ...(t ? { transitionIn: { type: 'crossfade' as const, durationFrames: t } } : {})
+  })
+  const audio = (id: string, v: MediaItem): AudioItem => ({
+    kind: 'audio',
+    id,
+    assetId: v.assetId,
+    startFrame: v.startFrame,
+    durationFrames: v.durationFrames,
+    sourceIn: v.sourceIn,
+    speed: 1,
+    origin: 'manual',
+    linkedItemId: v.id
+  })
+  const v1 = media('v1', 0, 153, 74)
+  const v2i = media('v2', 123, 120, 36, 30)
+  return {
+    version: 2,
+    id: 'l317',
+    name: 'Sequence 1',
+    assets: [
+      asset('bloomies', {
+        fps: 30,
+        duration: 248 / 30,
+        filePath: '/m/Bloomies.mov',
+        fileName: 'Bloomies.mov'
+      }),
+      asset('jeremy', {
+        fps: 30,
+        duration: 188 / 30,
+        filePath: '/m/Jeremy Solo.mov',
+        fileName: 'Jeremy Solo.mov'
+      })
+    ],
+    sequence: {
+      width: 1920,
+      height: 1080,
+      fps: { num: 30, den: 1 },
+      videoTracks: [{ id: 'v', name: 'V1', hidden: false, items: [v1, v2i] }],
+      audioTracks: [
+        {
+          id: 'a',
+          name: 'A1',
+          muted: false,
+          volume: 1,
+          duckingEnabled: false,
+          items: [audio('a1', v1), audio('a2', v2i)]
+        }
+      ]
+    }
+  }
+}
+
+describe('Apple の仕様の形(Listing 3-15/3-16/3-17)', () => {
+  /** 1 本のトラックの中身を、子要素の並びどおりに取り出す */
+  function trackItems(track: Element): Record<string, string>[] {
+    const out: Record<string, string>[] = []
+    for (let i = 0; i < track.childNodes.length; i++) {
+      const n = track.childNodes[i] as Element
+      if (n.nodeType !== 1 || (n.tagName !== 'clipitem' && n.tagName !== 'transitionitem')) continue
+      const rec: Record<string, string> = { tag: n.tagName }
+      for (const t of ['start', 'end', 'in', 'out', 'alignment', 'duration']) {
+        const direct = Array.from(n.childNodes).find((c) => (c as Element).tagName === t) as
+          Element | undefined
+        if (direct) rec[t] = direct.textContent ?? ''
+      }
+      out.push(rec)
+    }
+    return out
+  }
+
+  const { xml } = buildPremiereXml(listing317())
+  const doc = new DOMParser().parseFromString(xml, 'text/xml')
+  const tracks = Array.from(doc.getElementsByTagName('track')) as unknown as Element[]
+
+  it('映像: 前 in74 out227 start0 end-1、繋ぎ 123–153 center、後 in36 out156 start-1 end243', () => {
+    const items = trackItems(tracks[0])
+    expect(items).toEqual([
+      { tag: 'clipitem', start: '0', end: '-1', in: '74', out: '227', duration: '248' },
+      { tag: 'transitionitem', start: '123', end: '153', alignment: 'center' },
+      { tag: 'clipitem', start: '-1', end: '243', in: '36', out: '156', duration: '188' }
+    ])
+  })
+
+  it('音声: 同じ形(L・R の 2 本とも)で、繋ぎは Cross Fade', () => {
+    const audio = tracks.slice(1)
+    expect(audio.length).toBe(2)
+    for (const t of audio)
+      expect(trackItems(t)).toEqual([
+        { tag: 'clipitem', start: '0', end: '-1', in: '74', out: '227', duration: '248' },
+        { tag: 'transitionitem', start: '123', end: '153', alignment: 'center' },
+        { tag: 'clipitem', start: '-1', end: '243', in: '36', out: '156', duration: '188' }
+      ])
+    expect(xml).toContain('KGAudioTransCrossFade3dB')
+  })
+
+  it('ステレオは L・R の 2 本(sourcetrack 1/2・出力 1/2・exploded の印)、映像と L・R を相互にリンク', () => {
+    const [, l, r] = tracks
+    expect(l.getAttribute('currentExplodedTrackIndex')).toBe('0')
+    expect(r.getAttribute('currentExplodedTrackIndex')).toBe('1')
+    expect(l.getAttribute('totalExplodedTrackCount')).toBe('2')
+    const direct = (el: Element, tag: string): string | undefined =>
+      (Array.from(el.childNodes).find((c) => (c as Element).tagName === tag) as Element | undefined)
+        ?.textContent ?? undefined
+    expect(direct(l, 'outputchannelindex')).toBe('1')
+    expect(direct(r, 'outputchannelindex')).toBe('2')
+    const firstClip = (t: Element): Element => t.getElementsByTagName('clipitem')[0]
+    const src = (c: Element): string =>
+      c.getElementsByTagName('sourcetrack')[0].getElementsByTagName('trackindex')[0].textContent!
+    expect(src(firstClip(l))).toBe('1')
+    expect(src(firstClip(r))).toBe('2')
+    // 3 本(映像・L・R)とも同じリンクの組を持つ
+    const refs = (c: Element): string[] =>
+      Array.from(c.getElementsByTagName('linkclipref')).map((x) => x.textContent!)
+    const v = firstClip(tracks[0])
+    expect(refs(v)).toEqual([
+      v.getAttribute('id'),
+      firstClip(l).getAttribute('id'),
+      firstClip(r).getAttribute('id')
+    ])
+    expect(refs(firstClip(l))).toEqual(refs(v))
+    expect(refs(firstClip(r))).toEqual(refs(v))
+    // 音声のリンクは groupindex 1 で対
+    const links = Array.from(v.getElementsByTagName('link'))
+    expect(links.map((k) => k.getElementsByTagName('groupindex')[0]?.textContent ?? null)).toEqual([
+      null,
+      '1',
+      '1'
+    ])
+    expect(links.map((k) => k.getElementsByTagName('trackindex')[0].textContent)).toEqual([
+      '1',
+      '1',
+      '2'
+    ])
+  })
+
+  it('モノラルの素材は 1 本(channelcount 1・出力を片側に寄せない)', () => {
+    const { xml: monoXml } = buildPremiereXml(listing317(), {
+      audioChannels: new Map([
+        ['bloomies', 1],
+        ['jeremy', 1]
+      ])
+    })
+    const d = new DOMParser().parseFromString(monoXml, 'text/xml')
+    const ts = Array.from(d.getElementsByTagName('track')) as unknown as Element[]
+    expect(ts.length).toBe(2)
+    expect(ts[1].getAttribute('premiereTrackType')).toBe('Mono')
+    expect(ts[1].getElementsByTagName('outputchannelindex').length).toBe(0)
+    expect(monoXml).toContain('<channelcount>1</channelcount>')
+    expect(monoXml).not.toContain('<channelcount>2</channelcount>')
+  })
+
+  it('読み込み(FCP7)で読むと、繋ぎの両側は重なりのまま v2 と同じ位置', () => {
+    const seq = parse(xml)
+    expect(
+      seq.video[0].map((c) => [c.start, c.end, c.in, c.out].map((x) => Math.round(x * 30)))
+    ).toEqual([
+      [0, 153, 74, 227],
+      [123, 243, 36, 156]
+    ])
+    // ステレオの 2 本目(exploded)は読まないので、音声は 1 本
+    expect(seq.audio.length).toBe(1)
+  })
+
+  it('Time Remap: 同じ when のキーフレームを重ねない・value は素材のレートのフレーム', () => {
+    const p = listing317()
+    const it0 = p.sequence.videoTracks[0].items[0] as MediaItem
+    it0.sourceIn = 0
+    it0.speed = 2
+    p.assets[0].fps = 60
+    const { xml: rx } = buildPremiereXml(p)
+    const d = new DOMParser().parseFromString(rx, 'text/xml')
+    const kfs = Array.from(d.getElementsByTagName('clipitem')[0].getElementsByTagName('keyframe'))
+    const whens = kfs.map((k) => k.getElementsByTagName('when')[0].textContent)
+    expect(new Set(whens).size).toBe(whens.length)
+    // in 0 なので最初のキーは start と in を兼ねる
+    expect(kfs[0].getElementsByTagName('speedkfstart').length).toBe(1)
+    expect(kfs[0].getElementsByTagName('speedkfin').length).toBe(1)
+    // out(クリップの 153 フレーム目)= 素材の 153×2/30 秒 = 60fps の 612 フレーム
+    const out = kfs.find((k) => k.getElementsByTagName('speedkfout').length > 0)!
+    expect(out.getElementsByTagName('when')[0].textContent).toBe('153')
+    expect(out.getElementsByTagName('value')[0].textContent).toBe('612')
   })
 })
 
@@ -516,9 +745,11 @@ describe('素材のパスの符号化', () => {
     expect(fileUrl('\\\\nas\\共有\\a b.mov')).toBe('file://nas/%E5%85%B1%E6%9C%89/a%20b.mov')
   })
 
-  it('mac の分解した濁点(NFD)は合成済み(NFC)にそろえる', () => {
+  it('綴りは OS から得たまま(NFD の名前は NFD のまま。そろえると Windows・Linux で見つからない)', () => {
     const nfd = '/Users/a/ガ.mov'.normalize('NFD')
-    expect(fileUrl(nfd)).toBe(fileUrl('/Users/a/ガ.mov'.normalize('NFC')))
+    const nfc = '/Users/a/ガ.mov'.normalize('NFC')
+    expect(fileUrl(nfd)).not.toBe(fileUrl(nfc))
+    expect(decodeURIComponent(fileUrl(nfd).replace('file://localhost', ''))).toBe(nfd)
   })
 
   it('読み込み(FCP7)で元のパスに戻る', () => {
