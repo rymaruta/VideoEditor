@@ -97,6 +97,47 @@ describe('不具合の記録: 書かないもの', () => {
     expect(sanitizeLogText('/home/alice2/a', '/home/alice')).toBe('/home/alice2/a')
   })
 
+  it('JSON の鍵らしい項目・Bearer・client_secret= / signature= / password= を伏せる', () => {
+    const json = JSON.stringify({
+      headers: { Authorization: 'Bearer abc.def', 'x-api-key': 'k-123' },
+      apiKey: 'ak-1',
+      geminiApiKey: 'gk-2',
+      jamendoClientId: 'jc-3',
+      token: 'tok "quoted" 4',
+      password: 'pw5',
+      file: '/videos/a.mp4',
+      count: 3
+    })
+    const text = sanitizeLogText(json)
+    for (const secret of ['abc.def', 'k-123', 'ak-1', 'gk-2', 'jc-3', 'quoted', 'pw5'])
+      expect(text).not.toContain(secret)
+    expect(text).toContain('"file":"/videos/a.mp4"')
+    expect(text).toContain('"count":3')
+    // 文字列の中に入った JSON(エラーのメッセージに埋まったもの)
+    const nested = sanitizeLogText(
+      `Error: ${JSON.stringify({ body: JSON.stringify({ token: 't-6' }) })}`
+    )
+    expect(nested).not.toContain('t-6')
+    const line = sanitizeLogText(
+      'Bearer eyJhbGciOi.x.y failed; https://x/cb?client_secret=cs7&signature=sg8&ok=1 password=pw9'
+    )
+    for (const secret of ['eyJhbGciOi', 'cs7', 'sg8', 'pw9']) expect(line).not.toContain(secret)
+    expect(line).toContain('ok=1')
+  })
+
+  it('JSON にしたオブジェクトの記録でも鍵を伏せる', () => {
+    const dir = tempDir()
+    const now = new Date(2026, 6, 8, 8)
+    const log = new CrashLog({ dir, now: () => now })
+    log.write('renderer', '未処理の拒否', {
+      status: 403,
+      config: { apiKey: 'AK-SECRET', url: 'u' }
+    })
+    const text = readFileSync(join(dir, logFileName(now)), 'utf-8')
+    expect(text).not.toContain('AK-SECRET')
+    expect(text).toContain('"status":403')
+  })
+
   it('URL の鍵・Google の API キーの形を伏せる', () => {
     const text = sanitizeLogText(
       'GET https://generativelanguage.googleapis.com/v1beta/x?key=AIzaSyA1234567890abcdefghijklmnop&alt=1 ' +

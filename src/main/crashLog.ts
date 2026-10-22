@@ -52,13 +52,63 @@ export function sanitizeLogText(text: string, home?: string): string {
   }
   return (
     out
-      // URL の鍵(Gemini の ?key=、Jamendo の client_id=、Freesound の token= など)
-      .replace(/([?&](?:key|api_key|apikey|client_id|token|access_token)=)[^&\s"')]+/gi, '$1***')
-      .replace(/(Authorization:\s*(?:Bearer|Token)\s+)\S+/gi, '$1***')
+      // JSON の鍵らしい項目("apiKey": "…"。文字列の中に入った \"token\":\"…\" も)
+      .replace(
+        new RegExp(
+          `(\\\\?"(?:${SECRET_FIELDS})\\\\?"\\s*:\\s*)(\\\\?")(?:[^"\\\\]|\\\\(?!")|\\\\")*?\\2`,
+          'gi'
+        ),
+        '$1$2***$2'
+      )
+      // URL・設定の書き方の鍵(Gemini の ?key=、Jamendo の client_id=、Freesound の token=、
+      // client_secret= / signature= / password= など)
+      .replace(new RegExp(`((?:^|[?&\\s;,])(?:${SECRET_PARAMS})=)[^&\\s"',;)]+`, 'gim'), '$1***')
+      // Authorization の値(Bearer / Token / Basic の後ろも)
+      .replace(
+        /(Authorization["']?\s*[:=]\s*["']?)(?:(?:Bearer|Token|Basic)\s+)?[^\s"',;]+/gi,
+        '$1***'
+      )
+      // 先頭・途中の Bearer トークン
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer ***')
       // Google の API キーの形
       .replace(/AIza[0-9A-Za-z_-]{20,}/g, 'AIza***')
   )
 }
+
+/** JSON で値を伏せる項目の名前(大文字小文字は問わない) */
+const SECRET_FIELDS = [
+  'authorization',
+  '(?:x-)?api[-_]?key',
+  '[a-z]*apikey',
+  '[a-z]*clientid',
+  'client[-_]?id',
+  'client[-_]?secret',
+  'token',
+  'access[-_]?token',
+  'refresh[-_]?token',
+  'id[-_]?token',
+  'secret',
+  'password',
+  'passwd',
+  'signature',
+  'key'
+].join('|')
+
+/** URL・設定の `名前=値` で値を伏せる名前 */
+const SECRET_PARAMS = [
+  'key',
+  '(?:x-)?api[-_]?key',
+  'client[-_]?id',
+  'client[-_]?secret',
+  'token',
+  'access[-_]?token',
+  'refresh[-_]?token',
+  'signature',
+  'sig',
+  'password',
+  'passwd',
+  'secret'
+].join('|')
 
 /** 例外・拒否の理由を文字にする(名前・メッセージ・スタックの先頭) */
 export function describeError(e: unknown): string {
