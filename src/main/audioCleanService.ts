@@ -8,6 +8,7 @@ import type { DenoiseResult } from '@shared/denoise'
 import { escapeFilterPath, ffmpegPath, probeMedia } from './ffmpegService'
 import { trackProcess } from './liveProcesses'
 import { contentFingerprint } from './fileFingerprint'
+import { NO_SOURCE_METADATA_ARGS } from '@shared/sourceVideo'
 
 /**
  * ピンマイクのノイズ除去(計画書 §5.10)。RNNoise(ffmpeg の arnndn)で、笑い声も声として残すモデルを使う。
@@ -104,6 +105,7 @@ async function runOneUnshared(
         '-vn',
         '-af',
         denoiseFilter(rnnoiseModel.replace('app.asar', 'app.asar.unpacked')),
+        ...NO_SOURCE_METADATA_ARGS,
         '-c:a',
         'flac',
         tmp

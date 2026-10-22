@@ -15,6 +15,8 @@ import { describeFfmpegError } from './ffmpegError'
 import { isShuttingDown, trackUntilDone } from './liveProcesses'
 import { detectVideoEncoder } from './segmentRenderer'
 import { contentFingerprint } from './fileFingerprint'
+import { probeSourceVideo, sourceVideoFilterFor } from './ffmpegService'
+import { NO_SOURCE_METADATA_ARGS, SDR_COLOR_TAG_ARGS, isHdrTransfer } from '@shared/sourceVideo'
 import {
   isMonoChannelCount,
   isMultiChannelCount,
@@ -253,9 +255,19 @@ export function ensurePreviewProxy(
 
   // Written to a temporary name and renamed only on success, so an interrupted run
   // can never leave a half-written file that would later be treated as a valid cache.
-  const task = Promise.all([probeStreams(filePath), detectVideoEncoder()])
+  const task = Promise.all([
+    probeStreams(filePath),
+    detectVideoEncoder(),
+    sourceVideoFilterFor(filePath),
+    probeSourceVideo(filePath)
+  ])
     .then(
-      ([{ audioCodec, hasAudio, hasAlpha, audioChannels, audioLayout }, encoder]) =>
+      ([
+        { audioCodec, hasAudio, hasAlpha, audioChannels, audioLayout },
+        encoder,
+        sourceFilter,
+        sourceInfo
+      ]) =>
         new Promise<string>((resolve, reject) => {
           const finalPath = hasAlpha ? alphaPath : outPath
           const tmpPath = hasAlpha ? `${alphaPath}.partial.webm` : `${outPath}.partial.mp4`
@@ -263,8 +275,9 @@ export function ensurePreviewProxy(
             // VP9 のアルファ付き。WebM には AAC を入れられないので音は Opus にする
             const command = ffmpeg(filePath)
               .videoCodec('libvpx-vp9')
+              .outputOptions(NO_SOURCE_METADATA_ARGS)
               .outputOptions([
-                '-vf scale=-2:min(540\\,trunc(ih/2)*2)',
+                `-vf ${sourceFilter}scale=-2:min(540\\,trunc(ih/2)*2)`,
                 '-pix_fmt yuva420p',
                 '-b:v 0',
                 '-crf 34',
@@ -320,10 +333,16 @@ export function ensurePreviewProxy(
             command.outputOptions([
               // 540p is plenty for a preview and roughly halves both the encode time and
               // the file size versus 720p. Export is unaffected — it reads the original.
-              '-vf scale=-2:min(540\\,trunc(ih/2)*2)',
+              // インターレースの解除・HDR のトーンマッピングは書き出しと同じものを先に掛ける
+              // (8bit の H.264 に PQ・HLG の符号値とタグを残したまま作り、プレビューと書き出しで
+              //  見え方が違っていた)
+              `-vf ${sourceFilter}scale=-2:min(540\\,trunc(ih/2)*2)`,
               '-pix_fmt yuv420p',
               '-movflags +faststart'
             ])
+            command.outputOptions(NO_SOURCE_METADATA_ARGS)
+            // HDR を BT.709 へ寄せたので、タグもそう書く(素材の PQ・HLG のタグを写さない)
+            if (isHdrTransfer(sourceInfo?.colorTransfer)) command.outputOptions(SDR_COLOR_TAG_ARGS)
             // Re-encoding audio that the preview can already play is wasted time; only the
             // video stream is actually the problem in the common HEVC case.
             if (!hasAudio) command.noAudio()

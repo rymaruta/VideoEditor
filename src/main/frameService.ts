@@ -1,12 +1,19 @@
 import { trackUntilDone } from './liveProcesses'
 import { spawn } from 'child_process'
-import { ffmpegPath } from './ffmpegService'
+import { ffmpegPath, sourceVideoFilterFor } from './ffmpegService'
 
 /**
  * 素材の1枚を小さな RGB(rgb24)で読む。色の統計(色合わせ)に使う。読めなければ null。
  * 縦横比は見ない(色の分布は変わらない)。
  */
-function frameRgb(path: string, time: number, w: number, h: number): Promise<Uint8Array | null> {
+async function frameRgb(
+  path: string,
+  time: number,
+  w: number,
+  h: number
+): Promise<Uint8Array | null> {
+  // HDR の素材は書き出しと同じく SDR へ寄せた色で測る(寄せる前の色で合わせると、書き出しで外れる)
+  const source = await sourceVideoFilterFor(path)
   return new Promise((resolve) => {
     const child = spawn(
       ffmpegPath,
@@ -22,7 +29,7 @@ function frameRgb(path: string, time: number, w: number, h: number): Promise<Uin
         '-frames:v',
         '1',
         '-vf',
-        `scale=${w}:${h}`,
+        `${source}scale=${w}:${h}`,
         '-f',
         'rawvideo',
         '-pix_fmt',

@@ -12,6 +12,7 @@ import {
   type ExtractedTrack
 } from '@shared/ingest/tracks'
 import type { ProbedFile } from '@shared/ingest/classify'
+import { NO_SOURCE_METADATA_ARGS } from '@shared/sourceVideo'
 
 /**
  * OBS の複数音声トラックの録画から、トラックごとに音声ファイルを取り出す(`docs/GAME_AUTO_EDIT_PLAN.md` G2)。
@@ -121,6 +122,8 @@ async function extractOneUnshared(
       '-map',
       `0:a:${stream.index}`,
       '-vn',
+      // 録画のメタデータ・チャプターを取り出した音声へ写さない(BGM と同じく、書き出しへ持ち込まれる)
+      ...NO_SOURCE_METADATA_ARGS,
       ...codec,
       partial
     ])

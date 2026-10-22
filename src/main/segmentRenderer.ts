@@ -1,9 +1,15 @@
 import { trackProcess } from './liveProcesses'
 import {
+  ENCODED_LOUDNESS_FILTER,
+  LOUDNESS_TARGETS,
+  OUTPUT_AUDIO_CODEC_ARGS,
+  fitEncodedTruePeak,
+  limitedGainFilter,
   loudnormApplyFilter,
   loudnormMeasureFilter,
   needsLimitedGain,
-  planLimitedGain,
+  parseEbur128Summary,
+  planLimitedGainValues,
   type LoudnessTarget
 } from '@shared/loudness'
 import { spawn } from 'child_process'
@@ -36,9 +42,13 @@ import {
   ffSeconds,
   parseLoudnormMeasurement,
   probeAudioChannels,
+  sourceVideoFilters,
   type LoudnessMeasurement
 } from './ffmpegService'
 import { measureWideAdvances } from './fontMetrics'
+import { assertOutputFolderExists } from './exportOutputGuard'
+import { clipsBeyondSourceMessage, sequenceItemsBeyondSource } from '@shared/clipSourceRange'
+import { NO_SOURCE_METADATA_ARGS, SDR_COLOR_TAG_ARGS } from '@shared/sourceVideo'
 
 /** 速さを変えた音を、アイテムの終わりより先に読む長さ(秒) */
 const STRETCH_TAIL_SEC = 0.5
@@ -349,6 +359,11 @@ export async function exportSequenceSegmented(
       .filter((t) => !t.hidden)
       .flatMap((t) => t.items.map((i) => ('assetId' in i ? i.assetId : '')))
   )
+  // 入点が素材の長さより後ろのクリップ・書き出し先のフォルダが無いときは、始める前に
+  // 原因の分かる文面で止める(理由は `clipsBeyondSource`・`assertOutputFolderExists`)
+  const beyondSource = clipsBeyondSourceMessage(sequenceItemsBeyondSource(project))
+  if (beyondSource) throw new Error(beyondSource)
+  assertOutputFolderExists(outputPath)
   const totalFrames = segments[segments.length - 1].endFrame
 
   const encoder =
@@ -379,6 +394,16 @@ export async function exportSequenceSegmented(
     const alphaDecoders = await probeAlphaDecoders(
       seq.videoTracks
         .slice(1)
+        .filter((t) => !t.hidden)
+        .flatMap((t) => t.items)
+        .map((i) => ('assetId' in i ? assetsById.get(i.assetId) : undefined))
+        .filter((a): a is MediaAsset => !!a && a.hasVideo && !a.still)
+        .map((a) => a.filePath)
+    )
+
+    // インターレースの解除・HDR のトーンマッピングが要る素材(SDR・プログレッシブは入れない)
+    const sourceVideo = await sourceVideoFilters(
+      seq.videoTracks
         .filter((t) => !t.hidden)
         .flatMap((t) => t.items)
         .map((i) => ('assetId' in i ? assetsById.get(i.assetId) : undefined))
@@ -442,6 +467,7 @@ export async function exportSequenceSegmented(
             'pcm_f32le',
             '-ar',
             String(OUTPUT_SAMPLE_RATE),
+            ...NO_SOURCE_METADATA_ARGS,
             out
           ],
           signal
@@ -458,9 +484,14 @@ export async function exportSequenceSegmented(
       audioChannels,
       assPath,
       telopLayer,
-      stretched
+      stretched,
+      sourceFilters: sourceVideo.filters
     }
-    const encodeArgs = videoEncodeArgs(encoder, quality, fps)
+    // HDR を BT.709 へ寄せたときは、出力にもそう書く(全区間で同じ引数。SDR だけの書き出しは今までどおり)
+    const encodeArgs = [
+      ...videoEncodeArgs(encoder, quality, fps),
+      ...(sourceVideo.hasHdr ? SDR_COLOR_TAG_ARGS : [])
+    ]
     const threadsPerJob =
       encoder === 'libx264' ? Math.max(1, Math.floor(cpus().length / parallel)) : 0
 
@@ -485,6 +516,7 @@ export async function exportSequenceSegmented(
               'error',
               ...graphArgs(withDecoders(graph, alphaDecoders), name(s, 'v.txt')),
               '-an',
+              ...NO_SOURCE_METADATA_ARGS,
               ...encodeArgs,
               ...(threadsPerJob > 0 ? ['-threads', String(threadsPerJob)] : []),
               name(s, 'mp4')
@@ -504,6 +536,7 @@ export async function exportSequenceSegmented(
               'error',
               ...graphArgs(graph, name(s, 'a.txt')),
               '-vn',
+              ...NO_SOURCE_METADATA_ARGS,
               '-c:a',
               'pcm_f32le',
               '-ar',
@@ -559,11 +592,42 @@ export async function exportSequenceSegmented(
     if (options.loudnessNormalization) {
       // 2パス目の掛け方は v1 の書き出しと同じ(理由もそちらのコメント)
       const target = options.loudnessTarget ?? 'web'
-      const limited =
+      const plan =
         measured && needsLimitedGain(target, measured)
-          ? await planLimitedGain(target, measured, measureWith)
+          ? await planLimitedGainValues(target, measured, measureWith)
           : null
-      const loudnorm = limited ?? loudnormApplyFilter(options.loudnessTarget, measured)
+      const first = plan
+        ? limitedGainFilter(plan.gainDb, plan.ceilingDb)
+        : loudnormApplyFilter(options.loudnessTarget, measured)
+      // AAC にした後のトゥルーピークを測り、越えていればリミッタを下げる(理由は `fitEncodedTruePeak`)
+      const checkPath = join(work, 'loudness-check.m4a')
+      const loudnorm = await fitEncodedTruePeak(
+        target,
+        first,
+        plan,
+        measured ? LOUDNESS_TARGETS[target].integrated - measured.inputI : null,
+        async (filter) => {
+          await runFfmpeg(
+            [
+              '-v',
+              'error',
+              '-i',
+              fullWav,
+              '-af',
+              `${filter},${AUDIO_FORMAT}`,
+              ...OUTPUT_AUDIO_CODEC_ARGS,
+              checkPath
+            ],
+            signal
+          )
+          const { stderr } = await runFfmpeg(
+            ['-v', 'info', '-i', checkPath, '-af', ENCODED_LOUDNESS_FILTER, '-f', 'null', '-'],
+            signal
+          )
+          return parseEbur128Summary(stderr)
+        }
+      )
+      rmSync(checkPath, { force: true })
       audioFilter.push('-af', `${loudnorm},${AUDIO_FORMAT}`)
     }
 
@@ -587,12 +651,10 @@ export async function exportSequenceSegmented(
         '-c:v',
         'copy',
         ...audioFilter,
-        '-c:a',
-        'aac',
-        '-b:a',
-        '192k',
+        ...OUTPUT_AUDIO_CODEC_ARGS,
         '-movflags',
         '+faststart',
+        ...NO_SOURCE_METADATA_ARGS,
         outputPath
       ],
       signal

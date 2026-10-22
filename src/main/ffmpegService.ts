@@ -1,17 +1,24 @@
 import { trackUntilDone } from './liveProcesses'
 import { colorMatchFilter } from '@shared/color/match'
 import {
+  ENCODED_LOUDNESS_FILTER,
+  LOUDNESS_TARGETS,
+  OUTPUT_AUDIO_CODEC_ARGS,
+  fitEncodedTruePeak,
+  limitedGainFilter,
   loudnormApplyFilter,
   loudnormMeasureFilter,
   needsLimitedGain,
-  planLimitedGain,
+  parseEbur128Summary,
+  planLimitedGainValues,
+  type EncodedLoudness,
   type LoudnessTarget
 } from '@shared/loudness'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
 import { execFile } from 'child_process'
-import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type {
@@ -36,6 +43,7 @@ import { ffSeconds } from './ffArgs'
 import { normalizeFades } from '@shared/audioFade'
 import { overlayClipDuration, overlayClipSpeed } from '@shared/overlayClip'
 import { SQUARE_PIXEL_FILTER, scaleToFrameFilter, thumbnailScaleFilter } from '@shared/videoFrame'
+import { isImagePath } from '@shared/mediaExtensions'
 import {
   frameCountForDuration,
   rateExpr,
@@ -53,8 +61,17 @@ import {
   multiChannelDownmixFilter
 } from '@shared/audioUpmix'
 import { describeFfmpegError } from './ffmpegError'
-import { durationFromPacketCsv, finiteSeconds } from './mediaDuration'
+import { durationFromPacketCsv, mediaDurationSeconds } from './mediaDuration'
 import { isFourPointZero, needsPreviewProxy } from './previewProxyService'
+import { assertOutputFolderExists } from './exportOutputGuard'
+import { clipsBeyondSource, clipsBeyondSourceMessage } from '@shared/clipSourceRange'
+import {
+  NO_SOURCE_METADATA_ARGS,
+  SDR_COLOR_TAG_ARGS,
+  isHdrTransfer,
+  sourceVideoFilter,
+  type SourceVideoInfo
+} from '@shared/sourceVideo'
 
 export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
   'app.asar',
@@ -233,10 +250,8 @@ export function probeMedia(
       const audioCodec = audioStream?.codec_name ?? ''
       // `??` では防げない——`fluent-ffmpeg` は値が無いところに文字列 `'N/A'` を入れる
       // ので、`?? 0` は素通りして `Number('N/A')` = `NaN` が外へ出る(理由は mediaDuration.ts)。
-      const declared =
-        finiteSeconds(data.format.duration) ??
-        finiteSeconds(videoStream?.duration) ??
-        finiteSeconds(audioStream?.duration)
+      // 長さは映像・音声のストリームから決める(データ・字幕のトラックの長さを含めない。mediaDurationSeconds)
+      const declared = mediaDurationSeconds(data.format, data.streams)
       const duration =
         declared ?? (options.skipDurationScan ? null : await measureDurationByScan(filePath)) ?? 0
       let display = displayDimensions(videoStream as Record<string, unknown> | undefined)
@@ -298,15 +313,31 @@ export function probeMedia(
 // the thumbnail panel aborted its whole candidate run on a single failed frame.
 const SEEK_END_MARGIN = 0.1
 
-function clampSeekSeconds(filePath: string, atSeconds: number): Promise<number> {
+/**
+ * 1枚を取る位置。静止画(JPEG・PNG など)は `still: true` で、`-ss` を付けずに1枚目を取る
+ * (画像の入力には 0 秒の1枚しか無い。JPEG は `-ss` を付けると何秒でも0枚、PNG は 0 より後が全部0枚で、
+ *  写真がメディア一覧でサムネイル無しになり、静止画のクリップのフレーム取得も失敗していた)
+ */
+interface SeekPlan {
+  seconds: number
+  still: boolean
+}
+
+function planSeek(filePath: string, atSeconds: number): Promise<SeekPlan> {
   return new Promise((resolve) => {
-    if (!Number.isFinite(atSeconds) || atSeconds <= 0) return resolve(0)
+    if (isImagePath(filePath)) return resolve({ seconds: 0, still: true })
     ffmpeg.ffprobe(filePath, (err, data) => {
+      // 画像の入れ物(image2・*_pipe)は拡張子が違っても静止画として扱う
+      const formatName = String(data?.format?.format_name ?? '')
+      if (!err && /(^|,)(image2|[a-z0-9]+_pipe)(,|$)/.test(formatName))
+        return resolve({ seconds: 0, still: true })
+      if (!Number.isFinite(atSeconds) || atSeconds <= 0)
+        return resolve({ seconds: 0, still: false })
       const duration = data?.format?.duration
       // Probe failure is not ours to report here — run with the original time so the
       // real ffmpeg error (missing file, unreadable codec) reaches the caller intact.
       if (err || typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
-        return resolve(atSeconds)
+        return resolve({ seconds: atSeconds, still: false })
       }
       // 映像がファイルより先に終わる(音声の方が長い)素材は、映像の終わりで止める。ファイルの長さで
       // 止めると、映像の終わりより後ろを指して「フレームを取得できませんでした」になっていた
@@ -332,10 +363,18 @@ function clampSeekSeconds(filePath: string, atSeconds: number): Promise<number> 
             ? fromTag - (Number.isFinite(formatStart) ? formatStart : 0)
             : Infinity
       const end = Math.min(duration, videoEnd)
-      resolve(Math.min(atSeconds, Math.max(0, end - SEEK_END_MARGIN)))
+      resolve({ seconds: Math.min(atSeconds, Math.max(0, end - SEEK_END_MARGIN)), still: false })
     })
   })
 }
+
+/**
+ * 狙った位置で0枚だったときに、手前へ下がって取り直す幅(秒)。
+ * 索引の無い入れ物(MPEG-2 PS・TS)は時刻で探す位置が粗く、終わりの近くを指すと最後の GOP の頭を
+ * 飛び越えて0枚になる(実測: 開始時刻 0.53 秒の 6 秒の MPEG-2 PS で `-ss 5.91`・`5.85` は0枚、
+ * `5.8` なら取れた。20 秒の素材の `generateThumbnailDataUrl(…, 20)` も `-ss 19.91` で0枚だった)
+ */
+const SEEK_RETRY_BACKOFF = [0, 0.5, 1.5, 4]
 
 function readFrameFile(outFile: string): string {
   if (!existsSync(outFile)) {
@@ -344,38 +383,51 @@ function readFrameFile(outFile: string): string {
   return `data:image/jpeg;base64,${readFileSync(outFile).toString('base64')}`
 }
 
+/** 1枚を JPEG で取る。`filter` は `[0:v]` の後ろに付ける絵の処理(縮小など) */
+async function grabFrameDataUrl(
+  filePath: string,
+  atSeconds: number,
+  dirPrefix: string,
+  filter: string
+): Promise<string> {
+  const plan = await planSeek(filePath, atSeconds)
+  // インターレースの解除・HDR のトーンマッピング(書き出しと同じ絵にする。SDR の素材は空)
+  const source = plan.still ? '' : await sourceVideoFilterFor(filePath)
+  const dir = mkdtempSync(join(tmpdir(), dirPrefix))
+  const outFile = join(dir, 'frame.jpg')
+  const attempts = plan.still
+    ? [null]
+    : [...new Set(SEEK_RETRY_BACKOFF.map((b) => Math.max(0, plan.seconds - b)))]
+  try {
+    for (const seek of attempts) {
+      const ok = await new Promise<boolean>((resolve, reject) => {
+        const command = trackUntilDone(ffmpeg(filePath), ['end', 'error'])
+        if (seek !== null) command.inputOptions([`-ss ${ffSeconds(seek)}`])
+        command
+          .complexFilter([`[0:v]${source}${filter}[v]`])
+          .outputOptions(['-map [v]', '-frames:v 1'])
+          .output(outFile)
+          .on('error', (e, _stdout, stderr) => reject(describeFfmpegError(e, stderr)))
+          .on('end', () => resolve(existsSync(outFile)))
+          .run()
+      })
+      if (ok) return readFrameFile(outFile)
+      // 0 秒で0枚なら、手前へ下がっても変わらない
+      if (seek === 0) break
+    }
+    return readFrameFile(outFile)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 export async function generateThumbnailDataUrl(
   filePath: string,
   atSeconds: number
 ): Promise<string> {
-  const seekSeconds = await clampSeekSeconds(filePath, atSeconds)
-  const dir = mkdtempSync(join(tmpdir(), 've-thumb-'))
-  const outFile = join(dir, 'thumb.jpg')
-  const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
   // `.screenshots({ size: '320x?' })` は使わない。`?` の高さを**符号化された画素数**から
   // 出すので、画素が正方形でない素材だけ縦横比が変わる(理由と実測は thumbnailScaleFilter)。
-  // 組み立ては下の `generateFrameDataUrl` と同じ形にそろえる。
-  return new Promise((resolve, reject) => {
-    trackUntilDone(ffmpeg(filePath), ['end', 'error'])
-      .inputOptions([`-ss ${ffSeconds(seekSeconds)}`])
-      .complexFilter([`[0:v]${thumbnailScaleFilter()}[v]`])
-      .outputOptions(['-map [v]', '-frames:v 1'])
-      .output(outFile)
-      .on('error', (e, _stdout, stderr) => {
-        cleanup()
-        reject(describeFfmpegError(e, stderr))
-      })
-      .on('end', () => {
-        try {
-          resolve(readFrameFile(outFile))
-        } catch (e) {
-          reject(e)
-        } finally {
-          cleanup()
-        }
-      })
-      .run()
-  })
+  return grabFrameDataUrl(filePath, atSeconds, 've-thumb-', thumbnailScaleFilter())
 }
 
 export async function generateFrameDataUrl(
@@ -387,35 +439,14 @@ export async function generateFrameDataUrl(
   cropCenter?: { x: number; y: number },
   blurBackground?: boolean
 ): Promise<string> {
-  const seekSeconds = await clampSeekSeconds(filePath, atSeconds)
-  const dir = mkdtempSync(join(tmpdir(), 've-frame-'))
-  const outFile = join(dir, 'frame.jpg')
-  const cleanup = (): void => rmSync(dir, { recursive: true, force: true })
   const w = Math.round(width)
   const h = Math.round(height)
-  return new Promise((resolve, reject) => {
-    trackUntilDone(ffmpeg(filePath), ['end', 'error'])
-      .inputOptions([`-ss ${ffSeconds(seekSeconds)}`])
-      .complexFilter([
-        `[0:v]${scaleToFrameFilter(w, h, fillCrop, cropCenter, blurBackground)},setsar=1[v]`
-      ])
-      .outputOptions(['-map [v]', '-frames:v 1'])
-      .output(outFile)
-      .on('error', (e, _stdout, stderr) => {
-        cleanup()
-        reject(describeFfmpegError(e, stderr))
-      })
-      .on('end', () => {
-        try {
-          resolve(readFrameFile(outFile))
-        } catch (e) {
-          reject(e)
-        } finally {
-          cleanup()
-        }
-      })
-      .run()
-  })
+  return grabFrameDataUrl(
+    filePath,
+    atSeconds,
+    've-frame-',
+    `${scaleToFrameFilter(w, h, fillCrop, cropCenter, blurBackground)},setsar=1`
+  )
 }
 
 export function generateWaveformDataUrl(
@@ -824,6 +855,93 @@ export async function probeAlphaDecoders(paths: Iterable<string>): Promise<Map<s
   return map
 }
 
+/** 同梱の ffmpeg が持っているフィルタの名前(1回だけ調べる)。調べられなければ空 */
+let filterNames: Promise<Set<string>> | null = null
+export function ffmpegFilterNames(): Promise<Set<string>> {
+  if (!filterNames) {
+    filterNames = new Promise((resolve) => {
+      execFile(
+        ffmpegPath,
+        ['-hide_banner', '-filters'],
+        { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 },
+        (_err, stdout) => {
+          const names = new Set<string>()
+          for (const line of String(stdout ?? '').split('\n')) {
+            const m = /^\s*[.A-Z|]{2,3}\s+(\w+)\s+\S+->\S+/.exec(line)
+            if (m) names.add(m[1])
+          }
+          resolve(names)
+        }
+      )
+    })
+  }
+  return filterNames
+}
+
+const sourceVideoCache = new Map<string, Promise<SourceVideoInfo | undefined>>()
+
+/**
+ * 素材の映像の色(HDR か)と走査(インターレースか)。調べられなければ undefined
+ * (書き出しを止める理由にはしない。今までどおり何も掛けない)。
+ * 同じファイル(パス・大きさ・更新時刻)は1回だけ調べる(サムネイルを何十枚も取るため)
+ */
+export function probeSourceVideo(filePath: string): Promise<SourceVideoInfo | undefined> {
+  let key = filePath
+  try {
+    const st = statSync(filePath)
+    key = `${filePath}|${st.size}|${st.mtimeMs}`
+  } catch {
+    return Promise.resolve(undefined)
+  }
+  const cached = sourceVideoCache.get(key)
+  if (cached) return cached
+  const task = new Promise<SourceVideoInfo | undefined>((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err || !data) return resolve(undefined)
+      const v = data.streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic)
+      if (!v) return resolve(undefined)
+      const str = (x: unknown): string | undefined =>
+        typeof x === 'string' && x !== '' && x !== 'unknown' && x !== 'N/A' ? x : undefined
+      resolve({
+        colorTransfer: str(v.color_transfer),
+        colorPrimaries: str(v.color_primaries),
+        colorSpace: str(v.color_space),
+        colorRange: str(v.color_range),
+        fieldOrder: str((v as { field_order?: unknown }).field_order)
+      })
+    })
+  })
+  sourceVideoCache.set(key, task)
+  return task
+}
+
+/**
+ * 素材の映像の頭に掛けるフィルタ(インターレースの解除・HDR のトーンマッピング。末尾は `,`)。
+ * SDR・プログレッシブの素材は空文字(理由は `sourceVideoFilter`)
+ */
+export async function sourceVideoFilterFor(filePath: string): Promise<string> {
+  const info = await probeSourceVideo(filePath)
+  if (!info) return ''
+  const zscale = isHdrTransfer(info.colorTransfer)
+    ? (await ffmpegFilterNames()).has('zscale')
+    : false
+  return sourceVideoFilter(info, { zscale })
+}
+
+/** 映像として使う素材のうち、頭にフィルタが要るもののパス → フィルタ。HDR の素材があるかも返す */
+export async function sourceVideoFilters(
+  paths: Iterable<string>
+): Promise<{ filters: Map<string, string>; hasHdr: boolean }> {
+  const list = [...new Set(paths)]
+  const found = await Promise.all(list.map((p) => sourceVideoFilterFor(p)))
+  const infos = await Promise.all(list.map((p) => probeSourceVideo(p)))
+  const filters = new Map<string, string>()
+  list.forEach((p, i) => {
+    if (found[i]) filters.set(p, found[i])
+  })
+  return { filters, hasHdr: infos.some((info) => isHdrTransfer(info?.colorTransfer)) }
+}
+
 /** タイムラインが実際に使う音声素材だけを、パス単位で1回ずつ調べる。 */
 async function probeUsedAudioChannels(project: Project): Promise<Map<string, number>> {
   const used = new Set<string>()
@@ -913,6 +1031,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       .filter((t) => !t.hidden)
       .flatMap((t) => t.clips.map((c) => c.assetId))
   ])
+  // 入点が素材の長さより後ろのクリップ・書き出し先のフォルダが無いときは、ffmpeg を起こす前に
+  // 原因の分かる文面で止める(理由は `clipsBeyondSource`・`assertOutputFolderExists`)
+  const beyondSource = clipsBeyondSourceMessage(clipsBeyondSource(project))
+  if (beyondSource) return Promise.reject(new Error(beyondSource))
+  assertOutputFolderExists(outputPath)
   // The cancel handle and progress channel are singletons; a second concurrent
   // encode would overwrite currentExportCommand and leave the first job
   // uncancelable, with both jobs fighting over the one progress bar. The flag is
@@ -989,6 +1112,18 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       .filter((a): a is MediaAsset => !!a && a.hasVideo && !a.still)
       .map((a) => a.filePath)
   )
+  // インターレースの解除・HDR のトーンマッピングが要る素材(SDR・プログレッシブは空のまま)
+  const sourceVideo = await sourceVideoFilters(
+    [
+      ...clips.map((c) => assetById.get(c.assetId)),
+      ...project.videoOverlayTracks
+        .filter((t) => !t.hidden)
+        .flatMap((t) => t.clips)
+        .map((c) => assetById.get(c.assetId))
+    ]
+      .filter((a): a is MediaAsset => !!a && a.hasVideo && !a.still)
+      .map((a) => a.filePath)
+  )
   // テロップの折り返し幅は**見積もりではなく実測**で決める。libass に1度描かせて
   // 全角の送り幅を測る(結果はフォントごとに使い回すので、2回目以降は測らない)。
   // 上の probe と同じで、測れなくても例外にしない——折り返しが少し広いだけの話で、
@@ -1062,6 +1197,8 @@ export async function exportProject(options: ExportOptions): Promise<void> {
 
         // カメラ間の色合わせ(縮める前の画に掛ける)
         const colorPart = asset.colorMatch ? `${colorMatchFilter(asset.colorMatch)},` : ''
+        // インターレースの解除・HDR のトーンマッピングは、時刻を動かす前の素材の絵に掛ける
+        const sourcePart = sourceVideo.filters.get(asset.filePath) ?? ''
         const scalePadFilter = scaleToFrameFilter(
           w,
           h,
@@ -1118,7 +1255,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 乗っているので、この `fps` は素通しで、枚数を増やしも減らしもしない。
         if (includeVideo) {
           filterParts.push(
-            `[${myIndex}:v]setpts=PTS/${speed}${preOut > 0 ? `-${preOut}/TB` : ''},${colorPart}${scalePadFilter},setsar=1,` +
+            `[${myIndex}:v]${sourcePart}setpts=PTS/${speed}${preOut > 0 ? `-${preOut}/TB` : ''},${colorPart}${scalePadFilter},setsar=1,` +
               `tpad=stop_duration=${ffSeconds(outputDuration)}:stop_mode=clone,` +
               `trim=end_frame=${frameCountForDuration(outputDuration, outputFps)},` +
               `settb=${frameTb},setpts=N,fps=${fpsArg}[v${i}]`
@@ -1317,7 +1454,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               // `iw/ih` から高さを出すので、SAR≠1 の素材はここでも縦長に潰れる。
               // 全面(版面CG)は縦横比を保って画面に収める。透過(アルファ)はそのまま overlay へ渡る
               // 色合わせもプレビュー・本編と同じく当てる(ワイプのカメラだけ補正前の色で出ていた)
-              `[${myIndex}:v]${asset.colorMatch ? `${colorMatchFilter(asset.colorMatch)},` : ''}${SQUARE_PIXEL_FILTER},` +
+              `[${myIndex}:v]${sourceVideo.filters.get(asset.filePath) ?? ''}${asset.colorMatch ? `${colorMatchFilter(asset.colorMatch)},` : ''}${SQUARE_PIXEL_FILTER},` +
                 (full
                   ? `scale=${w}:${h}:force_original_aspect_ratio=decrease,`
                   : `scale=${scaledWidth}:-2,`) +
@@ -1723,16 +1860,86 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         resolveMeasure(null)
       }
     })
-  /** 一定のゲイン + リミッタで合わせるときの掛け方(まばらに鋭い山がある素材)。使わなければ null */
-  let limitedGain: string | null = null
+  /**
+   * 書き出しと同じ音声グラフに `filter` を掛け、書き出しと同じ AAC にしてから大きさを測る
+   * (AAC にすると鋭い山が持ち上がる。理由は `fitEncodedTruePeak`)。測れなければ null
+   */
+  const encodedPass = (filter: string): Promise<EncodedLoudness | null> =>
+    new Promise<EncodedLoudness | null>((resolveMeasure) => {
+      let dir: string | null = null
+      const cleanup = (): void => {
+        if (dir) rmSync(dir, { recursive: true, force: true })
+      }
+      const fail = (): void => {
+        cleanup()
+        resolveMeasure(null)
+      }
+      try {
+        const command = ffmpeg()
+        const built = buildGraph(command, false)
+        built.filterParts.push(`${built.audioLabel}${filter},${AUDIO_FORMAT}[aenc]`)
+        dir = mkdtempSync(join(tmpdir(), 've-graph-'))
+        const graphPath = join(dir, 'filtergraph.txt')
+        const m4a = join(dir, 'check.m4a')
+        writeFileSync(graphPath, built.filterParts.join(';'), 'utf-8')
+        command
+          .outputOptions('-filter_complex_script', graphPath)
+          .outputOptions(['-map [aenc]', ...OUTPUT_AUDIO_CODEC_ARGS])
+          .output(m4a)
+          .on('start', () => onProgress(29, '音量を測定中'))
+          .on('error', fail)
+          .on('end', () => {
+            if (exportCancelRequested) return fail()
+            const meter = ffmpeg(m4a)
+            const tail: string[] = []
+            meter
+              .outputOptions(['-af', ENCODED_LOUDNESS_FILTER, '-f', 'null'])
+              .output(process.platform === 'win32' ? 'NUL' : '/dev/null')
+              .on('stderr', (line: string) => {
+                tail.push(line)
+                if (tail.length > 60) tail.shift()
+              })
+              .on('error', fail)
+              .on('end', () => {
+                cleanup()
+                resolveMeasure(parseEbur128Summary(tail.join('\n')))
+              })
+              .run()
+            currentExportCommand = meter
+            trackExportCommand(meter)
+            if (exportCancelRequested) meter.kill('SIGKILL')
+          })
+          .run()
+        currentExportCommand = command
+        trackExportCommand(command)
+        if (exportCancelRequested) command.kill('SIGKILL')
+      } catch {
+        fail()
+      }
+    })
+  /** 音量の正規化の掛け方(loudnorm か、一定のゲイン + リミッタ)。正規化しなければ null */
+  let loudnessFilter: string | null = null
   if (loudnessNormalization) {
     measured = await measurePass('')
     const target = options.loudnessTarget ?? 'web'
-    if (!exportCancelRequested && measured && needsLimitedGain(target, measured)) {
-      limitedGain = await planLimitedGain(target, measured, (f) =>
-        exportCancelRequested ? Promise.resolve(null) : measurePass(f)
-      )
-    }
+    const plan =
+      !exportCancelRequested && measured && needsLimitedGain(target, measured)
+        ? await planLimitedGainValues(target, measured, (f) =>
+            exportCancelRequested ? Promise.resolve(null) : measurePass(f)
+          )
+        : null
+    const first = plan
+      ? limitedGainFilter(plan.gainDb, plan.ceilingDb)
+      : loudnormApplyFilter(options.loudnessTarget, measured)
+    loudnessFilter = exportCancelRequested
+      ? first
+      : await fitEncodedTruePeak(
+          target,
+          first,
+          plan,
+          measured ? LOUDNESS_TARGETS[target].integrated - measured.inputI : null,
+          (f) => (exportCancelRequested ? Promise.resolve(null) : encodedPass(f))
+        )
     currentExportCommand = null
     if (exportCancelRequested) {
       exportInProgress = false
@@ -1791,7 +1998,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         // 増幅量には効かない。素材の LRA が 11 を超えていると黙って dynamic に
         // 戻ってしまう(実測: LRA 18.5 の素材で 2パス目も -14.57/LRA 14.4 のまま)ので、
         // 測った LRA を下回らない値を渡して linear を守る(上限 50 は loudnorm の定義域)
-        const loudnormArgs = limitedGain ?? loudnormApplyFilter(options.loudnessTarget, measured)
+        const loudnormArgs = loudnessFilter ?? loudnormApplyFilter(options.loudnessTarget, measured)
         filterParts.push(`${audioLabel}${loudnormArgs},${AUDIO_FORMAT}[aloud]`)
         audioLabel = '[aloud]'
       }
@@ -1828,10 +2035,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           '-c:v libx264',
           '-preset veryfast',
           `-crf ${crfForQuality(quality)}`,
-          '-c:a aac',
-          '-b:a 192k',
+          ...OUTPUT_AUDIO_CODEC_ARGS,
           '-movflags +faststart'
         ])
+        .outputOptions(NO_SOURCE_METADATA_ARGS)
+        // HDR の素材は BT.709 へ寄せてあるので、出力にもそう書く(SDR だけの書き出しは今までどおり)
+        .outputOptions(sourceVideo.hasHdr ? SDR_COLOR_TAG_ARGS : [])
         .output(outputPath)
         .on('start', () => onProgress(0, 'エンコード開始'))
         .on('progress', (progress) => {

@@ -1,5 +1,5 @@
 import { statSync } from 'fs'
-import { basename, extname, resolve } from 'path'
+import { basename, dirname, extname, resolve } from 'path'
 import { writeViaPartial } from './partialOutput'
 import type { Project } from '@shared/types'
 
@@ -109,4 +109,24 @@ export async function writeExportGuarded<T>(
   const conflict = exportOutputConflict(outputPath, protectedPaths)
   if (conflict) throw new Error(conflict)
   return writeViaPartial(outputPath, write)
+}
+
+/**
+ * 書き出し先のフォルダが在るか。無ければ、書き出し先の問題だと分かる文面で止める。
+ * 前は ffmpeg の `No such file or directory` を素材の読み込みと同じ表で訳し、
+ * 「ファイルが見つかりません。移動または削除された可能性があります」と出ていた(素材が消えたと誤解させた)
+ */
+export function assertOutputFolderExists(outputPath: string): void {
+  const dir = dirname(resolve(outputPath))
+  let ok = false
+  try {
+    ok = statSync(dir).isDirectory()
+  } catch {
+    ok = false
+  }
+  if (!ok)
+    throw new Error(
+      `書き出し先のフォルダが見つかりません(${dir})。フォルダの名前が変わっていないか・` +
+        '外付けのディスクが外れていないかを確かめるか、保存先を選び直してください(素材は無事です)'
+    )
 }

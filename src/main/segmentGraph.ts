@@ -72,6 +72,11 @@ export interface GraphContext {
    * 先に1回だけ伸び縮みさせておき、どの区間もそれを等倍で読む
    */
   stretched?: ReadonlyMap<string, string>
+  /**
+   * 素材パス → 映像の頭に掛けるフィルタ(インターレースの解除・HDR のトーンマッピング。末尾は `,`)。
+   * 要らない素材(SDR・プログレッシブ)は入れない(`sourceVideoFilter`)
+   */
+  sourceFilters?: ReadonlyMap<string, string>
 }
 
 /** ffmpeg に渡すフレームレートの表記(29.97 は `30000/1001`) */
@@ -165,6 +170,9 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
     return m ? `${colorMatchFilter(m)},` : ''
   }
 
+  /** インターレースの解除・HDR のトーンマッピング(時刻を動かす前の素材の絵に掛ける) */
+  const sourceOf = (item: MediaItem): string => ctx.sourceFilters?.get(assetOf(item).filePath) ?? ''
+
   /**
    * 1本の枝を「ちょうど `frames` 枚・時刻は n 枚目 × 1フレーム」に揃える後半。
    * tpad(足りない分を最後の絵で延ばす)→ trim(フレーム数で切る)→ 時刻の作り直し → fps。
@@ -189,7 +197,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
       { labelSuffix: `_${label}`, fps }
     )
     parts.push(
-      `[${idx}:v]setpts=PTS/${num(speed)}${shift},${colorOf(item)}${scale},setsar=1,${exactFrames(visEnd - visStart)},${VIDEO_FORMAT}[${label}]`
+      `[${idx}:v]${sourceOf(item)}setpts=PTS/${num(speed)}${shift},${colorOf(item)}${scale},setsar=1,${exactFrames(visEnd - visStart)},${VIDEO_FORMAT}[${label}]`
     )
     return label
   }
@@ -323,7 +331,7 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
       parts.push(
         // フレーム数で切って番号を振り直すので、先にシーケンスのフレームレートへ揃える
         // (揃えないと 60fps のワイプが 30fps の書き出しで半分の速さになる。音は正しい速さのまま)
-        `[${idx}:v]setpts=PTS/${num(speed)}${shift},${colorOf(item)}${shape},setsar=1,${fpsFilter(fps)},` +
+        `[${idx}:v]${sourceOf(item)}setpts=PTS/${num(speed)}${shift},${colorOf(item)}${shape},setsar=1,${fpsFilter(fps)},` +
           `tpad=stop_duration=${num(sec(frames))}:stop_mode=clone,trim=end_frame=${frames},` +
           `settb=${tb},setpts=N+${offset}[${label}]`
       )

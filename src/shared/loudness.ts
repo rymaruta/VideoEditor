@@ -105,30 +105,125 @@ export function limitedGainFilter(gainDb: number, ceilingDb: number): string {
   )
 }
 
+/** 一定のゲイン + リミッタの掛け方(`limitedGainFilter` の引数) */
+export interface LimitedGainPlan {
+  gainDb: number
+  ceilingDb: number
+}
+
 /**
  * 一定のゲイン + リミッタの掛け方を決める。`measure(フィルタ)` はそのフィルタを掛けた後の大きさを測る。
  * 抑えた山の分だけ大きさが下がるので、測り直してゲインを足す。リミッタはサンプルの山しか抑えないので、
  * 測ったトゥルーピークが上限(AAC にしたときの持ち上がり分を残す)を越えていれば、抑える高さを下げて
  * 測り直す。測れなければ null(呼び出し側は loudnorm に任せる)
  */
-export async function planLimitedGain(
+export async function planLimitedGainValues(
   target: LoudnessTarget,
   measured: LoudnessMeasurementValues,
   measure: (filter: string) => Promise<LoudnessMeasurementValues | null>
-): Promise<string | null> {
+): Promise<LimitedGainPlan | null> {
   const t = LOUDNESS_TARGETS[normalizeLoudnessTarget(target)]
   const peakCeiling = t.truePeak - AAC_TRUE_PEAK_HEADROOM_DB
   let gain = t.integrated - measured.inputI
   let ceiling = peakCeiling - TRUE_PEAK_MARGIN_DB
   for (let i = 0; i < 6; i++) {
-    const filter = limitedGainFilter(gain, ceiling)
-    const r = await measure(filter)
-    if (!r || !Number.isFinite(r.inputI)) return i === 0 ? null : filter
+    const r = await measure(limitedGainFilter(gain, ceiling))
+    if (!r || !Number.isFinite(r.inputI))
+      return i === 0 ? null : { gainDb: gain, ceilingDb: ceiling }
     const miss = t.integrated - r.inputI
     const over = Number.isFinite(r.inputTP) ? r.inputTP - peakCeiling : 0
-    if (Math.abs(miss) <= LIMITED_GAIN_TOLERANCE_LU && over <= 0) return filter
+    if (Math.abs(miss) <= LIMITED_GAIN_TOLERANCE_LU && over <= 0)
+      return { gainDb: gain, ceilingDb: ceiling }
     gain += miss
     if (over > 0) ceiling -= over + 0.1
   }
-  return limitedGainFilter(gain, ceiling)
+  return { gainDb: gain, ceilingDb: ceiling }
+}
+
+/** `planLimitedGainValues` の結果をフィルタの文字列で返す(測れなければ null) */
+export async function planLimitedGain(
+  target: LoudnessTarget,
+  measured: LoudnessMeasurementValues,
+  measure: (filter: string) => Promise<LoudnessMeasurementValues | null>
+): Promise<string | null> {
+  const plan = await planLimitedGainValues(target, measured, measure)
+  return plan ? limitedGainFilter(plan.gainDb, plan.ceilingDb) : null
+}
+
+/** 出力(AAC にした後)の大きさ。`ebur128=peak=true` の締めの集計から読む */
+export interface EncodedLoudness {
+  /** 積分ラウドネス(LUFS) */
+  integrated: number
+  /** トゥルーピーク(dBTP) */
+  truePeak: number
+}
+
+/** 書き出しの音声の符号化(標準・区間ごとの書き出しと、AAC にした後の測りで同じものを使う) */
+export const OUTPUT_AUDIO_CODEC_ARGS = ['-c:a', 'aac', '-b:a', '192k']
+
+/** AAC にした後の大きさを測るフィルタ(締めの集計を `parseEbur128Summary` で読む) */
+export const ENCODED_LOUDNESS_FILTER = 'ebur128=framelog=quiet:peak=true'
+
+/** AAC にした後で測ったトゥルーピークに残す余裕(dB)。書き出しの本番と測りで丸めが僅かに揺れても越えないように */
+export const ENCODED_TRUE_PEAK_MARGIN_DB = 0.2
+
+/** `ebur128=framelog=quiet:peak=true` の締めの集計(Summary)を読む。読めなければ null */
+export function parseEbur128Summary(stderr: string): EncodedLoudness | null {
+  const at = stderr.lastIndexOf('Summary:')
+  const tail = at >= 0 ? stderr.slice(at) : stderr
+  const i = /Integrated loudness:\s*\n\s*I:\s*(-?[\d.]+|-inf) LUFS/.exec(tail)
+  const tp = /True peak:\s*\n\s*Peak:\s*(-?[\d.]+|-inf) dBFS/.exec(tail)
+  if (!i || !tp) return null
+  const integrated = i[1] === '-inf' ? -Infinity : Number(i[1])
+  const truePeak = tp[1] === '-inf' ? -Infinity : Number(tp[1])
+  return Number.isNaN(integrated) || Number.isNaN(truePeak) ? null : { integrated, truePeak }
+}
+
+/**
+ * **AAC にした後の**トゥルーピークを上限に収める。
+ *
+ * リミッタ(と loudnorm)は AAC にする前の音で山を抑えるが、AAC は高い倍音を削る・量子化するので、
+ * 鋭い音(爆発音・打楽器)の山が**数 dB 持ち上がる**。前は余裕を 1 dB と決め打ちにして AAC にした後を
+ * 一度も測っておらず、上限 −1.5 dBTP の配信で、書き出した mp4 が +0.5〜+2.7 dBTP になっていた
+ * (実地テスト: Tears of Steel 720p 12分。リミッタの後は −2.6 dBFS、AAC 192k で +3.2 dB 持ち上がった)。
+ *
+ * `encode(フィルタ)` は書き出しと同じ音にフィルタを掛け、書き出しと同じ AAC にして測った大きさを返す。
+ * 越えていれば、越えたぶんだけリミッタの高さを下げ(loudnorm で合わせていたときは、同じゲインの
+ * リミッタへ切り替える)、下がった大きさはゲインで戻して測り直す。越えていなければ `filter` をそのまま返す
+ * (AAC にしても山が上がらない素材の書き出しは変わらない)。測れなければ、そのとき最善のものを返す
+ *
+ * @param plan 一定のゲイン + リミッタで合わせているときの掛け方。loudnorm に任せているときは null
+ * @param fallbackGainDb loudnorm に任せていて越えたときに使う一定のゲイン(基準 − 測った大きさ)
+ */
+export async function fitEncodedTruePeak(
+  target: LoudnessTarget,
+  filter: string,
+  plan: LimitedGainPlan | null,
+  fallbackGainDb: number | null,
+  encode: (filter: string) => Promise<EncodedLoudness | null>
+): Promise<string> {
+  const t = LOUDNESS_TARGETS[normalizeLoudnessTarget(target)]
+  const limit = t.truePeak - ENCODED_TRUE_PEAK_MARGIN_DB
+  let current = filter
+  /** 測って上限に収まっていた最後の掛け方(大きさが合いきらずに回数が尽きたら、これを使う) */
+  let safe: string | null = null
+  let gain = plan?.gainDb ?? fallbackGainDb
+  // loudnorm(linear)はトゥルーピークを上限ちょうどまで許すので、切り替えた最初の高さは上限から
+  let ceiling = plan?.ceilingDb ?? t.truePeak - AAC_TRUE_PEAK_HEADROOM_DB - TRUE_PEAK_MARGIN_DB
+  for (let i = 0; i < 5; i++) {
+    const r = await encode(current)
+    if (!r || !Number.isFinite(r.truePeak) || !Number.isFinite(r.integrated)) return safe ?? current
+    const over = r.truePeak - limit
+    const miss = t.integrated - r.integrated
+    if (over <= 0) safe = current
+    // 大きさは上げすぎないときだけ戻す(上げると山も上がる)。合っていれば終わり
+    if (over <= 0 && (i === 0 || Math.abs(miss) <= LIMITED_GAIN_TOLERANCE_LU * 2)) return current
+    if (gain === null || !Number.isFinite(gain)) return safe ?? current
+    if (over > 0) ceiling -= over + 0.1
+    if (i > 0 || plan) gain += miss
+    // リミッタの高さには下限がある(`limitedGainFilter`)。それより下は抑えられないので、越えても止める
+    if (ceiling < -24) ceiling = -24
+    current = limitedGainFilter(gain, ceiling)
+  }
+  return safe ?? current
 }
