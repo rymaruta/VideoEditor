@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { execFileSync } from 'child_process'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -166,7 +167,16 @@ describe('ライセンス表記の生成: 文書', () => {
 
 describe('ライセンス表記の生成: このプロジェクト', () => {
   // node_modules を読むだけ(ffmpeg -version を1回ずつ走らせる)
-  const { text, packages, missing } = buildNotices(join(__dirname, '..', '..'))
+  const { text, packages, missing, problems, chromiumLicenses } = buildNotices(
+    join(__dirname, '..', '..')
+  )
+
+  it('表記に欠けが無く(ffmpeg を実行でき、GPL・Electron・Chromium の表記がある)、Chromium の表記の場所を正しく書く', () => {
+    expect(problems).toEqual([])
+    expect(existsSync(chromiumLicenses)).toBe(true)
+    expect(text).toContain('app.asar.unpacked/resources/')
+    expect(text).not.toContain('実行ファイルと同じフォルダ')
+  })
 
   it('同梱する依存がすべて見つかり、試験の道具は入らない', () => {
     expect(missing).toEqual([])
@@ -198,4 +208,48 @@ describe('ライセンス表記の生成: このプロジェクト', () => {
     expect(text).toContain('Qwen2.5')
     expect(text).not.toContain('全文のファイルが含まれていません。')
   })
+})
+
+describe('ライセンス表記の生成: 欠けたまま作らない', () => {
+  it('ffmpeg.LICENSE が無い・ffmpeg を実行できない・Chromium の表記が無いと、欠けとして挙げる', () => {
+    const root = join(tmp, 'broken')
+    pkg(root, { name: 'app', version: '1.0.0', dependencies: { 'ffmpeg-static': '1' } })
+    mkdirSync(join(root, 'src', 'shared'), { recursive: true })
+    writeFileSync(join(root, 'src', 'shared', 'product.json'), JSON.stringify({ name: 'P' }))
+    pkg(join(root, 'node_modules', 'ffmpeg-static'), {
+      name: 'ffmpeg-static',
+      version: '5.0.0',
+      license: 'GPL-3.0-or-later'
+    })
+    pkg(
+      join(root, 'node_modules', 'electron'),
+      { name: 'electron', version: '39.0.0' },
+      {
+        LICENSE: 'MIT electron'
+      }
+    )
+    const { problems } = buildNotices(root)
+    expect(problems).toEqual(
+      expect.arrayContaining([
+        'ffmpeg-static の ffmpeg.LICENSE がありません',
+        'ffmpeg を実行して版と構成を読めませんでした',
+        'Electron の LICENSES.chromium.html がありません'
+      ])
+    )
+    expect(problems.some((p) => p.includes('Electron の LICENSE がありません'))).toBe(false)
+  })
+
+  // Windows はシンボリックリンクを作るのに管理者の権限が要る
+  it.skipIf(process.platform === 'win32')(
+    'シンボリックリンク経由で実行しても、直接の実行と分かって表記を作る',
+    () => {
+      const link = join(tmp, 'notices-link.mjs')
+      symlinkSync(join(__dirname, '..', '..', 'scripts', 'third-party-notices.mjs'), link)
+      const out = execFileSync(process.execPath, [link], { encoding: 'utf-8', timeout: 60000 })
+      expect(out).toContain('THIRD_PARTY_NOTICES.txt')
+      expect(existsSync(join(__dirname, '..', '..', 'resources', 'LICENSES.chromium.html'))).toBe(
+        true
+      )
+    }
+  )
 })

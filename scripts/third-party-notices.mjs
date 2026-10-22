@@ -13,6 +13,7 @@
 // 依存は node_modules の package.json をたどって集める(新しい依存を足さない)。
 import { execFileSync } from 'node:child_process'
 import {
+  copyFileSync,
   existsSync,
   readdirSync,
   readFileSync,
@@ -21,10 +22,13 @@ import {
   writeFileSync
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 /** devDependencies だが、画面のコードに取り込まれて製品に入るもの */
 export const BUNDLED_FROM_DEV = ['react', 'react-dom']
+
+/** Chromium の表記(Electron が配る)。electron-builder が macOS・snap で消すので resources に写す */
+export const CHROMIUM_LICENSES = 'LICENSES.chromium.html'
 
 /** ライセンスの全文・告知が入っているファイルの名前 */
 const LICENSE_FILE =
@@ -278,8 +282,10 @@ export function renderNotices(input) {
   out.push(rule('2. Electron / Chromium'))
   out.push(
     `本製品は Electron ${input.electron.version}(MIT License)の上で動きます。Electron は Chromium と Node.js を含みます。`,
-    'Chromium とその部品のライセンスの全文は、インストール先のフォルダの LICENSES.chromium.html にあります',
-    '(macOS ではアプリの中の Contents/Resources/ 、Windows・Linux では実行ファイルと同じフォルダ)。',
+    'Chromium とその部品のライセンスの全文(LICENSES.chromium.html)は、どの OS でもアプリの resources の中',
+    '(Windows・Linux: インストール先の resources/app.asar.unpacked/resources/ 、',
+    ' macOS: アプリの中の Contents/Resources/app.asar.unpacked/resources/)に同梱しており、',
+    'ヘルプ > バージョン情報 の「Chromium のライセンス…」からも開けます。',
     'ソース: https://github.com/electron/electron 、https://source.chromium.org/chromium',
     '',
     'Electron の MIT License:',
@@ -424,6 +430,20 @@ export function buildNotices(projectDir) {
     version: electronDir ? readJson(join(electronDir, 'package.json')).version : '',
     license: electronDir ? optionalText(join(electronDir, 'LICENSE')) : ''
   }
+  const chromiumLicenses = electronDir ? join(electronDir, 'dist', CHROMIUM_LICENSES) : ''
+  const ffmpegVersion = ffmpegExe ? binaryVersion(ffmpegExe) : ''
+  const ffprobeVersion = ffprobeExe ? binaryVersion(ffprobeExe) : ''
+  const ffmpegLicense = ffmpegDir ? optionalText(join(ffmpegDir, 'ffmpeg.LICENSE')) : ''
+
+  // 表記が欠けたまま出荷しないよう、欠けたものを挙げる(CLI は失敗で終わる)
+  const problems = []
+  if (!ffmpegDir) problems.push('ffmpeg-static が入っていません')
+  if (!ffmpegLicense) problems.push('ffmpeg-static の ffmpeg.LICENSE がありません')
+  if (!ffmpegVersion) problems.push('ffmpeg を実行して版と構成を読めませんでした')
+  if (!ffprobeVersion) problems.push('ffprobe を実行して版と構成を読めませんでした')
+  if (!electron.license) problems.push('Electron の LICENSE がありません')
+  if (!chromiumLicenses || !existsSync(chromiumLicenses))
+    problems.push(`Electron の ${CHROMIUM_LICENSES} がありません`)
 
   const models = MODELS.map((m) => ({
     ...m,
@@ -437,29 +457,44 @@ export function buildNotices(projectDir) {
     ffmpeg: {
       ffmpeg: ffmpegDir
         ? {
-            version: ffmpegExe ? binaryVersion(ffmpegExe) : '',
+            version: ffmpegVersion,
             readme: optionalText(join(ffmpegDir, 'ffmpeg.README')),
-            license: optionalText(join(ffmpegDir, 'ffmpeg.LICENSE'))
+            license: ffmpegLicense
           }
         : undefined,
-      ffprobe: ffprobeExe ? { version: binaryVersion(ffprobeExe) } : undefined
+      ffprobe: ffprobeExe ? { version: ffprobeVersion } : undefined
     },
     electron,
     models
   })
-  return { text, packages, missing }
+  return { text, packages, missing, problems, chromiumLicenses }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-if (isMain) {
+/** 実際のパスで比べる(シンボリックリンク・相対パスで呼ばれても、直接実行かどうかを誤らない) */
+function isDirectRun() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isDirectRun()) {
   const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-  const { text, packages, missing } = buildNotices(projectDir)
+  const { text, packages, missing, problems, chromiumLicenses } = buildNotices(projectDir)
   if (missing.length > 0) {
     console.error(
       `見つからない依存があります(npm ci をやり直してください):\n  ${missing.join('\n  ')}`
     )
     process.exit(1)
   }
+  if (problems.length > 0) {
+    console.error(`ライセンス表記が揃わないので作りません:\n  ${problems.join('\n  ')}`)
+    process.exit(1)
+  }
+  // Chromium の表記は electron-builder が macOS・snap で消すので、resources に写して同梱する
+  copyFileSync(chromiumLicenses, join(projectDir, 'resources', CHROMIUM_LICENSES))
   const outPath = join(projectDir, 'resources', 'THIRD_PARTY_NOTICES.txt')
   // 先頭の BOM: Windows のメモ帳・ブラウザが UTF-8 と分かるように
   writeFileSync(outPath, '\uFEFF' + text)

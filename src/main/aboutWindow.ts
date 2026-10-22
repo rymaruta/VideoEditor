@@ -4,45 +4,54 @@ import { join } from 'path'
 import { PRODUCT_NAME } from '@shared/product'
 
 /**
- * バージョン情報と、サードパーティのライセンス表記(resources/THIRD_PARTY_NOTICES.txt)。
- * 表記はインストーラを作るときに `npm run licenses`(scripts/third-party-notices.mjs)が作る。
+ * バージョン情報と、サードパーティのライセンス表記。
+ * - resources/THIRD_PARTY_NOTICES.txt: インストーラを作るときに `npm run licenses`
+ *   (scripts/third-party-notices.mjs)が作る
+ * - resources/LICENSES.chromium.html: 同じスクリプトが Electron から写す(electron-builder は macOS・snap で
+ *   インストール先の LICENSES.chromium.html を消すため、どの OS でも resources に同梱する)
  */
 
 const NOTICES_FILE = 'THIRD_PARTY_NOTICES.txt'
+const CHROMIUM_FILE = 'LICENSES.chromium.html'
 
-/** 表記のファイルの場所(製品では asar の外 = app.asar.unpacked/resources。開発中はプロジェクトの resources) */
-export function noticesPath(): string | null {
+/** 同梱の文書の場所(製品では asar の外 = app.asar.unpacked/resources。開発中はプロジェクトの resources) */
+function bundledDocPath(file: string): string | null {
   const candidates = [
-    join(app.getAppPath(), 'resources', NOTICES_FILE).replace('app.asar', 'app.asar.unpacked'),
-    join(app.getAppPath(), 'resources', NOTICES_FILE),
-    join(process.resourcesPath ?? '', NOTICES_FILE)
+    join(app.getAppPath(), 'resources', file).replace('app.asar', 'app.asar.unpacked'),
+    join(app.getAppPath(), 'resources', file),
+    join(process.resourcesPath ?? '', file)
   ]
   return candidates.find((p) => existsSync(p)) ?? null
 }
 
-let noticesWindow: BrowserWindow | null = null
+export function noticesPath(): string | null {
+  return bundledDocPath(NOTICES_FILE)
+}
 
-/** ライセンス表記を別の窓で見せる(文字だけ。スクリプトは動かさない) */
-export function openThirdPartyNotices(parent?: BrowserWindow | null): void {
-  const path = noticesPath()
+const docWindows = new Map<string, BrowserWindow>()
+
+/** 同梱の文書を別の窓で見せる(スクリプトは動かさない・外へ移らない) */
+function openDocWindow(file: string, title: string, parent?: BrowserWindow | null): void {
+  const path = bundledDocPath(file)
   if (!path) {
     const options: Electron.MessageBoxOptions = {
       type: 'warning',
-      title: 'サードパーティのライセンス',
-      message: 'ライセンス表記のファイルが見つかりません',
+      title,
+      message: `${title}のファイルが見つかりません`,
       detail: '製品版ではインストール先に入っています。開発中は「npm run licenses」で作れます。'
     }
     void (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options))
     return
   }
-  if (noticesWindow && !noticesWindow.isDestroyed()) {
-    noticesWindow.focus()
+  const open = docWindows.get(file)
+  if (open && !open.isDestroyed()) {
+    open.focus()
     return
   }
-  noticesWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 860,
     height: 720,
-    title: `サードパーティのライセンス — ${PRODUCT_NAME}`,
+    title: `${title} — ${PRODUCT_NAME}`,
     autoHideMenuBar: true,
     webPreferences: {
       sandbox: true,
@@ -51,13 +60,27 @@ export function openThirdPartyNotices(parent?: BrowserWindow | null): void {
       javascript: false
     }
   })
-  noticesWindow.removeMenu()
+  docWindows.set(file, win)
+  win.removeMenu()
   // 文書の中の題名で窓の題名を上書きさせない
-  noticesWindow.on('page-title-updated', (e) => e.preventDefault())
-  noticesWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  noticesWindow.webContents.on('will-navigate', (e) => e.preventDefault())
-  noticesWindow.on('closed', () => (noticesWindow = null))
-  void noticesWindow.loadFile(path)
+  win.on('page-title-updated', (e) => e.preventDefault())
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // 同じ文書の中の移動(目次のリンク)だけ許す
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.split('#')[0].endsWith(file)) e.preventDefault()
+  })
+  win.on('closed', () => docWindows.delete(file))
+  void win.loadFile(path)
+}
+
+/** ヘルプ > サードパーティのライセンス */
+export function openThirdPartyNotices(parent?: BrowserWindow | null): void {
+  openDocWindow(NOTICES_FILE, 'サードパーティのライセンス', parent)
+}
+
+/** Chromium とその部品のライセンス */
+export function openChromiumLicenses(parent?: BrowserWindow | null): void {
+  openDocWindow(CHROMIUM_FILE, 'Chromium のライセンス', parent)
 }
 
 /** ヘルプ > バージョン情報 */
@@ -69,11 +92,12 @@ export async function showAboutDialog(win: BrowserWindow): Promise<void> {
     detail:
       `Electron ${process.versions.electron} / Chromium ${process.versions.chrome} / Node.js ${process.versions.node}\n\n` +
       'この製品は FFmpeg(GPL)などのオープンソースのソフトウェア・フォント・AI のモデルを使っています。' +
-      '著作権と各ライセンスは「サードパーティのライセンス」で読めます。',
-    buttons: ['OK', 'サードパーティのライセンス…'],
+      '著作権と各ライセンスは「サードパーティのライセンス」「Chromium のライセンス」で読めます。',
+    buttons: ['OK', 'サードパーティのライセンス…', 'Chromium のライセンス…'],
     defaultId: 0,
     cancelId: 0,
     noLink: true
   })
   if (response === 1) openThirdPartyNotices(win)
+  if (response === 2) openChromiumLicenses(win)
 }

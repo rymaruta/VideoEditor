@@ -19,6 +19,7 @@ export interface NoticeModel {
 }
 
 export const BUNDLED_FROM_DEV: string[]
+export const CHROMIUM_LICENSES: string
 export const MODELS: NoticeModel[]
 export function licenseOf(pkg: Record<string, unknown>): string
 export function sourceOf(pkg: Record<string, unknown>): string
@@ -48,4 +49,8 @@ export function buildNotices(projectDir: string): {
   text: string
   packages: NoticePackage[]
   missing: string[]
+  /** 表記が欠けるもの(あれば CLI は失敗で終わる) */
+  problems: string[]
+  /** Electron が配る Chromium の表記の場所 */
+  chromiumLicenses: string
 }
