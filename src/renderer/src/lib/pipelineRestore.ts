@@ -22,6 +22,8 @@ export interface RestoredPipeline<Id extends string = string> {
   keep: Record<string, boolean>
   /** 作り直しのたびの残した場面(`AutoEditDecisions.builtKept`。今の場面の ID に直したもの) */
   builtKept: { cut: string; keptIds: string[] }[]
+  /** 前回の作り直しの後にチェックを触った場面(`AutoEditDecisions.keepTouched`。今の場面の ID) */
+  keepTouched: string[]
   /** 人が直した演出テロップで提案の一覧に無いもの(共通の時刻) */
   carriedTelops: Omit<TextOverlay, 'id'>[]
   targetMinutes: number
@@ -49,11 +51,33 @@ export const LEGACY_NOTE =
   'この企画は前の版で保存されたため、手で決めた残す/落とす(と AI の判定)は残っていません。「仮編集を作り直す」と、残す場面は自動の選び方で選び直します(手で詰めた・消した所は守られます)。画面のチェックは作り直したときに残す場面(の見込み)です。落としたい場面はチェックを外してから作り直してください'
 
 /**
- * 前の版(b4cd4d9〜ac0e4c8)で保存した企画を開いたときの案内(作り直すまで出す)。その版の企画には
- * 手で決めた残す/落とすと AI の判定は残っているが、作り直しで残した場面の記録は残っていない
+ * 前の版(b4cd4d9〜ac0e4c8)で保存した企画などを開いたときの案内(作り直すまで出す)。作り直しで残した
+ * 場面の記録は無いが、手で決めた残す/落とす・AI の判定は保存されていれば引き継ぐ。実際に引き継いだ
+ * ものだけを書く(どちらも無ければ `LEGACY_NOTE`。10/09 版の企画を開いて長さだけ変えて保存し直した
+ * ものなど)
  */
-export const LEGACY_NOTE_DECISIONS_KEPT =
-  'この企画は前の版で保存されたため、作り直しで残した場面の記録が企画にありません。手で決めた残す/落とすと AI の判定は引き継いでいます。画面のチェックは、それらと保存した仕上がりの長さで作り直したときに残す場面(の見込み)です。「仮編集を作り直す」と、この選び方で選び直します(手で詰めた・消した所は守られます)'
+export function legacyNoteFor(carried: { keep: boolean; ai: boolean }): string {
+  if (!carried.keep && !carried.ai) return LEGACY_NOTE
+  const what =
+    carried.keep && carried.ai
+      ? '手で決めた残す/落とすと AI の判定は'
+      : carried.keep
+        ? '手で決めた残す/落とすは'
+        : 'AI の判定は'
+  return `${LEGACY_NOTE_KEPT_HEAD}${what}引き継いでいます。${LEGACY_NOTE_KEPT_TAIL}`
+}
+
+const LEGACY_NOTE_KEPT_HEAD =
+  'この企画は前の版で保存されたため、作り直しで残した場面の記録が企画にありません。保存されていた'
+const LEGACY_NOTE_KEPT_TAIL =
+  '画面のチェックは、それらと保存した仕上がりの長さで作り直したときに残す場面(の見込み)です。「仮編集を作り直す」と、この選び方で選び直します(手で詰めた・消した所は守られます)'
+
+/** 古い形式の企画の案内か(作り直したら消す) */
+export function isLegacyNote(m: string): boolean {
+  return (
+    m === LEGACY_NOTE || (m.startsWith(LEGACY_NOTE_KEPT_HEAD) && m.endsWith(LEGACY_NOTE_KEPT_TAIL))
+  )
+}
 
 /**
  * 前の場面の区切り(`prev`)から、今の場面(`next`)へ、時刻がほぼ同じ(重なりが長いほうの 8 割以上)場面の
@@ -152,7 +176,14 @@ export function restorePipelineFromProject(
   const planJudgements = saved?.planJudgements ? judgedBy(saved.planJudgements) : null
   const judgeSource = saved?.judgeSource ?? 'heuristic'
   const legacy = !saved || saved.legacyPending === true
-  if (legacy) missing.push(saved ? LEGACY_NOTE_DECISIONS_KEPT : LEGACY_NOTE)
+  // 引き継いだ手の残す/落とす・AI の判定が実際にあるものだけを書く(判断の形があるだけでは言わない)
+  if (legacy)
+    missing.push(
+      legacyNoteFor({
+        keep: saved !== undefined && Object.keys(saved.keep).length > 0,
+        ai: saved?.judgeSource === 'ai'
+      })
+    )
   if (saved && !sameScenes)
     missing.push(
       '保存した時と場面の区切りが変わりました(文字起こし・同期を直した など)。時刻がほぼ同じ場面だけ前の判定・残す/落とすを引き継ぎ、それ以外の場面は簡易の点数・自動の選び方にしています'
@@ -194,6 +225,7 @@ export function restorePipelineFromProject(
     : autoSig && project.clips.length > 0
       ? [{ cut: autoSig, keptIds }]
       : []
+  const keepTouched = saved?.keepTouched ? toNow(saved.keepTouched) : []
   const speechTelops = project.textOverlays.filter((o) => o.utteranceId).length
   const roughCut =
     project.clips.length > 0 && project.roughCutAuto
@@ -281,6 +313,7 @@ export function restorePipelineFromProject(
     hype,
     keep,
     builtKept,
+    keepTouched,
     carriedTelops: saved?.carriedTelops ?? [],
     targetMinutes: saved?.targetMinutes ?? 0,
     editNote: saved?.editNote ?? '',

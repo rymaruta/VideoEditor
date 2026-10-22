@@ -75,6 +75,27 @@ describe('認識の区切りの頭の空白(英語)', () => {
     expect(r.text).toBe('Minecraft。そこは深い谷')
   })
 
+  it("区切りの前が英字の後ろの句読点でも空ける(「given. The」「here, you're」)", () => {
+    const [group] = groupAsrJobs([{ id: 'a', path: 'm.wav', start: 0, end: 5 }])
+    const [r] = asrGroupResults(group, "was never given.The trip here,you're on", [
+      chunk('was', 0, 0.2, true),
+      chunk(' never', 0.2, 0.4),
+      chunk(' given.', 0.4, 0.8),
+      chunk('The', 1, 1.2, true),
+      chunk(' trip', 1.2, 1.4),
+      chunk(' here,', 1.4, 1.6),
+      chunk("you're", 1.8, 2, true),
+      chunk(' on', 2, 2.2)
+    ])
+    expect(r.text).toBe("was never given. The trip here, you're on")
+    // 日本語の後ろの「!」・数字の小数点はそのまま
+    const [j] = asrGroupResults(group, 'すごい!2人で', [
+      chunk('すごい!', 0, 0.5, true),
+      chunk('2人で', 0.6, 1, true)
+    ])
+    expect(j.text).toBe('すごい!2人で')
+  })
+
   it('日本語の文はそのまま(空白も変えない)', () => {
     const [group] = groupAsrJobs([{ id: 'a', path: 'm.wav', start: 0, end: 5 }])
     const [r] = asrGroupResults(group, ' はい ありがとう。2人で', [

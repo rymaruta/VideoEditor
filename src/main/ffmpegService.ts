@@ -1,16 +1,11 @@
 import { trackUntilDone } from './liveProcesses'
+import { meterEncodedAudio } from './encodedLoudness'
 import { colorMatchFilter } from '@shared/color/match'
 import {
-  ENCODED_LOUDNESS_FILTER,
-  LOUDNESS_TARGETS,
   OUTPUT_AUDIO_CODEC_ARGS,
-  fitEncodedTruePeak,
-  limitedGainFilter,
+  fitEncodedLoudness,
   loudnormApplyFilter,
   loudnormMeasureFilter,
-  needsLimitedGain,
-  parseEbur128Summary,
-  planLimitedGainValues,
   type EncodedLoudness,
   type LoudnessTarget
 } from '@shared/loudness'
@@ -1874,85 +1869,61 @@ export async function exportProject(options: ExportOptions): Promise<void> {
     })
   /**
    * 書き出しと同じ音声グラフに `filter` を掛け、書き出しと同じ AAC にしてから大きさを測る
-   * (AAC にすると鋭い山が持ち上がる。理由は `fitEncodedTruePeak`)。測れなければ null
+   * (AAC にすると鋭い山が持ち上がる。理由は `fitEncodedLoudness`)。AAC はファイルに書かず、
+   * 測る ffmpeg へ直接流す(`meterEncodedAudio`)。測れなければ null
    */
   const encodedPass = (filter: string): Promise<EncodedLoudness | null> =>
-    new Promise<EncodedLoudness | null>((resolveMeasure) => {
-      let dir: string | null = null
-      const cleanup = (): void => {
-        if (dir) rmSync(dir, { recursive: true, force: true })
-      }
-      const fail = (): void => {
-        cleanup()
-        resolveMeasure(null)
-      }
-      try {
-        const command = ffmpeg()
-        const built = buildGraph(command, false)
-        built.filterParts.push(`${built.audioLabel}${filter},${AUDIO_FORMAT}[aenc]`)
-        dir = mkdtempSync(join(tmpdir(), 've-graph-'))
-        const graphPath = join(dir, 'filtergraph.txt')
-        const m4a = join(dir, 'check.m4a')
-        writeFileSync(graphPath, built.filterParts.join(';'), 'utf-8')
-        command
-          .outputOptions('-filter_complex_script', graphPath)
-          .outputOptions(['-map [aenc]', ...OUTPUT_AUDIO_CODEC_ARGS])
-          .output(m4a)
-          .on('start', () => onProgress(29, '音量を測定中'))
-          .on('error', fail)
-          .on('end', () => {
-            if (exportCancelRequested) return fail()
-            const meter = ffmpeg(m4a)
-            const tail: string[] = []
-            meter
-              .outputOptions(['-af', ENCODED_LOUDNESS_FILTER, '-f', 'null'])
-              .output(process.platform === 'win32' ? 'NUL' : '/dev/null')
-              .on('stderr', (line: string) => {
-                tail.push(line)
-                if (tail.length > 60) tail.shift()
-              })
-              .on('error', fail)
-              .on('end', () => {
-                cleanup()
-                resolveMeasure(parseEbur128Summary(tail.join('\n')))
-              })
+    meterEncodedAudio(
+      ffmpegPath,
+      (sink, stop) =>
+        new Promise<boolean>((resolveFeed) => {
+          let dir: string | null = null
+          const done = (ok: boolean): void => {
+            if (dir) rmSync(dir, { recursive: true, force: true })
+            dir = null
+            resolveFeed(ok && !exportCancelRequested)
+          }
+          try {
+            const command = ffmpeg()
+            const built = buildGraph(command, false)
+            built.filterParts.push(`${built.audioLabel}${filter},${AUDIO_FORMAT}[aenc]`)
+            dir = mkdtempSync(join(tmpdir(), 've-graph-'))
+            const graphPath = join(dir, 'filtergraph.txt')
+            writeFileSync(graphPath, built.filterParts.join(';'), 'utf-8')
+            command
+              .outputOptions('-filter_complex_script', graphPath)
+              .outputOptions(['-map [aenc]', ...OUTPUT_AUDIO_CODEC_ARGS])
+              .format('adts')
+              .output(sink, { end: true })
+              .on('start', () => onProgress(29, '音量を合わせ中'))
+              .on('error', () => done(false))
+              .on('end', () => done(true))
               .run()
-            currentExportCommand = meter
-            trackExportCommand(meter)
-            if (exportCancelRequested) meter.kill('SIGKILL')
-          })
-          .run()
-        currentExportCommand = command
-        trackExportCommand(command)
-        if (exportCancelRequested) command.kill('SIGKILL')
-      } catch {
-        fail()
-      }
-    })
+            currentExportCommand = command
+            trackExportCommand(command)
+            if (exportCancelRequested) command.kill('SIGKILL')
+            // 測る側が先に終わったら、読む相手のいない書き込みで止まらないよう止める
+            stop.addEventListener('abort', () => command.kill('SIGKILL'), { once: true })
+          } catch {
+            done(false)
+          }
+        })
+    )
   /** 音量の正規化の掛け方(loudnorm か、一定のゲイン + リミッタ)。正規化しなければ null */
   let loudnessFilter: string | null = null
   if (loudnessNormalization) measured = await measurePass('')
   // 音声が全編無音(音声の無い企画)なら正規化しない。無音の音声のまま書き出す
   const normalizeLoudness = loudnessNormalization && !silentAudio
   if (normalizeLoudness) {
-    const target = options.loudnessTarget ?? 'web'
-    const plan =
-      !exportCancelRequested && measured && needsLimitedGain(target, measured)
-        ? await planLimitedGainValues(target, measured, (f) =>
-            exportCancelRequested ? Promise.resolve(null) : measurePass(f)
-          )
-        : null
-    const first = plan
-      ? limitedGainFilter(plan.gainDb, plan.ceilingDb)
-      : loudnormApplyFilter(options.loudnessTarget, measured)
+    // 書き出しと同じ AAC にして、大きさとトゥルーピークを測りながら合わせる(`fitEncodedLoudness`)
     loudnessFilter = exportCancelRequested
-      ? first
-      : await fitEncodedTruePeak(
-          target,
-          first,
-          plan,
-          measured ? LOUDNESS_TARGETS[target].integrated - measured.inputI : null,
-          (f) => (exportCancelRequested ? Promise.resolve(null) : encodedPass(f))
+      ? loudnormApplyFilter(options.loudnessTarget, measured)
+      : await fitEncodedLoudness(
+          options.loudnessTarget ?? 'web',
+          measured,
+          (f) => (exportCancelRequested ? Promise.resolve(null) : encodedPass(f)),
+          // 前のやり方(速いやり方で合わないときだけ使う): AAC にする前の音を loudnorm で測る
+          (f) => (exportCancelRequested ? Promise.resolve(null) : measurePass(f))
         )
     currentExportCommand = null
     if (exportCancelRequested) {

@@ -52,6 +52,11 @@ export interface AutoEditDecisions {
    * 戻っても、その回の残した場面と比べられる
    */
   builtKept?: { cut: string; keptIds: string[] }[]
+  /**
+   * 前回の作り直しの後に、画面でチェック(残す / 落とす)を触った場面。人が丸ごと消した「残す」場面は、
+   * ここにあるときだけ作り直しで戻す(付け直さなければ、丸ごと消したのも手の削りとして守る)
+   */
+  keepTouched?: string[]
   /** 古い形式の企画を開いて、まだ作り直していない(手で決めた残す/落とすは前の版のものが残っていない) */
   legacyPending?: boolean
   /** 演出テロップの提案の一覧と、置くと決めたもの */
@@ -148,6 +153,7 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
         .map((b) => ({ cut: b.cut as string, keptIds: (b.keptIds as unknown[]).filter(str) }))
         .slice(-BUILT_KEPT_MAX)
     : []
+  const keepTouched = Array.isArray(raw.keepTouched) ? raw.keepTouched.filter(str) : []
   const carriedTelops = Array.isArray(raw.carriedTelops)
     ? raw.carriedTelops.filter(
         (o): o is Omit<TextOverlay, 'id'> =>
@@ -196,6 +202,7 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
       ? { keptIds: raw.keptIds.filter(str) }
       : {}),
     ...(builtKept.length > 0 ? { builtKept } : {}),
+    ...(keepTouched.length > 0 ? { keepTouched } : {}),
     ...(raw.legacyPending === true || readFromTimeline ? { legacyPending: true } : {}),
     effects: effects.map((e) => ({ ...e, reason: str(e.reason) ? e.reason : '' })),
     effectChosen,

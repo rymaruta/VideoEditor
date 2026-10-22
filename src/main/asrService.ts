@@ -4,7 +4,14 @@ import { join } from 'path'
 import asrWorkerPath from './asrWorker?modulePath'
 import { ffmpegPath } from './ffmpegService'
 import { runChild } from './childRunner'
-import type { AsrJob, AsrJobResult, AsrWorkerMessage } from '@shared/transcript'
+import {
+  DEFAULT_ASR_LANGUAGE,
+  isAsrLanguage,
+  type AsrJob,
+  type AsrJobResult,
+  type AsrLanguage,
+  type AsrWorkerMessage
+} from '@shared/transcript'
 
 /**
  * 音声認識の呼び出し口。計算は `asrWorker`(別プロセス。理由は childMain)で行い、ここは結果を集めて返す。
@@ -13,10 +20,18 @@ import type { AsrJob, AsrJobResult, AsrWorkerMessage } from '@shared/transcript'
 
 let running: UtilityProcess | null = null
 let canceled = false
+/** 設定の言語(画面の設定から `setAsrLanguage` で伝わる) */
+let language: AsrLanguage = DEFAULT_ASR_LANGUAGE
+
+export function setAsrLanguage(value: unknown): void {
+  if (isAsrLanguage(value)) language = value
+}
 
 export function runAsr(
   jobs: AsrJob[],
-  onMessage: (m: Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 'error' }>) => void
+  onMessage: (m: Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 'error' }>) => void,
+  /** 省略は設定の言語 */
+  options?: { language?: unknown }
 ): Promise<AsrJobResult[]> {
   if (running) return Promise.reject(new Error('音声認識はすでに実行中です'))
   const cacheDir = join(app.getPath('userData'), 'models')
@@ -26,7 +41,12 @@ export function runAsr(
     const results: AsrJobResult[] = []
     running = runChild(
       asrWorkerPath,
-      { jobs, ffmpegPath, cacheDir },
+      {
+        jobs,
+        ffmpegPath,
+        cacheDir,
+        language: isAsrLanguage(options?.language) ? options.language : language
+      },
       (raw) => {
         const m = raw as unknown as AsrWorkerMessage
         if (m.type === 'result') results.push(m.result)

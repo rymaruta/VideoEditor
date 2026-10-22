@@ -2,12 +2,23 @@ import { childMain } from './childMain'
 import { readWindow } from './audioPcm'
 import {
   asrGroupResults,
+  averageProbs,
   groupAsrJobs,
+  languageProbes,
+  languageProbs,
   markSegmentStarts,
   type AsrRawChunk,
   type GroupedJob
 } from '@shared/diarize/groupJobs'
-import type { AsrDevice, AsrJob, AsrWorkerMessage } from '@shared/transcript'
+import {
+  chooseAsrLanguage,
+  withLanguageFallback,
+  DEFAULT_ASR_LANGUAGE,
+  type AsrDevice,
+  type AsrJob,
+  type AsrLanguage,
+  type AsrWorkerMessage
+} from '@shared/transcript'
 
 /**
  * 音声認識(計画書 §5.3)を別スレッドで行う。モデルは whisper-large-v3-turbo(単語の時刻つき)。
@@ -26,6 +37,8 @@ interface WorkerInput {
   cacheDir: string
   /** 指定があればその順に試す(テスト・設定用) */
   devices?: AsrDevice[]
+  /** 話している言語。`auto` は素材ごとに判定する。省略は日本語(今までどおり) */
+  language?: AsrLanguage
 }
 
 let input: WorkerInput
@@ -50,6 +63,45 @@ const OPTIONS = {
   task: 'transcribe',
   return_timestamps: 'word',
   chunk_length_s: 30
+}
+
+interface WhisperParts {
+  model?: ((
+    inputs: Record<string, unknown>
+  ) => Promise<{ logits: { data: ArrayLike<number>; dims: number[] } }>) & {
+    generation_config?: { decoder_start_token_id?: number; lang_to_id?: Record<string, number> }
+  }
+  processor?: (audio: Float32Array) => Promise<{ input_features: unknown }>
+}
+
+/**
+ * 窓の音の言語を判定する(Whisper の最初の言葉=言語の印の確からしさ)。transformers.js は言語を
+ * 指定しないと英語にしてしまう(判定しない)ので、エンコーダと最初の1語だけを自分で計算する。
+ * 判定できなければ null
+ */
+async function detectLanguage(
+  asr: Transcriber,
+  audio: Float32Array
+): Promise<Map<string, number> | null> {
+  const { model, processor } = asr as unknown as WhisperParts
+  const config = model?.generation_config
+  if (!model || !processor || !config?.lang_to_id || config.decoder_start_token_id === undefined)
+    return null
+  const { Tensor } = await import('@huggingface/transformers')
+  const { input_features } = await processor(audio)
+  const out = await model({
+    input_features,
+    decoder_input_ids: new Tensor(
+      'int64',
+      BigInt64Array.from([BigInt(config.decoder_start_token_id)]),
+      [1, 1]
+    )
+  })
+  const vocab = out.logits.dims[out.logits.dims.length - 1]
+  const data = out.logits.data
+  const last = Array.from({ length: vocab }, (_, i) => data[data.length - vocab + i])
+  const probs = languageProbs(last, config.lang_to_id)
+  return probs.size > 0 ? probs : null
 }
 
 async function loadTranscriber(): Promise<{ asr: Transcriber; device: AsrDevice }> {
@@ -118,6 +170,36 @@ async function run(): Promise<void> {
   const groups = groupAsrJobs(input.jobs)
   const read = (g: GroupedJob): Promise<Float32Array> =>
     readWindow(input.ffmpegPath, g.path, g.start, g.end - g.start, SAMPLE_RATE)
+  // 素材(マイク)ごとの言語。自動なら、声の多い窓を少し読んで判定する(1つの素材の中では変えない。
+  // 窓ごとに判定すると、短い相づち・笑いの窓で言語が揺れる)
+  const chosen = input.language ?? DEFAULT_ASR_LANGUAGE
+  const languageOf = new Map<string, string>()
+  if (chosen === 'auto') {
+    for (const [path, probes] of languageProbes(groups)) {
+      post({ type: 'status', stage: 'load', percent: 0, note: '話している言語を判定中' })
+      const found: Map<string, number>[] = []
+      for (const g of probes) {
+        try {
+          const p = await detectLanguage(asr, await read(g))
+          if (p) found.push(p)
+        } catch {
+          // 判定できない窓は飛ばす(全部だめなら日本語)
+        }
+      }
+      const lang = chooseAsrLanguage(averageProbs(found))
+      languageOf.set(path, lang)
+      post({
+        type: 'status',
+        stage: 'load',
+        percent: 0,
+        note: `話している言語: ${lang}(${path.split(/[/\\]/).pop() ?? path})`
+      })
+    }
+  }
+  const optionsFor = (g: GroupedJob): typeof OPTIONS =>
+    chosen === 'auto'
+      ? { ...OPTIONS, language: languageOf.get(g.path) ?? 'ja' }
+      : { ...OPTIONS, language: chosen }
   let done = 0
   let next = groups.length > 0 ? read(groups[0]) : null
   for (let gi = 0; gi < groups.length; gi++) {
@@ -126,7 +208,10 @@ async function run(): Promise<void> {
     next = gi + 1 < groups.length ? read(groups[gi + 1]) : null
     // 先読みが今の認識中に失敗しても「処理されない失敗」にしない(次の周の await で失敗として扱う)
     next?.catch(() => {})
-    const r = await asr(audio, OPTIONS)
+    const options = optionsFor(group)
+    const r = await withLanguageFallback(options.language, (language) =>
+      asr(audio, { ...options, language })
+    )
     for (const result of asrGroupResults(group, r.text ?? '', r.chunks ?? []))
       post({ type: 'result', result })
     done += group.parts.length

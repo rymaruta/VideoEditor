@@ -29,6 +29,7 @@ import {
   type EditPolicy,
   type EpisodeKind
 } from '@shared/structure/kind'
+import { ASR_LANGUAGES, DEFAULT_ASR_LANGUAGE, type AsrLanguage } from '@shared/transcript'
 
 const STORAGE_KEY = 've-youtube-api-key'
 const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
@@ -53,6 +54,7 @@ const AI_PROVIDER_KEY = 've-ai-provider'
 const SPEECH_TELOP_LOOK_KEY = 've-speech-telop-look'
 const EPISODE_KIND_KEY = 've-episode-kind'
 const EDIT_POLICY_KEY = 've-edit-policy'
+const ASR_LANGUAGE_KEY = 've-asr-language'
 const FAVORITE_COLORS_KEY = 've-favorite-colors'
 const FAVORITE_GRADIENTS_KEY = 've-favorite-gradients'
 const RECENT_COLORS_KEY = 've-recent-colors'
@@ -174,6 +176,9 @@ interface SettingsState {
   /** 編集の方針(面白い所だけ・テンポよく・軽く整える)。種類を替えると、その種類の既定に戻す */
   editPolicy: EditPolicy
   setEditPolicy: (policy: EditPolicy) => void
+  /** 自動編集の文字起こしの言語(自動判定・日本語・英語…)。番組の種類と同じく、回を作るときに選ぶ */
+  asrLanguage: AsrLanguage
+  setAsrLanguage: (language: AsrLanguage) => void
   /** お気に入りの色(`#rrggbb`。新しいものが先頭)。テロップ・サムネイルの色の欄で使い回す */
   favoriteColors: string[]
   addFavoriteColor: (color: string) => void
@@ -372,6 +377,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     writeSetting(EDIT_POLICY_KEY, policy)
     set({ editPolicy: policy })
   },
+  asrLanguage: readChoice<AsrLanguage>(ASR_LANGUAGE_KEY, ASR_LANGUAGES, DEFAULT_ASR_LANGUAGE),
+  setAsrLanguage: (language) => {
+    writeSetting(ASR_LANGUAGE_KEY, language)
+    set({ asrLanguage: language })
+    sendAsrLanguage(language)
+  },
   favoriteColors: (() => {
     try {
       return normalizeFavoriteColors(JSON.parse(readSetting(FAVORITE_COLORS_KEY) ?? '[]'))
@@ -516,3 +527,19 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     }
   }
 }))
+
+/**
+ * 文字起こしの言語を main に伝える(認識は main の別プロセスで行い、自動編集はその言語で認識する)。
+ * 画面のないテスト・古い preload では何もしない
+ */
+function sendAsrLanguage(language: AsrLanguage): void {
+  try {
+    const api = (
+      globalThis as { window?: { api?: { asrSetLanguage?: (l: AsrLanguage) => unknown } } }
+    ).window?.api
+    void Promise.resolve(api?.asrSetLanguage?.(language)).catch(() => {})
+  } catch {
+    // 伝えられなくても、main は既定の言語で認識する
+  }
+}
+sendAsrLanguage(useSettingsStore.getState().asrLanguage)

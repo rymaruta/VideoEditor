@@ -1,21 +1,31 @@
 import { trackProcess } from './liveProcesses'
 import {
-  ENCODED_LOUDNESS_FILTER,
-  LOUDNESS_TARGETS,
   OUTPUT_AUDIO_CODEC_ARGS,
-  fitEncodedTruePeak,
-  limitedGainFilter,
-  loudnormApplyFilter,
+  fitEncodedLoudness,
   loudnormMeasureFilter,
-  needsLimitedGain,
-  parseEbur128Summary,
-  planLimitedGainValues,
   type LoudnessTarget
 } from '@shared/loudness'
 import { spawn } from 'child_process'
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { app } from 'electron'
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  statfsSync,
+  writeFileSync
+} from 'fs'
+import { rm, stat } from 'fs/promises'
 import { cpus, tmpdir } from 'os'
-import { join } from 'path'
+import { dirname, join } from 'path'
+import {
+  LOW_DISK_RESERVE_BYTES,
+  chooseWorkLocation,
+  diskRanLowMessage,
+  estimateSegmentedExportBytes
+} from '@shared/exportDiskSpace'
+import { measureEncodedLoudness } from './encodedLoudness'
 import type { MediaAsset, QualityPreset, TextOverlay } from '@shared/types'
 import type { ProjectV2, Sequence } from '@shared/sequence/types'
 import {
@@ -67,9 +77,15 @@ import {
  * 計画書: `docs/VARIETY_AUTO_EDIT_PLAN.md` §4.3
  *
  * 1. シーケンスを 20〜90秒の区間に分ける(`planSegments`)
- * 2. 区間ごとに映像(最終の形式で直接エンコード)と音声(無圧縮 WAV)を**並列に**書き出す
- * 3. 映像は concat demuxer で**再エンコードせずに**繋ぎ、音声は WAV を繋いでから
- *    (必要ならラウドネスを2パスで測って)AAC にし、1つの mp4 にまとめる
+ * 2. 区間ごとに映像(最終の形式で直接エンコード)と音声(浮動小数のまま可逆に縮めた WavPack)を
+ *    **並列に**書き出す
+ * 3. 映像は concat demuxer で**再エンコードせずに**繋ぎ、音声は区間の WavPack を concat demuxer で
+ *    直接読んで(必要ならラウドネスを測って)AAC にし、1つの mp4 にまとめる
+ *
+ * 一時ファイル: 前は区間の音を無圧縮の 32bit WAV にし、さらに全体を1本の full.wav に写していたので、
+ * 音だけで 1 秒 768KB(95 分で一時フォルダが 4.2GB、3時間で 8GB 超。full.wav は 4GiB を越えると
+ * WAV の大きさの欄があふれる)。いまは全体の1本を作らず、区間の音は WavPack(実測で無圧縮の 4〜7 割)。
+ * 書き出す前に空きを見積もり、途中でも空きが減りすぎたら止める(`LOW_DISK_RESERVE_BYTES`)
  *
  * 区間ごとの映像は**同じエンコーダ・同じ設定**で作る(途中で別のエンコーダに切り替えると、
  * 再エンコードなしの連結で壊れたファイルになる)。音声は絶対位置のサンプル数で区切るので、
@@ -98,6 +114,10 @@ export interface SegmentedExportOptions {
   /** 区間の長さ。既定は `defaultSegmentOptions` */
   segmentOptions?: SegmentPlanOptions
   signal?: AbortSignal
+  /** 一時フォルダを作る場所。既定は OS の一時フォルダ(足りなければ書き出し先のフォルダ) */
+  tempDir?: string
+  /** ディスクの空き(バイト)を返す。試験で差し替える。既定は `statfs` */
+  diskFree?: (path: string) => number
 }
 
 export interface SegmentedExportResult {
@@ -371,7 +391,38 @@ export async function exportSequenceSegmented(
     options.encoder && options.encoder !== 'auto' ? options.encoder : await detectVideoEncoder()
   const parallel = Math.max(1, options.maxParallel ?? defaultParallelism(encoder))
 
-  const work = mkdtempSync(join(tmpdir(), 've-seg-'))
+  const diskFree = options.diskFree ?? freeBytes
+  const work = makeWorkDir(
+    options.tempDir ?? tmpdir(),
+    outputPath,
+    estimateSegmentedExportBytes({
+      durationSec: frameToSeconds(seq, totalFrames),
+      width: seq.width,
+      height: seq.height,
+      fps: seq.fps.num / seq.fps.den,
+      quality,
+      stretchedSec: stretchedSeconds(seq)
+    }),
+    diskFree
+  )
+  // 途中でディスクの空きが減りすぎたら止める(区間の映像は絵柄で見込みの数倍になりうる)
+  const lowDisk = new AbortController()
+  let lowDiskError: Error | null = null
+  // 一時フォルダと書き出し先が別のドライブなら、両方を見る
+  const watchPaths = sameVolume(work, dirname(outputPath)) ? [work] : [work, dirname(outputPath)]
+  const checkDisk = (): void => {
+    if (lowDiskError) return
+    const frees = watchPaths.map((p) => safeFree(diskFree, p)).filter((v) => v !== null)
+    const free = frees.length > 0 ? Math.min(...frees) : null
+    if (free !== null && free < LOW_DISK_RESERVE_BYTES) {
+      lowDiskError = new Error(diskRanLowMessage(free))
+      lowDisk.abort()
+    }
+  }
+  const watch = setInterval(checkDisk, 1000)
+  watch.unref?.()
+  const outerSignal = signal
+  const runSignal = outerSignal ? AbortSignal.any([outerSignal, lowDisk.signal]) : lowDisk.signal
   try {
     const assetsById = new Map(project.assets.map((a) => [a.id, a]))
 
@@ -452,6 +503,8 @@ export async function exportSequenceSegmented(
           item.sourceOut !== undefined && item.sourceOut > item.sourceIn
             ? Math.min(want, item.sourceOut - item.sourceIn)
             : want
+        // WAV のまま(区間ごとに -ss で読むので、読み始めの位置が確実な形式。空の WavPack は開けない)。
+        // 長いクリップでも 4GiB で大きさの欄があふれないよう、越えるときは RF64 にする
         const out = join(work, `stretch_${stretched.size}.wav`)
         await runFfmpeg(
           [
@@ -468,12 +521,14 @@ export async function exportSequenceSegmented(
             `${ALIGN_AUDIO_START},${audioSpeedChain(speed)}`,
             '-c:a',
             'pcm_f32le',
+            '-rf64',
+            'auto',
             '-ar',
             String(OUTPUT_SAMPLE_RATE),
             ...NO_SOURCE_METADATA_ARGS,
             out
           ],
-          signal
+          runSignal
         )
         stretched.set(item.id, out)
         const ch = audioChannels.get(asset.filePath)
@@ -499,11 +554,14 @@ export async function exportSequenceSegmented(
       encoder === 'libx264' ? Math.max(1, Math.floor(cpus().length / parallel)) : 0
 
     let doneFrames = 0
-    const report = (): void =>
+    const report = (): void => {
+      // 区間が1つ書けるたびにも空きを見る(短い書き出しは見回りの間隔より先に終わる)
+      checkDisk()
       onProgress(
         Math.min(90, (doneFrames / (totalFrames * 2)) * 90),
         `書き出し中(${segments.length}区間・${parallel}並列・${encoderLabel(encoder)})`
       )
+    }
     report()
 
     const name = (s: Segment, ext: string): string =>
@@ -524,11 +582,11 @@ export async function exportSequenceSegmented(
               ...(threadsPerJob > 0 ? ['-threads', String(threadsPerJob)] : []),
               name(s, 'mp4')
             ],
-            signal
+            runSignal
           )
           doneFrames += s.endFrame - s.startFrame
           report()
-        }, signal)
+        }, runSignal)
       )
       jobs.push(() =>
         withRetry(async () => {
@@ -540,102 +598,88 @@ export async function exportSequenceSegmented(
               ...graphArgs(graph, name(s, 'a.txt')),
               '-vn',
               ...NO_SOURCE_METADATA_ARGS,
-              '-c:a',
-              'pcm_f32le',
+              ...SEGMENT_AUDIO_CODEC_ARGS,
               '-ar',
               String(OUTPUT_SAMPLE_RATE),
-              name(s, 'wav')
+              name(s, 'wv')
             ],
-            signal
+            runSignal
           )
           doneFrames += s.endFrame - s.startFrame
           report()
-        }, signal)
+        }, runSignal)
       )
     }
     await runPool(jobs, parallel)
 
     // --- 連結 ---
+    // 音は全体を1本のファイルに写さず、区間の WavPack を concat demuxer で直接読む
+    // (前は full.wav に写していたので、区間の音と同じ大きさがもう1つ要り、4GiB を越えると壊れうる)
     const listLine = (p: string): string => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`
     const videoList = join(work, 'video.txt')
     const audioList = join(work, 'audio.txt')
     writeFileSync(videoList, segments.map((s) => listLine(name(s, 'mp4'))).join('\n'), 'utf-8')
-    writeFileSync(audioList, segments.map((s) => listLine(name(s, 'wav'))).join('\n'), 'utf-8')
-    const fullWav = join(work, 'full.wav')
-    onProgress(91, '音声をつなぎ中')
-    await runFfmpeg(
-      ['-v', 'error', '-f', 'concat', '-safe', '0', '-i', audioList, '-c', 'copy', fullWav],
-      signal
-    )
+    writeFileSync(audioList, segments.map((s) => listLine(name(s, 'wv'))).join('\n'), 'utf-8')
+    const audioInput = ['-f', 'concat', '-safe', '0', '-i', audioList]
 
-    let measured: LoudnessMeasurement | null = null
-    /** 何も掛けない1回目の測定が、音が全編デジタルの無音だと答えたか(`loudnormMeasuredSilence`) */
-    let silentAudio = false
-    /** 音全体に `filter` を掛けた後の大きさを測る */
-    const measureWith = async (filter: string): Promise<LoudnessMeasurement | null> => {
+    const audioFilter: string[] = []
+    if (options.loudnessNormalization) {
+      onProgress(91, '音量を測定中')
       const { stderr } = await runFfmpeg(
         [
           '-v',
           'info',
-          '-i',
-          fullWav,
+          ...audioInput,
           '-af',
-          `${filter ? `${filter},` : ''}${loudnormMeasureFilter(options.loudnessTarget)}`,
+          loudnormMeasureFilter(options.loudnessTarget),
           '-f',
           'null',
           '-'
         ],
-        signal
+        runSignal
       )
-      if (filter === '' && loudnormMeasuredSilence(stderr)) silentAudio = true
-      return parseLoudnormMeasurement(stderr)
-    }
-    if (options.loudnessNormalization) {
-      onProgress(93, '音量を測定中')
-      measured = await measureWith('')
-    }
-    const audioFilter: string[] = []
-    // 音が全編無音(音声の無い企画)なら正規化しない(無音に loudnorm を掛けると AAC が止まる)
-    if (options.loudnessNormalization && !silentAudio) {
-      // 2パス目の掛け方は v1 の書き出しと同じ(理由もそちらのコメント)
-      const target = options.loudnessTarget ?? 'web'
-      const plan =
-        measured && needsLimitedGain(target, measured)
-          ? await planLimitedGainValues(target, measured, measureWith)
-          : null
-      const first = plan
-        ? limitedGainFilter(plan.gainDb, plan.ceilingDb)
-        : loudnormApplyFilter(options.loudnessTarget, measured)
-      // AAC にした後のトゥルーピークを測り、越えていればリミッタを下げる(理由は `fitEncodedTruePeak`)
-      const checkPath = join(work, 'loudness-check.m4a')
-      const loudnorm = await fitEncodedTruePeak(
-        target,
-        first,
-        plan,
-        measured ? LOUDNESS_TARGETS[target].integrated - measured.inputI : null,
-        async (filter) => {
-          await runFfmpeg(
-            [
-              '-v',
-              'error',
-              '-i',
-              fullWav,
-              '-af',
-              `${filter},${AUDIO_FORMAT}`,
-              ...OUTPUT_AUDIO_CODEC_ARGS,
-              checkPath
-            ],
-            signal
-          )
-          const { stderr } = await runFfmpeg(
-            ['-v', 'info', '-i', checkPath, '-af', ENCODED_LOUDNESS_FILTER, '-f', 'null', '-'],
-            signal
-          )
-          return parseEbur128Summary(stderr)
-        }
-      )
-      rmSync(checkPath, { force: true })
-      audioFilter.push('-af', `${loudnorm},${AUDIO_FORMAT}`)
+      // 音が全編無音(音声の無い企画)なら正規化しない(無音に loudnorm を掛けると AAC が止まる)
+      if (!loudnormMeasuredSilence(stderr)) {
+        const measured: LoudnessMeasurement | null = parseLoudnormMeasurement(stderr)
+        // 書き出しと同じ AAC にして、大きさとトゥルーピークを測りながら合わせる(`fitEncodedLoudness`)
+        let pass = 0
+        const filter = await fitEncodedLoudness(
+          options.loudnessTarget ?? 'web',
+          measured,
+          async (f) => {
+            pass++
+            onProgress(Math.min(95, 92 + pass), '音量を合わせ中')
+            const r = await measureEncodedLoudness(
+              ffmpegPath,
+              audioInput,
+              `${f},${AUDIO_FORMAT}`,
+              runSignal
+            )
+            if (runSignal.aborted) throw new Error('EXPORT_CANCELED')
+            return r
+          },
+          // 前のやり方(速いやり方で合わないときだけ使う): AAC にする前の音を loudnorm で測る
+          async (f) => {
+            pass++
+            onProgress(Math.min(95, 92 + pass), '音量を合わせ中')
+            const { stderr: s } = await runFfmpeg(
+              [
+                '-v',
+                'info',
+                ...audioInput,
+                '-af',
+                `${f},${loudnormMeasureFilter(options.loudnessTarget)}`,
+                '-f',
+                'null',
+                '-'
+              ],
+              runSignal
+            )
+            return parseLoudnormMeasurement(s)
+          }
+        )
+        audioFilter.push('-af', `${filter},${AUDIO_FORMAT}`)
+      }
     }
 
     onProgress(96, '仕上げ中')
@@ -649,8 +693,7 @@ export async function exportSequenceSegmented(
         '0',
         '-i',
         videoList,
-        '-i',
-        fullWav,
+        ...audioInput,
         '-map',
         '0:v',
         '-map',
@@ -664,16 +707,172 @@ export async function exportSequenceSegmented(
         ...NO_SOURCE_METADATA_ARGS,
         outputPath
       ],
-      signal
+      runSignal
     )
     onProgress(100, '完了')
     return { segments: segments.length, encoder, parallel, frames: totalFrames }
   } catch (e) {
-    if (signal?.aborted) rmSync(outputPath, { force: true })
+    if (runSignal.aborted) rmSync(outputPath, { force: true })
+    // ディスクの空きで止めたときは、取り消しではなくその理由で失敗させる
+    if (lowDiskError && !outerSignal?.aborted) throw lowDiskError
     throw e
   } finally {
-    rmSync(work, { recursive: true, force: true })
+    clearInterval(watch)
+    // Windows では止めた直後にまだ掴まれていることがあるので、少し待ってやり直す
+    // 消せなくても、書き出しの成否(と元の失敗の理由)は変えない。残ったものは次の起動で消す
+    try {
+      rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      forgetOutsideWorkDir(work)
+    } catch (e) {
+      console.warn('区間ごとの書き出しの一時フォルダを消せませんでした', work, e)
+    }
   }
+}
+
+/**
+ * 区間ごとの音の形式: WavPack(浮動小数のまま可逆。0 dBFS を越える山も切らない)。
+ * 速さ優先の段(1)で、無圧縮の 32bit WAV の 4〜7 割(実測: 記録映像の音 60 秒で 23.0MB → 8.6MB、
+ * 書くのは 0.5 秒。AAC から戻した雑音の多い音では 0.67 倍)。段 0 は 6 割強で縮みが悪く、
+ * 段 2 以上は数倍遅いのに 1 割も縮まない
+ */
+const SEGMENT_AUDIO_CODEC_ARGS = ['-c:a', 'wavpack', '-compression_level', '1']
+
+/** 速さを変えた音を先に書く長さ(秒)の合計(ディスクの見込み用) */
+function stretchedSeconds(seq: Sequence): number {
+  let sec = 0
+  for (const t of seq.audioTracks) {
+    if (t.muted) continue
+    for (const item of t.items) {
+      const speed = item.speed > 0 ? item.speed : 1
+      if (Math.abs(speed - 1) > RESAMPLE_SPEED_LIMIT)
+        sec += frameToSeconds(seq, item.durationFrames) + STRETCH_TAIL_SEC
+    }
+  }
+  return sec
+}
+
+/** ディスクの空き(バイト)。測れなければ例外 */
+function freeBytes(path: string): number {
+  const s = statfsSync(path)
+  return Number(s.bavail) * Number(s.bsize)
+}
+
+function safeFree(diskFree: (path: string) => number, path: string): number | null {
+  try {
+    const v = diskFree(path)
+    return Number.isFinite(v) ? v : null
+  } catch {
+    return null
+  }
+}
+
+/** 2つのフォルダが同じドライブ(ファイルシステム)にあるか。分からなければ同じとみなす(多めに見る) */
+function sameVolume(a: string, b: string): boolean {
+  try {
+    return statSync(a).dev === statSync(b).dev
+  } catch {
+    return true
+  }
+}
+
+/** 一時フォルダを作る(場所は `chooseWorkLocation`)。どこにも入らなければ、始める前に分かる文面で止める */
+function makeWorkDir(
+  base: string,
+  outputPath: string,
+  need: { temp: number; output: number },
+  diskFree: (path: string) => number
+): string {
+  const outDir = dirname(outputPath)
+  const choice = chooseWorkLocation({
+    need,
+    baseFree: safeFree(diskFree, base),
+    outFree: safeFree(diskFree, outDir),
+    together: sameVolume(base, outDir)
+  })
+  if ('error' in choice) throw new Error(choice.error)
+  if (choice.where === 'base') return mkdtempSync(join(base, 've-seg-'))
+  // 書き出し先のフォルダに置くときは、隠しフォルダにする。落ちて残ったときに次の起動で消せるよう、
+  // 作った場所を記録しておく(OS の一時フォルダの外なので、名前で探して消すことはしない)
+  const dir = mkdtempSync(join(outDir, '.ve-seg-'))
+  rememberOutsideWorkDir(dir)
+  return dir
+}
+
+/**
+ * OS の一時フォルダの外に作った作業場の記録。既定はアプリの設定の置き場(userData)。
+ * 試験(Electron の外)では OS の一時フォルダに置く
+ */
+let outsideWorkRegistry: string | null = null
+export function outsideWorkRegistryPath(): string {
+  if (outsideWorkRegistry) return outsideWorkRegistry
+  try {
+    if (app?.getPath) return join(app.getPath('userData'), 'export-work-dirs.json')
+  } catch {
+    // Electron の外
+  }
+  return join(tmpdir(), 've-export-work-dirs.json')
+}
+/** 試験用: 記録の置き場を差し替える(null で既定に戻す) */
+export function setOutsideWorkRegistryPath(path: string | null): void {
+  outsideWorkRegistry = path
+}
+
+function readOutsideWorkDirs(): string[] {
+  try {
+    const v: unknown = JSON.parse(readFileSync(outsideWorkRegistryPath(), 'utf-8'))
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writeOutsideWorkDirs(dirs: string[]): void {
+  try {
+    writeFileSync(outsideWorkRegistryPath(), JSON.stringify(dirs), 'utf-8')
+  } catch {
+    // 記録できなくても書き出しは止めない
+  }
+}
+
+function rememberOutsideWorkDir(dir: string): void {
+  writeOutsideWorkDirs([...readOutsideWorkDirs().filter((d) => d !== dir), dir])
+}
+
+function forgetOutsideWorkDir(dir: string): void {
+  const dirs = readOutsideWorkDirs()
+  if (dirs.includes(dir)) writeOutsideWorkDirs(dirs.filter((d) => d !== dir))
+}
+
+/** 記録の上限(消せないまま残るもの・利用者が消したものが溜まり続けないように) */
+const MAX_OUTSIDE_WORK_RECORDS = 50
+
+/**
+ * 記録した作業場(書き出し先のフォルダに作った `.ve-seg-*`)のうち、半日より古いものを消す。
+ * 書き出し先は切れたネットワークドライブのこともあり、同期の stat はそこで main を止めうるので、
+ * すべて非同期で後回しに調べる。記録から外すのは、消せたとき(と、名前が `.ve-seg-` で始まらない =
+ * 自分の作ったものではないとき)だけ。名前の違うものは記録が壊れていても消さない
+ */
+export async function cleanupOutsideWorkDirs(now = Date.now()): Promise<void> {
+  const removed = new Set<string>()
+  for (const dir of readOutsideWorkDirs()) {
+    const name = dir.split(/[\\/]/).pop() ?? ''
+    if (!name.startsWith('.ve-seg-')) {
+      removed.add(dir)
+      continue
+    }
+    try {
+      const st = await stat(dir)
+      if (now - st.mtimeMs <= 12 * 3600 * 1000) continue
+      await rm(dir, { recursive: true, force: true })
+      removed.add(dir)
+    } catch (e) {
+      // もう無ければ外す。それ以外(切れたドライブ・権限)は次の起動でまた試す
+      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') removed.add(dir)
+    }
+  }
+  // 調べている間に書き出しが記録を足していることがあるので、読み直してから外す
+  const left = readOutsideWorkDirs().filter((d) => !removed.has(d))
+  writeOutsideWorkDirs(left.slice(-MAX_OUTSIDE_WORK_RECORDS))
 }
 
 /**
@@ -700,6 +899,8 @@ const STALE_TEMP_PREFIXES = [
  * 前回の残りの一時フォルダを消す。いま動いている処理のものを消さないよう、半日より古いものだけ
  */
 export function cleanupStaleSegmentDirs(now = Date.now(), base = tmpdir()): void {
+  // 書き出し先に作ったもの: 非同期で後回しに(切れたドライブで止まらないように)
+  void cleanupOutsideWorkDirs(now).catch(() => {})
   let names: string[]
   try {
     names = readdirSync(base)
