@@ -1099,12 +1099,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         readAt
       }
     const kept = new Set(built.keptIds)
-    const info = project.multicam
-    const owned = new Set(
-      info
-        ? coverageOfClips(project.clips, info).map((c) => sceneOfSpan(scenes, c))
-        : scenes.map((sc) => sc.id)
-    )
+    const owned = ownedScenes(project, scenes)
     const emptied = (id: string): boolean => touched.has(id) && !owned.has(id)
     return {
       keep: Object.fromEntries(
@@ -1404,6 +1399,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         `演出テロップ: 今の提案に無い ${carried.length} 枚(人が直したもの・前の提案)を置き直しました`
       )
     set({ lastSpans: plan.cut.spans, speechTelops: telops, carriedTelops: remember })
+    // この作り直しで使う付け直しは、取り消しで戻したものでも、ここからはこの作り直しの記録になる
+    for (const id of released.touched) revivedFrom.delete(id)
     useProjectStore
       .getState()
       .applyRoughCut(
@@ -1421,6 +1418,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
     // 取り消しで作り直しの前の本編に戻ったら、この作り直しで使った付け直しを使い直す
     if (released.touched.length > 0) usedTouches.set(project.clips, released.touched)
+    appliedBuilds++
     set({
       roughCut: {
         keptIds: plan.selection.kept,
@@ -1608,7 +1606,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         const next = { ...s.keep }
         if (keep === undefined) delete next[sceneId]
         else next[sceneId] = keep
+        // 付け直しを覚えるのは、丸ごと消した(本編にクリップが無い)場面だけ。クリップがある場面の
+        // チェックを外して付け直しても、その後で丸ごと消したのを戻す根拠にしない
+        const emptied = !ownedScenes(useProjectStore.getState().project, s.scenes).has(sceneId)
+        if (!emptied) return { keep: next }
         keepTouchedAt.set(sceneId, ++keepTouchClock)
+        revivedFrom.delete(sceneId)
         return {
           keep: next,
           keepTouched: s.keepTouched.includes(sceneId) ? s.keepTouched : [...s.keepTouched, sceneId]
@@ -1716,6 +1719,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       if (get().running || get().scenes.length === 0) return
       runCanceled = false
       set({ running: true })
+      let recut = false
       try {
         // 開き直した企画のゲーム実況は、声の盛り上がりを測り直してから(山の前後に絞るのに使う)
         const project = useProjectStore.getState().project
@@ -1747,9 +1751,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             keepTouched: remapKept(get().keepTouched, match),
             sceneKind: kind
           })
-          forgetUsedTouches()
+          recut = true
         }
+        const applied = appliedBuilds
         await buildAndApply()
+        // 切り直した場面で作り直しが当たったら、前の場面の ID の記録は使わない(当たらなければそのまま)
+        if (recut && appliedBuilds !== applied) forgetUsedTouches()
       } catch (e) {
         const msg = formatIpcError(e)
         // 中止した(このPCの AI の提案を止めた など)なら、動いていた工程を「中止しました」に戻す。
@@ -2226,16 +2233,37 @@ const keepTouchedAt = new Map<string, number>()
  * 戻ったら、付け直しはまだ使っていないことにする(自動編集の判断は取り消しで戻らないので)。
  * 同じ並びを手で作り直しても別の配列なので当たらない(付け直さなければ戻さない)
  */
+/** 当たった作り直しの数(場面の切り直しが当たったかを見る) */
+let appliedBuilds = 0
 let usedTouches = new WeakMap<readonly unknown[], string[]>()
 /**
  * 取り消しで付け直しを戻した時の本編(取り消す前の並び)→ 戻した付け直しと、戻した時のチェックの番号。
  * やり直し(Ctrl+Y)でその並びに来たら、戻した付け直しを使い済みに戻す(その後に触り直したものは除く)
  */
 let revivedTouches = new WeakMap<readonly unknown[], { ids: string[]; clock: number }>()
+/** 今の本編にクリップを持つ場面(クリップの場面は `sceneOfSpan`) */
+function ownedScenes(
+  project: Project,
+  scenes: readonly { id: string; start: number; end: number }[]
+): Set<string | undefined> {
+  return new Set(
+    project.multicam
+      ? coverageOfClips(project.clips, project.multicam).map((c) => sceneOfSpan(scenes, c))
+      : scenes.map((sc) => sc.id)
+  )
+}
+
+/**
+ * 取り消しで戻した付け直し → 戻した元の記録(`usedTouches` の中身)。戻した付け直しが、場面に本編の
+ * クリップが戻って捨てられたら、元の記録からも外す(やり直しでまた戻さない。消したのを取り消したのと同じ)
+ */
+const revivedFrom = new Map<string, string[]>()
+
 /** 場面を切り直したら、前の場面の ID の記録は使わない(別の場面に付く。戻さない側に倒す) */
 function forgetUsedTouches(): void {
   usedTouches = new WeakMap()
   revivedTouches = new WeakMap()
+  revivedFrom.clear()
 }
 
 /** 残した場面の ID を、切り直した場面の ID へ移す(時刻がほぼ同じ場面だけ。`match` は今 → 前) */
@@ -2387,25 +2415,44 @@ export function recordedAtByAsset(
 useProjectStore.subscribe((state, prev) => {
   if (state.project.clips === prev.project.clips) return
   const pending = usePipelineStore.getState().keepTouched
-  let keepTouched: string[] | null = null
+  let keepTouched = pending
   const used = usedTouches.get(state.project.clips)
   if (used) {
     const scenes = new Set(usePipelineStore.getState().scenes.map((sc) => sc.id))
     const back = used.filter((id) => scenes.has(id) && !pending.includes(id))
     if (back.length > 0) {
+      for (const id of back) revivedFrom.set(id, used)
       keepTouched = [...pending, ...back]
       revivedTouches.set(prev.project.clips, { ids: back, clock: keepTouchClock })
     }
   }
   const revived = revivedTouches.get(state.project.clips)
-  if (!keepTouched && revived) {
+  if (keepTouched === pending && revived) {
     const drop = new Set(revived.ids.filter((id) => (keepTouchedAt.get(id) ?? 0) <= revived.clock))
-    if (pending.some((id) => drop.has(id))) keepTouched = pending.filter((id) => !drop.has(id))
+    keepTouched = pending.filter((id) => !drop.has(id))
+    for (const id of drop) revivedFrom.delete(id)
   }
-  if (!keepTouched) return
+  // 付け直しは丸ごと消した場面のもの。場面に本編のクリップが戻ったら(消したのを取り消した など)、
+  // その付け直しはもう使わない(また消しても、付け直さなければ戻さない)
+  if (keepTouched.length > 0) {
+    const owned = ownedScenes(state.project, usePipelineStore.getState().scenes)
+    for (const id of keepTouched.filter((x) => owned.has(x))) {
+      const from = revivedFrom.get(id)
+      if (from?.includes(id)) from.splice(from.indexOf(id), 1)
+      revivedFrom.delete(id)
+    }
+    keepTouched = keepTouched.filter((id) => !owned.has(id))
+  }
+  if (keepTouched.length === pending.length && keepTouched.every((id, k) => id === pending[k]))
+    return
   usePipelineStore.setState({ keepTouched })
   const autoEdit = state.project.autoEdit
-  if (autoEdit) useProjectStore.getState().setAutoEdit({ ...autoEdit, keepTouched })
+  if (autoEdit) {
+    // 形は persistDecisions とそろえる(空なら書かない)
+    const { keepTouched: _old, ...rest } = autoEdit
+    void _old
+    useProjectStore.getState().setAutoEdit(keepTouched.length > 0 ? { ...rest, keepTouched } : rest)
+  }
 })
 
 // 別のプロジェクトを開いた・新しく作ったら、前の回の自動編集の結果を捨てる
