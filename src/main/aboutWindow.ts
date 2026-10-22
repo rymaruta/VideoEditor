@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { PRODUCT_NAME } from '@shared/product'
+import { docNavigation } from './docNavigation'
 
 /**
  * バージョン情報と、サードパーティのライセンス表記。
@@ -64,10 +65,18 @@ function openDocWindow(file: string, title: string, parent?: BrowserWindow | nul
   win.removeMenu()
   // 文書の中の題名で窓の題名を上書きさせない
   win.on('page-title-updated', (e) => e.preventDefault())
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  // 同じ文書の中の移動(目次のリンク)だけ許す
+  // 同じ文書の中の移動(目次のリンク)だけ許す。https のリンクは既定のブラウザで開く(docNavigation)
+  const follow = (url: string): boolean => {
+    const action = docNavigation(url, path)
+    if (action === 'external') void shell.openExternal(url)
+    return action === 'allow'
+  }
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    follow(url)
+    return { action: 'deny' }
+  })
   win.webContents.on('will-navigate', (e, url) => {
-    if (!url.split('#')[0].endsWith(file)) e.preventDefault()
+    if (!follow(url)) e.preventDefault()
   })
   win.on('closed', () => docWindows.delete(file))
   void win.loadFile(path)
