@@ -297,6 +297,57 @@ export interface RoughCutPlan {
 }
 
 /**
+ * 手で決めたもの(`keep`)を当てる前の、自動の場面の選び方(`planRoughCut` と同じ)。
+ * `checked` は見どころの数を見直した判定
+ */
+function autoSelection(
+  scenes: readonly Scene[],
+  judgements: readonly SceneJudgement[],
+  kind: EpisodeKind,
+  policyName: EditPolicy | undefined,
+  targetSec: number,
+  estimate: (s: Scene) => number
+): {
+  auto: ReturnType<typeof selectScenes>
+  checked: ReturnType<typeof demoteIndiscriminateHighlights>
+} {
+  const policy = POLICY_PROFILES[policyName ?? DEFAULT_POLICY[kind]]
+  const target = policy.useTarget ? targetSec : 0
+  const minScore = target ? -Infinity : policy.minScoreWithoutTarget
+  // 点数の下限で残す場面を決めるとき(「面白い所だけ」・長さの目標なし)だけ、見どころの数が残し方を
+  // 決める。ほとんどの場面が「見どころ」なら見分けになっていないので、点数の判定に置き換える
+  // (方針・目標を替えて作り直したときも、ここで決まる)
+  const checked = Number.isFinite(minScore)
+    ? demoteIndiscriminateHighlights(judgements, heuristicJudgements(scenes, kind))
+    : { judgements: [...judgements] }
+  const auto = selectScenes(
+    scenes,
+    checked.judgements,
+    target || Infinity,
+    estimate,
+    minScore,
+    policy.dropUnneeded
+  )
+  return { auto, checked }
+}
+
+/**
+ * 手で決めたものを当てる前に、作り直すと自動で残す場面(`planRoughCut` と同じ選び方)。
+ * 古い形式の企画を開いたときに、作り直したら残す場面として画面に出す。仕上がりの長さを決めていれば、
+ * 場面の長さは詰める前のもので見込む(作り直すと詰めた後の長さで選ぶので、多めに落ちることがある)
+ */
+export function autoKeptScenes(
+  scenes: readonly Scene[],
+  judgements: readonly SceneJudgement[],
+  kind: EpisodeKind,
+  policy?: EditPolicy,
+  targetSec = 0
+): string[] {
+  return autoSelection(scenes, judgements, kind, policy, targetSec, (s) => s.end - s.start).auto
+    .kept
+}
+
+/**
  * 選んだ場面から、カット → アングル → 仮編集の中身 → 発言テロップ を作る。
  * `keep` で場面ごとに残す/落とすを手で決められる(画面の「構成」タブ)。
  */
@@ -352,21 +403,13 @@ export function planRoughCut(
   const tightenedLength = new Map(
     scenes.map((s) => [s.id, totalLength(tightenRanges(rangesOf(s), activity, speech, tighten))])
   )
-  const target = policy.useTarget ? options.targetSec : 0
-  const minScore = target ? -Infinity : policy.minScoreWithoutTarget
-  // 点数の下限で残す場面を決めるとき(「面白い所だけ」・長さの目標なし)だけ、見どころの数が残し方を
-  // 決める。ほとんどの場面が「見どころ」なら見分けになっていないので、点数の判定に置き換える
-  // (方針・目標を替えて作り直したときも、ここで決まる)
-  const checked = Number.isFinite(minScore)
-    ? demoteIndiscriminateHighlights(judgements, heuristicJudgements(scenes, kind))
-    : { judgements: [...judgements] }
-  const auto = selectScenes(
+  const { auto, checked } = autoSelection(
     scenes,
-    checked.judgements,
-    target || Infinity,
-    (s) => tightenedLength.get(s.id) ?? s.end - s.start,
-    minScore,
-    policy.dropUnneeded
+    judgements,
+    kind,
+    options.policy,
+    options.targetSec,
+    (s) => tightenedLength.get(s.id) ?? s.end - s.start
   )
   // 手で決めた分を上書きする
   const keepSet = new Set(auto.kept)

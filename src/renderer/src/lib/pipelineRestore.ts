@@ -3,8 +3,10 @@ import type { EpisodeKind } from '@shared/structure/kind'
 import { heuristicJudgements, type Scene, type SceneJudgement } from '@shared/structure/scenes'
 import type { HypeMoment } from '@shared/structure/hype'
 import type { EffectProposal } from '@shared/telop/effects'
+import type { EditPolicy } from '@shared/structure/kind'
 import { spansOfClips } from '@shared/roughCut/overrides'
-import { scenesFor } from './roughCutPlan'
+import { cutSignature } from '@shared/autoEdit'
+import { autoKeptScenes, scenesFor } from './roughCutPlan'
 
 type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
 
@@ -18,8 +20,8 @@ export interface RestoredPipeline<Id extends string = string> {
   hype: HypeMoment[]
   /** 手で決めた残す / 落とす(保存した判断) */
   keep: Record<string, boolean>
-  /** 古い企画で、今の本編から読み取った残す / 落とす(手で決めたものとは別) */
-  timelineKeep: Record<string, boolean>
+  /** 作り直しのたびの残した場面(`AutoEditDecisions.builtKept`。今の場面の ID に直したもの) */
+  builtKept: { cut: string; keptIds: string[] }[]
   /** 人が直した演出テロップで提案の一覧に無いもの(共通の時刻) */
   carriedTelops: Omit<TextOverlay, 'id'>[]
   targetMinutes: number
@@ -36,93 +38,15 @@ export interface RestoredPipeline<Id extends string = string> {
   } | null
   /** 企画に残らないため作り直せなかったもの(画面に、何をやり直せばよいかと一緒に出す) */
   missing: string[]
-  /** 自動編集の判断が残っていない古い企画から読み取ったか */
+  /** 自動編集の判断が残っていない古い企画(前の版で保存した)を開いて、まだ作り直していないか */
   legacy: boolean
 }
 
 const UNKNOWN = '開き直した企画のため分かりません'
 
-/** 場面が今の本編にどれだけ残っているか(共通の時刻で重なる秒数) */
-function keptSeconds(scene: Scene, spans: readonly { start: number; end: number }[]): number {
-  let t = 0
-  for (const s of spans)
-    t += Math.max(0, Math.min(scene.end, s.end) - Math.max(scene.start, s.start))
-  return t
-}
-
-/**
- * 本編のクリップのうち、仮編集の並び(共通の時刻が進む順)に沿ったものの区間。並びに沿ったクリップの
- * 長さの合計が最も長くなる列(重み付きの最長増加列)を選ぶ。並びから外れたクリップ(前のクリップより前の
- * 時刻へ戻るもの・別の場面の途中に入ったもの = 人が差し込んだ反応のカット・振り返りなど)は入らない。
- * 仮編集は場面を時刻の順に並べ、手で詰めても・カメラを替えても・速さを変えても並びは崩れないので、
- * 並びに沿ったクリップが「仮編集で残した所」になる
- */
-export function inOrderSpans(
-  spans: readonly { start: number; end: number }[]
-): { start: number; end: number }[] {
-  const n = spans.length
-  if (n === 0) return []
-  // 始まりの時刻の順位(ほぼ同じ時刻は同じ順位にし、どちらの順でも並びに沿うとする)
-  const keys: number[] = []
-  for (const t of spans.map((s) => s.start).sort((a, b) => a - b))
-    if (keys.length === 0 || t - keys[keys.length - 1] > 1e-3) keys.push(t)
-  /** `t` + 1e-3 以下の最後の順位(1 始まり) */
-  const rankOf = (t: number): number => {
-    let lo = 0
-    let hi = keys.length
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1
-      if (keys[mid] <= t + 1e-3) lo = mid + 1
-      else hi = mid
-    }
-    return lo
-  }
-  // 順位ごとの「そこまでで最も長い列」(Fenwick 木で前の順位までの最大を引く)
-  const treeVal = new Float64Array(keys.length + 1)
-  const treeIdx = new Int32Array(keys.length + 1).fill(-1)
-  const best = new Float64Array(n)
-  const prev = new Int32Array(n).fill(-1)
-  for (let i = 0; i < n; i++) {
-    const r = rankOf(spans[i].start)
-    let v = 0
-    let from = -1
-    for (let k = r; k > 0; k -= k & -k)
-      if (treeVal[k] > v) {
-        v = treeVal[k]
-        from = treeIdx[k]
-      }
-    best[i] = v + Math.max(0, spans[i].end - spans[i].start)
-    prev[i] = from
-    for (let k = r; k <= keys.length; k += k & -k)
-      if (best[i] > treeVal[k]) {
-        treeVal[k] = best[i]
-        treeIdx[k] = i
-      }
-  }
-  let last = 0
-  for (let i = 1; i < n; i++) if (best[i] > best[last]) last = i
-  const out: { start: number; end: number }[] = []
-  for (let i = last; i >= 0; i = prev[i]) out.push(spans[i])
-  return out.reverse()
-}
-
-/**
- * 今の本編に残っている場面(仮編集で残した場面)を、本編のクリップから読み取る。並びに沿ったクリップ
- * (`inOrderSpans`)だけを数え、その中に少しでも残っていれば残した場面にする(場面の大半を手で削って
- * 一部だけ残した場面も残す。割合で決めると、その場面ごと落ちて残した部分も消えていた)。
- * 切れ目を静かな所へ寄せた分(0.12 秒以内)が隣の場面に掛かるだけのものは数えない。
- * 差し込んだ別の時刻のカットは並びから外れるので数えない(数えると、落とした場面が丸ごと戻っていた)
- */
-export function scenesOnTimeline(
-  scenes: readonly Scene[],
-  clips: Project['clips'],
-  info: NonNullable<Project['multicam']>
-): string[] {
-  const spans = clips.length > 0 ? inOrderSpans(spansOfClips(clips, info)) : []
-  return scenes
-    .filter((sc) => keptSeconds(sc, spans) >= Math.min(0.5, (sc.end - sc.start) * 0.5))
-    .map((sc) => sc.id)
-}
+/** 古い形式の企画を開いたときの案内(作り直すまで出す) */
+export const LEGACY_NOTE =
+  'この企画は前の版で保存されたため、手で決めた残す/落とす(と AI の判定)は残っていません。「仮編集を作り直す」と、残す場面は自動の選び方で選び直します(手で詰めた・消した所は守られます)。画面のチェックは作り直したときに残す場面(の見込み)です。落としたい場面はチェックを外してから作り直してください'
 
 /**
  * 前の場面の区切り(`prev`)から、今の場面(`next`)へ、時刻がほぼ同じ(重なりが長いほうの 8 割以上)場面の
@@ -166,15 +90,17 @@ export function remapSceneFlags(
  * 保存した企画(同期の情報・文字起こし・仮編集・テロップ・自動編集の判断)から、自動編集の画面の状態
  * (工程の済み・構成の場面・判定・残す/落とす・仕上がりの長さ・演出テロップの提案・仮編集の要約)を作り直す。
  * 自動編集の判断(`project.autoEdit`)があればそれを戻す(場面の区切りが変わっていたら、時刻がほぼ同じ場面
- * だけ)。無い古い企画では、判定は簡易の点数にし、今の本編に残っている場面を「残す」、無い場面を「落とす」と
- * 読み取る(何も変えずに作り直したら同じ場面になるように。手で残した場面・AI の判定で残した場面を
- * 落とさない)。読み取ったものは手で決めたもの(`keep`)とは別の印(`timelineKeep`)にする(手で決めた
- * ものにすると、手で削った区間が作り直しで戻り、仕上がりの長さも効かなかった)。
+ * だけ)。無い古い企画(前の版で保存したもの)では、手で決めた残す/落とすは引き継げない。判定は簡易の
+ * 点数にし、残す場面は作り直したときの自動の選び方(`autoKeptScenes`)で出す。今の本編から残した場面を
+ * 推し量ることはしない(推し量ると、場面の入れ替え・一部だけ残す・差し込みのたびに読み違えた)。
+ * 手で詰めた・消した所は企画の本編と前に組んだ本編に残っているので、作り直しでも守られる。
  * 同期と文字起こしが無い企画(手で作った企画)なら null
  */
 export function restorePipelineFromProject(
   project: Project,
-  fallbackKind: EpisodeKind
+  fallbackKind: EpisodeKind,
+  /** 古い形式の企画で、作り直したら残す場面を出すのに使う(作り直すときと同じ種類・方針) */
+  plan: { kind?: EpisodeKind; policy?: EditPolicy } = {}
 ): RestoredPipeline | null {
   const info = project.multicam
   const transcript = project.transcript ?? []
@@ -218,27 +144,38 @@ export function restorePipelineFromProject(
   const judgements = saved ? judgedBy(saved.judgements) : heuristic
   const planJudgements = saved?.planJudgements ? judgedBy(saved.planJudgements) : null
   const judgeSource = saved?.judgeSource ?? 'heuristic'
-  if (!saved)
-    missing.push(
-      '古い形式の企画のため、構成の判定(AI の判定)は企画に残っていません。簡易の点数で表示し、残す場面は今の本編に残っている場面にしています(何も変えずに作り直すと同じ場面で、手で詰めた所もそのまま)。仕上がりの長さを変えると自動の選び方に戻ります。場面ごとにチェックで変えることもできます'
-    )
-  else if (!sameScenes)
+  const legacy = !saved || saved.legacyPending === true
+  if (legacy) missing.push(LEGACY_NOTE)
+  if (saved && !sameScenes)
     missing.push(
       '保存した時と場面の区切りが変わりました(文字起こし・同期を直した など)。時刻がほぼ同じ場面だけ前の判定・残す/落とすを引き継ぎ、それ以外の場面は簡易の点数・自動の選び方にしています'
     )
 
-  // 残した場面: 保存したもの。無ければ今の本編に残っている所から読み取る(`scenesOnTimeline`)
+  // 残した場面: 保存したもの。無い古い企画では、作り直したら残す場面(自動の選び方)。
+  // 今の本編から推し量らない
   const spans = project.clips.length > 0 ? spansOfClips(project.clips, info) : []
-  const fromTimeline = scenesOnTimeline(scenes, project.clips, info)
-  const savedKept = new Set(saved?.keptIds ?? [])
+  const toNow = (ids: readonly string[]): string[] => {
+    const set = new Set(ids)
+    return scenes.map((sc) => sc.id).filter((id) => set.has(match.get(id) ?? ''))
+  }
   const keptIds = saved?.keptIds
-    ? scenes.map((sc) => sc.id).filter((id) => savedKept.has(match.get(id) ?? ''))
-    : fromTimeline
+    ? toNow(saved.keptIds)
+    : autoKeptScenes(
+        scenes,
+        judgements,
+        plan.kind ?? kind,
+        plan.policy,
+        (saved?.targetMinutes ?? 0) * 60
+      )
   const keep = saved ? remapSceneFlags(saved.keep, match) : {}
-  let timelineKeep: Record<string, boolean> = {}
-  if (saved) timelineKeep = remapSceneFlags(saved.timelineKeep ?? {}, match)
-  else if (project.clips.length > 0 && project.roughCutAuto)
-    for (const sc of scenes) timelineKeep[sc.id] = keptIds.includes(sc.id)
+  // 作り直しのたびの残した場面。古い企画では、今の本編を組んだ時の残した場面が分からないので、
+  // 画面に出した残す場面(手で決めた残す/落とすの元)を今の組んだ本編のものとする
+  const autoSig = cutSignature(project.roughCutAuto)
+  const builtKept = saved?.builtKept
+    ? saved.builtKept.map((b) => ({ cut: b.cut, keptIds: toNow(b.keptIds) }))
+    : autoSig && project.clips.length > 0
+      ? [{ cut: autoSig, keptIds }]
+      : []
   const speechTelops = project.textOverlays.filter((o) => o.utteranceId).length
   const roughCut =
     project.clips.length > 0 && project.roughCutAuto
@@ -325,7 +262,7 @@ export function restorePipelineFromProject(
     judgeSource,
     hype,
     keep,
-    timelineKeep,
+    builtKept,
     carriedTelops: saved?.carriedTelops ?? [],
     targetMinutes: saved?.targetMinutes ?? 0,
     editNote: saved?.editNote ?? '',
@@ -333,6 +270,6 @@ export function restorePipelineFromProject(
     effectChosen,
     roughCut,
     missing,
-    legacy: !saved
+    legacy
   }
 }

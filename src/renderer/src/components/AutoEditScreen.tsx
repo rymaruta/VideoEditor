@@ -55,6 +55,12 @@ function stepMark(state: StepStatus['state']): string {
 /** 工程ごとの残り時間の起点(段階が変わって進み具合が戻るたびに取り直す) */
 const etaTracker = createEtaTracker()
 
+/** 前の版で保存した企画を作り直す前の確認 */
+const LEGACY_REBUILD_CONFIRM =
+  'この企画は前の版で保存されたため、手で決めた残す/落とすは残っていません。\n' +
+  '作り直すと、残す場面は自動の選び方(構成の一覧のチェック)で選び直します。今の本編で落としている場面が戻ることがあります(手で詰めた・消した所は守られます。取り消しは Ctrl+Z)。\n\n' +
+  '作り直しますか?'
+
 function stepStateLabel(id: string, step: StepStatus): string {
   if (step.state !== 'run') etaTracker.reset(id)
   switch (step.state) {
@@ -119,8 +125,6 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const editNote = usePipelineStore((s) => s.editNote)
   const restored = usePipelineStore((s) => s.restored)
-  const fromTimeline = usePipelineStore((s) => Object.keys(s.timelineKeep).length > 0)
-  const timelineKeepCleared = usePipelineStore((s) => s.clearedTimelineKeep !== null)
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
@@ -346,31 +350,6 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 {restored.missing.map((m) => (
                   <li key={m}>{m}</li>
                 ))}
-                {fromTimeline && (
-                  <li>
-                    残す場面は今の本編から読み取っています。{' '}
-                    <button
-                      type="button"
-                      disabled={running}
-                      onClick={() => usePipelineStore.getState().clearTimelineKeep()}
-                    >
-                      自動の選び方に戻す
-                    </button>
-                    (「仮編集を作り直す」で反映。手で決めた場面はそのまま)
-                  </li>
-                )}
-                {timelineKeepCleared && (
-                  <li>
-                    自動の選び方に戻しました(「仮編集を作り直す」で反映)。{' '}
-                    <button
-                      type="button"
-                      disabled={running}
-                      onClick={() => usePipelineStore.getState().restoreTimelineKeep()}
-                    >
-                      取り消す
-                    </button>
-                  </li>
-                )}
                 {!scan && (
                   <li>
                     工程を最初からやり直すには、ファイル &gt; 新しい回を作る…
@@ -773,7 +752,12 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 <button
                   className="small-button"
                   disabled={running || scenes.length === 0}
-                  onClick={() => void usePipelineStore.getState().rebuildRoughCut()}
+                  onClick={() => {
+                    // 前の版で保存した企画は、手で決めた残す/落とすが残っていない。押し間違いで場面が
+                    // 入れ替わらないよう、作り直す前に確かめる
+                    if (restored?.legacy && !confirm(LEGACY_REBUILD_CONFIRM)) return
+                    void usePipelineStore.getState().rebuildRoughCut()
+                  }}
                   title="残す/落とすと長さに合わせて、カット・アングル・発言テロップを作り直します(取り消しは Ctrl+Z)"
                 >
                   仮編集を作り直す

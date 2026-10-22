@@ -16,11 +16,8 @@ import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import type { Project } from '@shared/types'
 import { spansOfClips } from '@shared/roughCut/overrides'
-import {
-  inOrderSpans,
-  matchScenesByTime,
-  restorePipelineFromProject
-} from '@renderer/lib/pipelineRestore'
+import { LEGACY_NOTE, matchScenesByTime } from '@renderer/lib/pipelineRestore'
+import { normalizeAutoEdit } from '@shared/autoEdit'
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
@@ -290,22 +287,40 @@ describe('自動編集の後に保存して開き直す', () => {
     expect(st.sources).toHaveLength(0)
   })
 
-  it('古い形式の企画(自動編集の判断が無い)でも、今の本編に残っている場面を残して作り直す', async () => {
+  it('古い形式の企画(自動編集の判断が無い)では、手で決めた残す/落とすは引き継がず、作り直すと自動の選び方になる', async () => {
     await runEpisode()
-    const s1 = await keepOneDroppedByHand()
-    const keptBefore = usePipelineStore.getState().roughCut!.keptIds
+    const all = usePipelineStore.getState().scenes.map((sc) => sc.id)
+    const full = mainDuration()
+    await keepOneDroppedByHand()
     saveAndReopen({ legacy: true })
     await flush()
     const after = usePipelineStore.getState()
+    // 案内: 前の版で保存したため手で決めた残す/落とすは残っていない・作り直すと自動の選び方
     expect(after.restored?.legacy).toBe(true)
-    expect(after.roughCut?.keptIds).toEqual(keptBefore)
-    // 今の本編から読み取った場面は、手で決めたもの(keep)とは別の印
-    expect(after.timelineKeep[s1]).toBe(true)
+    expect(after.restored?.missing).toContain(LEGACY_NOTE)
+    expect(LEGACY_NOTE).toContain('手で決めた残す/落とす')
+    expect(LEGACY_NOTE).toContain('自動の選び方')
+    expect(LEGACY_NOTE).toContain('手で詰めた・消した所は守られます')
     expect(after.keep).toEqual({})
     expect(after.targetMinutes).toBe(0)
+    // 画面のチェックは、作り直したら残す場面(今の本編から推し量らない)
+    expect(after.roughCut?.keptIds).toEqual(all)
+    // 手で何かを決めても、企画には「まだ作り直していない古い企画」と覚える(開き直しても案内が出る)
+    usePipelineStore.getState().setEditNote('メモ')
+    expect(useProjectStore.getState().project.autoEdit?.legacyPending).toBe(true)
+    saveAndReopen()
+    await flush()
+    expect(usePipelineStore.getState().restored?.legacy).toBe(true)
     await usePipelineStore.getState().rebuildRoughCut()
-    expect(usePipelineStore.getState().steps.cut.state).toBe('done')
-    expect(usePipelineStore.getState().roughCut?.keptIds).toEqual(keptBefore)
+    const st = usePipelineStore.getState()
+    expect(st.steps.cut.state).toBe('done')
+    // cee37ec(10/09 版と同じ考え方)と同じ: 長さを決めないので全部の場面を残す
+    expect(st.roughCut?.keptIds).toEqual(all)
+    expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
+    // 作り直したら、古い企画の案内は消え、企画にも残さない
+    expect(st.restored?.legacy).toBe(false)
+    expect(st.restored?.missing).not.toContain(LEGACY_NOTE)
+    expect(useProjectStore.getState().project.autoEdit?.legacyPending).toBeUndefined()
   })
 
   it('AI の提案で置いた演出テロップ(人が直したものも)が、開き直して AI を使わずに作り直しても残る', async () => {
@@ -451,13 +466,12 @@ describe('監査で見つかった不具合(c5fdddd)', () => {
       expect(Math.abs(mainDuration() - trimmed)).toBeLessThan(0.2)
     })
 
-  it('古い形式の企画でも、仕上がりの長さを変えると自動の選び方に戻る(手で変更と出さない)', async () => {
+  it('古い形式の企画でも、仕上がりの長さが効く(手で変更と出さない)', async () => {
     await runEpisode()
     const full = usePipelineStore.getState().roughCut!
     expect(full.dropped).toBe(0)
     saveAndReopen({ legacy: true })
     await flush()
-    // 今の本編から読み取った場面は「手で変更」ではない
     expect(usePipelineStore.getState().keep).toEqual({})
     // 何も変えずに作り直したら同じ場面
     await usePipelineStore.getState().rebuildRoughCut()
@@ -472,16 +486,6 @@ describe('監査で見つかった不具合(c5fdddd)', () => {
     expect(after.roughCut!.dropped).toBeGreaterThan(0)
     expect(after.roughCut!.duration).toBeLessThan(full.duration - 30)
     expect(after.keep).toEqual({})
-  })
-
-  it('古い形式の企画で「自動の選び方に戻す」と、読み取った場面をやめる(企画にも残さない)', async () => {
-    await runEpisode()
-    saveAndReopen({ legacy: true })
-    await flush()
-    expect(Object.keys(usePipelineStore.getState().timelineKeep).length).toBeGreaterThan(0)
-    usePipelineStore.getState().clearTimelineKeep()
-    expect(usePipelineStore.getState().timelineKeep).toEqual({})
-    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeUndefined()
   })
 
   it('人が直した演出テロップは、その場面を一度落としても、場面を戻せば戻る', async () => {
@@ -567,7 +571,6 @@ describe('監査で見つかった不具合(b4cd4d9)', () => {
     const before = mainDuration()
     saveAndReopen({ legacy: true })
     await flush()
-    expect(usePipelineStore.getState().timelineKeep[scene.id]).toBe(true)
     await usePipelineStore.getState().rebuildRoughCut()
     expect(usePipelineStore.getState().steps.cut.state).toBe('done')
     expect(usePipelineStore.getState().roughCut!.keptIds).toContain(scene.id)
@@ -612,62 +615,6 @@ describe('監査で見つかった不具合(b4cd4d9)', () => {
     await usePipelineStore.getState().rebuildRoughCut()
     expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
   })
-
-  /** 1.5 分で作り直した(場面の落ちた)回を、古い形式で開き直す。その時の残した場面と長さを返す */
-  async function legacyShortEpisode(): Promise<{ keptIds: string[]; duration: number }> {
-    await runEpisode()
-    usePipelineStore.getState().setTargetMinutes(1.5)
-    await usePipelineStore.getState().rebuildRoughCut()
-    const rc = usePipelineStore.getState().roughCut!
-    expect(rc.dropped).toBeGreaterThan(0)
-    const duration = mainDuration()
-    saveAndReopen({ legacy: true })
-    await flush()
-    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(rc.keptIds)
-    return { keptIds: rc.keptIds, duration }
-  }
-
-  it('古い形式の企画で、長さの欄に数字を入れて消しても、読み取った場面で作り直す', async () => {
-    const { keptIds, duration } = await legacyShortEpisode()
-    usePipelineStore.getState().setTargetMinutes(2)
-    // 打鍵の途中では捨てない(企画には、今作り直したら使うものを覚える)
-    expect(Object.keys(usePipelineStore.getState().timelineKeep).length).toBeGreaterThan(0)
-    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeUndefined()
-    usePipelineStore.getState().setTargetMinutes(0)
-    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeDefined()
-    await usePipelineStore.getState().rebuildRoughCut()
-    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
-    expect(Math.abs(mainDuration() - duration)).toBeLessThan(0.2)
-    expect(Object.keys(usePipelineStore.getState().timelineKeep).length).toBeGreaterThan(0)
-  })
-
-  it('古い形式の企画で「自動の選び方に戻す」を取り消せる(作り直すまで)', async () => {
-    const { keptIds, duration } = await legacyShortEpisode()
-    const read = usePipelineStore.getState().timelineKeep
-    usePipelineStore.getState().clearTimelineKeep()
-    expect(usePipelineStore.getState().timelineKeep).toEqual({})
-    usePipelineStore.getState().restoreTimelineKeep()
-    expect(usePipelineStore.getState().timelineKeep).toEqual(read)
-    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toEqual(read)
-    await usePipelineStore.getState().rebuildRoughCut()
-    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
-    expect(Math.abs(mainDuration() - duration)).toBeLessThan(0.2)
-    // 作り直した後は取り消せない(自動の選び方で作ったもの)
-    usePipelineStore.getState().clearTimelineKeep()
-    await usePipelineStore.getState().rebuildRoughCut()
-    usePipelineStore.getState().restoreTimelineKeep()
-    expect(usePipelineStore.getState().timelineKeep).toEqual({})
-  })
-
-  it('古い形式の企画で長さを変えて作り直すと、自動の選び方になる(読み取った場面は捨てる)', async () => {
-    const { keptIds } = await legacyShortEpisode()
-    usePipelineStore.getState().setTargetMinutes(4)
-    await usePipelineStore.getState().rebuildRoughCut()
-    const s = usePipelineStore.getState()
-    expect(s.timelineKeep).toEqual({})
-    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeUndefined()
-    expect(s.roughCut!.keptIds.length).toBeGreaterThan(keptIds.length)
-  })
 })
 
 describe('matchScenesByTime', () => {
@@ -689,42 +636,6 @@ describe('matchScenesByTime', () => {
 })
 
 describe('監査で見つかった不具合(25b2ade)', () => {
-  /** 目標 1.5 分で作り直し、落ちた場面を1つ返す */
-  async function dropOne(): Promise<{ id: string; start: number; end: number }> {
-    usePipelineStore.getState().setTargetMinutes(1.5)
-    await usePipelineStore.getState().rebuildRoughCut()
-    const s = usePipelineStore.getState()
-    const dropped = s.scenes.filter((sc) => !s.roughCut!.keptIds.includes(sc.id))
-    expect(dropped.length).toBeGreaterThan(0)
-    return dropped[0]
-  }
-
-  /** 同じ収録のカメラ素材から、共通の時刻 `at` からの `len` 秒を本編の `atTime` へ差し込む */
-  function insertFromRecording(at: number, len: number, atTime: number): void {
-    const project = useProjectStore.getState().project
-    const f = project.multicam!.files[0]
-    const src = (at - f.start) * f.rate
-    useProjectStore.getState().insertClipAtTime(f.assetId, src, src + len * f.rate, atTime)
-  }
-
-  it('古い形式の企画で、落とした場面から差し込んだ短いカットで、その場面が戻らない', async () => {
-    await runEpisode()
-    const s1 = await dropOne()
-    const keptIds = usePipelineStore.getState().roughCut!.keptIds
-    const clipsBefore = useProjectStore.getState().project.clips.length
-    insertFromRecording((s1.start + s1.end) / 2, 1.5, 5)
-    expect(useProjectStore.getState().project.clips.length).toBeGreaterThan(clipsBefore)
-    const before = mainDuration()
-    saveAndReopen({ legacy: true })
-    await flush()
-    expect(usePipelineStore.getState().timelineKeep[s1.id]).toBe(false)
-    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
-    await usePipelineStore.getState().rebuildRoughCut()
-    expect(usePipelineStore.getState().steps.cut.state).toBe('done')
-    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
-    expect(Math.abs(mainDuration() - before)).toBeLessThan(0.2)
-  })
-
   it('仮編集を取り消した後に作り直しても、「残す」にした場面の昔の削りが戻る', async () => {
     await runEpisode()
     const full = mainDuration()
@@ -747,57 +658,364 @@ describe('監査で見つかった不具合(25b2ade)', () => {
     expect(usePipelineStore.getState().roughCut!.keptIds).toContain(scene.id)
     expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
   })
+})
 
-  it('古い形式の企画で、長さを変えた作り直しが当たらなかったら、読み取った場面を捨てない', async () => {
+/** 目標 1.5 分で作り直し、落ちた場面を1つ返す */
+async function dropOne(): Promise<{ id: string; start: number; end: number }> {
+  usePipelineStore.getState().setTargetMinutes(1.5)
+  await usePipelineStore.getState().rebuildRoughCut()
+  const s = usePipelineStore.getState()
+  const dropped = s.scenes.filter((sc) => !s.roughCut!.keptIds.includes(sc.id))
+  expect(dropped.length).toBeGreaterThan(0)
+  return dropped[0]
+}
+
+/** 同じ収録のカメラ素材から、共通の時刻 `at` からの `len` 秒を本編の `atTime` へ差し込む */
+function insertFromRecording(at: number, len: number, atTime: number): void {
+  const project = useProjectStore.getState().project
+  const f = project.multicam!.files[0]
+  const src = (at - f.start) * f.rate
+  useProjectStore.getState().insertClipAtTime(f.assetId, src, src + len * f.rate, atTime)
+}
+
+/** 本編の中の、場面のクリップ(真ん中の時刻が場面にあるもの。本編の順)を本編の頭へ動かす(場面の入れ替え) */
+function moveSceneToFront(scene: { start: number; end: number }): void {
+  const project = useProjectStore.getState().project
+  const spans = spansOfClips(project.clips, project.multicam!)
+  project.clips
+    .filter((_, i) => {
+      const mid = (spans[i].start + spans[i].end) / 2
+      return mid >= scene.start && mid < scene.end
+    })
+    .forEach((c, i) => useProjectStore.getState().moveClipToIndex(c.id, i))
+}
+
+/** 場面の中のいちばん長いクリップのお尻を `sec` 秒詰める */
+function trimInScene(scene: { start: number; end: number }, sec: number): void {
+  const inside = clipsInScene(scene)
+  const longest = inside.reduce((a, c) => (c.end - c.start > a.end - a.start ? c : a))
+  const clip = useProjectStore.getState().project.clips.find((c) => c.id === longest.id)!
+  useProjectStore.getState().updateClipTrim(clip.id, clip.inPoint, clip.outPoint - sec)
+}
+
+const rebuild = async (): Promise<{ kept: string[]; duration: number }> => {
+  await usePipelineStore.getState().rebuildRoughCut()
+  const st = usePipelineStore.getState()
+  expect(st.steps.cut.state).toBe('done')
+  return { kept: st.roughCut!.keptIds, duration: mainDuration() }
+}
+
+/**
+ * 監査の再現手順を、古い形式・新しい形式の両方で。古い形式の期待は cee37ec(c5fdddd の前。10/09 版と
+ * 同じ考え方)と同じ結果(git worktree の cee37ec で同じ手順を走らせて確かめた値)、かつ手の削りは守る。
+ * 古い形式は判断が残っていないので、長さを決めない自動の選び方 = 全部の場面を残す(この素材では
+ * s1 0〜97.5・s2 97.5〜196.5・s3 196.5〜240)
+ */
+describe('開き直して作り直す回帰(古い形式・新しい形式)', () => {
+  for (const legacy of [true, false]) {
+    const label = legacy ? '古い形式' : '新しい形式'
+    const reopen = async (): Promise<void> => {
+      saveAndReopen({ legacy })
+      await flush()
+    }
+
+    it(`新しい回で長さ 1.5 分にしてすぐ始め、開き直して作り直す(${label})`, async () => {
+      await runEpisode(() => usePipelineStore.getState().setTargetMinutes(1.5))
+      const before = {
+        kept: usePipelineStore.getState().roughCut!.keptIds,
+        duration: mainDuration()
+      }
+      expect(before.duration).toBeLessThan(1.5 * 60 + 15)
+      await reopen()
+      const r = await rebuild()
+      if (legacy) {
+        // 長さは前の版の企画に残っていない: 全部の場面(cee37ec: s1〜s3・214.8 秒)
+        expect(r.kept).toEqual(['s1', 's2', 's3'])
+        expect(r.duration).toBeCloseTo(214.8, 0)
+      } else expect(r).toEqual({ kept: before.kept, duration: expect.closeTo(before.duration, 1) })
+    })
+
+    it(`手で残した場面を開き直して作り直す(${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      const s1 = await keepOneDroppedByHand()
+      const before = {
+        kept: usePipelineStore.getState().roughCut!.keptIds,
+        duration: mainDuration()
+      }
+      await reopen()
+      const r = await rebuild()
+      expect(r.kept).toContain(s1)
+      if (legacy) {
+        expect(r.kept).toEqual(['s1', 's2', 's3'])
+        expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+      } else expect(Math.abs(r.duration - before.duration)).toBeLessThan(0.2)
+    })
+
+    it(`人が直した演出テロップを開き直して作り直す(${label})`, async () => {
+      await runEpisode()
+      await placeAiEffectsAndEditOne()
+      const before = effectTelops()
+      await reopen()
+      await rebuild()
+      // cee37ec では作り直すと消えていた(c5fdddd で直したもの)。どちらの形式でも残す
+      expect(effectTelops()).toEqual(before)
+    })
+
+    it(`手で3秒詰めて開き直して作り直す(${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      trimInScene(usePipelineStore.getState().scenes[0], 3)
+      await reopen()
+      const r = await rebuild()
+      expect(r.kept).toEqual(['s1', 's2', 's3'])
+      expect(Math.abs(r.duration - (full - 3))).toBeLessThan(0.2)
+    })
+
+    it(`場面の大半を手で削って一部だけ残し、開き直して作り直す(${label})`, async () => {
+      await runEpisode()
+      const scenes = usePipelineStore.getState().scenes
+      const inside = clipsInScene(scenes[scenes.length - 1])
+      useProjectStore.getState().removeClips(inside.slice(0, -1).map((c) => c.id))
+      const before = mainDuration()
+      await reopen()
+      const r = await rebuild()
+      expect(r.kept).toEqual(['s1', 's2', 's3'])
+      expect(Math.abs(r.duration - before)).toBeLessThan(0.2)
+    })
+
+    it(`落とした場面から短いカットを差し込み、開き直して作り直す(${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      const s1 = await dropOne()
+      const keptIds = usePipelineStore.getState().roughCut!.keptIds
+      insertFromRecording((s1.start + s1.end) / 2, 1.5, 5)
+      const before = mainDuration()
+      await reopen()
+      const r = await rebuild()
+      if (legacy) {
+        // cee37ec と同じ: 長さが残っていないので全部の場面(差し込んだ所は戻った場面に入る)
+        expect(r.kept).toEqual(['s1', 's2', 's3'])
+        expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+      } else {
+        // 保存した判断(1.5 分)で同じ場面。差し込みで落とした場面は戻らない
+        expect(r.kept).toEqual(keptIds)
+        expect(r.kept).not.toContain(s1.id)
+        expect(Math.abs(r.duration - before)).toBeLessThan(0.2)
+      }
+    })
+
+    it(`隣り合う2場面の順を入れ替え、開き直して作り直しても場面が消えない(${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      const scenes = usePipelineStore.getState().scenes
+      expect(scenes.map((sc) => [sc.id, sc.start, sc.end]).slice(0, 2)).toEqual([
+        ['s1', 0, 97.5],
+        ['s2', 97.5, 196.5]
+      ])
+      moveSceneToFront(scenes[1])
+      await reopen()
+      // ac0e4c8 では s1 を「落とした」と読み、作り直すと 214.8 → 126.8 秒になっていた
+      expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(['s1', 's2', 's3'])
+      const r = await rebuild()
+      expect(r.kept).toEqual(['s1', 's2', 's3'])
+      expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+    })
+
+    it(`残すにした場面の中を詰めてから入れ替えても、作り直しで詰めた所が戻らない(${label})`, async () => {
+      await runEpisode()
+      const s1 = await keepOneDroppedByHand()
+      const scene = usePipelineStore.getState().scenes.find((sc) => sc.id === s1)!
+      trimInScene(scene, 3)
+      moveSceneToFront(scene)
+      const trimmed = mainDuration()
+      // 開き直さずに(cee37ec では詰めた3秒が戻っていた)
+      let r = await rebuild()
+      expect(r.kept).toContain(s1)
+      expect(Math.abs(r.duration - trimmed)).toBeLessThan(0.2)
+      await reopen()
+      r = await rebuild()
+      expect(r.kept).toContain(s1)
+      if (legacy) {
+        // 長さ(1.5 分)が残っていないので全部の場面。詰めた所は守る
+        expect(r.kept).toEqual(['s1', 's2', 's3'])
+        expect(clipsInScene(scene).length).toBeGreaterThan(0)
+      } else expect(Math.abs(r.duration - trimmed)).toBeLessThan(0.2)
+    })
+
+    it(`残す場面の中を後から詰めても、作り直すと戻らない(開き直した後・${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      const s1 = await keepOneDroppedByHand()
+      await reopen()
+      const scene = usePipelineStore.getState().scenes.find((sc) => sc.id === s1)!
+      trimInScene(scene, 3)
+      const trimmed = mainDuration()
+      // 古い形式では、手で決めた「残す」が無いので、画面で残すにし直す(画面で既に残す場面なので削りは戻さない)
+      if (legacy) usePipelineStore.getState().setKeep(s1, true)
+      const r = await rebuild()
+      expect(r.kept).toContain(s1)
+      // 古い形式は長さ(1.5 分)が残っていないので全部の場面。s1 の中の詰めた3秒は戻らない
+      expect(Math.abs(r.duration - (legacy ? full - 3 : trimmed))).toBeLessThan(0.2)
+      expect(Math.abs((await rebuild()).duration - r.duration)).toBeLessThan(0.2)
+    })
+
+    it(`開き直してから落として戻し、Ctrl+Z の後に作り直すと昔の削りが戻る(${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      const scene = usePipelineStore.getState().scenes[1]
+      trimInScene(scene, 3)
+      await reopen()
+      usePipelineStore.getState().setKeep(scene.id, false)
+      expect((await rebuild()).kept).not.toContain(scene.id)
+      usePipelineStore.getState().setKeep(scene.id, true)
+      expect(Math.abs((await rebuild()).duration - full)).toBeLessThan(0.2)
+      useProjectStore.getState().undo()
+      expect(clipsInScene(scene)).toHaveLength(0)
+      // cee37ec と同じ: 214.8 秒(昔の削りも戻る)
+      const r = await rebuild()
+      expect(r.kept).toContain(scene.id)
+      expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+    })
+
+    it(`長さの欄に数字を入れて消してから作り直す(${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      usePipelineStore.getState().setTargetMinutes(1.5)
+      await usePipelineStore.getState().rebuildRoughCut()
+      const before = {
+        kept: usePipelineStore.getState().roughCut!.keptIds,
+        duration: mainDuration()
+      }
+      await reopen()
+      const typed = usePipelineStore.getState().targetMinutes
+      usePipelineStore.getState().setTargetMinutes(2)
+      usePipelineStore.getState().setTargetMinutes(typed)
+      const r = await rebuild()
+      if (legacy) {
+        expect(typed).toBe(0)
+        expect(r.kept).toEqual(['s1', 's2', 's3'])
+        expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+      } else {
+        expect(typed).toBe(1.5)
+        expect(r.kept).toEqual(before.kept)
+        expect(Math.abs(r.duration - before.duration)).toBeLessThan(0.2)
+      }
+    })
+
+    it(`作り直しが当たらなかった後に作り直す(${label})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      await dropOne()
+      const before = usePipelineStore.getState().roughCut!.keptIds
+      await reopen()
+      const shown = usePipelineStore.getState().roughCut!.keptIds
+      const typed = usePipelineStore.getState().targetMinutes
+      usePipelineStore.getState().setTargetMinutes(2)
+      const running = usePipelineStore.getState().rebuildRoughCut()
+      // 作っている最中に本編を直す(作り直しは当たらない)
+      const c = useProjectStore.getState().project.clips[0]
+      useProjectStore.getState().updateClipTrim(c.id, c.inPoint, c.outPoint - 0.5)
+      await running
+      expect(usePipelineStore.getState().steps.cut.state).toBe('error')
+      // 当たらなかったので、画面の残す場面・古い企画の案内はそのまま
+      expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(shown)
+      expect(usePipelineStore.getState().restored?.legacy).toBe(legacy)
+      usePipelineStore.getState().setTargetMinutes(typed)
+      const r = await rebuild()
+      if (legacy) {
+        // cee37ec と同じ: 全部の場面・途中で詰めた 0.5 秒は守る(214.3 秒)
+        expect(r.kept).toEqual(['s1', 's2', 's3'])
+        expect(Math.abs(r.duration - (full - 0.5))).toBeLessThan(0.2)
+      } else expect(r.kept).toEqual(before)
+    })
+  }
+
+  it('取り消しで前の作り直しに戻っても、その回の残す/落とすと比べる(残す場面の中の詰めを戻さない)', async () => {
     await runEpisode()
-    await dropOne()
-    const rc = usePipelineStore.getState().roughCut!
-    saveAndReopen({ legacy: true })
+    const s1 = await keepOneDroppedByHand()
+    const scene = usePipelineStore.getState().scenes.find((sc) => sc.id === s1)!
+    trimInScene(scene, 3)
+    const trimmed = mainDuration()
+    expect(Math.abs((await rebuild()).duration - trimmed)).toBeLessThan(0.2)
+    // 作り直しを取り消す(本編は、前の作り直し + 手の詰め に戻る)
+    useProjectStore.getState().undo()
+    expect(Math.abs(mainDuration() - trimmed)).toBeLessThan(0.2)
+    // 前の作り直しでも s1 は残していたので、詰めた所は戻さない(cee37ec では戻っていた)
+    const r = await rebuild()
+    expect(r.kept).toContain(s1)
+    expect(Math.abs(r.duration - trimmed)).toBeLessThan(0.2)
+    // 作り直しの回ごとの残した場面は企画に覚える(保存して開き直しても比べられる)
+    expect(useProjectStore.getState().project.autoEdit?.builtKept?.length).toBeGreaterThan(1)
+  })
+
+  it('作り直しを取り消してから保存して開き直しても、取り消した後の本編を組んだ回の残す/落とすと比べる', async () => {
+    await runEpisode()
+    const full = mainDuration()
+    const scene = usePipelineStore.getState().scenes[1]
+    trimInScene(scene, 3)
+    usePipelineStore.getState().setKeep(scene.id, false)
+    expect((await rebuild()).kept).not.toContain(scene.id)
+    usePipelineStore.getState().setKeep(scene.id, true)
+    expect(Math.abs((await rebuild()).duration - full)).toBeLessThan(0.2)
+    useProjectStore.getState().undo()
+    expect(clipsInScene(scene)).toHaveLength(0)
+    saveAndReopen()
     await flush()
-    const read = usePipelineStore.getState().timelineKeep
-    expect(Object.keys(read).length).toBeGreaterThan(0)
-    usePipelineStore.getState().setTargetMinutes(2)
-    const running = usePipelineStore.getState().rebuildRoughCut()
-    // 作っている最中に本編を直す(作り直しは当たらない)
-    const c = useProjectStore.getState().project.clips[0]
-    useProjectStore.getState().updateClipTrim(c.id, c.inPoint, c.outPoint - 0.5)
-    await running
-    expect(usePipelineStore.getState().steps.cut.state).toBe('error')
-    expect(usePipelineStore.getState().timelineKeep).toEqual(read)
-    // 長さを戻して作り直すと、読み取った場面のまま
-    usePipelineStore.getState().setTargetMinutes(0)
-    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toEqual(read)
-    await usePipelineStore.getState().rebuildRoughCut()
-    expect(usePipelineStore.getState().steps.cut.state).toBe('done')
-    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(rc.keptIds)
-    expect(usePipelineStore.getState().timelineKeep).toEqual(read)
+    expect(usePipelineStore.getState().keep).toEqual({ [scene.id]: true })
+    const r = await rebuild()
+    expect(r.kept).toContain(scene.id)
+    expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+  })
+
+  it('前回の残す/落とすが分からない企画では、手で残すにした場面の昔の削りを戻す(10/09 版と同じ)', async () => {
+    await runEpisode()
+    const full = mainDuration()
+    const scene = usePipelineStore.getState().scenes[1]
+    trimInScene(scene, 3)
+    usePipelineStore.getState().setKeep(scene.id, false)
+    expect((await rebuild()).kept).not.toContain(scene.id)
+    // 覚えている作り直しの回に、今の組んだ本編が無い(取り消しで覚えている回より前まで戻った など)
+    const saved = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
+    saved.autoEdit!.builtKept = [{ cut: '0:0', keptIds: ['s1', 's2', 's3'] }]
+    useProjectStore.getState().newProject('別の回')
+    useProjectStore.getState().loadProject(saved, '/r/第1回.veproj')
+    await flush()
+    usePipelineStore.getState().setKeep(scene.id, true)
+    const r = await rebuild()
+    expect(r.kept).toContain(scene.id)
+    expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+  })
+
+  it('前の版(b4cd4d9〜ac0e4c8)で今の本編から読み取った残す/落とす(timelineKeep)は読み捨てる', async () => {
+    await runEpisode()
+    const all = usePipelineStore.getState().scenes.map((sc) => sc.id)
+    await dropOne()
+    const saved = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
+    const ae = saved.autoEdit as unknown as Record<string, unknown>
+    // その版の企画: 読み取った残す/落とすと、読み取った残した場面。長さは 0 にした
+    ae.timelineKeep = { s1: false, s2: false, s3: true }
+    ae.keptIds = ['s3']
+    ae.targetMinutes = 0
+    delete ae.builtKept
+    expect(normalizeAutoEdit(ae)).not.toHaveProperty('timelineKeep')
+    expect(normalizeAutoEdit(ae)?.legacyPending).toBe(true)
+    useProjectStore.getState().newProject('別の回')
+    useProjectStore.getState().loadProject(saved, '/r/第1回.veproj')
+    await flush()
+    const st = usePipelineStore.getState()
+    expect(useProjectStore.getState().project.autoEdit).not.toHaveProperty('timelineKeep')
+    expect(st.restored?.legacy).toBe(true)
+    expect(st.restored?.missing).toContain(LEGACY_NOTE)
+    // 画面のチェックは作り直したら残す場面(読み取った s3 だけではない)
+    expect(st.roughCut!.keptIds).toEqual(all)
+    const r = await rebuild()
+    expect(r.kept).toEqual(all)
+    expect(useProjectStore.getState().project.autoEdit).not.toHaveProperty('timelineKeep')
   })
 })
 
-describe('inOrderSpans(古い形式の企画の読み取りに使う、仮編集の並びに沿ったクリップ)', () => {
-  const sp = (start: number, end: number): { start: number; end: number } => ({ start, end })
-  it('前の時刻へ戻る差し込み・別の場面の途中に入った差し込みは入らない', () => {
-    // 0-5 | 差し込み 60-61.5 | 5-30 | 100-120
-    expect(inOrderSpans([sp(0, 5), sp(60, 61.5), sp(5, 30), sp(100, 120)])).toEqual([
-      sp(0, 5),
-      sp(5, 30),
-      sp(100, 120)
-    ])
-    // 前の時刻へ戻る(振り返り)
-    expect(inOrderSpans([sp(0, 20), sp(50, 60), sp(10, 12), sp(60, 80)])).toEqual([
-      sp(0, 20),
-      sp(50, 60),
-      sp(60, 80)
-    ])
-  })
-  it('並びに沿った差し込み・カメラの切り替え(同じ時刻)・一部だけ残した所は入る', () => {
-    const list = [sp(0, 10), sp(10, 12), sp(40, 46.3), sp(46.3, 50), sp(200, 201)]
-    expect(inOrderSpans(list)).toEqual(list)
-    expect(inOrderSpans([])).toEqual([])
-  })
-})
-
-describe('古い形式の企画の読み取り(乱択)', () => {
+describe('古い形式の企画の画面のチェック(乱択)', () => {
   /** 決まった種から作る乱数(mulberry32) */
   function rng(seed: number): () => number {
     let a = seed >>> 0
@@ -810,121 +1028,35 @@ describe('古い形式の企画の読み取り(乱択)', () => {
     }
   }
 
-  /** 本編のクリップ(本編の順)と、タイムラインの始まり・共通の時刻 */
-  function clipsWithTimes(): {
-    id: string
-    at: number
-    len: number
-    start: number
-    end: number
-  }[] {
-    const project = useProjectStore.getState().project
-    const spans = spansOfClips(project.clips, project.multicam!)
-    let at = 0
-    return project.clips.map((c, i) => {
-      const len = (c.outPoint - c.inPoint) / (c.speed || 1)
-      const out = { id: c.id, at, len, start: spans[i].start, end: spans[i].end }
-      at += len
-      return out
-    })
-  }
-
-  it('新しい形式で作り直した企画から判断を外して読み取った場面が、実際に残した場面と一致する', async () => {
-    const ROUNDS = 40
-    const kinds: Record<string, number> = {}
-    for (let round = 0; round < ROUNDS; round++) {
-      const rand = rng(1000 + round)
+  it('本編をどう直しても、開き直した画面の残す場面が作り直した結果と一致し、手で詰めた長さは戻らない', async () => {
+    for (let round = 0; round < 12; round++) {
+      const rand = rng(500 + round)
       const pick = <T>(list: readonly T[]): T => list[Math.floor(rand() * list.length)]
       await runEpisode()
-      usePipelineStore.getState().setTargetMinutes(pick([0, 1, 1.5, 2, 3]))
+      usePipelineStore.getState().setTargetMinutes(pick([0, 1, 1.5, 3]))
       for (const sc of usePipelineStore.getState().scenes)
-        if (rand() < 0.25) usePipelineStore.getState().setKeep(sc.id, rand() < 0.5)
+        if (rand() < 0.3) usePipelineStore.getState().setKeep(sc.id, rand() < 0.5)
       await usePipelineStore.getState().rebuildRoughCut()
-      const st = usePipelineStore.getState()
-      if (st.steps.cut.state !== 'done') continue
-      const kept = st.roughCut!.keptIds
-      const scenes = st.scenes
-      const done: string[] = []
-      // 一部だけ残す(場面の中のクリップを1本だけ残す)
-      if (rand() < 0.5) {
-        const many = scenes.filter((sc) => kept.includes(sc.id) && clipsInScene(sc).length > 1)
-        if (many.length > 0) {
-          const inside = clipsInScene(pick(many))
-          const keepOne = pick(inside.filter((c) => c.end - c.start >= 1))
-          if (keepOne) {
-            useProjectStore
-              .getState()
-              .removeClips(inside.filter((c) => c.id !== keepOne.id).map((c) => c.id))
-            done.push('一部だけ残す')
-          }
+      const scenes = usePipelineStore.getState().scenes
+      const kept = scenes.filter((sc) =>
+        usePipelineStore.getState().roughCut!.keptIds.includes(sc.id)
+      )
+      if (kept.length > 1 && rand() < 0.5) moveSceneToFront(kept[kept.length - 1])
+      let trimmed = 0
+      for (const sc of kept)
+        if (rand() < 0.4 && clipsInScene(sc).some((c) => c.end - c.start > 4)) {
+          trimInScene(sc, 2)
+          trimmed += 2
         }
-      }
-      // 手で詰める・速さを変える・トランジション
-      for (const c of clipsWithTimes()) {
-        const clip = useProjectStore.getState().project.clips.find((x) => x.id === c.id)!
-        const r = rand()
-        if (r < 0.15 && c.end - c.start > 4) {
-          const cut = (clip.outPoint - clip.inPoint) * 0.4 * rand()
-          useProjectStore.getState().updateClipTrim(clip.id, clip.inPoint, clip.outPoint - cut)
-          done.push('手で詰める')
-        } else if (r < 0.3) {
-          useProjectStore.getState().updateClipSpeed(clip.id, pick([0.5, 1.5, 2]))
-          done.push('速さ')
-        } else if (r < 0.4) {
-          useProjectStore
-            .getState()
-            .updateClipTransition(clip.id, { type: 'crossfade', duration: 0.5 })
-          done.push('トランジション')
-        }
-      }
-      // 反応のカットを差し込む(落とした場面から・前の時刻から)。長いクリップの途中へ
-      const dropped = scenes.filter((sc) => !kept.includes(sc.id))
-      const inserts = Math.floor(rand() * 3)
-      const used = new Set<string>()
-      for (let k = 0; k < inserts; k++) {
-        const long = clipsWithTimes().filter((c) => c.len > 6 && !used.has(c.id))
-        if (long.length === 0) break
-        const target = pick(long)
-        used.add(target.id)
-        const from =
-          dropped.length > 0 && rand() < 0.6
-            ? pick(dropped)
-            : { start: 0, end: Math.max(2, target.start - 1) }
-        const len = 1 + rand()
-        const at = from.start + (from.end - from.start - len) * rand()
-        if (at < 0 || at + len > from.end + 1e-6) continue
-        const f = useProjectStore.getState().project.multicam!.files[0]
-        const src = (at - f.start) * f.rate
-        const before = useProjectStore.getState().project.clips.length
-        useProjectStore
-          .getState()
-          .insertClipAtTime(f.assetId, src, src + len * f.rate, target.at + target.len / 2)
-        expect(useProjectStore.getState().project.clips.length).toBeGreaterThan(before)
-        done.push('差し込み')
-      }
-      // B ロール(オーバーレイ)
-      if (rand() < 0.3) {
-        useProjectStore.getState().addVideoOverlayTrack('B ロール')
-        const track = useProjectStore.getState().project.videoOverlayTracks.at(-1)!
-        const f = useProjectStore.getState().project.multicam!.files[0]
-        useProjectStore.getState().addClipToVideoOverlayTrack(track.id, f.assetId, 3)
-        done.push('B ロール')
-      }
-      for (const d of done) kinds[d] = (kinds[d] ?? 0) + 1
-      const saved = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
-      delete (saved as { autoEdit?: unknown }).autoEdit
-      const r = restorePipelineFromProject(saved, 'location')!
-      expect([round, done, r.roughCut!.keptIds]).toEqual([round, done, kept])
+      const before = mainDuration()
+      saveAndReopen({ legacy: true })
+      await flush()
+      const shown = usePipelineStore.getState().roughCut!.keptIds
+      const r = await rebuild()
+      expect([round, r.kept]).toEqual([round, shown])
+      // 戻った場面の分だけ長くなるが、手で詰めた所は戻らない(全部の場面 − 詰めた秒数 以下)
+      expect(r.duration).toBeGreaterThanOrEqual(before - 0.2)
+      if (r.kept.length === scenes.length) expect(r.duration).toBeLessThan(214.8 - trimmed + 0.2)
     }
-    // 混ぜた手直しが一通り出ていること
-    for (const k of [
-      '一部だけ残す',
-      '手で詰める',
-      '速さ',
-      'トランジション',
-      '差し込み',
-      'B ロール'
-    ])
-      expect([k, (kinds[k] ?? 0) > 0]).toEqual([k, true])
-  }, 120_000)
+  }, 60_000)
 })

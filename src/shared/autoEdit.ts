@@ -4,6 +4,7 @@ import type { EpisodeKind } from './structure/kind'
 import type { SceneJudgement, SceneKind } from './structure/scenes'
 import type { PlacementMethod } from './sync/solve'
 import type { TextOverlay } from './types'
+import type { CameraSeg } from './roughCut/overrides'
 
 /** 同期の結果の要約(自動編集の画面の「同期の結果」に出す数字)。同期の報告そのものは企画に残らない */
 export interface SyncSummary {
@@ -22,7 +23,10 @@ export interface SyncSummary {
 
 /**
  * 自動編集の判断(企画のファイルに残す)。開き直したときに、自動編集の画面と「仮編集を作り直す」の
- * 元をそのまま戻すのに使う。古い企画には無い(無ければ今の本編から読み取る)
+ * 元をそのまま戻すのに使う。古い企画(10/09 版など)には無い(無ければ手で決めた残す/落とすは引き継げず、
+ * 作り直すと自動の選び方になる。今の本編から推し量ることはしない)。
+ * b4cd4d9〜ac0e4c8 の版で保存した企画には `timelineKeep`(今の本編から読み取った残す/落とす)があるが、
+ * 読むときに捨てる
  */
 export interface AutoEditDecisions {
   /** 場面を切ったときの番組の種類と、声の盛り上がり(同じ場面に切り直すのに使う) */
@@ -36,16 +40,20 @@ export interface AutoEditDecisions {
   judgeSource: 'ai' | 'heuristic'
   /** 画面で手で決めた残す / 落とす */
   keep: Record<string, boolean>
-  /**
-   * 古い形式の企画で、今の本編から読み取った残す / 落とす(手で決めたものとは別。場面を選ぶのには使うが、
-   * 手で削った区間は戻さない。仕上がりの長さを変えたら捨てて自動の選び方に戻す)
-   */
-  timelineKeep?: Record<string, boolean>
   /** 仕上がりの長さ(分。0 なら決めない)と編集の方針 */
   targetMinutes: number
   editNote: string
   /** 今の仮編集で残した場面 */
   keptIds?: string[]
+  /**
+   * 作り直しのたびの、残した場面(新しいものが後ろ)。`cut` はその時に組んだ本編(`roughCutAuto`)の印
+   * (`cutSignature`)。次に作り直すとき、今の `roughCutAuto` と同じ印の回の残した場面と比べ、
+   * 「落とす → 残す」に変わった場面だけ、その中の手の削りを取り消す。取り消し(Ctrl+Z)で本編が前の回に
+   * 戻っても、その回の残した場面と比べられる
+   */
+  builtKept?: { cut: string; keptIds: string[] }[]
+  /** 古い形式の企画を開いて、まだ作り直していない(手で決めた残す/落とすは前の版のものが残っていない) */
+  legacyPending?: boolean
   /** 演出テロップの提案の一覧と、置くと決めたもの */
   effects: EffectProposal[]
   effectChosen: string[]
@@ -57,6 +65,22 @@ export interface AutoEditDecisions {
    */
   carriedTelops?: Omit<TextOverlay, 'id'>[]
   sync?: SyncSummary
+}
+
+/** 覚えておく作り直しの回数(取り消しで戻れる回数よりは少ないが、普段の行き来には足りる) */
+export const BUILT_KEPT_MAX = 20
+
+/** 組んだ本編(共通の時刻の区間とカメラ)の印。同じ本編なら同じ印 */
+export function cutSignature(segs: readonly CameraSeg[] | undefined): string | undefined {
+  if (!segs || segs.length === 0) return undefined
+  // FNV-1a(32 ビット)。区間は 1ms に丸める
+  let h = 0x811c9dc5
+  const text = segs.map((s) => `${s.start.toFixed(3)},${s.end.toFixed(3)},${s.cameraId}`).join(';')
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return `${segs.length}:${h.toString(16)}`
 }
 
 const SCENE_KINDS: readonly SceneKind[] = ['highlight', 'normal', 'unneeded']
@@ -112,7 +136,18 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     return out
   }
   const keep = flags(raw.keep)
-  const timelineKeep = flags(raw.timelineKeep)
+  // 前の版(b4cd4d9〜ac0e4c8)の `timelineKeep`(今の本編から読み取った残す/落とす)は読み捨てる。
+  // その版では残す場面をこれで決めていたので、手で決めた残す/落とすが残っていない古い企画と同じに扱う
+  // (残した場面 `keptIds` も、今の本編から読み取ったものなので使わない)
+  const readFromTimeline = isObj(raw.timelineKeep) && Object.keys(raw.timelineKeep).length > 0
+  const builtKept = Array.isArray(raw.builtKept)
+    ? raw.builtKept
+        .filter(
+          (b): b is Record<string, unknown> => isObj(b) && str(b.cut) && Array.isArray(b.keptIds)
+        )
+        .map((b) => ({ cut: b.cut as string, keptIds: (b.keptIds as unknown[]).filter(str) }))
+        .slice(-BUILT_KEPT_MAX)
+    : []
   const carriedTelops = Array.isArray(raw.carriedTelops)
     ? raw.carriedTelops.filter(
         (o): o is Omit<TextOverlay, 'id'> =>
@@ -155,10 +190,13 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     ...(planJudgements ? { planJudgements } : {}),
     judgeSource: raw.judgeSource === 'ai' ? 'ai' : 'heuristic',
     keep,
-    ...(Object.keys(timelineKeep).length > 0 ? { timelineKeep } : {}),
     targetMinutes: num(raw.targetMinutes) ? Math.max(0, raw.targetMinutes) : 0,
     editNote: str(raw.editNote) ? raw.editNote : '',
-    ...(Array.isArray(raw.keptIds) ? { keptIds: raw.keptIds.filter(str) } : {}),
+    ...(Array.isArray(raw.keptIds) && !readFromTimeline
+      ? { keptIds: raw.keptIds.filter(str) }
+      : {}),
+    ...(builtKept.length > 0 ? { builtKept } : {}),
+    ...(raw.legacyPending === true || readFromTimeline ? { legacyPending: true } : {}),
     effects: effects.map((e) => ({ ...e, reason: str(e.reason) ? e.reason : '' })),
     effectChosen,
     ...(raw.effectsAsked === true ? { effectsAsked: true } : {}),
