@@ -2558,6 +2558,7 @@ export function Timeline(): React.JSX.Element {
                         end={tc.clip.outPoint}
                         width={clipWidth}
                         height={28}
+                        variant="video"
                       />
                     </div>
                   )}
@@ -2904,6 +2905,7 @@ export function Timeline(): React.JSX.Element {
                           end={outPoint}
                           width={clipWidth}
                           height={30}
+                          variant={track.autoRole ? 'auto' : 'audio'}
                         />
                       </div>
                     )}

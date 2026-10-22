@@ -30,8 +30,28 @@ function baseName(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
 }
 
-/** 要確認の一覧(自動編集の画面と、画面の下のバーで同じものを使う) */
-export function useReviewItems(): { open: ReviewItem[]; done: ReviewItem[] } {
+type ReviewLists = { open: ReviewItem[]; done: ReviewItem[] }
+
+/**
+ * 最後に組んだ一覧と、その元。上の帯・下のバー・自動編集の画面が同じ元で呼ぶので、
+ * 元が同じなら組み直さずに同じ一覧を返す(画面のあちこちで同じ計算を重ねない)
+ */
+let shared: { deps: readonly unknown[]; lists: ReviewLists } | null = null
+
+function sameDeps(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a.length === b.length && a.every((v, i) => Object.is(v, b[i]))
+}
+
+/** 元が前と同じなら前の一覧を、違えば組んで覚える */
+function sharedLists(deps: readonly unknown[], build: () => ReviewLists): ReviewLists {
+  if (shared && sameDeps(shared.deps, deps)) return shared.lists
+  const lists = build()
+  shared = { deps, lists }
+  return lists
+}
+
+/** 要確認の一覧(自動編集の画面・上の帯・画面の下のバーで同じものを使う) */
+export function useReviewItems(): ReviewLists {
   const project = useProjectStore((s) => s.project)
   const report = usePipelineStore((s) => s.report)
   const sources = usePipelineStore((s) => s.sources)
@@ -44,28 +64,42 @@ export function useReviewItems(): { open: ReviewItem[]; done: ReviewItem[] } {
   const qc = useQcStore((s) => s.report)
 
   return useMemo(() => {
-    const sourceOf = new Map(syncedFiles.map((f) => [f.id, f.sourceId]))
-    const pathOf = new Map(syncedFiles.map((f) => [f.id, f.path]))
-    const placeOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
-    const items = buildReviewItems({
+    const deps = [
       project,
-      syncIssues: report?.issues ?? [],
-      fileLabel: (id) =>
-        `${sources.find((s) => s.id === sourceOf.get(id))?.name ?? ''} ${baseName(pathOf.get(id) ?? id)}`.trim(),
-      placedStart: (id) =>
-        project.multicam ? timelineStartOf(project, pathOf.get(id)) : placeOf.get(id)?.start,
+      report,
+      sources,
+      syncedFiles,
       telopReviews,
       colorIssues,
       denoiseFailures,
       effects,
       effectChosen,
       qc
+    ]
+    return sharedLists(deps, () => {
+      const sourceOf = new Map(syncedFiles.map((f) => [f.id, f.sourceId]))
+      const pathOf = new Map(syncedFiles.map((f) => [f.id, f.path]))
+      const placeOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
+      const items = buildReviewItems({
+        project,
+        syncIssues: report?.issues ?? [],
+        fileLabel: (id) =>
+          `${sources.find((s) => s.id === sourceOf.get(id))?.name ?? ''} ${baseName(pathOf.get(id) ?? id)}`.trim(),
+        placedStart: (id) =>
+          project.multicam ? timelineStartOf(project, pathOf.get(id)) : placeOf.get(id)?.start,
+        telopReviews,
+        colorIssues,
+        denoiseFailures,
+        effects,
+        effectChosen,
+        qc
+      })
+      const done = new Set(project.reviewed ?? [])
+      return {
+        open: items.filter((i) => !done.has(i.key)),
+        done: items.filter((i) => done.has(i.key))
+      }
     })
-    const done = new Set(project.reviewed ?? [])
-    return {
-      open: items.filter((i) => !done.has(i.key)),
-      done: items.filter((i) => done.has(i.key))
-    }
   }, [
     project,
     report,

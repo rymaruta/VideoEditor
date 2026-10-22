@@ -368,9 +368,8 @@ function App(): React.JSX.Element {
       <PanelBoundary name="作業の流れ">
         <WorkflowBar
           telopOpen={tab === 'text'}
-          onEdit={() => {
-            if (tab === 'text') setTab('inspector')
-          }}
+          // 「編集」はインスペクタへ戻す(テロップ以外のパネルを出しているときも、押せば移る)
+          onEdit={() => setTab('inspector')}
           onTelop={() => setTab('text')}
         />
       </PanelBoundary>

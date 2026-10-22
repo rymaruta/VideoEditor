@@ -69,10 +69,10 @@
   /* 波形 — 外側に山(peak)・内側に平均を重ねる */
   --ve-wave-peak: #2f6b50;
   --ve-wave-rms: #7bddae;
-  --ve-wave-auto-peak: #3a3060;
-  --ve-wave-auto-rms: #6e5ba8;
-  --ve-wave-video-peak: #34558a;
-  --ve-wave-video-rms: #5878ad;
+  --ve-wave-auto-peak: #4b3f7d;
+  --ve-wave-auto-rms: #9b86e0; /* 紫の地(#2A2240)の上で 4.9:1 */
+  --ve-wave-video-peak: #5c7cb3;
+  --ve-wave-video-rms: #a9c3ff; /* 映像の地(#2A4673)の上で 5.4:1 */
   /* 話者(テロップの縁・タイムラインの印・文字起こしの名前で同じ色。最大 8 人) */
   --ve-speaker-0: #f6a6cc;
   --ve-speaker-1: #7fa8ff;
@@ -334,12 +334,21 @@ input[type='number'] {
   font-variant-numeric: tabular-nums;
 }
 
-input:focus,
+/* 文字を打つ欄は、フォーカスで琥珀の枠と淡い光。チェック・ラジオ・スライダーは別(下) */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):focus,
 select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--ve-accent);
   box-shadow: 0 0 0 3px var(--ve-accent-soft);
+}
+
+/* キーボードで来たら、どの入力にも 2px の琥珀の輪を 2px 離して付ける */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--ve-accent);
+  outline-offset: 2px;
 }
 
 input[aria-invalid='true'],
@@ -389,20 +398,6 @@ input[type='checkbox']:indeterminate {
   box-shadow: none;
 }
 
-input[type='checkbox']:focus,
-input[type='radio']:focus {
-  border-color: transparent;
-}
-
-input[type='checkbox']:focus:not(:focus-visible),
-input[type='radio']:focus:not(:focus-visible) {
-  box-shadow: inset 0 0 0 1.5px var(--ve-line-strong);
-}
-
-input[type='checkbox']:checked:focus:not(:focus-visible) {
-  box-shadow: none;
-}
-
 input[type='radio'] {
   -webkit-appearance: none;
   appearance: none;
@@ -419,8 +414,7 @@ input[type='radio'] {
   vertical-align: middle;
 }
 
-input[type='radio']:checked,
-input[type='radio']:checked:focus:not(:focus-visible) {
+input[type='radio']:checked {
   background: radial-gradient(circle, var(--ve-on-accent) 0 3px, var(--ve-accent) 3.5px);
   box-shadow: none;
 }
@@ -3002,7 +2996,7 @@ h3 {
 }
 
 .toggle-chip.active {
-  background: var(--accent-gradient);
+  background: var(--ve-accent);
   border-color: transparent;
   color: var(--ve-on-accent);
 }
@@ -4900,17 +4894,19 @@ h3 {
   box-shadow: inset 0 0 0 1px var(--ve-trk-telop-line);
   color: var(--ve-trk-telop-ink);
 }
-/* 文字起こしから自動で並べたテロップ(以前の破線の見分けを、内側の破線で残す) */
+/* 文字起こしから自動で並べたテロップ。デザインの「自動で入れた」と同じ紫の点を左に付け、
+   色だけでなく形でも手のテロップと見分ける(点はテロップの地の上で 6.5:1、選択中でも 4.6:1) */
 .timeline-caption-clip.auto {
   border: 0;
-  background-image: repeating-linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.07) 0 4px,
-    transparent 4px 8px
-  );
-  background-size: 100% 1px;
-  background-repeat: no-repeat;
-  background-position: bottom;
+}
+.timeline-caption-clip.auto::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--ve-auto-ink);
 }
 .timeline-caption-clip.selected {
   background-color: var(--ve-trk-telop-line);
@@ -4948,11 +4944,25 @@ h3 {
   align-items: flex-start;
   padding-top: 4px;
 }
-/* 波形は自分の大きさで描いた絵(Waveform.tsx)を、そのまま重ねる */
-.waveform-canvas {
-  display: block;
+/* 波形は一定幅のタイル(canvas)に分けて描き(Waveform.tsx)、横に並べて重ねる */
+.waveform-tiles {
+  position: relative;
   width: 100%;
   height: 100%;
+}
+.waveform-tile {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: block;
+}
+.waveform-tiles[data-variant='video'] {
+  --ve-wave-peak: var(--ve-wave-video-peak);
+  --ve-wave-rms: var(--ve-wave-video-rms);
+}
+.waveform-tiles[data-variant='auto'] {
+  --ve-wave-peak: var(--ve-wave-auto-peak);
+  --ve-wave-rms: var(--ve-wave-auto-rms);
 }
 .timeline-video-overlay-clip.dragging,
 .timeline-audio-clip.dragging {

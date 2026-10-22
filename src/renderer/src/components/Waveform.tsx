@@ -1,67 +1,154 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  columnLevels,
+  peakEnvelope,
+  tileReadRange,
+  waveformTiles,
+  type WaveTile
+} from '../lib/waveformTiles'
 
-/** 外側の山を、まわりの何列ぶんの大きい方で取るか(1列 = 1px) */
-const PEAK_REACH = 4
+/** 波形の色の組(CSS の --ve-wave-* を選ぶ)。変われば描き直す */
+export type WaveformVariant = 'audio' | 'auto' | 'video'
 
 /**
- * 1列ごとの音の大きさ(中心からの高さ)を、ffmpeg の絵から読み取る。
- * 絵は `showwavespic` の既定(列ごとの平均)で、中心から上下へ対称に塗られている。
+ * ほどいた絵(URL ごと)。同じ絵を何度もほどかない。古いものから捨てる。
+ * `decode()` で待つので、大きな絵でもほどく間に画面を止めない。
  */
-function columnLevels(alpha: Uint8ClampedArray, w: number, h: number): Float32Array {
-  const levels = new Float32Array(w)
-  const center = (h - 1) / 2
-  for (let x = 0; x < w; x++) {
-    let top = -1
-    let bottom = -1
-    for (let y = 0; y < h; y++) {
-      if (alpha[(y * w + x) * 4 + 3] > 24) {
-        if (top < 0) top = y
-        bottom = y
-      }
-    }
-    levels[x] = top < 0 ? 0 : Math.max(center - top, bottom - center) + 0.5
+const decoded = new Map<string, Promise<HTMLImageElement>>()
+const DECODED_LIMIT = 64
+
+function decodeOnce(url: string): Promise<HTMLImageElement> {
+  const hit = decoded.get(url)
+  if (hit) {
+    decoded.delete(url)
+    decoded.set(url, hit)
+    return hit
   }
-  return levels
+  const img = new Image()
+  img.src = url
+  const p = img.decode().then(() => img)
+  p.catch(() => decoded.delete(url))
+  decoded.set(url, p)
+  while (decoded.size > DECODED_LIMIT) {
+    const oldest = decoded.keys().next().value
+    if (oldest === undefined) break
+    decoded.delete(oldest)
+  }
+  return p
+}
+
+/** タイルごとの大きさ(平均と山)。絵ごとに持ち、絵が捨てられれば一緒に消える */
+const levelsCache = new WeakMap<
+  HTMLImageElement,
+  Map<number, { rms: Float32Array; peak: Float32Array }>
+>()
+let readCanvas: HTMLCanvasElement | null = null
+
+function tileLevels(
+  img: HTMLImageElement,
+  tile: WaveTile
+): { rms: Float32Array; peak: Float32Array } {
+  let perImage = levelsCache.get(img)
+  if (!perImage) {
+    perImage = new Map()
+    levelsCache.set(img, perImage)
+  }
+  const hit = perImage.get(tile.x)
+  if (hit) return hit
+  const total = img.naturalWidth
+  const h = img.naturalHeight
+  const { sx, sw, offset } = tileReadRange(tile, total)
+  if (!readCanvas) readCanvas = document.createElement('canvas')
+  if (readCanvas.width < sw) readCanvas.width = sw
+  if (readCanvas.height !== h) readCanvas.height = h
+  const ctx = readCanvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new Error('canvas unavailable')
+  ctx.clearRect(0, 0, sw, h)
+  ctx.drawImage(img, sx, 0, sw, h, 0, 0, sw, h)
+  const levels = columnLevels(ctx.getImageData(0, 0, sw, h).data, sw, h)
+  const peak = peakEnvelope(levels)
+  const result = {
+    rms: levels.slice(offset, offset + tile.w),
+    peak: peak.slice(offset, offset + tile.w)
+  }
+  perImage.set(tile.x, result)
+  return result
 }
 
 /**
- * Graphite 2 の二重の波形: 外側に山(濃い色)・内側に平均(明るい色)。
- * 届く絵は列ごとの平均だけなので、外側の山は「まわり数列のうち大きい方」で取る
+ * Graphite 2 の二重の波形の 1 タイル: 外側に山(濃い色)・内側に平均(明るい色)。
+ * 届く絵は列ごとの平均だけなので、外側の山は「となりの列と比べて大きい方」で取る
  * (本当の最大値は書き出し側で別に読む必要がある。それまでの近い見え方)。
  */
-function drawLayered(canvas: HTMLCanvasElement, img: HTMLImageElement): void {
-  const w = img.naturalWidth
-  const h = img.naturalHeight
-  if (w <= 0 || h <= 0) return
-  const read = document.createElement('canvas')
-  read.width = w
-  read.height = h
-  const rctx = read.getContext('2d', { willReadFrequently: true })
+function drawTile(canvas: HTMLCanvasElement, img: HTMLImageElement, tile: WaveTile): void {
   const ctx = canvas.getContext('2d')
-  if (!rctx || !ctx) return
-  rctx.drawImage(img, 0, 0)
-  const levels = columnLevels(rctx.getImageData(0, 0, w, h).data, w, h)
-  canvas.width = w
-  canvas.height = h
+  if (!ctx) throw new Error('canvas unavailable')
+  const { rms, peak } = tileLevels(img, tile)
+  const h = img.naturalHeight
+  if (canvas.width !== tile.w) canvas.width = tile.w
+  if (canvas.height !== h) canvas.height = h
   const style = getComputedStyle(canvas)
-  const peakColor = style.getPropertyValue('--ve-wave-peak').trim() || '#2f6b50'
-  const rmsColor = style.getPropertyValue('--ve-wave-rms').trim() || '#7bddae'
   const mid = h / 2
-  ctx.clearRect(0, 0, w, h)
-  ctx.fillStyle = peakColor
-  for (let x = 0; x < w; x++) {
-    let peak = levels[x]
-    for (let k = 1; k <= PEAK_REACH; k++) {
-      if (x - k >= 0) peak = Math.max(peak, levels[x - k])
-      if (x + k < w) peak = Math.max(peak, levels[x + k])
+  ctx.clearRect(0, 0, tile.w, h)
+  ctx.fillStyle = style.getPropertyValue('--ve-wave-peak').trim() || '#2f6b50'
+  for (let x = 0; x < tile.w; x++) if (peak[x] > 0) ctx.fillRect(x, mid - peak[x], 1, peak[x] * 2)
+  ctx.fillStyle = style.getPropertyValue('--ve-wave-rms').trim() || '#7bddae'
+  for (let x = 0; x < tile.w; x++) if (rms[x] > 0) ctx.fillRect(x, mid - rms[x], 1, rms[x] * 2)
+}
+
+/** 1 タイル。画面に見えている(近い)ときだけ描く */
+function WaveTileCanvas({
+  img,
+  x,
+  w,
+  total,
+  variant,
+  onFail
+}: {
+  img: HTMLImageElement
+  x: number
+  w: number
+  total: number
+  variant: WaveformVariant
+  onFail: () => void
+}): React.JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    // 左右に少し余裕を持たせ、横に送ったときに描き終わっているようにする
+    const io = new IntersectionObserver(
+      (entries) => setVisible(entries.some((e) => e.isIntersecting)),
+      {
+        rootMargin: '0px 512px'
+      }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+  const onFailRef = useRef(onFail)
+  useEffect(() => {
+    onFailRef.current = onFail
+  })
+  useEffect(() => {
+    const el = ref.current
+    if (!visible || !el) return
+    try {
+      drawTile(el, img, { x, w })
+    } catch {
+      onFailRef.current()
     }
-    if (peak > 0) ctx.fillRect(x, mid - peak, 1, peak * 2)
-  }
-  ctx.fillStyle = rmsColor
-  for (let x = 0; x < w; x++) {
-    const level = levels[x]
-    if (level > 0) ctx.fillRect(x, mid - level, 1, level * 2)
-  }
+    // variant が変われば色を読み直して描き直す
+  }, [visible, img, x, w, variant])
+  return (
+    <canvas
+      ref={ref}
+      className="waveform-tile"
+      aria-hidden="true"
+      style={{ left: `${(x / total) * 100}%`, width: `${(w / total) * 100}%` }}
+    />
+  )
 }
 
 export function Waveform({
@@ -69,13 +156,16 @@ export function Waveform({
   start,
   end,
   width,
-  height
+  height,
+  variant = 'audio'
 }: {
   filePath: string
   start: number
   end: number
   width: number
   height: number
+  /** 色の組。自動の SE・BGM は 'auto'、本編クリップは 'video' */
+  variant?: WaveformVariant
 }): React.JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null)
 
@@ -123,29 +213,46 @@ export function Waveform({
     }
   }, [filePath, start, end, width, height])
 
-  // 届いた絵を、山と平均の二重に描き直す(描けない環境では元の絵をそのまま出す)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [layered, setLayered] = useState(true)
+  // 届いた絵をほどき、山と平均の二重に描き直す(描けなかった絵は元の絵をそのまま出す)。
+  // 描けなかった印は URL ごと(新しい絵になれば、また二重で描いてみる)
+  const [image, setImage] = useState<{ url: string; img: HTMLImageElement } | null>(null)
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!url || !canvas) return
+    if (!url) return
     let cancelled = false
-    const img = new Image()
-    img.onload = () => {
-      if (cancelled) return
-      try {
-        drawLayered(canvas, img)
-      } catch {
-        setLayered(false)
+    decodeOnce(url).then(
+      (img) => {
+        if (!cancelled) setImage({ url, img })
+      },
+      () => {
+        if (!cancelled) setFailedUrl(url)
       }
-    }
-    img.src = url
+    )
     return () => {
       cancelled = true
     }
   }, [url])
 
   if (!url) return null
-  if (!layered) return <img className="waveform-img" src={url} alt="" draggable={false} />
-  return <canvas ref={canvasRef} className="waveform-img waveform-canvas" aria-hidden="true" />
+  if (failedUrl === url) return <img className="waveform-img" src={url} alt="" draggable={false} />
+  // 新しい絵をほどいている間は前の絵のまま(トリム中に点滅しない)
+  if (!image) return null
+  const total = image.img.naturalWidth
+  const tiles = waveformTiles(total)
+  const failedFor = image.url
+  return (
+    <div className="waveform-img waveform-tiles" data-variant={variant}>
+      {tiles.map((tile) => (
+        <WaveTileCanvas
+          key={tile.x}
+          img={image.img}
+          x={tile.x}
+          w={tile.w}
+          total={total}
+          variant={variant}
+          onFail={() => setFailedUrl(failedFor)}
+        />
+      ))}
+    </div>
+  )
 }
