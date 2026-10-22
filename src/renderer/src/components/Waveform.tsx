@@ -96,6 +96,18 @@ function drawTile(canvas: HTMLCanvasElement, img: HTMLImageElement, tile: WaveTi
   for (let x = 0; x < tile.w; x++) if (rms[x] > 0) ctx.fillRect(x, mid - rms[x], 1, rms[x] * 2)
 }
 
+/**
+ * 横にスクロールする一番近い祖先(タイムラインの `.track-lanes-col` など)。
+ * IntersectionObserver の root に渡さないと、rootMargin(先読み)が効かない
+ */
+function scrollRootOf(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowX
+    if (o === 'auto' || o === 'scroll') return p
+  }
+  return null
+}
+
 /** 1 タイル。画面に見えている(近い)ときだけ描く */
 function WaveTileCanvas({
   img,
@@ -121,6 +133,7 @@ function WaveTileCanvas({
     const io = new IntersectionObserver(
       (entries) => setVisible(entries.some((e) => e.isIntersecting)),
       {
+        root: scrollRootOf(el),
         rootMargin: '0px 512px'
       }
     )
@@ -131,11 +144,24 @@ function WaveTileCanvas({
   useEffect(() => {
     onFailRef.current = onFail
   })
+  // 描いてある絵(見えていない間に絵が替わったら中を消し、古い波形を見せない)
+  const drawnRef = useRef<{ img: HTMLImageElement; x: number; w: number; variant: string } | null>(
+    null
+  )
   useEffect(() => {
     const el = ref.current
-    if (!visible || !el) return
+    if (!el) return
+    const drawn = drawnRef.current
+    if (!visible) {
+      if (drawn && (drawn.img !== img || drawn.x !== x || drawn.w !== w)) {
+        el.getContext('2d')?.clearRect(0, 0, el.width, el.height)
+        drawnRef.current = null
+      }
+      return
+    }
     try {
       drawTile(el, img, { x, w })
+      drawnRef.current = { img, x, w, variant }
     } catch {
       onFailRef.current()
     }
@@ -168,6 +194,9 @@ export function Waveform({
   variant?: WaveformVariant
 }): React.JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null)
+  // ほどいた絵と、二重に描けなかった絵の URL(下の描き直しで使う)
+  const [image, setImage] = useState<{ url: string; img: HTMLImageElement } | null>(null)
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -203,7 +232,11 @@ export function Waveform({
           // 同じ見え方で、実際にそこには音が無い。
           // 掴んでいる最中の見え方は変えない——`url` を消すのは**失敗したときだけ**で、
           // 待っている 150ms の間は前の絵のままにしてある(でないとトリム中に点滅する)。
-          if (!cancelled) setUrl(null)
+          // ほどいた絵も消す(次に絵が届くまでの間に、前の範囲の波形を出さない)
+          if (!cancelled) {
+            setUrl(null)
+            setImage(null)
+          }
         })
     }
     timer = setTimeout(() => request(0), 150)
@@ -215,8 +248,6 @@ export function Waveform({
 
   // 届いた絵をほどき、山と平均の二重に描き直す(描けなかった絵は元の絵をそのまま出す)。
   // 描けなかった印は URL ごと(新しい絵になれば、また二重で描いてみる)
-  const [image, setImage] = useState<{ url: string; img: HTMLImageElement } | null>(null)
-  const [failedUrl, setFailedUrl] = useState<string | null>(null)
   useEffect(() => {
     if (!url) return
     let cancelled = false

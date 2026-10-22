@@ -343,10 +343,11 @@ textarea:focus {
   box-shadow: 0 0 0 3px var(--ve-accent-soft);
 }
 
-/* キーボードで来たら、どの入力にも 2px の琥珀の輪を 2px 離して付ける */
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
+/* チェック・ラジオは、キーボードで来たら 2px の琥珀の輪を 2px 離して付ける。
+   文字を打つ欄・選択は上の琥珀の枠と淡い光だけ(select・textarea はマウスで押しても
+   :focus-visible が当たるので、輪まで足すと枠・光・輪の三重になる) */
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
   outline: 2px solid var(--ve-accent);
   outline-offset: 2px;
 }
