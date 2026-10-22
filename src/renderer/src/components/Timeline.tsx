@@ -132,6 +132,10 @@ import { spansOfClips } from '@shared/roughCut/overrides'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
 import { OverflowMenu, type OverflowAction } from './OverflowMenu'
+import { TimelineMarks } from './TimelineMarks'
+import { ShortcutHelpDialog } from './ShortcutHelpDialog'
+import { useShortcutHelpStore } from '../lib/shortcutHelp'
+import { useTimelineSubSelection } from '../lib/timelineSelection'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -627,6 +631,11 @@ export function Timeline(): React.JSX.Element {
     trackId: string
     clipId: string
   } | null>(null)
+  // 全体のキー処理(Shift+Delete など)から見えるよう、音声・PiP の選びを写す(理由は timelineSelection)
+  useEffect(() => {
+    useTimelineSubSelection.getState().setSubSelection(selectedAudioClip, selectedVideoOverlayClip)
+  }, [selectedAudioClip, selectedVideoOverlayClip])
+  useEffect(() => () => useTimelineSubSelection.getState().setSubSelection(null, null), [])
   const [videoOverlayDrag, setVideoOverlayDrag] = useState<VideoOverlayDragState | null>(null)
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
@@ -1698,7 +1707,7 @@ export function Timeline(): React.JSX.Element {
     if (id === 'view.zoomIn') setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))
     else if (id === 'view.zoomOut') setZoom((z) => Math.max(currentMinZoom(), z / 1.4))
     else if (id === 'view.zoomFit') handleZoomToFit()
-    else if (id === 'help.shortcuts') setShortcutGuideVisible(true)
+    else if (id === 'help.shortcuts') useShortcutHelpStore.getState().setOpen(true)
     else if (id === 'telop.auto') {
       // 選んでいるクリップ、無ければ再生位置のクリップの音声からテロップを作る
       const state = useProjectStore.getState()
@@ -2174,6 +2183,10 @@ export function Timeline(): React.JSX.Element {
                 <kbd>←/→</kbd>
               </span>
               <span className="shortcut-hint">
+                キー一覧
+                <kbd>?</kbd>
+              </span>
+              <span className="shortcut-hint">
                 ツール切替
                 <kbd>A</kbd>
                 <kbd>T</kbd>
@@ -2467,6 +2480,7 @@ export function Timeline(): React.JSX.Element {
                 />
               ) : null
             )}
+            <TimelineMarks pixelsPerSecond={pixelsPerSecond} total={total} />
           </div>
           {sceneRanges.length > 0 && (
             <TimelineSceneBand
@@ -3542,6 +3556,7 @@ export function Timeline(): React.JSX.Element {
         </div>
       )}
 
+      <ShortcutHelpDialog />
       {trimClipId && <TrimModal clipId={trimClipId} onClose={() => setTrimClipId(null)} />}
       {silenceCutClipIds && (
         <SilenceCutModal clipIds={silenceCutClipIds} onClose={() => setSilenceCutClipIds(null)} />

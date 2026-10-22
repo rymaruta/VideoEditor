@@ -397,6 +397,16 @@ export interface Project {
    * 開き直したときに自動編集の画面と作り直しの元を戻す。古い企画には無い
    */
   autoEdit?: AutoEditDecisions
+  /** タイムラインのマーカー(M キー)。時刻はタイムラインの秒。古い企画には無い */
+  markers?: TimelineMarker[]
+}
+
+/** タイムラインに打った印(Premiere のシーケンスマーカーと同じ。本編を編集しても動かない) */
+export interface TimelineMarker {
+  id: string
+  /** タイムラインの秒 */
+  time: number
+  label?: string
 }
 
 export interface TemplateSegment {
