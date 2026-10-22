@@ -97,6 +97,7 @@ export const IPC = {
   menuCommand: 'menu:command',
   menuUpdate: 'menu:update',
   menuPopup: 'menu:popup',
+  menuPopupTop: 'menu:popupTop',
   appAbout: 'app:about',
   openLicense: 'app:openLicense',
   logRendererError: 'diag:logRendererError',

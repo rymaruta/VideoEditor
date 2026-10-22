@@ -277,3 +277,19 @@ export function buildMenuTemplate(
     ? [{ label: PRODUCT_NAME, submenu: [{ label: '終了', role: 'quit' }] }, ...menu]
     : menu
 }
+
+/** メニューの名前のニーモニック(「ファイル(&F)」の F)。無ければ null */
+export function menuMnemonic(label: string | undefined): string | null {
+  const m = /&([A-Za-z0-9])/.exec(label ?? '')
+  return m ? m[1].toUpperCase() : null
+}
+
+/**
+ * 上の段のメニューのニーモニック(Windows / Linux)。帯のメニューボタンにまとめたので、Alt+F などで
+ * そのメニューを直接開くのに使う(OS のメニューバーがあった頃と同じ操作)
+ */
+export function topMenuMnemonics(): string[] {
+  return buildMenuTemplate({}, [], { isDev: false, isMac: false })
+    .map((m) => menuMnemonic(m.label))
+    .filter((c): c is string => c !== null)
+}

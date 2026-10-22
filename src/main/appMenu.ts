@@ -1,6 +1,7 @@
 import { BrowserWindow, Menu, type IpcMain, type MenuItemConstructorOptions } from 'electron'
 import {
   buildMenuTemplate,
+  menuMnemonic,
   type MenuFileState,
   type MenuItemSpec,
   type MenuShortcuts
@@ -101,9 +102,31 @@ export function popupAppMenu(win: BrowserWindow | null | undefined, at?: unknown
   return true
 }
 
-/** メニューボタンの IPC(画面 → main)を受ける */
+/**
+ * Alt+F などのニーモニックで、上の段のそのメニュー(ファイル など)を直接出す。
+ * 帯にまとめる前の OS のメニューバーと同じ操作。知らない英字なら何もしない
+ */
+export function popupTopMenu(
+  win: BrowserWindow | null | undefined,
+  letter: unknown,
+  at?: unknown
+): boolean {
+  const menu = Menu.getApplicationMenu()
+  if (!menu || !win || win.isDestroyed()) return false
+  if (typeof letter !== 'string' || !/^[A-Z0-9]$/.test(letter)) return false
+  const item = menu.items.find((i) => menuMnemonic(i.label) === letter)
+  if (!item?.submenu) return false
+  const pos = menuPopupPosition(at as { x?: unknown; y?: unknown } | undefined)
+  item.submenu.popup({ window: win, ...(pos ?? {}) })
+  return true
+}
+
+/** メニューボタン・ニーモニックの IPC(画面 → main)を受ける */
 export function installMenuPopupIpc(ipc: Pick<IpcMain, 'on'>): void {
   ipc.on(IPC.menuPopup, (e, at: unknown) => {
     popupAppMenu(BrowserWindow.fromWebContents(e.sender), at)
+  })
+  ipc.on(IPC.menuPopupTop, (e, letter: unknown, at: unknown) => {
+    popupTopMenu(BrowserWindow.fromWebContents(e.sender), letter, at)
   })
 }

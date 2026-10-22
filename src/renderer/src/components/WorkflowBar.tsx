@@ -7,7 +7,10 @@ import { modifierLabel, workflowBarUndo } from '../lib/undoAction'
 import { useModalOpen } from '../lib/useModalOpen'
 import { RedoIcon, UndoIcon, UploadIcon } from './icons'
 import { needsMenuButton } from '@shared/windowChrome'
-import { createAltTapDetector } from '../lib/altMenuKey'
+import { createAltTapDetector, menuMnemonicFor } from '../lib/altMenuKey'
+import { topMenuMnemonics } from '@shared/appMenu'
+import { editorActionFor, getEditorKeymap, getKeymap, matchesBinding } from '../lib/keymap'
+import { useSettingsStore } from '../store/settingsStore'
 import { usePipelineStore } from '../store/pipelineStore'
 
 /** 動いている OS(preload から。試験・古い preload では空) */
@@ -79,7 +82,21 @@ export function WorkflowBar({
   useEffect(() => {
     if (!showMenuButton) return
     const alt = createAltTapDetector()
-    const onDown = (e: KeyboardEvent): void => alt.keydown(e)
+    const mnemonics = topMenuMnemonics()
+    const onDown = (e: KeyboardEvent): void => {
+      alt.keydown(e)
+      // Alt+F などのニーモニックで、上の段のそのメニューを直接開く(OS のメニューバーがあった頃と同じ)。
+      // キー操作の設定にある Alt の組(Alt+X・Alt+Backspace など)は、そちらを先にする
+      const letter = menuMnemonicFor(e, mnemonics)
+      if (!letter || e.repeat || isModalOpen()) return
+      const scheme = useSettingsStore.getState().keymapScheme
+      if (editorActionFor(e, getEditorKeymap(scheme)) !== null) return
+      if (Object.values(getKeymap(scheme)).some((b) => matchesBinding(e, b))) return
+      e.preventDefault()
+      e.stopPropagation()
+      const b = menuButtonRef.current?.getBoundingClientRect()
+      window.api.popupTopMenu(letter, b ? { x: b.left, y: b.bottom + 2 } : { x: 8, y: 46 })
+    }
     const onUp = (e: KeyboardEvent): void => {
       if (!alt.keyup(e) || isModalOpen()) return
       const btn = menuButtonRef.current

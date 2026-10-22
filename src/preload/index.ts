@@ -284,6 +284,9 @@ const api = {
   }): Promise<void> => ipcRenderer.invoke(IPC.menuUpdate, next),
   /** 上の帯のメニューボタン: アプリのメニューを窓の中の (x, y) に出す(Windows / Linux) */
   popupAppMenu: (at: { x: number; y: number }): void => ipcRenderer.send(IPC.menuPopup, at),
+  /** Alt+F などのニーモニック: 上の段のそのメニューを (x, y) に出す(Windows / Linux) */
+  popupTopMenu: (letter: string, at: { x: number; y: number }): void =>
+    ipcRenderer.send(IPC.menuPopupTop, letter, at),
   /** バージョン情報の中身(製品名・版・Electron などの版) */
   appAbout: (): Promise<AboutInfo> => ipcRenderer.invoke(IPC.appAbout),
   /** ライセンスの文書を別の窓で開く */

@@ -34,3 +34,25 @@ export function createAltTapDetector(): AltTapDetector {
     }
   }
 }
+
+/** キーの出来事のうち、見る所だけ */
+export interface MnemonicKey {
+  key: string
+  code?: string
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+}
+
+/**
+ * Alt+英字が上の段のメニューのニーモニック(Alt+F でファイル など)なら、その英字(大文字)。
+ * Ctrl・Shift・Cmd と一緒のとき・ニーモニックに無い英字(キー操作の Alt+X など)は null。
+ * キーの位置(code)で見る(macOS の Option+英字は別の文字になるため。日本語入力中も同じ位置)
+ */
+export function menuMnemonicFor(e: MnemonicKey, mnemonics: readonly string[]): string | null {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null
+  const fromCode = /^Key([A-Z])$/.exec(e.code ?? '')?.[1]
+  const letter = fromCode ?? (e.key.length === 1 ? e.key.toUpperCase() : '')
+  return letter && mnemonics.includes(letter) ? letter : null
+}
