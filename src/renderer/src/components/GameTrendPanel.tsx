@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
+import { KeyStorageNote } from './KeyStorageNote'
 import { fetchTrendingGamingVideos, YouTubeVideoInfo } from '../lib/youtube'
 import {
   analyzeGamingTrends,
@@ -207,6 +208,7 @@ export function GameTrendPanel(): React.JSX.Element {
         {envKeySources.geminiApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
+        <KeyStorageNote />
       </div>
       <div className="youtube-field">
         <label>分析の観点(任意)</label>

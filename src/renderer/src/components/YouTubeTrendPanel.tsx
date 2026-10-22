@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSettingsStore } from '../store/settingsStore'
+import { KeyStorageNote } from './KeyStorageNote'
 import { fetchTrendingVideos, searchVideos, YouTubeVideoInfo } from '../lib/youtube'
 import { formatIpcError } from '../lib/ipcError'
 import { openExternalLink } from '../lib/openExternalLink'
@@ -80,6 +81,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
         {envKeySources.youtubeApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
+        <KeyStorageNote />
       </div>
       <div className="youtube-search-row">
         <button className="primary-button" onClick={handleTrending} disabled={loading}>

@@ -34,6 +34,8 @@ export const IPC = {
   loadProject: 'project:load',
   downloadAudioAsset: 'audioLibrary:download',
   getEnvApiKeys: 'settings:getEnvApiKeys',
+  secretsLoad: 'settings:secretsLoad',
+  secretsSet: 'settings:secretsSet',
   setDirtyState: 'project:setDirtyState',
   setBusyState: 'app:setBusyState',
   notifyDone: 'app:notifyDone',

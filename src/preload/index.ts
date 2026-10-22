@@ -1,5 +1,6 @@
 import type { AudioEventWindow } from '@shared/events/audioEvents'
 import type { SystemInfo } from '@shared/systemInfo'
+import type { SecretName, SecretsSnapshot } from '@shared/secrets'
 import type { ShowKit } from '@shared/finish/sound'
 import type { DenoiseResult } from '@shared/denoise'
 import type { QcMeasurement } from '@shared/qc/media'
@@ -211,6 +212,11 @@ const api = {
   ): Promise<{ filePath: string; duration: number }> =>
     ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName),
   getEnvApiKeys: (): Promise<EnvApiKeys> => ipcRenderer.invoke(IPC.getEnvApiKeys),
+  /** 暗号化して保存した API キー(起動時に1回。暗号化が使えないときは available: false) */
+  secretsLoad: (): Promise<SecretsSnapshot> => ipcRenderer.invoke(IPC.secretsLoad),
+  /** API キーを暗号化して保存する(空なら消す)。保存できたら true */
+  secretsSet: (name: SecretName, value: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.secretsSet, name, value),
   setDirtyState: (dirty: boolean): void => ipcRenderer.send(IPC.setDirtyState, dirty),
   /** 長い処理の最中か(スリープさせない・タスクバーに進み具合・閉じる前に確かめる)。終わったら null */
   setBusyState: (state: { label: string; percent?: number } | null): void =>

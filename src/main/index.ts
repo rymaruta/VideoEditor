@@ -65,6 +65,8 @@ import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
+import { SecretStore } from './secretStore'
+import { safeStorageCipher } from './safeStorageCipher'
 import { fitWindowStateToDisplays, type WindowState } from './windowState'
 import {
   cleanupStaleSegmentDirs,
@@ -830,6 +832,15 @@ app.whenReady().then(() => {
     downloadAudioAsset(url, suggestedName)
   )
   ipcMain.handle(IPC.getEnvApiKeys, () => getEnvApiKeys())
+  // API キーは OS の仕組みで暗号化して userData/secrets.json に置く(secretStore。前の版の平文は画面が移す)
+  const secretStore = new SecretStore(
+    join(app.getPath('userData'), 'secrets.json'),
+    safeStorageCipher
+  )
+  ipcMain.handle(IPC.secretsLoad, () => secretStore.load())
+  ipcMain.handle(IPC.secretsSet, (_e, name: unknown, value: unknown) =>
+    secretStore.set(name, value)
+  )
 
   autosavePath = join(app.getPath('userData'), 'autosave.veproj')
   ipcMain.on(IPC.setDirtyState, (_e, dirty: boolean) => {

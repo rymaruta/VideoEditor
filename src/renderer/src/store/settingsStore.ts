@@ -30,11 +30,15 @@ import {
   type EpisodeKind
 } from '@shared/structure/kind'
 import { ASR_LANGUAGES, DEFAULT_ASR_LANGUAGE, type AsrLanguage } from '@shared/transcript'
+import {
+  LEGACY_SECRET_STORAGE_KEYS,
+  legacySecretsToMigrate,
+  SECRET_NAMES,
+  type SecretName,
+  type SecretsSnapshot
+} from '@shared/secrets'
 
-const STORAGE_KEY = 've-youtube-api-key'
-const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
-const FREESOUND_STORAGE_KEY = 've-freesound-api-key'
-const GEMINI_STORAGE_KEY = 've-gemini-api-key'
+// API キーの置き場は `@shared/secrets`(暗号化できる PC では main。前の版の localStorage から移す)
 const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
 const SNAP_ENABLED_KEY = 've-snap-enabled'
 // 初期状態は隠す(常に出ていると邪魔、という声を受けて v2 で既定を変えた)。
@@ -90,6 +94,63 @@ function writeSetting(key: string, value: string): void {
   } catch {
     // 保存できなくても今回の起動の間は効く
   }
+}
+
+function removeSetting(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // 消せなくても、次の起動でまた移す
+  }
+}
+
+/** API キーの置き場。`pending` は main に聞いている途中、`plain` は今までどおり localStorage(平文) */
+export type KeyStorageMode = 'pending' | 'encrypted' | 'plain'
+
+interface SecretsApi {
+  secretsLoad: () => Promise<SecretsSnapshot>
+  secretsSet: (name: SecretName, value: string) => Promise<boolean>
+}
+
+/** 暗号化して保存する口(画面のないテスト・古い preload では無い) */
+function secretsApi(): SecretsApi | null {
+  try {
+    const api = (globalThis as { window?: { api?: Partial<SecretsApi> } }).window?.api
+    return typeof api?.secretsLoad === 'function' && typeof api?.secretsSet === 'function'
+      ? (api as SecretsApi)
+      : null
+  } catch {
+    return null
+  }
+}
+
+let keyStorageMode: KeyStorageMode = secretsApi() ? 'pending' : 'plain'
+/** 起動してから利用者が入れ直した鍵(main から読んだ値で上書きしない) */
+const touchedSecrets = new Set<SecretName>()
+let secretsReady: Promise<void> = Promise.resolve()
+
+/** 鍵を保存する。暗号化できれば main、できなければ今までどおり localStorage */
+function persistSecret(name: SecretName, value: string): void {
+  touchedSecrets.add(name)
+  const legacyKey = LEGACY_SECRET_STORAGE_KEYS[name]
+  if (keyStorageMode === 'plain') {
+    writeSetting(legacyKey, value)
+    return
+  }
+  if (keyStorageMode === 'pending') {
+    // 起動直後で置き場がまだ分からない。分かってから、入力の順のまま保存する
+    void secretsReady.then(() => persistSecret(name, value))
+    return
+  }
+  const api = secretsApi()
+  const fallback = (): void => writeSetting(legacyKey, value)
+  if (!api) return fallback()
+  void Promise.resolve(api.secretsSet(name, value)).then(
+    // 保存できたら、前に退避した平文を残さない(残ると次の起動で古い値に戻る)
+    (ok) => (ok ? removeSetting(legacyKey) : fallback()),
+    // 保存できなければ失わないよう今までどおり置く(次の起動でまた移す)
+    fallback
+  )
 }
 
 const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440, 2160]
@@ -202,36 +263,40 @@ interface SettingsState {
   setShortNote: (note: string) => void
   envKeySources: EnvKeySources
   loadEnvApiKeys: () => Promise<void>
+  /** API キーの置き場(暗号化できない PC では、設定の欄にその旨を出す) */
+  keyStorage: KeyStorageMode
+  /** 暗号化できない理由(一文) */
+  keyStorageNote: string
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  youtubeApiKey: readSetting(STORAGE_KEY) ?? '',
+  youtubeApiKey: readSetting(LEGACY_SECRET_STORAGE_KEYS.youtubeApiKey) ?? '',
   setYoutubeApiKey: (key) => {
-    writeSetting(STORAGE_KEY, key)
+    persistSecret('youtubeApiKey', key)
     set((s) => ({
       youtubeApiKey: key,
       envKeySources: { ...s.envKeySources, youtubeApiKey: false }
     }))
   },
-  jamendoClientId: readSetting(JAMENDO_STORAGE_KEY) ?? '',
+  jamendoClientId: readSetting(LEGACY_SECRET_STORAGE_KEYS.jamendoClientId) ?? '',
   setJamendoClientId: (key) => {
-    writeSetting(JAMENDO_STORAGE_KEY, key)
+    persistSecret('jamendoClientId', key)
     set((s) => ({
       jamendoClientId: key,
       envKeySources: { ...s.envKeySources, jamendoClientId: false }
     }))
   },
-  freesoundApiKey: readSetting(FREESOUND_STORAGE_KEY) ?? '',
+  freesoundApiKey: readSetting(LEGACY_SECRET_STORAGE_KEYS.freesoundApiKey) ?? '',
   setFreesoundApiKey: (key) => {
-    writeSetting(FREESOUND_STORAGE_KEY, key)
+    persistSecret('freesoundApiKey', key)
     set((s) => ({
       freesoundApiKey: key,
       envKeySources: { ...s.envKeySources, freesoundApiKey: false }
     }))
   },
-  geminiApiKey: readSetting(GEMINI_STORAGE_KEY) ?? '',
+  geminiApiKey: readSetting(LEGACY_SECRET_STORAGE_KEYS.geminiApiKey) ?? '',
   setGeminiApiKey: (key) => {
-    writeSetting(GEMINI_STORAGE_KEY, key)
+    persistSecret('geminiApiKey', key)
     set((s) => ({ geminiApiKey: key, envKeySources: { ...s.envKeySources, geminiApiKey: false } }))
   },
   // 知らない値(壊れた値・"constructor" など)は既定へ
@@ -507,7 +572,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     freesoundApiKey: false,
     geminiApiKey: false
   },
+  keyStorage: keyStorageMode,
+  keyStorageNote: '',
   loadEnvApiKeys: async () => {
+    // 暗号化して保存した鍵を読み終えてから(後から読んだ鍵で .env の値を上書きしない)
+    await secretsReady
     try {
       const envKeys = await window.api.getEnvApiKeys()
       set((s) => ({
@@ -543,3 +612,55 @@ function sendAsrLanguage(language: AsrLanguage): void {
   }
 }
 sendAsrLanguage(useSettingsStore.getState().asrLanguage)
+
+/**
+ * 起動時に、暗号化して保存した鍵を main から読み、前の版が localStorage に平文で置いた鍵を移す
+ * (移せたものだけ消す)。暗号化が使えない PC では今までどおり localStorage を使う。
+ */
+async function initSecureKeys(api: SecretsApi): Promise<void> {
+  let snapshot: SecretsSnapshot | null = null
+  try {
+    snapshot = await api.secretsLoad()
+  } catch {
+    snapshot = null
+  }
+  if (!snapshot || !snapshot.available) {
+    keyStorageMode = 'plain'
+    useSettingsStore.setState({
+      keyStorage: 'plain',
+      keyStorageNote: snapshot?.reason ?? 'API キーを暗号化して保存できません。'
+    })
+    return
+  }
+  const values: Partial<Record<SecretName, string>> = { ...snapshot.values }
+  const legacy = legacySecretsToMigrate(readSetting)
+  for (const name of SECRET_NAMES) {
+    const value = legacy[name]
+    if (value === undefined) continue
+    let ok = false
+    try {
+      ok = (await api.secretsSet(name, value)) === true
+    } catch {
+      ok = false
+    }
+    // 移せなかったものは localStorage に残し、その値を使う(次の起動でまた移す)
+    if (ok) removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+    if (value) values[name] = value
+    else delete values[name]
+  }
+  keyStorageMode = 'encrypted'
+  useSettingsStore.setState(() => {
+    const patch: Partial<Record<SecretName, string>> = {}
+    for (const name of SECRET_NAMES) if (!touchedSecrets.has(name)) patch[name] = values[name] ?? ''
+    return { ...patch, keyStorage: 'encrypted' as const, keyStorageNote: '' }
+  })
+}
+
+{
+  const api = secretsApi()
+  if (api)
+    secretsReady = initSecureKeys(api).catch(() => {
+      keyStorageMode = 'plain'
+      useSettingsStore.setState({ keyStorage: 'plain' })
+    })
+}
