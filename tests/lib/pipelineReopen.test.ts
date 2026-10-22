@@ -1505,3 +1505,80 @@ describe('監査で見つかった不具合(4回目の監査・取り消しで�
     expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
   })
 })
+
+describe('監査で見つかった不具合(5回目の監査)', () => {
+  it('戻した付け直しに触り直してから消したのを取り消し、やり直しても、付け直しは戻らない', async () => {
+    await runEpisode()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    const removed = mainDuration()
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    useProjectStore.getState().undo() // 作り直しを取り消す(付け直しが戻る)
+    expect(usePipelineStore.getState().keepTouched).toEqual(['s2'])
+    usePipelineStore.getState().setKeep('s2', true) // 同じチェックを触り直す
+    useProjectStore.getState().undo() // 消したのを取り消す(付け直しは捨てる)
+    expect(usePipelineStore.getState().keepTouched).toEqual([])
+    useProjectStore.getState().redo() // また丸ごと消した本編へ
+    expect(usePipelineStore.getState().keepTouched).toEqual([])
+    expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+  })
+
+  it('取り消しで戻した付け直しに触り直してからやり直し、また取り消すと、付け直しはまた戻る', async () => {
+    await runEpisode()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const full = mainDuration()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    useProjectStore.getState().undo()
+    usePipelineStore.getState().setKeep('s2', true)
+    useProjectStore.getState().redo() // 作り直しの後へ(s2 は本編に戻っている)
+    expect(usePipelineStore.getState().keepTouched).toEqual([])
+    useProjectStore.getState().undo() // また作り直しの前へ
+    expect(usePipelineStore.getState().keepTouched).toEqual(['s2'])
+    expect(Math.abs((await rebuild()).duration - full)).toBeLessThan(0.2)
+  })
+
+  it('取り消しで戻る付け直しが既に付け直してあっても、場面にクリップが戻って捨てたら、やり直しで戻さない', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    usePipelineStore.getState().setKeep('s2', false) // 丸ごと消した後に触る
+    await rebuild() // 付け直しを使う(s2 は落とすので本編に戻らない)
+    expect(clipsInScene(s2)).toHaveLength(0)
+    const c = useProjectStore.getState().project.clips[0]
+    useProjectStore.getState().updateClipTrim(c.id, c.inPoint, c.outPoint - 0.4)
+    usePipelineStore.getState().setKeep('s2', false) // また触る(まだ使っていない付け直し)
+    useProjectStore.getState().undo() // 詰めたのを取り消す
+    useProjectStore.getState().undo() // 作り直しを取り消す(付け直しは既にある)
+    expect(usePipelineStore.getState().keepTouched).toEqual(['s2'])
+    useProjectStore.getState().undo() // 消したのを取り消す(場面にクリップが戻るので捨てる)
+    expect(usePipelineStore.getState().keepTouched).toEqual([])
+    useProjectStore.getState().redo() // また丸ごと消した本編へ
+    expect(usePipelineStore.getState().keepTouched).toEqual([])
+  })
+
+  it('前の版で保存した、クリップのある場面の付け直しは、開き直すときに捨てる', async () => {
+    await runEpisode()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const p = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
+    // b2f573a・117a142 の版では、クリップのある場面に触っても付け直しとして覚えていた
+    p.autoEdit = { ...p.autoEdit!, keepTouched: ['s2'] }
+    useProjectStore.getState().newProject('別の回')
+    useProjectStore.getState().loadProject(p, '/r/第1回.veproj')
+    await flush()
+    expect(usePipelineStore.getState().keepTouched).toEqual([])
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    const removed = mainDuration()
+    expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+  })
+})
