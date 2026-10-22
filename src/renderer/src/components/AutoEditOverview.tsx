@@ -14,7 +14,7 @@ import {
   SCENE_BAND_COLORS,
   keptOrder
 } from '../lib/autoEditView'
-import type { NextAction, NextActionId } from '../lib/autoEditNext'
+import type { NextAction, NextActionButton, NextActionId } from '../lib/autoEditNext'
 
 /** 工程の状態の印。色だけでなく形でも分ける(済んだ=丸にチェック・進行中=弧・待ち=点線の丸・省いた=横棒・止まった=四角) */
 export function StepIcon({
@@ -389,6 +389,11 @@ export function NextActionCard({
   /** 押せないボタン(工程の都合)。押せない理由は説明に書く */
   disabled?: (id: NextActionId) => boolean
 }): React.JSX.Element {
+  // 手で決めたものを捨てる操作は、押す前に確かめる
+  const press = (b: NextActionButton): void => {
+    if (b.confirm && !window.confirm(b.confirm)) return
+    onAction(b.id)
+  }
   return (
     <section className={`ae-next ${action.kind}`} aria-label="次にやること">
       <span className="ae-next-icon" aria-hidden="true">
@@ -403,7 +408,7 @@ export function NextActionCard({
           type="button"
           className="primary-button ae-next-primary"
           disabled={disabled?.(action.primary.id)}
-          onClick={() => onAction(action.primary.id)}
+          onClick={() => press(action.primary)}
         >
           {action.primary.label}
         </button>
@@ -413,7 +418,7 @@ export function NextActionCard({
             type="button"
             className={`small-button ae-next-secondary ${b.id === 'cancel' ? 'danger' : ''}`}
             disabled={disabled?.(b.id)}
-            onClick={() => onAction(b.id)}
+            onClick={() => press(b)}
           >
             {b.label}
           </button>

@@ -29,7 +29,7 @@ import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 import { LocalAiRetry } from './LocalAiRetry'
 import { ShortsPanel } from './ShortsPanel'
 import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
-import { nextAction, type NextActionId } from '../lib/autoEditNext'
+import { nextAction, RESTART_CONFIRM, type NextActionId } from '../lib/autoEditNext'
 import {
   commonSpan,
   formatDuration,
@@ -211,7 +211,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
     steps: STEPS.map((st) => ({ id: st.id, label: st.label, ...steps[st.id] })),
     scenes: scenes.length,
     roughCut: roughCut ? { kept: roughCut.kept, duration: roughCut.duration } : null,
-    openIssues: openIssues.length
+    openIssues: openIssues.length,
+    manualKeep: Object.keys(keep).length
   })
 
   const utterances = placedUtterances(project)
@@ -503,7 +504,16 @@ export function AutoEditScreen(): React.JSX.Element | null {
               <button
                 className="small-button"
                 disabled={!scan || sources.length === 0}
-                onClick={() => void runPipeline()}
+                onClick={() => {
+                  // 前の結果と手で決めた残す/落とすを捨てて全部やり直す。手で決めたものがあれば確かめる
+                  if (
+                    steps.sync.state !== 'wait' &&
+                    Object.keys(keep).length > 0 &&
+                    !confirm(RESTART_CONFIRM)
+                  )
+                    return
+                  void runPipeline()
+                }}
                 title="同期からやり直します(前に並べた収録素材と自動で置いたものは入れ替わります。手で入れたクリップ・トラックは残ります)"
               >
                 {steps.sync.state === 'wait' ? '開始' : 'やり直す'}
