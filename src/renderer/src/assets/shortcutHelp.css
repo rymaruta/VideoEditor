@@ -17,7 +17,7 @@
 .shortcut-help-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px 20px;
+  gap: 12px 20px;
 }
 .shortcut-help-section h4 {
   font-size: var(--ve-fs-11);
@@ -36,7 +36,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 3px 0;
+  padding: 4px 0;
   font-size: var(--ve-fs-12);
 }
 .shortcut-help-row dt {
@@ -64,12 +64,12 @@
   border-radius: var(--ve-radius-md);
 }
 .shortcut-help-or {
-  margin: 0 3px;
+  margin: 0 4px;
   color: var(--ve-text-3);
   font-size: var(--ve-fs-11);
 }
 .shortcut-help-note {
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   font-size: var(--ve-fs-11);
 }
 
@@ -98,7 +98,7 @@
   top: 2px;
   width: 10px;
   height: 12px;
-  margin-left: -5px;
+  margin-left: -4px;
   padding: 0;
   border: 0;
   background: var(--ve-success);

@@ -170,8 +170,8 @@
 
 /* ---------- 書き出し: 左の概要(仕様の一覧) ---------- */
 .export-dialog-summary {
-  gap: 14px;
-  padding: 18px 18px 16px;
+  gap: 12px;
+  padding: 16px 16px 16px;
   border-right: 0;
   background:
     radial-gradient(
@@ -201,8 +201,8 @@
 }
 .export-dialog-summary dl > div {
   grid-template-columns: 76px minmax(0, 1fr);
-  gap: 10px;
-  padding: 9px 12px;
+  gap: 8px;
+  padding: 8px 12px;
   font-size: var(--ve-fs-13);
 }
 .export-dialog-summary dl > div + div {
@@ -218,7 +218,7 @@
 .export-dialog-summary dl > div:first-child {
   grid-template-columns: 1fr;
   gap: 2px;
-  padding: 12px 12px 10px;
+  padding: 12px 12px 8px;
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--ve-primary) 10%, transparent),
@@ -242,7 +242,7 @@
 /* ---------- 書き出し: 右の設定 ---------- */
 .export-dialog-fields {
   gap: 12px;
-  padding: 18px 22px;
+  padding: 16px 20px;
 }
 .form-row > label {
   color: var(--ve-text-2);
@@ -263,8 +263,8 @@
 }
 /* 選ぶ方式はカードで(選んだものは琥珀の地と輪) */
 .choice {
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 12px;
   border: 0;
   border-radius: var(--ve-radius-lg);
   background: linear-gradient(
@@ -351,7 +351,7 @@
 }
 .export-done {
   margin-top: 0;
-  padding: 12px 14px;
+  padding: 12px 12px;
   border-radius: var(--ve-radius-lg);
   background: linear-gradient(
     135deg,
@@ -383,18 +383,18 @@
     linear-gradient(145deg, var(--ve-success-ink), #2ebd7a);
 }
 .export-done-actions {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 /* ---------- 書き出し後の自動確認(QC) ---------- */
 .export-qc {
-  padding: 12px 18px 12px;
+  padding: 12px 16px 12px;
   border-top: 0;
   background: color-mix(in srgb, var(--ve-surface-sunken) 40%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
 .export-qc-head {
-  gap: 10px;
+  gap: 8px;
 }
 .export-qc-title {
   font-size: var(--ve-fs-13);
@@ -404,7 +404,7 @@
   display: inline-flex;
   align-items: center;
   height: 22px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: var(--ve-radius-xl);
   font-size: var(--ve-fs-12);
   font-weight: var(--ve-fw-semibold);
@@ -428,14 +428,14 @@
 .export-qc-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   margin-top: 8px;
 }
 .export-qc-item,
 .export-qc-item:hover:not(:disabled) {
   align-items: center;
   height: auto;
-  padding: 6px 10px;
+  padding: 6px 8px;
   border: 0;
   border-radius: var(--ve-radius-md);
   background-image: none;
@@ -473,7 +473,7 @@
 }
 .telop-style-item {
   margin: 2px 0;
-  padding: 7px 10px;
+  padding: 8px 8px;
   border-radius: var(--ve-radius-md);
 }
 .telop-style-item:hover {
@@ -507,7 +507,7 @@
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ve-edge) 8%, transparent);
 }
 .telop-style-sample-pane {
-  padding: 16px 18px;
+  padding: 16px 16px;
   border-right: 0;
   box-shadow: inset -1px 0 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
 }
@@ -531,11 +531,11 @@
     height: calc(100vh - 32px);
   }
   .export-dialog-summary {
-    padding: 14px 14px 12px;
+    padding: 12px 12px 12px;
   }
   .export-dialog-fields {
-    padding: 14px 18px;
-    gap: 10px;
+    padding: 12px 16px;
+    gap: 8px;
   }
 }
 @media (max-width: 1100px) {

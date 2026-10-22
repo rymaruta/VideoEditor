@@ -62,7 +62,7 @@
 }
 .timeline-panel .timeline-timecode-cell {
   border-bottom: 1px solid var(--ve-border-subtle);
-  padding: 0 10px;
+  padding: 0 8px;
 }
 .timeline-panel .timeline-timecode {
   font-family: var(--ve-font-mono);
@@ -79,7 +79,7 @@
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   border-bottom: 1px solid var(--ve-border-subtle);
@@ -164,7 +164,7 @@
   bottom: 4px;
   width: 9px;
   height: 9px;
-  margin-left: -4.5px;
+  margin-left: -4px;
   transform: rotate(45deg);
   background: var(--ve-primary);
   box-shadow: 0 0 0 2px var(--ve-ruler-bg);
@@ -183,7 +183,7 @@
   top: 3px;
   height: 16px;
   border-radius: var(--ve-radius-sm);
-  padding-left: 7px;
+  padding-left: 8px;
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--g3-hue) 18%, transparent),
@@ -255,8 +255,8 @@
 .timeline-panel .timeline-clip {
   top: 3px;
   height: calc(100% - 6px);
-  padding: 0 5px;
-  gap: 5px;
+  padding: 0 4px;
+  gap: 4px;
   align-items: flex-start;
   background: var(--ve-track-video-body);
   box-shadow: none;
@@ -299,7 +299,7 @@
   width: auto;
   min-width: 14px;
   height: 14px;
-  padding: 0 3px;
+  padding: 0 4px;
   border-radius: 0;
   background: var(--ve-track-video-index);
   font-family: var(--ve-font-mono);
@@ -330,7 +330,7 @@
 .timeline-panel .timeline-caption-clip {
   --g3-spk: var(--ve-track-telop-speaker-none);
   border: 0;
-  padding: 0 6px 0 9px;
+  padding: 0 6px 0 8px;
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--g3-spk) 48%, var(--ve-track-telop-base)),
@@ -408,7 +408,7 @@
   align-self: flex-start;
   width: 5px;
   height: 5px;
-  margin: 7px 4px 0 0;
+  margin: 8px 4px 0 0;
   border-radius: var(--ve-radius-round);
   background: var(--ve-auto);
 }

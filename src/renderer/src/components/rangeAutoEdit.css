@@ -29,8 +29,8 @@
 .range-auto-edit fieldset {
   border: 1px solid var(--ve-border);
   border-radius: var(--ve-radius-md);
-  padding: 8px 10px 10px;
-  margin: 10px 0 0;
+  padding: 8px 8px 8px;
+  margin: 8px 0 0;
 }
 .range-auto-edit legend {
   padding: 0 4px;
@@ -73,8 +73,8 @@
 .range-auto-edit-diff dl {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 3px 12px;
-  margin: 10px 0 0;
+  gap: 4px 12px;
+  margin: 8px 0 0;
   font-size: var(--ve-fs-12);
 }
 .range-auto-edit-diff dt {
@@ -114,7 +114,7 @@
 }
 .range-auto-edit-notes {
   margin: 8px 0 0;
-  padding-left: 18px;
+  padding-left: 16px;
   font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
@@ -126,7 +126,7 @@
 .range-review-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--ve-auto-line);
   background: linear-gradient(90deg, var(--ve-auto-soft), transparent 80%);
@@ -182,7 +182,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 10px;
+  padding: 0 8px;
   font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   border-bottom: 1px solid var(--ve-border-subtle);
@@ -241,8 +241,8 @@
 
 /* 落とした場面をまたいで範囲が大きく伸びるときの知らせ */
 .range-auto-edit-grow {
-  margin: 10px 0 0;
-  padding: 6px 10px;
+  margin: 8px 0 0;
+  padding: 6px 8px;
   border-radius: var(--ve-radius-md);
   font-size: var(--ve-fs-12);
   color: var(--ve-primary-ink);
