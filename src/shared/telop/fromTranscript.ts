@@ -9,7 +9,7 @@ import {
   type DictionaryEntry
 } from './polish'
 import { MIN_DISPLAY_SEC, READ_CHARS_PER_SEC } from '../qc/telop'
-import { AUTO_SOURCE_MARGIN } from './manual'
+import { AUTO_SOURCE_MARGIN, type AutoTelopSource } from './manual'
 
 /**
  * 発話を発言テロップの単位に区切る(計画書 §5.8 の手前の、仮の整形)。
@@ -57,6 +57,29 @@ export interface TelopChunk {
   zero?: [number, number]
   /** 元の文字の範囲と、その整えた文の何文字目から何文字がこの枚か(カットで頭・終わりを落とすのに使う) */
   piece?: { from: number; to: number; skip: number; count: number }
+}
+
+/**
+ * 枚の、作ったときの元の部分(`AutoTelopSource`)。出している文字の話している時刻から範囲を取る
+ * (仮編集と、自動編集の画面の「文字起こしからテロップ」で同じにする)。言葉の時刻が無ければ null
+ */
+export function chunkAutoSource(
+  shown: Pick<TelopChunk, 'text' | 'times' | 'spoken' | 'range' | 'durs' | 'fill'>,
+  /** タイムライン = offset + 素材の秒 / rate */
+  map: { offset: number; rate: number }
+): AutoTelopSource | null {
+  const { text, times, spoken, range, durs, fill } = shown
+  if (!times || times.length === 0) return null
+  return {
+    start: range?.[0] ?? Math.max(0, (spoken?.[0] ?? Math.min(...times)) - AUTO_SOURCE_MARGIN),
+    end: range?.[1] ?? (spoken?.[1] ?? Math.max(...times)) + AUTO_SOURCE_MARGIN,
+    text,
+    times,
+    offset: map.offset,
+    ...(map.rate !== 1 ? { rate: map.rate } : {}),
+    ...(durs && durs.length === times.length ? { durs } : {}),
+    ...(fill ? { fill } : {})
+  }
 }
 
 export interface ChunkOptions {

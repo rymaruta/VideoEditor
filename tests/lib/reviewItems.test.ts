@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { buildReviewItems, openReviewCount } from '@renderer/lib/reviewItems'
-import type { Project } from '@shared/types'
+import { utteranceToTelopChunks } from '@shared/telop/fromTranscript'
+import { autoTelopKey, mergeManualTelops, rememberEditedTelops } from '@shared/telop/manual'
+import { defaultTextStyle } from '@shared/textStyle'
+import type { Project, TextOverlay } from '@shared/types'
 
 const project: Project = {
   id: 'p',
@@ -127,5 +130,87 @@ describe('ノイズ除去の項目の鍵', () => {
     } as never)
     const keys = items.filter((i) => i.area === 'audio').map((i) => i.key)
     expect(new Set(keys).size).toBe(2)
+  })
+})
+
+describe('テロップと顔の項目(10/09 版の企画)', () => {
+  // 10/09 版(c25f5af)で直した発話は、合わせた後の枚が元の部分を持たない(鍵は何枚目かだけ)。
+  // 顔の配置は合わせる前の枚(範囲つきの鍵)で要確認を作るので、その鍵で置いた枚を探す
+  const ws = [
+    '今日は',
+    'みんなで',
+    'ラーメンを',
+    '食べに',
+    '横浜まで',
+    '来ました',
+    'すごく',
+    '並んで'
+  ]
+  const u = {
+    text: ws.join(''),
+    words: ws.map((text, i) => ({ text, start: i * 0.5, end: i * 0.5 + 0.5 })),
+    sourceStart: 0,
+    sourceEnd: 4
+  }
+  const style = defaultTextStyle()
+  const mk = (withSource: boolean): Omit<TextOverlay, 'id'>[] =>
+    utteranceToTelopChunks(u, { maxLineChars: 8 }).map((c, i) => ({
+      text: c.text,
+      startTime: c.sourceStart,
+      endTime: c.sourceEnd,
+      style,
+      source: 'auto' as const,
+      utteranceId: 'u1',
+      utteranceChunk: i,
+      ...(withSource
+        ? { autoSource: { start: c.sourceStart, end: c.sourceEnd, text: c.text } }
+        : {})
+    }))
+  const base = {
+    syncIssues: [],
+    fileLabel: (id: string) => id,
+    placedStart: () => undefined,
+    colorIssues: [],
+    denoiseFailures: [],
+    effects: [],
+    effectChosen: [],
+    qc: null
+  }
+
+  it.each([
+    ['10/09 版で直した企画', false],
+    ['新しい企画', true]
+  ])('%s: 要確認は置いた枚を指し、その枚を消すと要確認も消える', (_, fresh) => {
+    // 前の企画: 0枚目を人が直した
+    const old = mk(fresh).map((o, i) => ({ ...o, id: `old${i}` })) as TextOverlay[]
+    old[0] = { ...old[0], text: `${old[0].text}!`, edited: true }
+    const plan = mk(true)
+    expect(plan.length).toBeGreaterThanOrEqual(2)
+    const merged = mergeManualTelops(old, plan, new Set(), rememberEditedTelops(old, undefined))
+    const overlays = merged.map((o, i) => ({ ...o, id: `o${i}` })) as TextOverlay[]
+    const target = overlays.find((o) => o.utteranceChunk === 1)!
+    target.text = '人が直した1枚目'
+    const telopReviews = [
+      { startTime: plan[1].startTime, text: plan[1].text, key: autoTelopKey(plan[1]) }
+    ]
+    const items = buildReviewItems({
+      ...base,
+      project: { ...project, textOverlays: overlays },
+      telopReviews
+    })
+    expect(items).toHaveLength(1)
+    expect(items[0].overlayId).toBe(target.id)
+    expect(items[0].text).toContain('人が直した1枚目')
+    // その枚を消す(消した印は置いた枚の鍵)
+    const gone = buildReviewItems({
+      ...base,
+      project: {
+        ...project,
+        textOverlays: overlays.filter((o) => o !== target),
+        dismissedTelops: [autoTelopKey(target)!]
+      },
+      telopReviews
+    })
+    expect(gone).toEqual([])
   })
 })

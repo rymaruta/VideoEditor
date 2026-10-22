@@ -100,6 +100,16 @@ function baseKey(key: string): string {
   return at < 0 ? key : key.slice(0, at)
 }
 
+/**
+ * 合わせる前の枚の鍵(範囲つき)で、タイムラインに置いた枚・消した印を探すときの鍵の候補。
+ * 10/09 版の印のある発話は、合わせた後の枚が元の部分を外し何枚目かだけの鍵になる(`withoutAutoSource`)ので、
+ * 何枚目かだけの鍵も探す(範囲つきの鍵が先)
+ */
+export function placedTelopKeys(key: string): string[] {
+  const base = baseKey(key)
+  return base === key ? [key] : [key, base]
+}
+
 /** 鍵に添えた元の部分(素材の時刻) */
 function keySpan(key: string): { utteranceId: string; start: number; end: number } | null {
   const m = /^u:(.+)#\d+@([\d.]+)-([\d.]+)$/.exec(key)

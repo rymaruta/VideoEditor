@@ -54,11 +54,12 @@ import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { mixResidual } from '@shared/ingest/tracks'
 import {
+  chunkAutoSource,
   clipTelopChunk,
   settleTelopTimes,
   utteranceToTelopChunks
 } from '@shared/telop/fromTranscript'
-import { AUTO_SOURCE_MARGIN, type WithAutoSource } from '@shared/telop/manual'
+import { type WithAutoSource } from '@shared/telop/manual'
 import {
   speechLook,
   speechTelopStyle,
@@ -524,22 +525,10 @@ export function planRoughCut(
           // 延ばした・辞書で行数を超えて文字数で割り振った)から取ると、隣の枚の文字まで範囲に入り、
           // 消した枚の隣の言葉まで消えていた
           autoSource:
-            times && times.length > 0
-              ? {
-                  start:
-                    range?.[0] ??
-                    Math.max(0, (spoken?.[0] ?? Math.min(...times)) - AUTO_SOURCE_MARGIN),
-                  end: range?.[1] ?? (spoken?.[1] ?? Math.max(...times)) + AUTO_SOURCE_MARGIN,
-                  text,
-                  times,
-                  offset,
-                  ...(f.rate !== 1 ? { rate: f.rate } : {}),
-                  ...(durs && durs.length === times.length ? { durs } : {}),
-                  ...(fill ? { fill } : {})
-                }
-              : clipped
-                ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
-                : { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
+            chunkAutoSource({ text, times, spoken, range, durs, fill }, { offset, rate: f.rate }) ??
+            (clipped
+              ? { start: toSource(f, visStart), end: toSource(f, visEnd), text }
+              : { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text })
         }
         telops.push(telop)
         voiceEnds.set(telop, voiceEnd)

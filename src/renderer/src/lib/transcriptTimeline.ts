@@ -4,7 +4,12 @@ import {
   type PlacedClipRef,
   type TranscriptUtterance
 } from '@shared/transcript'
-import { settleTelopTimes, utteranceToTelopChunks } from '@shared/telop/fromTranscript'
+import {
+  chunkAutoSource,
+  settleTelopTimes,
+  utteranceToTelopChunks
+} from '@shared/telop/fromTranscript'
+import type { WithAutoSource } from '@shared/telop/manual'
 import { toCommon } from '@shared/sync/multicam'
 import {
   speechLook,
@@ -101,7 +106,7 @@ export function telopsFromTranscript(
   look: { style: TextStyle; styleId?: string } = speechLook(undefined, styles)
 ): Omit<TextOverlay, 'id'>[] {
   const clips = placedClips(project)
-  const out: Omit<TextOverlay, 'id'>[] = []
+  const out: (Omit<TextOverlay, 'id'> & WithAutoSource)[] = []
   for (const u of project.transcript ?? []) {
     const def = styleForSpeaker(styles, u.speaker)
     const chunks = utteranceToTelopChunks(u, {
@@ -117,6 +122,20 @@ export function telopsFromTranscript(
       // 0.2 秒に満たない枚は出さない。長さ 0 の言葉(認識が時刻を付けられなかった言葉)が続き、1枚分の
       // 時間が足りないときは、その枚が出ない(既知の制限。仮編集の 0.3 秒未満と同じ)
       if (!r || r.end - r.start < 0.2) continue
+      // 作ったときの元の部分(仮編集と同じ)。無いと、人が消した枚の印が何枚目かだけになり、その発話は以後
+      // ずっと 10/09 版と同じ当て方になっていた(新しい企画でも範囲で当てられない)
+      // (タイムライン = offset + 素材の秒 / rate。`utteranceTimelineRange` と同じクリップの速さ)
+      const clip = clips.find(
+        (c) =>
+          c.assetId === u.assetId &&
+          chunk.sourceStart >= c.inPoint - 1e-6 &&
+          chunk.sourceStart < c.outPoint
+      )
+      const rate = clip?.speed && clip.speed > 0 ? clip.speed : 1
+      const autoSource = chunkAutoSource(chunk, {
+        offset: r.start - chunk.sourceStart / rate,
+        rate
+      }) ?? { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
       out.push({
         text: chunk.text,
         startTime: r.start,
@@ -128,7 +147,8 @@ export function telopsFromTranscript(
         utteranceId: u.id,
         // 枚ごとの番号(仮編集と同じ)。無いと1つの発言の枚がみな同じ印になり、直した文字・消した枚が
         // 作り直しで別の枚に付いていた
-        utteranceChunk: ci
+        utteranceChunk: ci,
+        autoSource
       })
     }
   }

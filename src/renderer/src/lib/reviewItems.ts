@@ -4,7 +4,7 @@ import { AUTO_PLACE_CONFIDENCE } from '@shared/telop/effects'
 import type { Project } from '@shared/types'
 import type { QcReport } from '../store/qcStore'
 import { placedUtterances } from './transcriptTimeline'
-import { autoTelopKey } from '@shared/telop/manual'
+import { autoTelopKey, placedTelopKeys } from '@shared/telop/manual'
 import { stripTelopMarkup } from '@shared/telop/render'
 
 /**
@@ -101,9 +101,13 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
   // 自動テロップの鍵(発話+何枚目)で探し、印もその鍵で付ける(時刻で付けると作り直しで印が消える)
   const dismissed = new Set(s.project.dismissedTelops ?? [])
   for (const r of s.telopReviews) {
-    if (r.key && dismissed.has(r.key)) continue // 人が消したテロップ
+    // 要確認の鍵は合わせる前の枚の鍵。10/09 版の印のある発話は、置いた枚の鍵が何枚目かだけになる
+    const keys = r.key ? placedTelopKeys(r.key) : []
+    if (keys.some((k) => dismissed.has(k))) continue // 人が消したテロップ
     const overlay = r.key
-      ? s.project.textOverlays.find((o) => autoTelopKey(o) === r.key)
+      ? keys
+          .map((k) => s.project.textOverlays.find((o) => autoTelopKey(o) === k))
+          .find((o) => o !== undefined)
       : s.project.textOverlays.find(
           (o) => Math.abs(o.startTime - r.startTime) < 1e-3 && o.text === r.text
         )
