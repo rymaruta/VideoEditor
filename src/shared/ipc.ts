@@ -97,6 +97,8 @@ export const IPC = {
   menuCommand: 'menu:command',
   menuUpdate: 'menu:update',
   menuPopup: 'menu:popup',
+  appAbout: 'app:about',
+  openLicense: 'app:openLicense',
   logRendererError: 'diag:logRendererError',
   checkFilesExist: 'media:checkFilesExist',
   selectRelinkFile: 'media:selectRelinkFile'

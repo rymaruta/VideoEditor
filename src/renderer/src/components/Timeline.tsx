@@ -131,6 +131,7 @@ import { timelineRangeOf } from '@shared/finish/sound'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
+import { OverflowMenu, type OverflowAction } from './OverflowMenu'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -1970,45 +1971,82 @@ export function Timeline(): React.JSX.Element {
               <ScissorsIcon width={13} height={13} />
               カット
             </button>
-            <button
-              className="small-button"
-              onClick={() => setSilenceCutClipIds([selectedClip.id])}
-            >
-              <WandIcon width={13} height={13} />
-              無音カット
-            </button>
-            <button className="small-button" onClick={() => setFillerWordClipId(selectedClip.id)}>
-              <FillerWordIcon width={13} height={13} />
-              フィラーカット
-            </button>
-            <button className="small-button" onClick={() => setAutoCaptionClipId(selectedClip.id)}>
-              <MicIcon width={13} height={13} />
-              自動テロップ
-            </button>
-            <button className="small-button" onClick={() => setTextEditClipId(selectedClip.id)}>
-              <TypeIcon width={13} height={13} />
-              テキストで編集
-            </button>
-            {timedClips[selectedIndex]?.asset.hasAudio && !selectedClip.audioDetached && (
-              <button
-                className="small-button"
-                title="動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)"
-                onClick={() => detachClipAudio(selectedClip.id)}
-              >
-                <MusicIcon width={13} height={13} />
-                音声を分離
-              </button>
-            )}
-            {selectedClip.audioDetached && (
-              <button
-                className="small-button"
-                title="分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください"
-                onClick={() => reattachClipAudio(selectedClip.id)}
-              >
-                <MusicIcon width={13} height={13} />
-                音声を戻す
-              </button>
-            )}
+            {(() => {
+              // 道具の帯は 1 行に固定する。狭い窓(タイムラインの幅 1400px 未満)では、この操作を
+              // 「その他 ▾」にまとめる(広い窓では帯に並べる。CSS のコンテナクエリでどちらかだけ見せる)
+              const extra: OverflowAction[] = [
+                {
+                  key: 'silence',
+                  label: '無音カット',
+                  icon: <WandIcon width={13} height={13} />,
+                  onSelect: () => setSilenceCutClipIds([selectedClip.id])
+                },
+                {
+                  key: 'filler',
+                  label: 'フィラーカット',
+                  icon: <FillerWordIcon width={13} height={13} />,
+                  onSelect: () => setFillerWordClipId(selectedClip.id)
+                },
+                {
+                  key: 'caption',
+                  label: '自動テロップ',
+                  icon: <MicIcon width={13} height={13} />,
+                  onSelect: () => setAutoCaptionClipId(selectedClip.id)
+                },
+                {
+                  key: 'textEdit',
+                  label: 'テキストで編集',
+                  icon: <TypeIcon width={13} height={13} />,
+                  onSelect: () => setTextEditClipId(selectedClip.id)
+                },
+                ...(timedClips[selectedIndex]?.asset.hasAudio && !selectedClip.audioDetached
+                  ? [
+                      {
+                        key: 'detach',
+                        label: '音声を分離',
+                        icon: <MusicIcon width={13} height={13} />,
+                        title:
+                          '動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)',
+                        onSelect: () => detachClipAudio(selectedClip.id)
+                      }
+                    ]
+                  : []),
+                ...(selectedClip.audioDetached
+                  ? [
+                      {
+                        key: 'reattach',
+                        label: '音声を戻す',
+                        icon: <MusicIcon width={13} height={13} />,
+                        title:
+                          '分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください',
+                        onSelect: () => reattachClipAudio(selectedClip.id)
+                      }
+                    ]
+                  : [])
+              ]
+              return (
+                <>
+                  <span className="timeline-actions-extra">
+                    {extra.map((a) => (
+                      <button
+                        key={a.key}
+                        className="small-button"
+                        title={a.title}
+                        onClick={a.onSelect}
+                      >
+                        {a.icon}
+                        {a.label}
+                      </button>
+                    ))}
+                  </span>
+                  <OverflowMenu
+                    actions={extra}
+                    menuLabel="クリップのほかの操作(無音カット・フィラーカット・自動テロップ・テキストで編集・音声)"
+                    className="timeline-more"
+                  />
+                </>
+              )
+            })()}
             <label
               className="inline-select"
               title={

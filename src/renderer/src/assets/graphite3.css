@@ -49,16 +49,34 @@ button:active:not(:disabled) {
   background-image: var(--ve-accent-fill);
   border-color: transparent;
   color: var(--ve-on-accent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    var(--ve-accent-glow);
+  /* 主ボタンの定義はここだけ(tokens.css)。光るのは上の帯の「書き出す」1 つだけ(.workflow-export) */
+  box-shadow: var(--ve-shadow-primary);
 }
 .primary-button:hover:not(:disabled) {
   filter: brightness(1.06);
 }
 .primary-button:active:not(:disabled) {
   filter: brightness(0.94);
+}
+.workflow-export,
+.workflow-export:hover:not(:disabled),
+.workflow-export:active:not(:disabled) {
+  box-shadow: var(--ve-shadow-primary), var(--ve-glow-primary);
+}
+/* 無効は薄めない(泥色にしない)。面3・淡い線・無効の文字 */
+button.primary-button:disabled,
+button.small-button:disabled {
+  opacity: 1;
+  filter: none;
+  background-image: none;
+  background-color: var(--ve-disabled-surface);
+  border-color: var(--ve-disabled-border);
+  color: var(--ve-disabled-text);
+  box-shadow: none;
+}
+button.icon-button:disabled {
+  opacity: 1;
+  color: var(--ve-disabled-text);
 }
 /* 素材の読み込みは控えめのまま(main.css の .media-import-buttons と同じ考え) */
 .media-import-buttons .primary-button,
@@ -737,10 +755,6 @@ textarea {
   gap: 5px;
   margin-left: auto;
 }
-.panel-tab-more.open {
-  background-image: linear-gradient(180deg, #2a2f45, #20243a);
-  color: var(--ve-text);
-}
 /* 「その他」から選んだタブ: 表のタブの後ろに、琥珀の点を添えて */
 .panel-tab-more-current::before {
   content: '';
@@ -750,7 +764,7 @@ textarea {
   margin-right: 6px;
   vertical-align: middle;
   border-radius: 50%;
-  background: var(--ve-accent);
+  background: var(--ve-primary);
   box-shadow: 0 0 8px rgba(255, 154, 43, 0.8);
 }
 .app-popover.panel-more-menu {
@@ -769,8 +783,8 @@ textarea {
 }
 .panel-more-group-label {
   padding: 4px 8px 2px;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-semibold);
   letter-spacing: 0.08em;
   color: var(--ve-text-3);
 }
@@ -794,23 +808,193 @@ textarea {
   background-color: #262b45;
 }
 .panel-more-item:focus-visible {
-  outline: 2px solid var(--ve-accent);
+  outline: 2px solid var(--ve-primary);
   outline-offset: -2px;
 }
 .panel-more-item.current,
 .panel-more-item.current:hover:not(:disabled) {
   background-image: linear-gradient(180deg, rgba(255, 178, 36, 0.16), rgba(255, 138, 31, 0.08));
-  box-shadow: inset 0 0 0 1px var(--ve-accent-line);
+  box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
 .panel-more-item-label {
-  font-size: 13px;
-  color: var(--ve-text);
+  font-size: var(--ve-fs-13);
+  color: var(--ve-text-1);
 }
 .panel-more-item.current .panel-more-item-label {
-  color: var(--ve-accent-ink);
+  color: var(--ve-primary-ink);
 }
 .panel-more-item-note {
-  font-size: 11.5px;
+  font-size: var(--ve-fs-12);
   line-height: 1.4;
   color: var(--ve-text-3);
+}
+
+/* ---------- テロップの一覧(上の帯の「テロップ」で開く左のパネル) ---------- */
+.telop-list-pane {
+  border-right: 0;
+  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.08);
+}
+.telop-list-head {
+  height: 36px;
+  font-size: var(--ve-fs-13);
+  color: var(--ve-text-2);
+}
+.telop-list {
+  padding: 2px 4px 6px;
+}
+.telop-row {
+  height: 28px;
+  margin: 1px 0;
+  border-radius: 6px;
+  font-size: var(--ve-fs-13);
+}
+.telop-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.telop-row.selected {
+  background: linear-gradient(90deg, rgba(255, 178, 36, 0.16), rgba(255, 138, 31, 0.04));
+  box-shadow: inset 0 0 0 1px var(--ve-primary-line);
+}
+.telop-row-tc {
+  color: var(--ve-text-3);
+}
+.telop-list-paging,
+.telop-list-foot {
+  border-top: 0;
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+  color: var(--ve-text-2);
+}
+
+/* ---------- ① ページのタブ(tokens.css §3.5): 36px の帯・字 12・選んだタブは下に 2px の主の線 ----------
+   上段左のパネル・モニター・自動編集 / 確認の中身・書き出しの頁で同じ見た目。あふれる所は「その他 ▾」 */
+.panel-tabs {
+  height: var(--ve-bar-panel-head);
+  gap: 0;
+  padding: 0 var(--ve-space-2);
+  align-items: stretch;
+}
+.panel-tab,
+.panel-tab:hover:not(:disabled),
+.panel-tab.active,
+.panel-tab.active:hover:not(:disabled) {
+  position: relative;
+  height: auto;
+  padding: 0 var(--ve-space-2);
+  border: 0;
+  border-radius: 0;
+  background-image: none;
+  background-color: transparent;
+  box-shadow: none;
+  font: var(--ve-type-label);
+  color: var(--ve-text-2);
+  transition: color var(--ve-dur-fast) var(--ve-ease-out);
+}
+.panel-tab:hover:not(:disabled):not(.active) {
+  color: var(--ve-text-1);
+}
+.panel-tab.active,
+.panel-tab.active:hover:not(:disabled) {
+  color: var(--ve-text-1);
+  font-weight: var(--ve-fw-semibold);
+}
+.panel-tab::after {
+  content: '';
+  position: absolute;
+  left: var(--ve-space-2);
+  right: var(--ve-space-2);
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+  transition: background-color var(--ve-dur-base) var(--ve-ease-out);
+}
+.panel-tab.active::after {
+  background: var(--ve-primary);
+}
+.panel-tab:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: calc(var(--ve-focus-offset) * -1);
+}
+/* 「その他 ▾」: 開いている間は字を明るく */
+.panel-tab-more.open,
+.panel-tab-more.open:hover:not(:disabled) {
+  color: var(--ve-text-1);
+  background-image: none;
+}
+
+/* ---------- タイムラインの道具の帯は 1 行に固定(1366 幅で 3 行に折り返していた) ----------
+   収まらない操作は「その他 ▾」(OverflowMenu)。広いときは帯に並べ、狭いときはメニューにする */
+.timeline-panel {
+  container-type: inline-size;
+  container-name: timeline;
+}
+.timeline-panel .panel-header {
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+.timeline-panel .timeline-actions {
+  flex-wrap: nowrap;
+  min-width: 0;
+  gap: var(--ve-space-1);
+}
+.timeline-panel .timeline-actions > *,
+.timeline-actions-extra > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.timeline-actions-extra {
+  display: contents;
+}
+.timeline-more {
+  display: none;
+}
+@container timeline (max-width: 1399px) {
+  .timeline-actions-extra {
+    display: none;
+  }
+  .timeline-more {
+    display: inline-flex;
+  }
+}
+.overflow-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-gap-icon);
+}
+.app-popover.overflow-menu {
+  min-width: 200px;
+  padding: var(--ve-space-1);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-2);
+  box-shadow: var(--ve-shadow-popover);
+}
+.overflow-menu-item,
+.overflow-menu-item:hover:not(:disabled) {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  width: 100%;
+  height: var(--ve-control-md);
+  padding: var(--ve-control-pad-sm);
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background-image: none;
+  background-color: transparent;
+  box-shadow: none;
+  font: var(--ve-type-control);
+  color: var(--ve-text-1);
+  text-align: left;
+}
+.overflow-menu-item:hover:not(:disabled),
+.overflow-menu-item:focus-visible {
+  background-color: var(--ve-surface-3);
+}
+.overflow-menu-item:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: calc(var(--ve-focus-offset) * -1);
+}
+.timeline-panel .panel-header h2 {
+  flex-shrink: 0;
+  white-space: nowrap;
 }

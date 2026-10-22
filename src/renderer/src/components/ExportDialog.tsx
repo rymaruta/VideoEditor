@@ -18,6 +18,7 @@ import { FolderIcon, PlayCircleIcon, TrashIcon } from './icons'
 import { ExportQcPanel } from './ExportQcPanel'
 import { reportBusy } from '../lib/busyReporter'
 import { useQcStore } from '../store/qcStore'
+import { DialogHeader } from './DialogHeader'
 
 /**
  * 書き出し設定(ファイル > 書き出し… / Ctrl+M)。デザイン案の「書き出し設定」ダイアログ。
@@ -406,17 +407,11 @@ export function ExportDialog(): React.JSX.Element | null {
         aria-label="書き出し設定"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="dialog-titlebar">
-          <span>書き出し設定</span>
-          <button
-            className="dialog-close"
-            aria-label="閉じる"
-            title={running ? '閉じても書き出しは続きます' : '閉じる'}
-            onClick={() => setOpen(false)}
-          >
-            ×
-          </button>
-        </div>
+        <DialogHeader
+          title="書き出し設定"
+          closeTitle={running ? '閉じても書き出しは続きます' : '閉じる'}
+          onClose={() => setOpen(false)}
+        />
 
         <div className="export-dialog-body">
           <div className="export-dialog-summary">

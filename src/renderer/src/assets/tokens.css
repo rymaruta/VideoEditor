@@ -1,0 +1,396 @@
+/* =====================================================================
+   VideoEditor デザインの決まり(案) — tokens.css
+   - 基準: Graphite 3(design3/project/Main.dc.html と main.css の --ve-*)。
+     値はできるだけ今の Graphite 3 のまま。「役割の名前」に付け直し、足りない役割を足し、
+     重なっていた値(灰色の文字 4 種 → 3 種、琥珀 3 種 → 1 種 など)を寄せた。
+   - 名前は今の --ve-* の続き(4 つ目の名前の系統を作らない)。旧名は末尾の「移行用の別名」で
+     新しい名前へつなぐ。直し終わったら別名の塊を消す。
+   - コントラストは WCAG 2.1 AA。数字は計算値(tools/contrast.py)。
+     文字 4.5:1 以上 / 大きな文字(18.66px 太字・24px)と、線・印・枠などの「物」 3:1 以上。
+   - 色の直書き(#… / rgb(…))は、この表とトラック・話者・テロップの絵の中身(データ)以外では使わない。
+   ===================================================================== */
+
+:root {
+  /* ---------------------------------------------------------------
+     1. 色 — 地と面(奥 → 手前)
+     --------------------------------------------------------------- */
+  --ve-bg: #07080c; /* 地。窓の一番奥 */
+  --ve-well: #04050a; /* モニターの周り(絵の外) */
+  --ve-surface-sunken: #0d0f18; /* くぼみ: 入力欄・リスト・波形の地。面1 の上で 1 段沈む */
+  --ve-surface-1: #121426; /* 面1: パネル(カード) */
+  --ve-surface-1-fill: linear-gradient(180deg, #1a1d33 0%, #121426 55%, #0f1120 100%);
+  --ve-surface-2: #1a1d33; /* 面2: 浮く物(メニュー・ポップオーバー・ダイアログ・パネル見出し) */
+  --ve-surface-3: #22263d; /* 面3: 操作の地(ふつうのボタン・選んだタブ・選んだ行) */
+  --ve-surface-3-hover: #2a2f45;
+  --ve-surface-3-press: #1c2034;
+  --ve-surface-3-fill: linear-gradient(180deg, #2a2f45, #20243a); /* 面3 の立体(ボタンの地) */
+  --ve-surface-3-fill-hover: linear-gradient(180deg, #32385a, #262b45);
+  --ve-scrim: rgba(4, 5, 10, 0.66); /* ダイアログの後ろ(ぼかし 3px と組) */
+
+  /* 線 */
+  --ve-border-subtle: #1c2033; /* 区切り線・行の境(飾り。コントラストの決まりの外) */
+  --ve-border: #2e3350; /* 操作の枠(ボタン・入力欄)。欄の見分けは「くぼみの地 + ラベル」で付ける */
+  --ve-border-hover: #3c4266;
+  --ve-border-strong: #6a7090; /* チェック・ラジオ・スライダーの溝・トグルの枠。面1 で 3.76:1(今の #4A5070 は 2.32:1 で不足) */
+
+  /* 文字(面1 #121426 / 面2 #1A1D33 / 面3 #22263D の上の比) */
+  --ve-text-1: #edeef0; /* 本文・見出し 15.7 / 14.3 / 12.8 */
+  --ve-text-2: #a6abb3; /* 補足・ラベル 7.9 / 7.2 / 6.4 */
+  --ve-text-3: #8e949d; /* 注記・単位・無効でない薄い字 6.0 / 5.4 / 4.9(面3 の hover #2A2F45 では 4.3 → そこでは text-2 を使う) */
+  --ve-text-disabled: #737989; /* 無効(WCAG の対象外。それでも面3 で 3.4:1 を確保) */
+  --ve-text-on-primary: #1c1004; /* 琥珀の上 10.4(最も暗い #FF7A1F でも 7.2) */
+  --ve-text-on-danger: #2a0c08; /* 危険の塗りの上 6.5 */
+  --ve-text-link: #ffcb6b; /* = primary-ink */
+
+  /* ---------------------------------------------------------------
+     2. 色 — 意味の色(塗り / hover / press / 淡い地 soft / 字 ink / 線 line)
+        ink は soft と面1 の上で 4.5:1 以上。塗りの上の字は on-*。
+     --------------------------------------------------------------- */
+  /* 主(琥珀)— 塗りは「1 画面に 1 つの主ボタン」と「選択」だけ */
+  --ve-primary: #ffb224;
+  --ve-primary-hover: #ffc04a;
+  --ve-primary-press: #f08a1c;
+  --ve-primary-fill: linear-gradient(135deg, #ffd25c 0%, #ffa62b 55%, #ff7a1f 100%);
+  --ve-primary-soft: #2b2312; /* ink 10.4 */
+  --ve-primary-ink: #ffcb6b; /* 面1 12.1 */
+  --ve-primary-line: rgba(255, 178, 36, 0.38);
+  --ve-selection-fill: rgba(255, 178, 36, 0.16); /* 選んだ範囲・行(今の rgba(245,165,36,…) を寄せる) */
+  --ve-selection-ring: inset 0 0 0 1.5px var(--ve-primary);
+
+  /* 危険(取り返せない操作・失敗) */
+  --ve-danger: #ff6b5e; /* 面1 6.5 */
+  --ve-danger-hover: #ff8378;
+  --ve-danger-press: #e5544a;
+  --ve-danger-soft: #301714; /* ink 8.8 */
+  --ve-danger-soft-hover: #3d1c18;
+  --ve-danger-ink: #ffa49b;
+  --ve-danger-line: #5a2620;
+  --ve-danger-line-hover: #7a3028;
+
+  /* 成功(終わった・合っている) */
+  --ve-success: #4cc38a;
+  --ve-success-soft: #12291f; /* ink 9.9 */
+  --ve-success-ink: #7de3b1;
+  --ve-success-line: #1f4a36;
+
+  /* 注意(このままだと困るかも)— 主の琥珀と見分けるため、黄寄り + 必ず ⚠ のアイコンと一緒に。
+     塗りのボタンには使わない(塗りの琥珀は主だけ) */
+  --ve-warning: #f5c35a; /* 面1 11.1 */
+  --ve-warning-soft: #2d2512; /* ink 11.2 */
+  --ve-warning-ink: #ffd88a;
+  --ve-warning-line: #5a4a1f;
+
+  /* 情報(知らせ・ヒント・進行中) */
+  --ve-info: #6ea8ff; /* 面1 7.6 */
+  --ve-info-soft: #142038; /* ink 9.6 */
+  --ve-info-ink: #a9c8ff;
+  --ve-info-line: #29406b;
+
+  /* 自動(AI が入れた物)— 色だけに頼らず「自動」バッジ/点線の枠と組む(劇伴の紫と近いため) */
+  --ve-auto: #b79cff;
+  --ve-auto-soft: #221c36; /* ink 9.3 */
+  --ve-auto-ink: #cdb9ff;
+  --ve-auto-line: #43386a;
+
+  --ve-playhead: #ff4d55; /* 再生位置だけ */
+
+  /* ---------------------------------------------------------------
+     3. 色 — トラック(タイムライン・名札・素材の印で同じ色)
+        key: 名札の塗り・レーンの印(面1 で 5.7 以上 / 名札の上の字 #0A0B12 で 6.2 以上)
+        clip: クリップの地 / clip-line: 縁 / clip-ink: クリップの字(clip の上 7.9 以上)
+        lane: レーンに敷く薄い色(key 8%)
+        今の timelineG3.css の --g3-k と main.css の --ve-trk-* の 2 系統をここへ 1 つに。
+     --------------------------------------------------------------- */
+  --ve-track-tag-ink: #0a0b12;
+  --ve-track-video: #5b8cff; /* 本編 V1 */
+  --ve-track-video-clip: #2a4673;
+  --ve-track-video-clip-line: #3d5f96;
+  --ve-track-video-clip-ink: #e3ebfc;
+  --ve-track-video-lane: rgba(91, 140, 255, 0.08);
+  --ve-track-overlay: #22d3e6; /* グラフィック・PiP */
+  --ve-track-overlay-clip: #134a55;
+  --ve-track-overlay-clip-line: #1f6a78;
+  --ve-track-overlay-clip-ink: #d4f7fb;
+  --ve-track-overlay-lane: rgba(34, 211, 230, 0.07);
+  --ve-track-telop: #ff5fa2; /* テロップ(クリップの縁は話者の色) */
+  --ve-track-telop-clip: #5a2a45;
+  --ve-track-telop-clip-line: #7a3a5e;
+  --ve-track-telop-clip-ink: #fbe3ef;
+  --ve-track-telop-lane: rgba(255, 95, 162, 0.07);
+  --ve-track-dialog: #2ee59a; /* 台詞(本編の音) */
+  --ve-track-dialog-clip: #1c4030;
+  --ve-track-dialog-clip-line: #2a5a43;
+  --ve-track-dialog-clip-ink: #c9f5df;
+  --ve-track-dialog-lane: rgba(46, 229, 154, 0.07);
+  --ve-track-music: #9a7bff; /* 劇伴・BGM */
+  --ve-track-music-clip: #2f2657;
+  --ve-track-music-clip-line: #4a3c85;
+  --ve-track-music-clip-ink: #e3dcff;
+  --ve-track-music-lane: rgba(154, 123, 255, 0.07);
+  --ve-track-se: #ff8f3d; /* 効果音 */
+  --ve-track-se-clip: #4f2e14;
+  --ve-track-se-clip-line: #7a4620;
+  --ve-track-se-clip-ink: #ffe3cc;
+  --ve-track-se-lane: rgba(255, 143, 61, 0.07);
+  /* 波形(外側の山 / 内側の平均) */
+  --ve-wave-dialog-peak: #2f6b50;
+  --ve-wave-dialog-rms: #7bddae;
+  --ve-wave-music-peak: #4b3f7d;
+  --ve-wave-music-rms: #9b86e0;
+  --ve-wave-video-peak: #5c7cb3;
+  --ve-wave-video-rms: #a9c3ff;
+
+  /* 話者(テロップの縁・印・文字起こしの名前。最大 8 人)— 今のまま */
+  --ve-speaker-0: #f6a6cc;
+  --ve-speaker-1: #7fa8ff;
+  --ve-speaker-2: #f5c35a;
+  --ve-speaker-3: #6fd3a3;
+  --ve-speaker-4: #ff9a6b;
+  --ve-speaker-5: #b79cff;
+  --ve-speaker-6: #5fd0e0;
+  --ve-speaker-7: #d7db6a;
+
+  /* ---------------------------------------------------------------
+     4. 文字
+     --------------------------------------------------------------- */
+  --ve-font-sans:
+    'Geist Sans', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI',
+    'Hiragino Kaku Gothic ProN', system-ui, sans-serif;
+  --ve-font-mono: 'Geist Mono', 'Consolas', 'Cascadia Mono', 'Menlo', monospace;
+
+  /* 大きさの段(7 段 + 英数字専用の 10)。9 / 9.5 / 10.5 / 11.5 / 15 / 18 は使わない */
+  --ve-fs-10: 10px; /* micro: 英数字だけ(ルーラの時刻・クリップ番号・kbd)。和文は不可 */
+  --ve-fs-11: 11px; /* caption: 注記・単位・タグ・バッジ・表の見出し */
+  --ve-fs-12: 12px; /* label: 欄の名前・小さい操作(24px)・タブ・メニュー */
+  --ve-fs-13: 13px; /* body: 本文・既定の操作(28px)・入力欄 */
+  --ve-fs-14: 14px; /* subhead: パネルの見出し・ダイアログの節の見出し・ダイアログの本文 */
+  --ve-fs-16: 16px; /* title: ダイアログの見出し */
+  --ve-fs-20: 20px; /* headline: 画面の見出し・空の状態の見出し */
+  --ve-fs-24: 24px; /* display: モニターのタイムコード(Mono) */
+
+  /* 行の高さ(4 の倍数) */
+  --ve-lh-10: 14px;
+  --ve-lh-11: 16px;
+  --ve-lh-12: 16px;
+  --ve-lh-13: 20px;
+  --ve-lh-14: 20px;
+  --ve-lh-16: 24px;
+  --ve-lh-20: 28px;
+  --ve-lh-24: 32px;
+  --ve-lh-prose: 1.6; /* 3 行以上の説明文だけ */
+
+  /* 太さは 3 つだけ(700 はテロップの絵の中だけ) */
+  --ve-fw-regular: 400;
+  --ve-fw-medium: 500; /* 操作・タブ・ラベル */
+  --ve-fw-semibold: 600; /* 見出し・主ボタン・選んだタブ */
+
+  /* 組み合わせ(font の一括指定に使う) */
+  --ve-type-micro: 500 var(--ve-fs-10) / var(--ve-lh-10) var(--ve-font-mono);
+  --ve-type-caption: 400 var(--ve-fs-11) / var(--ve-lh-11) var(--ve-font-sans);
+  --ve-type-label: 500 var(--ve-fs-12) / var(--ve-lh-12) var(--ve-font-sans);
+  --ve-type-body: 400 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-sans);
+  --ve-type-control: 500 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-sans);
+  --ve-type-subhead: 600 var(--ve-fs-14) / var(--ve-lh-14) var(--ve-font-sans);
+  --ve-type-title: 600 var(--ve-fs-16) / var(--ve-lh-16) var(--ve-font-sans);
+  --ve-type-headline: 600 var(--ve-fs-20) / var(--ve-lh-20) var(--ve-font-sans);
+  --ve-type-display: 500 var(--ve-fs-24) / var(--ve-lh-24) var(--ve-font-mono);
+  --ve-type-timecode: 500 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-mono);
+
+  /* ---------------------------------------------------------------
+     5. 余白(4 の倍数。例外は 2px の「髪の毛」とアイコンと字の間 6px だけ)
+     --------------------------------------------------------------- */
+  --ve-space-0: 0;
+  --ve-space-hair: 2px;
+  --ve-space-1: 4px;
+  --ve-space-2: 8px;
+  --ve-space-3: 12px;
+  --ve-space-4: 16px;
+  --ve-space-5: 20px;
+  --ve-space-6: 24px;
+  --ve-space-8: 32px;
+  --ve-space-10: 40px;
+  --ve-space-12: 48px;
+  --ve-gap-icon: 6px; /* アイコンと字の間 */
+  /* 役割ごとの余白 */
+  --ve-pad-panel: var(--ve-space-3); /* パネルの中 12 */
+  --ve-pad-dialog: var(--ve-space-5); /* ダイアログの中 20 */
+  --ve-gap-field: var(--ve-space-3); /* 欄と欄 12 */
+  --ve-gap-section: var(--ve-space-6); /* 節と節 24 */
+  --ve-gap-actions: var(--ve-space-2); /* ボタンとボタン 8 */
+  --ve-gap-label: var(--ve-space-1); /* ラベルと欄 4(縦) / 8(横) */
+
+  /* ---------------------------------------------------------------
+     6. 操作の大きさ(高さ。アイコンだけの操作は同じ辺の正方形)
+     --------------------------------------------------------------- */
+  --ve-control-xs: 20px; /* トラック見出しの中だけ */
+  --ve-control-sm: 24px; /* 詰めた所: インスペクタの行・タイムラインの道具 */
+  --ve-control-md: 28px; /* 既定 */
+  --ve-control-lg: 32px; /* ダイアログの足・上の帯の主ボタン */
+  --ve-control-xl: 40px; /* 空の状態の 1 つだけの大きな操作 */
+  --ve-control-pad-sm: 0 8px;
+  --ve-control-pad-md: 0 12px;
+  --ve-control-pad-lg: 0 16px;
+  --ve-bar-workflow: 46px; /* 上の帯 */
+  --ve-bar-panel-head: 36px; /* パネルの見出し(タブ)の帯 */
+  --ve-bar-dialog-head: 48px;
+  --ve-bar-dialog-foot: 64px;
+  --ve-bar-status: 28px;
+  --ve-hit-min: 24px; /* 押せる所の最小(WCAG 2.5.8) */
+
+  /* アイコン(線のセット 1 つ: 24 の格子・線の端は丸。大きさで線が細らないよう非拡大の線) */
+  --ve-icon-xs: 12px; /* xs/sm の操作の中 */
+  --ve-icon-sm: 14px; /* sm の操作 */
+  --ve-icon-md: 16px; /* md/lg の操作・メニュー */
+  --ve-icon-lg: 20px; /* 見出し・空の状態の脇 */
+  --ve-icon-xl: 32px; /* 空の状態の絵 */
+  --ve-icon-stroke: 1.5px; /* vector-effect: non-scaling-stroke と組む(手本は 1.6) */
+
+  /* ---------------------------------------------------------------
+     7. 角
+     --------------------------------------------------------------- */
+  --ve-radius-xs: 2px; /* kbd・トラックの名札・小さな印 */
+  --ve-radius-sm: 4px; /* クリップ・チェック・ツールチップ・表の中のチップ */
+  --ve-radius-md: 7px; /* 操作(ボタン・入力欄・選択・タブ) */
+  --ve-radius-lg: 10px; /* メニュー・ポップオーバー・面の中のカード */
+  --ve-radius-xl: 12px; /* パネル・ダイアログ */
+  --ve-radius-pill: 999px; /* 絞り込みのチップ・トグル */
+  --ve-radius-round: 50%; /* 再生ボタン・色の丸 */
+
+  /* ---------------------------------------------------------------
+     8. 影(高さ)— 5 段 + 輪
+     --------------------------------------------------------------- */
+  --ve-shadow-0: none;
+  --ve-shadow-control: inset 0 1px 0 rgba(255, 255, 255, 0.05); /* ボタンの上の縁の光 */
+  --ve-shadow-panel:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px rgba(150, 165, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.6), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --ve-shadow-popover: 0 0 0 1px var(--ve-border), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --ve-shadow-dialog: 0 0 0 1px var(--ve-border), 0 24px 64px rgba(0, 0, 0, 0.55);
+  --ve-shadow-primary: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --ve-glow-primary: 0 6px 22px rgba(255, 140, 30, 0.35); /* 上の帯の「書き出す」1 つだけ */
+  --ve-focus-ring: 0 0 0 2px var(--ve-bg), 0 0 0 4px var(--ve-primary); /* 面1 で 11:1 */
+  --ve-focus-outline: 2px solid var(--ve-primary);
+  --ve-focus-offset: 2px;
+
+  /* ---------------------------------------------------------------
+     9. 動き
+     --------------------------------------------------------------- */
+  --ve-dur-instant: 0ms;
+  --ve-dur-fast: 90ms; /* hover・押す・色が変わる */
+  --ve-dur-base: 160ms; /* タブの印・メニュー/ポップオーバーが出る・開閉の矢印 */
+  --ve-dur-slow: 240ms; /* ダイアログが出る・パネルの開閉 */
+  --ve-dur-exit: 120ms; /* 消えるときは出るときより速く */
+  --ve-ease-out: cubic-bezier(0.2, 0.7, 0.2, 1); /* 出る・変わる(既定) */
+  --ve-ease-in: cubic-bezier(0.4, 0, 1, 1); /* 消える */
+  --ve-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* 画面の中を動く(つまみ・並べ替え) */
+  --ve-motion-dialog-from: translateY(4px) scale(0.98);
+
+  /* ---------------------------------------------------------------
+     10. 重なり(17 種 → 9 段)
+     --------------------------------------------------------------- */
+  --ve-z-base: 0;
+  --ve-z-raised: 1; /* 隣より上(選んだクリップ・つまみ) */
+  --ve-z-sticky: 10; /* ルーラ・トラック見出し */
+  --ve-z-playhead: 20;
+  --ve-z-dropdown: 100; /* 右クリック・選択の一覧 */
+  --ve-z-popover: 110;
+  --ve-z-modal: 200; /* 背景 + ダイアログ */
+  --ve-z-toast: 300;
+  --ve-z-tooltip: 400;
+
+  /* 無効 */
+  --ve-disabled-surface: var(--ve-surface-3);
+  --ve-disabled-border: var(--ve-border-subtle);
+  --ve-disabled-text: var(--ve-text-disabled);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ve-dur-fast: 0ms;
+    --ve-dur-base: 0ms;
+    --ve-dur-slow: 0ms;
+    --ve-dur-exit: 0ms;
+    --ve-motion-dialog-from: none;
+  }
+}
+
+/* =====================================================================
+   移行用の別名(旧名 → 新名)。旧名の使用 535 か所(--text-1/2/3・--border(-soft)・
+   --bg-elevated-*・--radius-sm/md・--accent-1 など)と --ve-* の旧名を、直すまでの間
+   新しい値へつなぐ。直し終わったら、この塊と base.css の --ev-* を消す。
+   ===================================================================== */
+:root {
+  /* --ve-* の旧名 */
+  --ve-panel: var(--ve-surface-1);
+  --ve-panel-top: var(--ve-surface-2);
+  --ve-panel-fill: var(--ve-surface-1-fill);
+  --ve-panel-shadow: var(--ve-shadow-panel);
+  --ve-field: var(--ve-surface-sunken);
+  --ve-raised: var(--ve-surface-3);
+  --ve-raised-fill: var(--ve-surface-3-fill);
+  --ve-raised-hover: var(--ve-surface-3-hover);
+  --ve-line: var(--ve-border-subtle);
+  --ve-line-field: var(--ve-border);
+  --ve-line-control: var(--ve-border);
+  --ve-line-control-hover: var(--ve-border-hover);
+  --ve-line-strong: var(--ve-border-strong);
+  --ve-text: var(--ve-text-1);
+  --ve-accent: var(--ve-primary);
+  --ve-accent-fill: var(--ve-primary-fill);
+  --ve-accent-hover: var(--ve-primary-hover);
+  --ve-accent-press: var(--ve-primary-press);
+  --ve-accent-soft: var(--ve-primary-soft);
+  --ve-accent-ink: var(--ve-primary-ink);
+  --ve-accent-line: var(--ve-primary-line);
+  --ve-accent-glow: var(--ve-glow-primary);
+  --ve-on-accent: var(--ve-text-on-primary);
+  --ve-ok: var(--ve-success);
+  --ve-ok-soft: var(--ve-success-soft);
+  --ve-ok-ink: var(--ve-success-ink);
+  --ve-radius-clip: var(--ve-radius-sm);
+  --ve-radius-control: var(--ve-radius-md);
+  --ve-radius-card: var(--ve-radius-xl);
+  --ve-ease: var(--ve-ease-out);
+  --ve-dur: var(--ve-dur-base);
+  --ve-trk-video: var(--ve-track-video-clip);
+  --ve-trk-video-line: var(--ve-track-video-clip-line);
+  --ve-trk-video-ink: var(--ve-track-video-clip-ink);
+  --ve-trk-telop: var(--ve-track-telop-clip);
+  --ve-trk-telop-line: var(--ve-track-telop-clip-line);
+  --ve-trk-telop-ink: var(--ve-track-telop-clip-ink);
+  --ve-trk-audio: var(--ve-track-dialog-clip);
+  --ve-trk-audio-line: var(--ve-track-dialog-clip-line);
+  --ve-trk-audio-ink: var(--ve-track-dialog-clip-ink);
+  /* timelineG3.css の --g3-* */
+  --g3-mono: var(--ve-font-mono);
+  --g3-line: var(--ve-border-subtle);
+  --g3-select-ring: var(--ve-selection-ring);
+  /* main.css の旧い短い名前 */
+  --bg: var(--ve-bg);
+  --bg-elevated: var(--ve-surface-1);
+  --bg-elevated-2: var(--ve-surface-sunken);
+  --bg-elevated-3: var(--ve-surface-3);
+  --border: var(--ve-border);
+  --border-soft: var(--ve-border-subtle);
+  --text-1: var(--ve-text-1);
+  --text-2: var(--ve-text-2);
+  --text-3: var(--ve-text-3);
+  --text-dim: var(--ve-text-3);
+  --accent: var(--ve-primary);
+  --accent-1: var(--ve-primary);
+  --accent-2: var(--ve-primary-press);
+  --accent-ink: var(--ve-primary-ink);
+  --accent-soft: var(--ve-primary-soft);
+  --on-accent: var(--ve-text-on-primary);
+  --danger: var(--ve-danger);
+  --danger-soft: var(--ve-danger-soft);
+  --danger-ink: var(--ve-danger-ink);
+  --success: var(--ve-success);
+  --warn: var(--ve-warning); /* 今は琥珀(=主)。注意は黄へ分ける */
+  --radius-sm: var(--ve-radius-md);
+  --radius-md: var(--ve-radius-md);
+  --radius-lg: var(--ve-radius-xl);
+  --shadow-float: var(--ve-shadow-popover);
+  --font-sans: var(--ve-font-sans);
+  --font-mono: var(--ve-font-mono);
+}

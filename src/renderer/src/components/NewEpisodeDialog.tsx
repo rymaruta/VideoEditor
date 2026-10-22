@@ -20,6 +20,7 @@ import {
   EPISODE_KIND_LABEL
 } from '@shared/structure/kind'
 import { ASR_LANGUAGES, ASR_LANGUAGE_LABEL, type AsrLanguage } from '@shared/transcript'
+import { DialogHeader } from './DialogHeader'
 
 /**
  * 新しい回を作る(ファイル > 新しい回を作る… / Ctrl+Shift+N)。デザイン案の「NewEpisode」。
@@ -227,12 +228,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
         aria-label="新しい回を作る"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="dialog-titlebar">
-          <span>新しい回を作る</span>
-          <button className="dialog-close" aria-label="閉じる" onClick={() => setOpen(false)}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="新しい回を作る" onClose={() => setOpen(false)} />
 
         <div className="new-episode-body">
           <label className="form-stack">

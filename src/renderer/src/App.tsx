@@ -25,6 +25,7 @@ import { PanelTabBar } from './components/PanelTabBar'
 import { storedPanelTab } from './lib/panelTabs'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
+import { AboutDialog } from './components/AboutDialog'
 import { useProjectStore } from './store/projectStore'
 import { formatIpcError } from './lib/ipcError'
 import { useAutosaveStore } from './store/autosaveStore'
@@ -545,6 +546,9 @@ function App(): React.JSX.Element {
       </PanelBoundary>
       <PanelBoundary name="自動保存の復元">
         <AutosaveRestoreModal />
+      </PanelBoundary>
+      <PanelBoundary name="バージョン情報">
+        <AboutDialog />
       </PanelBoundary>
     </div>
   )

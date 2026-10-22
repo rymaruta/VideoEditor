@@ -14,6 +14,7 @@ import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import type { LoudnessTarget } from '@shared/loudness'
 import type { CancelWaveformPeaks, GenerateWaveformPeaks } from '@shared/waveformPeaks'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { AboutInfo, LicenseDoc } from '@shared/about'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
 import type { TelopLayerPayload, TelopLayerStageApi } from '@shared/telop/layer'
@@ -283,6 +284,10 @@ const api = {
   }): Promise<void> => ipcRenderer.invoke(IPC.menuUpdate, next),
   /** 上の帯のメニューボタン: アプリのメニューを窓の中の (x, y) に出す(Windows / Linux) */
   popupAppMenu: (at: { x: number; y: number }): void => ipcRenderer.send(IPC.menuPopup, at),
+  /** バージョン情報の中身(製品名・版・Electron などの版) */
+  appAbout: (): Promise<AboutInfo> => ipcRenderer.invoke(IPC.appAbout),
+  /** ライセンスの文書を別の窓で開く */
+  openLicense: (doc: LicenseDoc): void => ipcRenderer.send(IPC.openLicense, doc),
   /** 窓の枠の作り(帯にメニューボタンを置くか・信号のボタンの分を空けるか)に使う */
   platform: process.platform as string,
   onLibraryChanged: (callback: () => void): (() => void) => {

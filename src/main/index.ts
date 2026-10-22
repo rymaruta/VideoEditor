@@ -76,6 +76,8 @@ import {
   exportSequenceSegmented
 } from './segmentRenderer'
 import { installAppMenu, installMenuPopupIpc, updateAppMenu } from './appMenu'
+import { openChromiumLicenses, openThirdPartyNotices } from './aboutWindow'
+import { isLicenseDoc, type AboutInfo } from '@shared/about'
 import { windowChromeOptions } from '@shared/windowChrome'
 import { RendererCrashGuard } from './rendererRecovery'
 import { collectSystemInfo, installCrashLogging, logRendererError } from './diagnostics'
@@ -693,6 +695,20 @@ app.whenReady().then(() => {
     updateAppMenu(next ?? {}, is.dev)
   )
   installMenuPopupIpc(ipcMain)
+  // バージョン情報(アプリの中のダイアログ)の中身と、そこから開くライセンスの文書
+  ipcMain.handle(IPC.appAbout, (): AboutInfo => ({
+    product: PRODUCT_NAME,
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node
+  }))
+  ipcMain.on(IPC.openLicense, (e, doc: unknown) => {
+    if (!isLicenseDoc(doc)) return
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (doc === 'notices') openThirdPartyNotices(win)
+    else openChromiumLicenses(win)
+  })
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

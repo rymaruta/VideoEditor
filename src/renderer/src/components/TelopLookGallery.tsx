@@ -7,6 +7,7 @@ import { loadTelopFonts } from '../lib/telopFonts'
 import { matchesLookQuery } from '../lib/appearanceEdit'
 import { drawLookThumb } from '../lib/lookThumb'
 import { SearchIcon } from './icons'
+import { DialogHeader } from './DialogHeader'
 
 /**
  * 見た目の一覧(CapCut の「テキスト > スタイル」のような、絵で選ぶプリセット)。
@@ -315,12 +316,7 @@ export function TelopLookPicker({
         aria-label="見た目を選ぶ"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="dialog-titlebar">
-          <span>見た目を選ぶ</span>
-          <button className="dialog-close" aria-label="閉じる" onClick={onClose}>
-            ×
-          </button>
-        </div>
+        <DialogHeader title="見た目を選ぶ" onClose={onClose} />
         <p className="hint-text look-picker-hint">{hint}</p>
         <div className="look-picker-body">
           <TelopLookGallery

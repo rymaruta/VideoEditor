@@ -20,6 +20,7 @@ import { Segmented } from './AppearanceControls'
 import { TelopLookGallery, type LookItem } from './TelopLookGallery'
 import { useStyleClipboard } from '../lib/styleClipboard'
 import { lookPatch, SECTION_IDS } from '../lib/appearanceEdit'
+import { DialogHeader } from './DialogHeader'
 
 /**
  * テロップスタイルの管理(テロップ > テロップスタイルの管理…)。デザイン案の「TelopStyles」。
@@ -357,12 +358,10 @@ export function TelopStyleDialog(): React.JSX.Element | null {
         aria-label="テロップスタイルの管理"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="dialog-titlebar">
-          <span>{speechMode ? '発言テロップの見た目を作る' : 'テロップスタイルの管理'}</span>
-          <button className="dialog-close" aria-label="閉じる" onClick={() => setDraft(null)}>
-            ×
-          </button>
-        </div>
+        <DialogHeader
+          title={speechMode ? '発言テロップの見た目を作る' : 'テロップスタイルの管理'}
+          onClose={() => setDraft(null)}
+        />
 
         <div className="telop-style-body">
           <div className="telop-style-list-pane">

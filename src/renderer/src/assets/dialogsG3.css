@@ -1,0 +1,539 @@
+/* =====================================================================
+   ダイアログの Graphite 3 の見た目(tokens.css の決まり §3.5「ダイアログは 1 つの枠」)。
+   graphite3.css の後に読み込む(main.tsx)。
+   - 枠は 2 系統(.dialog-titlebar の窓 4 つ・.modal の窓 11 個)あったのを、同じ見た目に:
+     背景 scrim + ぼかし 3px、枠は面2・角 12・幅 440 / 560 / 800 / 1120、見出し 48(16/600、
+     閉じるはアイコンのボタン 28。部品は components/DialogHeader)、中 20、足 64(左に補足、
+     右に キャンセル と 主)。.modal は h3 を見出しの帯に、.modal-actions を足の帯に見せる。
+   - 主ボタンは光らせない(光るのは上の帯の「書き出す」だけ)。
+   ===================================================================== */
+
+/* ---------- 覆いと枠 ---------- */
+.modal-backdrop {
+  z-index: var(--ve-z-modal);
+  background: var(--ve-scrim);
+  backdrop-filter: blur(3px);
+}
+.modal,
+.export-dialog,
+.telop-style-dialog,
+.new-episode-dialog,
+.look-picker {
+  border: 0;
+  border-radius: var(--ve-radius-xl);
+  background: var(--ve-surface-2);
+  box-shadow: var(--ve-shadow-dialog);
+}
+
+/* ---------- 見出しの帯(DialogHeader) ---------- */
+.dialog-titlebar {
+  height: var(--ve-bar-dialog-head);
+  padding: 0 var(--ve-space-3) 0 var(--ve-space-5);
+  border-bottom: 0;
+  font: var(--ve-type-title);
+  color: var(--ve-text-1);
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--ve-border-subtle);
+}
+.dialog-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dialog-close,
+.dialog-close:hover:not(:disabled),
+.dialog-close:active:not(:disabled) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ve-control-md);
+  height: var(--ve-control-md);
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background-image: none;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--ve-text-2);
+}
+.dialog-close:hover:not(:disabled) {
+  background-color: var(--ve-surface-3);
+  color: var(--ve-text-1);
+}
+.dialog-close:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: calc(var(--ve-focus-offset) * -1);
+}
+
+/* ---------- 足の帯 ---------- */
+.dialog-footer {
+  min-height: var(--ve-bar-dialog-foot);
+  gap: var(--ve-gap-actions);
+  padding: 0 var(--ve-space-5);
+  border-top: 0;
+  background: transparent;
+  box-shadow: inset 0 1px 0 var(--ve-border-subtle);
+}
+.dialog-footer .primary-button,
+.dialog-footer .small-button {
+  height: var(--ve-control-lg);
+  padding: var(--ve-control-pad-lg);
+  border-radius: var(--ve-radius-md);
+  font: var(--ve-type-control);
+}
+.dialog-footer .primary-button {
+  font-weight: var(--ve-fw-semibold);
+}
+.dialog-footer-label {
+  color: var(--ve-text-2);
+}
+
+/* ---------- .modal(h3 を見出しの帯に、.modal-actions を足の帯に) ---------- */
+.modal {
+  padding: var(--ve-pad-dialog);
+}
+.modal:has(> h3:first-child) {
+  padding-top: 0;
+}
+.modal > h3:first-child {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-gap-icon);
+  height: var(--ve-bar-dialog-head);
+  margin: 0 calc(var(--ve-pad-dialog) * -1) var(--ve-pad-dialog);
+  padding: 0 var(--ve-pad-dialog);
+  font: var(--ve-type-title);
+  color: var(--ve-text-1);
+  box-shadow: inset 0 -1px 0 var(--ve-border-subtle);
+}
+.modal > .modal-actions:last-child {
+  min-height: var(--ve-bar-dialog-foot);
+  align-items: center;
+  gap: var(--ve-gap-actions);
+  margin: var(--ve-pad-dialog) calc(var(--ve-pad-dialog) * -1) calc(var(--ve-pad-dialog) * -1);
+  padding: 0 var(--ve-pad-dialog);
+  box-shadow: inset 0 1px 0 var(--ve-border-subtle);
+}
+.modal-actions .primary-button,
+.modal-actions .small-button,
+.modal-actions > button {
+  height: var(--ve-control-lg);
+  padding: var(--ve-control-pad-lg);
+}
+
+/* ---------- 書き出し: 幅 800 の 2 列(左に概要、右に設定) ---------- */
+.export-dialog {
+  width: 800px;
+  height: 680px;
+}
+.export-dialog-body {
+  grid-template-columns: 264px minmax(0, 1fr);
+}
+.export-dialog .form-row {
+  grid-template-columns: 96px minmax(0, 200px) minmax(0, 1fr);
+}
+.export-dialog .form-hint {
+  margin-left: 106px;
+}
+.export-dialog .form-check {
+  margin-left: 106px;
+}
+.telop-style-dialog {
+  width: 1120px;
+}
+.new-episode-dialog,
+.look-picker {
+  width: 800px;
+}
+
+/* ---------- 書き出し: 左の概要(仕様の一覧) ---------- */
+.export-dialog-summary {
+  gap: 14px;
+  padding: 18px 18px 16px;
+  border-right: 0;
+  background:
+    radial-gradient(360px 220px at 0% 0%, rgba(124, 92, 255, 0.12), transparent 70%),
+    rgba(8, 10, 18, 0.45);
+  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.1);
+}
+.export-dialog-section {
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-semibold);
+  letter-spacing: 0.12em;
+  color: var(--ve-text-3);
+}
+.export-dialog-summary dl {
+  gap: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.15));
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+}
+.export-dialog-summary dl > div {
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 12px;
+  font-size: var(--ve-fs-13);
+}
+.export-dialog-summary dl > div + div {
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+}
+.export-dialog-summary dt {
+  color: var(--ve-text-3);
+}
+.export-dialog-summary dd {
+  color: var(--ve-text-1);
+}
+/* 最初の行(長さ)は大きな数字で */
+.export-dialog-summary dl > div:first-child {
+  grid-template-columns: 1fr;
+  gap: 2px;
+  padding: 12px 12px 10px;
+  background: linear-gradient(135deg, rgba(255, 178, 36, 0.1), transparent 70%);
+}
+.export-dialog-summary dl > div:first-child dt {
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-semibold);
+  letter-spacing: 0.08em;
+  color: #ffc07a;
+}
+.export-dialog-summary dl > div:first-child dd {
+  font-family: var(--ve-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--ve-fs-24);
+  font-weight: var(--ve-fw-semibold);
+  letter-spacing: 0.01em;
+}
+
+/* ---------- 書き出し: 右の設定 ---------- */
+.export-dialog-fields {
+  gap: 12px;
+  padding: 18px 22px;
+}
+.form-row > label {
+  color: var(--ve-text-2);
+}
+.form-row select {
+  height: 30px;
+  border-radius: 7px;
+}
+.form-value {
+  color: var(--ve-text-1);
+}
+.export-dialog .form-row .form-value {
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-13);
+}
+.form-note {
+  color: var(--ve-text-3);
+}
+/* 選ぶ方式はカードで(選んだものは琥珀の地と輪) */
+.choice {
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+  transition: box-shadow var(--ve-dur-fast) var(--ve-ease-out);
+}
+.choice:hover {
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.24);
+}
+.choice:has(input:checked) {
+  border: 0;
+  background: linear-gradient(135deg, rgba(255, 178, 36, 0.16), rgba(255, 122, 31, 0.05));
+  box-shadow:
+    inset 0 0 0 1px var(--ve-primary-line),
+    0 0 18px rgba(255, 160, 40, 0.08);
+}
+.choice:has(input:focus-visible) {
+  box-shadow: var(--ve-focus-ring);
+}
+.choice-label {
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-semibold);
+  color: var(--ve-text-1);
+}
+.choice-note {
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-3);
+}
+.export-queue {
+  margin-top: 8px;
+  padding: 12px;
+  border-top: 0;
+  border-radius: 10px;
+  background: rgba(8, 10, 18, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.1);
+}
+.export-queue-item {
+  border-bottom-color: rgba(150, 165, 255, 0.08);
+}
+.export-queue-item.done .export-queue-status {
+  color: var(--ve-success-ink);
+}
+.export-queue-item.error .export-queue-status {
+  color: var(--ve-danger-ink);
+}
+
+/* ---------- 書き出し中・完了 ---------- */
+.export-dialog-progress .progress-bar {
+  height: 40px;
+  margin-top: 0;
+  border-radius: 10px;
+  background: #0b0d16;
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
+}
+/* 帯は全体の高さに淡い琥珀、下に濃い線(数字は帯の上でも 4.5:1 以上の白) */
+.export-dialog-progress .progress-bar-fill {
+  top: 0;
+  height: auto;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(255, 178, 36, 0.1), rgba(255, 122, 31, 0.26));
+  box-shadow:
+    inset 0 -3px 0 #ffa62b,
+    inset -2px 0 0 #ffd25c,
+    6px 0 18px rgba(255, 150, 40, 0.35);
+}
+.export-dialog-progress .progress-bar span {
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-semibold);
+  color: var(--ve-text-1);
+}
+.export-done {
+  margin-top: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(76, 195, 138, 0.16), rgba(76, 195, 138, 0.04));
+  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.35);
+}
+.export-done .success-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  font-size: var(--ve-fs-14);
+  font-weight: var(--ve-fw-semibold);
+  color: var(--ve-success-ink);
+}
+.export-done .success-text::before {
+  content: '';
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6.5 12.5 3.5 3.5 7.5-8' fill='none' stroke='%2304140c' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      center / 14px no-repeat,
+    linear-gradient(145deg, #7de3b1, #2ebd7a);
+}
+.export-done-actions {
+  margin-top: 10px;
+}
+
+/* ---------- 書き出し後の自動確認(QC) ---------- */
+.export-qc {
+  padding: 12px 18px 12px;
+  border-top: 0;
+  background: rgba(8, 10, 18, 0.4);
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.1);
+}
+.export-qc-head {
+  gap: 10px;
+}
+.export-qc-title {
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-semibold);
+}
+.export-qc-summary {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 11px;
+  font-size: var(--ve-fs-12);
+  font-weight: var(--ve-fw-semibold);
+}
+.export-qc-summary.ok {
+  background: rgba(76, 195, 138, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(76, 195, 138, 0.35);
+}
+.export-qc-summary.warn {
+  background: rgba(255, 178, 36, 0.12);
+  box-shadow: inset 0 0 0 1px var(--ve-primary-line);
+}
+.export-qc-summary.error {
+  background: var(--ve-danger-soft);
+  box-shadow: inset 0 0 0 1px var(--ve-danger-line);
+}
+.export-qc-loudness {
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-12);
+}
+.export-qc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+}
+.export-qc-item,
+.export-qc-item:hover:not(:disabled) {
+  align-items: center;
+  height: auto;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background-image: none;
+  background-color: rgba(255, 255, 255, 0.025);
+  box-shadow: inset 3px 0 0 var(--ve-primary);
+}
+.export-qc-item.error,
+.export-qc-item.error:hover:not(:disabled) {
+  box-shadow: inset 3px 0 0 var(--ve-danger);
+}
+.export-qc-item:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+.export-qc-time {
+  font-family: var(--ve-font-mono);
+  opacity: 1;
+  color: var(--ve-text-2);
+}
+.export-qc-kind {
+  opacity: 1;
+  color: #ffd27a;
+}
+.export-qc-item.error .export-qc-kind {
+  color: var(--ve-danger-ink);
+}
+
+/* ---------- テロップスタイルの管理 ---------- */
+.telop-style-list-pane {
+  border-right: 0;
+  background: rgba(8, 10, 18, 0.45);
+  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.1);
+}
+.telop-style-list {
+  padding: 2px 6px 6px;
+}
+.telop-style-item {
+  margin: 2px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+}
+.telop-style-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.telop-style-item.selected {
+  background: linear-gradient(90deg, rgba(255, 178, 36, 0.16), rgba(255, 138, 31, 0.04));
+  box-shadow: inset 0 0 0 1px var(--ve-primary-line);
+}
+.telop-style-glyph {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #2a2f45, #1a1d31);
+  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.14);
+}
+.telop-style-name {
+  font-size: var(--ve-fs-13);
+  color: var(--ve-text-1);
+}
+.telop-style-use {
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-3);
+}
+.telop-style-list-actions {
+  border-top: 0;
+  box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
+}
+.telop-style-sample-pane {
+  padding: 16px 18px;
+  border-right: 0;
+  box-shadow: inset -1px 0 0 rgba(150, 165, 255, 0.1);
+}
+/* 見本は暗い枠の中に(モニターと同じ淡い光) */
+.telop-style-sample {
+  border-radius: 8px;
+  background:
+    radial-gradient(60% 55% at 45% 58%, rgba(120, 170, 90, 0.1), transparent 70%),
+    radial-gradient(40% 40% at 72% 38%, rgba(70, 130, 220, 0.1), transparent 70%), var(--ve-well);
+  box-shadow:
+    0 0 0 1px #16191e,
+    0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.telop-style-sample-controls label {
+  color: var(--ve-text-2);
+}
+
+/* ---------- 低い窓(1366×768) ---------- */
+@media (max-height: 820px) {
+  .export-dialog {
+    height: calc(100vh - 32px);
+  }
+  .export-dialog-summary {
+    padding: 14px 14px 12px;
+  }
+  .export-dialog-fields {
+    padding: 14px 18px;
+    gap: 10px;
+  }
+}
+@media (max-width: 1100px) {
+  .export-dialog-body {
+    grid-template-columns: 290px minmax(0, 1fr);
+  }
+}
+
+/* ---------- バージョン情報(アプリの中のダイアログ・幅 440) ---------- */
+.about-dialog {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ve-radius-xl);
+  background: var(--ve-surface-2);
+  box-shadow: var(--ve-shadow-dialog);
+  overflow: hidden;
+}
+.about-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-3);
+  padding: var(--ve-pad-dialog);
+}
+.about-dialog-product {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-3);
+}
+.about-dialog-logo {
+  width: 32px;
+  height: 32px;
+}
+.about-dialog-title {
+  font: var(--ve-type-title);
+  color: var(--ve-text-1);
+}
+.about-dialog-runtime {
+  margin: 0;
+  font: var(--ve-type-caption);
+  font-family: var(--ve-font-mono);
+  color: var(--ve-text-2);
+}
+.about-dialog-note {
+  margin: 0;
+  font: var(--ve-type-body);
+  line-height: var(--ve-lh-prose);
+  color: var(--ve-text-2);
+}
+.about-dialog-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ve-gap-actions);
+}
