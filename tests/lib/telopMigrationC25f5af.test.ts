@@ -40,6 +40,16 @@ import { TURN_RATE } from '@shared/diarize/micTurns'
 import { defaultTextStyle } from '@shared/textStyle'
 import type { MulticamInfo } from '@shared/sync/multicam'
 import type { EditedTelop, Project, TextOverlay } from '@shared/types'
+import * as OF from './fixtures/telopc25f5af/fromTranscript'
+import {
+  mainHardCuts,
+  placedClips,
+  telopsFromTranscript
+} from '../../src/renderer/src/lib/transcriptTimeline'
+import { utteranceTimelineRange } from '@shared/transcript'
+import { speechTelopStyle } from '@shared/telop/styles'
+import { stackSimultaneousTelops } from '@shared/telop/stack'
+import { textCanvasSize } from '@shared/resolution'
 
 /**
  * 前の版(c25f5af、10/09 までの版: テロップに元の部分を覚えず、人の修正・消した印を「発話+何枚目か」の
@@ -1376,4 +1386,287 @@ describe('10/09 版の修正・消した印を、何回作り直しても何枚�
     expect(want.slice(0, 2)).toEqual(['*一二三四 | 三四 | 五六', '*一二三四 | 五六'])
     expect(got).toEqual(want)
   })
+})
+
+/**
+ * 第69回の監査: 10/09 版の何枚目かだけの印がある発話で、自動編集の画面の「文字起こしからテロップ」で並べた枚に
+ * 元の部分が付き、その枚を消す・直すと範囲つきの印が何枚目かの古い印と混ざって、作り直すと 10/09 版で消した
+ * 言葉が戻っていた。その発話は並べた枚にも元の部分を付けず(作り直しと同じ判定)、10/09 版より悪くならないこと
+ */
+describe('10/09 版の印のある発話を、文字起こしから並べ直して消す・直す(第69回の監査)', () => {
+  type Auto = Omit<TextOverlay, 'id'>
+  const look = { style: defaultTextStyle() }
+  /** 10/09 版(c25f5af)の「文字起こしからテロップ」(元の部分を付けない) */
+  const arrangeOld = (project: Project, lineChars: number, dict: Gen['dict']): Auto[] => {
+    const clips = placedClips(project)
+    const out: Auto[] = []
+    for (const u of project.transcript ?? []) {
+      const chunks = OF.utteranceToTelopChunks(u, {
+        dictionary: dict,
+        maxLineChars: lineChars,
+        minDurationSec: 1
+      })
+      for (const [ci, chunk] of chunks.entries()) {
+        const r = utteranceTimelineRange(
+          { assetId: u.assetId, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd },
+          clips
+        )
+        if (!r || r.end - r.start < 0.2) continue
+        out.push({
+          text: chunk.text,
+          startTime: r.start,
+          endTime: r.end,
+          style: speechTelopStyle(look.style),
+          speaker: u.speaker,
+          source: 'auto',
+          utteranceId: u.id,
+          utteranceChunk: ci
+        })
+      }
+    }
+    const settled = OF.settleTelopTimes(out, mainHardCuts(project))
+    return stackSimultaneousTelops(settled, textCanvasSize(project.aspectRatio).h)
+  }
+  const arrangeNew = (project: Project, lineChars: number, dict: Gen['dict']): Auto[] =>
+    telopsFromTranscript(project, [], dict, { lineChars, minSec: 1 }, look)
+  /** 10/09 版と同じく元の部分を持たない枚 */
+  const withoutSource = (t: Auto): Auto => {
+    const c = { ...t } as Auto & { autoSource?: unknown }
+    delete c.autoSource
+    return c
+  }
+  /** マイクの音声トラックだけの企画(速さを変えたクリップ) */
+  const withAudio = (base: Project, speed: number): Project =>
+    ({
+      ...base,
+      audioTracks: [
+        {
+          id: 'at',
+          name: 'A',
+          muted: false,
+          volume: 1,
+          duckingEnabled: false,
+          clips: [{ id: 'ac', assetId: 'MA', startTime: 0, inPoint: 0, outPoint: 400, speed }]
+        }
+      ]
+    }) as unknown as Project
+  const planWith = (old: boolean, p: Gen, scenes: Scene[], lineChars: number): Auto[] =>
+    ((old ? OP.planRoughCut : NP.planRoughCut) as (...x: unknown[]) => { telops: Auto[] })(
+      p.project,
+      info,
+      scenes,
+      scenes.map((s) => ({ sceneId: s.id, score: 100, kind: 'highlight' as const, reason: '' })),
+      p.activity,
+      {
+        targetSec: 0,
+        keep: Object.fromEntries(scenes.map((s) => [s.id, true])),
+        styles: [],
+        speechLook: look,
+        kind: 'game',
+        policy: 'light',
+        dictionary: p.dict,
+        style: { telopLineChars: lineChars } as never
+      }
+    ).telops
+  interface State {
+    timeline: TextOverlay[]
+    dismissed: string[]
+    edited?: Record<string, EditedTelop>
+    /** 人が消した・直した枚の言葉(作り直しても自動の枚に出てはいけない) */
+    gone: Set<string>
+  }
+  type Lib = typeof NM | typeof OM
+  /** 人が枚を消す・直す(`removeTextOverlay`・`updateTextOverlay` と同じ印) */
+  const touch = (
+    lib: Lib,
+    st: State,
+    pick: (o: TextOverlay, i: number) => 'del' | 'edit' | null
+  ): State => {
+    const timeline: TextOverlay[] = []
+    const dismissed = [...st.dismissed]
+    const gone = new Set(st.gone)
+    st.timeline.forEach((o, i) => {
+      const op = o.edited ? null : pick(o, i)
+      if (op) for (const c of kanji(o.text)) gone.add(c)
+      if (op === 'del') {
+        const k = lib.autoTelopKey(o as never)
+        if (k && !dismissed.includes(k)) dismissed.push(k)
+      } else if (op === 'edit') timeline.push({ ...o, text: `★${i}`, edited: true })
+      else timeline.push(o)
+    })
+    return { ...st, timeline, dismissed, gone }
+  }
+  /** 仮編集の作り直し(`applyRoughCut` と同じ順) */
+  const rebuild = (lib: Lib, st: State, telops: Auto[], tag: string): State => {
+    const remember = lib.rememberEditedTelops as typeof NM.rememberEditedTelops
+    const merge = lib.mergeManualTelops as typeof NM.mergeManualTelops
+    const edited = remember(st.timeline, st.edited)
+    const merged = merge(st.timeline, telops, new Set(st.dismissed), st.edited)
+    // 保存と読み込みを挟む
+    return {
+      ...saveLoad({
+        dismissed: st.dismissed,
+        edited,
+        timeline: [
+          ...st.timeline.filter((o) => !o.utteranceId && !o.effectId),
+          ...merged.map((o, i) => ({ ...o, id: `${tag}-${i}` }))
+        ]
+      }),
+      gone: st.gone
+    }
+  }
+  /** 文字起こしから並べる(`addTextOverlays`) */
+  const arrange = (st: State, telops: Auto[], tag: string): State => ({
+    ...st,
+    timeline: [...st.timeline, ...telops.map((o, i) => ({ ...o, id: `${tag}-${i}` }))]
+  })
+  const projectOf = (p: Gen, st: State, speed: number): Project => ({
+    ...withAudio(p.project, speed),
+    textOverlays: st.timeline,
+    dismissedTelops: st.dismissed,
+    editedTelops: st.edited
+  })
+  /** 自動の枚に出た、人が消した・直した言葉と、2回出た言葉 */
+  const errors = (st: State): string[] => {
+    const count = new Map<string, number>()
+    for (const t of st.timeline.filter((o) => !o.edited))
+      for (const c of kanji(t.text)) count.set(c, (count.get(c) ?? 0) + 1)
+    return [...count].flatMap(([c, n]) => [
+      ...(st.gone.has(c) ? [`戻った「${c}」`] : []),
+      ...(n > 1 ? [`${n}回「${c}」`] : [])
+    ])
+  }
+
+  /**
+   * 1通り: 10/09 版の時代に並べて(作り直して)消す・直す → 開き直して並べ直し、消す・直す → 2回作り直す。
+   * 開き直した後の「文字起こしからテロップ」を 10/09 版と同じく元の部分の無い枚で並べた結果(第69回より前・
+   * 10/09 版と同じ当て方)と、今の版で並べた結果の誤り(人の操作は同じ。仮編集・合わせ方は今の版)
+   */
+  const runSeed = (seed: number): { old: string[]; now: string[] } => {
+    const r = rng(seed)
+    const p = makeProject(r)
+    const speed = r() < 0.5 ? 1 : [0.75, 1.25, 1.5][Math.floor(r() * 3)]
+    const cut = (): Scene[] => {
+      const n = 1 + Math.floor(r() * 3)
+      const cuts = Array.from({ length: n * 2 }, () => r() * p.total).sort((a, b) => a - b)
+      return Array.from({ length: n }, (_, i) => ({
+        id: `s${i}`,
+        start: cuts[i * 2],
+        end: Math.max(cuts[i * 2] + 0.5, cuts[i * 2 + 1]),
+        lines: [] as never[],
+        speech: 0
+      }))
+    }
+    const lc = (): number => 4 + Math.floor(r() * 12)
+    const act = (o: TextOverlay, i: number, rr: () => number): 'del' | 'edit' | null => {
+      void o
+      void i
+      const x = rr()
+      return x < 0.25 ? 'del' : x < 0.37 ? 'edit' : null
+    }
+    // 10/09 版の時代(どちらも同じ)
+    let st: State = { timeline: [], dismissed: [], gone: new Set() }
+    st = arrange(st, arrangeOld(withAudio(p.project, speed), lc(), p.dict), 'a0')
+    st = touch(OM, st, (o, i) => act(o, i, r))
+    if (r() < 0.5) {
+      st = rebuild(OM, st, planWith(true, p, cut(), lc()), 'b0')
+      st = touch(OM, st, (o, i) => act(o, i, r))
+    }
+    st = {
+      ...saveLoad({ timeline: st.timeline, dismissed: st.dismissed, edited: st.edited }),
+      gone: st.gone
+    }
+    // 開き直した後(同じ乱数の並びで、10/09 版のまま・今の版の両方)
+    const lc1 = lc()
+    const cut1 = cut()
+    const lc2 = lc()
+    const cut2 = r() < 0.5 ? cut1 : cut()
+    const lc3 = lc()
+    const after = r() * 1e9
+    const go = (asOf1009: boolean): string[] => {
+      const rr = rng(after)
+      let s: State = { ...st, gone: new Set(st.gone) }
+      const arranged = arrangeNew(projectOf(p, s, speed), lc1, p.dict)
+      s = arrange(s, asOf1009 ? arranged.map(withoutSource) : arranged, 'a1')
+      const fresh = new Set(s.timeline.slice(st.timeline.length).map((o) => o.id))
+      s = touch(NM, s, (o, i) => (fresh.has(o.id) ? act(o, i, rr) : null))
+      s = rebuild(NM, s, planWith(false, p, cut1, lc2), 'b1')
+      s = rebuild(NM, s, planWith(false, p, cut2, lc3), 'b2')
+      return errors(s)
+    }
+    return { old: go(true), now: go(false) }
+  }
+
+  it('監査の再現: 並べ直した1枚目を消して作り直しても、10/09 版で消した後ろ半分は出ない', () => {
+    const words = Array.from({ length: 14 }, (_, k) => ({
+      text: String.fromCodePoint(0x4e00 + k * 3),
+      start: 1 + k * 0.3,
+      end: 1.25 + k * 0.3
+    }))
+    const project = {
+      id: 'p',
+      name: 'p',
+      aspectRatio: '16:9',
+      assets: [],
+      clips: [],
+      audioTracks: [],
+      videoOverlayTracks: [],
+      textOverlays: [],
+      transcript: [
+        {
+          id: 'u0',
+          assetId: 'MA',
+          speaker: 'A',
+          sourceStart: words[0].start,
+          sourceEnd: words[13].end,
+          text: words.map((w) => w.text).join(''),
+          words,
+          overlap: false
+        }
+      ],
+      multicam: info
+    } as unknown as Project
+    const p: Gen = {
+      project,
+      total: 6,
+      activity: new Uint8Array(400 * TURN_RATE).fill(1, TURN_RATE, 6 * TURN_RATE),
+      dict: [],
+      atom: new Map()
+    }
+    const scenes: Scene[] = [{ id: 's0', start: 0, end: 6, lines: [], speech: 0 }]
+    const start: State = {
+      timeline: [],
+      dismissed: ['u:u0#1'],
+      gone: new Set(kanji('丕丘丛丞両两丧'))
+    }
+    const go = (old: boolean): string => {
+      const lib = old ? OM : NM
+      const proj = projectOf(p, start, 1)
+      let s = arrange(start, old ? arrangeOld(proj, 5, []) : arrangeNew(proj, 5, []), 'a')
+      expect(s.timeline.map((o) => o.text.replace(/\s/g, ''))).toEqual([
+        '一七丆三丌丏丒',
+        '丕丘丛丞両两丧'
+      ])
+      s = touch(lib, s, (_, i) => (i === 0 ? 'del' : null))
+      s = rebuild(lib, s, planWith(old, p, scenes, 12), 'b')
+      return s.timeline.map((o) => o.text.replace(/\s/g, '')).join(' | ')
+    }
+    expect(go(true)).toBe('')
+    expect(go(false)).toBe('')
+  })
+
+  const SEEDS = Number(process.env.TELOP_ARRANGE_SEEDS ?? 600)
+  it(
+    '乱択: 10/09 版のまま続けるより、消した・直した言葉が戻る・2回出る通りが増えない',
+    () => {
+      const worse: string[] = []
+      for (let seed = 1; seed <= SEEDS; seed++) {
+        const { old, now } = runSeed(seed)
+        if (now.length > old.length)
+          worse.push(`#${seed} 今: ${now.join(' ')} / 10/09 版: ${old.join(' ')}`)
+      }
+      expect(worse, worse.slice(0, 5).join('\n')).toEqual([])
+    },
+    Math.max(120000, SEEDS * 400)
+  )
 })

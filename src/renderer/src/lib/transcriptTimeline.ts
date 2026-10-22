@@ -9,7 +9,7 @@ import {
   settleTelopTimes,
   utteranceToTelopChunks
 } from '@shared/telop/fromTranscript'
-import type { WithAutoSource } from '@shared/telop/manual'
+import { legacyTelopUtterances, type WithAutoSource } from '@shared/telop/manual'
 import { toCommon } from '@shared/sync/multicam'
 import {
   speechLook,
@@ -107,6 +107,13 @@ export function telopsFromTranscript(
 ): Omit<TextOverlay, 'id'>[] {
   const clips = placedClips(project)
   const out: (Omit<TextOverlay, 'id'> & WithAutoSource)[] = []
+  // 10/09 版の印(何枚目かだけ)がある発話は、作り直し(`mergeManualTelops`)と同じく元の部分を付けない。
+  // 付けると、この枚を消した・直した印が範囲つきになり、何枚目かの古い印と混ざって消した言葉が戻っていた
+  const legacy = legacyTelopUtterances(
+    project.textOverlays ?? [],
+    new Set(project.dismissedTelops ?? []),
+    project.editedTelops
+  )
   for (const u of project.transcript ?? []) {
     const def = styleForSpeaker(styles, u.speaker)
     const chunks = utteranceToTelopChunks(u, {
@@ -132,10 +139,12 @@ export function telopsFromTranscript(
           chunk.sourceStart < c.outPoint
       )
       const rate = clip?.speed && clip.speed > 0 ? clip.speed : 1
-      const autoSource = chunkAutoSource(chunk, {
-        offset: r.start - chunk.sourceStart / rate,
-        rate
-      }) ?? { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text }
+      const autoSource = legacy.has(u.id)
+        ? undefined
+        : (chunkAutoSource(chunk, {
+            offset: r.start - chunk.sourceStart / rate,
+            rate
+          }) ?? { start: chunk.sourceStart, end: chunk.sourceEnd, text: chunk.text })
       out.push({
         text: chunk.text,
         startTime: r.start,
@@ -148,7 +157,7 @@ export function telopsFromTranscript(
         // 枚ごとの番号(仮編集と同じ)。無いと1つの発言の枚がみな同じ印になり、直した文字・消した枚が
         // 作り直しで別の枚に付いていた
         utteranceChunk: ci,
-        autoSource
+        ...(autoSource ? { autoSource } : {})
       })
     }
   }

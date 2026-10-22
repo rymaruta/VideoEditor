@@ -279,6 +279,68 @@ export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
   /** 覚えておいた人の修正(今タイムラインに無いものも含む) */
   remembered: Readonly<Record<string, EditedTelop>> = {}
 ): T[] {
+  const { dismissedSpans, dismissedBases, effectEdits, uniq } = collectEdits(
+    existing,
+    dismissed,
+    remembered
+  )
+  // 発話ごとの枚の並び(同じ発話の枚は、最初の枚の位置にまとめて出す)
+  const groups = new Map<string, (T & WithAutoSource)[]>()
+  const order: (T | string)[] = []
+  for (const n0 of incoming) {
+    const n = n0 as T & WithAutoSource
+    const key = autoTelopKey(n)
+    if (!n.utteranceId) {
+      if (key && dismissed.has(key)) continue
+      const e = key ? effectEdits.get(key) : undefined
+      order.push(e ? applyEdit(n, e.rec, n.text === e.rec.text) : n)
+      continue
+    }
+    // 前の版の消した印(何枚目かだけ)は、これまでどおりその番号の枚を出さない(分かれた枚も全部)
+    if (dismissedBases.has(`u:${n.utteranceId}#${n.utteranceChunk ?? 0}`)) continue
+    if (key && dismissed.has(key)) continue
+    const g = groups.get(n.utteranceId)
+    if (g) g.push(n)
+    else {
+      groups.set(n.utteranceId, [n])
+      order.push(n.utteranceId)
+    }
+  }
+
+  // 10/09 版の企画から来た印(何枚目かだけの鍵の修正・消した印)がある発話は、その発話の枚を元の部分を持たない
+  // 枚(10/09 版と同じ)のまま出す。人がその発話の枚を新しく直す・消しても何枚目かの鍵で覚え、10/09 版の印と
+  // 同じ「何枚目か」の当て方を続ける。範囲で覚えた新しい印と何枚目かの古い印が同じ発話に混ざると、枚の分け方が
+  // 変わったときに互いの言葉を取り合い、消した言葉が戻る・同じ言葉が2回出る(第67回の監査。10/09 版のまま
+  // 作り直し続けた結果より悪くなっていた)
+  const legacyUtterances = legacyOf(dismissedBases, uniq)
+
+  const out: T[] = []
+  for (const x of order) {
+    if (typeof x !== 'string') out.push(x)
+    else {
+      const carved = carveUtterance(
+        groups.get(x)!,
+        uniq.filter((e) => e.utteranceId === x),
+        dismissedSpans.filter((d) => d.utteranceId === x),
+        existing.filter((o) => o.utteranceId === x && !o.edited)
+      )
+      out.push(...(legacyUtterances.has(x) ? carved.map(withoutAutoSource) : carved))
+    }
+  }
+  return out
+}
+
+/** 人の修正・消した印を集める(`mergeManualTelops` と `legacyTelopUtterances` で同じものを使う) */
+function collectEdits(
+  existing: readonly TextOverlay[],
+  dismissed: ReadonlySet<string>,
+  remembered: Readonly<Record<string, EditedTelop>>
+): {
+  dismissedSpans: { utteranceId: string; start: number; end: number }[]
+  dismissedBases: Set<string>
+  effectEdits: Map<string, EditEntry>
+  uniq: EditEntry[]
+} {
   // 修正を集める(今タイムラインにあるものが新しい)
   const byKey = new Map<string, EditEntry>()
   for (const [key, rec] of Object.entries(remembered)) byKey.set(key, { key, rec })
@@ -340,35 +402,11 @@ export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
     seenSpan.add(id)
     return true
   })
+  return { dismissedSpans, dismissedBases, effectEdits, uniq }
+}
 
-  // 発話ごとの枚の並び(同じ発話の枚は、最初の枚の位置にまとめて出す)
-  const groups = new Map<string, (T & WithAutoSource)[]>()
-  const order: (T | string)[] = []
-  for (const n0 of incoming) {
-    const n = n0 as T & WithAutoSource
-    const key = autoTelopKey(n)
-    if (!n.utteranceId) {
-      if (key && dismissed.has(key)) continue
-      const e = key ? effectEdits.get(key) : undefined
-      order.push(e ? applyEdit(n, e.rec, n.text === e.rec.text) : n)
-      continue
-    }
-    // 前の版の消した印(何枚目かだけ)は、これまでどおりその番号の枚を出さない(分かれた枚も全部)
-    if (dismissedBases.has(`u:${n.utteranceId}#${n.utteranceChunk ?? 0}`)) continue
-    if (key && dismissed.has(key)) continue
-    const g = groups.get(n.utteranceId)
-    if (g) g.push(n)
-    else {
-      groups.set(n.utteranceId, [n])
-      order.push(n.utteranceId)
-    }
-  }
-
-  // 10/09 版の企画から来た印(何枚目かだけの鍵の修正・消した印)がある発話は、その発話の枚を元の部分を持たない
-  // 枚(10/09 版と同じ)のまま出す。人がその発話の枚を新しく直す・消しても何枚目かの鍵で覚え、10/09 版の印と
-  // 同じ「何枚目か」の当て方を続ける。範囲で覚えた新しい印と何枚目かの古い印が同じ発話に混ざると、枚の分け方が
-  // 変わったときに互いの言葉を取り合い、消した言葉が戻る・同じ言葉が2回出る(第67回の監査。10/09 版のまま
-  // 作り直し続けた結果より悪くなっていた)
+/** 10/09 版の企画から来た印(何枚目かだけの消した印・修正)がある発話 */
+function legacyOf(dismissedBases: ReadonlySet<string>, uniq: readonly EditEntry[]): Set<string> {
   const legacyUtterances = new Set<string>()
   for (const k of dismissedBases) {
     const m = /^u:(.+)#\d+$/.exec(k)
@@ -376,21 +414,21 @@ export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
   }
   for (const e of uniq)
     if (e.utteranceId !== undefined && !e.src) legacyUtterances.add(e.utteranceId)
+  return legacyUtterances
+}
 
-  const out: T[] = []
-  for (const x of order) {
-    if (typeof x !== 'string') out.push(x)
-    else {
-      const carved = carveUtterance(
-        groups.get(x)!,
-        uniq.filter((e) => e.utteranceId === x),
-        dismissedSpans.filter((d) => d.utteranceId === x),
-        existing.filter((o) => o.utteranceId === x && !o.edited)
-      )
-      out.push(...(legacyUtterances.has(x) ? carved.map(withoutAutoSource) : carved))
-    }
-  }
-  return out
+/**
+ * 10/09 版の企画から来た印(何枚目かだけの鍵の修正・消した印)がある発話。`mergeManualTelops` はこの発話の枚を
+ * 元の部分を持たない枚で出す。ほかの所で発言テロップを作るとき(文字起こしからのテロップ)も、この発話の枚は
+ * 元の部分を付けない(付けると人が消した・直した印が範囲つきになり、何枚目かの古い印と混ざって消した言葉が戻る)
+ */
+export function legacyTelopUtterances(
+  existing: readonly TextOverlay[],
+  dismissed: ReadonlySet<string>,
+  remembered: Readonly<Record<string, EditedTelop>> = {}
+): Set<string> {
+  const { dismissedBases, uniq } = collectEdits(existing, dismissed, remembered)
+  return legacyOf(dismissedBases, uniq)
 }
 
 /** 元の部分を外した枚(10/09 版の枚と同じく、鍵は何枚目かだけ) */
