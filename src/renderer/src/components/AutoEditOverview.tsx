@@ -12,7 +12,8 @@ import {
   type SceneChip,
   type StepState,
   SCENE_BAND_COLORS,
-  keptOrder
+  keptOrder,
+  rulerTicks
 } from '../lib/autoEditView'
 import type { NextAction, NextActionButton, NextActionId } from '../lib/autoEditNext'
 
@@ -104,17 +105,10 @@ function place(r: Range, span: number): React.CSSProperties {
 }
 
 /** 目盛り(6 本前後の切りのよい間隔) */
-function ticksFor(span: number): number[] {
-  const step = [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200].find((v) => v >= span / 6) ?? 7200
-  const out: number[] = []
-  for (let t = 0; t < span - step * 0.3; t += step) out.push(t)
-  return out
-}
-
 export function SpanRuler({ span }: { span: number }): React.JSX.Element {
   return (
     <span className="ae-ruler tc" aria-hidden="true">
-      {ticksFor(span).map((t) => (
+      {rulerTicks(span).map((t) => (
         <span key={t} style={{ left: `${(t / span) * 100}%` }}>
           {formatDuration(t)}
         </span>

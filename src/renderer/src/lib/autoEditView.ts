@@ -205,3 +205,15 @@ export function keptOrder(
   for (const sc of scenes) out.set(sc.id, keptOf(sc.id) ? n++ : null)
   return out
 }
+
+/**
+ * 全体の帯の目盛り(6 本前後の切りのよい間隔)。右端に全体の長さを書くので、右端の 15% より後ろの
+ * 目盛りは書かない(狭い列で「10:00」と「12:14」が重なっていた)
+ */
+export function rulerTicks(span: number): number[] {
+  if (!(span > 0)) return []
+  const step = [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200].find((v) => v >= span / 6) ?? 7200
+  const out: number[] = []
+  for (let t = 0; t <= span * 0.85; t += step) out.push(t)
+  return out
+}

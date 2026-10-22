@@ -3,26 +3,9 @@
    Graphite 3 の変数(main.css の :root・graphite3.css)だけで描く。
    ===================================================================== */
 
-/* ---------- キー操作の一覧 ---------- */
-.modal.shortcut-help {
-  width: 760px;
-  max-width: 94vw;
-  padding: 18px 20px 14px;
-  background: var(--ve-panel-fill);
-  border: 1px solid rgba(150, 165, 255, 0.14);
-  border-radius: var(--ve-radius-card);
-  box-shadow: var(--ve-panel-shadow);
-  color: var(--ve-text);
-}
-.shortcut-help-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.shortcut-help-head h3 {
-  margin: 0;
-}
+/* ---------- キー操作の一覧 ----------
+   枠(地・線・角・影・見出しの帯)は統一のダイアログ(dialogsG3.css の .shortcut-help-dialog と
+   DialogHeader)。ここは中身の格子だけ */
 .shortcut-help-scheme {
   font-size: 11px;
   color: var(--ve-accent-ink);
@@ -30,12 +13,6 @@
   border: 1px solid var(--ve-accent-line);
   border-radius: 999px;
   padding: 1px 8px;
-}
-.shortcut-help-close {
-  margin-left: auto;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--ve-text-2);
 }
 .shortcut-help-grid {
   display: grid;

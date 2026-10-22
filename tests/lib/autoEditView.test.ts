@@ -9,6 +9,7 @@ import {
   keptOrder,
   mergeRanges,
   overallFraction,
+  rulerTicks,
   sceneChips,
   sceneTitle,
   sourceLanes,
@@ -238,5 +239,14 @@ describe('場面の表示', () => {
       ['b', null],
       ['c', 1]
     ])
+  })
+})
+
+describe('rulerTicks(全体の帯の目盛り)', () => {
+  it('0 から切りのよい間隔で、右端の 15% には書かない(右端の長さと重ならない)', () => {
+    expect(rulerTicks(734)).toEqual([0, 300, 600])
+    for (const span of [40, 95, 734, 3600, 7300])
+      for (const t of rulerTicks(span)) expect(t).toBeLessThanOrEqual(span * 0.85)
+    expect(rulerTicks(0)).toEqual([])
   })
 })

@@ -543,3 +543,27 @@
   flex-wrap: wrap;
   gap: var(--ve-gap-actions);
 }
+
+/* ---------- キー操作の一覧(統一の枠・幅 800。中身の格子は shortcutHelp.css) ---------- */
+.shortcut-help-dialog {
+  width: 800px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ve-radius-xl);
+  background: var(--ve-surface-2);
+  box-shadow: var(--ve-shadow-dialog);
+  color: var(--ve-text-1);
+  overflow: hidden;
+}
+.shortcut-help-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ve-pad-dialog);
+}
+.dialog-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+}

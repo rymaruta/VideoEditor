@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
+import { useEscapeToClose } from '../lib/useEscapeToClose'
 import { useMenuCommand } from '../lib/menuCommands'
 import { ABOUT_NOTE, aboutLines, type AboutInfo } from '@shared/about'
 import { DialogHeader } from './DialogHeader'
@@ -13,18 +14,13 @@ export function AboutDialog(): React.JSX.Element | null {
     if (id !== 'help.about') return
     void window.api.appAbout().then(setInfo)
   })
-  useEffect(() => {
-    if (!info) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setInfo(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [info])
+  // Esc で閉じる(ほかのダイアログと同じ。上に重なった窓があればそちらが先)
+  const backdropRef = useRef<HTMLDivElement>(null)
+  useEscapeToClose(backdropRef, () => setInfo(null), info !== null)
   if (!info) return null
   const { title, runtime } = aboutLines(info)
   return (
-    <div className="modal-backdrop" onMouseDown={() => setInfo(null)}>
+    <div className="modal-backdrop" ref={backdropRef} onMouseDown={() => setInfo(null)}>
       <div
         className="about-dialog"
         role="dialog"

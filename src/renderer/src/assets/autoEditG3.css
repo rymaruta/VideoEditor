@@ -647,10 +647,6 @@
   background: linear-gradient(90deg, rgba(255, 178, 36, 0.1), transparent 70%);
   box-shadow: inset 0 0 0 1px var(--ve-primary-line);
 }
-.structure-row.dropped .structure-body,
-.structure-row.dropped .structure-kind {
-  opacity: 0.62;
-}
 .structure-kind {
   padding: 2px 0;
   border-radius: 5px;
@@ -850,4 +846,21 @@
   .auto-edit-screen.review-mode .auto-edit-body {
     grid-template-columns: 230px minmax(0, 1fr) minmax(380px, 42%);
   }
+}
+
+/* ---------- 落とした場面の行: 薄めず(AA の 4.5:1 を保つ)、字の色で分ける ---------- */
+.structure-row.dropped .structure-body,
+.structure-row.dropped .structure-kind {
+  opacity: 1;
+}
+.structure-row.dropped .structure-title {
+  color: var(--ve-text-2);
+}
+.structure-row.dropped .structure-reason,
+.structure-reason {
+  color: var(--ve-text-3);
+}
+.ae-chip.neutral {
+  color: var(--ve-text-2);
+  box-shadow: inset 0 0 0 1px var(--ve-border);
 }
