@@ -18,6 +18,7 @@ import type { AboutInfo, LicenseDoc } from '@shared/about'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
 import type { TelopLayerPayload, TelopLayerStageApi } from '@shared/telop/layer'
+import type { PremiereExportPayload, PremiereExportResult } from '@shared/export/premiereTypes'
 import type { LibraryFile, LibraryState } from '@shared/library'
 import type { MenuFileState, MenuShortcuts } from '@shared/appMenu'
 import type {
@@ -190,6 +191,12 @@ const api = {
     engine?: ExportEngine
     telopLayer?: TelopLayerPayload | null
   }): Promise<{ success: boolean }> => ipcRenderer.invoke(IPC.exportProject, payload),
+  /** Premiere 用 XML の保存先を選ぶ(.xml を補う) */
+  selectPremiereXmlPath: (defaultName: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.selectPremiereXmlPath, defaultName),
+  /** Premiere 用 XML(FCP7 xmeml)と SRT・見た目どおりのテロップを書き出す */
+  exportPremiereXml: (payload: PremiereExportPayload): Promise<PremiereExportResult> =>
+    ipcRenderer.invoke(IPC.exportPremiereXml, payload),
   /** 書き出しのテロップの層の画像を、描きながら少しずつ main へ送る(`telopLayerStage`) */
   telopLayer: {
     begin: (width: number, height: number): Promise<string> =>
