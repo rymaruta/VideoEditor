@@ -22,7 +22,8 @@ import {
   legacyNoteFor,
   matchScenesByTime
 } from '@renderer/lib/pipelineRestore'
-import { normalizeAutoEdit } from '@shared/autoEdit'
+import { cutSignature, normalizeAutoEdit } from '@shared/autoEdit'
+import { DEFAULT_RANGED_OPTIONS, type RangedPreview } from '@renderer/lib/rangedAutoEdit'
 import { releaseRanges, sceneOfSpan } from '@renderer/lib/roughCutPlan'
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
@@ -1580,5 +1581,164 @@ describe('監査で見つかった不具合(5回目の監査)', () => {
     useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
     const removed = mainDuration()
     expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+  })
+})
+
+describe('範囲だけ自動編集する(作り直しの記録との食い違い)', () => {
+  const rangedEdit = async (range: { start: number; end: number }): Promise<RangedPreview> => {
+    const r = await usePipelineStore.getState().prepareRangedEdit(range, DEFAULT_RANGED_OPTIONS)
+    if (!r.ok) throw new Error(r.reason)
+    expect(usePipelineStore.getState().applyRangedEdit(r.preview).ok).toBe(true)
+    return r.preview
+  }
+
+  it('範囲を自動編集→取り消し→全体の作り直しでも、取り消した後の本編を組んだ回の残す/落とすと比べる', async () => {
+    await runEpisode()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const sig = cutSignature(useProjectStore.getState().project.roughCutAuto)
+    const s2 = usePipelineStore.getState().scenes[1]
+    trimInScene(s2, 3)
+    const trimmed = mainDuration()
+    await rangedEdit({ start: trimmed - 30, end: trimmed - 5 })
+    // 範囲の自動編集は、新しい印の回を1件積む(前の回の記録は残す)
+    const built = usePipelineStore.getState().builtKept
+    expect(built.at(-1)!.cut).toBe(cutSignature(useProjectStore.getState().project.roughCutAuto))
+    expect(built.some((b) => b.cut === sig)).toBe(true)
+    useProjectStore.getState().undo()
+    expect(cutSignature(useProjectStore.getState().project.roughCutAuto)).toBe(sig)
+    // 前の回で s2 は残していたので、s2 の中の手の詰めは戻さない
+    expect(Math.abs((await rebuild()).duration - trimmed)).toBeLessThan(0.2)
+  })
+
+  it('付け直した(丸ごと消した)場面を範囲の自動編集で埋めると付け直しを使い、取り消すと戻る', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    expect(usePipelineStore.getState().keepTouched).toContain('s2')
+    // s1 と s3 のつなぎ目の前後
+    const project = useProjectStore.getState().project
+    const spans = spansOfClips(project.clips, project.multicam!)
+    const seam = spans.find((sp) => sp.start >= s2.end - 1)!.timeline
+    const preview = await rangedEdit({ start: seam - 5, end: seam + 5 })
+    expect(preview.usedTouches).toEqual(['s2'])
+    expect(clipsInScene(s2).length).toBeGreaterThan(0)
+    expect(usePipelineStore.getState().keepTouched).not.toContain('s2')
+    useProjectStore.getState().undo()
+    expect(clipsInScene(s2)).toHaveLength(0)
+    expect(usePipelineStore.getState().keepTouched).toContain('s2')
+    // やり直すと、また使い済み
+    useProjectStore.getState().redo()
+    expect(usePipelineStore.getState().keepTouched).not.toContain('s2')
+  })
+})
+
+describe('自動編集で触らない範囲(ロック)', () => {
+  /** 場面の今の本編のクリップの所(場面の最後のクリップは次の場面へはみ出す)をロックする */
+  const lockScene = (sc: { start: number; end: number }): void => {
+    const inside = clipsInScene(sc)
+    useProjectStore.getState().addAutoEditLock({
+      start: Math.min(sc.start, ...inside.map((c) => c.start)),
+      end: Math.max(sc.end, ...inside.map((c) => c.end))
+    })
+  }
+
+  it('ロックの中を丸ごと消して場面のチェックを付け直しても、全体の作り直しで戻らない', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    lockScene(s2)
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    expect(clipsInScene(s2)).toHaveLength(0)
+    const removed = mainDuration()
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+    expect(clipsInScene(s2)).toHaveLength(0)
+  })
+
+  it('ロックの中の場面を「落とす」にしても、中身は残る', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    lockScene(s2)
+    const before = clipsInScene(s2).map((c) => [c.start, c.end])
+    const full = mainDuration()
+    usePipelineStore.getState().setKeep('s2', false)
+    await rebuild()
+    expect(clipsInScene(s2).map((c) => [c.start, c.end])).toEqual(before)
+    expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
+    // ロックを外して作り直すと、落とすが効く
+    useProjectStore
+      .getState()
+      .removeAutoEditLock(useProjectStore.getState().project.autoEditLocks![0].id)
+    await rebuild()
+    expect(clipsInScene(s2)).toHaveLength(0)
+  })
+
+  it('ロックの中の速さ替え・並べ替えは、全体の作り直しでも同じクリップのまま残る', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    const inside = clipsInScene(s2)
+    expect(inside.length).toBeGreaterThan(2)
+    lockScene(s2)
+    const ids = (): string[] => useProjectStore.getState().project.clips.map((c) => c.id)
+    // 2本目を速くし、3本目を2本目の前へ
+    useProjectStore.getState().updateClipSpeed(inside[1].id, 2)
+    useProjectStore.getState().moveClipToIndex(inside[2].id, ids().indexOf(inside[1].id))
+    const lockedClips = useProjectStore
+      .getState()
+      .project.clips.filter((c) => inside.slice(1, 3).some((x) => x.id === c.id))
+    const order = ids().filter((id) => inside.slice(1, 3).some((x) => x.id === id))
+    await rebuild()
+    const after = useProjectStore.getState().project.clips
+    for (const c of lockedClips) expect(after.find((x) => x.id === c.id)).toBe(c)
+    expect(ids().filter((id) => order.includes(id))).toEqual(order)
+    expect(after.find((x) => x.id === inside[1].id)!.speed).toBe(2)
+  })
+
+  it('範囲の自動編集はロックに掛かる範囲を断り、終わったらロックすると取り消し1回でロックも戻る', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    lockScene(s2)
+    const project = useProjectStore.getState().project
+    const spans = spansOfClips(project.clips, project.multicam!)
+    const inS2 = spans.find((sp) => sp.start >= s2.start && sp.end <= s2.end)!
+    const r = await usePipelineStore
+      .getState()
+      .prepareRangedEdit({ start: inS2.timeline, end: inS2.timeline + 5 }, DEFAULT_RANGED_OPTIONS)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toContain('ロック')
+    // s3 の所を、終わったらロックで
+    const total = mainDuration()
+    const r2 = await usePipelineStore
+      .getState()
+      .prepareRangedEdit(
+        { start: total - 20, end: total - 2 },
+        { ...DEFAULT_RANGED_OPTIONS, lockAfter: true }
+      )
+    expect(r2.ok).toBe(true)
+    if (!r2.ok) return
+    const locksBefore = useProjectStore.getState().project.autoEditLocks
+    expect(usePipelineStore.getState().applyRangedEdit(r2.preview).ok).toBe(true)
+    expect(useProjectStore.getState().project.autoEditLocks).toHaveLength(2)
+    useProjectStore.getState().undo()
+    expect(useProjectStore.getState().project.autoEditLocks).toBe(locksBefore)
+  })
+
+  it('壊れたロックは読むときに捨てる', () => {
+    useProjectStore.getState().newProject('ロック')
+    const p = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
+    ;(p as unknown as Record<string, unknown>).autoEditLocks = [
+      { id: 'a', start: 10, end: 20 },
+      { id: 'b', start: 30, end: 25 },
+      { start: 'x', end: 3 },
+      null,
+      { id: 'c', start: 15, end: 22 }
+    ]
+    useProjectStore.getState().loadProject(p, '/r/x.veproj')
+    expect(useProjectStore.getState().project.autoEditLocks).toEqual([
+      { id: 'a', start: 10, end: 22 }
+    ])
   })
 })

@@ -397,8 +397,20 @@ export interface Project {
    * 開き直したときに自動編集の画面と作り直しの元を戻す。古い企画には無い
    */
   autoEdit?: AutoEditDecisions
+  /**
+   * 自動編集で触らない範囲(ロック。共通の時刻)。全体の作り直し・範囲の自動編集は、ここの中身を
+   * そのまま残す(手で編集はできる)。取り消しの履歴に積む
+   */
+  autoEditLocks?: AutoEditLock[]
   /** タイムラインのマーカー(M キー)。時刻はタイムラインの秒。古い企画には無い */
   markers?: TimelineMarker[]
+}
+
+/** 自動編集で触らない範囲(共通の時刻) */
+export interface AutoEditLock {
+  id: string
+  start: number
+  end: number
 }
 
 /** タイムラインに打った印(Premiere のシーケンスマーカーと同じ。本編を編集しても動かない) */
