@@ -117,3 +117,17 @@ export function classifyLlmExit(e: {
   if (e.code === 0) return 'clean'
   return 'crashed'
 }
+
+/**
+ * アプリの終了が決まったか。before-quit は取り消せる(閉じる前の確認で「キャンセル」)ので、
+ * 取り消せない will-quit で立てる(before-quit で立てると、取り消した後に落ちたモデルを覚えなかった)。
+ */
+export function trackQuitting(app: {
+  on(event: 'will-quit', listener: () => void): unknown
+}): () => boolean {
+  let quitting = false
+  app.on('will-quit', () => {
+    quitting = true
+  })
+  return () => quitting
+}

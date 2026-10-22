@@ -4,7 +4,7 @@ import { totalmem } from 'os'
 import { join } from 'path'
 import llmWorkerPath from './llmWorker?modulePath'
 import { runChild } from './childRunner'
-import { classifyLlmExit, LlmLoadFailures, LlmLoadTracker } from './llmLoadFailures'
+import { classifyLlmExit, LlmLoadFailures, LlmLoadTracker, trackQuitting } from './llmLoadFailures'
 import {
   loadCrashedMessage,
   type LlmLoadFailure,
@@ -16,11 +16,8 @@ import {
 let running: UtilityProcess | null = null
 let canceling: (() => void) | null = null
 let failures: LlmLoadFailures | null = null
-/** アプリの終了中(終了で閉じられた解析のプロセスを「読み込めなかった」と覚えない) */
-let quitting = false
-app.on('before-quit', () => {
-  quitting = true
-})
+/** アプリの終了中(終了で閉じられた解析のプロセスを「読み込めなかった」と覚えない。trackQuitting) */
+const isQuitting = trackQuitting(app)
 
 const ramGb = (): number => totalmem() / 1024 ** 3
 
@@ -93,7 +90,7 @@ export function runLlm(
       (code, stderr) => {
         running = null
         canceling = null
-        const kind = classifyLlmExit({ canceled, quitting, code })
+        const kind = classifyLlmExit({ canceled, quitting: isQuitting(), code })
         if (kind === 'canceled') return reject(new Error('LLM_CANCELED'))
         if (kind === 'quitting') return reject(new Error('アプリを終了しています'))
         const loading = tracker.loading()

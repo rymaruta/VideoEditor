@@ -87,3 +87,25 @@ describe('解析のプロセスが答えずに終わったときの分かれ道'
     expect(classifyLlmExit({ canceled: false, quitting: false, code: -1 })).toBe('crashed')
   })
 })
+
+describe('終了中の印(取り消せる before-quit ではなく will-quit で立てる)', () => {
+  it('before-quit(終了を取り消せる)では立てず、will-quit で立てる', async () => {
+    const { EventEmitter } = await import('events')
+    const { trackQuitting } = await import('@main/llmLoadFailures')
+    const app = new EventEmitter()
+    const isQuitting = trackQuitting(app)
+    app.emit('before-quit')
+    // 閉じる前の確認で取り消した: まだ終了中ではない(この後に落ちたモデルは覚える)
+    expect(isQuitting()).toBe(false)
+    app.emit('will-quit')
+    expect(isQuitting()).toBe(true)
+  })
+
+  it('llmService は trackQuitting で配線し、before-quit では立てない', async () => {
+    const { readFileSync } = await import('fs')
+    const src = readFileSync(join(__dirname, '..', '..', 'src', 'main', 'llmService.ts'), 'utf-8')
+    expect(src).toMatch(/trackQuitting\(app\)/)
+    expect(src).not.toMatch(/['"]before-quit['"]/)
+    expect(src).toMatch(/quitting: isQuitting\(\)/)
+  })
+})
