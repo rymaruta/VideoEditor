@@ -7,6 +7,7 @@ import {
   rememberEditedTelops
 } from '../../src/shared/telop/manual'
 import { defaultTextStyle } from '../../src/shared/textStyle'
+import * as OM from '../lib/fixtures/telopc25f5af/manual'
 import type { TextOverlay } from '../../src/shared/types'
 
 const ws = [
@@ -56,14 +57,22 @@ describe('人の修正の当て直し(第54回の見直し)', () => {
     const i = tl.findIndex((o) => o.edited)
     tl[i] = { ...tl[i], text: tl[i].text.replace('v1たのしみ', 'v2たのしみ') }
     remembered = rememberEditedTelops(tl, remembered)
-    // 同じ枚の前の版の鍵は覚えておかない
-    expect(Object.keys(remembered!)).not.toContain('u:u1#1')
+    // 前の版の鍵の修正は、直し直しても前の版と同じく何枚目かの鍵のまま覚える(第67回: 前の版の印のある発話は、
+    // 何回作り直しても前の版と同じ当て方を続ける)。古い文字は残さない
+    expect(Object.keys(remembered!)).toEqual(['u:u1#1'])
+    expect(remembered!['u:u1#1'].text).toContain('v2')
     const merged = mergeManualTelops(tl, mk(8), new Set(), remembered)
-    expect(shown(merged)).toBe(
-      '今日はみんなでラーメンを食べに横浜まで来ましたすごく並んでますねv2たのしみです'
-    )
+    expect(shown(merged)).not.toContain('v1')
+    expect(merged.filter((o) => o.text.includes('v2たのしみ'))).toHaveLength(1)
+    // 前の版のまま作り直した結果と同じ
+    expect(shown(merged)).toBe(shown(OM.mergeManualTelops(tl, mk(8), new Set(), remembered)))
     // すでに両方の鍵を覚えてしまった企画でも、古い方は当てない
-    const both = { ...remembered, 'u:u1#1': { text: 'v1古い', style } }
+    // (範囲つきの鍵で直し直した修正と、前の版の鍵の古い修正の両方)
+    const fresh = mk(14)[1]
+    const both = {
+      [autoTelopKey(fresh)!]: { text: 'v2新しい', style, autoSource: fresh.autoSource },
+      'u:u1#1': { text: 'v1古い', style }
+    }
     expect(shown(mergeManualTelops([], mk(8), new Set(), both))).not.toContain('v1')
   })
 

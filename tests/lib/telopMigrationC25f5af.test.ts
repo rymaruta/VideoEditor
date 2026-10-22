@@ -541,7 +541,9 @@ const N_SAME = Number(process.env.TELOP_MIGRATE_SAMECUT_SEEDS ?? Math.ceil(N / 2
  * (頭をカットで落とした枚)に当たった(既知の型 1。修正の文は元の枚の文のままなので、その言葉を出す自動の枚・
  * 消した言葉と数が重なる)
  */
-const FIXED_SEEDS = [7007, 7153, 7413, 11735, 15763]
+// 8354(と同じカットの 1102): 開き直した後の作り直しで、10/09 版の当て方が2枚に出した同じ修正の片方だけを
+// 人が直した通り(試験の操作を両方にする)
+const FIXED_SEEDS = [7007, 7153, 7413, 8354, 11735, 15763]
 /**
  * 同じカットのまま1行の文字数だけ変える通りで、いつも回し、10/09 版の当て方(何枚目か)を今の仮編集に当てた
  * 結果と同じになることも確かめる通り。235・492・494・1331・7048: 第66回の版は 10/09 版の修正を時刻で当て、
@@ -549,8 +551,18 @@ const FIXED_SEEDS = [7007, 7153, 7413, 11735, 15763]
  * 文が同じ枚の終わりがずれた通り(第66回で見つけた。10/09 版と同じ当て方のままでよい)。7153: 別のカットで
  * 同じ文の枚が偶然近くに始まった通り
  */
-const FIXED_SAMECUT_SEEDS = [235, 492, 494, 1331, 1522, 1590, 3440, 3754, 7048, 7153]
+const FIXED_SAMECUT_SEEDS = [235, 492, 494, 1102, 1331, 1522, 1590, 3440, 3754, 7048, 7153, 8354]
 let SAMECUT = false
+/**
+ * 開き直して作り直した後に、続けて作り直す回数(`TELOP_MIGRATE_AFTER`。既定 3 = 開き直してから4回作り直す)。
+ * 毎回、10/09 版の当て方を今の仮編集に当て続けた結果より悪くならないことを確かめる
+ */
+const AFTER = Number(process.env.TELOP_MIGRATE_AFTER ?? 3)
+/**
+ * 開き直した後の作り直しを続ける通りの間隔(`TELOP_MIGRATE_AFTER_EVERY`。既定 2 = 1つおきの通り。CI の時間に
+ * 収めるため。決まった通り・1つだけ見る通りはいつも続ける)
+ */
+const AFTER_EVERY = Math.max(1, Number(process.env.TELOP_MIGRATE_AFTER_EVERY ?? 2))
 const ONLY = process.env.TELOP_MIGRATE_SEED ? Number(process.env.TELOP_MIGRATE_SEED) : 0
 const seedsFor = (n: number, fixed: number[]): number[] =>
   ONLY ? [ONLY] : [...Array.from({ length: n }, (_, i) => i + 1), ...fixed.filter((x) => x > n)]
@@ -564,8 +576,74 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
   const worse: string[] = []
   const midWorse: string[] = []
   let fillerExcused = 0
+  let afterRuns = 0
+  let afterSeeds = 0
   let knownCases = 0
   let knownHid = 0
+  /**
+   * 今の版の当て直しそのものが 10/09 版の当て方より悪くないか(どちらも今の仮編集に当てて比べる。既知の型を
+   * 除かずに比べる。既知の型は、前の版と今の版の仮編集の違い(枚の分け方・出す言葉)から来るものだけのはず)。
+   * ただし今の版は、言いよどみの切れ端だけの枚(漢字の無い枚)に当たった修正を出さない(仕様。直した言葉は
+   * もう聞こえない)。10/09 版の当て方ではそこにだけ出る修正の、出る回数の違いは比べない。
+   * `exact` なら、結果が 10/09 版の当て方と同じになることも確かめる
+   */
+  const compareMid = (
+    seed: number,
+    step: number | string,
+    mergedNew: readonly Omit<TextOverlay, 'id'>[],
+    mergedMid: readonly Omit<TextOverlay, 'id'>[],
+    plainNew: readonly Omit<TextOverlay, 'id'>[],
+    before: Map<string, number>,
+    exact: boolean,
+    m: Model,
+    /** 誤りの名前の頭(開き直した後の作り直しは 'A'。前の版との合計の比べに入れない) */
+    pre = ''
+  ): void => {
+    const grew = (k: string): number => (pairs.get(k)?.length ?? 0) - (before.get(k) ?? 0)
+    const nOf = (ts: readonly Omit<TextOverlay, 'id'>[], text: string): number =>
+      ts.filter((t) => t.text === text).length
+    const fillerOnly = (text: string): boolean => {
+      const at = mergedMid.filter((t) => t.edited && t.text === text)
+      return (
+        nOf(mergedNew, text) === 0 &&
+        at.length > 0 &&
+        at.every((t) =>
+          plainNew.filter((q) => chunkOf(q) === chunkOf(t)).every((q) => kanji(q.text).length === 0)
+        )
+      )
+    }
+    const differ = [...m.edits.keys()].filter(
+      (text) => nOf(mergedNew, text) !== nOf(mergedMid, text)
+    )
+    const fillerEdits = differ.length > 0 && differ.every(fillerOnly)
+    // 同じ結果か(10/09 版の当て方は、2枚に分かれた枚に同じ修正を2回出す。今の版は1回にまとめるので、
+    // 並んだ同じ修正は1つとみなす。言いよどみの切れ端だけの枚(漢字の無い枚)と、そこに当たった修正は上の
+    // とおり比べない)
+    if (exact) {
+      const fillerChunk = (t: Omit<TextOverlay, 'id'>): boolean =>
+        plainNew.filter((q) => chunkOf(q) === chunkOf(t)).every((q) => kanji(q.text).length === 0)
+      const flat = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
+        ts
+          .filter((t) => (t.edited ? !fillerChunk(t) : kanji(t.text).length > 0))
+          .map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, ''))
+          .filter((x, i, a) => !(x.startsWith('*') && a[i - 1] === x))
+          .join(' | ')
+      if (flat(mergedNew) !== flat(mergedMid))
+        midWorse.push(
+          `seed${seed}/step${step} 10/09 版の当て方と違う: 今 ${flat(mergedNew)} / 10/09 版の当て方 ${flat(mergedMid)}`
+        )
+    }
+    if (fillerEdits) fillerExcused++
+    WORSE_KINDS.forEach((k) => {
+      if (fillerEdits && k.startsWith('c-')) return
+      if (grew(`RAW${pre}NEW:` + k) > grew(`RAW${pre}MID:` + k)) {
+        const v = pairs.get(`RAW${pre}NEW:` + k)!
+        midWorse.push(
+          `seed${seed}/step${step} ${k} MID ${grew(`RAW${pre}MID:` + k)} → 今 ${grew(`RAW${pre}NEW:` + k)}: ${v[v.length - 1]}\n      MIDMERGED=${mergedMid.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')}`
+        )
+      }
+    })
+  }
   for (const seed of seeds) {
     // 長く続けて回すとテストの作業スレッドが応答できなくなるので、ときどき空ける
     if (seed % 100 === 0) await new Promise((r) => setTimeout(r, 0))
@@ -645,46 +723,16 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
           knownCases++
           if (WORSE_KINDS.some((k) => grew('RAWNEW:' + k) > grew('OLD:' + k))) knownHid++
         }
-        // 今の版の当て直しそのものが 10/09 版の当て方より悪くないか(どちらも今の仮編集に当てて比べる。既知の型を
-        // 除かずに比べる。既知の型は、前の版と今の版の仮編集の違い(枚の分け方・出す言葉)から来るものだけのはず)。
-        // ただし今の版は、言いよどみの切れ端だけの枚(漢字の無い枚)に当たった修正を出さない(仕様。直した言葉は
-        // もう聞こえない)。10/09 版の当て方ではそこにだけ出る修正の、出る回数の違いは比べない
-        const nOf = (ts: readonly Omit<TextOverlay, 'id'>[], text: string): number =>
-          ts.filter((t) => t.text === text).length
-        const fillerOnly = (text: string): boolean => {
-          const at = mergedMid.filter((t) => t.edited && t.text === text)
-          return (
-            nOf(mergedNew, text) === 0 &&
-            at.length > 0 &&
-            at.every((t) =>
-              plainNew
-                .filter((q) => chunkOf(q) === chunkOf(t))
-                .every((q) => kanji(q.text).length === 0)
-            )
-          )
-        }
-        const differ = [...m.edits.keys()].filter(
-          (text) => nOf(mergedNew, text) !== nOf(mergedMid, text)
+        compareMid(
+          seed,
+          step,
+          mergedNew,
+          mergedMid,
+          plainNew,
+          before,
+          sameCut && FIXED_SAMECUT_SEEDS.includes(seed),
+          m
         )
-        const fillerEdits = differ.length > 0 && differ.every(fillerOnly)
-        if (sameCut && FIXED_SAMECUT_SEEDS.includes(seed)) {
-          const flat = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
-            ts.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')
-          if (flat(mergedNew) !== flat(mergedMid))
-            midWorse.push(
-              `seed${seed} 10/09 版の当て方と違う: 今 ${flat(mergedNew)} / 10/09 版の当て方 ${flat(mergedMid)}`
-            )
-        }
-        if (fillerEdits) fillerExcused++
-        WORSE_KINDS.forEach((k) => {
-          if (fillerEdits && k.startsWith('c-')) return
-          if (grew('RAWNEW:' + k) > grew('RAWMID:' + k)) {
-            const v = pairs.get('RAWNEW:' + k)!
-            midWorse.push(
-              `seed${seed} ${k} MID ${grew('RAWMID:' + k)} → 今 ${grew('RAWNEW:' + k)}: ${v[v.length - 1]}\n      MIDMERGED=${mergedMid.map((t) => (t.edited ? '*' : '') + t.text.replace(/\n/g, '')).join(' | ')}`
-            )
-          }
-        })
         WORSE_KINDS.forEach((k) => {
           const grewNew = grew('NEW:' + k)
           const grewOld = grew('OLD:' + k)
@@ -710,6 +758,145 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
                   .join(' ')}`
               ])
           }
+        // 開き直した後も、作り直しを続ける(カット・1行の文字数を変えながら、人が直す・消す回を混ぜて)。
+        // 毎回、10/09 版の当て方を今の仮編集に当て続けた結果より悪くない。人が開き直した後に何も触っていない間は、
+        // 10/09 版の当て方と同じ結果になる(第67回の監査: 1回目の作り直しで 10/09 版の修正だけが範囲を持つ形に
+        // 変わり、10/09 版の消した印は何枚目かで効き続けて、2回目以降に消した言葉が戻る・同じ言葉が2回出ていた)
+        lastScenes = madeScenes
+        const ids = (ts: readonly Omit<TextOverlay, 'id'>[], k: number): TextOverlay[] =>
+          ts.map((o, i) => ({ ...o, id: `a${seed}-${k}-${i}` }))
+        let now = {
+          timeline: ids(mergedNew, 0),
+          dismissed: [...dismissed],
+          remembered: NM.rememberEditedTelops(timeline, remembered)
+        }
+        let mid = {
+          timeline: ids(mergedMid, 0),
+          dismissed: [...dismissed],
+          remembered: OM.rememberEditedTelops(timeline, remembered)
+        }
+        let touched = false
+        const after =
+          ONLY ||
+          seed % AFTER_EVERY === 0 ||
+          FIXED_SEEDS.includes(seed) ||
+          FIXED_SAMECUT_SEEDS.includes(seed)
+            ? AFTER
+            : 0
+        if (after > 0) afterSeeds++
+        for (let k = 1; k <= after; k++) {
+          now = saveLoad(now)
+          mid = saveLoad(mid)
+          const actions = r() < 0.5 ? 0 : 1 + Math.floor(r() * 3)
+          for (let a = 0; a < actions && now.timeline.length > 0; a++) {
+            const i = Math.floor(r() * now.timeline.length)
+            const t = now.timeline[i]
+            // 10/09 版の当て方でも同じ枚(同じ発話・番号・文)にだけ、同じ操作をする。10/09 版の当て方は
+            // 2枚に分かれた枚に同じ修正を2回出す(鍵も同じ)ので、修正した枚への操作はその全部にする
+            // (片方だけ直すと、もう片方の古い文字が同じ鍵で残って当たる)
+            const same = mid.timeline
+              .map((o, q) =>
+                chunkOf(o) === chunkOf(t) && o.text === t.text && !!o.edited === !!t.edited ? q : -1
+              )
+              .filter((q) => q >= 0)
+            const js = new Set(t.edited ? same : same.slice(0, 1))
+            const j = same[0]
+            const x = r()
+            if (j === undefined) continue
+            touched = true
+            const words = t.edited
+              ? (m.edits.get(t.text) ?? new Set<string>())
+              : expand(p, kanji(t.text))
+            if (!t.edited) {
+              const shownChars = new Set(kanji(t.text))
+              for (const d of p.dict) {
+                const from = [...d.from]
+                const to = [...d.to]
+                const hit = [...from, ...to].some((c) => shownChars.has(c))
+                const whole =
+                  to.every((c) => shownChars.has(c)) || from.every((c) => shownChars.has(c))
+                if (hit && !whole) for (const c of [...from, ...to]) m.ambiguous.add(c)
+              }
+            }
+            dbg(`  after${k} action on ${t.text.replace(/\n/g, '')} x=${x.toFixed(2)}`)
+            if (x < 0.45) {
+              const text = `E${nextEdit++}` + 'x'.repeat(Math.floor(r() * 30))
+              if (t.edited) m.edits.delete(t.text)
+              m.edits.set(text, words)
+              const patch: Partial<TextOverlay> = { text, edited: true, words: undefined }
+              now.timeline[i] = { ...t, ...patch }
+              mid.timeline = mid.timeline.map((o, q) => (js.has(q) ? { ...o, ...patch } : o))
+            } else if (x < 0.55 && on('style')) {
+              if (!t.edited && m.edits.has(t.text)) continue
+              if (!t.edited) m.edits.set(t.text, words)
+              now.timeline[i] = { ...t, style: { ...t.style, fontSize: 99 }, edited: true }
+              mid.timeline = mid.timeline.map((o, q) =>
+                js.has(q) ? { ...o, style: { ...o.style, fontSize: 99 }, edited: true } : o
+              )
+            } else {
+              if (t.edited) m.edits.delete(t.text)
+              for (const w of words) m.dismissed.add(w)
+              now.dismissed.push(NM.autoTelopKey(t)!)
+              now.remembered = NM.rememberEditedTelops(now.timeline, now.remembered)
+              now.timeline = now.timeline.filter((_, q) => q !== i)
+              mid.dismissed.push(OM.autoTelopKey(mid.timeline[j])!)
+              mid.remembered = OM.rememberEditedTelops(mid.timeline, mid.remembered)
+              mid.timeline = mid.timeline.filter((_, q) => !js.has(q))
+            }
+          }
+          const plan = randomPlan(rng(Math.floor(r() * 1e9)), p, r() < 0.5)
+          lastScenes = madeScenes
+          const mergedNow = NM.mergeManualTelops(
+            now.timeline,
+            plan,
+            new Set(now.dismissed),
+            now.remembered
+          )
+          const mergedOld = OM.mergeManualTelops(
+            mid.timeline,
+            plan,
+            new Set(mid.dismissed),
+            mid.remembered
+          )
+          dbg(
+            `--- after${k}\n  now: ${now.timeline.map((t) => `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '')}[${NM.autoTelopKey(t)}]`).join(' | ')}\n  nowD: ${now.dismissed.join(' ')}\n  nowR: ${Object.entries(
+              now.remembered ?? {}
+            )
+              .map(([q, v]) => q + '=' + v.text)
+              .join(
+                ' '
+              )}\n  mid: ${mid.timeline.map((t) => `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '')}[${OM.autoTelopKey(t)}]`).join(' | ')}\n  midD: ${mid.dismissed.join(' ')}\n  plan: ${plan.map((t) => `${t.text.replace(/\n/g, '')}[${NM.autoTelopKey(t as never)}]`).join(' | ')}\n  gotNow: ${mergedNow.map((t) => `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '')}`).join(' | ')}\n  gotMid: ${mergedOld.map((t) => `${t.edited ? '*' : ''}${t.text.replace(/\n/g, '')}`).join(' | ')}\n  model: edits=${[...m.edits].map(([q, v]) => q + ':' + [...v].join('')).join(' ')} dismissed=${[...m.dismissed].join('')}`
+          )
+          const before = new Map([...pairs].map(([key, v]) => [key, v.length]))
+          PAIRED = true
+          PREFIX = 'ANEW:'
+          check(mergedNow, plan, m, `seed${seed}/step${step}+${k}`)
+          PREFIX = 'AMID:'
+          check(mergedOld, plan, m, `seed${seed}/step${step}+${k}`)
+          PAIRED = false
+          compareMid(
+            seed,
+            `${step}+${k}${touched ? '(人の操作の後)' : ''}`,
+            mergedNow,
+            mergedOld,
+            plan,
+            before,
+            !touched,
+            m,
+            'A'
+          )
+          afterRuns++
+          now = {
+            timeline: ids(mergedNow, k),
+            dismissed: now.dismissed,
+            remembered: NM.rememberEditedTelops(now.timeline, now.remembered)
+          }
+          mid = {
+            timeline: ids(mergedOld, k),
+            dismissed: mid.dismissed,
+            remembered: OM.rememberEditedTelops(mid.timeline, mid.remembered)
+          }
+        }
         break
       }
       const plain = randomPlan(r, p)
@@ -833,7 +1020,7 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
     )
   if (midWorse.length > 0)
     console.log(
-      `10/09 版の当て方より悪い ${midWorse.length} 通り\n${midWorse.slice(0, 10).join('\n')}`
+      `10/09 版の当て方より悪い ${midWorse.length} 通り\n${midWorse.slice(0, process.env.TELOP_MIGRATE_REPORT ? undefined : 10).join('\n')}`
     )
   expect(worse.slice(0, 5)).toEqual([])
   expect(midWorse.slice(0, 5)).toEqual([])
@@ -847,6 +1034,8 @@ async function runMigration(seeds: number[], sameCut: boolean): Promise<void> {
         `言いよどみの切れ端の修正で 10/09 版の当て方と回数を比べなかった通り ${fillerExcused}`
     )
   expect(paired).toBe(seeds.length)
+  expect(afterRuns).toBe(afterSeeds * AFTER)
+  expect(afterSeeds).toBeGreaterThanOrEqual(Math.floor(seeds.length / AFTER_EVERY))
 }
 describe('前の版(c25f5af)で保存した企画の作り直し(辞書・長さ 0 の言葉・相づち)', () => {
   it(
@@ -1043,5 +1232,148 @@ describe('10/09 版の修正・消した印を、同じカットで1行の文字
     )
     expect(want).toBe('一二 | *三四')
     expect(got).toBe(want)
+  })
+})
+
+/**
+ * 第67回の監査: 10/09 版の修正は作り直し1回目で範囲を持つ形に変わり、10/09 版の消した印(何枚目かだけ)は
+ * その後も何枚目かで効くので、2回目以降の作り直しで消した言葉が戻る・同じ言葉が2回出ていた。10/09 版の
+ * 企画から来た印は、人が新しく触るまで何回作り直しても 10/09 版と同じく何枚目かで当て、10/09 版のまま
+ * 作り直し続けた結果と同じになること(1文字1秒の枚)
+ */
+describe('10/09 版の修正・消した印を、何回作り直しても何枚目かで当てる(第67回の監査)', () => {
+  const style = defaultTextStyle()
+  const looked = { ...style, fontSize: 99 }
+  const saved = (
+    utteranceChunk: number,
+    text: string,
+    startTime: number,
+    endTime: number,
+    edited = false
+  ): TextOverlay => ({
+    id: `o${utteranceChunk}`,
+    text,
+    startTime,
+    endTime,
+    style: edited ? looked : style,
+    speaker: 'A',
+    source: 'auto',
+    utteranceId: 'u',
+    utteranceChunk,
+    ...(edited ? { edited: true } : {})
+  })
+  /** 今の仮編集: 文を枚ごとに分けた並び(1文字1秒、頭は 0 秒) */
+  const plan = (...texts: string[]): Omit<TextOverlay, 'id'>[] => {
+    let t = 0
+    return texts.map((text, utteranceChunk) => {
+      const startTime = t
+      const times = [...text].map((_, k) => t + k + 0.5)
+      t += [...text].length
+      return {
+        text,
+        startTime,
+        endTime: t,
+        style,
+        speaker: 'A',
+        source: 'auto',
+        utteranceId: 'u',
+        utteranceChunk,
+        autoSource: { start: startTime, end: t, text, times, offset: 0 }
+      } as Omit<TextOverlay, 'id'>
+    })
+  }
+  const flat = (ts: readonly Omit<TextOverlay, 'id'>[]): string =>
+    ts.map((t) => (t.edited ? '*' : '') + t.text).join(' | ')
+  type Lib = typeof NM | typeof OM
+  /** 同じ仮編集の並びで作り直し続け(保存と読み込みを挟む)、毎回の結果 */
+  const chain = (
+    lib: Lib,
+    start: TextOverlay[],
+    dismissedKeys: string[],
+    plans: Omit<TextOverlay, 'id'>[][],
+    /** 作り直しの前に人がする操作(文がこの文の枚を直す・消す) */
+    touch: Record<number, { text: string; to?: string }> = {}
+  ): string[] => {
+    let timeline = start
+    let remembered: Record<string, EditedTelop> | undefined
+    const dismissed = new Set(dismissedKeys)
+    return plans.map((incoming, step) => {
+      const op = touch[step]
+      if (op) {
+        const i = timeline.findIndex((o) => o.text === op.text)
+        expect(i).toBeGreaterThanOrEqual(0)
+        if (op.to !== undefined)
+          timeline[i] = { ...timeline[i], text: op.to, edited: true, words: undefined }
+        else {
+          dismissed.add(lib.autoTelopKey(timeline[i])!)
+          remembered = (lib.rememberEditedTelops as typeof NM.rememberEditedTelops)(
+            timeline,
+            remembered
+          )
+          timeline = timeline.filter((_, k) => k !== i)
+        }
+      }
+      const merged = (lib.mergeManualTelops as typeof NM.mergeManualTelops)(
+        timeline,
+        incoming,
+        dismissed,
+        remembered
+      )
+      remembered = (lib.rememberEditedTelops as typeof NM.rememberEditedTelops)(
+        timeline,
+        remembered
+      )
+      ;({ timeline, remembered } = saveLoad({
+        timeline: merged.map((o, i) => ({ ...o, id: `r${step}-${i}` })),
+        remembered
+      }))
+      return flat(merged)
+    })
+  }
+
+  it('A: 直した枚の隣の枚を消してあっても、2回目以降の作り直しで消した言葉が戻らない', () => {
+    const start = [saved(0, 'E0', 0, 3, true), saved(2, '七八', 6, 8)]
+    const plans = [
+      plan('一二三', '四五六', '七八'),
+      plan('一二三四五', '六七八'),
+      plan('一二', '三四五六', '七八'),
+      plan('一二三四五', '六七八')
+    ]
+    const want = chain(OM, start, ['u:u#1'], plans)
+    const got = chain(NM, start, ['u:u#1'], plans)
+    expect(want.slice(0, 2)).toEqual(['*E0 | 七八', '*E0'])
+    expect(got).toEqual(want)
+  })
+
+  it('A で人が後から別の枚を直す・消しても、10/09 版のまま作り直し続けた結果と同じ', () => {
+    const start = [saved(0, 'E0', 0, 3, true), saved(2, '七八', 6, 8)]
+    const plans = [
+      plan('一二三', '四五六', '七八'),
+      plan('一二三四五', '六七八'),
+      plan('一二', '三四五六', '七八'),
+      plan('一二三四五', '六七八'),
+      plan('一二三', '四五六', '七八')
+    ]
+    const touch = { 1: { text: '七八', to: 'F' }, 3: { text: 'E0' } }
+    const want = chain(OM, start, ['u:u#1'], plans, touch)
+    const got = chain(NM, start, ['u:u#1'], plans, touch)
+    expect(want).toEqual(['*E0 | 七八', '*E0', '*E0 | *F', '', '*F'])
+    expect(got).toEqual(want)
+    // 10/09 版の印のある発話の枚は、元の部分を持たない(人が新しく触っても何枚目かの鍵で覚える)
+    const out = NM.mergeManualTelops([], plan('一二', '三四'), new Set(['u:u#1']), {})
+    expect(out.map((t) => NM.autoTelopKey(t))).toEqual(['u:u#0'])
+  })
+
+  it('B: 見た目だけの修正が、2回目以降の作り直しで自動の枚と2回出ない', () => {
+    const start = [saved(0, '一二三四', 0, 4, true), saved(1, '五六', 4, 6)]
+    const plans = [
+      plan('一二', '三四', '五六'),
+      plan('一二三四', '五六'),
+      plan('一二', '三四', '五六')
+    ]
+    const want = chain(OM, start, [], plans)
+    const got = chain(NM, start, [], plans)
+    expect(want.slice(0, 2)).toEqual(['*一二三四 | 三四 | 五六', '*一二三四 | 五六'])
+    expect(got).toEqual(want)
   })
 })

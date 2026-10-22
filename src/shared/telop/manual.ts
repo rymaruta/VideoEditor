@@ -258,7 +258,9 @@ function charsOf(n: Omit<TextOverlay, 'id'> & WithAutoSource): { chars: string[]
  * 3. ほか → 自動の文字のまま(枚の一部が直した・消した範囲に入るなら、残りだけの枚にする)
  * に分ける。何枚目かで当てたり、枚を丸ごと外したりすると、言葉が2回出る・消えることがあった
  * (2つに分かれた枚の片方を消してカットを戻すと、残した方の言葉まで消えていた)。
- * 前の版の修正(範囲を覚えていない)は、これまでどおり何枚目かで当てる(分かれた枚は全部まとめて)
+ * 前の版の修正(範囲を覚えていない)は、これまでどおり何枚目かで当てる(分かれた枚は全部まとめて)。
+ * 前の版の修正・消した印のある発話は、何回作り直しても前の版と同じく何枚目かで当て続ける(枚に元の部分を
+ * 付けないので、人がその発話の枚を新しく直す・消しても何枚目かの鍵で覚える)
  */
 export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
   existing: readonly TextOverlay[],
@@ -352,20 +354,41 @@ export function mergeManualTelops<T extends Omit<TextOverlay, 'id'>>(
     }
   }
 
+  // 10/09 版の企画から来た印(何枚目かだけの鍵の修正・消した印)がある発話は、その発話の枚を元の部分を持たない
+  // 枚(10/09 版と同じ)のまま出す。人がその発話の枚を新しく直す・消しても何枚目かの鍵で覚え、10/09 版の印と
+  // 同じ「何枚目か」の当て方を続ける。範囲で覚えた新しい印と何枚目かの古い印が同じ発話に混ざると、枚の分け方が
+  // 変わったときに互いの言葉を取り合い、消した言葉が戻る・同じ言葉が2回出る(第67回の監査。10/09 版のまま
+  // 作り直し続けた結果より悪くなっていた)
+  const legacyUtterances = new Set<string>()
+  for (const k of dismissedBases) {
+    const m = /^u:(.+)#\d+$/.exec(k)
+    if (m) legacyUtterances.add(m[1])
+  }
+  for (const e of uniq)
+    if (e.utteranceId !== undefined && !e.src) legacyUtterances.add(e.utteranceId)
+
   const out: T[] = []
   for (const x of order) {
     if (typeof x !== 'string') out.push(x)
-    else
-      out.push(
-        ...carveUtterance(
-          groups.get(x)!,
-          uniq.filter((e) => e.utteranceId === x),
-          dismissedSpans.filter((d) => d.utteranceId === x),
-          existing.filter((o) => o.utteranceId === x && !o.edited)
-        )
+    else {
+      const carved = carveUtterance(
+        groups.get(x)!,
+        uniq.filter((e) => e.utteranceId === x),
+        dismissedSpans.filter((d) => d.utteranceId === x),
+        existing.filter((o) => o.utteranceId === x && !o.edited)
       )
+      out.push(...(legacyUtterances.has(x) ? carved.map(withoutAutoSource) : carved))
+    }
   }
   return out
+}
+
+/** 元の部分を外した枚(10/09 版の枚と同じく、鍵は何枚目かだけ) */
+function withoutAutoSource<T extends Omit<TextOverlay, 'id'>>(n: T): T {
+  if (!('autoSource' in n)) return n
+  const copy: T & WithAutoSource = { ...(n as T & WithAutoSource) }
+  delete copy.autoSource
+  return copy
 }
 
 function applyEdit<T extends Omit<TextOverlay, 'id'>>(
@@ -546,7 +569,8 @@ function carveUtterance<T extends Omit<TextOverlay, 'id'>>(
     const keepWords = x.wholeHost && e.rec.text === x.host.text
     const startTime = Math.min(...x.chars.map((c) => c.t0))
     const endTime = Math.max(...x.chars.map((c) => c.t1))
-    // 範囲を覚えていない修正は、当てた文字の範囲を覚えさせる(次からは範囲で当たる)。
+    // 範囲を覚えていない修正は、当てた文字の範囲を覚えさせる。ただし前の版の修正・消した印のある発話は、
+    // 出すときに元の部分を外す(`mergeManualTelops`。何回作り直しても前の版と同じく何枚目かで当てる)。
     // 枚を丸ごと当てたなら、その枚の範囲のまま(文字の時刻の分からない枚でも、隣の枚の文字を含まない)
     const hosts = parsed.filter((p) => p.vis.some((c) => c.claim === e))
     const wholePieces =
