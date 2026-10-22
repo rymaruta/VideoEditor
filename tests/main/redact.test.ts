@@ -196,7 +196,9 @@ describe('記録の伏せ字: 4回目の監査', () => {
     ['x://a:', (n) => 'x://' + 'a:'.repeat(n / 2)],
     ['eyJa-', (n) => 'eyJaaaa-'.repeat(n / 8)],
     ['eyJ.', (n) => 'eyJaaaa.aaaa-'.repeat(n / 13)],
-    ['A.', (n) => 'A.'.repeat(n / 2)]
+    ['A.', (n) => 'A.'.repeat(n / 2)],
+    // 5回目の監査: // が続く形(修正前は 64KB で約3秒)
+    ['//a:', (n) => '//a:'.repeat(n / 4)]
   ]
   it.each(slow)('URL の user:password@・JWT の形が二乗にならない: %s', (_n, make) => {
     const s = make(MAX_SANITIZE_CHARS)
