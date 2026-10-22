@@ -3,6 +3,7 @@ import { spawn } from 'child_process'
 import { ffmpegPath } from './ffmpegService'
 import { ffSeconds } from './ffArgs'
 import { describeFfmpegExit } from './ffmpegError'
+import { allSettledOrThrow } from './settleAll'
 import type {
   HighlightCandidate,
   HighlightSensitivity,
@@ -125,7 +126,8 @@ export async function detectHighlights(
   assetDuration: number,
   sensitivity: HighlightSensitivity = DEFAULT_HIGHLIGHT_SENSITIVITY
 ): Promise<HighlightCandidate[]> {
-  const [sceneTimes, audioLevels] = await Promise.all([
+  // 同じ素材を開く ffmpeg を2本並べるので、片方が失敗してももう片方が終わるまで待つ(`allSettledOrThrow`)
+  const [sceneTimes, audioLevels] = await allSettledOrThrow([
     detectSceneChanges(filePath),
     detectAudioLevels(filePath)
   ])

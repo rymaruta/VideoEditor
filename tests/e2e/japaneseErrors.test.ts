@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, statSync, writeFileSync } from 'fs'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
+import { removeTempDir } from '../helpers/tempDir'
 
 /** 解析・試聴用の素材作りの失敗は、英語の生のログではなく短い日本語で出す */
 const state = vi.hoisted(() => ({ userData: '' }))
@@ -17,7 +18,7 @@ import { ensurePreviewProxy } from '@main/previewProxyService'
 const work = mkdtempSync(join(tmpdir(), 've-jaerr-'))
 state.userData = join(work, 'userdata')
 mkdirSync(state.userData, { recursive: true })
-afterAll(() => rmSync(work, { recursive: true, force: true }))
+afterAll(() => removeTempDir(work))
 
 describe.skipIf(!existsSync(ffmpegPath))('失敗の文面', () => {
   const notMedia = join(work, 'not-media.mp4')

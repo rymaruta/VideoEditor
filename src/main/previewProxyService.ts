@@ -15,6 +15,7 @@ import { describeFfmpegError } from './ffmpegError'
 import { isShuttingDown, trackUntilDone } from './liveProcesses'
 import { detectVideoEncoder } from './segmentRenderer'
 import { contentFingerprint } from './fileFingerprint'
+import { allSettledOrThrow } from './settleAll'
 import { probeSourceVideo, sourceVideoFilterFor } from './ffmpegService'
 import { NO_SOURCE_METADATA_ARGS, SDR_COLOR_TAG_ARGS, isHdrTransfer } from '@shared/sourceVideo'
 import {
@@ -255,7 +256,10 @@ export function ensurePreviewProxy(
 
   // Written to a temporary name and renamed only on success, so an interrupted run
   // can never leave a half-written file that would later be treated as a valid cache.
-  const task = Promise.all([
+  // 素材を開く ffprobe を2本並べるので、片方が失敗しても**もう片方が終わるまで待ってから**失敗を返す
+  // (`Promise.all` だと、動画でないファイルで1本目が失敗した時点で返り、2本目がまだ素材を開いたまま
+  //  だった。Windows ではその間、素材を消す・置き換えると「使用中」で失敗する)
+  const task = allSettledOrThrow([
     probeStreams(filePath),
     detectVideoEncoder(),
     // HDR の素材はプロキシの高さ(540)まで縮めてからトーンマッピングする(4K のまま掛けると重い)

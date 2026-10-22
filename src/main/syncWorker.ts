@@ -1,5 +1,6 @@
 import { parentPort, workerData } from 'worker_threads'
 import { cachedEnvelope, readWindow } from './audioPcm'
+import { allSettledOrThrow } from './settleAll'
 import {
   beatPeriod,
   isReliableMatch,
@@ -100,7 +101,8 @@ async function refineAt(
   maxShiftSec?: number
 ): Promise<{ offset: number; sharpness: number }> {
   const s = center - REFINE_WINDOW_SEC / 2
-  const [aWin, bWin] = await Promise.all([
+  // 片方の読み込みが失敗しても、もう片方の ffmpeg が素材を閉じるまで待つ(`allSettledOrThrow`)
+  const [aWin, bWin] = await allSettledOrThrow([
     windowOf(a, s, REFINE_WINDOW_SEC),
     windowOf(b, s - coarse, REFINE_WINDOW_SEC)
   ])
