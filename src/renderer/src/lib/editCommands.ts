@@ -6,6 +6,7 @@ import {
   runAsOneUndoStep,
   useProjectStore
 } from '../store/projectStore'
+import { hasNonMainSelection } from './timelineSelection'
 
 /**
  * 編集画面のキー(Premiere の既定)から呼ぶ、本編への操作。
@@ -160,6 +161,9 @@ export function rippleDeleteRange(start: number, end: number): boolean {
  * 何かしたら true
  */
 export function rippleDelete(): boolean {
+  // 音声・PiP・テロップを選んでいるなら、それを消すのはタイムライン側(Delete と同じ処理)。
+  // ここでは何もしない(イン〜アウトまで抜くと、1回の押下で2つの操作になっていた)
+  if (hasNonMainSelection()) return false
   const store = useProjectStore.getState()
   const ids =
     store.multiSelectedClipIds.length > 0
@@ -172,7 +176,7 @@ export function rippleDelete(): boolean {
     return runAsOneUndoStep(() => useProjectStore.getState().removeClips(ids))
   }
   const { timelineIn, timelineOut } = store
-  if (store.selectedOverlayId || timelineIn === null || timelineOut === null) return false
+  if (timelineIn === null || timelineOut === null) return false
   if (!rippleDeleteRange(timelineIn, timelineOut)) return false
   const after = useProjectStore.getState()
   after.clearTimelineInOut()
@@ -220,7 +224,9 @@ export function removeMarkerAtPlayhead(): boolean {
 /** Shift+M / Ctrl+Shift+M: 次・前のマーカーへ */
 export function goToMarker(direction: -1 | 1): boolean {
   const s = useProjectStore.getState()
-  const times = (s.project.markers ?? []).map((m) => m.time)
+  // 0〜本編の長さに収めて見る(本編を縮めたあと、末尾より先へ飛ばない)
+  const total = getTotalDuration(s.project)
+  const times = (s.project.markers ?? []).map((m) => Math.min(Math.max(0, m.time), total))
   const t =
     direction < 0 ? previousEditPoint(times, s.playheadTime) : nextEditPoint(times, s.playheadTime)
   if (t === null) return false

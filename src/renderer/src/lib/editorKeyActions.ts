@@ -33,13 +33,67 @@ const SOURCE_VIEWER_ACTIONS = new Set<EditorAction>([
   'markOut'
 ])
 
+/**
+ * 本編を変える操作・本編の再生位置を動かす操作。ソースビューアが見えている間と、
+ * 吹き出し・右クリックのメニューが開いている間は通さない
+ * (ソースを見ながら押した Q・M・↓ が、見えていない本編を切り・印を打ち・再生位置を動かしていた。
+ * メニューの上の ↑↓ は項目を選ぶキー)
+ */
+const TIMELINE_ACTIONS = new Set<EditorAction>([
+  'rippleDelete',
+  'rippleTrimPrev',
+  'rippleTrimNext',
+  'addMarker',
+  'nextMarker',
+  'prevMarker',
+  'removeMarker',
+  'clearInOut',
+  'goToIn',
+  'goToOut',
+  'playInToOut',
+  'prevEditPoint',
+  'nextEditPoint',
+  'goToStart',
+  'goToEnd'
+])
+
 /** ソースビューアが見えているか(右のタブで「ソース」を開いている) */
-function sourceViewerHasKeys(): boolean {
+export function isSourceViewerVisible(): boolean {
   if (typeof document === 'undefined') return false
   const el = document.querySelector('.source-viewer')
   if (!el) return false
   const pane = el.closest('.tab-pane')
   return !pane || pane.classList.contains('active')
+}
+
+/** 吹き出し・色の選び・右クリックのメニューが開いているか(モーダルではないもの) */
+export function isPopoverOpen(): boolean {
+  if (typeof document === 'undefined') return false
+  return (
+    document.querySelector('.app-popover, .color-popover, .clip-context-menu, [role="menu"]') !==
+    null
+  )
+}
+
+/** テロップのタブを開いているか(シャトルの送りを止める) */
+export function isTelopTabOpen(): boolean {
+  if (typeof document === 'undefined') return false
+  return document.querySelector('.tab-pane.active .telop-panel') !== null
+}
+
+/** 画面の様子(試験では差し替える) */
+export interface EditorKeyEnv {
+  sourceViewerVisible: () => boolean
+  popoverOpen: () => boolean
+  telopTabOpen: () => boolean
+  pageHidden: () => boolean
+}
+
+const domEnv: EditorKeyEnv = {
+  sourceViewerVisible: isSourceViewerVisible,
+  popoverOpen: isPopoverOpen,
+  telopTabOpen: isTelopTabOpen,
+  pageHidden: () => typeof document !== 'undefined' && document.hidden
 }
 
 /**
@@ -50,10 +104,13 @@ function sourceViewerHasKeys(): boolean {
 export function runEditorAction(
   action: EditorAction,
   e: Pick<KeyboardEvent, 'repeat'>,
-  isTimelineCovered: () => boolean
+  isTimelineCovered: () => boolean,
+  env: EditorKeyEnv = domEnv
 ): boolean {
   if (isTimelineCovered()) return false
-  if (SOURCE_VIEWER_ACTIONS.has(action) && sourceViewerHasKeys()) return false
+  const sourceVisible = env.sourceViewerVisible()
+  if (SOURCE_VIEWER_ACTIONS.has(action) && sourceVisible) return false
+  if (TIMELINE_ACTIONS.has(action) && (sourceVisible || env.popoverOpen())) return false
   if (e.repeat) {
     // K を押したままの J / L(1フレーム送り)は、押しっぱなしで続けて送る
     const stepping =
@@ -61,7 +118,10 @@ export function runEditorAction(
     if (!stepping && !REPEATABLE.has(action)) return true
   }
   const store = useProjectStore.getState()
-  const shuttleOptions = { shouldStop: isTimelineCovered }
+  // 窓が隠れた・テロップのタブへ移った・ダイアログが開いたら、送るのをやめる
+  const shuttleOptions = {
+    shouldStop: () => isTimelineCovered() || env.pageHidden() || env.telopTabOpen()
+  }
   switch (action) {
     case 'shuttleReverse':
       stopRangePlayback()

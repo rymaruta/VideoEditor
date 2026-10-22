@@ -804,6 +804,9 @@ function normalizeLoadedProjectFields(project: Project): Project {
   const durationById = new Map<string, number>()
   for (const a of assets) if (!durationById.has(a.id)) durationById.set(a.id, a.duration)
   const durationOf = (assetId: string): number => durationById.get(assetId) ?? 0
+  const clips = asRecordArray<Record<string, unknown>>(raw.clips)
+    .map((c) => normalizeClip(c, durationOf))
+    .filter((c): c is Clip => c !== null)
   return {
     // 知らない項目(新しい版で足した項目)も残す。消すと、古い版で保存したときに新しい版のデータが消える
     ...(raw as Partial<Project>),
@@ -813,9 +816,7 @@ function normalizeLoadedProjectFields(project: Project): Project {
     aspectRatio:
       raw.aspectRatio === '16:9' || raw.aspectRatio === '9:16' ? raw.aspectRatio : '9:16',
     assets,
-    clips: asRecordArray<Record<string, unknown>>(raw.clips)
-      .map((c) => normalizeClip(c, durationOf))
-      .filter((c): c is Clip => c !== null),
+    clips,
     audioTracks: asRecordArray<Record<string, unknown>>(raw.audioTracks).map((t) =>
       normalizeAudioTrack(t, durationOf)
     ),
@@ -834,7 +835,7 @@ function normalizeLoadedProjectFields(project: Project): Project {
     roughCutAuto: normalizeSegs(raw.roughCutAuto, true) as CameraSeg[] | undefined,
     cutOverrides: normalizeOverrides(raw.cutOverrides),
     autoEdit: normalizeAutoEdit(raw.autoEdit),
-    markers: normalizeMarkers(raw.markers),
+    markers: normalizeMarkers(raw.markers, totalDuration({ clips } as Project)),
     audioEvents: Array.isArray(raw.audioEvents)
       ? (raw.audioEvents as unknown[]).filter(
           (e): e is AudioEventWindow =>
@@ -848,8 +849,11 @@ function normalizeLoadedProjectFields(project: Project): Project {
   }
 }
 
-/** マーカー(壊れた要素は捨て、ID が無ければ付け、時刻の順に並べる) */
-function normalizeMarkers(raw: unknown): TimelineMarker[] | undefined {
+/**
+ * マーカー(壊れた要素は捨て、ID が無ければ付け、時刻を 0〜本編の長さに収めて順に並べる)。
+ * 収めないと、1e308 秒のマーカーで Shift+M が本編の末尾より先へ飛んでいた
+ */
+function normalizeMarkers(raw: unknown, total: number): TimelineMarker[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const seen = new Set<string>()
   const out: TimelineMarker[] = []
@@ -863,7 +867,7 @@ function normalizeMarkers(raw: unknown): TimelineMarker[] | undefined {
     out.push({
       ...unknownFields(r, ['id', 'time', 'label']),
       id,
-      time: r.time,
+      time: Math.min(r.time, Math.max(0, total)),
       ...(typeof r.label === 'string' ? { label: r.label } : {})
     })
   }
@@ -2154,7 +2158,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   addMarker: (time) => {
     const state = get()
-    const at = Math.max(0, Number.isFinite(time) ? time : 0)
+    // 0〜本編の長さに収める(末尾より先に打たない)
+    const at = Math.min(Math.max(0, Number.isFinite(time) ? time : 0), totalDuration(state.project))
     // 同じフレーム(半フレーム以内)に打ってあれば打ち直さない(M の押し直しで同じ所に積もらない)
     const half = frameSeconds(state.project.clips, state.project.assets) / 2
     const existing = (state.project.markers ?? []).find((m) => Math.abs(m.time - at) < half)

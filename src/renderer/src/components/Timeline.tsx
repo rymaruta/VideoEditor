@@ -134,6 +134,7 @@ import { useReviewItems } from '../lib/useReviewItems'
 import { TimelineMarks } from './TimelineMarks'
 import { ShortcutHelpDialog } from './ShortcutHelpDialog'
 import { useShortcutHelpStore } from '../lib/shortcutHelp'
+import { useTimelineSubSelection } from '../lib/timelineSelection'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -629,6 +630,11 @@ export function Timeline(): React.JSX.Element {
     trackId: string
     clipId: string
   } | null>(null)
+  // 全体のキー処理(Shift+Delete など)から見えるよう、音声・PiP の選びを写す(理由は timelineSelection)
+  useEffect(() => {
+    useTimelineSubSelection.getState().setSubSelection(selectedAudioClip, selectedVideoOverlayClip)
+  }, [selectedAudioClip, selectedVideoOverlayClip])
+  useEffect(() => () => useTimelineSubSelection.getState().setSubSelection(null, null), [])
   const [videoOverlayDrag, setVideoOverlayDrag] = useState<VideoOverlayDragState | null>(null)
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)

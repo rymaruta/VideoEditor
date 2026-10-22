@@ -184,13 +184,20 @@ export function useKeyboardShortcuts(): void {
       if (e.key.toLowerCase() === 'k') releaseShuttleK()
     }
 
+    // 窓が隠れたら送るのをやめる(見えないまま再生位置が動き続けていた)
+    function handleVisibility(): void {
+      if (document.hidden) stopShuttle()
+    }
+
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
     window.addEventListener('blur', releaseShuttleK)
+    document.addEventListener('visibilitychange', handleVisibility)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', releaseShuttleK)
+      document.removeEventListener('visibilitychange', handleVisibility)
       stopShuttle()
       stopRangePlayback()
     }

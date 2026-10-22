@@ -38,7 +38,8 @@ import {
   stopRangePlayback,
   stopShuttle
 } from '@renderer/lib/shuttle'
-import { runEditorAction } from '@renderer/lib/editorKeyActions'
+import { runEditorAction, type EditorKeyEnv } from '@renderer/lib/editorKeyActions'
+import { useTimelineSubSelection } from '@renderer/lib/timelineSelection'
 import { shortcutHelpSections, useShortcutHelpStore } from '@renderer/lib/shortcutHelp'
 
 const S = useProjectStore
@@ -95,6 +96,7 @@ function baseProject(): Project {
 }
 
 function reset(): void {
+  useTimelineSubSelection.getState().setSubSelection(null, null)
   stopShuttle()
   stopRangePlayback()
   releaseShuttleK()
@@ -616,5 +618,142 @@ describe('キーの振り分け(runEditorAction)', () => {
     expect(st().project.markers).toHaveLength(1)
     expect(total()).toBeCloseTo(11)
     expect(st().playheadTime).toBe(4)
+  })
+})
+
+const env = (patch: Partial<EditorKeyEnv> = {}): EditorKeyEnv => ({
+  sourceViewerVisible: () => false,
+  popoverOpen: () => false,
+  telopTabOpen: () => false,
+  pageHidden: () => false,
+  ...patch
+})
+const press = (action: Parameters<typeof runEditorAction>[0], e: EditorKeyEnv = env()): boolean =>
+  runEditorAction(action, { repeat: false }, () => false, e)
+
+describe('監査の指摘(二重操作・ソースのタブ・吹き出し・マーカーの範囲・シャトルの停止)', () => {
+  it('音声・PiP を選んで I/O があるときの Shift+Delete は、イン〜アウトを抜かない(タイムライン側が消すだけ)', () => {
+    const before = st().project
+    st().setTimelineIn(2)
+    st().setTimelineOut(4)
+    for (const sub of [
+      { audio: { trackId: 't1', clipId: 'a2' }, videoOverlay: null },
+      { audio: null, videoOverlay: { trackId: 'v1', clipId: 'p1' } }
+    ]) {
+      useTimelineSubSelection.getState().setSubSelection(sub.audio, sub.videoOverlay)
+      expect(rippleDelete()).toBe(false)
+      expect(press('rippleDelete')).toBe(false)
+      expect(st().project).toBe(before)
+      expect(st().past).toHaveLength(0)
+      expect([st().timelineIn, st().timelineOut]).toEqual([2, 4])
+    }
+    // 選びを外せば、イン〜アウトを抜く
+    useTimelineSubSelection.getState().setSubSelection(null, null)
+    expect(rippleDelete()).toBe(true)
+    expect(st().past).toHaveLength(1)
+  })
+
+  it('テロップを選んでいるときも、イン〜アウトを抜かない', () => {
+    st().setTimelineIn(2)
+    st().setTimelineOut(4)
+    S.setState({ selectedOverlayId: 'tx1' })
+    expect(rippleDelete()).toBe(false)
+    expect(st().past).toHaveLength(0)
+  })
+
+  it('ソースのタブが見えている間は、本編を変える・本編の再生位置を動かすキーを通さない', () => {
+    const source = env({ sourceViewerVisible: () => true })
+    S.setState({ playheadTime: 5 })
+    st().setTimelineIn(1)
+    st().setTimelineOut(3)
+    const before = st().project
+    for (const a of [
+      'rippleTrimPrev',
+      'rippleTrimNext',
+      'rippleDelete',
+      'addMarker',
+      'nextMarker',
+      'prevMarker',
+      'removeMarker',
+      'clearInOut',
+      'goToIn',
+      'goToOut',
+      'playInToOut',
+      'prevEditPoint',
+      'nextEditPoint',
+      'goToStart',
+      'goToEnd',
+      'shuttleReverse',
+      'shuttleStop',
+      'shuttleForward',
+      'markIn',
+      'markOut'
+    ] as const) {
+      expect(press(a, source), a).toBe(false)
+    }
+    expect(st().project).toBe(before)
+    expect(st().past).toHaveLength(0)
+    expect(st().playheadTime).toBe(5)
+    expect(st().isPlaying).toBe(false)
+    expect([st().timelineIn, st().timelineOut]).toEqual([1, 3])
+    // 一覧は開ける
+    useShortcutHelpStore.getState().setOpen(false)
+    expect(press('shortcutHelp', source)).toBe(true)
+    expect(useShortcutHelpStore.getState().open).toBe(true)
+    useShortcutHelpStore.getState().setOpen(false)
+  })
+
+  it('吹き出し・右クリックのメニューが開いている間は Q・W・M・↑↓ を通さない', () => {
+    const popover = env({ popoverOpen: () => true })
+    S.setState({ playheadTime: 5 })
+    for (const a of [
+      'rippleTrimPrev',
+      'rippleTrimNext',
+      'addMarker',
+      'prevEditPoint',
+      'nextEditPoint'
+    ] as const) {
+      expect(press(a, popover), a).toBe(false)
+    }
+    expect(st().past).toHaveLength(0)
+    expect(st().playheadTime).toBe(5)
+    expect(st().project.markers).toBeUndefined()
+  })
+
+  it('マーカーの時刻は読み込みで 0〜本編の長さに収める(1e308 を受けない)', () => {
+    const loaded = normalizeLoadedProject({
+      ...baseProject(),
+      markers: [
+        { id: 'far', time: 1e308 },
+        { id: 'n', time: 5 }
+      ]
+    } as unknown as Project)
+    expect(loaded.markers!.map((m) => m.time)).toEqual([5, 12])
+  })
+
+  it('末尾より先にマーカーを打たない。本編を縮めても Shift+M は末尾より先へ飛ばない', () => {
+    st().addMarker(99)
+    expect(st().project.markers!.map((m) => m.time)).toEqual([12])
+    S.setState({ playheadTime: 10 })
+    // 本編を 8 秒に縮める(マーカーは 12 のまま)
+    st().removeClips(['c3'])
+    S.setState({ playheadTime: 7 })
+    expect(goToMarker(1)).toBe(true)
+    expect(st().playheadTime).toBe(8)
+    expect(goToMarker(1)).toBe(false)
+  })
+
+  it('シャトルの送りは、窓が隠れた・テロップのタブへ移ったら止まる', () => {
+    vi.useFakeTimers()
+    for (const which of ['pageHidden', 'telopTabOpen'] as const) {
+      reset()
+      let hidden = false
+      S.setState({ playheadTime: 5 })
+      press('shuttleReverse', env({ [which]: () => hidden }))
+      expect(isShuttling()).toBe(true)
+      hidden = true
+      vi.advanceTimersByTime(SHUTTLE_TICK_MS * 2)
+      expect(isShuttling()).toBe(false)
+    }
   })
 })
