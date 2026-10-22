@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { performUndoRedo } from './undoAction'
 import type { MenuShortcuts } from '@shared/appMenu'
 import { defaultTextStyle } from '@shared/textStyle'
 import { getTotalDuration, useProjectStore } from '../store/projectStore'
@@ -89,12 +90,14 @@ export function useAppMenu(windows: readonly { id: string; label: string }[]): v
         if (id === 'edit.undo' || id === 'edit.redo') {
           // キーの取り消しと同じ扱い: 文字を打っている欄なら欄の取り消し、ダイアログの上なら何もしない
           // (メニューからだと、入力中・トリム画面の裏でプロジェクトを取り消していた)
-          if (isTypingTarget(document.activeElement)) {
-            document.execCommand(id === 'edit.undo' ? 'undo' : 'redo')
-            return
-          }
-          if (isModalOpen()) return
-          return id === 'edit.undo' ? store.undo() : store.redo()
+          performUndoRedo(id === 'edit.undo' ? 'undo' : 'redo', {
+            typing: isTypingTarget(document.activeElement),
+            modalOpen: isModalOpen(),
+            execCommand: (cmd) => document.execCommand(cmd),
+            undo: store.undo,
+            redo: store.redo
+          })
+          return
         }
         const action = KEY_ACTIONS[id]
         if (action) return pressShortcut(action)

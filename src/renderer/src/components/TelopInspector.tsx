@@ -12,9 +12,10 @@ import { TelopLookPicker, type LookItem } from './TelopLookGallery'
 import { LookTransfer } from './LookTransfer'
 import { applyLook, styleForSpeaker } from '@shared/telop/styles'
 import { DraftNumber } from './DraftNumber'
-import { stripTelopMarkup } from '@shared/telop/render'
 import { TypeIcon } from './icons'
 import { formatTimecode } from '../lib/timelineRuler'
+import { telopMetrics } from '../lib/telopMetrics'
+import { readTelopMetricsOpen, storeTelopMetricsOpen } from '../lib/uiPrefs'
 
 /** 読みやすい速さの上限(字/秒)。これを超えたら注意の色にする */
 const READABLE_CPS = 8
@@ -48,6 +49,7 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
   const [picked, setPicked] = useState<{ key: string; style: TextStyle } | null>(null)
   // インスペクタとテロップタブの両方に同時に出るので、ID は置き場ごとに分ける
   const uid = useId()
+  const [metricsOpen, setMetricsOpen] = useState(() => readTelopMetricsOpen(window.innerHeight))
 
   const speakers = useMemo(() => listSpeakers(project.textOverlays), [project.textOverlays])
   const linked = presets.find((p) => p.id === o.styleId) ?? null
@@ -119,13 +121,7 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
   }
 
   // 見出しと数値のカード(どれも今のテロップから数える)
-  const order = [...project.textOverlays].sort((a, b) => a.startTime - b.startTime)
-  const nth = order.findIndex((x) => x.id === o.id) + 1
-  const plain = stripTelopMarkup(o.text)
-  const chars = plain.replace(/\s/g, '').length
-  const longestLine = Math.max(0, ...plain.split('\n').map((l) => l.trim().length))
-  const shownSec = Math.max(0, o.endTime - o.startTime)
-  const cps = shownSec > 0 ? chars / shownSec : 0
+  const { nth, total, chars, longestLine, shownSec, cps, fps } = telopMetrics(o, project)
   const kindLabel = o.effectId ? '演出テロップ' : o.source === 'auto' ? '発言テロップ' : 'テロップ'
 
   return (
@@ -137,9 +133,9 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
         <span className="telop-insp-title">
           <span className="telop-insp-kind">{kindLabel}</span>
           <span className="telop-insp-sub">
-            T1 · {order.length} 枚のうち {nth} 枚目 ·{' '}
+            T1 · {total} 枚のうち {nth} 枚目 ·{' '}
             <span className="tc">
-              {formatTimecode(o.startTime, 30)} → {formatTimecode(o.endTime, 30)}
+              {formatTimecode(o.startTime, fps)} → {formatTimecode(o.endTime, fps)}
             </span>
           </span>
         </span>
@@ -153,7 +149,26 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
           </span>
         )}
       </div>
-      <div className="telop-insp-metrics" aria-label="数値">
+      <button
+        type="button"
+        className="telop-insp-metrics-toggle"
+        aria-expanded={metricsOpen}
+        aria-controls={`${uid}-metrics`}
+        onClick={() => {
+          const next = !metricsOpen
+          setMetricsOpen(next)
+          storeTelopMetricsOpen(next)
+        }}
+      >
+        数値(表示 {shownSec.toFixed(1)} 秒 · {cps.toFixed(1)} 字/秒)
+        <span aria-hidden="true">{metricsOpen ? '▾' : '▸'}</span>
+      </button>
+      <div
+        className="telop-insp-metrics"
+        id={`${uid}-metrics`}
+        aria-label="数値"
+        hidden={!metricsOpen}
+      >
         <div className="telop-metric shown">
           <span className="telop-metric-label">表示</span>
           <span className="telop-metric-value tc">

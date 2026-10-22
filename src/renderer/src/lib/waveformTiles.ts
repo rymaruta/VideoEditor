@@ -116,6 +116,100 @@ export function peakEnvelope(levels: Float32Array, reach: number = PEAK_REACH): 
   return out
 }
 
+/**
+ * ffmpeg が作れる絵の大きさの上限(`(w+128)*(h+128) < 2^28`。超えると絵が作られず、波形が出ない)。
+ * 2.5〜3 時間のクリップを最大拡大すると、縦 2 倍で越えていた
+ */
+export const FFMPEG_MAX_PIXELS = 2 ** 28
+
+export function fitsFfmpegImage(w: number, h: number): boolean {
+  return (Math.round(w) + 128) * (Math.round(h) + 128) < FFMPEG_MAX_PIXELS
+}
+
+/**
+ * 絵の波形(値で描けないときの戻り先)を頼む大きさ。細かく(横 2 倍・縦 2 倍)頼み、上限を越えるなら
+ * 横 1 倍 → 縦 1 倍 → 幅を上限まで縮める、の順に落とす(縮めた絵は枠いっぱいに引き伸ばして描く)
+ */
+export function waveformImageRequestSize(
+  screenWidth: number,
+  screenHeight: number
+): { width: number; height: number } {
+  const w = Math.max(1, screenWidth)
+  const h = Math.max(1, screenHeight)
+  const tries: [number, number][] = [
+    [waveformDensity(w), WAVEFORM_HEIGHT_SCALE],
+    [1, WAVEFORM_HEIGHT_SCALE],
+    [1, 1]
+  ]
+  for (const [dx, dy] of tries) {
+    const width = Math.round(w * dx)
+    const height = Math.round(h * dy)
+    if (fitsFfmpegImage(width, height)) return { width, height }
+  }
+  const height = Math.round(h)
+  const width = Math.max(1, Math.floor(FFMPEG_MAX_PIXELS / (height + 128)) - 129)
+  return { width, height }
+}
+
+/**
+ * 大きさ(バイト)の合計で上限を持つ、古いものから捨てる覚え場所(ほどいた波形の絵など)。
+ * 数だけで上限を持つと、長いクリップの大きな絵が 64 枚溜まって画面のメモリが膨らんでいた
+ */
+export class ByteLimitedCache<V> {
+  private readonly map = new Map<string, { value: V; size: number }>()
+  private total = 0
+
+  constructor(
+    private readonly maxBytes: number,
+    private readonly maxEntries: number = Number.POSITIVE_INFINITY
+  ) {}
+
+  get bytes(): number {
+    return this.total
+  }
+
+  get size(): number {
+    return this.map.size
+  }
+
+  get(key: string): V | undefined {
+    const hit = this.map.get(key)
+    if (!hit) return undefined
+    this.map.delete(key)
+    this.map.set(key, hit)
+    return hit.value
+  }
+
+  set(key: string, value: V, size: number): void {
+    this.delete(key)
+    // 1 つで上限を越えるものは覚えない(覚えると、ほかを全部捨てても収まらない)
+    if (size > this.maxBytes) return
+    this.map.set(key, { value, size })
+    this.total += size
+    while (this.total > this.maxBytes || this.map.size > this.maxEntries) {
+      const oldest = this.map.keys().next().value
+      if (oldest === undefined) break
+      this.delete(oldest)
+    }
+  }
+
+  delete(key: string): void {
+    const hit = this.map.get(key)
+    if (!hit) return
+    this.map.delete(key)
+    this.total -= hit.size
+  }
+}
+
+/**
+ * 見えなくなったタイルの canvas の中身を捨てる(幅・高さを 0 にすると描いた絵の記憶が放される)。
+ * 消すだけ(clearRect)では記憶が残り、3 時間の素材を端まで送ると画面のメモリが 1GB を越えていた
+ */
+export function releaseCanvas(canvas: { width: number; height: number }): void {
+  canvas.width = 0
+  canvas.height = 0
+}
+
 /** 振幅(-1〜1)を平方根で持ち上げる。符号は残す(上下の非対称をそのまま描く) */
 export function liftAmplitude(v: number, exponent: number = 0.5): number {
   if (!(v === v) || v === 0) return 0

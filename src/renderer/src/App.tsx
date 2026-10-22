@@ -19,6 +19,7 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
+import { defaultBottomHeight } from './lib/layoutDefaults'
 import { WorkflowBar } from './components/WorkflowBar'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
@@ -138,7 +139,6 @@ const BOTTOM_HEIGHT_KEY = 've-layout2-bottom-height'
 
 const DEFAULT_PROPS_WIDTH = 520
 const DEFAULT_BIN_WIDTH = 320
-const DEFAULT_BOTTOM_HEIGHT = 420
 const MIN_PROPS_WIDTH = 300
 const MIN_BIN_WIDTH = 220
 const MIN_MONITOR_WIDTH = 360
@@ -282,7 +282,10 @@ function App(): React.JSX.Element {
     fitLayout({
       props: readStoredSize(PROPS_WIDTH_KEY, DEFAULT_PROPS_WIDTH),
       bin: readStoredSize(BIN_WIDTH_KEY, DEFAULT_BIN_WIDTH),
-      bottom: readStoredSize(BOTTOM_HEIGHT_KEY, DEFAULT_BOTTOM_HEIGHT)
+      bottom: readStoredSize(
+        BOTTOM_HEIGHT_KEY,
+        defaultBottomHeight(window.innerHeight, CHROME_HEIGHT, MIN_BOTTOM_HEIGHT)
+      )
     })
   )
   const [resizeDrag, setResizeDrag] = useState<ResizeDragState | null>(null)

@@ -27,17 +27,7 @@ import {
   ImageIcon,
   LayersIcon
 } from './icons'
-
-/** 素材の並べ方(格子 / 一覧)。この PC に覚える */
-const MEDIA_LAYOUT_KEY = 've-media-layout'
-
-function readMediaLayout(): 'grid' | 'list' {
-  try {
-    return localStorage.getItem(MEDIA_LAYOUT_KEY) === 'list' ? 'list' : 'grid'
-  } catch {
-    return 'grid'
-  }
-}
+import { readMediaLayout, storeMediaLayout } from '../lib/uiPrefs'
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
@@ -69,11 +59,7 @@ export function MediaBin(): React.JSX.Element {
   const [layout, setLayoutState] = useState<'grid' | 'list'>(readMediaLayout)
   const setLayout = (next: 'grid' | 'list'): void => {
     setLayoutState(next)
-    try {
-      localStorage.setItem(MEDIA_LAYOUT_KEY, next)
-    } catch {
-      // 覚えられなくても今回の並べ方は効く
-    }
+    storeMediaLayout(next)
   }
   // タイムラインで使っている素材(格子の「使用中」の帯)
   const usedAssetIds = new Set([

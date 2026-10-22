@@ -66,6 +66,7 @@ import { loadTelopFonts } from '../lib/telopFonts'
 import { telopHitBounds, type TelopContext } from '@shared/telop/render'
 import { ShortsUiMockup } from './ShortsUiMockup'
 import { shortsSafeAreaInset } from '../lib/shortsSafeArea'
+import { readSafeFrame, storeSafeFrame } from '../lib/uiPrefs'
 import type {
   AudioTrackClip,
   MediaAsset,
@@ -822,6 +823,9 @@ export function PreviewPlayer(): React.JSX.Element {
   // 出していないと「隠れる場所に置いている」ことに作っている最中は気付けない
   // (理由と実測は shortsSafeArea)。画面だけの線で、書き出しには影響しない。
   const [showSafeArea, setShowSafeArea] = useState(true)
+  // 16:9 などの安全枠は既定で出さない(今までの見え方のまま)。出す・出さないはこの PC に覚える
+  const [showSafeFrame, setShowSafeFrame] = useState(readSafeFrame)
+  const safeGuideOn = project.aspectRatio === '9:16' ? showSafeArea : showSafeFrame
   const [isExpanded, setIsExpanded] = useState(false)
   const [volume, setVolume] = useState(readStoredVolume)
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTED_KEY) === 'true')
@@ -1569,7 +1573,7 @@ export function PreviewPlayer(): React.JSX.Element {
               </div>
             )}
             {/* 横長の安全枠(放送の目安: 動きの安全 5%・文字の安全 10%)。画面だけの線で、書き出しには写らない */}
-            {showSafeArea && project.aspectRatio !== '9:16' && activeSrc && (
+            {showSafeFrame && project.aspectRatio !== '9:16' && activeSrc && (
               <>
                 <div className="preview-safe-frame action" aria-hidden="true" />
                 <div className="preview-safe-frame title" aria-hidden="true" />
@@ -1652,14 +1656,22 @@ export function PreviewPlayer(): React.JSX.Element {
                 </button>
               )}
               <button
-                className={`icon-button ${showSafeArea ? 'active' : ''}`}
-                aria-pressed={showSafeArea}
+                className={`icon-button ${safeGuideOn ? 'active' : ''}`}
+                aria-pressed={safeGuideOn}
                 title={
                   project.aspectRatio === '9:16'
                     ? 'セーフエリアの目安線を表示(この線の外はYouTubeのUIに隠れやすい範囲です。線は画面だけのもので、書き出しには写りません)'
                     : '安全枠を表示(外側が動きの安全 5%・内側が文字の安全 10% の目安。線は画面だけのもので、書き出しには写りません)'
                 }
-                onClick={() => setShowSafeArea((v) => !v)}
+                onClick={() => {
+                  if (project.aspectRatio === '9:16') {
+                    setShowSafeArea((v) => !v)
+                    return
+                  }
+                  const next = !showSafeFrame
+                  setShowSafeFrame(next)
+                  storeSafeFrame(next)
+                }}
               >
                 <TargetIcon width={14} height={14} />
               </button>

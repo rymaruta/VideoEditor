@@ -275,7 +275,8 @@
   right: 0;
   top: 0;
   height: 14px;
-  background: linear-gradient(90deg, #3d6bff, #2b4fd6 60%, #3a3ac9);
+  /* 文字(#F2F5FF)が 4.5:1 以上になる青から始める(#3D6BFF の上では 4.06:1 だった) */
+  background: linear-gradient(90deg, #335ce6, #2b4fd6 60%, #3a3ac9);
   pointer-events: none;
 }
 .timeline-panel .g3-clip-frames {

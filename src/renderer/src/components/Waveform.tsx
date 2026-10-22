@@ -8,6 +8,9 @@ import {
   WAVEFORM_HEIGHT_SCALE,
   tileReadRange,
   waveformTiles,
+  waveformImageRequestSize,
+  ByteLimitedCache,
+  releaseCanvas,
   type WaveTile
 } from '../lib/waveformTiles'
 import { isWavePeaks, type WavePeaks } from '@shared/waveformPeaks'
@@ -17,28 +20,26 @@ export type WaveformVariant = 'audio' | 'auto' | 'video'
 
 /**
  * ほどいた絵(URL ごと)。同じ絵を何度もほどかない。古いものから捨てる。
- * `decode()` で待つので、大きな絵でもほどく間に画面を止めない。
+ * 上限は大きさ(ほどいた絵の画素 × 4 バイト + URL の長さ)の合計で持つ(数だけだと、長いクリップの
+ * 大きな絵が溜まって画面のメモリが膨らんでいた)。`decode()` で待つので、ほどく間に画面を止めない。
  */
-const decoded = new Map<string, Promise<HTMLImageElement>>()
 const DECODED_LIMIT = 64
+const DECODED_MAX_BYTES = 48 * 1024 * 1024
+const decoded = new ByteLimitedCache<Promise<HTMLImageElement>>(DECODED_MAX_BYTES, DECODED_LIMIT)
 
 function decodeOnce(url: string): Promise<HTMLImageElement> {
   const hit = decoded.get(url)
-  if (hit) {
-    decoded.delete(url)
-    decoded.set(url, hit)
-    return hit
-  }
+  if (hit) return hit
   const img = new Image()
   img.src = url
-  const p = img.decode().then(() => img)
+  const p = img.decode().then(() => {
+    // ほどけたら本当の大きさで数え直す(まだ覚えている時だけ)
+    if (decoded.get(url) === p)
+      decoded.set(url, p, url.length + img.naturalWidth * img.naturalHeight * 4)
+    return img
+  })
   p.catch(() => decoded.delete(url))
-  decoded.set(url, p)
-  while (decoded.size > DECODED_LIMIT) {
-    const oldest = decoded.keys().next().value
-    if (oldest === undefined) break
-    decoded.delete(oldest)
-  }
+  decoded.set(url, p, url.length)
   return p
 }
 
@@ -212,8 +213,9 @@ function WaveTileCanvas({
     if (!el) return
     const drawn = drawnRef.current
     if (!visible) {
-      if (drawn && (drawn.source !== source || drawn.x !== x || drawn.w !== w)) {
-        el.getContext('2d')?.clearRect(0, 0, el.width, el.height)
+      // 見えなくなったタイルは中身を捨てる(描いた絵の記憶を放す。見えたらまた描く)
+      if (drawn) {
+        releaseCanvas(el)
         drawnRef.current = null
       }
       return
@@ -298,15 +300,11 @@ export function Waveform({
         })
     }
     const requestImage = (attempt: number): void => {
-      // 1 画面 px に 2 列・縦も 2 倍の細かい絵を頼む(描く時に枠へ縮める。細い線が並ぶ見え方)
+      // 1 画面 px に 2 列・縦も 2 倍の細かい絵を頼む(描く時に枠へ縮める。細い線が並ぶ見え方)。
+      // ffmpeg の絵の上限を越えない大きさで頼む(越えると絵が作られず波形が消えていた)
+      const size = waveformImageRequestSize(width, height)
       window.api
-        .generateWaveform(
-          filePath,
-          start,
-          end,
-          Math.round(width * waveformDensity(width)),
-          Math.round(height * WAVEFORM_HEIGHT_SCALE)
-        )
+        .generateWaveform(filePath, start, end, size.width, size.height)
         .then((dataUrl) => {
           if (!cancelled) setUrl(dataUrl)
         })

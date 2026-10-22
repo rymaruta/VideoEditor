@@ -1,7 +1,9 @@
 import { useProjectStore } from '../store/projectStore'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
-import { isModalOpen } from '../lib/useKeyboardShortcuts'
+import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
+import { modifierLabel, performUndoRedo } from '../lib/undoAction'
+import { useModalOpen } from '../lib/useModalOpen'
 import { RedoIcon, UndoIcon, UploadIcon } from './icons'
 
 /**
@@ -30,17 +32,27 @@ export function WorkflowBar({
   const reviewCount = useReviewItems().open.length
   const canUndo = useProjectStore((s) => s.past.length > 0)
   const canRedo = useProjectStore((s) => s.future.length > 0)
-  // メニューの「元に戻す / やり直す」と同じ(ダイアログの上では何もしない)
-  const undo = (): void => {
-    if (!isModalOpen()) useProjectStore.getState().undo()
+  // メニューの「元に戻す / やり直す」と同じ: 文字を打っている欄なら欄の取り消し(文字単位)、
+  // ダイアログの上では何もしない。ボタンは押してもフォーカスを奪わない(欄にフォーカスを残す)
+  const run = (kind: 'undo' | 'redo'): void => {
+    const store = useProjectStore.getState()
+    performUndoRedo(kind, {
+      typing: isTypingTarget(document.activeElement),
+      modalOpen: isModalOpen(),
+      execCommand: (cmd) => document.execCommand(cmd),
+      undo: store.undo,
+      redo: store.redo
+    })
   }
-  const redo = (): void => {
-    if (!isModalOpen()) useProjectStore.getState().redo()
-  }
+  const undo = (): void => run('undo')
+  const redo = (): void => run('redo')
+  const mod = modifierLabel(navigator.userAgent)
+  // ダイアログを開いている間は帯ごと inert(Tab でダイアログの裏のボタンに届かない)
+  const modalOpen = useModalOpen()
   const openAutoEdit = (): void => emitMenuCommand('auto.screen')
   const openExport = (): void => emitMenuCommand('file.export')
   return (
-    <header className="workflow-bar">
+    <header className="workflow-bar" inert={modalOpen || undefined}>
       <div className="workflow-bar-project">
         <span className="workflow-bar-logo" aria-hidden="true">
           <svg width="14" height="14" viewBox="0 0 24 24">
@@ -91,9 +103,11 @@ export function WorkflowBar({
         <button
           type="button"
           className="icon-button workflow-icon"
-          title="元に戻す (Ctrl+Z)"
+          title={`元に戻す (${mod}+Z)`}
           aria-label="元に戻す"
           disabled={!canUndo}
+          // 押してもフォーカスを欄に残す(欄の取り消しにするため)
+          onMouseDown={(e) => e.preventDefault()}
           onClick={undo}
         >
           <UndoIcon width={16} height={16} />
@@ -101,9 +115,11 @@ export function WorkflowBar({
         <button
           type="button"
           className="icon-button workflow-icon"
-          title="やり直す (Ctrl+Shift+Z)"
+          title={`やり直す (${mod}+Shift+Z)`}
           aria-label="やり直す"
           disabled={!canRedo}
+          // 押してもフォーカスを欄に残す(欄の取り消しにするため)
+          onMouseDown={(e) => e.preventDefault()}
           onClick={redo}
         >
           <RedoIcon width={16} height={16} />
@@ -112,7 +128,7 @@ export function WorkflowBar({
         <button type="button" className="primary-button workflow-export" onClick={openExport}>
           <UploadIcon width={15} height={15} />
           書き出す
-          <span className="workflow-export-key tc">Ctrl+M</span>
+          <span className="workflow-export-key tc">{mod}+M</span>
         </button>
       </div>
     </header>
