@@ -6,6 +6,7 @@ import { buildCutSegments } from '../lib/silenceCut'
 import { formatIpcError } from '../lib/ipcError'
 import { TypeIcon } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 export function TextBasedEditModal({
   clipId,
@@ -102,11 +103,22 @@ export function TextBasedEditModal({
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal text-edit-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <TypeIcon width={15} height={15} />
-          テキストで編集: {asset.fileName}
-        </h3>
+      <div
+        className="modal text-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`テキストで編集: ${asset.fileName}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <TypeIcon width={16} height={16} />
+              テキストで編集: {asset.fileName}
+            </>
+          }
+          onClose={onClose}
+        />
         <div className="trim-field">
           <label>音声の言語</label>
           <select value={language} onChange={(e) => setLanguage(e.target.value)} disabled={loading}>

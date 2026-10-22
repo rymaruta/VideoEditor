@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useAutosaveStore } from '../store/autosaveStore'
 import { checkMissingAssets } from '../lib/projectFileActions'
 import { formatIpcError } from '../lib/ipcError'
+import { DialogHeader } from './DialogHeader'
 
 function formatTimestamp(mtimeMs?: number): string {
   if (!mtimeMs) return '日時不明'
@@ -60,8 +61,18 @@ export function AutosaveRestoreModal(): React.JSX.Element | null {
   return (
     // 背景クリックは「あとで決める」と同じ。閉じただけでデータを失わせない
     <div className="modal-backdrop" onClick={() => !busy && clearPending()}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>自動保存されたデータが見つかりました</h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="自動保存されたデータが見つかりました"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title="自動保存されたデータが見つかりました"
+          onClose={() => !busy && clearPending()}
+          closeDisabled={busy}
+        />
         <p className="hint-text">
           前回、保存せずに終了した可能性があります(自動保存: {formatTimestamp(pending.mtimeMs)})。
         </p>

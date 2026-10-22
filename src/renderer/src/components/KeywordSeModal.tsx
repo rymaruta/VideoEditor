@@ -6,6 +6,7 @@ import { detectKeywordSeMatches } from '../lib/keywordSe'
 import { formatIpcError } from '../lib/ipcError'
 import { WandIcon, PlusIcon } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -119,11 +120,22 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal keyword-se-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <WandIcon width={15} height={15} />
-          キーワード連動SEをスキャン
-        </h3>
+      <div
+        className="modal keyword-se-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="キーワード連動SEをスキャン"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <WandIcon width={16} height={16} />
+              キーワード連動SEをスキャン
+            </>
+          }
+          onClose={onClose}
+        />
         <p className="hint-text">
           すべてのテロップから辞書に登録したキーワードを検索し、一致した箇所に効果音を自動配置します。チェックを外すと配置対象から除外できます。
         </p>
@@ -169,7 +181,7 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
             onClick={handleApply}
             disabled={applying || selected.size === 0}
           >
-            <PlusIcon width={13} height={13} />
+            <PlusIcon width={14} height={14} />
             {applying ? '配置中...' : 'タイムラインに配置'}
           </button>
         </div>

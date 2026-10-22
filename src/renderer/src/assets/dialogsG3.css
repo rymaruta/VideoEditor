@@ -94,19 +94,32 @@
 .modal {
   padding: var(--ve-pad-dialog);
 }
-.modal:has(> h3:first-child) {
+.modal:has(> .dialog-titlebar:first-child) {
   padding-top: 0;
 }
-.modal > h3:first-child {
+/* 見出しの帯(DialogHeader)は枠の端まで。中身が長くて枠の中で送るときも上に残す */
+.modal > .dialog-titlebar:first-child {
+  position: sticky;
+  top: 0;
+  z-index: var(--ve-z-raised);
   display: flex;
   align-items: center;
-  gap: var(--ve-gap-icon);
-  height: var(--ve-bar-dialog-head);
+  justify-content: space-between;
+  gap: var(--ve-space-2);
   margin: 0 calc(var(--ve-pad-dialog) * -1) var(--ve-pad-dialog);
-  padding: 0 var(--ve-pad-dialog);
-  font: var(--ve-type-title);
-  color: var(--ve-text-1);
-  box-shadow: inset 0 -1px 0 var(--ve-border-subtle);
+  padding: 0 var(--ve-space-3) 0 var(--ve-pad-dialog);
+  background: var(--ve-surface-2);
+}
+/* 見出しの前のアイコン(字と同じ行に。色は補足の灰) */
+.dialog-title > .ve-icon {
+  margin-right: var(--ve-gap-icon);
+  vertical-align: -3px;
+  color: var(--ve-text-2);
+}
+.dialog-close:disabled {
+  opacity: 1;
+  color: var(--ve-text-disabled);
+  cursor: not-allowed;
 }
 .modal > .modal-actions:last-child {
   min-height: var(--ve-bar-dialog-foot);

@@ -6,6 +6,7 @@ import { toTimelineSeconds } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { WandIcon } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -166,12 +167,23 @@ export function SilenceCutModal({
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <WandIcon width={15} height={15} />
-          無音区間の検出
-          {multi ? `: ${clipIds.length}個のクリップ` : `: ${detections[0]?.fileName ?? ''}`}
-        </h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`無音区間の検出${multi ? `: ${clipIds.length}個のクリップ` : `: ${detections[0]?.fileName ?? ''}`}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <WandIcon width={16} height={16} />
+              無音区間の検出
+              {multi ? `: ${clipIds.length}個のクリップ` : `: ${detections[0]?.fileName ?? ''}`}
+            </>
+          }
+          onClose={onClose}
+        />
         {running && (
           <p className="hint-text detect-progress">
             検出中... ({detections.length}/{total})

@@ -5,6 +5,8 @@ import { ScissorsIcon } from './icons'
 import { previewSourceUrl } from '../lib/previewSource'
 import { cropPreviewStyle } from '../lib/cropPreview'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { VideoTransport } from './VideoTransport'
+import { DialogHeader } from './DialogHeader'
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -23,6 +25,8 @@ export function TrimModal({
   onClose: () => void
 }): React.JSX.Element | null {
   const backdropRef = useRef<HTMLDivElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
   useEscapeToClose(backdropRef, onClose)
   const project = useProjectStore((s) => s.project)
   const applyClipTrimAndCrop = useProjectStore((s) => s.applyClipTrimAndCrop)
@@ -76,29 +80,52 @@ export function TrimModal({
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <ScissorsIcon width={15} height={15} />
-          クリップをトリム: {asset.fileName}
-        </h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`クリップをトリム: ${asset.fileName}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <ScissorsIcon width={16} height={16} />
+              クリップをトリム: {asset.fileName}
+            </>
+          }
+          onClose={onClose}
+        />
         {/* プロジェクトの縦横比の枠に入れて、書き出しと同じ切り取り方で見せる。
             素材そのままを出していた頃は、クロップを入れても自動検出を押しても
             **適用するまで見た目が1画素も変わらなかった**。 */}
         <div
+          ref={frameRef}
           className={`trim-preview-frame ${
             project.aspectRatio === '9:16' ? 'aspect-9-16' : 'aspect-16-9'
           }`}
         >
           <video
+            ref={videoRef}
             src={previewSourceUrl(asset)}
-            controls
             className="trim-preview-video"
             style={cropPreviewStyle(asset.width / asset.height, targetAspect, fillCrop, cropCenter)}
             onLoadedMetadata={(e) => {
               e.currentTarget.currentTime = inPoint
             }}
+            onClick={(e) => {
+              const v = e.currentTarget
+              if (v.paused || v.ended) void v.play().catch(() => {})
+              else v.pause()
+            }}
           />
         </div>
+        {/* Chrome 既定の操作盤の代わりに、モニターと同じ再生の帯(溝にイン〜アウトを重ねる) */}
+        <VideoTransport
+          videoRef={videoRef}
+          fullscreenRef={frameRef}
+          range={{ start: inPoint, end: outPoint }}
+        />
         <div className="trim-field">
           <label>開始 (イン点): {formatTime(inPoint)}</label>
           <input

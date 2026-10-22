@@ -5,6 +5,7 @@ import type { HighlightCandidate, HighlightSensitivity } from '@shared/types'
 import { DEFAULT_HIGHLIGHT_SENSITIVITY, HIGHLIGHT_SENSITIVITY_OPTIONS } from '@shared/highlight'
 import { TargetIcon, PlusIcon } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -57,11 +58,22 @@ export function HighlightModal({
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <TargetIcon width={15} height={15} />
-          ハイライト検出: {asset.fileName}
-        </h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`ハイライト検出: ${asset.fileName}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <TargetIcon width={16} height={16} />
+              ハイライト検出: {asset.fileName}
+            </>
+          }
+          onClose={onClose}
+        />
         <div className="highlight-sensitivity-row">
           <label className="inline-select">
             検出の感度

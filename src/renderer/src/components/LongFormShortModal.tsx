@@ -24,6 +24,7 @@ import { defaultTextStyle } from '@shared/textStyle'
 import { WandIcon, SparklesIcon } from './icons'
 import type { TextOverlay, TranscriptSegment, TransitionType } from '@shared/types'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 // How many windows are shortlisted from the audio scan. Every one of these costs a
 // transcription pass, so this is the main lever on how long the whole run takes:
@@ -339,11 +340,23 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
   return (
     // 作っている間は、外を押しても閉じない(閉じるボタンと同じ。閉じると裏で走ったまま結果が捨てられていた)
     <div className="modal-backdrop" ref={backdropRef} onClick={() => !running && onClose()}>
-      <div className="modal long-form-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <WandIcon width={15} height={15} />
-          長尺動画からショートを自動生成
-        </h3>
+      <div
+        className="modal long-form-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="長尺動画からショートを自動生成"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <WandIcon width={16} height={16} />
+              長尺動画からショートを自動生成
+            </>
+          }
+          onClose={() => !running && onClose()}
+          closeDisabled={running}
+        />
         <p className="hint-text">
           動画全体の音声を解析して盛り上がっている箇所を探し、その部分だけを文字起こししてAIが構成を決めます。映像の解析はしないので、長い動画でも現実的な時間で終わります。
         </p>
@@ -642,7 +655,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
               onClick={handleRun}
               disabled={running || !asset || videoAssets.length === 0}
             >
-              <SparklesIcon width={13} height={13} />
+              <SparklesIcon width={14} height={14} />
               {running ? '処理中...' : 'ショートを作る'}
             </button>
           )}

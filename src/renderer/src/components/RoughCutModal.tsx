@@ -5,6 +5,7 @@ import { formatIpcError } from '../lib/ipcError'
 import { noHighlightsMessage } from '../lib/autoEdit'
 import { TargetIcon, PlusIcon } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 interface FlatCandidate {
   assetId: string
@@ -141,11 +142,22 @@ export function RoughCutModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal roughcut-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <TargetIcon width={15} height={15} />
-          複数素材から自動ラフカット
-        </h3>
+      <div
+        className="modal roughcut-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="複数素材から自動ラフカット"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <TargetIcon width={16} height={16} />
+              複数素材から自動ラフカット
+            </>
+          }
+          onClose={onClose}
+        />
         <p className="hint-text">
           メディア内のすべての動画素材からハイライトを検出し、目標の尺に収まるよう自動で候補を選びます。チェックを外したり付けたりして調整してから、タイムラインの末尾に追加できます。
         </p>
@@ -237,7 +249,7 @@ export function RoughCutModal({ onClose }: { onClose: () => void }): React.JSX.E
             onClick={handleApply}
             disabled={loading || selected.size === 0}
           >
-            <PlusIcon width={13} height={13} />
+            <PlusIcon width={14} height={14} />
             タイムラインに追加
           </button>
         </div>

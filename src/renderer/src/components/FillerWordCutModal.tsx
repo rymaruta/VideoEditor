@@ -7,6 +7,7 @@ import { formatIpcError } from '../lib/ipcError'
 import { isFillerWordText } from '../lib/fillerWords'
 import { WandIcon } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -73,11 +74,22 @@ export function FillerWordCutModal({
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <WandIcon width={15} height={15} />
-          フィラーワードの検出: {asset.fileName}
-        </h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`フィラーワードの検出: ${asset.fileName}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <WandIcon width={16} height={16} />
+              フィラーワードの検出: {asset.fileName}
+            </>
+          }
+          onClose={onClose}
+        />
         {loading && (
           <p className="hint-text">音声を解析中...(初回はモデルのダウンロードが必要です)</p>
         )}

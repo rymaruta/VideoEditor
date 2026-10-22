@@ -6,6 +6,7 @@ import { defaultTextStyle } from '@shared/textStyle'
 import type { TextOverlay, TranscriptSegment } from '@shared/types'
 import { MicIcon } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -107,11 +108,22 @@ export function AutoCaptionModal({
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <MicIcon width={15} height={15} />
-          自動テロップ生成: {asset.fileName}
-        </h3>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`自動テロップ生成: ${asset.fileName}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <MicIcon width={16} height={16} />
+              自動テロップ生成: {asset.fileName}
+            </>
+          }
+          onClose={onClose}
+        />
         <div className="trim-field">
           <label>音声の言語</label>
           <select value={language} onChange={(e) => setLanguage(e.target.value)} disabled={loading}>
