@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { reportRendererError } from '../lib/errorReporting'
 
 interface ErrorBoundaryState {
   error: Error | null
@@ -17,6 +18,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBound
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('Uncaught render error:', error, info.componentStack)
+    reportRendererError('画面の描画の失敗', error, info.componentStack ?? undefined)
   }
 
   render(): ReactNode {

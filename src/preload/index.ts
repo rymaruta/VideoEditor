@@ -1,9 +1,10 @@
 import type { AudioEventWindow } from '@shared/events/audioEvents'
 import type { SystemInfo } from '@shared/systemInfo'
+import type { SecretName, SecretsSnapshot } from '@shared/secrets'
 import type { ShowKit } from '@shared/finish/sound'
 import type { DenoiseResult } from '@shared/denoise'
 import type { QcMeasurement } from '@shared/qc/media'
-import type { LlmRequest, LlmWorkerMessage } from '@shared/llm'
+import type { LlmLoadFailure, LlmRequest, LlmWorkerMessage } from '@shared/llm'
 type LlmProgressMessage = Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>
 import type { FaceBox } from '@shared/telop/avoidFaces'
 import type { AsrJob, AsrJobResult, AsrLanguage, AsrWorkerMessage } from '@shared/transcript'
@@ -211,6 +212,11 @@ const api = {
   ): Promise<{ filePath: string; duration: number }> =>
     ipcRenderer.invoke(IPC.downloadAudioAsset, url, suggestedName),
   getEnvApiKeys: (): Promise<EnvApiKeys> => ipcRenderer.invoke(IPC.getEnvApiKeys),
+  /** 暗号化して保存した API キー(起動時に1回。暗号化が使えないときは available: false) */
+  secretsLoad: (): Promise<SecretsSnapshot> => ipcRenderer.invoke(IPC.secretsLoad),
+  /** API キーを暗号化して保存する(空なら消す)。保存できたら true */
+  secretsSet: (name: SecretName, value: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.secretsSet, name, value),
   setDirtyState: (dirty: boolean): void => ipcRenderer.send(IPC.setDirtyState, dirty),
   /** 長い処理の最中か(スリープさせない・タスクバーに進み具合・閉じる前に確かめる)。終わったら null */
   setBusyState: (state: { label: string; percent?: number } | null): void =>
@@ -249,6 +255,9 @@ const api = {
     ipcRenderer.invoke(IPC.libraryFiles, folderPath),
   libraryToggleFavorite: (filePath: string): Promise<LibraryState> =>
     ipcRenderer.invoke(IPC.libraryToggleFavorite, filePath),
+  /** 画面の未処理のエラーを main の記録(userData/logs)に残す。返事は待たない */
+  logRendererError: (payload: { kind: string; message?: string; stack?: string }): void =>
+    ipcRenderer.send(IPC.logRendererError, payload),
   onMenuCommand: (callback: (id: string) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, id: string): void => callback(id)
     ipcRenderer.on(IPC.menuCommand, listener)
@@ -287,6 +296,10 @@ const api = {
   llmRun: (requests: LlmRequest[]): Promise<(unknown | null)[]> =>
     ipcRenderer.invoke(IPC.llmRun, requests),
   llmCancel: (): Promise<void> => ipcRenderer.invoke(IPC.llmCancel),
+  /** このPCで読み込めなかった AI のモデル(次から試さない) */
+  llmLoadFailures: (): Promise<LlmLoadFailure[]> => ipcRenderer.invoke(IPC.llmLoadFailures),
+  /** 「このPCの AI をもう一度試す」: 読み込めなかった記録を消す */
+  llmClearLoadFailures: (): Promise<void> => ipcRenderer.invoke(IPC.llmClearLoadFailures),
   qcMeasure: (filePath: string): Promise<QcMeasurement> =>
     ipcRenderer.invoke(IPC.qcMeasure, filePath),
   qcCancel: (): Promise<void> => ipcRenderer.invoke(IPC.qcCancel),

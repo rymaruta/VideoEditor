@@ -1,10 +1,9 @@
 import { standardExportFits } from '@shared/exportLimits'
 import { cachedEnvelope } from './audioPcm'
 import { readFile, stat, writeFile } from 'fs/promises'
-import os from 'os'
 import { cancelAsr, runAsr, setAsrLanguage } from './asrService'
 import { detectFaces } from './faceService'
-import { cancelLlm, runLlm } from './llmService'
+import { cancelLlm, clearLlmLoadFailures, listLlmLoadFailures, runLlm } from './llmService'
 import { cancelMeasureExport, measureExport } from './qcService'
 import { readFramesRgb } from './frameService'
 import { cancelDenoise, denoiseFiles } from './audioCleanService'
@@ -29,6 +28,7 @@ import {
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
+import { APP_ID, PRODUCT_NAME } from '@shared/product'
 import {
   AUDIO_EXTENSIONS,
   IMAGE_EXTENSIONS,
@@ -65,6 +65,8 @@ import { detectHighlights, analyzeReferenceStyle } from './highlightService'
 import { analyzeBpm } from './bpmService'
 import { downloadAudioAsset } from './audioLibraryService'
 import { loadEnvFile, getEnvApiKeys } from './envConfig'
+import { SecretStore } from './secretStore'
+import { safeStorageCipher } from './safeStorageCipher'
 import { fitWindowStateToDisplays, type WindowState } from './windowState'
 import {
   cleanupStaleSegmentDirs,
@@ -73,6 +75,7 @@ import {
 } from './segmentRenderer'
 import { installAppMenu, updateAppMenu } from './appMenu'
 import { RendererCrashGuard } from './rendererRecovery'
+import { collectSystemInfo, installCrashLogging, logRendererError } from './diagnostics'
 import {
   appendTelopLayerImages,
   beginTelopLayer,
@@ -500,7 +503,7 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectProjectSavePath, async (event, defaultName: string) => {
     const result = await showSaveDialogForSender(event, {
       defaultPath: defaultName,
-      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+      filters: [{ name: `${PRODUCT_NAME}プロジェクト`, extensions: ['veproj'] }]
     })
     if (result.canceled || !result.filePath) return null
     return confirmExtendedPath(event, result.filePath, withVeprojExtension(result.filePath))
@@ -509,7 +512,7 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectProjectOpenPath, async (event) => {
     const result = await showOpenDialogForSender(event, {
       properties: ['openFile'],
-      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+      filters: [{ name: `${PRODUCT_NAME}プロジェクト`, extensions: ['veproj'] }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
@@ -648,6 +651,8 @@ const hasInstanceLock = app.requestSingleInstanceLock()
 if (!hasInstanceLock) {
   app.quit()
 } else {
+  // 未処理の例外・拒否、画面や解析のプロセスが落ちたことを userData/logs に残す(diagnostics)
+  installCrashLogging()
   app.on('second-instance', () => {
     const win = BrowserWindow.getAllWindows()[0]
     if (!win) return
@@ -659,7 +664,7 @@ if (!hasInstanceLock) {
 
 app.whenReady().then(() => {
   if (!hasInstanceLock) return
-  electronApp.setAppUserModelId('com.videoeditor.app')
+  electronApp.setAppUserModelId(APP_ID)
   startLibraryWatchers()
   // 前回、書き出しの途中で閉じた・落ちたときの一時フォルダ(数 GB になる)を片付ける
   setTimeout(cleanupStaleSegmentDirs, 5000)
@@ -827,6 +832,15 @@ app.whenReady().then(() => {
     downloadAudioAsset(url, suggestedName)
   )
   ipcMain.handle(IPC.getEnvApiKeys, () => getEnvApiKeys())
+  // API キーは OS の仕組みで暗号化して userData/secrets.json に置く(secretStore。前の版の平文は画面が移す)
+  const secretStore = new SecretStore(
+    join(app.getPath('userData'), 'secrets.json'),
+    safeStorageCipher
+  )
+  ipcMain.handle(IPC.secretsLoad, () => secretStore.load())
+  ipcMain.handle(IPC.secretsSet, (_e, name: unknown, value: unknown) =>
+    secretStore.set(name, value)
+  )
 
   autosavePath = join(app.getPath('userData'), 'autosave.veproj')
   ipcMain.on(IPC.setDirtyState, (_e, dirty: boolean) => {
@@ -979,6 +993,9 @@ app.whenReady().then(() => {
     runLlm(requests, (m) => notifySender(event, IPC.llmProgress, m))
   )
   ipcMain.handle(IPC.llmCancel, () => cancelLlm())
+  // 読み込めなかったモデルの記録(次から試さない)と、「このPCの AI をもう一度試す」
+  ipcMain.handle(IPC.llmLoadFailures, () => listLlmLoadFailures())
+  ipcMain.handle(IPC.llmClearLoadFailures, () => clearLlmLoadFailures())
   ipcMain.handle(IPC.qcMeasure, (event, filePath: string) =>
     measureExport(filePath, (percent) => notifySender(event, IPC.qcProgress, percent))
   )
@@ -1003,7 +1020,7 @@ app.whenReady().then(() => {
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'プロジェクト・XML', extensions: ['veproj', 'xml'] },
-        { name: 'VideoEditorプロジェクト', extensions: ['veproj'] },
+        { name: `${PRODUCT_NAME}プロジェクト`, extensions: ['veproj'] },
         { name: 'Premiere の XML(FCP7)', extensions: ['xml'] }
       ]
     })
@@ -1018,38 +1035,9 @@ app.whenReady().then(() => {
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
   // 処理の記録に載せる PC の構成
-  ipcMain.handle(IPC.systemInfo, async () => {
-    const cpus = os.cpus()
-    let gpu: string[] = []
-    try {
-      const info = (await app.getGPUInfo('complete')) as {
-        gpuDevice?: {
-          vendorId?: number
-          deviceId?: number
-          active?: boolean
-          driverVersion?: string
-        }[]
-        auxAttributes?: { glRenderer?: string }
-      }
-      gpu = [
-        ...(info.auxAttributes?.glRenderer ? [info.auxAttributes.glRenderer] : []),
-        ...(info.gpuDevice ?? []).map(
-          (d) =>
-            `vendor 0x${(d.vendorId ?? 0).toString(16)} device 0x${(d.deviceId ?? 0).toString(16)}${d.driverVersion ? ` driver ${d.driverVersion}` : ''}${d.active ? '(使用中)' : ''}`
-        )
-      ]
-    } catch {
-      gpu = []
-    }
-    return {
-      os: `${os.type()} ${os.release()} (${os.arch()})`,
-      cpu: cpus[0]?.model?.trim() ?? '不明',
-      cores: cpus.length,
-      memoryGb: Math.round(os.totalmem() / 1024 ** 3),
-      gpu,
-      app: `${app.getName()} ${app.getVersion()} / Electron ${process.versions.electron}`
-    }
-  })
+  ipcMain.handle(IPC.systemInfo, () => collectSystemInfo())
+  // 画面の未処理のエラーを記録に残す(diagnostics。返事は要らない)
+  ipcMain.on(IPC.logRendererError, (_e, payload: unknown) => logRendererError(payload))
   ipcMain.handle(IPC.saveRunReport, async (event, defaultName: string, text: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.SaveDialogOptions = {

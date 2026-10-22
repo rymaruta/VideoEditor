@@ -26,6 +26,7 @@ import {
   type EditPolicy
 } from '@shared/structure/kind'
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
+import { LocalAiRetry } from './LocalAiRetry'
 import { ShortsPanel } from './ShortsPanel'
 import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
 
@@ -729,6 +730,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     <option value="off">使わない(簡易の点数)</option>
                   </select>
                 </label>
+                {aiProvider === 'local' && <LocalAiRetry refreshKey={running} />}
                 <label title={EDIT_POLICY_HINT[editPolicy]}>
                   大事にすること
                   <select

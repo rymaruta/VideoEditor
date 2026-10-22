@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { KeyStorageNote } from './KeyStorageNote'
 import { buildTimedClips, totalTimelineDuration } from '../lib/timelineMath'
 import { captureAiFrames } from '../lib/aiFrames'
 import {
@@ -179,6 +180,7 @@ export function MetadataPanel(): React.JSX.Element {
         {envKeySources.geminiApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
+        <KeyStorageNote names={['geminiApiKey']} />
       </div>
       <div className="trim-field">
         <label>出力言語</label>
