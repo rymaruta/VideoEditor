@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
@@ -135,5 +135,111 @@ describe('暗号化が使える起動・使えない起動の混在', () => {
     const s = await boot(storage, file)
     expect(s.getState().jamendoClientId).toBe('jam-main')
     expect(storage.has('ve-jamendo-client-id')).toBe(false)
+  })
+})
+
+describe('利用者が消した鍵・壊れた保存ファイル・読めない鍵の上書き(再監査)', () => {
+  it('暗号化できない起動で消した鍵は、暗号化できる起動に戻っても古い鍵に戻らない(main からも消す)', async () => {
+    const file = join(dir, 'clear-plain.json')
+    const storage = new Map<string, string>()
+    cipher.on = true
+    cipher.key = 'pc1'
+    let s = await boot(storage, file)
+    s.getState().setGeminiApiKey('AIza-leaked')
+    await settle()
+    cipher.on = false
+    s = await boot(storage, file)
+    s.getState().setGeminiApiKey('AIza-new')
+    s.getState().setGeminiApiKey('')
+    expect(storage.get('ve-gemini-api-key-cleared')).toBe('1')
+    cipher.on = true
+    s = await boot(storage, file)
+    expect(s.getState().geminiApiKey).toBe('')
+    expect(new SecretStore(file, cipher).load().values.geminiApiKey).toBeUndefined()
+    expect(storage.has('ve-gemini-api-key')).toBe(false)
+    expect(storage.has('ve-gemini-api-key-cleared')).toBe(false)
+    // 消した後に入れ直したら印は消え、新しい値が使われる
+    cipher.on = false
+    s = await boot(storage, file)
+    s.getState().setGeminiApiKey('')
+    s.getState().setGeminiApiKey('AIza-again')
+    expect(storage.has('ve-gemini-api-key-cleared')).toBe(false)
+    cipher.on = true
+    s = await boot(storage, file)
+    expect(s.getState().geminiApiKey).toBe('AIza-again')
+  })
+
+  it('暗号化できる起動で消したのに main に保存できなかったときも、次の起動で古い鍵に戻らない', async () => {
+    const file = join(dir, 'clear-fail.json')
+    const storage = new Map<string, string>()
+    cipher.on = true
+    let s = await boot(storage, file)
+    s.getState().setYoutubeApiKey('yt-old')
+    await settle()
+    const api = (globalThis as { window: { api: { secretsSet: unknown } } }).window.api
+    api.secretsSet = async () => false
+    s.getState().setYoutubeApiKey('')
+    await settle()
+    expect(storage.get('ve-youtube-api-key-cleared')).toBe('1')
+    s = await boot(storage, file)
+    expect(s.getState().youtubeApiKey).toBe('')
+    expect(new SecretStore(file, cipher).load().values.youtubeApiKey).toBeUndefined()
+  })
+
+  it('壊れた保存ファイルは .broken に退避して欄で知らせる(.broken は上書きせず番号を付ける)', async () => {
+    const file = join(dir, 'corrupt.json')
+    writeFileSync(`${file}.broken`, 'older broken')
+    writeFileSync(file, '{"version":1,"secrets":{"geminiApiKey":"abc"')
+    cipher.on = true
+    const s = await boot(new Map(), file)
+    expect(s.getState().secretsFileNote).toContain('corrupt.json.broken.1 に退避しました')
+    expect(readFileSync(`${file}.broken`, 'utf-8')).toBe('older broken')
+    expect(readFileSync(`${file}.broken.1`, 'utf-8')).toContain('"geminiApiKey":"abc"')
+    expect(existsSync(file)).toBe(false)
+  })
+
+  it('復号できない鍵の欄に1文字打っても、上書き前の暗号文を secrets.json.prev に残す', async () => {
+    const file = join(dir, 'prev.json')
+    const storage = new Map<string, string>()
+    cipher.on = true
+    cipher.key = 'pc1'
+    let s = await boot(storage, file)
+    s.getState().setFreesoundApiKey('fs-real')
+    await settle()
+    cipher.key = 'pc2'
+    s = await boot(storage, file)
+    s.getState().setFreesoundApiKey('x')
+    s.getState().setFreesoundApiKey('')
+    await settle()
+    cipher.key = 'pc1'
+    const prev = JSON.parse(readFileSync(`${file}.prev`, 'utf-8')) as {
+      secrets: Record<string, string>
+    }
+    expect(cipher.decrypt(Buffer.from(prev.secrets.freesoundApiKey, 'base64'))).toBe('fs-real')
+  })
+})
+
+describe('保存ファイルの形(再監査)', () => {
+  it('secrets がオブジェクトでなければ壊れたものとして退避し、新しく書く', () => {
+    const file = join(dir, 'shape.json')
+    writeFileSync(file, JSON.stringify({ secrets: 'oops' }))
+    cipher.on = true
+    cipher.key = 'pc1'
+    expect(new SecretStore(file, cipher).set('youtubeApiKey', 'y')).toBe(true)
+    expect(readFileSync(`${file}.broken`, 'utf-8')).toContain('oops')
+    expect(new SecretStore(file, cipher).load().values).toEqual({ youtubeApiKey: 'y' })
+  })
+
+  it('知らない名前の鍵は書き戻すときに残し、version が新しいファイルには書かない', () => {
+    const file = join(dir, 'unknown.json')
+    cipher.on = true
+    cipher.key = 'pc1'
+    writeFileSync(file, JSON.stringify({ version: 1, secrets: { openaiApiKey: 'ENC' } }))
+    expect(new SecretStore(file, cipher).set('youtubeApiKey', 'y')).toBe(true)
+    expect(JSON.parse(readFileSync(file, 'utf-8')).secrets.openaiApiKey).toBe('ENC')
+    const newer = JSON.stringify({ version: 2, secrets: { openaiApiKey: 'ENC' } })
+    writeFileSync(file, newer)
+    expect(new SecretStore(file, cipher).set('youtubeApiKey', 'y')).toBe(false)
+    expect(readFileSync(file, 'utf-8')).toBe(newer)
   })
 })

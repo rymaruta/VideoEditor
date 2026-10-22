@@ -45,6 +45,13 @@ export interface SecretsSnapshot {
    */
   unreadable?: SecretName[]
   unreadableCause?: 'decrypt' | 'unavailable'
+  /** 保存ファイルが壊れていた(`backup` の名前に移して残した)。鍵は入れ直しが要る */
+  corrupt?: { backup: string }
+}
+
+/** 「利用者が消した」印の localStorage の名前(触っていないのとを区別する) */
+export function clearedMarkKey(name: SecretName): string {
+  return `${LEGACY_SECRET_STORAGE_KEYS[name]}-cleared`
 }
 
 /** 欄に出す鍵の名前 */

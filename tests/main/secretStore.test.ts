@@ -110,7 +110,11 @@ describe('API キーの暗号化した保存', () => {
     const path = tempFile()
     writeFileSync(path, '{not json')
     const store = new SecretStore(path, fakeCipher())
-    expect(store.load()).toEqual({ available: true, values: {} })
+    expect(store.load()).toEqual({
+      available: true,
+      values: {},
+      corrupt: { backup: 'secrets.json.broken' }
+    })
     expect(store.set('freesoundApiKey', 'fs')).toBe(true)
     expect(readFileSync(`${path}.broken`, 'utf-8')).toBe('{not json')
     writeFileSync(path, JSON.stringify({ secrets: { evil: 'x', geminiApiKey: 5 } }))

@@ -13,11 +13,13 @@ export function KeyStorageNote({ names }: { names: readonly SecretName[] }): Rea
   const note = useSettingsStore((s) => s.keyStorageNote)
   const unreadableKeys = useSettingsStore((s) => s.unreadableKeys)
   const cause = useSettingsStore((s) => s.unreadableCause)
+  const fileNote = useSettingsStore((s) => s.secretsFileNote)
   const unreadable = names.filter((n) => unreadableKeys.includes(n))
-  if (mode !== 'plain' && unreadable.length === 0) return null
+  if (mode !== 'plain' && unreadable.length === 0 && !fileNote) return null
   const labels = unreadable.map((n) => SECRET_LABELS[n]).join('・')
   return (
     <>
+      {fileNote && <p className="hint-text">{fileNote}</p>}
       {unreadable.length > 0 && (
         <p className="hint-text">
           {cause === 'unavailable'

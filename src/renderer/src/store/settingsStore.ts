@@ -31,6 +31,7 @@ import {
 } from '@shared/structure/kind'
 import { ASR_LANGUAGES, DEFAULT_ASR_LANGUAGE, type AsrLanguage } from '@shared/transcript'
 import {
+  clearedMarkKey,
   LEGACY_SECRET_STORAGE_KEYS,
   legacySecretsToMigrate,
   SECRET_NAMES,
@@ -138,8 +139,15 @@ function persistSecret(name: SecretName, value: string): void {
       unreadableKeys: s.unreadableKeys.filter((n) => n !== name)
     }))
   const legacyKey = LEGACY_SECRET_STORAGE_KEYS[name]
-  if (keyStorageMode === 'plain') {
+  // 平文で置くとき、空(利用者が消した)には印を付ける。印が無いと「触っていない」と区別できず、
+  // 暗号化できる起動に戻ったときに main の古い鍵(漏れた鍵かもしれない)が戻る
+  const writePlain = (): void => {
     writeSetting(legacyKey, value)
+    if (value === '') writeSetting(clearedMarkKey(name), '1')
+    else removeSetting(clearedMarkKey(name))
+  }
+  if (keyStorageMode === 'plain') {
+    writePlain()
     return
   }
   if (keyStorageMode === 'pending') {
@@ -148,11 +156,15 @@ function persistSecret(name: SecretName, value: string): void {
     return
   }
   const api = secretsApi()
-  const fallback = (): void => writeSetting(legacyKey, value)
+  const fallback = writePlain
   if (!api) return fallback()
   void Promise.resolve(api.secretsSet(name, value)).then(
-    // 保存できたら、前に退避した平文を残さない(残ると次の起動で古い値に戻る)
-    (ok) => (ok ? removeSetting(legacyKey) : fallback()),
+    // 保存できたら、前に退避した平文・消した印を残さない(残ると次の起動で古い値に戻る)
+    (ok) => {
+      if (!ok) return fallback()
+      removeSetting(legacyKey)
+      removeSetting(clearedMarkKey(name))
+    },
     // 保存できなければ失わないよう今までどおり置く(次の起動でまた移す)
     fallback
   )
@@ -275,6 +287,8 @@ interface SettingsState {
   /** 保存してあるのに読めなかった鍵(欄に「入れ直してください」を出す) */
   unreadableKeys: SecretName[]
   unreadableCause: 'decrypt' | 'unavailable' | null
+  /** 鍵の保存ファイルが壊れていたときの一文(無ければ空) */
+  secretsFileNote: string
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -584,6 +598,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   keyStorageNote: '',
   unreadableKeys: [],
   unreadableCause: null,
+  secretsFileNote: '',
   loadEnvApiKeys: async () => {
     // 暗号化して保存した鍵を読み終えてから(後から読んだ鍵で .env の値を上書きしない)
     await secretsReady
@@ -627,6 +642,15 @@ sendAsrLanguage(useSettingsStore.getState().asrLanguage)
  * 起動時に、暗号化して保存した鍵を main から読み、前の版が localStorage に平文で置いた鍵を移す
  * (移せたものだけ消す)。暗号化が使えない PC では今までどおり localStorage を使う。
  */
+/** 保存ファイルが壊れていたときの一文 */
+function corruptNote(snapshot: SecretsSnapshot | null): string {
+  if (!snapshot?.corrupt) return ''
+  const where = snapshot.corrupt.backup
+    ? `${snapshot.corrupt.backup} に退避しました`
+    : '読めませんでした'
+  return `API キーの保存ファイルが壊れていたため、${where}。鍵を入れ直してください。`
+}
+
 async function initSecureKeys(api: SecretsApi): Promise<void> {
   let snapshot: SecretsSnapshot | null = null
   try {
@@ -642,7 +666,8 @@ async function initSecureKeys(api: SecretsApi): Promise<void> {
       // 暗号化して保存した鍵は、この起動では読めないだけ(main はファイルを消さない)。
       // この起動の localStorage に値があればそれを使っているので知らせない
       unreadableKeys: (snapshot?.unreadable ?? []).filter((n) => !s[n] && !touchedSecrets.has(n)),
-      unreadableCause: snapshot?.unreadableCause ?? null
+      unreadableCause: snapshot?.unreadableCause ?? null,
+      secretsFileNote: corruptNote(snapshot)
     }))
     return
   }
@@ -651,8 +676,25 @@ async function initSecureKeys(api: SecretsApi): Promise<void> {
   const legacy = legacySecretsToMigrate(readSetting)
   for (const name of SECRET_NAMES) {
     const value = legacy[name]
+    const cleared = readSetting(clearedMarkKey(name)) === '1'
+    if (value === undefined && cleared) {
+      // 暗号化できない起動の間に利用者が消した: main の鍵も消す(消せたら印を片付ける)
+      let ok = false
+      try {
+        ok = (await api.secretsSet(name, '')) === true
+      } catch {
+        ok = false
+      }
+      if (ok) {
+        removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+        removeSetting(clearedMarkKey(name))
+      }
+      delete values[name]
+      unreadable.delete(name)
+      continue
+    }
     if (value === undefined) {
-      // 空の項目は移さずに片付ける(空で main の鍵を消さない)
+      // 印の無い空の項目(前の版)は移さずに片付ける(空で main の鍵を消さない)
       if (readSetting(LEGACY_SECRET_STORAGE_KEYS[name]) === '')
         removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
       continue
@@ -665,7 +707,10 @@ async function initSecureKeys(api: SecretsApi): Promise<void> {
     }
     // 暗号化できなかった起動の間に入れ直した値を優先する(読めない古い値もこれで上書き)。
     // 移せなかったものは localStorage に残し、その値を使う(次の起動でまた移す)
-    if (ok) removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+    if (ok) {
+      removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+      removeSetting(clearedMarkKey(name))
+    }
     values[name] = value
     unreadable.delete(name)
   }
@@ -678,7 +723,8 @@ async function initSecureKeys(api: SecretsApi): Promise<void> {
       keyStorage: 'encrypted' as const,
       keyStorageNote: '',
       unreadableKeys: [...unreadable].filter((n) => !touchedSecrets.has(n)),
-      unreadableCause: unreadable.size > 0 ? (snapshot.unreadableCause ?? 'decrypt') : null
+      unreadableCause: unreadable.size > 0 ? (snapshot.unreadableCause ?? 'decrypt') : null,
+      secretsFileNote: corruptNote(snapshot)
     }
   })
 }
