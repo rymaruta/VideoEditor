@@ -10,7 +10,6 @@ import {
   intersectSegs,
   overridesWithin,
   spliceClips,
-  spliceTimed,
   subtractSegs,
   timelineWindowOf,
   type TimelineRange
@@ -6294,8 +6293,13 @@ export function rangedEditProject(base: Project, input: RangedEditInput): Ranged
   ).map((o) => ({ ...o, id: uuid() }) as TextOverlay)
   const isAuto = (o: TextOverlay): boolean =>
     !o.linkedClipId && autoTelopKey(o) !== null && (input.replaceTelop?.(o) ?? true)
-  const autoTelops = spliceTimed(followed.textOverlays.filter(isAuto), incoming, after)
-  let textOverlays = [...followed.textOverlays.filter((o) => !isAuto(o)), ...autoTelops.items]
+  // 範囲の境をまたぐ古いものは境で切って外側だけ残す(真ん中の時刻だけで入れ替えると、境をまたぐ古い
+  // 枚が丸ごと残り、同じ発言の新しい枚と2枚同時に出ていた)
+  let textOverlays = [
+    ...followed.textOverlays.filter((o) => !isAuto(o)),
+    ...followed.textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, after)),
+    ...incoming.flatMap((o) => telopWithin(o, after))
+  ]
 
   // リップル: 範囲より後ろの手置き(自動の印も紐づきも無いもの)も、長さの変わりだけ動かす
   let movedHand = 0
@@ -6584,6 +6588,49 @@ function joinAt(clips: Clip[], i: number): Clip[] {
   return [...clips.slice(0, i), { ...a, outPoint: b.outPoint }, ...clips.slice(i + 2)]
 }
 
+/** 境で切ったテロップの切れ端の最短(これより短い切れ端は出さない。仮編集の発言テロップと同じ) */
+const MIN_TELOP_PIECE_SEC = 0.3
+
+/** テロップの [a, b) の所(カラオケの言葉も切る)。短すぎれば無し */
+function telopPiece(o: TextOverlay, a: number, b: number): TextOverlay | null {
+  const start = Math.max(o.startTime, a)
+  const end = Math.min(o.endTime, b)
+  if (start <= o.startTime + 1e-9 && end >= o.endTime - 1e-9) return o
+  if (end - start < MIN_TELOP_PIECE_SEC) return null
+  const words = o.words?.filter((x) => {
+    const m = (x.start + x.end) / 2
+    return m >= start && m < end
+  })
+  return {
+    ...o,
+    startTime: start,
+    endTime: end,
+    ...(o.words ? { words: words && words.length > 0 ? words : undefined } : {})
+  }
+}
+
+/** テロップの、区間 `r` の外の所(またぐものは境で切る。長さの無いものは頭の時刻で決める) */
+function telopOutside(o: TextOverlay, r: TimelineRange): TextOverlay[] {
+  if (o.endTime - o.startTime <= 1e-6)
+    return o.startTime >= r.start - 1e-6 && o.startTime < r.end - 1e-6 ? [] : [o]
+  if (o.endTime <= r.start + 1e-6 || o.startTime >= r.end - 1e-6) return [o]
+  const left = o.startTime < r.start ? telopPiece(o, -Infinity, r.start) : null
+  const right = o.endTime > r.end ? telopPiece(o, r.end, Infinity) : null
+  // 両側に残るなら後ろの切れ端は別の枚(別の id)
+  return [left, right && left ? { ...right, id: uuid() } : right].filter(
+    (x): x is TextOverlay => x !== null
+  )
+}
+
+/** テロップの、区間 `r` の中の所(またぐものは境で切る。長さの無いものは頭の時刻で決める) */
+function telopWithin<T extends TextOverlay>(o: T, r: TimelineRange): T[] {
+  if (o.endTime - o.startTime <= 1e-6)
+    return o.startTime >= r.start - 1e-6 && o.startTime < r.end - 1e-6 ? [o] : []
+  if (o.endTime <= r.start + 1e-6 || o.startTime >= r.end - 1e-6) return []
+  const piece = telopPiece(o, r.start, r.end)
+  return piece ? [piece as T] : []
+}
+
 /** 時刻のあるクリップの、タイムラインの区間 [a, b) の中の所(掛かるものは境で切る) */
 function insideWindow<
   C extends { id: string; startTime: number; inPoint: number; outPoint: number; speed?: number }
@@ -6659,19 +6706,22 @@ function restoreLockedContent(
     })
     // 自動テロップ: 真ん中の時刻が範囲の中の新しいものは捨て、前のものを残す
     const isAuto = (o: TextOverlay): boolean => !o.linkedClipId && autoTelopKey(o) !== null
-    const midIn = (o: TextOverlay, r: TimelineRange): boolean => {
-      const m = (o.startTime + o.endTime) / 2
-      return m >= r.start - 1e-6 && m < r.end - 1e-6
-    }
+    // 境をまたぐものは境で切る(新しいものは外側だけ、前のものは中だけ。2枚同時に出さない)
     const back = prev.textOverlays
-      .filter((o) => isAuto(o) && midIn(o, w.prev))
+      .filter(isAuto)
+      .flatMap((o) => telopWithin(o, w.prev))
       .map((o) => ({
         ...o,
+        id: uuid(),
         startTime: o.startTime + shift,
         endTime: o.endTime + shift,
         words: shiftOverlayWords(o.words, shift)
       }))
-    textOverlays = [...textOverlays.filter((o) => !(isAuto(o) && midIn(o, now))), ...back]
+    textOverlays = [
+      ...textOverlays.filter((o) => !isAuto(o)),
+      ...textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, now)),
+      ...back
+    ]
   }
   return { ...project, audioTracks, videoOverlayTracks, textOverlays }
 }

@@ -42,7 +42,6 @@ import { buildMulticamLayout } from '@shared/sync/multicamLayout'
 import type { MediaAsset } from '@shared/types'
 import {
   isUntouchedAuto,
-  mergeLocks,
   onProjectSwitch,
   rangedEditProject,
   useProjectStore,
@@ -330,6 +329,8 @@ interface PipelineState {
    */
   rangeReview: RangeReview | null
   closeRangeReview: () => void
+  /** 範囲の自動編集の記録を入れ替えて企画に覚える(取り消し・やり直しで行き来させる) */
+  setRangeRuns: (runs: RangeRun[]) => void
   /**
    * 選んだ範囲(タイムラインの秒)だけを自動で作り直す用意をする(企画には当てない)。
    * 境は静かな所・フレームへ寄せる。使えない・作れないときは理由を返す
@@ -1463,18 +1464,26 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     set({ lastSpans: plan.cut.spans, speechTelops: telops, carriedTelops: remember })
     // この作り直しで使う付け直しは、取り消しで戻したものでも、ここからはこの作り直しの記録になる
     for (const id of released.touched) revivedFrom.delete(id)
-    useProjectStore
-      .getState()
-      .applyRoughCut(
-        plan.cut,
-        [
-          ...telops.filter((o) => !o.utteranceId || !bubbled.has(o.utteranceId)),
-          ...effectTelops,
-          ...carried
-        ],
-        overrides,
-        locks.length > 0 ? { windows: locks, overrides: keptOverrides } : undefined
-      )
+    useProjectStore.getState().applyRoughCut(
+      plan.cut,
+      [
+        ...telops.filter((o) => !o.utteranceId || !bubbled.has(o.utteranceId)),
+        ...effectTelops,
+        ...carried
+      ],
+      overrides,
+      locks.length > 0
+        ? {
+            windows: locks,
+            // ロックの中は、覚えている手直しも作り直す前のまま(組んだ本編の記録も前のままなので、
+            // ロックの中の手直し・その取り消しを、ロックを外した後に今の本編から読み取れる)
+            overrides: mergeOverrideParts(
+              overridesWithin(keptOverrides, locks, false),
+              overridesWithin(project.cutOverrides, locks, true)
+            )
+          }
+        : undefined
+    )
     if (hasOverrides(overrides))
       log(
         `本編の手直しを当て直しました(削った区間 ${overrides!.removed.length}・足した区間 ${overrides!.added.length}・替えたカメラ ${overrides!.angles.length})`
@@ -2298,20 +2307,29 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // 本編の修正: 範囲の中の手直しを残すなら、作り直しと同じく今の本編から読み取った判断の、窓の中だけ。
       // カットをやり直さないなら今の残し方に、アングルをやり直さないなら今のカメラに固定する
       const current = coverageOfClips(project.clips, info)
-      let kept: CutOverrides | undefined
-      if (options.keepInside) {
-        const released = releasedKeep(project)
-        kept = overridesWithin(
-          releaseOverridesForScenes(
-            project.roughCutAuto
-              ? updateOverrides(project.cutOverrides, project.roughCutAuto, current)
-              : project.cutOverrides,
-            released.scenes,
-            released.keep
-          ),
-          [win]
-        )
-      }
+      // 窓の中の人の手直し(作り直しと同じく今の本編から読み取ったもの)
+      const released = releasedKeep(project)
+      const read = overridesWithin(
+        releaseOverridesForScenes(
+          project.roughCutAuto
+            ? updateOverrides(project.cutOverrides, project.roughCutAuto, current)
+            : project.cutOverrides,
+          released.scenes,
+          released.keep
+        ),
+        [win]
+      )
+      const kept = options.keepInside ? read : undefined
+      // 企画に覚え直す窓の中の手直し。残すときは全部。カット・アングルをやり直さない(今の中身に固定する)
+      // ときは、その種類の手直しを残す(覚えないと、固定した中身が「自動」になり、手直しが次の全体の
+      // 作り直しで戻る)
+      const remembered: CutOverrides | undefined = read
+        ? {
+            removed: options.keepInside || !steps.cut ? read.removed : [],
+            added: options.keepInside || !steps.cut ? read.added : [],
+            angles: options.keepInside || !steps.angles ? read.angles : []
+          }
+        : undefined
       let overrides = kept
       if (!steps.cut || !steps.angles) {
         const pin = pinOverrides([win], current)
@@ -2418,7 +2436,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           ...effectTelops
         ],
         keepLength: options.keepLength,
-        keptOverrides: options.keepInside ? kept : undefined,
+        keptOverrides: remembered,
         replaceTelop: (o) =>
           o.utteranceId ? steps.speech : steps.effects && proposals.has(o.effectId ?? '')
       })
@@ -2495,14 +2513,19 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           reason: '用意している間に本編が直されたため、やめました。もう一度選んでください'
         }
       // 終わったらロックする: 当てるのと同じ1回の取り消しで戻るよう、当てる企画に入れておく
-      if (options.lockAfter)
+      // ロックするのは、選んだタイムラインの範囲に当てた後の中身の所だけ(落とした場面をまたいだ窓の
+      // 全体ではない)。ほかのロックとはまとめない
+      if (options.lockAfter) {
+        const lockWin = commonWindowOf(after.clips, info, result.range)
+        const w = lockWin.ok ? lockWin.window : win
         after = {
           ...after,
-          autoEditLocks: mergeLocks([
+          autoEditLocks: [
             ...(after.autoEditLocks ?? []),
-            { id: uuid(), start: win.start, end: win.end }
-          ])
+            { id: uuid(), start: w.start, end: w.end }
+          ]
         }
+      }
       const summary = summarizeRangedEdit(project, after, range, result.range, {
         movedHand: result.movedHand,
         insideHand: result.insideHand,
@@ -2529,6 +2552,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     },
     applyRangedEdit: (preview) => {
       if (get().running) return { ok: false, reason: '自動編集が動いている間は当てられません' }
+      // 使った付け直しは、当てる時の一覧で決める(用意してから当てるまでに付け直した・外したものも)。
+      // 当てると場面にクリップが戻り、付け直しの一覧から外れるので、当てる前に読む
+      const usedNow = get().keepTouched.filter((id) => preview.sceneIds.includes(id))
       const ok = useProjectStore.getState().applyRangedProject(preview.after, preview.base)
       if (!ok) {
         log(
@@ -2556,15 +2582,20 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         .scenes.map((sc) => sc.id)
         .filter((id) => keptNow.has(id))
       const applied = useProjectStore.getState().project
-      if (preview.usedTouches.length > 0) usedTouches.set(preview.base.clips, preview.usedTouches)
-      const used = new Set(preview.usedTouches)
+      if (usedNow.length > 0) usedTouches.set(preview.base.clips, usedNow)
+      const used = new Set(usedNow)
+      const run = { start: preview.window.start, end: preview.window.end, at: Date.now() }
+      // 取り消し・やり直しで、範囲の自動編集の記録とイン点・アウト点(ルーラーの範囲)も行き来させる
+      rangeApplied.set(applied.clips, {
+        run,
+        baseClips: preview.base.clips,
+        oldRange: preview.range,
+        newRange: preview.newRange
+      })
       set((s) => ({
         builtKept: builtKeptWith(s.builtKept, cutSignature(applied.roughCutAuto), keptIds),
         keepTouched: s.keepTouched.filter((id) => !used.has(id)),
-        rangeRuns: [
-          ...s.rangeRuns,
-          { start: preview.window.start, end: preview.window.end, at: Date.now() }
-        ].slice(-RANGE_RUNS_MAX),
+        rangeRuns: [...s.rangeRuns, run].slice(-RANGE_RUNS_MAX),
         roughCut: s.roughCut
           ? {
               ...s.roughCut,
@@ -2590,9 +2621,67 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
       return { ok: true }
     },
+    setRangeRuns: (runs) => {
+      set({ rangeRuns: runs })
+      persistDecisions()
+    },
     markReviewed: (key, reviewed) => useProjectStore.getState().setReviewed(key, reviewed)
   }
 })
+
+/** 当てた後の本編(クリップの並び)→ その範囲の自動編集(取り消し・やり直しで記録を行き来させる) */
+const rangeApplied = new WeakMap<
+  readonly unknown[],
+  { run: RangeRun; baseClips: readonly unknown[]; oldRange: TimelineRange; newRange: TimelineRange }
+>()
+
+/** イン点・アウト点・ルーラーの範囲が `from` を指していれば `to` へ移す */
+function moveMarkedRange(from: TimelineRange, to: TimelineRange): void {
+  const st = useProjectStore.getState()
+  const same = (a: number | null | undefined, b: number): boolean =>
+    a !== null && a !== undefined && Math.abs(a - b) < 1e-6
+  if (same(st.timelineIn, from.start) && same(st.timelineOut, from.end)) {
+    st.setTimelineIn(null)
+    st.setTimelineOut(to.end)
+    st.setTimelineIn(to.start)
+  }
+  if (st.dragRange && same(st.dragRange.start, from.start) && same(st.dragRange.end, from.end))
+    st.setDragRange({ ...to })
+}
+
+// 範囲の自動編集を取り消したら記録(全体の作り直しの前の確認に使う)を外し、やり直したら戻す。
+// 当てた後に動かしたイン点・アウト点・ルーラーの範囲も一緒に戻す
+useProjectStore.subscribe((state, prev) => {
+  if (state.project.clips === prev.project.clips) return
+  const undone = rangeApplied.get(prev.project.clips)
+  if (undone && undone.baseClips === state.project.clips) {
+    const runs = usePipelineStore.getState().rangeRuns
+    if (runs.includes(undone.run))
+      usePipelineStore.getState().setRangeRuns(runs.filter((r) => r !== undone.run))
+    moveMarkedRange(undone.newRange, undone.oldRange)
+  }
+  const redone = rangeApplied.get(state.project.clips)
+  if (redone && redone.baseClips === prev.project.clips) {
+    const runs = usePipelineStore.getState().rangeRuns
+    if (!runs.includes(redone.run))
+      usePipelineStore.getState().setRangeRuns([...runs, redone.run].slice(-RANGE_RUNS_MAX))
+    moveMarkedRange(redone.oldRange, redone.newRange)
+  }
+})
+
+/** 本編の修正を重ねる(重ならない窓の内と外を合わせる) */
+function mergeOverrideParts(
+  a: CutOverrides | undefined,
+  b: CutOverrides | undefined
+): CutOverrides | undefined {
+  if (!a) return b
+  if (!b) return a
+  return {
+    removed: [...a.removed, ...b.removed].sort((x, y) => x.start - y.start),
+    added: [...a.added, ...b.added].sort((x, y) => x.start - y.start),
+    angles: [...a.angles, ...b.angles].sort((x, y) => x.start - y.start)
+  }
+}
 
 /** 自動編集で触らない範囲の、作り直す前と後のタイムラインの区間と、作り直す前の企画 */
 interface LockedSounds {

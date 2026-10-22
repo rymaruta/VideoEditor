@@ -501,7 +501,13 @@ export function planRoughCut(
   if (options.window) {
     pieces = clampPieces(overridden, options.window)
     if (options.window.fitSec !== undefined) {
-      const fitted = fitLength(pieces, options.window.fitSec, options.window)
+      // 人が削った区間へは伸ばさない(手直しを残すとき、削った所が埋め戻されていた)
+      const fitted = fitLength(
+        pieces,
+        options.window.fitSec,
+        options.window,
+        options.overrides?.removed
+      )
       pieces = fitted.pieces
       fitShort = fitted.short
     }

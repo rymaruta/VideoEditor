@@ -251,8 +251,24 @@ export function clampPieces(pieces: readonly CutRange[], window: Range): CutRang
 export function fitLength(
   pieces: readonly CutRange[],
   target: number,
-  window: Range
+  window: Range,
+  /** 伸ばしてはいけない所(人が削った区間)。伸ばすのはその手前まで */
+  blocked: readonly Range[] = []
 ): { pieces: CutRange[]; short: number } {
+  const stops = unionRanges(blocked)
+  /** t から後ろへ伸ばせる限り(削った区間の頭まで) */
+  const forwardStop = (t: number): number => {
+    for (const b of stops) if (b.end > t + EPS) return b.start <= t + EPS ? t : b.start
+    return Infinity
+  }
+  /** t から前へ伸ばせる限り(削った区間の終わりまで) */
+  const backwardStop = (t: number): number => {
+    for (let i = stops.length - 1; i >= 0; i--) {
+      const b = stops[i]
+      if (b.start < t - EPS) return b.end >= t - EPS ? t : b.end
+    }
+    return -Infinity
+  }
   const out = pieces.map((p) => ({ ...p })).sort((a, b) => a.start - b.start)
   const total = (): number => out.reduce((t, p) => t + (p.end - p.start), 0)
   let diff = total() - target
@@ -272,7 +288,10 @@ export function fitLength(
   let need = -diff
   // 後ろへ伸ばす(最後の区間から)
   for (let i = out.length - 1; i >= 0 && need > EPS; i--) {
-    const limit = i + 1 < out.length ? out[i + 1].start : window.end
+    const limit = Math.min(
+      i + 1 < out.length ? out[i + 1].start : window.end,
+      forwardStop(out[i].end)
+    )
     const room = Math.max(0, limit - out[i].end)
     const take = Math.min(room, need)
     out[i].end += take
@@ -280,15 +299,16 @@ export function fitLength(
   }
   // 前へ伸ばす(頭の区間から)
   for (let i = 0; i < out.length && need > EPS; i++) {
-    const limit = i > 0 ? out[i - 1].end : window.start
+    const limit = Math.max(i > 0 ? out[i - 1].end : window.start, backwardStop(out[i].start))
     const room = Math.max(0, out[i].start - limit)
     const take = Math.min(room, need)
     out[i].start -= take
     need -= take
   }
   if (out.length === 0 && need > EPS && window.end - window.start > EPS) {
-    const take = Math.min(need, window.end - window.start)
-    out.push({ start: window.start, end: window.start + take })
+    const end = Math.min(window.end, forwardStop(window.start))
+    const take = Math.min(need, Math.max(0, end - window.start))
+    if (take > EPS) out.push({ start: window.start, end: window.start + take })
     need -= take
   }
   return { pieces: out, short: Math.max(0, need) }

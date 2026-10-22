@@ -146,8 +146,12 @@ export function RangeAutoEditDialog({
         ) : (
           <>
             <p className="form-note">
-              範囲の中だけを、自動編集と同じやり方で作り直します。範囲の外の本編・手で直した所はそのままです。
-              境は近くの静かな所へ寄せます。
+              範囲の中だけを、自動編集と同じやり方で作り直します。範囲の外の本編はそのままです。
+              範囲の中の手直し(削った・足した所、替えたカメラ)は、下の「手直しを残す」を入れない限り
+              自動の結果に置き換わります。
+              {origin === 'marks'
+                ? 'イン点・アウト点の所をそのまま使います。'
+                : '境は近くの静かな所へ寄せます。'}
             </p>
             <fieldset className="range-auto-edit-steps">
               <legend>やり直す工程</legend>
@@ -226,6 +230,16 @@ export function RangeAutoEditDialog({
                   <span className="form-note">後</span>
                   <Strip pieces={sm.stripAfter} length={sm.lengthAfter} scale={scale} />
                 </div>
+                {sm.lengthAfter > sm.lengthBefore * 1.5 + 5 && (
+                  <p className="range-auto-edit-grow" role="alert">
+                    落とした場面の所も作り直すため、範囲が {sec(sm.lengthBefore)} から{' '}
+                    {sec(sm.lengthAfter)} に伸びます(
+                    {options.keepLength
+                      ? '長さを保つ'
+                      : `後ろが ${sec(sm.lengthAfter - sm.lengthBefore)} 送られます`}
+                    )
+                  </p>
+                )}
                 <dl>
                   <dt>範囲の長さ</dt>
                   <dd>

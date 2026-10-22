@@ -269,8 +269,15 @@ describe('範囲だけ自動編集する', () => {
             )
         ),
         ...p.textOverlays
-          .filter((o) => o.utteranceId && inW((o.startTime + o.endTime) / 2))
-          .map((o) => `t|${o.text}|${rel(o.startTime)}`)
+          // ロックの境をまたぐ発言テロップは、ロックの中の所(0.3 秒以上)を比べる
+          .filter(
+            (o) =>
+              o.utteranceId && Math.min(o.endTime, w.end) - Math.max(o.startTime, w.start) >= 0.3
+          )
+          .map(
+            (o) =>
+              `t|${o.text}|${rel(Math.max(o.startTime, w.start))}|${rel(Math.min(o.endTime, w.end))}`
+          )
       ].sort()
     }
     const before = snapshot()
@@ -357,6 +364,64 @@ describe('範囲だけ自動編集する', () => {
       })
       // 抜いた後は用意した範囲の自動編集を当てない(本編が変わった)
       expect(usePipelineStore.getState().applyRangedEdit(r.preview).ok).toBe(false)
+    })
+  })
+
+  describe('取り消し・やり直しと一緒に戻るもの(7211975 の監査)', () => {
+    it('範囲の自動編集の記録とイン点・アウト点は、取り消しで戻り、やり直しでまた進む', async () => {
+      await episode()
+      const total = mainLength(project())
+      useProjectStore.getState().seekTo(Math.round(total * 0.3 * 30) / 30)
+      markIn()
+      useProjectStore.getState().seekTo(Math.round(total * 0.6 * 30) / 30)
+      markOut()
+      const st0 = useProjectStore.getState()
+      const range = { start: st0.timelineIn!, end: st0.timelineOut! }
+      const r = await usePipelineStore
+        .getState()
+        .prepareRangedEdit(range, DEFAULT_RANGED_OPTIONS, { exact: true })
+      if (!r.ok) throw new Error(r.reason)
+      expect(usePipelineStore.getState().applyRangedEdit(r.preview).ok).toBe(true)
+      // ダイアログと同じく、当てた後はイン点・アウト点を新しい範囲へ
+      const st = useProjectStore.getState()
+      st.setTimelineIn(null)
+      st.setTimelineOut(r.preview.newRange.end)
+      st.setTimelineIn(r.preview.newRange.start)
+      expect(usePipelineStore.getState().rangeRuns).toHaveLength(1)
+      expect(project().autoEdit?.rangeRuns).toHaveLength(1)
+      useProjectStore.getState().undo()
+      expect(usePipelineStore.getState().rangeRuns).toEqual([])
+      expect(project().autoEdit?.rangeRuns).toBeUndefined()
+      expect(useProjectStore.getState().timelineIn).toBe(range.start)
+      expect(useProjectStore.getState().timelineOut).toBe(range.end)
+      useProjectStore.getState().redo()
+      expect(usePipelineStore.getState().rangeRuns).toHaveLength(1)
+      expect(useProjectStore.getState().timelineIn).toBeCloseTo(r.preview.newRange.start, 9)
+      expect(useProjectStore.getState().timelineOut).toBeCloseTo(r.preview.newRange.end, 9)
+    })
+
+    it('「終わったらロック」は当てた後の範囲の所だけをロックし、ほかのロックとまとめない', async () => {
+      await episode()
+      const total = mainLength(project())
+      const info = project().multicam!
+      // 先に頭の所をロックしておく
+      const head = commonWindowOf(project().clips, info, { start: 0, end: total * 0.2 })
+      if (!head.ok) throw new Error(head.reason)
+      useProjectStore.getState().addAutoEditLock(head.window)
+      const r = await usePipelineStore
+        .getState()
+        .prepareRangedEdit(
+          { start: total * 0.4, end: total * 0.8 },
+          { ...DEFAULT_RANGED_OPTIONS, lockAfter: true }
+        )
+      if (!r.ok) throw new Error(r.reason)
+      usePipelineStore.getState().applyRangedEdit(r.preview)
+      const locks = project().autoEditLocks!
+      expect(locks).toHaveLength(2)
+      const cw = commonWindowOf(project().clips, info, r.preview.newRange)
+      if (!cw.ok) throw new Error(cw.reason)
+      expect(locks[1].start).toBeCloseTo(cw.window.start, 6)
+      expect(locks[1].end).toBeCloseTo(cw.window.end, 6)
     })
   })
 })

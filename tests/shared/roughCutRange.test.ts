@@ -243,6 +243,29 @@ describe('fitLength', () => {
       { start: 20, end: 40 }
     ])
   })
+  it('人が削った区間へは伸ばさない(足りなければ足りない秒を返す)', () => {
+    const r = fitLength(
+      [
+        { start: 0, end: 10 },
+        { start: 20, end: 30 }
+      ],
+      30,
+      W,
+      [{ start: 33, end: 60 }]
+    )
+    // 30〜33 まで伸ばし、残り 7 秒は前へ(10〜17)。削った 33〜60 には入らない
+    expect(r.short).toBe(0)
+    expect(r.pieces).toEqual([
+      { start: 0, end: 17 },
+      { start: 20, end: 33 }
+    ])
+    const r2 = fitLength([{ start: 10, end: 20 }], 30, { start: 0, end: 40 }, [
+      { start: 0, end: 10 },
+      { start: 20, end: 40 }
+    ])
+    expect(r2.pieces).toEqual([{ start: 10, end: 20 }])
+    expect(r2.short).toBeCloseTo(20)
+  })
   it('窓の素材で埋めきれなければ足りない秒を返す', () => {
     const r = fitLength([{ start: 10, end: 20 }], 30, { start: 5, end: 25 })
     expect(r.pieces).toEqual([{ start: 5, end: 25 }])
