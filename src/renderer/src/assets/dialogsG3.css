@@ -172,7 +172,7 @@
   box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
 }
 .export-dialog-summary dl > div {
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 76px minmax(0, 1fr);
   gap: 10px;
   padding: 9px 12px;
   font-size: var(--ve-fs-13);
@@ -280,28 +280,34 @@
 }
 
 /* ---------- 書き出し中・完了 ---------- */
+/* 書き出し中: 段階と % を上に、下に 4px の溝と進み具合(空のときも溝が見えるので入力欄に見えない) */
 .export-dialog-progress .progress-bar {
-  height: 40px;
-  margin-top: 0;
-  border-radius: 10px;
-  background: #0b0d16;
-  box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
-}
-/* 帯は全体の高さに淡い琥珀、下に濃い線(数字は帯の上でも 4.5:1 以上の白) */
-.export-dialog-progress .progress-bar-fill {
-  top: 0;
   height: auto;
-  bottom: 0;
-  background: linear-gradient(90deg, rgba(255, 178, 36, 0.1), rgba(255, 122, 31, 0.26));
-  box-shadow:
-    inset 0 -3px 0 #ffa62b,
-    inset -2px 0 0 #ffd25c,
-    6px 0 18px rgba(255, 150, 40, 0.35);
+  margin-top: 0;
+  padding: var(--ve-space-3) var(--ve-space-3) calc(var(--ve-space-3) + 8px);
+  display: block;
+  border-radius: var(--ve-radius-lg);
+  background:
+    linear-gradient(var(--ve-surface-sunken), var(--ve-surface-sunken)) var(--ve-space-3)
+      calc(100% - var(--ve-space-3)) / calc(100% - var(--ve-space-6)) 4px no-repeat,
+    linear-gradient(135deg, var(--ve-selection-fill), transparent 70%);
+  box-shadow: inset 0 0 0 1px var(--ve-primary-line);
+}
+.export-dialog-progress .progress-bar-fill {
+  top: auto;
+  left: var(--ve-space-3);
+  bottom: var(--ve-space-3);
+  height: 4px;
+  max-width: calc(100% - var(--ve-space-6));
+  border-radius: 2px;
+  background: var(--ve-primary-fill);
+  box-shadow: none;
 }
 .export-dialog-progress .progress-bar span {
-  font-size: var(--ve-fs-13);
-  font-weight: var(--ve-fw-semibold);
+  display: block;
+  font: var(--ve-type-label);
   color: var(--ve-text-1);
+  white-space: normal;
 }
 .export-done {
   margin-top: 0;
