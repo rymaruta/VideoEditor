@@ -81,7 +81,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
         {envKeySources.youtubeApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
-        <KeyStorageNote />
+        <KeyStorageNote names={['youtubeApiKey']} />
       </div>
       <div className="youtube-search-row">
         <button className="primary-button" onClick={handleTrending} disabled={loading}>

@@ -68,24 +68,51 @@ describe('API キーの暗号化した保存', () => {
     expect(store.load().values).toEqual({})
   })
 
-  it('復号できない値(OS の鍵が変わった)は無いものとして扱い、ほかは読める', () => {
+  it('復号できない値(OS の鍵が変わった)は黙って空にせず「読めない」と返し、ほかは読める', () => {
     const path = tempFile()
     const a = fakeCipher()
     const store = new SecretStore(path, a)
     store.set('geminiApiKey', 'old')
     a.key = 'k2'
     store.set('youtubeApiKey', 'new')
-    expect(new SecretStore(path, a).load().values).toEqual({ youtubeApiKey: 'new' })
+    expect(new SecretStore(path, a).load()).toEqual({
+      available: true,
+      values: { youtubeApiKey: 'new' },
+      unreadable: ['geminiApiKey'],
+      unreadableCause: 'decrypt'
+    })
     // ファイルには残す(OS の鍵が戻れば読める)
     a.key = 'k1'
     expect(new SecretStore(path, a).load().values).toEqual({ geminiApiKey: 'old' })
   })
 
-  it('壊れたファイル・知らない項目があっても落ちず、上書きで直る', () => {
+  it('暗号化が使えない起動では、保存してある鍵を「この起動では読めない」と返し、ファイルは変えない', () => {
+    const path = tempFile()
+    const cipher = fakeCipher()
+    new SecretStore(path, cipher).set('geminiApiKey', 'kept')
+    const before = readFileSync(path, 'utf-8')
+    const off = new SecretStore(path, fakeCipher(false))
+    expect(off.load()).toEqual({
+      available: false,
+      reason: '鍵の保管場所がありません',
+      values: {},
+      unreadable: ['geminiApiKey'],
+      unreadableCause: 'unavailable'
+    })
+    expect(off.set('geminiApiKey', 'typed-while-off')).toBe(false)
+    expect(off.set('youtubeApiKey', '')).toBe(false)
+    expect(readFileSync(path, 'utf-8')).toBe(before)
+    // 使える起動に戻れば読める
+    expect(new SecretStore(path, cipher).load().values).toEqual({ geminiApiKey: 'kept' })
+  })
+
+  it('壊れたファイル・知らない項目があっても落ちず、上書きで直る(壊れたものは退避して残す)', () => {
     const path = tempFile()
     writeFileSync(path, '{not json')
     const store = new SecretStore(path, fakeCipher())
     expect(store.load()).toEqual({ available: true, values: {} })
+    expect(store.set('freesoundApiKey', 'fs')).toBe(true)
+    expect(readFileSync(`${path}.broken`, 'utf-8')).toBe('{not json')
     writeFileSync(path, JSON.stringify({ secrets: { evil: 'x', geminiApiKey: 5 } }))
     expect(store.load().values).toEqual({})
     expect(store.set('jamendoClientId', 'jam')).toBe(true)
@@ -102,7 +129,7 @@ describe('API キーの暗号化した保存', () => {
 })
 
 describe('前の版の localStorage から移す鍵', () => {
-  it('10/09 版以前と同じ名前で読み、空(消した)も移す。読めない・長すぎるものは移さない', () => {
+  it('10/09 版以前と同じ名前で読む。空・読めない・長すぎるものは移さない', () => {
     // 10/09 版(c25f5af)の settingsStore と同じ名前
     expect(LEGACY_SECRET_STORAGE_KEYS).toEqual({
       youtubeApiKey: 've-youtube-api-key',
@@ -116,8 +143,7 @@ describe('前の版の localStorage から移す鍵', () => {
       've-freesound-api-key': 'x'.repeat(5000)
     }
     expect(legacySecretsToMigrate((k) => stored[k] ?? null)).toEqual({
-      geminiApiKey: 'g',
-      youtubeApiKey: ''
+      geminiApiKey: 'g'
     })
     expect(
       legacySecretsToMigrate(() => {

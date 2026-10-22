@@ -38,12 +38,27 @@ export interface SecretsSnapshot {
   reason?: string
   /** 復号できた鍵(無いものは入れない) */
   values: Partial<Record<SecretName, string>>
+  /**
+   * 保存してあるのに読めなかった鍵(黙って空にせず、欄に知らせる)。
+   * `decrypt`: 復号できなかった(別の PC から移した・OS の鍵が変わった)。
+   * `unavailable`: この起動では暗号化が使えないので読めない(ファイルは消していない)
+   */
+  unreadable?: SecretName[]
+  unreadableCause?: 'decrypt' | 'unavailable'
+}
+
+/** 欄に出す鍵の名前 */
+export const SECRET_LABELS: Record<SecretName, string> = {
+  geminiApiKey: 'Gemini API キー',
+  youtubeApiKey: 'YouTube Data API キー',
+  jamendoClientId: 'Jamendo Client ID',
+  freesoundApiKey: 'Freesound API キー'
 }
 
 /**
  * localStorage に残っている鍵のうち、main へ移すもの。
- * 残っている値(空も「消した」として)を優先する: 暗号化が使えなかった間に、利用者が
- * 入れ直した・消したものがそこにあるため。
+ * 残っている値を main の値より優先する: 暗号化が使えなかった起動の間に、利用者が入れ直した
+ * 新しい値がそこにあるため。**空は移さない**(空で main の鍵を消さない。空の項目は片付けるだけ)。
  */
 export function legacySecretsToMigrate(
   read: (storageKey: string) => string | null
@@ -56,7 +71,8 @@ export function legacySecretsToMigrate(
     } catch {
       value = null
     }
-    if (typeof value === 'string' && value.length <= MAX_SECRET_LENGTH) out[name] = value
+    if (typeof value === 'string' && value !== '' && value.length <= MAX_SECRET_LENGTH)
+      out[name] = value
   }
   return out
 }

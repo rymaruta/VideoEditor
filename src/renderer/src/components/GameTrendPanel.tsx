@@ -208,7 +208,7 @@ export function GameTrendPanel(): React.JSX.Element {
         {envKeySources.geminiApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
-        <KeyStorageNote />
+        <KeyStorageNote names={['youtubeApiKey', 'geminiApiKey']} />
       </div>
       <div className="youtube-field">
         <label>分析の観点(任意)</label>

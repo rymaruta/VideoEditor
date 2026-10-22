@@ -177,7 +177,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
         {(kind === 'music' ? envKeySources.jamendoClientId : envKeySources.freesoundApiKey) && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
-        <KeyStorageNote />
+        <KeyStorageNote names={[kind === 'music' ? 'jamendoClientId' : 'freesoundApiKey']} />
       </div>
       <div className="youtube-search-row">
         <input

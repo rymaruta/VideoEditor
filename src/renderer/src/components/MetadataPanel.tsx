@@ -180,7 +180,7 @@ export function MetadataPanel(): React.JSX.Element {
         {envKeySources.geminiApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
-        <KeyStorageNote />
+        <KeyStorageNote names={['geminiApiKey']} />
       </div>
       <div className="trim-field">
         <label>出力言語</label>

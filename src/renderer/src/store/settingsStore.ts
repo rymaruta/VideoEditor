@@ -132,6 +132,11 @@ let secretsReady: Promise<void> = Promise.resolve()
 /** 鍵を保存する。暗号化できれば main、できなければ今までどおり localStorage */
 function persistSecret(name: SecretName, value: string): void {
   touchedSecrets.add(name)
+  // 入れ直したら「読めなかった」の知らせは消す
+  if (useSettingsStore.getState().unreadableKeys.includes(name))
+    useSettingsStore.setState((s) => ({
+      unreadableKeys: s.unreadableKeys.filter((n) => n !== name)
+    }))
   const legacyKey = LEGACY_SECRET_STORAGE_KEYS[name]
   if (keyStorageMode === 'plain') {
     writeSetting(legacyKey, value)
@@ -267,6 +272,9 @@ interface SettingsState {
   keyStorage: KeyStorageMode
   /** 暗号化できない理由(一文) */
   keyStorageNote: string
+  /** 保存してあるのに読めなかった鍵(欄に「入れ直してください」を出す) */
+  unreadableKeys: SecretName[]
+  unreadableCause: 'decrypt' | 'unavailable' | null
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -574,6 +582,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
   keyStorage: keyStorageMode,
   keyStorageNote: '',
+  unreadableKeys: [],
+  unreadableCause: null,
   loadEnvApiKeys: async () => {
     // 暗号化して保存した鍵を読み終えてから(後から読んだ鍵で .env の値を上書きしない)
     await secretsReady
@@ -626,33 +636,50 @@ async function initSecureKeys(api: SecretsApi): Promise<void> {
   }
   if (!snapshot || !snapshot.available) {
     keyStorageMode = 'plain'
-    useSettingsStore.setState({
+    useSettingsStore.setState((s) => ({
       keyStorage: 'plain',
-      keyStorageNote: snapshot?.reason ?? 'API キーを暗号化して保存できません。'
-    })
+      keyStorageNote: snapshot?.reason ?? 'API キーを暗号化して保存できません。',
+      // 暗号化して保存した鍵は、この起動では読めないだけ(main はファイルを消さない)。
+      // この起動の localStorage に値があればそれを使っているので知らせない
+      unreadableKeys: (snapshot?.unreadable ?? []).filter((n) => !s[n] && !touchedSecrets.has(n)),
+      unreadableCause: snapshot?.unreadableCause ?? null
+    }))
     return
   }
   const values: Partial<Record<SecretName, string>> = { ...snapshot.values }
+  const unreadable = new Set<SecretName>(snapshot.unreadable ?? [])
   const legacy = legacySecretsToMigrate(readSetting)
   for (const name of SECRET_NAMES) {
     const value = legacy[name]
-    if (value === undefined) continue
+    if (value === undefined) {
+      // 空の項目は移さずに片付ける(空で main の鍵を消さない)
+      if (readSetting(LEGACY_SECRET_STORAGE_KEYS[name]) === '')
+        removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+      continue
+    }
     let ok = false
     try {
       ok = (await api.secretsSet(name, value)) === true
     } catch {
       ok = false
     }
+    // 暗号化できなかった起動の間に入れ直した値を優先する(読めない古い値もこれで上書き)。
     // 移せなかったものは localStorage に残し、その値を使う(次の起動でまた移す)
     if (ok) removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
-    if (value) values[name] = value
-    else delete values[name]
+    values[name] = value
+    unreadable.delete(name)
   }
   keyStorageMode = 'encrypted'
   useSettingsStore.setState(() => {
     const patch: Partial<Record<SecretName, string>> = {}
     for (const name of SECRET_NAMES) if (!touchedSecrets.has(name)) patch[name] = values[name] ?? ''
-    return { ...patch, keyStorage: 'encrypted' as const, keyStorageNote: '' }
+    return {
+      ...patch,
+      keyStorage: 'encrypted' as const,
+      keyStorageNote: '',
+      unreadableKeys: [...unreadable].filter((n) => !touchedSecrets.has(n)),
+      unreadableCause: unreadable.size > 0 ? (snapshot.unreadableCause ?? 'decrypt') : null
+    }
   })
 }
 
