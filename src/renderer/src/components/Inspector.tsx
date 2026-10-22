@@ -156,7 +156,7 @@ export function Inspector(): React.JSX.Element {
         <p className="hint-text">{multiSelectedClipIds.length}個のクリップを選択中です。</p>
         <div className="inspector-section">
           <h3>
-            <GaugeIcon width={13} height={13} />
+            <GaugeIcon width={14} height={14} />
             再生速度(一括)
           </h3>
           <div className="inspector-speed-row">
@@ -176,7 +176,7 @@ export function Inspector(): React.JSX.Element {
         </div>
         <div className="inspector-section">
           <h3>
-            <TagIcon width={13} height={13} />
+            <TagIcon width={14} height={14} />
             色ラベル(一括)
           </h3>
           <ClipColorPicker
@@ -211,7 +211,7 @@ export function Inspector(): React.JSX.Element {
           <h2>インスペクタ</h2>
         </div>
         <div className="inspector-empty">
-          <TargetIcon width={26} height={26} />
+          <TargetIcon width={32} height={32} />
           <p>タイムラインのクリップやテロップを選択すると、その設定がここに表示されます。</p>
         </div>
       </div>
@@ -285,7 +285,7 @@ export function Inspector(): React.JSX.Element {
 
       <div className="inspector-section">
         <h3>
-          <ScissorsIcon width={13} height={13} />
+          <ScissorsIcon width={14} height={14} />
           尺とトリム
         </h3>
         <div className="inspector-field">
@@ -335,7 +335,7 @@ export function Inspector(): React.JSX.Element {
 
       <div className="inspector-section">
         <h3>
-          <GaugeIcon width={13} height={13} />
+          <GaugeIcon width={14} height={14} />
           再生速度
         </h3>
         <select
@@ -355,7 +355,7 @@ export function Inspector(): React.JSX.Element {
 
       <div className="inspector-section">
         <h3>
-          <TagIcon width={13} height={13} />
+          <TagIcon width={14} height={14} />
           色ラベル
         </h3>
         <ClipColorPicker
@@ -370,7 +370,7 @@ export function Inspector(): React.JSX.Element {
       {mismatch && (
         <div className="inspector-section">
           <h3>
-            <TargetIcon width={13} height={13} />
+            <TargetIcon width={14} height={14} />
             フレーミング
           </h3>
           <label className="checkbox-label">
@@ -449,7 +449,7 @@ export function Inspector(): React.JSX.Element {
       {index > 0 && (
         <div className="inspector-section">
           <h3>
-            <LayersIcon width={13} height={13} />
+            <LayersIcon width={14} height={14} />
             前のクリップからの繋ぎ
           </h3>
           <select
@@ -503,7 +503,7 @@ export function Inspector(): React.JSX.Element {
 
       <div className="inspector-section">
         <h3>
-          <MusicIcon width={13} height={13} />
+          <MusicIcon width={14} height={14} />
           音声
         </h3>
         {!asset.hasAudio ? (

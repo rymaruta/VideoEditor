@@ -85,7 +85,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
       </div>
       <div className="youtube-search-row">
         <button className="primary-button" onClick={handleTrending} disabled={loading}>
-          <SparklesIcon width={13} height={13} />
+          <SparklesIcon width={14} height={14} />
           急上昇(日本)
         </button>
         <input

@@ -247,7 +247,7 @@ export function WorkflowBar({
         </button>
         <span className="workflow-bar-sep" aria-hidden="true" />
         <button type="button" className="primary-button workflow-export" onClick={openExport}>
-          <UploadIcon width={15} height={15} />
+          <UploadIcon width={16} height={16} />
           書き出す
           <span className="workflow-export-key tc">{mod}+M</span>
         </button>

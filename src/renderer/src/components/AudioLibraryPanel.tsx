@@ -151,11 +151,11 @@ export function AudioLibraryPanel(): React.JSX.Element {
       </p>
       <div className="audio-library-kind-tabs">
         <button className={kind === 'music' ? 'active' : ''} onClick={() => setKind('music')}>
-          <MusicIcon width={13} height={13} />
+          <MusicIcon width={14} height={14} />
           BGM (Jamendo)
         </button>
         <button className={kind === 'sfx' ? 'active' : ''} onClick={() => setKind('sfx')}>
-          <MusicIcon width={13} height={13} />
+          <MusicIcon width={14} height={14} />
           効果音 (Freesound)
         </button>
       </div>
@@ -214,7 +214,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                       void openExternalLink(t.licenseUrl, setError)
                     }}
                   >
-                    <ExternalLinkIcon width={10} height={10} />
+                    <ExternalLinkIcon width={12} height={12} />
                     ライセンス
                   </a>
                 )}
@@ -226,7 +226,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handlePreview(t.id, t.audioUrl)}
                 >
-                  <PlayIcon width={13} height={13} />
+                  <PlayIcon width={14} height={14} />
                 </button>
                 <button
                   className="icon-button"
@@ -234,7 +234,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handleAdd(t.id, t.audioUrl, `${t.title}.mp3`)}
                 >
-                  {busyId === `add-${t.id}` ? '...' : <PlusIcon width={13} height={13} />}
+                  {busyId === `add-${t.id}` ? '...' : <PlusIcon width={14} height={14} />}
                 </button>
                 <button
                   className="icon-button"
@@ -242,7 +242,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handleFavorite(t.id, t.audioUrl, `${t.title}.mp3`)}
                 >
-                  {busyId === `fav-${t.id}` ? '...' : <StarIcon width={13} height={13} />}
+                  {busyId === `fav-${t.id}` ? '...' : <StarIcon width={14} height={14} />}
                 </button>
               </div>
             </div>
@@ -266,7 +266,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                       void openExternalLink(s.licenseUrl, setError)
                     }}
                   >
-                    <ExternalLinkIcon width={10} height={10} />
+                    <ExternalLinkIcon width={12} height={12} />
                     ライセンス
                   </a>
                 )}
@@ -278,7 +278,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handlePreview(s.id, s.previewUrl)}
                 >
-                  <PlayIcon width={13} height={13} />
+                  <PlayIcon width={14} height={14} />
                 </button>
                 <button
                   className="icon-button"
@@ -286,7 +286,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handleAdd(s.id, s.previewUrl, `${s.name}.mp3`)}
                 >
-                  {busyId === `add-${s.id}` ? '...' : <PlusIcon width={13} height={13} />}
+                  {busyId === `add-${s.id}` ? '...' : <PlusIcon width={14} height={14} />}
                 </button>
                 <button
                   className="icon-button"
@@ -294,7 +294,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handleFavorite(s.id, s.previewUrl, `${s.name}.mp3`)}
                 >
-                  {busyId === `fav-${s.id}` ? '...' : <StarIcon width={13} height={13} />}
+                  {busyId === `fav-${s.id}` ? '...' : <StarIcon width={14} height={14} />}
                 </button>
               </div>
             </div>

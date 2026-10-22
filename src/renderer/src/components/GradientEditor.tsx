@@ -19,6 +19,7 @@ import { sameGradient } from '../lib/appearancePresets'
 import { useSettingsStore } from '../store/settingsStore'
 import { ColorField } from './ColorField'
 import './gradientEditor.css'
+import { XIcon, ArrowDownIcon } from './icons'
 
 /**
  * グラデーションの編集欄(Premiere の「線形グラデーション」の止まりの帯と同じ操作)。
@@ -202,7 +203,7 @@ export function GradientEditor({
             disabled={value.stops.length <= GRADIENT_MIN_STOPS}
             onClick={() => remove(sel)}
           >
-            ×
+            <XIcon width={12} height={12} />
           </button>
           <span className="grad-count" title="色の数">
             {value.stops.length}/{GRADIENT_MAX_STOPS}
@@ -288,7 +289,7 @@ export function GradientEditor({
                 title={`${a}°`}
                 onClick={() => onChange({ ...value, angle: a })}
               >
-                <span style={{ transform: `rotate(${-a}deg)` }}>↓</span>
+                <ArrowDownIcon width={12} height={12} style={{ transform: `rotate(${-a}deg)` }} />
               </button>
             ))}
           </div>
@@ -426,7 +427,7 @@ export function GradientEditor({
                 title="マイ配色から外す"
                 onClick={() => removeFavorite(f.id)}
               >
-                ×
+                <XIcon width={12} height={12} />
               </button>
             </div>
           ))}

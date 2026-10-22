@@ -200,7 +200,7 @@ export function MetadataPanel(): React.JSX.Element {
         />
       </div>
       <button className="primary-button" onClick={handleGenerate} disabled={loading}>
-        <SparklesIcon width={13} height={13} />
+        <SparklesIcon width={14} height={14} />
         {loading ? '生成中...' : result ? '別案を生成' : 'メタデータを生成'}
       </button>
       {error && <p className="error-text">{error}</p>}
@@ -295,7 +295,7 @@ export function MetadataPanel(): React.JSX.Element {
           {result.pinnedComment && (
             <div className="metadata-section">
               <h3>
-                <MegaphoneIcon width={13} height={13} />
+                <MegaphoneIcon width={14} height={14} />
                 固定コメント案
                 <button
                   className="small-button metadata-copy-inline"

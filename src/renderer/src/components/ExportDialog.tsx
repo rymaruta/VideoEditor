@@ -545,7 +545,7 @@ export function ExportDialog(): React.JSX.Element | null {
                       window.api.openPath(donePath).catch((e) => setError(formatIpcError(e)))
                     }
                   >
-                    <PlayCircleIcon width={13} height={13} />
+                    <PlayCircleIcon width={14} height={14} />
                     再生
                   </button>
                   <button
@@ -556,7 +556,7 @@ export function ExportDialog(): React.JSX.Element | null {
                         .catch((e) => setError(formatIpcError(e)))
                     }
                   >
-                    <FolderIcon width={13} height={13} />
+                    <FolderIcon width={14} height={14} />
                     フォルダを表示
                   </button>
                 </div>
@@ -577,7 +577,7 @@ export function ExportDialog(): React.JSX.Element | null {
                         .catch((e) => setError(formatIpcError(e)))
                     }
                   >
-                    <FolderIcon width={13} height={13} />
+                    <FolderIcon width={14} height={14} />
                     フォルダを表示
                   </button>
                 </div>

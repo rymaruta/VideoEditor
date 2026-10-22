@@ -236,7 +236,7 @@ export function SourceViewer(): React.JSX.Element | null {
     <div className="panel source-viewer" ref={rootRef}>
       <div className="source-viewer-header">
         <h3>
-          <ClapperboardIcon width={13} height={13} />
+          <ClapperboardIcon width={14} height={14} />
           ソース
           <span className="source-viewer-name" title={asset.fileName}>
             {asset.fileName}
@@ -337,7 +337,7 @@ export function SourceViewer(): React.JSX.Element | null {
           onClick={() => seek(time - frameStep)}
           title="1フレーム戻る"
         >
-          <StepBackIcon width={13} height={13} />
+          <StepBackIcon width={14} height={14} />
         </button>
         <button
           className={`icon-button ${playing && rate < 0 ? 'active' : ''}`}
@@ -365,7 +365,7 @@ export function SourceViewer(): React.JSX.Element | null {
           onClick={() => seek(time + frameStep)}
           title="1フレーム進む"
         >
-          <StepForwardIcon width={13} height={13} />
+          <StepForwardIcon width={14} height={14} />
         </button>
         {playing && Math.abs(rate) > 1 && <span className="source-viewer-rate">{rate}x</span>}
       </div>
@@ -404,7 +404,7 @@ export function SourceViewer(): React.JSX.Element | null {
           disabled={cannotPlace}
           title={mainRefusal ?? 'タイムラインの末尾に追加 (F)'}
         >
-          <PlusIcon width={13} height={13} />
+          <PlusIcon width={14} height={14} />
           末尾に追加 (F)
         </button>
         <button

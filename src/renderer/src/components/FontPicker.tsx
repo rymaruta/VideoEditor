@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FontFamily } from '@shared/types'
 import { FONT_FAMILY_OPTIONS } from '@shared/textStyle'
 import { TELOP_FONT_STACKS } from '@shared/telop/render'
-import { ChevronDownIcon, SearchIcon } from './icons'
+import { ChevronDownIcon, SearchIcon, CheckIcon } from './icons'
 import { Popover } from './Popover'
 import { filterFonts } from '../lib/appearanceEdit'
 
@@ -96,7 +96,7 @@ function FontList({
   return (
     <div className="font-picker-panel">
       <label className="font-picker-search look-search">
-        <SearchIcon width={13} height={13} aria-hidden="true" />
+        <SearchIcon width={14} height={14} aria-hidden="true" />
         <input
           type="search"
           aria-label="書体を探す"
@@ -159,7 +159,9 @@ function FontList({
                   >
                     {f.label}
                   </span>
-                  {f.value === value && <span className="font-picker-check">✓</span>}
+                  {f.value === value && (
+                    <CheckIcon className="font-picker-check" width={14} height={14} />
+                  )}
                 </div>
               </li>
             )

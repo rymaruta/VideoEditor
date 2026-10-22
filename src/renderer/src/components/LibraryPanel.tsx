@@ -263,7 +263,7 @@ export function LibraryPanel({
                   aria-label={fav ? 'お気に入りから外す' : 'お気に入りに入れる'}
                   onClick={() => void handleFavorite(f.path)}
                 >
-                  <StarIcon width={13} height={13} />
+                  <StarIcon width={14} height={14} />
                 </button>
                 {f.kind === 'audio' ? (
                   <button
@@ -272,9 +272,9 @@ export function LibraryPanel({
                     onClick={() => handlePreview(f)}
                   >
                     {playing === f.path ? (
-                      <PauseIcon width={11} height={11} />
+                      <PauseIcon width={12} height={12} />
                     ) : (
-                      <PlayIcon width={11} height={11} />
+                      <PlayIcon width={12} height={12} />
                     )}
                   </button>
                 ) : (

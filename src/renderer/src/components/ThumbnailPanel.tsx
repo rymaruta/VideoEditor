@@ -360,7 +360,7 @@ export function ThumbnailPanel(): React.JSX.Element {
           {loading ? '生成中...' : '均等間隔で生成'}
         </button>
         <button className="small-button" onClick={generateHighlightCandidates} disabled={loading}>
-          <WandIcon width={13} height={13} />
+          <WandIcon width={14} height={14} />
           ハイライトから生成
         </button>
       </div>

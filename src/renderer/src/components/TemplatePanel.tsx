@@ -109,7 +109,7 @@ export function TemplatePanel(): React.JSX.Element {
                 onClick={() => handleAutoCut(t.id)}
                 title="メディアの素材からハイライトを検出し、自動でタイムラインを組み立てます"
               >
-                <TargetIcon width={13} height={13} />
+                <TargetIcon width={14} height={14} />
                 {autoCutting === t.id ? '解析中...' : '素材から自動カット'}
               </button>
             </div>

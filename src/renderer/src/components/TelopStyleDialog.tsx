@@ -21,6 +21,7 @@ import { TelopLookGallery, type LookItem } from './TelopLookGallery'
 import { useStyleClipboard } from '../lib/styleClipboard'
 import { lookPatch, SECTION_IDS } from '../lib/appearanceEdit'
 import { DialogHeader } from './DialogHeader'
+import { StopIcon, PlayIcon } from './icons'
 
 /**
  * テロップスタイルの管理(テロップ > テロップスタイルの管理…)。デザイン案の「TelopStyles」。
@@ -483,7 +484,17 @@ export function TelopStyleDialog(): React.JSX.Element | null {
                 title={`入り・出・ループの動きを、${PLAY_SECONDS} 秒のテロップとして繰り返し再生します`}
                 onClick={() => setPlaying((v) => !v)}
               >
-                {playing ? '■ 止める' : '▶ 動きを再生'}
+                {playing ? (
+                  <>
+                    <StopIcon width={12} height={12} />
+                    止める
+                  </>
+                ) : (
+                  <>
+                    <PlayIcon width={12} height={12} />
+                    動きを再生
+                  </>
+                )}
               </button>
             </div>
             {selected && (

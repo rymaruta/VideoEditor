@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { normalizeHex, parseColor, rgbToHex, type Rgb } from '../lib/colorValue'
 import { placePopover } from '../lib/appearanceEdit'
 import { useSettingsStore } from '../store/settingsStore'
+import { XIcon } from './icons'
 
 /**
  * 色の欄。押すと、RGB の数値・16進・パレット・スポイトで自由に選べ、
@@ -432,7 +433,7 @@ function ColorPopover({
                 title="お気に入りから外す"
                 onClick={() => removeFavorite(c)}
               >
-                ×
+                <XIcon width={12} height={12} />
               </button>
             </div>
           ))}

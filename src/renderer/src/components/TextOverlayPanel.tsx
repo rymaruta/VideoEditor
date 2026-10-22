@@ -176,7 +176,7 @@ export function TextOverlayPanel(): React.JSX.Element {
           />
           {sorted.length === 0 ? (
             <div className="empty-state">
-              <TypeIcon width={22} height={22} />
+              <TypeIcon width={20} height={20} />
               <p className="hint-text">
                 テロップはありません。「追加」か、テロップメニューの「音声から自動でテロップを作る」で作れます。
               </p>

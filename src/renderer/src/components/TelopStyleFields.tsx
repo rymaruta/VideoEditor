@@ -38,6 +38,7 @@ import { FillField, NumberSlider, Segmented, StyleSection } from './AppearanceCo
 import { AngleDial } from './GradientEditor'
 import { FontPicker } from './FontPicker'
 import { SectionPresetMenu } from './SectionPresetMenu'
+import { ArrowUpIcon, ArrowDownIcon, XIcon } from './icons'
 
 /**
  * テロップの見た目の欄。Premiere のエッセンシャルグラフィックス(アピアランス)と
@@ -67,16 +68,18 @@ const TAIL_SIDES: { value: TelopBubbleTail['side']; label: string }[] = [
 ]
 
 /** 矢印の向きのボタン(画面の向き。y は下向き) */
-const POINTER_DIRS: { x: number; y: number; glyph: string; label: string }[] = [
-  { x: -1, y: -1, glyph: '↖', label: '左上' },
-  { x: 0, y: -1, glyph: '↑', label: '上' },
-  { x: 1, y: -1, glyph: '↗', label: '右上' },
-  { x: -1, y: 0, glyph: '←', label: '左' },
-  { x: 1, y: 0, glyph: '→', label: '右' },
-  { x: -1, y: 1, glyph: '↙', label: '左下' },
-  { x: 0, y: 1, glyph: '↓', label: '下' },
-  { x: 1, y: 1, glyph: '↘', label: '右下' }
+const POINTER_DIRS: { x: number; y: number; label: string }[] = [
+  { x: -1, y: -1, label: '左上' },
+  { x: 0, y: -1, label: '上' },
+  { x: 1, y: -1, label: '右上' },
+  { x: -1, y: 0, label: '左' },
+  { x: 1, y: 0, label: '右' },
+  { x: -1, y: 1, label: '左下' },
+  { x: 0, y: 1, label: '下' },
+  { x: 1, y: 1, label: '右下' }
 ]
+/** 下向きの矢印のアイコンを (x, y) の向きへ回す角度(度。時計回り) */
+const pointerDirDeg = (x: number, y: number): number => (-Math.atan2(x, y) * 180) / Math.PI
 
 export function PropRow({
   label,
@@ -506,7 +509,7 @@ function StrokeSection({ style, patch }: SectionProps): React.JSX.Element {
                 disabled={i === 0}
                 onClick={() => set(moveStroke(list, i, -1))}
               >
-                ↑
+                <ArrowUpIcon width={12} height={12} />
               </button>
               <button
                 type="button"
@@ -516,7 +519,7 @@ function StrokeSection({ style, patch }: SectionProps): React.JSX.Element {
                 disabled={i === list.length - 1}
                 onClick={() => set(moveStroke(list, i, 1))}
               >
-                ↓
+                <ArrowDownIcon width={12} height={12} />
               </button>
               <button
                 type="button"
@@ -525,7 +528,7 @@ function StrokeSection({ style, patch }: SectionProps): React.JSX.Element {
                 title="この縁を消す"
                 onClick={() => set(list.filter((_, j) => j !== i))}
               >
-                ×
+                <XIcon width={12} height={12} />
               </button>
             </div>
           </div>
@@ -1036,7 +1039,11 @@ function PointerSection({ style, patch }: SectionProps): React.JSX.Element {
                   title={d.label}
                   onClick={() => patch({ pointer: { ...p, ...pointerToward(p, d.x, d.y) } })}
                 >
-                  {d.glyph}
+                  <ArrowDownIcon
+                    width={12}
+                    height={12}
+                    style={{ transform: `rotate(${pointerDirDeg(d.x, d.y)}deg)` }}
+                  />
                 </button>
               ))}
             </div>

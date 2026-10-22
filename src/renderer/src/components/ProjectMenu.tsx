@@ -12,6 +12,7 @@ import {
 } from '../lib/projectFileActions'
 import { useMenuCommand } from '../lib/menuCommands'
 import { checkMissingAssets } from '../lib/projectFileActions'
+import { XIcon } from './icons'
 
 /**
  * プロジェクトのファイル操作(新規・開く・最近使った・保存・名前を付けて保存・自動保存の復元)。
@@ -126,7 +127,7 @@ export function ProjectMenu(): React.JSX.Element | null {
           setSaveError(null)
         }}
       >
-        ×
+        <XIcon width={12} height={12} />
       </button>
     </span>
   )

@@ -2,17 +2,27 @@ import type { SVGProps } from 'react'
 
 type IconProps = SVGProps<SVGSVGElement>
 
+/**
+ * アイコンの共通の形(tokens.css §3.4): 24 の格子・線 1.5・端は丸。大きさは 12 / 14 / 16 / 20 / 32 の 5 つ。
+ * 線は拡大しない(vector-effect: non-scaling-stroke)。どの大きさでも画面上 1.5px の線になる
+ * (vector-effect は子へ継がれないので、子の線には .ve-icon の CSS で掛ける)
+ */
 function base(props: IconProps): IconProps {
+  const { className, ...rest } = props
   return {
     width: 16,
     height: 16,
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 2,
+    strokeWidth: 1.5,
     strokeLinecap: 'round',
     strokeLinejoin: 'round',
-    ...props
+    vectorEffect: 'non-scaling-stroke',
+    'aria-hidden': true,
+    focusable: false,
+    className: className ? `ve-icon ${className}` : 've-icon',
+    ...rest
   }
 }
 
@@ -561,6 +571,51 @@ export function TagIcon(props: IconProps): React.JSX.Element {
     <svg {...base(props)}>
       <path d="M20.6 13.4 12 22l-9-9V4a1 1 0 0 1 1-1h9l7.6 7.6a2 2 0 0 1 0 2.8z" />
       <circle cx="7.5" cy="7.5" r="1.2" />
+    </svg>
+  )
+}
+
+/** 閉じる・外す・消す(文字の「×」の代わり) */
+export function XIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  )
+}
+
+/** 選んでいる印(文字の「✓」の代わり) */
+export function CheckIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <polyline points="5 12.5 10 17.5 19 7" />
+    </svg>
+  )
+}
+
+/** 止める(文字の「■」の代わり) */
+export function StopIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+/** 下向きの矢印(文字の「↓」の代わり。ほかの向きは style の rotate で回す) */
+export function ArrowDownIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 5v14M6 13l6 6 6-6" />
+    </svg>
+  )
+}
+
+/** 上向きの矢印(文字の「↑」の代わり) */
+export function ArrowUpIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 19V5M6 11l6-6 6 6" />
     </svg>
   )
 }

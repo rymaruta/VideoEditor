@@ -434,7 +434,7 @@ function SplitAtPlayheadButton({
       disabled={playheadTime <= start || playheadTime >= end}
       onClick={() => onSplit(playheadTime)}
     >
-      <ScissorsIcon width={13} height={13} />
+      <ScissorsIcon width={14} height={14} />
       カット
     </button>
   )
@@ -1968,25 +1968,25 @@ export function Timeline(): React.JSX.Element {
         {
           key: 'silence',
           label: '無音カット',
-          icon: <WandIcon width={13} height={13} />,
+          icon: <WandIcon width={14} height={14} />,
           onSelect: () => setSilenceCutClipIds([selectedClip!.id])
         },
         {
           key: 'filler',
           label: 'フィラーカット',
-          icon: <FillerWordIcon width={13} height={13} />,
+          icon: <FillerWordIcon width={14} height={14} />,
           onSelect: () => setFillerWordClipId(selectedClip!.id)
         },
         {
           key: 'caption',
           label: '自動テロップ',
-          icon: <MicIcon width={13} height={13} />,
+          icon: <MicIcon width={14} height={14} />,
           onSelect: () => setAutoCaptionClipId(selectedClip!.id)
         },
         {
           key: 'textEdit',
           label: 'テキストで編集',
-          icon: <TypeIcon width={13} height={13} />,
+          icon: <TypeIcon width={14} height={14} />,
           onSelect: () => setTextEditClipId(selectedClip!.id)
         },
         ...(timedClips[selectedIndex]?.asset.hasAudio && !selectedClip!.audioDetached
@@ -1994,7 +1994,7 @@ export function Timeline(): React.JSX.Element {
               {
                 key: 'detach',
                 label: '音声を分離',
-                icon: <MusicIcon width={13} height={13} />,
+                icon: <MusicIcon width={14} height={14} />,
                 title:
                   '動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)',
                 onSelect: () => detachClipAudio(selectedClip!.id)
@@ -2006,7 +2006,7 @@ export function Timeline(): React.JSX.Element {
               {
                 key: 'reattach',
                 label: '音声を戻す',
-                icon: <MusicIcon width={13} height={13} />,
+                icon: <MusicIcon width={14} height={14} />,
                 title:
                   '分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください',
                 onSelect: () => reattachClipAudio(selectedClip!.id)
@@ -2037,7 +2037,7 @@ export function Timeline(): React.JSX.Element {
           key: 'cut',
           label: 'カット',
           title: `分割 (${keymap.split.display})`,
-          icon: <ScissorsIcon width={13} height={13} />,
+          icon: <ScissorsIcon width={14} height={14} />,
           onSelect: () => splitClipAtTime(sc.id, useProjectStore.getState().playheadTime)
         },
         ...clipExtra
@@ -2049,7 +2049,7 @@ export function Timeline(): React.JSX.Element {
           key: 'copy',
           label: 'コピー',
           title: `コピー (${keymap.copy.display})`,
-          icon: <CopyIcon width={13} height={13} />,
+          icon: <CopyIcon width={14} height={14} />,
           iconOnly: true,
           onSelect: () => copySelectedClip()
         },
@@ -2092,7 +2092,7 @@ export function Timeline(): React.JSX.Element {
       data-fit-compact="speed"
       title={sc.audioDetached ? '分離した音声にも同じ速度が掛かります' : '再生速度'}
     >
-      <GaugeIcon width={13} height={13} />
+      <GaugeIcon width={14} height={14} />
       <select
         aria-label="再生速度"
         value={speedSelectChoices(sc.speed || 1, SPEED_OPTIONS).value}
@@ -2110,7 +2110,7 @@ export function Timeline(): React.JSX.Element {
     sc && selectedIndex > 0 ? (
       <span className="timeline-transition-field">
         <label className="inline-select" data-fit-compact="transition" title="前のクリップとの繋ぎ">
-          <LayersIcon width={13} height={13} />
+          <LayersIcon width={14} height={14} />
           <select
             aria-label="前のクリップとの繋ぎ"
             value={sc.transitionIn?.type ?? 'none'}
@@ -2225,7 +2225,7 @@ export function Timeline(): React.JSX.Element {
             title="縮小"
             onClick={() => setZoom((z) => Math.max(currentMinZoom(), z / 1.4))}
           >
-            <ZoomOutIcon width={13} height={13} />
+            <ZoomOutIcon width={14} height={14} />
           </button>
           <span className="hint-text zoom-label">{Math.round(zoom * 100)}%</span>
           <button
@@ -2233,17 +2233,17 @@ export function Timeline(): React.JSX.Element {
             title="拡大"
             onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))}
           >
-            <ZoomInIcon width={13} height={13} />
+            <ZoomInIcon width={14} height={14} />
           </button>
           <button className="icon-button" title="タイムライン全体を表示" onClick={handleZoomToFit}>
-            <MaximizeIcon width={13} height={13} />
+            <MaximizeIcon width={14} height={14} />
           </button>
           <button
             className={`icon-button ${snapEnabled ? 'active' : ''}`}
             title={snapEnabled ? 'スナップを無効化' : 'スナップを有効化'}
             onClick={() => setSnapEnabled(!snapEnabled)}
           >
-            <MagnetIcon width={13} height={13} />
+            <MagnetIcon width={14} height={14} />
           </button>
           <div className="timeline-tools" role="group" aria-label="編集ツール">
             {(
@@ -2275,7 +2275,7 @@ export function Timeline(): React.JSX.Element {
               }
               onClick={() => toggleBeatGridEnabled()}
             >
-              <ActivityIcon width={13} height={13} />
+              <ActivityIcon width={14} height={14} />
             </button>
             <BeatGridControls
               bpm={project.beatGrid.bpm}
@@ -2302,7 +2302,7 @@ export function Timeline(): React.JSX.Element {
                   : undefined
               }
             >
-              <GaugeIcon width={13} height={13} />
+              <GaugeIcon width={14} height={14} />
               <select
                 defaultValue=""
                 onChange={(e) => {
@@ -2337,7 +2337,7 @@ export function Timeline(): React.JSX.Element {
                 )
               }
             >
-              <WandIcon width={13} height={13} />
+              <WandIcon width={14} height={14} />
               無音カット
             </button>
             <button
@@ -2345,7 +2345,7 @@ export function Timeline(): React.JSX.Element {
               title={`コピー (${keymap.copy.display})`}
               onClick={() => copySelectedClip()}
             >
-              <CopyIcon width={13} height={13} />
+              <CopyIcon width={14} height={14} />
             </button>
             <button
               className="small-button"
@@ -2359,7 +2359,7 @@ export function Timeline(): React.JSX.Element {
               title="選択したクリップをまとめて削除"
               onClick={() => removeClips(multiSelectedClipIds)}
             >
-              <TrashIcon width={13} height={13} />
+              <TrashIcon width={14} height={14} />
               まとめて削除
             </button>
           </div>
@@ -2394,7 +2394,7 @@ export function Timeline(): React.JSX.Element {
             title={`貼り付け (${keymap.paste.display})`}
             onClick={() => pasteClip()}
           >
-            <ClipboardPasteIcon width={13} height={13} />
+            <ClipboardPasteIcon width={14} height={14} />
             貼り付け{clipboardClips.length > 1 ? `(${clipboardClips.length}個)` : ''}
           </button>
         )}
@@ -2410,11 +2410,11 @@ export function Timeline(): React.JSX.Element {
           }
           onClick={() => setShortcutGuideVisible(!shortcutGuideVisible)}
         >
-          <KeyIcon width={13} height={13} />
+          <KeyIcon width={14} height={14} />
           {shortcutGuideVisible ? (
-            <ChevronLeftIcon width={11} height={11} />
+            <ChevronLeftIcon width={12} height={12} />
           ) : (
-            <ChevronRightIcon width={11} height={11} />
+            <ChevronRightIcon width={12} height={12} />
           )}
         </button>
         {shortcutGuideVisible && (
@@ -2496,9 +2496,9 @@ export function Timeline(): React.JSX.Element {
                   onClick={() => toggleVideoOverlayTrackHidden(track.id)}
                 >
                   {track.hidden ? (
-                    <EyeOffIcon width={13} height={13} />
+                    <EyeOffIcon width={14} height={14} />
                   ) : (
-                    <EyeIcon width={13} height={13} />
+                    <EyeIcon width={14} height={14} />
                   )}
                 </button>
                 <button
@@ -2512,9 +2512,9 @@ export function Timeline(): React.JSX.Element {
                   onClick={() => toggleVideoOverlayTrackAudio(track.id)}
                 >
                   {track.audioMuted ? (
-                    <VolumeXIcon width={13} height={13} />
+                    <VolumeXIcon width={14} height={14} />
                   ) : (
-                    <Volume2Icon width={13} height={13} />
+                    <Volume2Icon width={14} height={14} />
                   )}
                 </button>
                 <select
@@ -2568,7 +2568,7 @@ export function Timeline(): React.JSX.Element {
                   disabled={bpmAnalyzingTrackId === track.id || track.clips.length === 0}
                   onClick={() => handleAnalyzeBpm(track)}
                 >
-                  {bpmAnalyzingTrackId === track.id ? '…' : <ActivityIcon width={13} height={13} />}
+                  {bpmAnalyzingTrackId === track.id ? '…' : <ActivityIcon width={14} height={14} />}
                 </button>
                 <button
                   className="icon-button"
@@ -2576,9 +2576,9 @@ export function Timeline(): React.JSX.Element {
                   onClick={() => toggleAudioTrackMute(track.id)}
                 >
                   {track.muted ? (
-                    <VolumeXIcon width={13} height={13} />
+                    <VolumeXIcon width={14} height={14} />
                   ) : (
-                    <Volume2Icon width={13} height={13} />
+                    <Volume2Icon width={14} height={14} />
                   )}
                 </button>
                 <button
@@ -2586,7 +2586,7 @@ export function Timeline(): React.JSX.Element {
                   title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる"
                   onClick={() => toggleAudioTrackDucking(track.id)}
                 >
-                  <DuckingIcon width={13} height={13} />
+                  <DuckingIcon width={14} height={14} />
                 </button>
                 <input
                   type="range"
@@ -3024,14 +3024,14 @@ export function Timeline(): React.JSX.Element {
                         className="timeline-mismatch-icon timeline-crop-icon"
                         title="スマートクロップ適用済み(黒帯なしで表示)"
                       >
-                        <WandIcon width={11} height={11} />
+                        <WandIcon width={12} height={12} />
                       </span>
                     ) : (
                       <span
                         className="timeline-mismatch-icon"
                         title="プロジェクトのアスペクト比と異なるため黒帯が入ります"
                       >
-                        <AlertTriangleIcon width={11} height={11} />
+                        <AlertTriangleIcon width={12} height={12} />
                       </span>
                     ))}
                   {tc.clip.audioDetached && (
@@ -3039,7 +3039,7 @@ export function Timeline(): React.JSX.Element {
                       className="timeline-mismatch-icon"
                       title="音声は分離済み(音声トラックで管理されています)"
                     >
-                      <VolumeXIcon width={11} height={11} />
+                      <VolumeXIcon width={12} height={12} />
                     </span>
                   )}
                   {tc.asset.hasAudio && !tc.clip.audioDetached && clipWidth > 24 && (
@@ -3750,7 +3750,7 @@ export function Timeline(): React.JSX.Element {
               setSelectedAudioClip(null)
             }}
           >
-            <TrashIcon width={13} height={13} />
+            <TrashIcon width={14} height={14} />
           </button>
         </div>
       )}
@@ -3858,7 +3858,7 @@ export function Timeline(): React.JSX.Element {
               setSelectedVideoOverlayClip(null)
             }}
           >
-            <TrashIcon width={13} height={13} />
+            <TrashIcon width={14} height={14} />
           </button>
         </div>
       )}

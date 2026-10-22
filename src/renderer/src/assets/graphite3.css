@@ -1058,3 +1058,71 @@ textarea {
   padding-top: 0;
   padding-bottom: 0;
 }
+
+/* ---------- アイコン(icons.tsx の base()。線は拡大しない 1.5px) ---------- */
+.ve-icon {
+  flex: none;
+}
+.ve-icon * {
+  vector-effect: non-scaling-stroke;
+}
+/* 文の中のアイコン(説明文の中で字の代わりに出すもの) */
+.inline-icon {
+  display: inline-block;
+  margin: 0 var(--ve-space-hair);
+  vertical-align: -2px;
+}
+.font-picker-check,
+.section-preset-check {
+  flex: none;
+  color: var(--ve-primary-ink);
+}
+.section-preset-check {
+  margin-left: auto;
+  margin-right: var(--ve-space-1);
+}
+
+/* ---------- 1 本の動画の再生の帯(VideoTransport。モニターと同じ部品) ---------- */
+.video-transport {
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-2) 0 0;
+}
+.video-transport .time-label {
+  font: var(--ve-type-timecode);
+  color: var(--ve-text-1);
+}
+.video-transport .time-label.total {
+  color: var(--ve-text-3);
+}
+.video-transport .scrub-track {
+  position: relative;
+  overflow: visible;
+}
+.video-transport .scrub-track:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.video-transport .scrub-fill {
+  position: relative;
+  border-radius: inherit;
+}
+/* 溝に重ねるイン〜アウト(選んだ範囲の琥珀) */
+.video-transport .scrub-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: inherit;
+  background: var(--ve-selection-fill);
+  box-shadow:
+    inset 2px 0 0 var(--ve-primary),
+    inset -2px 0 0 var(--ve-primary);
+  pointer-events: none;
+}
+.video-transport .play-button,
+.video-transport .play-button:hover:not(:disabled) {
+  width: var(--ve-control-lg);
+  height: var(--ve-control-lg);
+}
+.trim-preview-video {
+  cursor: pointer;
+}

@@ -17,6 +17,7 @@ import {
   TrashIcon
 } from './icons'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
+import { DialogHeader } from './DialogHeader'
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -128,19 +129,33 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
 
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={onClose}>
-      <div className="modal autoedit-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          <WandIcon width={15} height={15} />
-          AIおまかせ全自動編集
-        </h3>
+      <div
+        className="modal autoedit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="AIおまかせ全自動編集"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <DialogHeader
+          title={
+            <>
+              <WandIcon width={16} height={16} />
+              AIおまかせ全自動編集
+            </>
+          }
+          onClose={onClose}
+        />
         <p className="hint-text">
           配置した動画素材からハイライトを検出し、傾向の異なる5パターンの編集案を自動生成します。Gemini
-          APIキーを設定している場合は、候補シーンの画像を見せて盛り上がり度を採点させ、選定精度を高めます。気に入ったものはタイムラインに適用し、👍👎で評価すると次回以降の生成に好みが反映されます。
+          APIキーを設定している場合は、候補シーンの画像を見せて盛り上がり度を採点させ、選定精度を高めます。気に入ったものはタイムラインに適用し、
+          <ThumbsUpIcon className="inline-icon" width={12} height={12} />
+          <ThumbsDownIcon className="inline-icon" width={12} height={12} />
+          (良い・いまいち)で評価すると次回以降の生成に好みが反映されます。
         </p>
         <p className="hint-text autoedit-preference">好みの傾向: {preferenceSummary}</p>
         <div className="autoedit-toolbar">
           <button className="small-button" onClick={startRun} disabled={loading}>
-            <RefreshIcon width={13} height={13} />
+            <RefreshIcon width={14} height={14} />
             {loading ? '生成中...' : '再生成'}
           </button>
           {geminiApiKey && (
@@ -150,12 +165,12 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                 checked={useGemini}
                 onChange={(e) => setUseGemini(e.target.checked)}
               />
-              <SparklesIcon width={13} height={13} />
+              <SparklesIcon width={14} height={14} />
               Geminiでハイライト候補を採点して選定精度を上げる
             </label>
           )}
           <button className="small-button" onClick={handlePickReference} disabled={loading}>
-            <ClapperboardIcon width={13} height={13} />
+            <ClapperboardIcon width={14} height={14} />
             参考動画を選ぶ
           </button>
           {referencePath && (
@@ -221,13 +236,13 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                 >
                   {isDirector ? (
                     <span className="autoedit-badge autoedit-badge-director">
-                      <WandIcon width={11} height={11} />
+                      <WandIcon width={12} height={12} />
                       AIディレクター
                     </span>
                   ) : (
                     recommendedId === p.id && (
                       <span className="autoedit-badge">
-                        <SparklesIcon width={11} height={11} />
+                        <SparklesIcon width={12} height={12} />
                         AIのおすすめ
                       </span>
                     )
@@ -257,7 +272,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                             : undefined
                         }
                       >
-                        <PlusIcon width={13} height={13} />
+                        <PlusIcon width={14} height={14} />
                         {appliedId === p.id ? '適用済み' : 'タイムラインに適用'}
                       </button>
                       <div className="autoedit-feedback">
@@ -266,14 +281,14 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                           title="良い編集案"
                           onClick={() => handleFeedback(p, true)}
                         >
-                          <ThumbsUpIcon width={13} height={13} />
+                          <ThumbsUpIcon width={14} height={14} />
                         </button>
                         <button
                           className={`icon-button ${feedback[p.id] === 'disliked' ? 'active' : ''}`}
                           title="好みではない"
                           onClick={() => handleFeedback(p, false)}
                         >
-                          <ThumbsDownIcon width={13} height={13} />
+                          <ThumbsDownIcon width={14} height={14} />
                         </button>
                       </div>
                     </div>

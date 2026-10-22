@@ -211,7 +211,7 @@ export function TelopLookGallery({
     <div className="look-gallery">
       <div className="look-gallery-bar">
         <label className="look-search">
-          <SearchIcon width={13} height={13} aria-hidden="true" />
+          <SearchIcon width={14} height={14} aria-hidden="true" />
           <input
             type="search"
             aria-label="見た目を探す"

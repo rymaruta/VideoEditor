@@ -23,6 +23,7 @@ import { loadTelopFonts } from '../lib/telopFonts'
 import { useSettingsStore } from '../store/settingsStore'
 import { Popover } from './Popover'
 import { drawLookThumb } from '../lib/lookThumb'
+import { XIcon, CheckIcon } from './icons'
 
 /**
  * 項目ごとの「マイ設定」(Photoshop のスタイル・CapCut のプリセットを項目単位にしたもの)。
@@ -289,7 +290,7 @@ function SectionPresetPanel({
                     <span className="section-preset-item-name">{p.name}</span>
                     {note && <span className="section-preset-note">{note}</span>}
                   </span>
-                  {active && <span className="section-preset-check">✓</span>}
+                  {active && <CheckIcon className="section-preset-check" width={14} height={14} />}
                 </button>
                 <button
                   type="button"
@@ -305,7 +306,7 @@ function SectionPresetPanel({
                     setMessage(null)
                   }}
                 >
-                  ×
+                  <XIcon width={12} height={12} />
                 </button>
               </li>
             )

@@ -5,7 +5,7 @@ import { useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
 import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
 import { MIN_OVERLAY_DURATION } from '../lib/textOverlayPlacement'
-import { CopyIcon, SparklesIcon, TrashIcon } from './icons'
+import { CopyIcon, SparklesIcon, TrashIcon, ChevronDownIcon, ChevronRightIcon } from './icons'
 import { PropRow, TelopStyleFields } from './TelopStyleFields'
 import { NumberSlider, StyleSection } from './AppearanceControls'
 import { TelopLookPicker, type LookItem } from './TelopLookGallery'
@@ -128,7 +128,7 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
     <div className="telop-inspector">
       <div className="telop-insp-head">
         <span className="telop-insp-icon" aria-hidden="true">
-          <TypeIcon width={15} height={15} />
+          <TypeIcon width={16} height={16} />
         </span>
         <span className="telop-insp-title">
           <span className="telop-insp-kind">{kindLabel}</span>
@@ -161,7 +161,11 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
         }}
       >
         数値(表示 {shownSec.toFixed(1)} 秒 · {cps.toFixed(1)} 字/秒)
-        <span aria-hidden="true">{metricsOpen ? '▾' : '▸'}</span>
+        {metricsOpen ? (
+          <ChevronDownIcon width={12} height={12} />
+        ) : (
+          <ChevronRightIcon width={12} height={12} />
+        )}
       </button>
       <div
         className="telop-insp-metrics"

@@ -698,7 +698,7 @@ export function MediaBin(): React.JSX.Element {
           <div className={`media-list ${layout === 'grid' ? 'media-grid' : ''}`}>
             {assets.length === 0 && (
               <div className="empty-state">
-                <ClapperboardIcon width={28} height={28} />
+                <ClapperboardIcon width={32} height={32} />
                 <p className="hint-text">動画・音声ファイルを追加してください</p>
                 <p className="hint-text">ファイルをこのウィンドウにドロップしても追加できます</p>
               </div>
@@ -767,8 +767,8 @@ export function MediaBin(): React.JSX.Element {
                   <span className="media-col-name">
                     {(isMissing || mismatch) && (
                       <AlertTriangleIcon
-                        width={11}
-                        height={11}
+                        width={12}
+                        height={12}
                         className="media-warn"
                         aria-label={
                           isMissing
@@ -828,7 +828,7 @@ export function MediaBin(): React.JSX.Element {
         createPortal(
           <div className="file-drop-overlay">
             <div className="file-drop-card">
-              <UploadIcon width={26} height={26} />
+              <UploadIcon width={32} height={32} />
               <p className="file-drop-title">ドロップして素材に追加</p>
               <p className="hint-text">{MEDIA_EXTENSIONS.join(' / ')}</p>
             </div>

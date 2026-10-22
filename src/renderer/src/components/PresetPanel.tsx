@@ -165,13 +165,15 @@ export function PresetPanel(): React.JSX.Element {
         <h2>マイプリセット</h2>
       </div>
       <p className="hint-text">
-        よく使うテロップのスタイルや効果音をお気に入り登録しておくと、ここからワンクリックで追加できます。テロップは「テキスト」タブの各テロップ、効果音は「BGM/SE」タブの検索結果から★ボタンで登録できます。
+        よく使うテロップのスタイルや効果音をお気に入り登録しておくと、ここからワンクリックで追加できます。テロップは「テキスト」タブの各テロップ、効果音は「BGM/SE」タブの検索結果から
+        <StarIcon className="inline-icon" width={12} height={12} />
+        (お気に入り)のボタンで登録できます。
       </p>
       {error && <p className="error-text">{error}</p>}
 
       <div className="preset-section">
         <h3>
-          <TypeIcon width={13} height={13} />
+          <TypeIcon width={14} height={14} />
           テロップスタイル
         </h3>
         {captionPresets.length === 0 && <p className="hint-text">まだ登録されていません。</p>}
@@ -201,7 +203,7 @@ export function PresetPanel(): React.JSX.Element {
                 title="現在の再生位置に新規テロップとして追加"
                 onClick={() => handleAddCaption(preset)}
               >
-                <PlusIcon width={13} height={13} />
+                <PlusIcon width={14} height={14} />
               </button>
               <button
                 className="icon-button danger"
@@ -210,7 +212,7 @@ export function PresetPanel(): React.JSX.Element {
                   if (confirmDeletePreset(preset.name)) removeCaptionPreset(preset.id)
                 }}
               >
-                <TrashIcon width={13} height={13} />
+                <TrashIcon width={14} height={14} />
               </button>
             </div>
           </div>
@@ -219,7 +221,7 @@ export function PresetPanel(): React.JSX.Element {
 
       <div className="preset-section">
         <h3>
-          <MusicIcon width={13} height={13} />
+          <MusicIcon width={14} height={14} />
           効果音(SE)お気に入り
         </h3>
         {sePresets.length === 0 && <p className="hint-text">まだ登録されていません。</p>}
@@ -253,7 +255,7 @@ export function PresetPanel(): React.JSX.Element {
           >
             <div className="preset-item-info">
               <span className="preset-item-name">
-                <StarIcon width={11} height={11} />
+                <StarIcon width={12} height={12} />
                 {preset.name}
               </span>
             </div>
@@ -268,9 +270,9 @@ export function PresetPanel(): React.JSX.Element {
                 onClick={() => handlePreviewSe(preset)}
               >
                 {playingId === preset.id ? (
-                  <PauseIcon width={13} height={13} />
+                  <PauseIcon width={14} height={14} />
                 ) : (
-                  <PlayIcon width={13} height={13} />
+                  <PlayIcon width={14} height={14} />
                 )}
               </button>
               <button
@@ -279,7 +281,7 @@ export function PresetPanel(): React.JSX.Element {
                 disabled={busyId === preset.id}
                 onClick={() => handleAddSe(preset)}
               >
-                {busyId === preset.id ? '...' : <PlusIcon width={13} height={13} />}
+                {busyId === preset.id ? '...' : <PlusIcon width={14} height={14} />}
               </button>
               <button
                 className="icon-button danger"
@@ -288,7 +290,7 @@ export function PresetPanel(): React.JSX.Element {
                   if (confirmDeletePreset(preset.name)) removeSePreset(preset.id)
                 }}
               >
-                <TrashIcon width={13} height={13} />
+                <TrashIcon width={14} height={14} />
               </button>
             </div>
           </div>
@@ -297,7 +299,7 @@ export function PresetPanel(): React.JSX.Element {
 
       <div className="preset-section">
         <h3>
-          <WandIcon width={13} height={13} />
+          <WandIcon width={14} height={14} />
           キーワード連動SE辞書
         </h3>
         <p className="hint-text">
@@ -332,7 +334,7 @@ export function PresetPanel(): React.JSX.Element {
                   if (confirmDeletePreset(entry.keyword)) removeDictionaryEntry(entry.id)
                 }}
               >
-                <TrashIcon width={13} height={13} />
+                <TrashIcon width={14} height={14} />
               </button>
             </div>
           </div>
@@ -362,7 +364,7 @@ export function PresetPanel(): React.JSX.Element {
             disabled={!newKeyword.trim() || !newEntrySePresetId}
             onClick={handleAddDictionaryEntry}
           >
-            <PlusIcon width={13} height={13} />
+            <PlusIcon width={14} height={14} />
           </button>
         </div>
         <button
@@ -370,7 +372,7 @@ export function PresetPanel(): React.JSX.Element {
           disabled={dictionaryEntries.length === 0}
           onClick={() => setShowKeywordSeModal(true)}
         >
-          <WandIcon width={13} height={13} />
+          <WandIcon width={14} height={14} />
           テロップをスキャンしてSEを配置
         </button>
       </div>

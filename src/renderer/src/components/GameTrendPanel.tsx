@@ -224,7 +224,7 @@ export function GameTrendPanel(): React.JSX.Element {
         </p>
       </div>
       <button className="primary-button" onClick={handleRefresh} disabled={loading || asking}>
-        <SparklesIcon width={13} height={13} />
+        <SparklesIcon width={14} height={14} />
         {loading ? '分析中...' : '最新トレンドを分析'}
       </button>
       {error && <p className="error-text">{error}</p>}
@@ -242,7 +242,7 @@ export function GameTrendPanel(): React.JSX.Element {
 
       <div className="game-trend-chat">
         <h3>
-          <MegaphoneIcon width={13} height={13} />
+          <MegaphoneIcon width={14} height={14} />
           {hasData ? 'このトレンドについて質問する' : 'トレンドについて質問する'}
         </h3>
         <p className="hint-text">
@@ -347,7 +347,7 @@ export function GameTrendPanel(): React.JSX.Element {
           {analysis.insights.map((insight, i) => (
             <div key={i} className="game-trend-insight-card">
               <h4>
-                <TargetIcon width={13} height={13} />
+                <TargetIcon width={14} height={14} />
                 {insight.gameName}
               </h4>
               <p>{insight.sceneSuggestion}</p>
@@ -383,7 +383,7 @@ export function GameTrendPanel(): React.JSX.Element {
       {analysis && analysis.thumbnailInsight && (
         <div className="game-trend-thumbnail-insight">
           <h3>
-            <ImageIcon width={13} height={13} />
+            <ImageIcon width={14} height={14} />
             サムネイルの視覚傾向
           </h3>
           <ul>
