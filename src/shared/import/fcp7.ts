@@ -32,6 +32,11 @@ export interface Fcp7Clip {
   /** 音量(Audio Levels。1 = 0dB。音声のクリップだけ) */
   gain?: number
   /**
+   * 速さ(Time Remap の speed。1 = 等倍)。等倍のときは付けない。
+   * FCP7 の in / out は速さを掛けた後のクリップの時間なので、素材の秒は `in × speed`
+   */
+  speed?: number
+  /**
    * ネストしたシーケンスを展開したクリップのうち、**どのカメラを選んだか XML から分からない**もの
    * (マルチカメラのソースシーケンス: 同じ時間に複数のカメラが積まれている)。
    * 時間(採用区間・カット点)は正しいが、カメラは一番上のトラックを仮に入れてある。
@@ -51,6 +56,8 @@ export interface Fcp7Sequence {
   texts: { start: number; end: number; text: string }[]
   /** 展開したネストしたシーケンスの数と、そのうちカメラが分からなかった(マルチカメラの)数 */
   nested: { count: number; multicam: number }
+  /** シーケンスのマーカー(秒)。長さの無いマーカーは `end` が無い */
+  markers?: { start: number; end?: number; name: string; comment: string }[]
 }
 
 /** 読み取りの文脈(文書の中の、ID で参照されるファイル・シーケンスの定義) */
@@ -304,6 +311,8 @@ function readTrack(track: XmlElement, fps: number, ctx: ReadContext, depth = 0):
     }
     const gain = levelOf(item)
     if (gain !== undefined) clip.gain = gain
+    const speed = speedOf(item)
+    if (speed !== undefined) clip.speed = speed
     lastEnd = clip.end
     out.push(clip)
   }
@@ -326,6 +335,37 @@ function levelOf(item: XmlElement): number | undefined {
     if (Number.isFinite(v) && v >= 0) return v
   }
   return undefined
+}
+
+/** クリップに掛かった Time Remap の速さ(倍率)。等倍・無ければ undefined */
+function speedOf(item: XmlElement): number | undefined {
+  for (const filter of children(item, 'filter')) {
+    const effect = child(filter, 'effect')
+    if (child(effect, 'effectid')?.textContent?.trim().toLowerCase() !== 'timeremap') continue
+    for (const p of children(effect!, 'parameter')) {
+      if (child(p, 'parameterid')?.textContent?.trim().toLowerCase() !== 'speed') continue
+      const v = num(child(p, 'value')) / 100
+      if (Number.isFinite(v) && v > 0 && Math.abs(v - 1) > 1e-9) return v
+    }
+  }
+  return undefined
+}
+
+/** シーケンスの直下のマーカー */
+function readMarkers(seq: XmlElement, fps: number): NonNullable<Fcp7Sequence['markers']> {
+  const out: NonNullable<Fcp7Sequence['markers']> = []
+  for (const m of children(seq, 'marker')) {
+    const inF = num(child(m, 'in'))
+    if (!(inF >= 0)) continue
+    const outF = num(child(m, 'out'))
+    out.push({
+      start: inF / fps,
+      ...(outF > inF ? { end: outF / fps } : {}),
+      name: child(m, 'name')?.textContent ?? '',
+      comment: child(m, 'comment')?.textContent ?? ''
+    })
+  }
+  return out
 }
 
 /** 無効にした(`<enabled>FALSE</enabled>` を直下に持つ)クリップ・文字・トラック */
@@ -407,7 +447,8 @@ export function readFcp7(root: XmlElement): Fcp7Sequence | null {
     video,
     audio,
     texts: texts.sort((a, b) => a.start - b.start),
-    nested: ctx.nested
+    nested: ctx.nested,
+    markers: readMarkers(seq, fps)
   }
 }
 

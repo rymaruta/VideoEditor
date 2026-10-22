@@ -18,6 +18,8 @@ import { FolderIcon, PlayCircleIcon, TrashIcon } from './icons'
 import { ExportQcPanel } from './ExportQcPanel'
 import { reportBusy } from '../lib/busyReporter'
 import { useQcStore } from '../store/qcStore'
+import { useReviewItems } from '../lib/useReviewItems'
+import type { PremiereExportResult, PremiereTelopMode } from '@shared/export/premiereTypes'
 
 /**
  * 書き出し設定(ファイル > 書き出し… / Ctrl+M)。デザイン案の「書き出し設定」ダイアログ。
@@ -37,14 +39,39 @@ interface QueueJob {
 }
 
 type JobStatus = 'pending' | 'running' | 'done' | 'error'
-type SettingsTab = 'video' | 'audio' | 'telop' | 'output'
+type SettingsTab = 'video' | 'audio' | 'telop' | 'output' | 'premiere'
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'video', label: '映像' },
   { id: 'audio', label: '音声' },
   { id: 'telop', label: 'テロップ' },
-  { id: 'output', label: '出力先' }
+  { id: 'output', label: '出力先' },
+  { id: 'premiere', label: 'Premiere 用 XML' }
 ]
+
+/** Premiere 用 XML のテロップの渡し方(文字は必ずマーカーと SRT で渡す) */
+const PREMIERE_TELOP_CHOICES: [PremiereTelopMode, string, string][] = [
+  [
+    'text',
+    '文字だけ(マーカー+SRT)',
+    'テロップの文字をシーケンスのマーカーのコメントと、同じ名前の .srt に書きます。Premiere で打ち直す・キャプションにする場合に'
+  ],
+  [
+    'png',
+    '見た目どおり: 透過 PNG',
+    '画面と同じ描画のテロップを透過 PNG にして、一番上の映像トラックに並べます(「名前_telop」フォルダ)'
+  ],
+  [
+    'prores',
+    '見た目どおり: ProRes 4444(透過)',
+    '画面と同じ描画のテロップを透過付きの動画 1 本にして、一番上の映像トラックに置きます。長尺ではファイルが大きくなります'
+  ]
+]
+
+/** 29.97 / 59.94(ドロップフレームを選べるレート) */
+function isDropFrameRate(fps: number): boolean {
+  return [30, 60].some((tb) => Math.abs(fps - (tb * 1000) / 1001) < 0.005)
+}
 
 const QUALITY_LABEL: Record<QualityPreset, string> = {
   high: '高画質',
@@ -109,6 +136,12 @@ export function ExportDialog(): React.JSX.Element | null {
   const [presetError, setPresetError] = useState<string | null>(null)
   const [queue, setQueue] = useState<QueueJob[]>([])
   const [queueStatus, setQueueStatus] = useState<Record<string, JobStatus>>({})
+  const [premiereTelop, setPremiereTelop] = useState<PremiereTelopMode>('text')
+  const [premiereDropFrame, setPremiereDropFrame] = useState(true)
+  const [premiereReviews, setPremiereReviews] = useState(true)
+  const [premiereTelopMarkers, setPremiereTelopMarkers] = useState(true)
+  const [premiereDone, setPremiereDone] = useState<PremiereExportResult | null>(null)
+  const reviewLists = useReviewItems()
 
   useMenuCommand((id) => {
     if (id === 'file.export') setOpen(true)
@@ -121,6 +154,7 @@ export function ExportDialog(): React.JSX.Element | null {
     return onProjectSwitch(() => {
       setError(null)
       setDonePath(null)
+      setPremiereDone(null)
       setProgress(null)
       setQueue([])
       setQueueStatus({})
@@ -274,6 +308,67 @@ export function ExportDialog(): React.JSX.Element | null {
         window.api.notifyDone('書き出しに失敗しました', message)
       }
     } finally {
+      setRunning(false)
+      setProgress(null)
+    }
+  }
+
+  /** Premiere 用 XML(FCP7 xmeml)と SRT・(選べば)見た目どおりのテロップを書き出す */
+  async function handlePremiereExport(): Promise<void> {
+    abortRef.current = new AbortController()
+    setError(null)
+    setDonePath(null)
+    setPremiereDone(null)
+    const reason = blocker()
+    if (reason) {
+      setError(reason)
+      return
+    }
+    const outputPath = await window.api.selectPremiereXmlPath(
+      `${safeFileBaseName(project.name)}.xml`
+    )
+    if (!outputPath) return
+    setRunning(true)
+    setProgress({ percent: 0, stage: '準備中' })
+    const session = useProjectStore.getState().projectSession
+    let telopLayer: TelopLayerPayload | null = null
+    try {
+      // 見た目どおりのテロップは、動画の書き出しと同じ描画(画面と同じ関数)で先に画像にする
+      if (premiereTelop !== 'text')
+        telopLayer = await telopLayerFor(project.aspectRatio, resolutionHeight)
+      if (abortRef.current?.signal.aborted) throw new Error('EXPORT_CANCELED')
+      const result = await window.api.exportPremiereXml({
+        project,
+        aspectRatio: project.aspectRatio,
+        resolutionHeight,
+        outputPath,
+        dropFrame: premiereDropFrame,
+        telopMode: premiereTelop,
+        telopMarkers: premiereTelopMarkers,
+        reviews: premiereReviews
+          ? reviewLists.open.map((r) => ({
+              key: r.key,
+              kind: r.kind,
+              text: r.text,
+              ...(r.at !== undefined ? { at: r.at } : {}),
+              ...(r.overlayId ? { overlayId: r.overlayId } : {})
+            }))
+          : [],
+        telopLayer
+      })
+      if (useProjectStore.getState().projectSession === session) setPremiereDone(result)
+      window.api.notifyDone('Premiere 用 XML を書き出しました', outputPath)
+      if (openFolderAfter) await window.api.showItemInFolder(outputPath).catch(() => {})
+    } catch (e) {
+      const message = formatIpcError(e)
+      if (message !== 'EXPORT_CANCELED') {
+        setError(message)
+        window.api.notifyDone('Premiere 用 XML の書き出しに失敗しました', message)
+      }
+    } finally {
+      // 層の画像は main が使い終わりに片付ける。渡らなかったときもここで片付ける(2回目は何もしない)
+      if (telopLayer?.stagedId)
+        void window.api.telopLayer.release(telopLayer.stagedId).catch(() => {})
       setRunning(false)
       setProgress(null)
     }
@@ -472,6 +567,32 @@ export function ExportDialog(): React.JSX.Element | null {
                 </div>
               </div>
             )}
+            {premiereDone && (
+              <div className="export-done">
+                <p className="success-text" title={premiereDone.xmlPath}>
+                  Premiere 用 XML を書き出しました(映像 {premiereDone.stats.videoClips}・音声{' '}
+                  {premiereDone.stats.audioClips} クリップ・マーカー {premiereDone.stats.markers})
+                </p>
+                <div className="export-done-actions">
+                  <button
+                    className="small-button"
+                    onClick={() =>
+                      window.api
+                        .showItemInFolder(premiereDone.xmlPath)
+                        .catch((e) => setError(formatIpcError(e)))
+                    }
+                  >
+                    <FolderIcon width={13} height={13} />
+                    フォルダを表示
+                  </button>
+                </div>
+                {premiereDone.warnings.map((w) => (
+                  <p key={w} className="hint-text">
+                    {w}
+                  </p>
+                ))}
+              </div>
+            )}
             {error && <p className="error-text">{error}</p>}
           </div>
 
@@ -645,6 +766,88 @@ export function ExportDialog(): React.JSX.Element | null {
                   <p className="hint-text form-hint">
                     どちらの書き出し方式でも、プレビューで見えているとおりに書き出します。
                   </p>
+                </>
+              )}
+
+              {tab === 'premiere' && (
+                <>
+                  <div className="form-row">
+                    <label>形式</label>
+                    <span className="form-value">Final Cut Pro 7 XML(xmeml v4)</span>
+                    <span className="form-note">Premiere の「読み込み」で開けます</span>
+                  </div>
+                  <div className="form-row">
+                    <label>シーケンス</label>
+                    <span className="form-value">
+                      {w}×{h} · {displayFps(fps)}p · 48kHz ステレオ
+                    </span>
+                  </div>
+                  {isDropFrameRate(fps) && (
+                    <div className="form-row">
+                      <label>タイムコード</label>
+                      <select
+                        value={premiereDropFrame ? 'df' : 'ndf'}
+                        disabled={running}
+                        onChange={(e) => setPremiereDropFrame(e.target.value === 'df')}
+                      >
+                        <option value="df">ドロップフレーム(DF)</option>
+                        <option value="ndf">ノンドロップ(NDF)</option>
+                      </select>
+                    </div>
+                  )}
+                  <div className="form-row form-row-top">
+                    <label>テロップ</label>
+                    <div className="choice-list">
+                      {PREMIERE_TELOP_CHOICES.map(([value, label, note]) => (
+                        <label key={value} className="choice">
+                          <input
+                            type="radio"
+                            name="premiere-telop"
+                            checked={premiereTelop === value}
+                            disabled={running}
+                            onChange={() => setPremiereTelop(value)}
+                          />
+                          <span>
+                            <span className="choice-label">{label}</span>
+                            <span className="choice-note">{note}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="checkbox-label form-check">
+                    <input
+                      type="checkbox"
+                      checked={premiereTelopMarkers}
+                      disabled={running}
+                      onChange={(e) => setPremiereTelopMarkers(e.target.checked)}
+                    />
+                    テロップの文字をマーカーにも入れる(SRT は常に書きます)
+                  </label>
+                  <label className="checkbox-label form-check">
+                    <input
+                      type="checkbox"
+                      checked={premiereReviews}
+                      disabled={running}
+                      onChange={(e) => setPremiereReviews(e.target.checked)}
+                    />
+                    要確認の印をマーカーにする({reviewLists.open.length} 件)・章はいつもマーカーに
+                  </label>
+                  <p className="hint-text form-hint">
+                    {'本編のカット(カメラの切り替え)・速さ・繋ぎ、ワイプ・CG、BGM・SE の音量とフェードを同じ並びで書きます。' +
+                      'ダッキング・ラウドネスの調整・色合わせは Premiere で仕上げてください。'}
+                  </p>
+                  <div className="form-row">
+                    <label />
+                    <button
+                      className="small-button"
+                      disabled={running}
+                      onClick={handlePremiereExport}
+                      title="XML と同じ名前の .srt を並べて書きます"
+                    >
+                      Premiere 用 XML を書き出す…
+                    </button>
+                  </div>
                 </>
               )}
 
