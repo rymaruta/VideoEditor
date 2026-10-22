@@ -1,10 +1,23 @@
 import { childMain } from './childMain'
-import { chooseLocalModel, type LlmRequest, type LlmWorkerMessage } from '@shared/llm'
+import { statSync } from 'fs'
+import { freemem } from 'os'
+import {
+  chooseLocalModel,
+  judgeLocalModelLoad,
+  type LlmRequest,
+  type LlmWorkerMessage
+} from '@shared/llm'
+
+const GB = 1024 ** 3
 
 /**
  * このPCで言語モデルを動かす(node-llama-cpp)。別プロセス(理由は childMain)。
  * GPU は CUDA → Vulkan → なし の順に自動で選ぶ。モデルは初回だけダウンロードして userData/models に置く。
  * 出力は JSON スキーマから作った文法で縛るので、形の崩れた答えは出ない。
+ *
+ * 読み込みは別プロセス(utilityProcess)なので、ここで落ちてもアプリ本体は落ちない(llmService が理由を
+ * 返し、呼び出し側は簡易の点数で続ける)。それでも落ちると待たせた上に理由が分かりにくいので、
+ * GPU が無い・メモリが足りないときは読み込む前に止める(`judgeLocalModelLoad`)。
  */
 
 interface WorkerInput {
@@ -19,9 +32,25 @@ childMain<WorkerInput>(async (input, send) => {
   const { getLlama, resolveModelFile, LlamaChatSession } = await import('node-llama-cpp')
   post({ type: 'status', stage: 'load', percent: 0, note: 'AI を準備中' })
   const llama = await getLlama({ gpu: 'auto' })
-  const vram = llama.gpu ? (await llama.getVramState()).total / 1024 ** 3 : 0
+  const vramState = llama.gpu ? await llama.getVramState() : null
+  const vram = vramState ? vramState.total / GB : 0
   const choice = chooseLocalModel(vram)
   const uri = input.modelUri ?? choice.uri
+  const label = input.modelUri ? uri.replace(/^hf:/, '') : choice.label
+  // 読み込んで落ちる前に、GPU とメモリで足りるかを確かめる(足りなければ読み込まず、理由を返す。
+  // 呼び出し側は簡易の点数で続ける)。決まったモデルはダウンロードの前にも確かめる(使えない大きな
+  // モデルを落とさない)
+  const ensureLoadable = (modelGb: number): void => {
+    const decision = judgeLocalModelLoad({
+      gpu: llama.gpu,
+      vramFreeGb: vramState ? vramState.free / GB : 0,
+      ramFreeGb: freemem() / GB,
+      modelGb,
+      modelLabel: label
+    })
+    if (!decision.ok) throw new Error(decision.reason)
+  }
+  if (!input.modelUri) ensureLoadable(choice.sizeGb)
   const modelPath = await resolveModelFile(uri, {
     directory: input.cacheDir,
     cli: false,
@@ -33,11 +62,13 @@ childMain<WorkerInput>(async (input, send) => {
         note: `AI のモデルをダウンロード中(初回のみ・${(totalSize / 1e9).toFixed(1)}GB)`
       })
   })
+  // 指定のモデル(大きさが前もって分からない)は、取得したファイルの大きさで確かめる
+  if (input.modelUri) ensureLoadable(statSync(modelPath).size / GB)
   // 読み込みの前に知らせる(読み込み中に落ちたとき、どの装置だったかで理由を示せるように)
   post({
     type: 'device',
     device: (llama.gpu || 'cpu') as 'cuda' | 'vulkan' | 'metal' | 'cpu',
-    model: input.modelUri ? uri.replace(/^hf:/, '') : choice.label
+    model: label
   })
   post({ type: 'status', stage: 'load', percent: 50, note: 'AI のモデルを読み込み中' })
   const model = await llama.loadModel({ modelPath })
