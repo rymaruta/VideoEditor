@@ -11,6 +11,7 @@ import { classifyFootage, type FootageScan, type ProbedFile } from '@shared/inge
 import { recordedAtFromTags, tagValue as tag } from '@shared/ingest/recordedAt'
 import type { SyncInputFile, SyncReport, SyncWorkerMessage } from '@shared/sync/report'
 import { extractAudioTracks, type AudioStreamInfo } from './obsTracks'
+import { mediaDurationSeconds } from './mediaDuration'
 
 /**
  * 収録フォルダの取り込み・整理(計画書 §5.1)と、同期(§5.2)の呼び出し口。
@@ -49,13 +50,14 @@ async function listMediaFiles(root: string): Promise<string[]> {
 }
 
 interface FfprobeJson {
-  format?: { duration?: string; tags?: Record<string, string> }
+  format?: { duration?: string; start_time?: string; tags?: Record<string, string> }
   streams?: {
     codec_type?: string
     codec_name?: string
     width?: number
     height?: number
     duration?: string
+    start_time?: string
     disposition?: { attached_pic?: number }
     tags?: Record<string, string>
   }[]
@@ -98,7 +100,8 @@ async function probeFile(
     .map((a) => (a.title && /handler$/i.test(a.title) ? { ...a, title: undefined } : a))
   const video = streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic)
   const audio = streams.find((s) => s.codec_type === 'audio')
-  const duration = Number(info.format?.duration ?? video?.duration ?? audio?.duration ?? 0)
+  // 長さは映像・音声のストリームから決める(データ・字幕のトラックの長さを含めない。mediaDurationSeconds)
+  const duration = mediaDurationSeconds(info.format, streams) ?? 0
   const tags = { ...(audio?.tags ?? {}), ...(video?.tags ?? {}), ...(info.format?.tags ?? {}) }
   // BWF の wav は日付と時刻が別のタグに入るので、組み合わせて読む(shared/ingest/recordedAt)
   const recordedAt = recordedAtFromTags(tags)

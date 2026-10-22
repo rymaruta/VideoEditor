@@ -89,6 +89,7 @@ import {
 } from '@shared/diarize/micTurns'
 import { turnsToJobs } from '@shared/diarize/turnJobs'
 import {
+  hallucinatedIndices,
   isLikelyHallucination,
   type AsrDevice,
   type AsrJobResult,
@@ -579,9 +580,25 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const byId = new Map(results.map((r) => [r.id, r]))
     const nameOf = new Map(used.map((s) => [s.id, s.name]))
     const utterances: TranscriptUtterance[] = []
+    // 音楽・効果音の所の作り話(発話をまたいだ繰り返し・話す速さに合わない文字数)は、同じ素材の発話を
+    // 時刻の順に並べて見る(「2分間」「2分間2分間2分間2分間」・「んんんんん…」が 10〜20 秒のテロップになっていた)
+    const made = new Set<string>()
+    const byFile = new Map<
+      string,
+      { id: string; text: string; start: number; end: number; words: AsrJobResult['words'] }[]
+    >()
     for (const j of jobs) {
       const r = byId.get(j.job.id)
-      if (!r || isLikelyHallucination(r.text)) continue
+      if (!r) continue
+      const list = byFile.get(j.fileId) ?? []
+      list.push({ id: j.job.id, text: r.text, start: j.job.start, end: j.job.end, words: r.words })
+      byFile.set(j.fileId, list)
+    }
+    for (const list of byFile.values())
+      for (const i of hallucinatedIndices(list)) made.add(list[i].id)
+    for (const j of jobs) {
+      const r = byId.get(j.job.id)
+      if (!r || made.has(j.job.id) || isLikelyHallucination(r.text)) continue
       const assetId = assetIdOf[j.fileId]
       if (!assetId) continue
       utterances.push({

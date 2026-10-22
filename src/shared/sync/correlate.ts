@@ -14,22 +14,97 @@ import { crossCorrelation } from './fft'
 export const ENVELOPE_RATE = 100
 
 /**
+ * 同期の相関に使う音の帯域(Hz)。声の帯域(おおよそ 250Hz〜3kHz)だけを見る。
+ *
+ * 録音機によって低域・高域の録れ方が違う(低域カット・風よけのフィルタ・小さなマイクの高域)。帯域を
+ * 揃えずに大きさの立ち上がりを比べると、片方にしか無い低音(音楽・効果音の太鼓や地鳴り)の立ち上がりが
+ * 目立ち、正しいずれでも一致の山が低くなっていた(実測: 片方に 200Hz の低域カットで 確からしさ 27 → 不採用)。
+ * 両方を同じ帯域に揃えてから比べる。どの機材でもまず録れている帯域なので、揃えても失うものは少ない
+ */
+export const SYNC_BAND_HZ: readonly [number, number] = [250, 3000]
+
+/** 2次の IIR フィルタ(RBJ の式)。状態を持ち、少しずつ流し込める */
+class Biquad {
+  private x1 = 0
+  private x2 = 0
+  private y1 = 0
+  private y2 = 0
+  private readonly b0: number
+  private readonly b1: number
+  private readonly b2: number
+  private readonly a1: number
+  private readonly a2: number
+
+  constructor(kind: 'highpass' | 'lowpass', freq: number, q: number, sampleRate: number) {
+    const w = (2 * Math.PI * Math.min(freq, sampleRate * 0.45)) / sampleRate
+    const cos = Math.cos(w)
+    const alpha = Math.sin(w) / (2 * q)
+    const a0 = 1 + alpha
+    const b1 = kind === 'lowpass' ? 1 - cos : -(1 + cos)
+    this.b0 = Math.abs(b1) / 2 / a0
+    this.b1 = b1 / a0
+    this.b2 = this.b0
+    this.a1 = (-2 * cos) / a0
+    this.a2 = (1 - alpha) / a0
+  }
+
+  step(x: number): number {
+    const y =
+      this.b0 * x + this.b1 * this.x1 + this.b2 * this.x2 - this.a1 * this.y1 - this.a2 * this.y2
+    this.x2 = this.x1
+    this.x1 = x
+    this.y2 = this.y1
+    // 小さくなりすぎた値(非正規化数)で遅くならないよう、0 に丸める
+    this.y1 = Math.abs(y) < 1e-30 ? 0 : y
+    return this.y1
+  }
+}
+
+/** 4次の Butterworth(2次を2段)の Q */
+const BUTTERWORTH4_Q = [0.5412, 1.3066]
+
+/** 帯域通過(4次の高域通過 + 4次の低域通過)。`SYNC_BAND_HZ` の帯域だけを残す */
+export class BandPass {
+  private readonly stages: Biquad[]
+
+  constructor(sampleRate: number, band: readonly [number, number] = SYNC_BAND_HZ) {
+    this.stages = [
+      ...BUTTERWORTH4_Q.map((q) => new Biquad('highpass', band[0], q, sampleRate)),
+      // 低域通過は、帯域の上が標本化の周波数の半分に近ければ要らない(8kHz なら 3kHz は掛ける)
+      ...(band[1] < sampleRate * 0.45
+        ? BUTTERWORTH4_Q.map((q) => new Biquad('lowpass', band[1], q, sampleRate))
+        : [])
+    ]
+  }
+
+  step(x: number): number {
+    let v = x
+    for (const s of this.stages) v = s.step(v)
+    return v
+  }
+}
+
+/**
  * 波形を受け取りながら、10ms ごとの RMS(包絡線)を作る。
  * 4時間の音声を丸ごと持たずに済むよう、少しずつ流し込めるようにしてある。
+ * `band` を付けると、声の帯域(`SYNC_BAND_HZ`)に絞ってから測る(同期の相関用)
  */
 export class EnvelopeBuilder {
   private readonly hop: number
   private acc = 0
   private count = 0
   private readonly out: number[] = []
+  private readonly filter: BandPass | null
 
-  constructor(sampleRate: number) {
+  constructor(sampleRate: number, options: { band?: boolean } = {}) {
     this.hop = Math.max(1, Math.round(sampleRate / ENVELOPE_RATE))
+    this.filter = options.band ? new BandPass(sampleRate) : null
   }
 
   push(samples: ArrayLike<number>): void {
+    const filter = this.filter
     for (let i = 0; i < samples.length; i++) {
-      const v = samples[i]
+      const v = filter ? filter.step(samples[i]) : samples[i]
       this.acc += v * v
       if (++this.count === this.hop) {
         this.out.push(Math.sqrt(this.acc / this.hop))

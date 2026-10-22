@@ -1,6 +1,12 @@
 import { childMain } from './childMain'
 import { readWindow } from './audioPcm'
-import { groupAsrJobs, splitGroupWords, type GroupedJob } from '@shared/diarize/groupJobs'
+import {
+  asrGroupResults,
+  groupAsrJobs,
+  markSegmentStarts,
+  type AsrRawChunk,
+  type GroupedJob
+} from '@shared/diarize/groupJobs'
 import type { AsrDevice, AsrJob, AsrWorkerMessage } from '@shared/transcript'
 
 /**
@@ -34,14 +40,10 @@ const DTYPES: Record<AsrDevice, Record<string, string>> = {
   cpu: { encoder_model: 'q4', decoder_model_merged: 'q4' }
 }
 
-interface AsrChunk {
-  text: string
-  timestamp: [number, number | null]
-}
 type Transcriber = (
   audio: Float32Array,
   options: Record<string, unknown>
-) => Promise<{ text: string; chunks?: AsrChunk[] }>
+) => Promise<{ text: string; chunks?: AsrRawChunk[] }>
 
 const OPTIONS = {
   language: 'japanese',
@@ -92,6 +94,8 @@ async function loadTranscriber(): Promise<{ asr: Transcriber; device: AsrDevice 
       } as Record<string, unknown>)) as unknown as Transcriber
       // 読み込めても、実際に計算させると落ちる GPU がある(対応していない演算など)。1秒の無音で試す
       await asr(new Float32Array(SAMPLE_RATE), OPTIONS)
+      // 認識の区切りの頭の片に印を付ける(日本語に固定して英語を認識すると、区切りの間の空白が消える)
+      markSegmentStarts(asr)
       return { asr, device }
     } catch (e) {
       failures.push(`${device}: ${e instanceof Error ? e.message : String(e)}`)
@@ -123,24 +127,8 @@ async function run(): Promise<void> {
     // 先読みが今の認識中に失敗しても「処理されない失敗」にしない(次の周の await で失敗として扱う)
     next?.catch(() => {})
     const r = await asr(audio, OPTIONS)
-    // 片の頭の空白は、まとめた発話の文を作るまで残す(認識の片「Mine」「craft」を「Mine craft」と
-    // 空けないよう、空白のあった所だけ空ける。`splitGroupWords`)
-    const tokens = (r.chunks ?? [])
-      .map((c) => ({
-        text: c.text,
-        start: group.start + c.timestamp[0],
-        end: group.start + (c.timestamp[1] ?? c.timestamp[0])
-      }))
-      .filter((w) => w.text.trim().length > 0)
-    const words = tokens.map((w) => ({ ...w, text: w.text.trim() }))
-    if (group.parts.length === 1)
-      post({
-        type: 'result',
-        result: { id: group.parts[0].id, text: (r.text ?? '').trim(), words }
-      })
-    else
-      for (const part of splitGroupWords(group, tokens, true))
-        post({ type: 'result', result: part })
+    for (const result of asrGroupResults(group, r.text ?? '', r.chunks ?? []))
+      post({ type: 'result', result })
     done += group.parts.length
     post({ type: 'progress', done, total: input.jobs.length })
   }

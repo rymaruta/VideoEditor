@@ -12,6 +12,7 @@ import { describeFfmpegExit } from './ffmpegError'
 import { ffSeconds } from './ffArgs'
 import { PCM_ALIGN_FILTER } from './audioPcm'
 import { fitSegmentsToRange } from '@shared/transcript'
+import { markSegmentStarts, spaceSegmentStarts, type AsrRawChunk } from '@shared/diarize/groupJobs'
 
 const execFileAsyncRaw = promisify(execFile)
 /** 外部の処理を始め、アプリを閉じるときに止める一覧に入れる */
@@ -28,14 +29,9 @@ const ffmpegPath = (ffmpegStatic as unknown as string).replace('app.asar', 'app.
 
 const MODEL_ID = 'Xenova/whisper-base'
 
-interface AsrChunk {
-  text: string
-  timestamp: [number, number | null]
-}
-
 interface AsrResult {
   text: string
-  chunks?: AsrChunk[]
+  chunks?: AsrRawChunk[]
 }
 
 type Transcriber = (audio: Float32Array, options: Record<string, unknown>) => Promise<AsrResult>
@@ -63,9 +59,12 @@ const getTranscriber = retryableSingleton<Transcriber>(async () => {
   const { env, pipeline } = await import('@huggingface/transformers')
   // 読み込みの前に置き場を差し替える(pipeline はここを見てダウンロード先を決める)
   env.cacheDir = modelCacheDir()
-  return (await pipeline('automatic-speech-recognition', MODEL_ID, {
+  const asr = (await pipeline('automatic-speech-recognition', MODEL_ID, {
     dtype: 'fp32'
   })) as unknown as Transcriber
+  // 認識の区切りの頭の片に印を付ける(区切りの頭に空白が無いと、英語の語の間が詰まる)
+  markSegmentStarts(asr)
+  return asr
 })
 
 // Async on purpose: a synchronous ffmpeg call here blocks the whole main process
@@ -285,7 +284,7 @@ export async function transcribeWordsRange(
     chunk_length_s: 30
   })
 
-  const words = (result.chunks ?? [])
+  const words = spaceSegmentStarts(result.chunks ?? [])
     .map((c) => ({
       raw: c.text,
       start: rangeStart + c.timestamp[0],

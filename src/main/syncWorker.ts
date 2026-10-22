@@ -70,7 +70,8 @@ const DECODE_PARALLEL = 3
  */
 async function envelopeOf(f: SyncInputFile): Promise<Float32Array> {
   try {
-    return await cachedEnvelope(input.ffmpegPath, input.cacheDir, f)
+    // 声の帯域に絞った包絡線で比べる(録音機ごとの低域カットなどの違いに強くする。SYNC_BAND_HZ)
+    return await cachedEnvelope(input.ffmpegPath, input.cacheDir, f, { band: true })
   } catch (e) {
     console.warn(
       `[sync] 音を読めないので照らし合わせから外します: ${f.path}: ${e instanceof Error ? e.message : String(e)}`

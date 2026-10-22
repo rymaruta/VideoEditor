@@ -1,10 +1,10 @@
 import { spawn } from 'child_process'
 import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { contentFingerprint } from './fileFingerprint'
 import { describeFfmpegExit } from './ffmpegError'
-import { ENVELOPE_RATE, EnvelopeBuilder } from '@shared/sync/correlate'
+import { ENVELOPE_RATE, EnvelopeBuilder, SYNC_BAND_HZ } from '@shared/sync/correlate'
 
 /**
  * 素材の音を ffmpeg で読む部品。同期・話者の判定・音声認識で共有する
@@ -61,13 +61,31 @@ export const PCM_ALIGN_FILTER = 'aresample=async=1:first_pts=0'
 /** 包絡線のキャッシュの形が変わったら上げる(古い形のキャッシュを使わない) */
 const ENVELOPE_CACHE_VERSION = 2
 
-function envelopeCachePath(cacheDir: string, f: AudioFileRef): string {
+function envelopeCachePath(cacheDir: string, f: AudioFileRef, band: boolean): string {
   const key = createHash('sha1')
     .update(
-      `${f.path}|${f.size}|${f.mtimeMs}|${contentFingerprint(f.path)}|${ENVELOPE_SAMPLE_RATE}|${ENVELOPE_RATE}|v${ENVELOPE_CACHE_VERSION}`
+      `${f.path}|${f.size}|${f.mtimeMs}|${contentFingerprint(f.path)}|${ENVELOPE_SAMPLE_RATE}|${ENVELOPE_RATE}|v${ENVELOPE_CACHE_VERSION}` +
+        // 帯域を絞った包絡線(同期用)は別に持つ。絞らないもの(話者の判定・トラックの役割)の鍵は今までどおり
+        (band ? `|band${SYNC_BAND_HZ.join('-')}` : '')
     )
     .digest('hex')
   return join(cacheDir, `${key}.env`)
+}
+
+function writeCachedEnvelope(cached: string, env: Float32Array): void {
+  try {
+    mkdirSync(dirname(cached), { recursive: true })
+    // 別の名前に書いてから名前を替える(書いている途中の物を、別のスレッドが読まないように)
+    const tmp = `${cached}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`
+    writeFileSync(tmp, Buffer.from(env.buffer, env.byteOffset, env.byteLength))
+    try {
+      renameSync(tmp, cached)
+    } catch {
+      rmSync(tmp, { force: true })
+    }
+  } catch {
+    // キャッシュに書けなくても続けられる
+  }
 }
 
 /**
@@ -87,18 +105,25 @@ function readCachedEnvelope(cached: string): Float32Array | null {
   }
 }
 
-/** 10ms ごとの音の大きさ(包絡線)。一度作ったものはキャッシュから読む */
+/**
+ * 10ms ごとの音の大きさ(包絡線)。一度作ったものはキャッシュから読む。
+ * `band`: 声の帯域に絞って測る(同期の相関用。`SYNC_BAND_HZ`)。読むときは絞ったもの・絞らないものを
+ * 1回の読み込みで両方作ってキャッシュする(同期の後の話者の判定で、同じ素材をもう1回読まない)
+ */
 export async function cachedEnvelope(
   ffmpegPath: string,
   cacheDir: string,
-  f: AudioFileRef
+  f: AudioFileRef,
+  options: { band?: boolean } = {}
 ): Promise<Float32Array> {
-  const cached = envelopeCachePath(cacheDir, f)
+  const band = options.band === true
+  const cached = envelopeCachePath(cacheDir, f, band)
   if (existsSync(cached)) {
     const env = readCachedEnvelope(cached)
     if (env) return env
   }
-  const builder = new EnvelopeBuilder(ENVELOPE_SAMPLE_RATE)
+  const plain = new EnvelopeBuilder(ENVELOPE_SAMPLE_RATE)
+  const banded = new EnvelopeBuilder(ENVELOPE_SAMPLE_RATE, { band: true })
   await readPcm(
     ffmpegPath,
     [
@@ -115,23 +140,15 @@ export async function cachedEnvelope(
       'f32le',
       'pipe:1'
     ],
-    (s) => builder.push(s)
-  )
-  const env = builder.finish()
-  try {
-    mkdirSync(cacheDir, { recursive: true })
-    // 別の名前に書いてから名前を替える(書いている途中の物を、別のスレッドが読まないように)
-    const tmp = `${cached}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`
-    writeFileSync(tmp, Buffer.from(env.buffer, env.byteOffset, env.byteLength))
-    try {
-      renameSync(tmp, cached)
-    } catch {
-      rmSync(tmp, { force: true })
+    (s) => {
+      plain.push(s)
+      banded.push(s)
     }
-  } catch {
-    // キャッシュに書けなくても続けられる
-  }
-  return env
+  )
+  const envs = { plain: plain.finish(), banded: banded.finish() }
+  writeCachedEnvelope(envelopeCachePath(cacheDir, f, false), envs.plain)
+  writeCachedEnvelope(envelopeCachePath(cacheDir, f, true), envs.banded)
+  return band ? envs.banded : envs.plain
 }
 
 /** start 秒から length 秒の波形(モノラル)。素材の外にはみ出した分は無音で埋める */
