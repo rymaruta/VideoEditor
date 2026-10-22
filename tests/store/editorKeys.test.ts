@@ -624,7 +624,6 @@ describe('キーの振り分け(runEditorAction)', () => {
 const env = (patch: Partial<EditorKeyEnv> = {}): EditorKeyEnv => ({
   sourceViewerVisible: () => false,
   popoverOpen: () => false,
-  telopTabOpen: () => false,
   pageHidden: () => false,
   ...patch
 })
@@ -743,17 +742,29 @@ describe('監査の指摘(二重操作・ソースのタブ・吹き出し・マ
     expect(goToMarker(1)).toBe(false)
   })
 
-  it('シャトルの送りは、窓が隠れた・テロップのタブへ移ったら止まる', () => {
+  it('シャトルの送りは、窓が隠れたら止まる', () => {
     vi.useFakeTimers()
-    for (const which of ['pageHidden', 'telopTabOpen'] as const) {
-      reset()
-      let hidden = false
-      S.setState({ playheadTime: 5 })
-      press('shuttleReverse', env({ [which]: () => hidden }))
-      expect(isShuttling()).toBe(true)
-      hidden = true
-      vi.advanceTimersByTime(SHUTTLE_TICK_MS * 2)
-      expect(isShuttling()).toBe(false)
-    }
+    reset()
+    let hidden = false
+    S.setState({ playheadTime: 5 })
+    press('shuttleReverse', env({ pageHidden: () => hidden }))
+    expect(isShuttling()).toBe(true)
+    hidden = true
+    vi.advanceTimersByTime(SHUTTLE_TICK_MS * 2)
+    expect(isShuttling()).toBe(false)
+  })
+
+  it('テロップのタブでもシャトルの送りは止まらない(止める条件は窓が隠れた・タイムラインが覆われたときだけ)', async () => {
+    // 監査: テロップのタブではタイムラインもプログラムも見えたままなのに、送りが止まり J・2倍・4倍が効かなかった
+    const { readFileSync } = await import('fs')
+    const src = readFileSync('src/renderer/src/lib/editorKeyActions.ts', 'utf-8')
+    expect(src).not.toMatch(/telop-panel|telopTabOpen/)
+    vi.useFakeTimers()
+    reset()
+    S.setState({ playheadTime: 5 })
+    press('shuttleReverse', env({}))
+    vi.advanceTimersByTime(SHUTTLE_TICK_MS * 3)
+    expect(isShuttling()).toBe(true)
+    expect(st().playheadTime).toBeLessThan(5)
   })
 })

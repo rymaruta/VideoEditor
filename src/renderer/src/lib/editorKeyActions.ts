@@ -75,24 +75,16 @@ export function isPopoverOpen(): boolean {
   )
 }
 
-/** テロップのタブを開いているか(シャトルの送りを止める) */
-export function isTelopTabOpen(): boolean {
-  if (typeof document === 'undefined') return false
-  return document.querySelector('.tab-pane.active .telop-panel') !== null
-}
-
 /** 画面の様子(試験では差し替える) */
 export interface EditorKeyEnv {
   sourceViewerVisible: () => boolean
   popoverOpen: () => boolean
-  telopTabOpen: () => boolean
   pageHidden: () => boolean
 }
 
 const domEnv: EditorKeyEnv = {
   sourceViewerVisible: isSourceViewerVisible,
   popoverOpen: isPopoverOpen,
-  telopTabOpen: isTelopTabOpen,
   pageHidden: () => typeof document !== 'undefined' && document.hidden
 }
 
@@ -120,7 +112,8 @@ export function runEditorAction(
   const store = useProjectStore.getState()
   // 窓が隠れた・テロップのタブへ移った・ダイアログが開いたら、送るのをやめる
   const shuttleOptions = {
-    shouldStop: () => isTimelineCovered() || env.pageHidden() || env.telopTabOpen()
+    // テロップのタブではタイムラインもプログラムも見えたままなので止めない(止めると J・2倍・4倍が効かなかった)
+    shouldStop: () => isTimelineCovered() || env.pageHidden()
   }
   switch (action) {
     case 'shuttleReverse':
