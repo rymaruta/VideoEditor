@@ -1,4 +1,5 @@
 import type { AudioEventWindow } from './events/audioEvents'
+import type { AutoEditDecisions } from './autoEdit'
 import type { CameraSeg, CutOverrides } from './roughCut/overrides'
 import type { ColorMatch } from './color/match'
 import type { MulticamInfo } from './sync/multicam'
@@ -391,6 +392,11 @@ export interface Project {
   cutOverrides?: CutOverrides
   /** 笑い・歓声の検出結果(共通の時間軸)。構成の判定に使う */
   audioEvents?: AudioEventWindow[]
+  /**
+   * 自動編集の判断(場面の判定・残す/落とす・仕上がりの長さ・方針・演出テロップの提案と採否・同期の要約)。
+   * 開き直したときに自動編集の画面と作り直しの元を戻す。古い企画には無い
+   */
+  autoEdit?: AutoEditDecisions
 }
 
 export interface TemplateSegment {

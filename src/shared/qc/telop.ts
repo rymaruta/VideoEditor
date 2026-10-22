@@ -62,15 +62,21 @@ function searchText(text: string): string {
   )
 }
 
+/** 英語の文の区切り(この後ろに英数字の行が続けば、空白でつなぐ) */
+const asciiBreak = (c: string | undefined): boolean => c !== undefined && /[.!?,;:]/.test(c)
+
 /**
  * 何行かのテロップを、確認の文に引くための1行にする。日本語どうしの改行は詰め、英数字どうしの改行だけ
  * 空白にする(`searchText` と同じ見分け方。改行を一律に空白にすると「身を 投げて」と日本語の途中に
- * 空白が入っていた)。行の中の空白はそのまま
+ * 空白が入っていた)。空行をはさんでも、続いた改行をまとめて両側を見る(1つずつ見ると「Good\n\nmorning」
+ * が「Goodmorning」になっていた)。英語の文末・区切りの記号の後ろに英数字の行が続くときも空白を入れる
+ * (「Nice!\nGood job」が「Nice!Good job」になっていた)。行の中の空白はそのまま
  */
 export function joinTelopLines(text: string): string {
-  return text.replace(/[ \t]*\r?\n[ \t]*/g, (ws: string, at: number, all: string) =>
-    alnum(all[at - 1]) && alnum(all[at + ws.length]) ? ' ' : ''
-  )
+  return text.replace(/[ \t]*(?:\r?\n[ \t]*)+/g, (ws: string, at: number, all: string) => {
+    const before = all[at - 1]
+    return (alnum(before) || asciiBreak(before)) && alnum(all[at + ws.length]) ? ' ' : ''
+  })
 }
 
 export function telopIssues(

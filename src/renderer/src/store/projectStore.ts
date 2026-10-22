@@ -58,6 +58,7 @@ import { clampBpm } from '../lib/beatGrid'
 import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
 import { normalizeTextStyle } from '@shared/textStyle'
 import { textCanvasSize } from '@shared/resolution'
+import { normalizeAutoEdit, type AutoEditDecisions } from '@shared/autoEdit'
 import type {
   AspectRatio,
   AudioTrack,
@@ -830,6 +831,7 @@ function normalizeLoadedProjectFields(project: Project): Project {
     editedTelops: normalizeEditedTelops(raw.editedTelops),
     roughCutAuto: normalizeSegs(raw.roughCutAuto, true) as CameraSeg[] | undefined,
     cutOverrides: normalizeOverrides(raw.cutOverrides),
+    autoEdit: normalizeAutoEdit(raw.autoEdit),
     audioEvents: Array.isArray(raw.audioEvents)
       ? (raw.audioEvents as unknown[]).filter(
           (e): e is AudioEventWindow =>
@@ -1241,6 +1243,12 @@ interface ProjectState {
    * 演出テロップを入れ替える。`speech` を渡すと、その発言の発言テロップも入れ替える
    * (吹き出しにした発言は発言テロップを外し、吹き出しをやめたら戻す。1回の取り消しで両方戻る)
    */
+  /**
+   * 自動編集の判断を企画に覚える(保存して開き直したときに戻す)。編集の履歴には積まない
+   * (取り消しでも自動編集の画面の判断は戻らないので、企画の側も戻さない)。`session` は判断を
+   * 作った企画の番号。別の企画に替わっていれば書かない
+   */
+  setAutoEdit: (autoEdit: AutoEditDecisions | undefined, session?: number) => void
   setEffectTelops: (
     telops: Omit<TextOverlay, 'id'>[],
     speech?: { utteranceId: string; telops: Omit<TextOverlay, 'id'>[] },
@@ -1548,8 +1556,15 @@ function keepBackgroundResults(restored: Project, current: Project): Project {
       JSON.stringify(current.multicam?.files ?? null)
   const events =
     sameRecording && current.audioEvents !== restored.audioEvents && current.audioEvents
-  if (!changed && !events) return restored
-  return { ...restored, assets, ...(events ? { audioEvents: current.audioEvents } : {}) }
+  // 自動編集の判断も編集の履歴に積まない(自動編集の画面の判断は取り消しで戻らないので、戻すと食い違う)
+  const autoEdit = sameRecording && current.autoEdit !== restored.autoEdit
+  if (!changed && !events && !autoEdit) return restored
+  return {
+    ...restored,
+    assets,
+    ...(events ? { audioEvents: current.audioEvents } : {}),
+    ...(autoEdit ? { autoEdit: current.autoEdit } : {})
+  }
 }
 
 /** 裏の結果(プレビュー用のプロキシ)だけを書き込んだプロジェクト → 書き込む前のプロジェクト */
@@ -1772,8 +1787,10 @@ function applyInsertedClips(project: Project, built: InsertedClips): Project {
  * 別のプロジェクトへ切り替わったときに知らせる先(自動編集の結果を捨てる)。
  * 自動編集のストアはこのストアを読むので、こちらからは読まずに知らせだけを受け付ける
  */
-const projectSwitchListeners = new Set<() => void>()
-export function onProjectSwitch(listener: () => void): () => void {
+/** 切り替えの入口。'new' は新しい企画、'open' は開いた・自動保存から戻した企画 */
+export type ProjectSwitchKind = 'new' | 'open'
+const projectSwitchListeners = new Set<(kind: ProjectSwitchKind) => void>()
+export function onProjectSwitch(listener: (kind: ProjectSwitchKind) => void): () => void {
   projectSwitchListeners.add(listener)
   return () => projectSwitchListeners.delete(listener)
 }
@@ -2186,7 +2203,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   newProject: (name) => {
     resetHistoryCoalescing()
     resetTransientFollowState()
-    projectSwitchListeners.forEach((l) => l())
+    projectSwitchListeners.forEach((l) => l('new'))
     const blank = createBlankProject()
     set({
       ...projectSwitchReset(),
@@ -2205,7 +2222,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
     resetHistoryCoalescing()
     resetTransientFollowState()
-    projectSwitchListeners.forEach((l) => l())
+    projectSwitchListeners.forEach((l) => l('open'))
     // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
@@ -2224,7 +2241,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     // `undo`/`redo` は最初からこれを通していて、開く／復元だけが漏れていた)。
     resetHistoryCoalescing()
     resetTransientFollowState()
-    projectSwitchListeners.forEach((l) => l())
+    projectSwitchListeners.forEach((l) => l('open'))
     // 落とした分離音声の紐づき先は、印を下ろして内蔵の音へ戻す(消す経路と同じ関門)。
     const cleaned = dropOrphanClips(normalizeLoadedProject(project))
     set({
@@ -2365,6 +2382,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
             ),
             roughCutAuto: undefined,
             cutOverrides: undefined,
+            // 前の収録の自動編集の判断(場面・残す/落とす・演出テロップの提案)も捨てる
+            autoEdit: undefined,
             dismissedTelops: undefined,
             editedTelops: undefined,
             reviewed: undefined
@@ -3706,6 +3725,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         selectedOverlayId: null,
         project: rebuiltProject
       }
+    }),
+
+  setAutoEdit: (autoEdit, session) =>
+    set((state) => {
+      if (session !== undefined && session !== state.projectSession) return state
+      if (JSON.stringify(state.project.autoEdit ?? null) === JSON.stringify(autoEdit ?? null))
+        return state
+      return { project: { ...state.project, autoEdit }, isDirty: true }
     }),
 
   setEffectTelops: (telops, speech, undismiss) =>

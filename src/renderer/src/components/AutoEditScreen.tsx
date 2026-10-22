@@ -74,13 +74,20 @@ function stepStateLabel(id: string, step: StepStatus): string {
   }
 }
 
+/** 同期の結果の1本の帯(機材ごと) */
+interface SyncLane {
+  id: string
+  name: string
+  basis: string
+  bars: { key: string; path: string; start: number; duration: number; method: string }[]
+}
+
 export function AutoEditScreen(): React.JSX.Element | null {
   const open = usePipelineStore((s) => s.screenOpen)
   const setOpen = usePipelineStore((s) => s.setScreenOpen)
   const steps = usePipelineStore((s) => s.steps)
   const sources = usePipelineStore((s) => s.sources)
   const report = usePipelineStore((s) => s.report)
-  const syncedFiles = usePipelineStore((s) => s.syncedFiles)
   const log = usePipelineStore((s) => s.log)
   const { open: openIssues, done: doneIssues } = useReviewItems()
   const running = usePipelineStore((s) => s.running)
@@ -156,8 +163,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const current = STEPS.find((s) => steps[s.id].state === 'run')
 
   const utterances = placedUtterances(project)
+  const placedEffects = project.textOverlays.filter((o) => o.effectId).length
   const placementOf = new Map((report?.placements ?? []).map((p) => [p.id, p]))
-  const durationOf = new Map(syncedFiles.map((f) => [f.id, f.duration]))
 
   /** 処理の記録(工程ごとの時間・PC の構成・ログ)をテキストに保存する */
   async function saveRunReport(): Promise<void> {
@@ -235,17 +242,71 @@ export function AutoEditScreen(): React.JSX.Element | null {
     setTelopsMade({ count: overlays.length, ids: added.map((o) => o.id) })
   }
 
+  // 同期の結果の並び。同期したこの起動の結果があればそれを、無ければ(開き直した企画)企画に残る同期の
+  // 情報(機材と素材の位置)と、覚えておいた要約から作る
+  const savedSync = project.autoEdit?.sync
+  const fromProject = !report && Boolean(project.multicam) && steps.sync.state === 'done'
+  const lanes: SyncLane[] = report
+    ? sources
+        .filter((s) => s.kind !== 'skip')
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          basis: s.basis,
+          bars: s.files.flatMap((f) => {
+            const p = placementOf.get(f.path)
+            return p
+              ? [
+                  {
+                    key: f.path,
+                    path: f.path,
+                    start: p.start,
+                    duration: f.duration,
+                    method: p.method
+                  }
+                ]
+              : []
+          })
+        }))
+    : fromProject && project.multicam
+      ? project.multicam.sources
+          .filter((src) => project.multicam!.files.some((f) => f.sourceId === src.id))
+          .map((src) => ({
+            id: src.id,
+            name: src.name,
+            basis: '',
+            bars: project
+              .multicam!.files.filter((f) => f.sourceId === src.id)
+              .map((f) => ({
+                key: f.assetId,
+                path: project.assets.find((a) => a.id === f.assetId)?.filePath ?? '',
+                start: f.start,
+                duration: f.duration / (f.rate || 1),
+                method: savedSync?.methods?.[f.assetId] ?? ('reference' as const)
+              }))
+          }))
+      : []
   // 同期の結果: 共通の時間軸
-  const span = Math.max(
-    1,
-    ...[...placementOf.values()].map((p) => p.start + (durationOf.get(p.id) ?? 0))
-  )
+  const span = Math.max(1, ...lanes.flatMap((l) => l.bars.map((b) => b.start + b.duration)))
   // 目盛りは6本前後になる切りのよい間隔(10秒〜2時間)
   const tickStep =
     [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200].find((v) => v >= span / 6) ?? 7200
   const ticks: number[] = []
   for (let t = 0; t <= span; t += tickStep) ticks.push(t)
-  const usedSources = sources.filter((s) => s.kind !== 'skip')
+  // 素材の整理: 読んだ収録フォルダが無ければ(開き直した企画)、企画に残る同期の情報の機材を並べる
+  const projectSources =
+    sources.length === 0 && project.multicam
+      ? project.multicam.sources.map((src) => {
+          const files = project.multicam!.files.filter((f) => f.sourceId === src.id)
+          return {
+            id: src.id,
+            name: src.name,
+            kind: src.kind,
+            count: files.length,
+            duration: files.reduce((t, f) => t + f.duration, 0)
+          }
+        })
+      : []
 
   return (
     <div className="auto-edit-screen" role="region" aria-label="自動編集">
@@ -361,7 +422,33 @@ export function AutoEditScreen(): React.JSX.Element | null {
 
           {tab === 'sources' && (
             <div className="auto-edit-pane">
-              {sources.length === 0 ? (
+              {sources.length === 0 && projectSources.length > 0 ? (
+                <>
+                  <p className="form-note">
+                    開き直した企画のため、企画に残る同期の情報から機材を並べています(振り分けの手がかりは残っていません。振り分けを直すには、新しい回を作るで収録フォルダを読み直してください)。
+                  </p>
+                  <table className="auto-edit-table">
+                    <thead>
+                      <tr>
+                        <th>名前</th>
+                        <th>役割</th>
+                        <th>本数</th>
+                        <th>長さ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {projectSources.map((s) => (
+                        <tr key={s.id}>
+                          <td>{s.name}</td>
+                          <td>{s.kind === 'camera' ? 'カメラ' : 'マイク'}</td>
+                          <td>{s.count}</td>
+                          <td className="mono">{formatTimecode(s.duration, 30)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : sources.length === 0 ? (
                 <p className="hint-text">
                   ファイル &gt; 新しい回を作る… で収録フォルダを指定すると、ここに出ます。
                 </p>
@@ -400,7 +487,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
 
           {tab === 'sync' && (
             <div className="auto-edit-pane">
-              {!report ? (
+              {lanes.length === 0 ? (
                 <p className="hint-text">
                   {steps.sync.state === 'run'
                     ? `同期しています… ${steps.sync.note ?? ''}`
@@ -419,31 +506,27 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     </span>
                   </div>
                   <div className="sync-lanes">
-                    {usedSources.map((s, i) => (
+                    {lanes.map((s, i) => (
                       <div key={s.id} className="sync-lane">
                         <span className="sync-lane-name" title={s.basis}>
                           {s.name}
                         </span>
                         <div className="sync-lane-track">
-                          {s.files.map((f) => {
-                            const p = placementOf.get(f.path)
-                            if (!p) return null
-                            return (
-                              <div
-                                key={f.path}
-                                className={`sync-bar ${p.method}`}
-                                style={{
-                                  left: `${(p.start / span) * 100}%`,
-                                  width: `${Math.max(0.3, (f.duration / span) * 100)}%`,
-                                  background:
-                                    p.method === 'audio'
-                                      ? SOURCE_COLORS[i % SOURCE_COLORS.length]
-                                      : undefined
-                                }}
-                                title={`${fileName(f.path)}\n${formatTimecode(p.start, 30)} 〜 ${formatTimecode(p.start + f.duration, 30)}`}
-                              />
-                            )
-                          })}
+                          {s.bars.map((b) => (
+                            <div
+                              key={b.key}
+                              className={`sync-bar ${b.method}`}
+                              style={{
+                                left: `${(b.start / span) * 100}%`,
+                                width: `${Math.max(0.3, (b.duration / span) * 100)}%`,
+                                background:
+                                  b.method === 'audio'
+                                    ? SOURCE_COLORS[i % SOURCE_COLORS.length]
+                                    : undefined
+                              }}
+                              title={`${fileName(b.path)}\n${formatTimecode(b.start, 30)} 〜 ${formatTimecode(b.start + b.duration, 30)}`}
+                            />
+                          ))}
                         </div>
                       </div>
                     ))}
@@ -462,29 +545,53 @@ export function AutoEditScreen(): React.JSX.Element | null {
                       </div>
                     </div>
                   </div>
+                  {fromProject && (
+                    <p className="form-note">
+                      開き直した企画のため、企画に残る同期の情報から並べています
+                      {savedSync
+                        ? ''
+                        : '(位置の決め方・照らし合わせの数字は古い形式の企画に残っていません)'}
+                      。
+                    </p>
+                  )}
                   <div className="auto-edit-stats">
-                    {[
-                      [
-                        '同期できた素材',
-                        `${report.placements.filter((p) => p.method !== 'none').length} / ${report.placements.length}`
-                      ],
-                      [
-                        '照らし合わせた組',
-                        `${report.pairs.filter((p) => p.reliable).length} / ${report.pairs.length}`
-                      ],
-                      [
-                        '時計のずれ(最大)',
-                        (() => {
-                          const d = report.pairs
-                            .map((p) => p.driftPpm)
-                            .filter((v): v is number => v !== undefined)
-                          return d.length
-                            ? `${Math.max(...d.map(Math.abs)).toFixed(0)} ppm`
-                            : '測定なし'
-                        })()
-                      ],
-                      ['処理時間', `${(report.elapsedMs / 1000).toFixed(1)} 秒`]
-                    ].map(([k, v]) => (
+                    {(report
+                      ? [
+                          [
+                            '同期できた素材',
+                            `${report.placements.filter((p) => p.method !== 'none').length} / ${report.placements.length}`
+                          ],
+                          [
+                            '照らし合わせた組',
+                            `${report.pairs.filter((p) => p.reliable).length} / ${report.pairs.length}`
+                          ],
+                          [
+                            '時計のずれ(最大)',
+                            (() => {
+                              const d = report.pairs
+                                .map((p) => p.driftPpm)
+                                .filter((v): v is number => v !== undefined)
+                              return d.length
+                                ? `${Math.max(...d.map(Math.abs)).toFixed(0)} ppm`
+                                : '測定なし'
+                            })()
+                          ],
+                          ['処理時間', `${(report.elapsedMs / 1000).toFixed(1)} 秒`]
+                        ]
+                      : savedSync
+                        ? [
+                            ['同期できた素材', `${savedSync.placed} / ${savedSync.total}`],
+                            ['照らし合わせた組', `${savedSync.reliablePairs} / ${savedSync.pairs}`],
+                            [
+                              '時計のずれ(最大)',
+                              savedSync.maxDriftPpm !== undefined
+                                ? `${savedSync.maxDriftPpm.toFixed(0)} ppm`
+                                : '測定なし'
+                            ],
+                            ['処理時間', `${(savedSync.elapsedMs / 1000).toFixed(1)} 秒`]
+                          ]
+                        : [['同期した素材', `${project.multicam?.files.length ?? 0} 本`]]
+                    ).map(([k, v]) => (
                       <div key={k} className="auto-edit-stat">
                         <span className="form-note">{k}</span>
                         <span>{v}</span>
@@ -770,9 +877,13 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 <p className="hint-text effects-empty">
                   {steps.effects.state === 'run'
                     ? 'AI が提案しています…'
-                    : steps.effects.state === 'skipped' || steps.effects.state === 'error'
-                      ? steps.effects.note
-                      : '仮編集ができると、ツッコミ・心の声・状況説明・地名などの演出テロップを AI が提案します。'}
+                    : placedEffects > 0
+                      ? `置いている演出テロップ ${placedEffects} 枚はタイムラインにあります。提案の一覧に無いもの(古い形式の企画から読んだもの・前の提案)のため、ここには出せません。「仮編集を作り直す」でも、人が直したものは直した文字のまま残ります。直していないものは、AI に提案し直したときだけ新しい提案に替わります${steps.effects.state === 'skipped' || steps.effects.state === 'error' ? `(提案の工程: ${steps.effects.note ?? ''})` : ''}。`
+                      : steps.effects.state === 'skipped' || steps.effects.state === 'error'
+                        ? steps.effects.note
+                        : roughCut
+                          ? '提案はありません。「仮編集を作り直す」で、ツッコミ・心の声・状況説明・地名などの演出テロップを提案し直せます(AI を使う設定のとき)。'
+                          : '仮編集ができると、ツッコミ・心の声・状況説明・地名などの演出テロップを AI が提案します。'}
                 </p>
               ) : (
                 <>

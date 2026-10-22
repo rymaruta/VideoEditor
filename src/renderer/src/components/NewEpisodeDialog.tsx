@@ -97,7 +97,8 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
   const running = usePipelineStore((s) => s.running)
   const scanFolder = usePipelineStore((s) => s.scanFolder)
   const updateSource = usePipelineStore((s) => s.updateSource)
-  const targetMinutes = usePipelineStore((s) => s.targetMinutes)
+  // 仕上がりの長さは作る回のもの。今開いている企画(自動編集の判断を覚えている)には書かず、作るときに入れる
+  const [targetMinutes, setTargetMinutes] = useState(0)
   const showKitFolder = useSettingsStore((s) => s.showKitFolder)
   const episodeKind = useSettingsStore((s) => s.episodeKind)
   const editPolicy = useSettingsStore((s) => s.editPolicy)
@@ -204,10 +205,13 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
     )
       return
     const store = useProjectStore.getState()
+    // 仕上がりの長さは企画ごと(企画を替えると捨てる)。この画面で決めた長さを、作った企画に入れる
+    const minutes = targetMinutes
     // 名前ごと新しい企画にする(名前を後から変えると取り消しの1件目になり、取り消すと既定の名前に戻った)
     store.newProject(name.trim())
     setOpen(false)
     const pipeline = usePipelineStore.getState()
+    pipeline.setTargetMinutes(minutes)
     pipeline.setScreenOpen(true)
     if (startNow) void pipeline.runPipeline()
   }
@@ -491,9 +495,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
               step={1}
               placeholder="決めない"
               value={targetMinutes || ''}
-              onChange={(e) =>
-                usePipelineStore.getState().setTargetMinutes(Number(e.target.value) || 0)
-              }
+              onChange={(e) => setTargetMinutes(Math.max(0, Number(e.target.value) || 0))}
             />
             分
             <span className="form-note">

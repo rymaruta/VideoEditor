@@ -1,5 +1,6 @@
 import { speechLook } from '@shared/telop/styles'
 import type { HypeMoment } from '@shared/structure/hype'
+import type { EpisodeKind } from '@shared/structure/kind'
 import type { ShortOptions } from '@shared/structure/shorts'
 import { buildShortProject, shortWindowsFor } from '../lib/gameShorts'
 import { prepareTelopLayerForExport } from '../lib/telopRaster'
@@ -35,6 +36,7 @@ import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import type { FootageScan, FootageSource, ProbedFile, SourceKind } from '@shared/ingest/classify'
 import type { SyncInputFile, SyncReport } from '@shared/sync/report'
+import type { PlacementMethod } from '@shared/sync/solve'
 import { buildMulticamLayout } from '@shared/sync/multicamLayout'
 import type { MediaAsset } from '@shared/types'
 import { onProjectSwitch, useProjectStore } from './projectStore'
@@ -60,6 +62,7 @@ import {
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPlacement'
 import { restorePipelineFromProject } from '../lib/pipelineRestore'
+import type { AutoEditDecisions, SyncSummary } from '@shared/autoEdit'
 import { heuristicJudgements } from '@shared/structure/scenes'
 import {
   AI_EFFECT_KINDS,
@@ -194,6 +197,8 @@ interface PipelineState {
   hype: HypeMoment[]
   /** 画面で手で決めた「残す / 落とす」 */
   keep: Record<string, boolean>
+  /** 場面を切ったときの番組の種類(企画に覚えて、開き直したときに同じ場面に切り直す) */
+  sceneKind: EpisodeKind | null
   /** 演出テロップの提案(AI)と、置くと決めたもの */
   effects: EffectProposal[]
   effectChosen: string[]
@@ -246,13 +251,18 @@ interface PipelineState {
   reset: () => void
   /** 自動編集の結果(構成・提案・要確認など)だけを捨てる。取り込んだフォルダは残す */
   resetResults: () => void
+  /** 収録フォルダの読み取り(素材の整理・同期にかけた素材)を捨てる。別の企画を開いたとき */
+  dropScan: () => void
   /**
    * 開き直した企画に残っている結果(同期・文字起こし・仮編集)から、工程の済み・構成・仮編集の要約を
    * 作り直す。開き直すと自動編集の画面が空(工程が全部「待機」・構成が空・ショートを作れない)だった
    */
   restoreFromProject: () => void
-  /** 開き直した企画から作り直した状態か。企画に残らず作り直せなかったもの(画面に出す) */
-  restored: { missing: string[] } | null
+  /**
+   * 開き直した企画から作り直した状態か。企画に残らず作り直せなかったもの(画面に出す)。
+   * `legacy` は自動編集の判断が残っていない古い企画から読み取ったとき
+   */
+  restored: { missing: string[]; legacy: boolean } | null
 }
 
 const initialSteps = (): Record<StepId, StepStatus> => ({
@@ -930,6 +940,35 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     return activityCache.mask
   }
 
+  /**
+   * 自動編集の判断(場面の判定・残す/落とす・仕上がりの長さ・方針・演出テロップの提案と採否・同期の要約)を
+   * 企画に覚える。保存して開き直したときに、そのまま戻す(覚えていないと、開き直して作り直すと
+   * 手で残した場面・AI の判定で残した場面が落ち、演出テロップも消えていた)
+   */
+  function persistDecisions(): void {
+    const s = get()
+    const project = useProjectStore.getState().project
+    if (!project.multicam || s.scenes.length === 0 || !s.judgeSource) return
+    const sync = s.report ? syncSummaryOf(s.report, project) : project.autoEdit?.sync
+    const decisions: AutoEditDecisions = {
+      kind: s.sceneKind ?? useSettingsStore.getState().episodeKind,
+      ...(s.hype.length > 0 ? { hype: s.hype } : {}),
+      scenes: s.scenes.map((sc) => ({ id: sc.id, start: sc.start, end: sc.end })),
+      judgements: s.judgements,
+      ...(s.planJudgements ? { planJudgements: s.planJudgements } : {}),
+      judgeSource: s.judgeSource,
+      keep: s.keep,
+      targetMinutes: s.targetMinutes,
+      editNote: s.editNote,
+      ...(s.roughCut ? { keptIds: s.roughCut.keptIds } : {}),
+      effects: s.effects,
+      effectChosen: s.effectChosen,
+      ...(s.steps.effects.state === 'done' ? { effectsAsked: true } : {}),
+      ...(sync ? { sync } : {})
+    }
+    useProjectStore.getState().setAutoEdit(decisions)
+  }
+
   /** 構成(場面の判定)→ カット → アングル → 仮編集を入れる */
   async function structureAndCut(): Promise<void> {
     const project = useProjectStore.getState().project
@@ -971,13 +1010,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       planJudgements: null,
       judgeSource: source,
       keep: {},
-      hype: hype ?? []
+      hype: hype ?? [],
+      sceneKind: kind
     })
     setStep('structure', {
       state: 'done',
       percent: 100,
       note: structureNote(judgements, source, false)
     })
+    persistDecisions()
     log(
       source === 'ai'
         ? `構成: AI(${model ?? ''}${device ? `・${device === 'cpu' ? 'CPU' : `GPU ${device.toUpperCase()}`}` : ''})で ${scenes.length} 場面を判定しました`
@@ -1123,6 +1164,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     // 演出テロップ。AI を使わずに決まるもの(人物紹介・笑い・章・時刻・吹き出し)は、残した場面が
     // 変わるので作り直しのたびに作り直す。AI の提案は最初の1回だけ頼み、作り直しでは同じものを置き直す。
     // 人物紹介だけが入っているときは、まだ AI に頼んでいない(AI の設定を入れてから作り直せば頼む)
+    let freshAi = false
     {
       const aiAsked = get().steps.effects.state === 'done'
       const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
@@ -1169,10 +1211,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // 前にもあった提案は、人が選んだ・外した状態を保つ。新しい提案は自信の高いものだけ置く
       const prevIds = new Set(get().effects.map((e) => e.id))
       const prevChosen = new Set(get().effectChosen)
+      // 古い形式の企画では提案の一覧が無く、置いていた演出テロップの ID だけが選んだものに入っている。
+      // 同じ提案がまた出たら置いたままにする
       const chooseFrom = (list: readonly EffectProposal[]): string[] =>
         list
           .filter((p) =>
-            prevIds.has(p.id) ? prevChosen.has(p.id) : p.confidence >= AUTO_PLACE_CONFIDENCE
+            prevChosen.has(p.id)
+              ? true
+              : prevIds.has(p.id)
+                ? false
+                : p.confidence >= AUTO_PLACE_CONFIDENCE
           )
           .map((p) => p.id)
       const aiKinds = new Set<string>(AI_EFFECT_KINDS)
@@ -1214,6 +1262,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             (p) => setStep('effects', { percent: p.percent, note: p.note })
           )
           const placed = apply(aiProposals)
+          freshAi = aiProposals.length > 0
           const count = autos.length + aiProposals.length
           const failNote = failed > 0 ? ` · AI が答えられなかった ${failed}/${total}` : ''
           setStep('effects', {
@@ -1251,12 +1300,30 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       get().effectChosen,
       useProjectStore.getState().project.dismissedTelops
     )
+    // 今置いてある演出テロップのうち、今回の提案の一覧に無いものを、新しい仮編集の位置へ写して置き直す。
+    // 人が直したものは必ず(AI の提案は頼み直すと ID が変わり、直した文字が引き継がれなかった)。
+    // 直していない AI の提案は、新しい AI の提案が無いとき(AI を使わない・失敗した・古い企画で
+    // 提案の一覧が無い)だけ。自動で決まる種類(笑い・章・時刻・吹き出し・人物紹介)は毎回作り直すので写さない
+    const carried = carriedEffectTelops(
+      useProjectStore.getState().project,
+      get().effects,
+      freshAi,
+      plan.cut.spans
+    )
+    if (carried.length > 0)
+      log(
+        `演出テロップ: 今の提案に無い ${carried.length} 枚(人が直したもの・前の提案)を置き直しました`
+      )
     set({ lastSpans: plan.cut.spans, speechTelops: telops })
     useProjectStore
       .getState()
       .applyRoughCut(
         plan.cut,
-        [...telops.filter((o) => !o.utteranceId || !bubbled.has(o.utteranceId)), ...effectTelops],
+        [
+          ...telops.filter((o) => !o.utteranceId || !bubbled.has(o.utteranceId)),
+          ...effectTelops,
+          ...carried
+        ],
         overrides
       )
     if (hasOverrides(overrides))
@@ -1273,6 +1340,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         telops: telops.length
       }
     })
+    persistDecisions()
     // SE・BGM・CG は、仮編集を当てた後の本編(人が差し込んだクリップ・削った区間を含む)の時刻で置く。
     // 組んだだけの仮編集の時刻で置くと、差し込んだクリップの後ろが差し込んだ長さぶん早くずれる
     const applied = useProjectStore.getState().project
@@ -1298,6 +1366,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     judgeSource: null,
     hype: [],
     keep: {},
+    sceneKind: null,
     roughCut: null,
     telopReviews: [],
     colorIssues: [],
@@ -1320,14 +1389,23 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         steps: { ...s.steps, ...r.steps },
         scenes: r.scenes,
         judgements: r.judgements,
-        planJudgements: null,
-        judgeSource: 'heuristic',
-        keep: {},
-        hype: [],
+        planJudgements: r.planJudgements,
+        judgeSource: r.judgeSource,
+        keep: r.keep,
+        sceneKind: project.autoEdit?.kind ?? kind,
+        hype: r.hype,
+        targetMinutes: r.targetMinutes,
+        editNote: r.editNote,
+        effects: r.effects,
+        effectChosen: r.effectChosen,
         roughCut: r.roughCut,
-        restored: { missing: r.missing }
+        restored: { missing: r.missing, legacy: r.legacy }
       }))
-      log('保存した企画から、自動編集の結果(工程・構成・仮編集の要約)を読み直しました')
+      log(
+        r.legacy
+          ? '保存した企画から、自動編集の結果(工程・構成・仮編集の要約)を読み直しました(古い形式の企画のため、判定は簡易の点数・残す場面は今の本編から)'
+          : '保存した企画から、自動編集の結果(工程・構成・判定・残す/落とす・仕上がりの長さ・演出テロップの提案)を読み直しました'
+      )
     },
     setEffectChosen: (id, chosen) => {
       const project = useProjectStore.getState().project
@@ -1352,6 +1430,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       }
       const next = chosen ? [...new Set([...base, id])] : base.filter((x) => x !== id)
       set({ effectChosen: next })
+      persistDecisions()
       // 対応は今の本編から作る(作り直したあとに元に戻す・手で詰めると、覚えていた対応は古い)
       if (!project.multicam || spans.length === 0) {
         // 置けないときも、選び直したら前に手で消した印は外す
@@ -1397,15 +1476,23 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           chosen ? [`e:${id}`] : undefined
         )
     },
-    setTargetMinutes: (minutes) => set({ targetMinutes: Math.max(0, minutes) }),
-    setEditNote: (note) => set({ editNote: note }),
-    setKeep: (sceneId, keep) =>
+    setTargetMinutes: (minutes) => {
+      set({ targetMinutes: Math.max(0, minutes) })
+      persistDecisions()
+    },
+    setEditNote: (note) => {
+      set({ editNote: note })
+      persistDecisions()
+    },
+    setKeep: (sceneId, keep) => {
       set((s) => {
         const next = { ...s.keep }
         if (keep === undefined) delete next[sceneId]
         else next[sceneId] = keep
         return { keep: next }
-      }),
+      })
+      persistDecisions()
+    },
     shorts: { state: 'idle', done: 0, total: 0, files: [] },
     makeShorts: async (folder, options) => {
       const project = useProjectStore.getState().project
@@ -1510,7 +1597,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         // 開き直した企画のゲーム実況は、声の盛り上がりを測り直してから(山の前後に絞るのに使う)
         const project = useProjectStore.getState().project
         const kind = useSettingsStore.getState().episodeKind
-        if (get().restored && kind === 'game' && get().hype.length === 0 && project.multicam) {
+        if (
+          get().restored?.legacy &&
+          kind === 'game' &&
+          get().hype.length === 0 &&
+          project.multicam
+        ) {
           setStep('cut', { state: 'run', percent: 0, note: '声の盛り上がりを測っています' })
           const hype = hypeMomentsFor(
             project,
@@ -1518,7 +1610,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             await activityOf(project, project.multicam)
           )
           const scenes = scenesFor(project, project.multicam, { kind, hype })
-          set({ hype, scenes, judgements: heuristicJudgements(scenes, kind) })
+          // 切り直した場面に、読み取った残す/落とすを当て直す(同じ ID の場面だけ)
+          const ids = new Set(scenes.map((sc) => sc.id))
+          const keep = Object.fromEntries(Object.entries(get().keep).filter(([id]) => ids.has(id)))
+          set({
+            hype,
+            scenes,
+            judgements: heuristicJudgements(scenes, kind),
+            keep,
+            sceneKind: kind
+          })
         }
         await buildAndApply()
       } catch (e) {
@@ -1568,6 +1669,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgeSource: null,
         hype: [],
         keep: {},
+        sceneKind: null,
+        // 仕上がりの長さ・方針は企画ごと(開いた企画に覚えていれば、読み直すときに戻す)
+        targetMinutes: 0,
+        editNote: '',
         roughCut: null,
         telopReviews: [],
         colorIssues: [],
@@ -1577,6 +1682,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         lastSpans: [],
         speechTelops: [],
         restored: null
+      }))
+    },
+
+    dropScan: () => {
+      scanToken++
+      set((s) => ({
+        root: null,
+        scanTracks: null,
+        scan: null,
+        sources: [],
+        syncedFiles: [],
+        steps: { ...s.steps, ingest: { state: 'wait', percent: 0 } }
       }))
     },
 
@@ -1599,6 +1716,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgeSource: null,
         hype: [],
         keep: {},
+        sceneKind: null,
         roughCut: null,
         telopReviews: [],
         colorIssues: [],
@@ -1955,6 +2073,68 @@ function mapTelopsToTimeline<
   })
 }
 
+/** 同期の報告から、企画に覚える要約を作る(素材ごとの位置の決め方は、企画の素材の ID で) */
+function syncSummaryOf(report: SyncReport, project: Project): SyncSummary {
+  const drift = report.pairs
+    .map((p) => p.driftPpm)
+    .filter((v): v is number => v !== undefined && Number.isFinite(v))
+  const methodOf = new Map(report.placements.map((p) => [p.id, p.method]))
+  const methods: Record<string, PlacementMethod> = {}
+  for (const f of project.multicam?.files ?? []) {
+    const a = project.assets.find((x) => x.id === f.assetId)
+    const m = a && (methodOf.get(a.denoisedFrom ?? a.filePath) ?? methodOf.get(a.filePath))
+    if (m) methods[f.assetId] = m
+  }
+  return {
+    placed: report.placements.filter((p) => p.method !== 'none').length,
+    total: report.placements.length,
+    reliablePairs: report.pairs.filter((p) => p.reliable).length,
+    pairs: report.pairs.length,
+    ...(drift.length > 0 ? { maxDriftPpm: Math.max(...drift.map(Math.abs)) } : {}),
+    elapsedMs: report.elapsedMs,
+    ...(Object.keys(methods).length > 0 ? { methods } : {})
+  }
+}
+
+/** AI に頼んで決まる演出テロップの ID(自動で決まる種類は、作り直しのたびに同じ ID で作り直す) */
+const AUTO_EFFECT_ID = /^(laugh|chapter|clock|bubble|name)-/
+
+/**
+ * 作り直しで、今置いてある演出テロップのうち提案の一覧に無いものを、新しい仮編集の位置へ写したもの。
+ * 人が直したものは必ず写す。直していない AI の提案は、新しい AI の提案が無いときだけ写す
+ * (古い形式の企画・AI を使わない設定・AI が失敗した)。人が消したものは写さない
+ */
+function carriedEffectTelops(
+  project: Project,
+  proposals: readonly EffectProposal[],
+  freshAi: boolean,
+  to: RoughCut['spans']
+): Omit<TextOverlay, 'id'>[] {
+  const info = project.multicam
+  if (!info || project.clips.length === 0) return []
+  const listed = new Set(proposals.map((p) => p.id))
+  const dismissed = new Set(project.dismissedTelops ?? [])
+  const carry = project.textOverlays.filter(
+    (o) =>
+      o.effectId &&
+      !listed.has(o.effectId) &&
+      !dismissed.has(`e:${o.effectId}`) &&
+      (o.edited || (!freshAi && !AUTO_EFFECT_ID.test(o.effectId)))
+  )
+  if (carry.length === 0) return []
+  return mapTelopsToTimeline(
+    carry.map((o) => omitId(o)),
+    spansOfClips(project.clips, info),
+    to
+  )
+}
+
+function omitId(o: TextOverlay): Omit<TextOverlay, 'id'> {
+  const rest: Partial<TextOverlay> = { ...o }
+  delete rest.id
+  return rest as Omit<TextOverlay, 'id'>
+}
+
 /** 吹き出しを選んだ発言(発言テロップの代わりに吹き出しで出す) */
 function bubbledUtterances(
   effects: readonly EffectProposal[],
@@ -2007,13 +2187,17 @@ export function recordedAtByAsset(
 
 // 別のプロジェクトを開いた・新しく作ったら、前の回の自動編集の結果を捨てる
 // (残すと「仮編集を作り直す」が前の回の場面の区切りで今の回を切り、要確認にも前の回の項目が出る)
-onProjectSwitch(() => {
+onProjectSwitch((switchKind) => {
   const pipeline = usePipelineStore.getState()
   // 自動編集の途中で「開く / 新規 / 自動保存を復元」すると、resetResults だけでは
   // 既に走っている main 側の同期・ASR・イベント検出が生き残る。完了後にその古い結果が
   // 新しいプロジェクトへ書き込まれるため、切替時はまず処理を中止する。
   if (pipeline.running) pipeline.cancel()
   pipeline.resetResults()
+  // 別の企画を開いたら、前の回の収録フォルダの読み取り(素材の整理・同期にかけた素材)も捨てる。
+  // 残すと、開いた企画の取り込みの欄と食い違う(タブに前の回のカメラが並ぶ)。
+  // 新しい回では残す(「新しい回を作る」で読んだフォルダを、作った企画で使う)
+  if (switchKind === 'open') pipeline.dropScan()
   // 開いた企画は、知らせの後に入る。入ってから、企画に残っている結果で画面を作り直す
   queueMicrotask(() => usePipelineStore.getState().restoreFromProject())
 })

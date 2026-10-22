@@ -20,6 +20,19 @@ describe('要確認の文: 2行のテロップの改行', () => {
     expect(joinTelopLines('はい そうです\nね')).toBe('はい そうですね')
   })
 
+  it('空行をはさんだ英語の行も空白でつなぎ、英語の文末記号の後ろは詰めない', () => {
+    // 空行(改行が2つ続く)の両側を見ずに、1つ目の改行の後ろ(2つ目の改行)だけを見ていた
+    expect(joinTelopLines('Good\n\nmorning')).toBe('Good morning')
+    expect(joinTelopLines('Good \n \n morning')).toBe('Good morning')
+    expect(joinTelopLines('Nice!\nGood job')).toBe('Nice! Good job')
+    expect(joinTelopLines('Wait.\r\nWhat?')).toBe('Wait. What?')
+    expect(joinTelopLines('Yes,\nsir')).toBe('Yes, sir')
+    // 日本語どうし・日本語の前後は今までどおり詰める
+    expect(joinTelopLines('すごい!\nこれ')).toBe('すごい!これ')
+    expect(joinTelopLines('Nice!\nすごい')).toBe('Nice!すごい')
+    expect(joinTelopLines('いっそ\n\n投げて')).toBe('いっそ投げて')
+  })
+
   it('書き出しの確認(確認する言葉)の文に、改行の空白を入れない', () => {
     const ctx = {
       font: '',
