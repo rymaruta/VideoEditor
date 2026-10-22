@@ -23,6 +23,8 @@ export const IPC = {
   selectExportPath: 'export:selectPath',
   selectExportFolder: 'export:selectFolder',
   exportProject: 'export:run',
+  selectPremiereXmlPath: 'export:selectPremiereXmlPath',
+  exportPremiereXml: 'export:premiereXml',
   exportProgress: 'export:progress',
   telopLayerBegin: 'export:telopLayerBegin',
   telopLayerAppend: 'export:telopLayerAppend',

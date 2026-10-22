@@ -16,8 +16,19 @@ import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
 import { withMp4Extension, withVeprojExtension } from './partialOutput'
-import { projectSourcePaths, writeExportGuarded, type ProtectedPath } from './exportOutputGuard'
-import { basename, join } from 'path'
+import {
+  exportOutputConflict,
+  projectSourcePaths,
+  writeExportGuarded,
+  type ProtectedPath
+} from './exportOutputGuard'
+import {
+  existingPremiereSidecars,
+  exportPremiereXml,
+  premiereSidecarPaths,
+  type PremiereExportPayload
+} from './premiereExportService'
+import { basename, extname, join } from 'path'
 import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
 import {
@@ -49,6 +60,7 @@ import {
   exportProject,
   cancelExport,
   runExclusiveExport,
+  probeAudioChannels,
   detectSilence,
   ffmpegPath,
   ffprobePath
@@ -541,6 +553,61 @@ function registerWindowScopedIpcHandlers(): void {
     }
     // 層の画像の置き場は、書き出しが終わったら(成功・失敗・中止のどれでも)片付ける
     return withTelopLayer(payload.telopLayer, () => runExport(payload, onProgress))
+  })
+  // Premiere 用 XML(FCP7 xmeml)。XML・SRT・(選べば)見た目どおりのテロップを並べて書く
+  ipcMain.handle(IPC.selectPremiereXmlPath, async (event, defaultName: string) => {
+    const result = await showSaveDialogForSender(event, {
+      defaultPath: defaultName,
+      filters: [{ name: 'Premiere 用 XML(Final Cut Pro 7 XML)', extensions: ['xml'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const withXml =
+      extname(result.filePath).toLowerCase() === '.xml' ? result.filePath : `${result.filePath}.xml`
+    const chosen = await confirmExtendedPath(event, result.filePath, withXml)
+    if (!chosen) return null
+    // XML と同じ名前で並べて書く字幕・テロップ(PNG のフォルダ・ProRes)が既にあれば、上書きしてよいか確かめる
+    // (保存ダイアログの上書きの確認は XML のファイルにしか効かない)
+    const existing = existingPremiereSidecars(chosen)
+    if (existing.length === 0) return chosen
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.MessageBoxOptions = {
+      type: 'warning',
+      buttons: ['上書きする', 'キャンセル'],
+      defaultId: 1,
+      cancelId: 1,
+      message: '同じ名前で並べて書くファイルがすでにあります',
+      detail:
+        existing.map((p) => `・${basename(p)}`).join('\n') +
+        '\n\n上書きしますか?(テロップの PNG のフォルダは、前回の telop_*.png を消してから書きます)'
+    }
+    const { response } = win
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    return response === 0 ? chosen : null
+  })
+  ipcMain.handle(IPC.exportPremiereXml, async (event, payload: PremiereExportPayload) => {
+    const onProgress = (percent: number, stage: string): void => {
+      notifySender(event, IPC.exportProgress, { percent, stage })
+    }
+    const protectedPaths = exportProtectedPaths(payload.project)
+    // 並べて書く字幕・テロップの動画も、素材・企画ファイルを上書きしないか確かめる
+    const sidecars = premiereSidecarPaths(payload.outputPath)
+    for (const sidecar of [sidecars.srt, sidecars.telopMov, sidecars.telopDir]) {
+      const conflict = exportOutputConflict(sidecar, protectedPaths)
+      if (conflict) throw new Error(conflict)
+    }
+    return withTelopLayer(payload.telopLayer, () =>
+      runExclusiveExport((signal) =>
+        writeExportGuarded(payload.outputPath, protectedPaths, (xmlWritePath) =>
+          exportPremiereXml(payload, xmlWritePath, {
+            ffmpegPath,
+            onProgress,
+            signal,
+            probeChannels: probeAudioChannels
+          })
+        )
+      )
+    )
   })
   // テロップの層の画像は、描きながら少しずつ受け取ってディスクへ書く(`telopLayerStage`)
   ipcMain.handle(IPC.telopLayerBegin, (_e, width: number, height: number) =>
