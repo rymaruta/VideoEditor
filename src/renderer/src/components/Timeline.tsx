@@ -858,6 +858,7 @@ export function Timeline(): React.JSX.Element {
       return
     }
     useProjectStore.getState().addAutoEditLock(cw.window)
+    useProjectStore.getState().setDragRange(null)
   }
 
   function openRangeMenu(e: React.MouseEvent, range: TimelineRange, what: string): void {

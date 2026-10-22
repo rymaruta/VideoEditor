@@ -59,6 +59,7 @@ export function RangeReviewBar(): React.JSX.Element | null {
         className="small-button"
         onClick={() => {
           if (showing === 'after') store().undo()
+          store().setDragRange(review.oldRange)
           usePipelineStore.getState().closeRangeReview()
         }}
       >

@@ -108,6 +108,8 @@ export function RangeAutoEditDialog({
       setError(r.reason ?? '当てられませんでした')
       return
     }
+    // 当てた後の範囲をルーラーに出す(前の範囲のままだと、ずれた所を指す)
+    useProjectStore.getState().setDragRange(preview.newRange)
     onClose()
   }
 
