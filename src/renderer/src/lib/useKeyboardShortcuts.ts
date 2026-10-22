@@ -3,8 +3,10 @@ import { getTotalDuration, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { saveProject } from './projectFileActions'
 import { formatIpcError } from './ipcError'
-import { getKeymap, matchesBinding } from './keymap'
+import { editorActionFor, getEditorKeymap, getKeymap, matchesBinding } from './keymap'
 import { frameSeconds } from '@shared/frameRate'
+import { runEditorAction } from './editorKeyActions'
+import { isShuttling, releaseShuttleK, stopRangePlayback, stopShuttle } from './shuttle'
 
 /**
  * 文字を打っている最中か。**この判定は必ずここから呼ぶこと。**
@@ -57,6 +59,7 @@ export function useKeyboardShortcuts(): void {
 
   useEffect(() => {
     const keymap = getKeymap(keymapScheme)
+    const editorKeymap = getEditorKeymap(keymapScheme)
 
     function handleKeyDown(e: KeyboardEvent): void {
       // 保存は文字を打っている最中・ダイアログの上でも効かせる(メニューの Ctrl+S はここが受け持つので、
@@ -87,6 +90,14 @@ export function useKeyboardShortcuts(): void {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'y') {
         e.preventDefault()
         store.redo()
+        return
+      }
+      // 編集画面の素早い操作(J/K/L・I/O・Q/W・↑↓・Home/End・+/-・M・? など)。
+      // 既存の割り当て(上の取り消し・やり直し)より後、既存の操作より前に見る。
+      // Shift+Delete・Alt+Backspace(リップル削除)を、修飾キーを見ない Delete より先に取るため
+      const editorAction = editorActionFor(e, editorKeymap)
+      if (editorAction) {
+        if (runEditorAction(editorAction, e, isTimelineCovered)) e.preventDefault()
         return
       }
       // ここから先は、押しっぱなしの繰り返し(オートリピート)を1回とみなす(矢印キーの移動を除く)。
@@ -126,6 +137,12 @@ export function useKeyboardShortcuts(): void {
       }
       if (matchesBinding(e, keymap.playPause)) {
         e.preventDefault()
+        // J / L で再生位置を送っている最中は、止めるだけ(Premiere と同じ)
+        if (isShuttling()) {
+          stopShuttle()
+          return
+        }
+        stopRangePlayback()
         store.togglePlayback()
         return
       }
@@ -162,7 +179,27 @@ export function useKeyboardShortcuts(): void {
       }
     }
 
+    // K を離した(K を押したままの J / L は1フレーム送り)。窓から外れたら離したことにする
+    function handleKeyUp(e: KeyboardEvent): void {
+      if (e.key.toLowerCase() === 'k') releaseShuttleK()
+    }
+
+    // 窓が隠れたら送るのをやめる(見えないまま再生位置が動き続けていた)
+    function handleVisibility(): void {
+      if (document.hidden) stopShuttle()
+    }
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('blur', releaseShuttleK)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('blur', releaseShuttleK)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      stopShuttle()
+      stopRangePlayback()
+    }
   }, [keymapScheme])
 }

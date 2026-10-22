@@ -150,6 +150,9 @@ export function SourceViewer(): React.JSX.Element | null {
       } else if (key === 'l') {
         e.preventDefault()
         shuttle(1)
+      } else if ((key === 'i' || key === 'o') && e.shiftKey) {
+        // Shift+I / Shift+O は本編のイン・アウトへ移るキー。ソースの範囲を打ち直さない
+        return
       } else if (key === 'i') {
         e.preventDefault()
         setSourceIn(time)

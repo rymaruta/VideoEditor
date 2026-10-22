@@ -23,7 +23,14 @@ import {
 } from '@renderer/lib/rangedAutoEdit'
 import type { Project } from '@shared/types'
 import { clipTimes, commonWindowOf, timelineWindowOf } from '@shared/roughCut/range'
-import { coverageOfClips, updateOverrides } from '@shared/roughCut/overrides'
+import {
+  coverageOfClips,
+  subtractRanges,
+  unionRanges,
+  updateOverrides
+} from '@shared/roughCut/overrides'
+import { markIn, markOut, rippleDelete } from '@renderer/lib/editCommands'
+import { currentTimelineRange } from '@renderer/lib/timelineRange'
 import { cutSignature } from '@shared/autoEdit'
 import { runEpisode } from '../helpers/episodeHarness'
 
@@ -272,5 +279,84 @@ describe('範囲だけ自動編集する', () => {
     usePipelineStore.getState().setTargetMinutes(2.5)
     await usePipelineStore.getState().rebuildRoughCut()
     expect(snapshot()).toEqual(before)
+  })
+
+  describe('イン点・アウト点(I / O)で決めた範囲', () => {
+    /** I / O のキーと同じ操作でイン点・アウト点を打つ */
+    const markRange = (a: number, b: number): void => {
+      useProjectStore.getState().seekTo(a)
+      markIn()
+      useProjectStore.getState().seekTo(b)
+      markOut()
+    }
+    const ioRange = (): { start: number; end: number } => {
+      const st = useProjectStore.getState()
+      const picked = currentTimelineRange({
+        timelineIn: st.timelineIn,
+        timelineOut: st.timelineOut,
+        dragRange: st.dragRange,
+        multiSelectedClipIds: st.multiSelectedClipIds,
+        project: st.project
+      })
+      expect(picked?.origin).toBe('marks')
+      return picked!.range
+    }
+
+    it('I〜O の範囲をそのまま自動編集し、取り消し1回で戻る', async () => {
+      await episode()
+      const total = mainLength(project())
+      const a = Math.round(total * 0.3 * 30) / 30
+      const b = Math.round(total * 0.6 * 30) / 30
+      markRange(a, b)
+      expect(ioRange()).toEqual({ start: a, end: b })
+      const base = project()
+      const r = await usePipelineStore
+        .getState()
+        .prepareRangedEdit(ioRange(), DEFAULT_RANGED_OPTIONS, { exact: true })
+      if (!r.ok) throw new Error(r.reason)
+      // 境を静かな所へ寄せない(イン点・アウト点のまま)
+      expect(r.preview.range).toEqual({ start: a, end: b })
+      expect(usePipelineStore.getState().applyRangedEdit(r.preview).ok).toBe(true)
+      expect(project()).not.toBe(base)
+      useProjectStore.getState().undo()
+      expect(project().clips).toBe(base.clips)
+      expect(sameProjectContent({ ...project(), autoEdit: base.autoEdit }, base)).toBe(true)
+      // イン点・アウト点は取り消しの履歴に積まない(打ったまま)
+      expect(useProjectStore.getState().timelineIn).toBe(a)
+      expect(useProjectStore.getState().timelineOut).toBe(b)
+    })
+
+    it('Shift+Delete(I〜O を抜く)と同じ範囲を使う: 抜く所と範囲の自動編集の窓の中身が一致する', async () => {
+      await episode()
+      const total = mainLength(project())
+      markRange(total * 0.25, total * 0.55)
+      const range = ioRange()
+      const base = project()
+      const info = base.multicam!
+      const r = await usePipelineStore
+        .getState()
+        .prepareRangedEdit(range, DEFAULT_RANGED_OPTIONS, { exact: true })
+      if (!r.ok) throw new Error(r.reason)
+      const cw = commonWindowOf(base.clips, info, range)
+      if (!cw.ok) throw new Error(cw.reason)
+      expect(r.preview.window).toEqual(cw.window)
+      // 当てずに、同じ I〜O を Shift+Delete で抜く
+      useProjectStore.getState().selectClip(null)
+      expect(rippleDelete()).toBe(true)
+      const after = project()
+      expect(mainLength(after)).toBeCloseTo(total - (range.end - range.start), 6)
+      const removed = subtractRanges(
+        coverageOfClips(base.clips, info),
+        coverageOfClips(after.clips, info)
+      )
+      const windowed = unionRanges(cw.pieces.map((p) => ({ start: p.start, end: p.end })))
+      expect(removed.length).toBe(windowed.length)
+      removed.forEach((x, i) => {
+        expect(x.start).toBeCloseTo(windowed[i].start, 4)
+        expect(x.end).toBeCloseTo(windowed[i].end, 4)
+      })
+      // 抜いた後は用意した範囲の自動編集を当てない(本編が変わった)
+      expect(usePipelineStore.getState().applyRangedEdit(r.preview).ok).toBe(false)
+    })
   })
 })

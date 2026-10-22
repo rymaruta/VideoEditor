@@ -73,6 +73,7 @@ import { clampBpm } from '../lib/beatGrid'
 import { DEFAULT_PROJECT_NAME } from '@shared/fileName'
 import { normalizeTextStyle } from '@shared/textStyle'
 import { textCanvasSize } from '@shared/resolution'
+import { frameSeconds } from '@shared/frameRate'
 import { normalizeAutoEdit, type AutoEditDecisions } from '@shared/autoEdit'
 import type {
   AspectRatio,
@@ -90,6 +91,7 @@ import type {
   Project,
   TextOverlay,
   TextStyle,
+  TimelineMarker,
   TranscriptWord,
   Transition,
   VideoOverlayClip,
@@ -818,6 +820,9 @@ function normalizeLoadedProjectFields(project: Project): Project {
   const durationById = new Map<string, number>()
   for (const a of assets) if (!durationById.has(a.id)) durationById.set(a.id, a.duration)
   const durationOf = (assetId: string): number => durationById.get(assetId) ?? 0
+  const clips = asRecordArray<Record<string, unknown>>(raw.clips)
+    .map((c) => normalizeClip(c, durationOf))
+    .filter((c): c is Clip => c !== null)
   return {
     // 知らない項目(新しい版で足した項目)も残す。消すと、古い版で保存したときに新しい版のデータが消える
     ...(raw as Partial<Project>),
@@ -827,9 +832,7 @@ function normalizeLoadedProjectFields(project: Project): Project {
     aspectRatio:
       raw.aspectRatio === '16:9' || raw.aspectRatio === '9:16' ? raw.aspectRatio : '9:16',
     assets,
-    clips: asRecordArray<Record<string, unknown>>(raw.clips)
-      .map((c) => normalizeClip(c, durationOf))
-      .filter((c): c is Clip => c !== null),
+    clips,
     audioTracks: asRecordArray<Record<string, unknown>>(raw.audioTracks).map((t) =>
       normalizeAudioTrack(t, durationOf)
     ),
@@ -850,6 +853,7 @@ function normalizeLoadedProjectFields(project: Project): Project {
     autoEdit: normalizeAutoEdit(raw.autoEdit),
     // 自動編集で触らない範囲(壊れたものは捨てる)。無い企画には足さない
     ...('autoEditLocks' in raw ? { autoEditLocks: normalizeLocks(raw.autoEditLocks) } : {}),
+    markers: normalizeMarkers(raw.markers, totalDuration({ clips } as Project)),
     audioEvents: Array.isArray(raw.audioEvents)
       ? (raw.audioEvents as unknown[]).filter(
           (e): e is AudioEventWindow =>
@@ -894,6 +898,31 @@ export function mergeLocks(locks: readonly AutoEditLock[]): AutoEditLock[] {
     else out.push({ id: l.id, start: l.start, end: l.end })
   }
   return out
+}
+
+/**
+ * マーカー(壊れた要素は捨て、ID が無ければ付け、時刻を 0〜本編の長さに収めて順に並べる)。
+ * 収めないと、1e308 秒のマーカーで Shift+M が本編の末尾より先へ飛んでいた
+ */
+function normalizeMarkers(raw: unknown, total: number): TimelineMarker[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const seen = new Set<string>()
+  const out: TimelineMarker[] = []
+  for (const m of raw) {
+    if (!m || typeof m !== 'object') continue
+    const r = m as Record<string, unknown>
+    if (typeof r.time !== 'number' || !Number.isFinite(r.time) || r.time < 0) continue
+    let id = typeof r.id === 'string' && r.id ? r.id : uuid()
+    if (seen.has(id)) id = uuid()
+    seen.add(id)
+    out.push({
+      ...unknownFields(r, ['id', 'time', 'label']),
+      id,
+      time: Math.min(r.time, Math.max(0, total)),
+      ...(typeof r.label === 'string' ? { label: r.label } : {})
+    })
+  }
+  return out.length > 0 ? out.sort((a, b) => a.time - b.time) : undefined
 }
 
 /** 区間の並び(壊れた要素は捨てる)。`camera` なら cameraId も要る */
@@ -1089,6 +1118,18 @@ interface ProjectState {
   sourceAssetId: string | null
   sourceIn: number | null
   sourceOut: number | null
+  /**
+   * タイムラインのイン点・アウト点(I / O キー。タイムラインの秒)。画面の上の印で、
+   * 企画には保存しない(ソースビューアの範囲と同じ扱い)。企画を切り替えたら捨てる
+   */
+  timelineIn: number | null
+  timelineOut: number | null
+  setTimelineIn: (t: number | null) => void
+  setTimelineOut: (t: number | null) => void
+  clearTimelineInOut: () => void
+  /** 再生位置にマーカーを打つ(同じフレームにあればそれを返す)。取り消しで戻せる */
+  addMarker: (time: number) => string
+  removeMarker: (markerId: string) => void
   /**
    * メディアパネルから引きずっている素材のID。
    *
@@ -1907,6 +1948,8 @@ function projectSwitchReset(): Pick<
   | 'sourceAssetId'
   | 'sourceIn'
   | 'sourceOut'
+  | 'timelineIn'
+  | 'timelineOut'
   | 'projectSession'
 > {
   return {
@@ -1926,7 +1969,9 @@ function projectSwitchReset(): Pick<
     saveError: null,
     sourceAssetId: null,
     sourceIn: null,
-    sourceOut: null
+    sourceOut: null,
+    timelineIn: null,
+    timelineOut: null
   }
 }
 
@@ -2137,6 +2182,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   sourceAssetId: null,
   sourceIn: null,
   sourceOut: null,
+  timelineIn: null,
+  timelineOut: null,
   draggingAssetId: null,
   setDraggingAssetId: (assetId) => set({ draggingAssetId: assetId }),
   // Marks reset with the clip: they describe a range inside one asset and mean
@@ -2156,6 +2203,60 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       sourceOut: t,
       sourceIn: t !== null && state.sourceIn !== null && state.sourceIn >= t ? null : state.sourceIn
     })),
+
+  // イン点がアウト点を越えたら(またはその逆)、古い方を捨てる(Premiere と同じ)
+  setTimelineIn: (t) =>
+    set((state) => {
+      const at = t === null || !Number.isFinite(t) ? null : Math.max(0, t)
+      return {
+        timelineIn: at,
+        timelineOut:
+          at !== null && state.timelineOut !== null && state.timelineOut <= at
+            ? null
+            : state.timelineOut
+      }
+    }),
+  setTimelineOut: (t) =>
+    set((state) => {
+      const at = t === null || !Number.isFinite(t) ? null : Math.max(0, t)
+      return {
+        timelineOut: at,
+        timelineIn:
+          at !== null && state.timelineIn !== null && state.timelineIn >= at
+            ? null
+            : state.timelineIn
+      }
+    }),
+  clearTimelineInOut: () => set({ timelineIn: null, timelineOut: null }),
+
+  addMarker: (time) => {
+    const state = get()
+    // 0〜本編の長さに収める(末尾より先に打たない)
+    const at = Math.min(Math.max(0, Number.isFinite(time) ? time : 0), totalDuration(state.project))
+    // 同じフレーム(半フレーム以内)に打ってあれば打ち直さない(M の押し直しで同じ所に積もらない)
+    const half = frameSeconds(state.project.clips, state.project.assets) / 2
+    const existing = (state.project.markers ?? []).find((m) => Math.abs(m.time - at) < half)
+    if (existing) return existing.id
+    const marker: TimelineMarker = { id: uuid(), time: at }
+    set((s) => ({
+      ...pushHistory(s),
+      project: {
+        ...s.project,
+        markers: [...(s.project.markers ?? []), marker].sort((a, b) => a.time - b.time)
+      }
+    }))
+    return marker.id
+  },
+  removeMarker: (markerId) =>
+    set((state) => {
+      const markers = state.project.markers ?? []
+      if (!markers.some((m) => m.id === markerId)) return state
+      const rest = markers.filter((m) => m.id !== markerId)
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, markers: rest.length > 0 ? rest : undefined }
+      }
+    }),
 
   setSaveError: (message) => set({ saveError: message }),
 
@@ -5239,6 +5340,31 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 })
 
 export const useProjectStore = create<ProjectState>(skipNoOpHistory(projectStateCreator))
+
+/**
+ * いくつかの操作(分割→分割→削除 など)を、**1回の取り消しで丸ごと戻る1件**にまとめて書き込む。
+ * 中の操作はそれぞれ履歴を積むので、終わったら「始める前の企画」1件に置き換える。
+ * 何も変わらなければ履歴は増えない。変わったら true
+ */
+export function runAsOneUndoStep(run: () => void): boolean {
+  resetHistoryCoalescing()
+  const before = useProjectStore.getState()
+  try {
+    run()
+  } finally {
+    // 後に続く操作(数値の欄など)を、この1件にまとめない
+    resetHistoryCoalescing()
+  }
+  const after = useProjectStore.getState()
+  if (after.project === before.project) return false
+  if (after.past === before.past) return true
+  useProjectStore.setState({
+    past: [...before.past, before.project].slice(-MAX_HISTORY),
+    future: [],
+    isDirty: true
+  })
+  return true
+}
 
 // Detached-audio clips (linkedClipId set) must follow their source clip: the main
 // track lays clips back-to-back, so trimming/reordering/deleting ANY earlier clip

@@ -1,0 +1,134 @@
+/* =====================================================================
+   編集のキー: キー操作の一覧(? / Ctrl+/)と、目盛りの帯のイン・アウト・マーカー。
+   Graphite 3 の変数(main.css の :root・graphite3.css)だけで描く。
+   ===================================================================== */
+
+/* ---------- キー操作の一覧 ---------- */
+.modal.shortcut-help {
+  width: 760px;
+  max-width: 94vw;
+  padding: 18px 20px 14px;
+  background: var(--ve-panel-fill);
+  border: 1px solid rgba(150, 165, 255, 0.14);
+  border-radius: var(--ve-radius-card);
+  box-shadow: var(--ve-panel-shadow);
+  color: var(--ve-text);
+}
+.shortcut-help-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.shortcut-help-head h3 {
+  margin: 0;
+}
+.shortcut-help-scheme {
+  font-size: 11px;
+  color: var(--ve-accent-ink);
+  background: var(--ve-accent-soft);
+  border: 1px solid var(--ve-accent-line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.shortcut-help-close {
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ve-text-2);
+}
+.shortcut-help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px 20px;
+}
+.shortcut-help-section h4 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ve-text-3);
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--ve-line);
+}
+.shortcut-help-section dl {
+  margin: 0;
+}
+.shortcut-help-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.shortcut-help-row dt {
+  color: var(--ve-text-2);
+}
+.shortcut-help-row dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+.shortcut-help-row kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ve-text);
+  background-image: var(--ve-raised-fill);
+  border: 1px solid var(--ve-line-control);
+  border-bottom-width: 2px;
+  border-radius: var(--ve-radius-control);
+}
+.shortcut-help-or {
+  margin: 0 3px;
+  color: var(--ve-text-3);
+  font-size: 11px;
+}
+.shortcut-help-note {
+  margin: 14px 0 0;
+  font-size: 11px;
+}
+
+/* ---------- 目盛りの帯: イン〜アウトとマーカー ---------- */
+.timeline-panel .g3-ruler-inout {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(150, 165, 255, 0.16);
+  pointer-events: none;
+}
+.timeline-panel .g3-ruler-inout.in-edge {
+  box-shadow: inset 2px 0 0 var(--ve-text-2);
+}
+.timeline-panel .g3-ruler-inout.out-edge {
+  box-shadow: inset -2px 0 0 var(--ve-text-2);
+}
+.timeline-panel .g3-ruler-inout.in-edge.out-edge {
+  box-shadow:
+    inset 2px 0 0 var(--ve-text-2),
+    inset -2px 0 0 var(--ve-text-2);
+}
+/* マーカー(Premiere と同じ緑の五角形) */
+.timeline-panel .g3-ruler-marker {
+  position: absolute;
+  top: 2px;
+  width: 10px;
+  height: 12px;
+  margin-left: -5px;
+  padding: 0;
+  border: 0;
+  background: var(--ve-ok);
+  clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
+  cursor: pointer;
+  z-index: 2;
+}
+.timeline-panel .g3-ruler-marker:hover {
+  filter: brightness(1.2);
+}

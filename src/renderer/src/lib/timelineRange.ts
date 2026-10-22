@@ -14,7 +14,7 @@ import { TURN_RATE } from '@shared/diarize/micTurns'
  * どれも無ければ null(場面の帯の右クリックは、その場面の範囲を直に渡す)
  */
 export interface RangeSource {
-  /** イン点・アウト点(キー操作の担当が足す `projectStore` の UI 状態。タイムラインの秒) */
+  /** イン点・アウト点(`projectStore` の UI 状態。タイムラインの秒。Shift+Delete と同じく両方あるときだけ使う) */
   timelineIn?: number | null
   timelineOut?: number | null
   dragRange?: TimelineRange | null

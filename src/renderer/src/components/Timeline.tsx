@@ -131,7 +131,11 @@ import { timelineRangeOf } from '@shared/finish/sound'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
-import { currentTimelineRange, onRangeAutoEditRequest } from '../lib/timelineRange'
+import {
+  currentTimelineRange,
+  onRangeAutoEditRequest,
+  type RangeOrigin
+} from '../lib/timelineRange'
 import { rangedEditBlockedReason } from '../lib/rangedAutoEdit'
 import type { TimelineRange } from '@shared/roughCut/range'
 import { RangeAutoEditDialog } from './RangeAutoEditDialog'
@@ -139,6 +143,10 @@ import { RangeReviewBar } from './RangeReviewBar'
 import { AutoEditLockBand, LockGlyph } from './AutoEditLockBand'
 import { commonWindowOf } from '@shared/roughCut/range'
 import { snapRangeBoundaries } from '../lib/timelineRange'
+import { TimelineMarks } from './TimelineMarks'
+import { ShortcutHelpDialog } from './ShortcutHelpDialog'
+import { useShortcutHelpStore } from '../lib/shortcutHelp'
+import { useTimelineSubSelection } from '../lib/timelineSelection'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -638,6 +646,11 @@ export function Timeline(): React.JSX.Element {
     trackId: string
     clipId: string
   } | null>(null)
+  // 全体のキー処理(Shift+Delete など)から見えるよう、音声・PiP の選びを写す(理由は timelineSelection)
+  useEffect(() => {
+    useTimelineSubSelection.getState().setSubSelection(selectedAudioClip, selectedVideoOverlayClip)
+  }, [selectedAudioClip, selectedVideoOverlayClip])
+  useEffect(() => () => useTimelineSubSelection.getState().setSubSelection(null, null), [])
   const [videoOverlayDrag, setVideoOverlayDrag] = useState<VideoOverlayDragState | null>(null)
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
@@ -670,10 +683,13 @@ export function Timeline(): React.JSX.Element {
   const setSelectedOverlayId = useProjectStore((s) => s.selectOverlay)
   const [transitionPopoverClipId, setTransitionPopoverClipId] = useState<string | null>(null)
   /** 範囲の自動編集のダイアログ(開いている範囲) */
-  const [rangeDialog, setRangeDialog] = useState<TimelineRange | null>(null)
+  const [rangeDialog, setRangeDialog] = useState<{
+    range: TimelineRange
+    origin?: RangeOrigin
+  } | null>(null)
   const dragRange = useProjectStore((s) => s.dragRange)
   const hasLocks = (project.autoEditLocks?.length ?? 0) > 0 && Boolean(project.multicam)
-  useEffect(() => onRangeAutoEditRequest((r) => setRangeDialog(r)), [])
+  useEffect(() => onRangeAutoEditRequest((r) => setRangeDialog({ range: r, origin: 'scene' })), [])
   const [scrubbing, setScrubbing] = useState(false)
 
   function selectOnly(kind: 'clip' | 'audio' | 'videoOverlay' | 'caption'): void {
@@ -799,11 +815,9 @@ export function Timeline(): React.JSX.Element {
   /** 今選んでいる範囲(イン点・アウト点 → ルーラーの Shift+ドラッグ → 本編の複数選択の外枠) */
   function currentRange(): ReturnType<typeof currentTimelineRange> {
     const st = useProjectStore.getState()
-    // イン点・アウト点はキー操作の担当が足す UI 状態(無い版でも動くように読む)
-    const io = st as unknown as { timelineIn?: number | null; timelineOut?: number | null }
     return currentTimelineRange({
-      timelineIn: io.timelineIn,
-      timelineOut: io.timelineOut,
+      timelineIn: st.timelineIn,
+      timelineOut: st.timelineOut,
       dragRange: st.dragRange,
       multiSelectedClipIds: st.multiSelectedClipIds,
       project: st.project
@@ -811,22 +825,31 @@ export function Timeline(): React.JSX.Element {
   }
 
   /** 右クリックしたクリップの範囲: 選んでいる範囲がそのクリップに掛かればそれ、無ければ選んだクリップの外枠 */
-  function rangeAroundClip(clipId: string, targets: readonly string[]): TimelineRange | null {
+  function rangeAroundClip(
+    clipId: string,
+    targets: readonly string[]
+  ): { range: TimelineRange; origin: RangeOrigin } | null {
     const tc = timedClips.find((x) => x.clip.id === clipId)
     if (!tc) return null
-    const picked = currentRange()?.range
-    if (picked && picked.end > tc.start && picked.start < tc.end) return picked
+    const picked = currentRange()
+    if (picked && picked.range.end > tc.start && picked.range.start < tc.end) return picked
     const chosen = timedClips.filter((x) => targets.includes(x.clip.id))
-    if (chosen.length === 0) return { start: tc.start, end: tc.end }
+    if (chosen.length === 0) return { range: { start: tc.start, end: tc.end }, origin: 'selection' }
     return {
-      start: Math.min(...chosen.map((x) => x.start)),
-      end: Math.max(...chosen.map((x) => x.end))
+      range: {
+        start: Math.min(...chosen.map((x) => x.start)),
+        end: Math.max(...chosen.map((x) => x.end))
+      },
+      origin: 'selection'
     }
   }
 
   /** 範囲に対する右クリックの項目(使えなければ理由付きで押せなくする) */
-  function rangeItems(range: TimelineRange | null): ContextMenuItem[] {
-    if (!range) return []
+  function rangeItems(
+    picked: { range: TimelineRange; origin?: RangeOrigin } | null
+  ): ContextMenuItem[] {
+    if (!picked) return []
+    const { range, origin } = picked
     const blocked = rangedEditBlockedReason(
       useProjectStore.getState().project,
       usePipelineStore.getState()
@@ -836,23 +859,30 @@ export function Timeline(): React.JSX.Element {
       {
         label: blocked ? `この範囲を自動編集…(${blocked})` : 'この範囲を自動編集…',
         disabled: Boolean(blocked),
-        onSelect: () => setRangeDialog(range)
+        onSelect: () => setRangeDialog({ range, origin })
       },
       {
         label: p.multicam
           ? 'この範囲を手動で編集する(自動編集で触らない)'
           : 'この範囲を手動で編集する(同期した収録素材の企画で使えます)',
         disabled: !p.multicam,
-        onSelect: () => lockRange(range)
+        onSelect: () => lockRange(range, origin === 'marks')
       }
     ]
   }
 
-  /** 範囲を自動編集で触らない範囲(ロック)にする。境はフレームへ寄せ、共通の時刻で覚える */
-  function lockRange(range: TimelineRange): void {
+  /**
+   * 範囲を自動編集で触らない範囲(ロック)にする。境はフレームへ寄せ(イン点・アウト点はそのまま)、
+   * 共通の時刻で覚える
+   */
+  function lockRange(range: TimelineRange, exact: boolean): void {
     const p = useProjectStore.getState().project
     if (!p.multicam) return
-    const cw = commonWindowOf(p.clips, p.multicam, snapRangeBoundaries(p, range, undefined))
+    const cw = commonWindowOf(
+      p.clips,
+      p.multicam,
+      exact ? range : snapRangeBoundaries(p, range, undefined)
+    )
     if (!cw.ok) {
       setSfxDropError(`ロックできません: ${cw.reason}`)
       return
@@ -861,10 +891,15 @@ export function Timeline(): React.JSX.Element {
     useProjectStore.getState().setDragRange(null)
   }
 
-  function openRangeMenu(e: React.MouseEvent, range: TimelineRange, what: string): void {
+  function openRangeMenu(
+    e: React.MouseEvent,
+    range: TimelineRange,
+    what: string,
+    origin?: RangeOrigin
+  ): void {
     e.preventDefault()
     e.stopPropagation()
-    const items = rangeItems(range).map((it) => ({
+    const items = rangeItems({ range, origin }).map((it) => ({
       ...it,
       label: it.label.replace('この範囲', what)
     }))
@@ -873,13 +908,13 @@ export function Timeline(): React.JSX.Element {
 
   /** メニューの「選んだ範囲を自動編集…」: 範囲が無ければ、選んでいるクリップ・再生位置のクリップ */
   function openRangeAutoEdit(): void {
-    const picked = currentRange()?.range
+    const picked = currentRange()
     if (picked) return setRangeDialog(picked)
     const st = useProjectStore.getState()
     const tc =
       timedClips.find((x) => x.clip.id === st.selectedClipId) ??
       findTimedClipAt(timedClips, st.playheadTime)
-    if (tc) setRangeDialog({ start: tc.start, end: tc.end })
+    if (tc) setRangeDialog({ range: { start: tc.start, end: tc.end }, origin: 'selection' })
   }
 
   /** ルーラーの Shift+ドラッグ */
@@ -1825,7 +1860,7 @@ export function Timeline(): React.JSX.Element {
     if (id === 'view.zoomIn') setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))
     else if (id === 'view.zoomOut') setZoom((z) => Math.max(currentMinZoom(), z / 1.4))
     else if (id === 'view.zoomFit') handleZoomToFit()
-    else if (id === 'help.shortcuts') setShortcutGuideVisible(true)
+    else if (id === 'help.shortcuts') useShortcutHelpStore.getState().setOpen(true)
     else if (id === 'edit.rangeAutoEdit') openRangeAutoEdit()
     else if (id === 'telop.auto') {
       // 選んでいるクリップ、無ければ再生位置のクリップの音声からテロップを作る
@@ -2265,6 +2300,10 @@ export function Timeline(): React.JSX.Element {
                 <kbd>←/→</kbd>
               </span>
               <span className="shortcut-hint">
+                キー一覧
+                <kbd>?</kbd>
+              </span>
+              <span className="shortcut-hint">
                 ツール切替
                 <kbd>A</kbd>
                 <kbd>T</kbd>
@@ -2546,7 +2585,7 @@ export function Timeline(): React.JSX.Element {
             onContextMenu={(e) => {
               const picked = currentRange()
               if (!picked) return
-              openRangeMenu(e, picked.range, '選んだ範囲')
+              openRangeMenu(e, picked.range, '選んだ範囲', picked.origin)
             }}
           >
             {rulerTicks(
@@ -2588,13 +2627,14 @@ export function Timeline(): React.JSX.Element {
                 />
               ) : null
             )}
+            <TimelineMarks pixelsPerSecond={pixelsPerSecond} total={total} />
           </div>
           {sceneRanges.length > 0 && (
             <TimelineSceneBand
               ranges={sceneRanges}
               pixelsPerSecond={pixelsPerSecond}
               width={timelineWidth}
-              onSceneMenu={(e, r) => openRangeMenu(e, r, 'この場面')}
+              onSceneMenu={(e, r) => openRangeMenu(e, r, 'この場面', 'scene')}
             />
           )}
           {hasLocks && (
@@ -3410,7 +3450,11 @@ export function Timeline(): React.JSX.Element {
         />
       )}
       {rangeDialog && (
-        <RangeAutoEditDialog range={rangeDialog} onClose={() => setRangeDialog(null)} />
+        <RangeAutoEditDialog
+          range={rangeDialog.range}
+          origin={rangeDialog.origin}
+          onClose={() => setRangeDialog(null)}
+        />
       )}
 
       {selectedAudioClipData && selectedAudioClip && (
@@ -3688,6 +3732,7 @@ export function Timeline(): React.JSX.Element {
         </div>
       )}
 
+      <ShortcutHelpDialog />
       {trimClipId && <TrimModal clipId={trimClipId} onClose={() => setTrimClipId(null)} />}
       {silenceCutClipIds && (
         <SilenceCutModal clipIds={silenceCutClipIds} onClose={() => setSilenceCutClipIds(null)} />

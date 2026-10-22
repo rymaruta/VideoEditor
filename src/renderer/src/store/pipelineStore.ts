@@ -336,7 +336,9 @@ interface PipelineState {
    */
   prepareRangedEdit: (
     range: TimelineRange,
-    options: RangedEditOptions
+    options: RangedEditOptions,
+    /** `exact`: 境を寄せない(イン点・アウト点で決めた範囲。Shift+Delete と同じ所を使う) */
+    how?: { exact?: boolean }
   ) => Promise<RangedPrepareResult>
   /** 用意した範囲の自動編集を当てる(取り消し1回で戻る)。用意している間に本編が変わっていれば当てない */
   applyRangedEdit: (preview: RangedPreview) => { ok: boolean; reason?: string }
@@ -2264,13 +2266,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     // 確認済みはプロジェクトに保存する(開き直しても残る)
     rangeReview: null,
     closeRangeReview: () => set({ rangeReview: null }),
-    prepareRangedEdit: async (requested, options) => {
+    prepareRangedEdit: async (requested, options, how) => {
       const project = useProjectStore.getState().project
       const info = project.multicam
       const blocked = rangedEditBlockedReason(project, get())
       if (blocked || !info) return { ok: false, reason: blocked ?? '使えません' }
       const activity = await activityOf(project, info)
-      const range = snapRangeBoundaries(project, requested, levelOf(activity))
+      const range = how?.exact
+        ? { start: requested.start, end: requested.end }
+        : snapRangeBoundaries(project, requested, levelOf(activity))
       const cw = commonWindowOf(project.clips, info, range)
       if (!cw.ok) return { ok: false, reason: cw.reason }
       const win = cw.window

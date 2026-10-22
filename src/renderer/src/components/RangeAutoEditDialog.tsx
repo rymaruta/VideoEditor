@@ -11,6 +11,7 @@ import {
 } from '../lib/rangedAutoEdit'
 import type { TimelineRange } from '@shared/roughCut/range'
 import { formatTimecode } from '../lib/timelineRuler'
+import type { RangeOrigin } from '../lib/timelineRange'
 import { frameSeconds } from '@shared/frameRate'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
 import { WandIcon } from './icons'
@@ -60,9 +61,12 @@ function Strip({
  */
 export function RangeAutoEditDialog({
   range,
+  origin,
   onClose
 }: {
   range: TimelineRange
+  /** どこで決めた範囲か。イン点・アウト点なら境を寄せず、当てた後のイン点・アウト点も合わせる */
+  origin?: RangeOrigin
   onClose: () => void
 }): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
@@ -89,7 +93,9 @@ export function RangeAutoEditDialog({
     setError(null)
     setAskRipple(false)
     try {
-      const r = await usePipelineStore.getState().prepareRangedEdit(range, opts)
+      const r = await usePipelineStore
+        .getState()
+        .prepareRangedEdit(range, opts, { exact: origin === 'marks' })
       if (r.ok) setPreview(r.preview)
       else {
         setPreview(null)
@@ -109,7 +115,12 @@ export function RangeAutoEditDialog({
       return
     }
     // 当てた後の範囲をルーラーに出す(前の範囲のままだと、ずれた所を指す)
-    useProjectStore.getState().setDragRange(preview.newRange)
+    const st = useProjectStore.getState()
+    if (origin === 'marks') {
+      st.setTimelineIn(null)
+      st.setTimelineOut(preview.newRange.end)
+      st.setTimelineIn(preview.newRange.start)
+    } else st.setDragRange(preview.newRange)
     onClose()
   }
 

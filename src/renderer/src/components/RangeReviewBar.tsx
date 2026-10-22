@@ -59,7 +59,15 @@ export function RangeReviewBar(): React.JSX.Element | null {
         className="small-button"
         onClick={() => {
           if (showing === 'after') store().undo()
-          store().setDragRange(review.oldRange)
+          // イン点・アウト点で決めた範囲なら、イン点・アウト点を前の範囲へ戻す
+          const st = store()
+          const same = (a: number | null, b: number): boolean =>
+            a !== null && Math.abs(a - b) < 1e-6
+          if (same(st.timelineIn, review.range.start) && same(st.timelineOut, review.range.end)) {
+            st.setTimelineIn(null)
+            st.setTimelineOut(review.oldRange.end)
+            st.setTimelineIn(review.oldRange.start)
+          } else st.setDragRange(review.oldRange)
           usePipelineStore.getState().closeRangeReview()
         }}
       >
