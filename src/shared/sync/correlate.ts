@@ -265,14 +265,21 @@ export interface SyncFeatures {
  * (クラブ・ライブ・イベントのキック。会場のざわめきはマイクごとに違う)では、絞ると共通の立ち上がりが
  * 消えて合わなくなる(実測: 絞らなければ 15.000 秒・確からしさ 92、絞ると 確からしさ 4 で誤った位置)。
  * どちらにも同じ基準(`isReliableMatch`・短い重なりの抜け具合)を掛け、基準を満たすものの中から
- * 確からしさの高いほうを取る。どちらも満たさなければ、確からしさの高いほう(時計のずれの合わせ直しに使う)
+ * 確からしさの高いほうを取る。どちらも満たさなければ、確からしさの高いほう。
+ * 時計のずれの合わせ直しは、どちらの特徴でも試す(`byKind`。syncWorker)
  */
 export function matchWholeFileBoth(
   a: SyncFeatures,
   b: SyncFeatures
-): { match: FeatureMatch; band: boolean } | null {
+): {
+  match: FeatureMatch
+  band: boolean
+  /** 特徴ごとの丸ごとの照合(時計のずれの合わせ直しを、それぞれの位置の周りで試すのに使う) */
+  byKind: Record<keyof SyncFeatures, FeatureMatch | null>
+} | null {
   const band = matchWholeFile(a.band, b.band)
   const plain = matchWholeFile(a.plain, b.plain)
+  const byKind = { band, plain }
   const candidates = [
     ...(band ? [{ match: band, band: true }] : []),
     ...(plain ? [{ match: plain, band: false }] : [])
@@ -280,7 +287,8 @@ export function matchWholeFileBoth(
   if (candidates.length === 0) return null
   const reliable = candidates.filter((c) => isReliableMatch(c.match))
   const pool = reliable.length > 0 ? reliable : candidates
-  return pool.reduce((x, y) => (y.match.confidence > x.match.confidence ? y : x))
+  const best = pool.reduce((x, y) => (y.match.confidence > x.match.confidence ? y : x))
+  return { ...best, byKind }
 }
 
 /** 窓ごとの合わせで受ける時計のずれの上限(±0.2%。現実の録音機は ±0.01% 前後) */

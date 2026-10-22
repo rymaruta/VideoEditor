@@ -4,6 +4,7 @@ import {
   isReliableMatch,
   matchWholeFileBoth,
   matchWithDrift,
+  type DriftMatch,
   type FeatureMatch,
   onsetFeature,
   refineOffset,
@@ -151,21 +152,37 @@ async function matchPair(
   b: SyncInputFile,
   envelopes: Map<string, SyncFeatures>
 ): Promise<SyncPairResult | null> {
-  const whole = matchWholeFileBoth(envelopes.get(a.id)!, envelopes.get(b.id)!)
-  // 時計のずれの合わせ直しも、丸ごとで良かったほう(帯域を絞った・絞らない)の特徴で行う
-  const kind = whole?.band === false ? 'plain' : 'band'
-  const ea = envelopes.get(a.id)![kind]
-  const eb = envelopes.get(b.id)![kind]
+  const fa = envelopes.get(a.id)!
+  const fb = envelopes.get(b.id)!
+  const whole = matchWholeFileBoth(fa, fb)
   let m: FeatureMatch | null = whole?.match ?? null
   let reliable = m ? isReliableMatch(m) : false
+  /**
+   * 時計のずれの合わせ直し(窓ごと)を、帯域を絞った・絞らない特徴の両方で試し、合ったものの中から
+   * 確からしさの高いほうを取る(丸ごとの照合と同じ判定)。丸ごとの照合がどちらも基準を満たさないとき、
+   * 確からしさの高いほうの特徴だけで試すと、一定間隔の BGM で絞らない相関が周期の山で確からしさだけ
+   * 高くなり(抜け具合 約1.0)、そちらで失敗して合っていた組が「合わない」になっていた。
+   * 2分の窓で合わなければ1分の窓で(時計のずれが大きいと、2分の窓の中でも山が広がる。
+   * 実測: 500ppm・12分は2分の窓では合わず、1分の窓で合う)
+   */
+  const driftBoth = (
+    aroundOf: (k: keyof SyncFeatures) => number | undefined
+  ): DriftMatch | null => {
+    let best: DriftMatch | null = null
+    for (const k of ['band', 'plain'] as const) {
+      const at = aroundOf(k)
+      const around = at !== undefined ? { around: at } : {}
+      const d =
+        matchWithDrift(fa[k], fb[k], around) ??
+        matchWithDrift(fa[k], fb[k], { ...around, windowSec: 60, maxWindows: 12 })
+      if (d && (!best || d.confidence > best.confidence)) best = d
+    }
+    return best
+  }
   // 丸ごとでは合わない長い2本は、時計のずれで山がつぶれていることがある。窓ごとに合わせ直す
+  // (それぞれの特徴の丸ごとの照合で一番合った位置の周りを探す)
   if (!reliable) {
-    // 2分の窓で合わなければ1分の窓で(時計のずれが大きいと、2分の窓の中でも山が広がる。
-    // 実測: 500ppm・12分は2分の窓では合わず、1分の窓で合う)
-    const around = m ? { around: m.offset } : {}
-    const d =
-      matchWithDrift(ea, eb, around) ??
-      matchWithDrift(ea, eb, { ...around, windowSec: 60, maxWindows: 12 })
+    const d = driftBoth((k) => whole?.byKind[k]?.offset ?? m?.offset)
     if (d) {
       m = d
       reliable = true
@@ -205,9 +222,8 @@ async function matchPair(
       result.rate === undefined &&
       ovEnd - ovStart >= minDriftOverlap
     ) {
-      const d =
-        matchWithDrift(ea, eb, { around: m.offset }) ??
-        matchWithDrift(ea, eb, { around: m.offset, windowSec: 60, maxWindows: 12 })
+      const at = m.offset
+      const d = driftBoth(() => at)
       if (d) {
         result.offset = d.offset
         result.center = d.center

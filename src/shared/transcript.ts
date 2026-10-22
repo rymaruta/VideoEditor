@@ -168,6 +168,36 @@ const SHORT_REPLIES = new Set([
 ])
 /** 1 文字の繰り返しを遅さで捨てるときの、さらに遅い速さ(1 秒の文字数)。歌の「ラララ」・数えるのを残す */
 const SLOW_SINGLE_CHARS_PER_SEC = 1
+/**
+ * 1 文字が 5〜7 回でも、1 文字に 2 秒以上かけた繰り返しは作り話(「ん」×6 を 20 秒)。
+ * 本当の「んんん」(1 秒に 1 文字ほど)・「んー」(伸ばす記号で別の文字)は当たらない
+ */
+const VERY_SLOW_SINGLE_CHARS_PER_SEC = 0.5
+const VERY_SLOW_SINGLE_REPEATS = 5
+
+/** 繰り返しの一番短い元の単位(「はいはい」→「はい」) */
+function primitiveUnit(unit: readonly string[]): readonly string[] {
+  const L = unit.length
+  for (let p = 1; p < L; p++) {
+    if (L % p !== 0) continue
+    let ok = true
+    for (let k = p; k < L && ok; k++) ok = unit[k] === unit[k - p]
+    if (ok) return unit.slice(0, p)
+  }
+  return unit
+}
+
+/**
+ * よく言う返事の繰り返しか。繰り返しはどこから数えても同じなので、単位をずらした形(「いは」)・
+ * 倍の単位(「はいはい」)も、元の単位を回して返事と比べる(ずらした単位では返事と見分けられず、
+ * 「はい。」×5 を捨て、間を空けた「うん」5つの途中だけを捨てていた)
+ */
+function isShortReplyUnit(unit: readonly string[]): boolean {
+  const root = primitiveUnit(unit)
+  for (let r = 0; r < root.length; r++)
+    if (SHORT_REPLIES.has([...root.slice(r), ...root.slice(0, r)].join(''))) return true
+  return false
+}
 
 /**
  * 速さを見たときの、少ない回数の繰り返し。本当にゆっくり繰り返して言う言葉(「はい。はい。はい。」・
@@ -176,8 +206,12 @@ const SLOW_SINGLE_CHARS_PER_SEC = 1
  * (「んんんんんんんんんんん」を 20 秒)を求め、よく言う短い返事は数えない
  */
 function slowLoop(unit: readonly string[], repeats: number, charsPerSec: number): boolean {
-  if (new Set(unit).size < 2) return repeats >= 8 && charsPerSec < SLOW_SINGLE_CHARS_PER_SEC
-  if (SHORT_REPLIES.has(unit.join(''))) return false
+  if (new Set(unit).size < 2)
+    return (
+      (repeats >= 8 && charsPerSec < SLOW_SINGLE_CHARS_PER_SEC) ||
+      (repeats >= VERY_SLOW_SINGLE_REPEATS && charsPerSec < VERY_SLOW_SINGLE_CHARS_PER_SEC)
+    )
+  if (isShortReplyUnit(unit)) return false
   return repeats >= 4
 }
 
@@ -188,16 +222,26 @@ function repetitionLoopLength(t: string): number {
   return chars.length === 0 ? 0 : (covered / chars.length) * t.length
 }
 
-/** 決まり文句の作り話(「ご視聴ありがとうございました」など。本当に言うこともある)か */
+/**
+ * 決まり文句の作り話(「ご視聴ありがとうございました」など。本当に言うこともある)か。
+ * 決まり文句をそのまま繰り返したもの(「ご視聴ありがとうございました。」×3)も決まり文句とする
+ * (2 文字以上の言葉は遅くても 4 回から繰り返しとみなすので、3 回では見逃していた)
+ */
 export function isStockHallucination(text: string): boolean {
   const t = text.trim()
-  return t !== '' && HALLUCINATIONS.some((r) => r.test(t))
+  if (t === '') return false
+  if (HALLUCINATIONS.some((r) => r.test(t))) return true
+  const chars = normalizedChars(t)
+  const unit = primitiveUnit(chars)
+  if (unit.length === chars.length) return false
+  const one = unit.join('')
+  return HALLUCINATIONS.some((r) => r.test(one))
 }
 
 /** 文字だけで見た作り話(決まり文句・長い繰り返し)。時刻が分かるなら `hallucinatedIndices` も使う */
 export function isLikelyHallucination(text: string): boolean {
   const t = text.trim()
-  if (t === '' || HALLUCINATIONS.some((r) => r.test(t))) return true
+  if (t === '' || isStockHallucination(t)) return true
   return repetitionLoopLength(t) >= t.length * LOOP_SHARE
 }
 

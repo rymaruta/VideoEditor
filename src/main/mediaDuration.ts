@@ -47,6 +47,17 @@ export interface ProbeStreamLike {
   start_time?: unknown
   disposition?: { attached_pic?: number } | Record<string, unknown>
   tags?: Record<string, unknown>
+  nb_frames?: unknown
+  avg_frame_rate?: unknown
+}
+
+/** 映像の枚数と平均の速さから求めた、絵が続く長さ(秒)。分からなければ null */
+function videoFramesSeconds(s: ProbeStreamLike): number | null {
+  if (s.codec_type !== 'video') return null
+  const frames = finiteSeconds(s.nb_frames)
+  const m = typeof s.avg_frame_rate === 'string' ? /^(\d+)\/(\d+)$/.exec(s.avg_frame_rate) : null
+  const rate = m && Number(m[2]) > 0 ? Number(m[1]) / Number(m[2]) : 0
+  return frames !== null && frames > 0 && rate > 0 ? frames / rate : null
 }
 
 /** Matroska のストリームの長さのタグ(`00:03:00.000000000`) */
@@ -94,8 +105,13 @@ export function mediaDurationSeconds(
     const d = finiteSeconds(s.duration) ?? tagSeconds(s.tags)
     if (d === null) continue
     const start = finiteSeconds(s.start_time) ?? formatStart
-    // 時刻 0 から数えた長さが頭より短いことは無い。そのときは頭から数えたものとみなす
-    const streamEnd = fromZero && d >= start ? d : start + d
+    // 時刻 0 から数えた長さが頭より短いことは無い。そのときは頭から数えたものとみなす。
+    // 編集リストの無い MP4(-use_editlist 0)の映像は、B フレームの遅れの分だけ頭が 0 でなく、長さは頭から
+    // 数えた値(開始 0.08・長さ 8.0 で 8.08 秒まで)。映像の枚数から分かる長さに近いほうで読む
+    // (時刻 0 からとすると 2 フレーム短く 7.92 秒と読んでいた)
+    const frames = videoFramesSeconds(s)
+    const startCounted = frames !== null && Math.abs(d - frames) < Math.abs(d - start - frames)
+    const streamEnd = fromZero && d >= start && !startCounted ? d : start + d
     end = Math.max(end ?? 0, streamEnd - formatStart)
   }
   if (end === null || end <= 0) return declared

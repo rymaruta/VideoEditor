@@ -72,6 +72,37 @@ describe('mediaDurationSeconds — 映像・音声のストリームの長さ', 
     ).toBeCloseTo(6.5, 6)
   })
 
+  it('編集リストの無い MP4 の映像の長さは、頭(B フレームの遅れ)から数えた値(2 フレーム短く読まない)', () => {
+    // 同梱の ffprobe の実際の値: 映像だけ・B フレームあり・-use_editlist 0・字幕付き(25fps・200 枚 = 8 秒)
+    const mov = 'mov,mp4,m4a,3gp,3g2,mj2'
+    expect(
+      mediaDurationSeconds({ duration: '30.08', start_time: '0.08', format_name: mov }, [
+        {
+          codec_type: 'video',
+          duration: '8.0',
+          start_time: '0.08',
+          nb_frames: '200',
+          avg_frame_rate: '25/1'
+        },
+        { codec_type: 'subtitle', duration: '30.08', start_time: '0.08' }
+      ])
+    ).toBeCloseTo(8, 6)
+    // -output_ts_offset 2(編集リストあり): 映像の長さ 10 は時刻 0 から(枚数 200 = 8 秒と合う)
+    expect(
+      mediaDurationSeconds({ duration: '32', start_time: '1.976009', format_name: mov }, [
+        {
+          codec_type: 'video',
+          duration: '10',
+          start_time: '2',
+          nb_frames: '200',
+          avg_frame_rate: '25/1'
+        },
+        { codec_type: 'audio', duration: '10', start_time: '1.976009', nb_frames: '346' },
+        { codec_type: 'subtitle', duration: '32', start_time: '0' }
+      ])
+    ).toBeCloseTo(8.023991, 5)
+  })
+
   it('映像・音声だけの素材・ストリームの長さが分からない素材は、これまでどおり入れ物の長さ', () => {
     expect(
       mediaDurationSeconds({ duration: '12.5' }, [
@@ -184,6 +215,41 @@ describe.skipIf(!existsSync(ffmpegPath))(
       const probed = await probeMedia(file)
       expect(probed.duration).toBeGreaterThan(5.4)
       expect(probed.duration).toBeLessThan(5.6)
+    })
+
+    it('映像だけ・B フレームあり・編集リスト無しの MP4(字幕付き)を、映像の長さ(8 秒)で読む', async () => {
+      const srt = join(work, 'cue-noedit.srt')
+      writeFileSync(
+        srt,
+        '1\n00:00:00,000 --> 00:00:01,000\nhi\n\n2\n00:00:29,000 --> 00:00:30,000\nend\n'
+      )
+      const file = join(work, 'no-editlist.mp4')
+      execFileSync(ffmpegPath, [
+        '-y',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=s=64x36:r=25:d=8',
+        '-i',
+        srt,
+        '-map',
+        '0',
+        '-map',
+        '1',
+        '-c:v',
+        'libx264',
+        '-bf',
+        '2',
+        '-c:s',
+        'mov_text',
+        '-use_editlist',
+        '0',
+        file
+      ])
+      const probed = await probeMedia(file)
+      expect(probed.duration).toBeCloseTo(8, 2)
     })
   }
 )

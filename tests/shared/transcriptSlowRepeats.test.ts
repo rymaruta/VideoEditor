@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   fitSegmentsToRange,
   hallucinatedIndices,
+  isLikelyHallucination,
+  isStockHallucination,
   type TimedText
 } from '../../src/shared/transcript'
 
@@ -103,5 +105,60 @@ describe('典型的な作り話は引き続き捨てる', () => {
       words: [{ text: 'Okay.', start: 163.54, end: 163.54 }]
     }
     expect(fitSegmentsToRange([...segs, zero], 160, 200, () => false)).toEqual([])
+  })
+})
+
+describe('よく言う返事は、単位をずらしても(「いは」「はいはい」)返事として残す', () => {
+  it('ゆっくり言った「はい。」×5・「うん。」×5(7.5 秒)・「そうそう」×4', () => {
+    const cases: TimedText[][] = [
+      [timed('はい。はい。はい。はい。はい。', 0, 7.5, 5)],
+      [timed('うん。うん。うん。うん。うん。', 10, 17.5, 5)],
+      [timed('はいはい。はいはい。はいはい。はいはい。', 20, 32, 4)],
+      [timed('そうそう、そうそう、そうそう、そうそう', 40, 52, 4)]
+    ]
+    for (const items of cases) expect(kept(items)).toEqual(items.map((x) => x.text))
+  })
+
+  it('1.5 秒の「うん」5つ(間 0.5 秒)は、途中だけ消さずに全部残す', () => {
+    const items = Array.from({ length: 5 }, (_, k) => timed('うん', 60 + k * 2, 61.5 + k * 2))
+    expect(kept(items)).toEqual(items.map((x) => x.text))
+  })
+
+  it('返事でない言葉の遅すぎる繰り返しは、ずらした単位でも引き続き捨てる', () => {
+    expect(kept([timed('2分間2分間2分間2分間2分間', 0, 12, 5)])).toEqual([])
+    const items = Array.from({ length: 5 }, (_, k) => timed('2分間', 20 + k * 3, 22.5 + k * 3))
+    expect(kept(items)).toEqual([])
+  })
+})
+
+describe('決まり文句の繰り返し・とても遅い「ん」', () => {
+  it('「ご視聴ありがとうございました。」×3(30 秒に引き伸ばし)は決まり文句として捨てる', () => {
+    const text = 'ご視聴ありがとうございました。'.repeat(3)
+    const t = timed(text, 0, 30, 3)
+    const stock = { ...t, words: (t.words ?? []).map((w) => ({ ...w, text: w.text ?? '' })) }
+    expect(isStockHallucination(text)).toBe(true)
+    expect(isLikelyHallucination(text)).toBe(true)
+    expect(isLikelyHallucination('ご視聴ありがとうございました ご視聴ありがとうございました')).toBe(
+      true
+    )
+    expect(fitSegmentsToRange([stock], 0, 30)).toEqual([])
+    expect(fitSegmentsToRange([stock], 0, 30, () => true)).toEqual([])
+    // 決まり文句と同じく、音が鳴っている所のものは本当の言葉として残す
+    expect(fitSegmentsToRange([stock], 0, 30, () => false)).toHaveLength(1)
+    // 決まり文句を含むだけの文は当たらない
+    expect(isLikelyHallucination('ご視聴ありがとうございました。また来週お会いしましょう')).toBe(
+      false
+    )
+  })
+
+  it('言葉の時刻の無い「ん」×6 を 20 秒は捨て、本当の「んー」「んんん」は残す', () => {
+    expect(kept([{ text: 'んんんんんん', start: 0, end: 20 }])).toEqual([])
+    const real: TimedText[][] = [
+      [{ text: 'んー', start: 0, end: 3 }],
+      [{ text: 'んーーー、んーーー', start: 10, end: 16 }],
+      [{ text: 'んんん', start: 20, end: 23.5 }],
+      [{ text: 'ん、ん、ん、ん、ん', start: 30, end: 35 }]
+    ]
+    for (const items of real) expect(kept(items)).toEqual(items.map((x) => x.text))
   })
 })
