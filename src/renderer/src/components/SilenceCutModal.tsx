@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import type { Clip, SilenceRange } from '@shared/types'
-import { buildCutSegments } from '../lib/silenceCut'
+import { buildCutSegments, mergeShortPieceCuts } from '../lib/silenceCut'
 import { toTimelineSeconds } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
 import { WandIcon } from './icons'
@@ -76,7 +76,11 @@ export function SilenceCutModal({
         if (disposed || abortRef.current) break
         let detection: ClipDetection
         try {
-          const ranges = await window.api.detectSilence(asset.filePath, clip.inPoint, clip.outPoint)
+          // 言葉になりえない短い片(0.12 秒未満)は前後の無音と一緒に詰める(細切れのクリップにしない)
+          const ranges = mergeShortPieceCuts(
+            clip,
+            await window.api.detectSilence(asset.filePath, clip.inPoint, clip.outPoint)
+          )
           detection = {
             clipId: clip.id,
             fileName: asset.fileName,
@@ -133,7 +137,11 @@ export function SilenceCutModal({
       if (cutRanges.length === 0) continue
       const clip = project.clips.find((c) => c.id === d.clipId)
       if (!clip) continue
-      replacements.push({ clipId: d.clipId, newClips: buildCutSegments(clip, cutRanges) })
+      // 一部の無音を外したときも、言葉になりえない短い片は前後の無音と一緒に詰める
+      replacements.push({
+        clipId: d.clipId,
+        newClips: buildCutSegments(clip, mergeShortPieceCuts(clip, cutRanges))
+      })
     }
     // 何本掛けても履歴は1件(store 側でまとめて適用する)。
     replaceClipRanges(replacements)

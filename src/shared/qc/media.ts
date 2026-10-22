@@ -23,12 +23,28 @@ export interface QcMeasurement {
   duration: number
 }
 
-/** 黒味: 0.5秒以上。フリーズ: 2秒以上。無音: -50dB 未満が2秒以上 */
+/**
+ * 黒味: 0.5秒以上。フリーズ: 2秒以上。無音: -50dB 未満が2秒以上。
+ *
+ * 黒味とフリーズは、実写の暗い場面・固定カメラを誤って拾わないよう厳しめにする(実地テスト: 3時間の記録映像で
+ * 「画が止まっています」325 件・暗いホールに小さく映る演台の場面を黒 3 件。わざと入れた黒・止まりは見逃さない):
+ * - 黒味は2通りで見る。どちらかに当たれば黒:
+ *   - 真っ黒(書き出しの隙間など。輝度が下から 5% 未満の画素が画の 98% 以上)。小さなテロップが載っていても黒
+ *   - 一様に暗い(フィルムの浮いた黒・暗転。輝度が下から 10% 未満の画素が画の 99.9% 以上)。暗いホールに
+ *     小さく映る演台・人(画の 0.1% 以上)は黒にしない
+ * - フリーズ: 止まり始めの画との差が −74dB(0.0002)未満のまま 2 秒。止めた画を圧縮しても差は 0.0001 未満
+ *   (同じ画になる)。固定カメラで頭だけ動く話者は 2 秒のうちに差がこれを超える
+ */
 export const QC_THRESHOLDS = {
   blackMinSec: 0.5,
-  blackPixel: 0.1,
+  /** 真っ黒: 画素の輝度のしきい値と、黒い画素の割合 */
+  blackPixel: 0.05,
+  blackRatio: 0.98,
+  /** 一様に暗い */
+  darkPixel: 0.1,
+  darkRatio: 0.999,
   freezeMinSec: 2,
-  freezeNoise: 0.003,
+  freezeNoise: 0.0002,
   silenceDb: -50,
   silenceMinSec: 2,
   /** ラウドネスの許容差(LU) */
@@ -52,7 +68,8 @@ export function qcFilter(hasVideo: boolean, hasAudio: boolean, duration?: number
   if (hasVideo)
     parts.push(
       `[0:v]${d ? `tpad=stop_mode=clone:stop_duration=${d},trim=end=${d},` : ''}` +
-        `scale=320:-2,blackdetect=d=${t.blackMinSec}:pix_th=${t.blackPixel},` +
+        `scale=320:-2,blackdetect=d=${t.blackMinSec}:pix_th=${t.blackPixel}:pic_th=${t.blackRatio},` +
+        `blackdetect=d=${t.blackMinSec}:pix_th=${t.darkPixel}:pic_th=${t.darkRatio},` +
         `freezedetect=n=${t.freezeNoise}:d=${t.freezeMinSec}[qv]`
     )
   if (hasAudio)
@@ -137,7 +154,8 @@ export class QcLogParser {
     const silence = [...this.silence]
     if (this.silenceStart !== null) silence.push({ start: this.silenceStart, end })
     return {
-      black: this.black,
+      // 黒味は2通り(真っ黒・一様に暗い)で見るので、重なった区間を1つにする
+      black: mergeTouching(this.black),
       freeze: mergeTouching(freeze),
       silence,
       loudness: Number.isNaN(this.integrated)

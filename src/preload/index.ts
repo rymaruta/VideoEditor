@@ -6,7 +6,7 @@ import type { QcMeasurement } from '@shared/qc/media'
 import type { LlmRequest, LlmWorkerMessage } from '@shared/llm'
 type LlmProgressMessage = Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>
 import type { FaceBox } from '@shared/telop/avoidFaces'
-import type { AsrJob, AsrJobResult, AsrWorkerMessage } from '@shared/transcript'
+import type { AsrJob, AsrJobResult, AsrLanguage, AsrWorkerMessage } from '@shared/transcript'
 type AsrProgressMessage = Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 'error' }>
 import type { FootageScan } from '@shared/ingest/classify'
 import type { SyncInputFile, SyncReport } from '@shared/sync/report'
@@ -277,7 +277,12 @@ const api = {
   syncCancel: (): Promise<void> => ipcRenderer.invoke(IPC.syncCancel),
   footageEnvelopes: (paths: string[]): Promise<Float32Array[]> =>
     ipcRenderer.invoke(IPC.footageEnvelopes, paths),
-  asrRun: (jobs: AsrJob[]): Promise<AsrJobResult[]> => ipcRenderer.invoke(IPC.asrRun, jobs),
+  /** `options.language` を省くと、設定の言語(`asrSetLanguage`)で認識する */
+  asrRun: (jobs: AsrJob[], options?: { language?: AsrLanguage }): Promise<AsrJobResult[]> =>
+    ipcRenderer.invoke(IPC.asrRun, jobs, options),
+  /** 自動編集の文字起こしの言語(設定)を伝える */
+  asrSetLanguage: (language: AsrLanguage): Promise<void> =>
+    ipcRenderer.invoke(IPC.asrSetLanguage, language),
   asrCancel: (): Promise<void> => ipcRenderer.invoke(IPC.asrCancel),
   llmRun: (requests: LlmRequest[]): Promise<(unknown | null)[]> =>
     ipcRenderer.invoke(IPC.llmRun, requests),

@@ -29,6 +29,99 @@ export interface AsrJobResult {
 
 export type AsrDevice = 'dml' | 'cuda' | 'cpu'
 
+/**
+ * 自動編集の文字起こしの言語。`auto` は素材(マイク)ごとに話している言語を判定する。
+ * 日本語に固定すると、英語の素材は日本語への訳として出て、テロップが実用にならない
+ */
+export type AsrLanguage = 'auto' | 'japanese' | 'english' | 'chinese' | 'korean'
+
+export const ASR_LANGUAGES: readonly AsrLanguage[] = [
+  'auto',
+  'japanese',
+  'english',
+  'chinese',
+  'korean'
+]
+
+export const ASR_LANGUAGE_LABEL: Record<AsrLanguage, string> = {
+  auto: '自動判定',
+  japanese: '日本語',
+  english: '英語',
+  chinese: '中国語',
+  korean: '韓国語'
+}
+
+/** 既定の言語(今までどおり日本語)。`auto` を選べば素材ごとに判定する */
+export const DEFAULT_ASR_LANGUAGE: AsrLanguage = 'japanese'
+
+export function isAsrLanguage(v: unknown): v is AsrLanguage {
+  return typeof v === 'string' && (ASR_LANGUAGES as readonly string[]).includes(v)
+}
+
+/**
+ * 判定した言語(Whisper の言語の印ごとの確からしさ。足して 1)から、認識に使う言語を決める。
+ * 日本語以外は、それが一番で `AUTO_LANGUAGE_CONFIDENCE` 以上、かつ日本語が `AUTO_JAPANESE_MAX` 未満の
+ * ときだけ使う。音楽・雑音・短い声で判定が揺れたときは日本語(今までの振る舞い)にする。
+ * 実測(whisper-large-v3-turbo): 日本語の文 12 本はどれも日本語 0.9 以上、英語の記録映像は 0.42〜1.0
+ * (雑音の多い窓で低い)。返すのは Whisper の言語の符号(`ja`・`en` …)
+ */
+export const AUTO_LANGUAGE_CONFIDENCE = 0.5
+export const AUTO_JAPANESE_MAX = 0.2
+
+/**
+ * transformers.js(whisper_language_to_code)が受ける言語の符号。言語の判定は Whisper の全部の印
+ * (広東語 `yue` など)から選ぶので、受けない符号をそのまま渡すと「Language "yue" is not supported」で
+ * 文字起こし全体が止まっていた
+ */
+const WHISPER_CODES = new Set(
+  (
+    'en zh de es ru ko fr ja pt tr pl ca nl ar sv it id hi fi vi he uk el ms cs ro da hu ta no th ' +
+    'ur hr bg lt la mi ml cy sk te fa lv bn sr az sl kn et mk br eu is hy ne mn bs kk sq sw gl mr ' +
+    'pa si km sn yo so af oc ka be tg sd gu am yi lo uz fo ht ps tk nn mt sa lb my bo tl mg as tt ' +
+    'haw ln ha ba jw su'
+  ).split(' ')
+)
+/** 受けない符号のうち、近い言語に寄せるもの */
+const WHISPER_CODE_ALIASES: Record<string, string> = { yue: 'zh' }
+
+/** 判定した言語の符号を、認識に渡せる符号にする(広東語は中国語に寄せ、受けないものは日本語) */
+export function whisperLanguageCode(code: string): string {
+  const c = WHISPER_CODE_ALIASES[code] ?? code
+  return WHISPER_CODES.has(c) ? c : 'ja'
+}
+
+export function chooseAsrLanguage(probs: ReadonlyMap<string, number>): string {
+  let best = ''
+  let bestP = -1
+  for (const [code, p] of probs)
+    if (p > bestP) {
+      best = code
+      bestP = p
+    }
+  if (!best || best === 'ja' || bestP < AUTO_LANGUAGE_CONFIDENCE) return 'ja'
+  if ((probs.get('ja') ?? 0) >= AUTO_JAPANESE_MAX) return 'ja'
+  return whisperLanguageCode(best)
+}
+
+/**
+ * 言語を指定して認識し、言語の指定が原因で失敗したら(受けない言語など)日本語で認識し直す。
+ * 1つの窓の失敗で文字起こし全体を止めない。日本語で失敗したら、その失敗をそのまま返す
+ */
+export async function withLanguageFallback<T>(
+  language: string,
+  run: (language: string) => Promise<T>,
+  fallback = 'japanese'
+): Promise<T> {
+  try {
+    return await run(language)
+  } catch (e) {
+    if (language === fallback || language === 'ja') throw e
+    // 言語と関係のない失敗(メモリ不足など)を日本語でやり直すと、英語の音が黙って日本語の文字になるのでやり直さない
+    if (!/language/i.test(e instanceof Error ? e.message : String(e))) throw e
+    return run(fallback)
+  }
+}
+
 export type AsrWorkerMessage =
   | { type: 'status'; stage: 'download' | 'load'; percent: number; note: string }
   | { type: 'device'; device: AsrDevice; note?: string }

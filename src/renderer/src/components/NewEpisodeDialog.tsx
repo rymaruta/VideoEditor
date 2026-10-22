@@ -19,6 +19,7 @@ import {
   EPISODE_KINDS,
   EPISODE_KIND_LABEL
 } from '@shared/structure/kind'
+import { ASR_LANGUAGES, ASR_LANGUAGE_LABEL, type AsrLanguage } from '@shared/transcript'
 
 /**
  * 新しい回を作る(ファイル > 新しい回を作る… / Ctrl+Shift+N)。デザイン案の「NewEpisode」。
@@ -102,6 +103,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
   const showKitFolder = useSettingsStore((s) => s.showKitFolder)
   const episodeKind = useSettingsStore((s) => s.episodeKind)
   const editPolicy = useSettingsStore((s) => s.editPolicy)
+  const asrLanguage = useSettingsStore((s) => s.asrLanguage)
   const showStyle = useSettingsStore((s) => s.showStyle)
   const setShowStyle = useSettingsStore((s) => s.setShowStyle)
   const [learning, setLearning] = useState(false)
@@ -281,6 +283,28 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
             />
             <span className="form-note">{EDIT_POLICY_HINT[editPolicy]}</span>
           </div>
+
+          <label className="form-stack">
+            <span>話している言葉(文字起こし・テロップ)</span>
+            <select
+              aria-label="話している言葉"
+              value={asrLanguage}
+              onChange={(e) =>
+                useSettingsStore.getState().setAsrLanguage(e.target.value as AsrLanguage)
+              }
+            >
+              {ASR_LANGUAGES.map((l) => (
+                <option key={l} value={l}>
+                  {ASR_LANGUAGE_LABEL[l]}
+                </option>
+              ))}
+            </select>
+            <span className="form-note">
+              {asrLanguage === 'auto'
+                ? 'マイクごとに言葉を判定します(はっきりしないときは日本語)'
+                : '外国語の素材で日本語を選ぶと、日本語に訳した文字になります'}
+            </span>
+          </label>
 
           <div className="form-stack">
             <span>収録フォルダ(カードごとコピーしたフォルダをそのまま指定)</span>

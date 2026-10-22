@@ -8,6 +8,38 @@ import type { Clip, SilenceRange } from '@shared/types'
 const MIN_SEGMENT_SOURCE_DURATION = 0.05
 
 /**
+ * 無音詰めで、これより短い片(素材秒)は前後の無音と一緒に詰める(無音をつないで1つにする)。
+ * 言葉になりえない長さ(息・物音の切れ端)に限る。0.25 秒の「はい」のような短い返事は残す。
+ * 無音の検出は余白なしで切るので、無音の間の切れ端が細切れのクリップになっていた
+ * (実地テスト: 3時間で 806 区間を詰めると、0.3 秒未満の片が 47 本)
+ */
+export const MERGE_PIECE_MAX_SEC = 0.12
+
+/**
+ * 詰める区間(無音)のうち、間の片が `maxPieceSec` より短い2つをつないで1つにする。
+ * クリップの頭・終わりの短い片はまとめない(隣のクリップに続く言葉の尾・頭のことがある)。
+ * クリップの範囲に収め、重なり・接した区間もつなぐ。返す区間は時刻の順
+ */
+export function mergeShortPieceCuts(
+  clip: Pick<Clip, 'inPoint' | 'outPoint'>,
+  cutRanges: readonly SilenceRange[],
+  maxPieceSec = MERGE_PIECE_MAX_SEC
+): SilenceRange[] {
+  const cuts: SilenceRange[] = []
+  for (const r of [...cutRanges]
+    .filter((r) => Number.isFinite(r.start) && Number.isFinite(r.end) && r.end > r.start)
+    .sort((a, b) => a.start - b.start)) {
+    const start = Math.min(clip.outPoint, Math.max(clip.inPoint, r.start))
+    const end = Math.min(clip.outPoint, Math.max(clip.inPoint, r.end))
+    if (end <= start) continue
+    const last = cuts[cuts.length - 1]
+    if (last && start - last.end < maxPieceSec) last.end = Math.max(last.end, end)
+    else cuts.push({ ...r, start, end })
+  }
+  return cuts
+}
+
+/**
  * クリップから指定区間を抜いた残りを、断片クリップの配列として組み立てる。
  *
  * 無音カット・フィラーカット・テキストで編集は、どれも「素材内の区間を消して

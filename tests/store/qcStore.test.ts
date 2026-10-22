@@ -118,3 +118,33 @@ describe('書き出している間に別のプロジェクトを開いたとき'
     expect(useQcStore.getState().report).toBeNull()
   })
 })
+
+describe('自動編集で作った企画の無音', () => {
+  it('本編の中の 2〜5.5 秒の無音(手で入れた無音・マイクの抜け)も、今までどおり「途切れ」と知らせる', async () => {
+    const auto = {
+      ...project,
+      clips: [{ id: 'c1', assetId: 'A', inPoint: 0, outPoint: 10, speed: 1 }],
+      autoEdit: { scenes: [], judgements: [], judgeSource: 'heuristic', keep: {} }
+    } as unknown as Project
+    const m: QcMeasurement = {
+      ...measurement(),
+      duration: 10,
+      silence: [
+        { start: 1, end: 3.7 },
+        { start: 4, end: 9 }
+      ]
+    }
+    const api = stubApi({ '/a.mp4': m })
+    useQcStore.setState({ report: null })
+    useProjectStore.setState({ project: auto })
+    const done = useQcStore.getState().run('/a.mp4', 'off', auto)
+    await tick()
+    api.resolve('/a.mp4')
+    await done
+    const silences = useQcStore.getState().report?.issues.filter((i) => i.kind === 'silence') ?? []
+    expect(silences.map((i) => [i.start, i.end])).toEqual([
+      [1, 3.7],
+      [4, 9]
+    ])
+  })
+})

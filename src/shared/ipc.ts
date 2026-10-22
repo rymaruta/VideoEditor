@@ -62,6 +62,7 @@ export const IPC = {
   asrRun: 'asr:run',
   asrProgress: 'asr:progress',
   asrCancel: 'asr:cancel',
+  asrSetLanguage: 'asr:set-language',
   faceDetect: 'face:detect',
   llmRun: 'llm:run',
   llmProgress: 'llm:progress',

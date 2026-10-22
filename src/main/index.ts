@@ -2,7 +2,7 @@ import { standardExportFits } from '@shared/exportLimits'
 import { cachedEnvelope } from './audioPcm'
 import { readFile, stat, writeFile } from 'fs/promises'
 import os from 'os'
-import { cancelAsr, runAsr } from './asrService'
+import { cancelAsr, runAsr, setAsrLanguage } from './asrService'
 import { detectFaces } from './faceService'
 import { cancelLlm, runLlm } from './llmService'
 import { cancelMeasureExport, measureExport } from './qcService'
@@ -970,9 +970,10 @@ app.whenReady().then(() => {
       })
     )
   )
-  ipcMain.handle(IPC.asrRun, (event, jobs: AsrJob[]) =>
-    runAsr(jobs, (m) => notifySender(event, IPC.asrProgress, m))
+  ipcMain.handle(IPC.asrRun, (event, jobs: AsrJob[], options?: { language?: unknown }) =>
+    runAsr(jobs, (m) => notifySender(event, IPC.asrProgress, m), options)
   )
+  ipcMain.handle(IPC.asrSetLanguage, (_e, language: unknown) => setAsrLanguage(language))
   ipcMain.handle(IPC.asrCancel, () => cancelAsr())
   ipcMain.handle(IPC.llmRun, (event, requests: LlmRequest[]) =>
     runLlm(requests, (m) => notifySender(event, IPC.llmProgress, m))
