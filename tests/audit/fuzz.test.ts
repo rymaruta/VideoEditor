@@ -23,12 +23,14 @@ import {
   type CameraSeg
 } from '@shared/roughCut/overrides'
 import { autoTelopKey } from '@shared/telop/manual'
+import { markIn, markOut, rippleDelete } from '@renderer/lib/editCommands'
 import { cov, episode2, inter, len, memory, project } from './h'
 
 /**
- * 範囲の自動編集・ロック・作り直し・手直し・取り消しを乱択で混ぜる監査の試験(7211975 の監査から)。
+ * 範囲の自動編集・ロック・作り直し・手直し(詰め・消す・カメラ・速さ替え・並べ替え・I/O の Shift+Delete)・
+ * I/O の範囲・取り消しを乱択で混ぜる監査の試験(7211975・9cb67d8 の監査から)。
  * 常設は種を固定した短い版(監査で見つかった 10・73 を含む)。多く回すときは
- * `SEEDS=1,2,...,120 NSTEPS=35` を付けて走らせる
+ * `SEEDS=1,2,...,300 NSTEPS=40` を付けて走らせる
  */
 const SEEDS = (process.env.SEEDS ?? '1,2,3,10,13,29,43,73').split(',').map(Number)
 const STEPS = Number(process.env.NSTEPS ?? 25)
@@ -81,17 +83,42 @@ describe('audit fuzz', () => {
           'remove',
           'angle',
           'angle',
+          'speed',
+          'move',
+          'ripple',
           'range',
           'range',
           'range',
+          'iorange',
           'lock',
           'unlock',
           'rebuild',
           'rebuild',
           'undo',
           'redo',
+          'undo',
           'target'
         ])
+        if (op === 'speed' && p.clips.length > 0) {
+          const i = Math.floor(rand() * p.clips.length)
+          useProjectStore.getState().updateClipSpeed(p.clips[i].id, pick([0.5, 1.5, 2]))
+          log.push(`speed clip ${i}`)
+        } else if (op === 'move' && p.clips.length > 2) {
+          const i = Math.floor(rand() * p.clips.length),
+            j = Math.floor(rand() * p.clips.length)
+          useProjectStore.getState().moveClipToIndex(p.clips[i].id, j)
+          log.push(`move ${i}->${j}`)
+        } else if (op === 'ripple' && total > 6) {
+          const a = Math.round(rand() * (total - 3) * 30) / 30,
+            b = Math.min(total, Math.round((a + 0.5 + rand() * 2) * 30) / 30)
+          useProjectStore.getState().selectClip(null)
+          useProjectStore.getState().seekTo(a)
+          markIn()
+          useProjectStore.getState().seekTo(b)
+          markOut()
+          const ok = rippleDelete()
+          log.push(`ripple-delete ${a.toFixed(2)}-${b.toFixed(2)} ${ok}`)
+        }
         if (op === 'trim' && p.clips.length > 1) {
           const i = Math.floor(rand() * p.clips.length)
           const c = p.clips[i]
@@ -114,7 +141,7 @@ describe('audit fuzz', () => {
             useProjectStore.getState().switchClipAngle(c.id, other.sourceId)
             log.push(`angle clip ${i} -> ${other.sourceId}`)
           }
-        } else if (op === 'range') {
+        } else if (op === 'range' || op === 'iorange') {
           const a = Math.round(rand() * total * 0.7 * 30) / 30
           const b = Math.min(total, Math.round((a + 4 + rand() * total * 0.4) * 30) / 30)
           const o: RangedEditOptions = {
@@ -125,15 +152,15 @@ describe('audit fuzz', () => {
               effects: true,
               se: rand() < 0.7,
               cg: true,
-              bgm: rand() < 0.4
+              bgm: rand() < 0.5
             },
-            keepLength: rand() < 0.4,
+            keepLength: rand() < 0.5,
             keepInside: rand() < 0.5,
             lockAfter: rand() < 0.25
           }
           const r = await usePipelineStore
             .getState()
-            .prepareRangedEdit({ start: a, end: b }, o, { exact: rand() < 0.5 })
+            .prepareRangedEdit({ start: a, end: b }, o, { exact: op === 'iorange' || rand() < 0.3 })
           if (!r.ok) {
             log.push(`range ${a.toFixed(2)}-${b.toFixed(2)} refused: ${r.reason.slice(0, 30)}`)
             continue
@@ -145,7 +172,11 @@ describe('audit fuzz', () => {
           const outsideBefore = base.clips.filter(
             (_, k) => bt[k].end <= pv.range.start + 1e-6 || bt[k].start >= pv.range.end - 1e-6
           )
+          const runs0 = usePipelineStore.getState().rangeRuns.length
+          const past0 = useProjectStore.getState().past.length
           if (!usePipelineStore.getState().applyRangedEdit(pv).ok) fail('apply refused')
+          if (useProjectStore.getState().past.length !== past0 + 1) fail('history not +1')
+          const runs1 = usePipelineStore.getState().rangeRuns.length
           log.push(
             `range ${pv.range.start.toFixed(2)}-${pv.range.end.toFixed(2)} win ${pv.window.start.toFixed(2)}-${pv.window.end.toFixed(2)} ${JSON.stringify(o)}`
           )
@@ -161,7 +192,10 @@ describe('audit fuzz', () => {
           const dAdd =
             len(subtractRanges(outs(memBefore.added), outs(memAfter.added))) +
             len(subtractRanges(outs(memAfter.added), outs(memBefore.added)))
-          if (dRem > 0.05 || dAdd > 0.05) fail(`outside memory changed rem=${dRem} add=${dAdd}`)
+          if (dRem > 0.05 || dAdd > 0.05)
+            fail(
+              `outside memory changed rem=${dRem} add=${dAdd}\n addBefore=${JSON.stringify(outs(memBefore.added).map((r) => [+r.start.toFixed(2), +r.end.toFixed(2)]))}\n addAfter=${JSON.stringify(outs(memAfter.added).map((r) => [+r.start.toFixed(2), +r.end.toFixed(2)]))}\n covBefore=${fmtSegs(cov(base))}\n covAfter=${fmtSegs(cov())}\n autoBefore=${fmtSegs(base.roughCutAuto ?? [])}\n autoAfter=${fmtSegs(project().roughCutAuto ?? [])}\n clipsBefore=${JSON.stringify(base.clips.map((c) => [c.assetId.slice(0, 4), +c.inPoint.toFixed(2), +c.outPoint.toFixed(2), c.speed]))}`
+            )
           // 窓の中: 残すなら同じ / カットをやり直さないなら手で削った所は残っている
           const ins = (rs: { start: number; end: number }[]) => inter(unionRanges(rs), w)
           if (o.keepInside || !o.steps.cut) {
@@ -236,9 +270,46 @@ describe('audit fuzz', () => {
           useProjectStore.getState().undo()
           if (!sameProjectContent({ ...project(), autoEdit: base.autoEdit }, base))
             fail('undo not exact')
+          if (usePipelineStore.getState().rangeRuns.length !== runs0)
+            log.push(
+              `  !!R rangeRuns after undo ${usePipelineStore.getState().rangeRuns.length} vs ${runs0}`
+            )
           useProjectStore.getState().redo()
           if (!sameProjectContent({ ...project(), autoEdit: after.autoEdit }, after))
             fail('redo not exact')
+          if (usePipelineStore.getState().rangeRuns.length !== runs1)
+            log.push(`  !!R rangeRuns after redo`)
+          // 範囲の外(前)の発言テロップの時刻の合併は変わらない / 境の切れ端の同文連続を数える
+          {
+            const un = (pp: typeof base, lo: number, hi: number) =>
+              unionRanges(
+                pp.textOverlays
+                  .filter((x) => x.utteranceId)
+                  .map((x) => ({ start: Math.max(lo, x.startTime), end: Math.min(hi, x.endTime) }))
+                  .filter((x) => x.end > x.start + 1e-6)
+              )
+            const a0 = un(base, 0, pv.range.start),
+              a1 = un(after, 0, pv.range.start)
+            const lost = len(subtractRanges(a0, a1))
+            if (lost > 0.05 && o.steps.speech)
+              log.push(`  !!S speech telop time lost before range ${lost.toFixed(2)}`)
+            const sp = after.textOverlays
+              .filter((x) => x.utteranceId)
+              .sort((x, y) => x.startTime - y.startTime)
+            for (let i = 0; i < sp.length; i++)
+              for (let j = 0; j < sp.length; j++)
+                if (
+                  i !== j &&
+                  sp[i].utteranceId === sp[j].utteranceId &&
+                  Math.abs(sp[i].endTime - sp[j].startTime) < 0.02 &&
+                  sp[i].text === sp[j].text &&
+                  (Math.abs(sp[i].endTime - pv.newRange.start) < 0.02 ||
+                    Math.abs(sp[i].endTime - pv.newRange.end) < 0.02)
+                )
+                  log.push(
+                    `  ~~same text consecutive at ${sp[i].endTime.toFixed(2)} (range ${pv.newRange.start.toFixed(2)}-${pv.newRange.end.toFixed(2)})`
+                  )
+          }
         } else if (op === 'lock') {
           const a = rand() * total * 0.7
           const b = Math.min(total, a + 3 + rand() * total * 0.3)
@@ -334,6 +405,25 @@ describe('audit fuzz', () => {
             fail(
               `hand angle lost ${angleLost.toFixed(2)} angles=${fmtSegs(mem.angles)}\nlocks=${JSON.stringify(locks)}\nbefore=${fmtSegs(cov(before))}\nauto=${fmtSegs(before.roughCutAuto ?? [])}\nover=${JSON.stringify(before.cutOverrides)}\nafter=${fmtSegs(c)}`
             )
+          for (const { l, tw } of lockCov) {
+            if (!tw) continue
+            const tn = timelineWindowOf(now.clips, now.multicam!, l)
+            if (!tn) continue
+            const rel = (pp: typeof before, w: { start: number; end: number }) =>
+              unionRanges(
+                pp.textOverlays
+                  .filter((x) => x.utteranceId)
+                  .map((x) => ({
+                    start: Math.max(w.start, x.startTime) - w.start,
+                    end: Math.min(w.end, x.endTime) - w.start
+                  }))
+                  .filter((x) => x.end > x.start + 1e-6)
+              )
+            const r0 = rel(before, tw),
+              r1 = rel(now, tn)
+            const d = len(subtractRanges(r0, r1)) + len(subtractRanges(r1, r0))
+            if (d > 0.05) log.push(`  !!L speech telop time inside lock changed ${d.toFixed(2)}`)
+          }
           for (const { l, segs, tw } of lockCov) {
             if (!tw) continue
             const segsNow = inter(c, [l])
@@ -360,9 +450,9 @@ describe('audit fuzz', () => {
         }
       }
       // 同じ鍵の自動テロップが2枚あるだけ(!!D)は失敗にしない: 仮編集でも、カットで分かれた1枚は同じ鍵の
-      // 枚になる(範囲の境で切った古い枚も同じ)。時刻が重なる(!!E・!!F)は失敗
+      // 枚になる。時刻が重なる(!!E・!!F)・同じ文が継ぎ目なく続く(~~)は失敗
       const warn = log.filter(
-        (l) => (l.includes('!!') && !l.includes('!!D')) || l.includes('stale')
+        (l) => (l.includes('!!') && !l.includes('!!D')) || l.includes('stale') || l.includes('~~')
       )
       if (warn.length || process.env.VERBOSE) console.log(`seed ${seed0}:\n` + log.join('\n'))
       expect(warn).toEqual([])

@@ -2352,12 +2352,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const fitSec = Math.max(0, range.end - range.start - extrasLen)
       const sceneLen = (list: readonly { start: number; end: number }[]): number =>
         list.reduce((t, sc) => t + (sc.end - sc.start), 0)
-      const targetSec =
-        options.keepLength && steps.cut
-          ? fitSec
-          : get().targetMinutes > 0
-            ? (get().targetMinutes * 60 * sceneLen(inWindow)) / Math.max(1e-9, sceneLen(scenes))
-            : 0
+      const targetSec = options.keepLength
+        ? fitSec
+        : get().targetMinutes > 0
+          ? (get().targetMinutes * 60 * sceneLen(inWindow)) / Math.max(1e-9, sceneLen(scenes))
+          : 0
       const plan = planRoughCut(project, info, inWindow, get().judgements, activity, {
         overrides,
         targetSec,
@@ -2375,7 +2374,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         window: {
           start: win.start,
           end: win.end,
-          ...(options.keepLength && steps.cut ? { fitSec } : {})
+          // カットをやり直さないときも(速さを戻したクリップ・固定した中身で長さが変わる)
+          ...(options.keepLength ? { fitSec } : {})
         }
       })
       if (plan.cut.main.length === 0)
@@ -2385,7 +2385,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             '範囲の中に残す所がありません(構成で範囲の場面を「残す」にするか、範囲を広げてください)'
         }
       const frame = frameSeconds(project.clips, project.assets)
-      if (options.keepLength && steps.cut && (plan.fitShort ?? 0) > frame)
+      if (options.keepLength && (plan.fitShort ?? 0) > frame)
         return {
           ok: false,
           needsRipple: true,
@@ -2440,6 +2440,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         replaceTelop: (o) =>
           o.utteranceId ? steps.speech : steps.effects && proposals.has(o.effectId ?? '')
       })
+      // 長さを保つで、窓の中の素材で埋めきれなかった(素材の終わり・窓の終わりで止めた)ならリップルを勧める
+      if (options.keepLength && result.lengthShort > frame)
+        return {
+          ok: false,
+          needsRipple: true,
+          reason: `範囲の中の素材では、元の長さに ${result.lengthShort.toFixed(1)} 秒足りません。後ろを詰めて(リップル)当てますか?`
+        }
       let after = result.project
       const skipped: string[] = []
       // SE・CG・BGM: 範囲の中だけ置き直す(番組素材フォルダがあるとき)

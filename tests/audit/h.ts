@@ -83,6 +83,9 @@ export const project = (): Project => useProjectStore.getState().project
 
 /** 今の企画から読み取る人の手直し */
 export function memory(p: Project = project()): CutOverrides {
+  // 組んだ本編の記録が無い(仮編集を入れる前まで取り消した)ときは、作り直しと同じく覚えている手直しだけ
+  // (今の本編を全部「人が足した」とは読まない。pipelineStore.buildAndApply と同じ)
+  if (!p.roughCutAuto) return p.cutOverrides ?? { removed: [], added: [], angles: [] }
   return updateOverrides(
     p.cutOverrides,
     p.roughCutAuto ?? [],
