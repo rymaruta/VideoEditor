@@ -115,3 +115,32 @@ export function peakEnvelope(levels: Float32Array, reach: number = PEAK_REACH): 
   }
   return out
 }
+
+/** 振幅(-1〜1)を平方根で持ち上げる。符号は残す(上下の非対称をそのまま描く) */
+export function liftAmplitude(v: number, exponent: number = 0.5): number {
+  if (!(v === v) || v === 0) return 0
+  const a = Math.min(1, Math.abs(v))
+  return Math.sign(v) * Math.pow(a, exponent)
+}
+
+/**
+ * 細かい波形の 1 列の縦の範囲(px)。外側の山は最大〜最小(上下非対称のまま)、内側の RMS は
+ * 中心から上下に同じだけ取り、山の範囲からははみ出させない(片側だけの音で、無い側に RMS を描かない)。
+ * `cy` は中心、`amp` は振幅 1 のときの高さ。上が小さい y
+ */
+export function peakColumnSpan(
+  max: number,
+  min: number,
+  rms: number,
+  cy: number,
+  amp: number
+): { top: number; bottom: number; rmsTop: number; rmsBottom: number } {
+  const hi = Math.max(liftAmplitude(max), liftAmplitude(min))
+  const lo = Math.min(liftAmplitude(max), liftAmplitude(min))
+  const top = cy - hi * amp
+  const bottom = cy - lo * amp
+  const r = liftAmplitude(Math.abs(rms)) * amp
+  const rmsTop = Math.max(top, cy - r)
+  const rmsBottom = Math.max(rmsTop, Math.min(bottom, cy + r))
+  return { top, bottom, rmsTop, rmsBottom }
+}

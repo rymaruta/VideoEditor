@@ -8,6 +8,7 @@ export const IPC = {
   previewProxyProgress: 'media:previewProxyProgress',
   generateFrame: 'media:frame',
   generateWaveform: 'media:waveform',
+  generateWaveformPeaks: 'media:waveformPeaks',
   detectSilence: 'media:detectSilence',
   detectHighlights: 'media:detectHighlights',
   scanLongFormWindows: 'media:scanLongFormWindows',

@@ -37,6 +37,8 @@ import {
 } from '@shared/mediaExtensions'
 import { checkPreviewProxy, ensurePreviewProxy } from './previewProxyService'
 import { MediaJobQueue } from './mediaJobQueue'
+import { generateWaveformPeaks } from './waveformPeaks'
+import { wavePeaksBytes, type WavePeaks } from '@shared/waveformPeaks'
 import { killLiveProcesses } from './liveProcesses'
 import { currentBusy, notifyDone, setBusy, type BusyState } from './busyState'
 import { scanLongFormWindows } from './longFormService'
@@ -106,6 +108,11 @@ import type {
  * スクロールで通り過ぎた分は捨ててよいので、待ちが溢れたら古い頼みから落とす
  */
 const timelineImages = new MediaJobQueue<string>(2)
+/**
+ * タイムラインの細かい波形の値(列ごとの最大・最小・RMS)。波形の絵と同じ扱い(落としてよい・覚える)。
+ * 覚える量は値の大きさ(バイト)で数える
+ */
+const timelinePeaks = new MediaJobQueue<WavePeaks>(2, 64, 500, 64 * 1024 * 1024, wavePeaksBytes)
 /** サムネイル・フレーム。1回きりの頼み(素材の読み込み・サムネイル作り)なので、落とさない */
 const stillImages = new MediaJobQueue<string>(2, Number.POSITIVE_INFINITY)
 
@@ -737,6 +744,14 @@ app.whenReady().then(() => {
       timelineImages.request(
         `wave|${filePath}|${fileStamp(filePath)}|${rangeStart}|${rangeEnd}|${width}x${height}`,
         () => generateWaveformDataUrl(filePath, rangeStart, rangeEnd, width, height)
+      )
+  )
+  ipcMain.handle(
+    IPC.generateWaveformPeaks,
+    async (_e, filePath: string, rangeStart: number, rangeEnd: number, columns: number) =>
+      timelinePeaks.request(
+        `peaks|${filePath}|${fileStamp(filePath)}|${rangeStart}|${rangeEnd}|${columns}`,
+        () => generateWaveformPeaks(ffmpegPath, filePath, rangeStart, rangeEnd, columns)
       )
   )
   ipcMain.handle(

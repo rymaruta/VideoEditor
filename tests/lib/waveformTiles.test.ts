@@ -5,6 +5,8 @@ import {
   WAVEFORM_TILE_WIDTH,
   columnLevels,
   liftLevels,
+  liftAmplitude,
+  peakColumnSpan,
   peakEnvelope,
   waveformDensity,
   tileReadRange,
@@ -109,5 +111,25 @@ describe('細かい波形(Graphite 3)', () => {
   it('1px に 2 列で頼む。canvas の上限を超える長さは 1 列に戻す', () => {
     expect(waveformDensity(1000)).toBe(2)
     expect(waveformDensity(CANVAS_MAX_SIDE)).toBe(1)
+  })
+})
+
+describe('値で描く細かい波形の 1 列(peakColumnSpan)', () => {
+  it('上下非対称の山をそのまま、振幅は平方根で持ち上げる', () => {
+    const s = peakColumnSpan(0.25, -0.04, 0.1, 50, 40)
+    expect(s.top).toBeCloseTo(50 - 0.5 * 40)
+    expect(s.bottom).toBeCloseTo(50 + 0.2 * 40)
+    expect(liftAmplitude(-0.25)).toBeCloseTo(-0.5)
+  })
+  it('RMS は山の範囲からはみ出さない(片側だけの音で、無い側に描かない)', () => {
+    const s = peakColumnSpan(0.64, 0, 0.36, 50, 40)
+    expect(s.bottom).toBe(50)
+    expect(s.rmsTop).toBeCloseTo(50 - 0.6 * 40)
+    expect(s.rmsBottom).toBe(50)
+  })
+  it('無音は高さ 0', () => {
+    const s = peakColumnSpan(0, 0, 0, 50, 40)
+    expect(s.bottom - s.top).toBe(0)
+    expect(s.rmsBottom - s.rmsTop).toBe(0)
   })
 })
