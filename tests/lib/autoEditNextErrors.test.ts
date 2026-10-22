@@ -116,4 +116,19 @@ describe('nextAction: 続けて進む失敗と止まる失敗を分ける(監査
     })
     expect(a.primary.id).toBe('newEpisode')
   })
+  it('SE・BGM・CG を本編が直されたため置かなかったときは、補足でなく作り直しを勧める', () => {
+    const a = nextAction({
+      ...base,
+      steps: steps(
+        { sound: 'error' },
+        {
+          sound: '用意している間に本編が直されたため、置きませんでした。もう一度作り直してください'
+        }
+      )
+    })
+    expect(a.kind).toBe('rebuild')
+    expect(a.primary.id).toBe('rebuild')
+    expect(a.title).toBe('SE・BGM・CGを置けませんでした')
+    expect(a.secondary.map((b) => b.id)).toEqual(['finish'])
+  })
 })

@@ -132,7 +132,14 @@
   grid-template-columns: 264px minmax(0, 1fr);
 }
 .export-dialog .form-row {
-  grid-template-columns: 96px minmax(0, 200px) minmax(0, 1fr);
+  grid-template-columns: 96px minmax(200px, max-content) minmax(0, 1fr);
+}
+/* 形式・シーケンスなどの値(Mono)は折り返さない(欄の幅は値に合わせ、注記の側を詰める) */
+.export-dialog .form-row:not(.form-row-top) > .form-value {
+  white-space: nowrap;
+}
+.export-dialog .form-row select {
+  width: 200px;
 }
 .export-dialog .form-hint {
   margin-left: 106px;

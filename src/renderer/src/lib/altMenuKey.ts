@@ -7,17 +7,27 @@
  * 単独押しではない。キーの繰り返し(押しっぱなし)は単独押しのまま。
  */
 export interface AltTapDetector {
-  keydown: (e: { key: string; repeat?: boolean }) => void
+  keydown: (e: { key: string; repeat?: boolean; isComposing?: boolean; keyCode?: number }) => void
   /** 離したキーが単独押しの Alt なら true */
-  keyup: (e: { key: string }) => boolean
+  keyup: (e: { key: string; isComposing?: boolean; keyCode?: number }) => boolean
   /** マウスのボタンを押した・窓のフォーカスが外れた */
   cancel: () => void
+}
+
+/** 日本語入力(IME)の変換中のキーか(isComposing、または変換中に来る keyCode 229) */
+export function isComposingKey(e: { isComposing?: boolean; keyCode?: number }): boolean {
+  return e.isComposing === true || e.keyCode === 229
 }
 
 export function createAltTapDetector(): AltTapDetector {
   let armed = false
   return {
     keydown: (e) => {
+      // 日本語入力の変換中は何もしない(変換の Alt・文字を奪わない)
+      if (isComposingKey(e)) {
+        armed = false
+        return
+      }
       if (e.key === 'Alt') {
         if (!e.repeat) armed = true
         return
@@ -25,6 +35,10 @@ export function createAltTapDetector(): AltTapDetector {
       armed = false
     },
     keyup: (e) => {
+      if (isComposingKey(e)) {
+        armed = false
+        return false
+      }
       const hit = armed && e.key === 'Alt'
       armed = false
       return hit
@@ -43,6 +57,8 @@ export interface MnemonicKey {
   ctrlKey: boolean
   metaKey: boolean
   shiftKey: boolean
+  isComposing?: boolean
+  keyCode?: number
 }
 
 /**
@@ -51,7 +67,7 @@ export interface MnemonicKey {
  * キーの位置(code)で見る(macOS の Option+英字は別の文字になるため。日本語入力中も同じ位置)
  */
 export function menuMnemonicFor(e: MnemonicKey, mnemonics: readonly string[]): string | null {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || isComposingKey(e)) return null
   const fromCode = /^Key([A-Z])$/.exec(e.code ?? '')?.[1]
   const letter = fromCode ?? (e.key.length === 1 ? e.key.toUpperCase() : '')
   return letter && mnemonics.includes(letter) ? letter : null

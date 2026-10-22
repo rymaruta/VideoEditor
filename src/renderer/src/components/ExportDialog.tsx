@@ -832,17 +832,6 @@ export function ExportDialog(): React.JSX.Element | null {
                     {'本編のカット(カメラの切り替え)・速さ・繋ぎ、ワイプ・CG、BGM・SE の音量とフェードを同じ並びで書きます。' +
                       'ダッキング・ラウドネスの調整・色合わせは Premiere で仕上げてください。'}
                   </p>
-                  <div className="form-row">
-                    <label />
-                    <button
-                      className="small-button"
-                      disabled={running}
-                      onClick={handlePremiereExport}
-                      title="XML と同じ名前の .srt を並べて書きます"
-                    >
-                      Premiere 用 XML を書き出す…
-                    </button>
-                  </div>
                 </>
               )}
 
@@ -981,9 +970,12 @@ export function ExportDialog(): React.JSX.Element | null {
             </>
           )}
           <div className="dialog-footer-spacer" />
-          <button className="small-button" disabled={running} onClick={addToQueue}>
-            キューに追加
-          </button>
+          {/* Premiere 用 XML の頁では、足の主ボタンを XML の書き出しにする(主ボタンは 1 つ) */}
+          {tab !== 'premiere' && (
+            <button className="small-button" disabled={running} onClick={addToQueue}>
+              キューに追加
+            </button>
+          )}
           {running ? (
             <button className="small-button danger" onClick={cancelExport}>
               書き出しを中止
@@ -993,9 +985,20 @@ export function ExportDialog(): React.JSX.Element | null {
               キャンセル
             </button>
           )}
-          <button className="primary-button" disabled={running} onClick={handleExport}>
-            {running ? '書き出し中…' : '書き出し…'}
-          </button>
+          {tab === 'premiere' ? (
+            <button
+              className="primary-button"
+              disabled={running}
+              onClick={handlePremiereExport}
+              title="XML と同じ名前の .srt を並べて書きます"
+            >
+              Premiere 用 XML を書き出す…
+            </button>
+          ) : (
+            <button className="primary-button" disabled={running} onClick={handleExport}>
+              {running ? '書き出し中…' : '書き出し…'}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -149,6 +149,17 @@ export function nextAction(input: NextActionInput): NextAction {
     }
   }
 
+  // 作っている間に本編が直されたため置かなかった(SE・BGM・CG など): 作り直せば置ける。補足でなく、作り直しを勧める
+  const editedMeanwhile = soft.find((s) => s.note?.includes('本編が直された'))
+  if (editedMeanwhile && input.scenes > 0) {
+    return {
+      kind: 'rebuild',
+      title: `${editedMeanwhile.label}を置けませんでした`,
+      detail: `${editedMeanwhile.note}。手で直した所は守られます。`,
+      primary: { id: 'rebuild', label: '仮編集を作り直す' },
+      secondary: input.roughCut ? [{ id: 'finish', label: '今の仮編集で仕上げる' }] : []
+    }
+  }
   if (input.roughCut) {
     return {
       kind: 'done',

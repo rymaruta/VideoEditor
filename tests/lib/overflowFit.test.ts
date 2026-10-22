@@ -1,53 +1,77 @@
 import { describe, expect, it } from 'vitest'
-import { fitToolbar, fixedWidthOf, itemsThatFit } from '@renderer/lib/overflowFit'
+import { COMPACT, fitByLevels, rowWidth, type FitInput } from '@renderer/lib/overflowFit'
 
-describe('itemsThatFit(1 行の帯に並べる数)', () => {
-  it('全部入るなら全部(「その他」は要らない)', () => {
-    expect(itemsThatFit(1000, 500, [100, 100, 100], 4, 70)).toBe(3)
-  })
-  it('入らないときは「その他」の分を空けて、前から入るだけ', () => {
-    // 500 + 104 + 104 + (70+4) = 782 ≤ 800、3 つ目は入らない
-    expect(itemsThatFit(800, 500, [100, 100, 100], 4, 70)).toBe(2)
-  })
-  it('回せない物だけで一杯なら 0', () => {
-    expect(itemsThatFit(500, 520, [100], 4, 70)).toBe(0)
-  })
+// タイムラインの道具の帯と同じ並び・回す順(幅は 1366 で測った値に近いもの)
+const elements = [
+  { id: 'left', width: 28 },
+  { id: 'right', width: 28 },
+  { id: 'trim', width: 58 },
+  { id: 'cut', width: 77 },
+  { id: 'silence', width: 96 },
+  { id: 'filler', width: 110 },
+  { id: 'speed', width: 105, narrowWidth: 64 },
+  { id: 'transition', width: 145, narrowWidth: 88 },
+  { id: 'copy', width: 28 },
+  { id: 'dup', width: 46 },
+  { id: 'del', width: 28 }
+]
+const removal = [
+  'filler',
+  'silence',
+  COMPACT,
+  'del',
+  'dup',
+  'copy',
+  'transition',
+  'speed',
+  'cut',
+  'trim',
+  'right',
+  'left'
+]
+const input = (available: number): FitInput => ({
+  available,
+  fixed: 350,
+  elements,
+  removal,
+  gap: 4,
+  moreWidth: 76
 })
 
-describe('fixedWidthOf', () => {
-  it('今並べている回せる物と「その他」を引く', () => {
-    expect(fixedWidthOf(900, [100, 100], 4, true, 70)).toBe(900 - 208 - 74)
-    expect(fixedWidthOf(900, [], 4, false, 70)).toBe(900)
+describe('fitByLevels(道具の帯を 1 行に、切り落とさずに)', () => {
+  it('広ければ全部並べ、「その他」は出さない', () => {
+    expect(fitByLevels(input(2000))).toEqual({ hidden: [], compact: false })
   })
-})
-
-describe('fitToolbar(回す → それでも入らなければ欄を詰める)', () => {
-  const base = { gap: 4, moreWidth: 70, items: [80, 90, 100], compactSaving: 60 }
-  it('広いときは全部並べ、詰めない', () => {
-    expect(fitToolbar({ ...base, available: 2000, contentWidth: 1200, shownNow: 3 })).toEqual({
-      shown: 3,
-      compact: false
-    })
+  it('狭くなるにつれ、決めた順に回す(後ろの操作 → 欄を詰める → 削除・複製・コピー → 欄 → …)', () => {
+    let prev = -1
+    for (let w = 2000; w >= 300; w -= 20) {
+      const r = fitByLevels(input(w))
+      const level = r.hidden.length + (r.compact ? 1 : 0)
+      expect(level).toBeGreaterThanOrEqual(prev)
+      prev = level
+      // 入る並べ方を選んでいる(全部回しても入らないときだけ例外)
+      if (r.hidden.length < elements.length)
+        expect(rowWidth(input(w), new Set(r.hidden), r.compact)).toBeLessThanOrEqual(w)
+    }
   })
-  it('今の並べ方に関係なく同じ答え(並べ直しで揺れない)', () => {
-    const all = 600 + 84 + 94 + 104
-    const a = fitToolbar({ ...base, available: 800, contentWidth: all, shownNow: 3 })
-    // 1 つだけ並べて「その他」が出ている帯
-    const b = fitToolbar({ ...base, available: 800, contentWidth: 600 + 84 + 74, shownNow: 1 })
-    expect(a).toEqual(b)
-    expect(a.shown).toBe(1)
+  it('すべての操作に、帯か「その他」から届く(回した物は hidden に、残りは帯に)', () => {
+    for (let w = 300; w <= 2000; w += 40) {
+      const r = fitByLevels(input(w))
+      const shown = elements.filter((e) => !r.hidden.includes(e.id)).map((e) => e.id)
+      expect([...shown, ...r.hidden].sort()).toEqual(elements.map((e) => e.id).sort())
+    }
   })
-  it('全部回しても入らなければ欄を詰める', () => {
-    // 中身の幅は「その他」(74)を含む
-    expect(fitToolbar({ ...base, available: 700, contentWidth: 760, shownNow: 0 })).toEqual({
-      shown: 0,
-      compact: true
-    })
+  it('右端のまとまり(削除・複製・コピー)は、欄を詰めても入らないときに回す', () => {
+    const atCompact = fitByLevels(
+      input(350 + 28 * 2 + 58 + 77 + 64 + 88 + 28 + 46 + 28 + 9 * 4 + 80)
+    )
+    expect(atCompact.compact).toBe(true)
+    expect(atCompact.hidden).not.toContain('del')
+    const tighter = fitByLevels(input(350 + 28 * 2 + 58 + 77 + 64 + 88 + 8 * 4 + 40))
+    expect(tighter.hidden).toEqual(expect.arrayContaining(['del', 'dup', 'copy']))
   })
-  it('全部回せば入るなら、詰めない', () => {
-    expect(fitToolbar({ ...base, available: 700, contentWidth: 690, shownNow: 0 })).toEqual({
-      shown: 0,
-      compact: false
-    })
+  it('無い要素の段は飛ばす', () => {
+    const r = fitByLevels({ ...input(2000), elements: elements.slice(0, 4) })
+    expect(r).toEqual({ hidden: [], compact: false })
   })
 })

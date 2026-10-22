@@ -21,7 +21,16 @@ export const TITLE_BAR_OVERLAY_COLOR = '#0b121a'
 /** 重ねるボタンの記号の色(文字の色 --ve-text) */
 export const TITLE_BAR_SYMBOL_COLOR = '#edeef0'
 
+/**
+ * 窓の最小の大きさ。これより狭いと、パネル(最小 300)・モニター・タイムラインの道具の帯
+ * (「その他」に回しても)が入らない
+ */
+export const MIN_WINDOW_WIDTH = 960
+export const MIN_WINDOW_HEIGHT = 600
+
 export interface WindowChromeOptions {
+  minWidth: number
+  minHeight: number
   titleBarStyle: 'hidden' | 'hiddenInset'
   titleBarOverlay?: { color: string; symbolColor: string; height: number }
   /** OS のメニューバーを Alt で出さない(Alt は帯のメニューボタンへ) */
@@ -34,12 +43,16 @@ export interface WindowChromeOptions {
 export function windowChromeOptions(platform: string): WindowChromeOptions {
   if (platform === 'darwin')
     return {
+      minWidth: MIN_WINDOW_WIDTH,
+      minHeight: MIN_WINDOW_HEIGHT,
       titleBarStyle: 'hiddenInset',
       autoHideMenuBar: false,
       // 信号のボタン(高さ 14px)を 46px の帯の真ん中に
       trafficLightPosition: { x: 14, y: Math.round((TITLE_BAR_HEIGHT - 14) / 2) }
     }
   return {
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
       color: TITLE_BAR_OVERLAY_COLOR,

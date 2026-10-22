@@ -1,67 +1,62 @@
 /**
- * 1 行の帯に、後ろへ回せる操作をいくつ並べられるか(残りは「その他 ▾」へ)。
+ * 1 行の帯に並べる操作を、帯の幅に合わせて選ぶ(入らない物は「その他 ▾」へ)。
  * 帯は折り返さず、切り落とさない(切り落とすと右端のコピー・複製・削除に届かなくなった)。
  *
- * - available: 帯の中で使える幅
- * - fixed: 回せない物(題名・拡大縮小・道具・右端のコピー・複製・削除など)が使う幅(間を含む)
- * - items: 回せる操作の幅(並べる順)
- * - gap: 並べた物の間
- * - moreWidth: 「その他 ▾」のボタンの幅(1 つでも回すときだけ要る)
- *
- * 前から順に、入るだけ並べる。全部入らないときは「その他」の分も空ける。
+ * 決めた順に 1 つずつ回していき、入った所で止める。順の中の `COMPACT` は「選択の欄を詰める」段。
+ * 「その他」のボタンは、1 つでも回すときは必ず場所を取る(最優先)。
  */
-export function itemsThatFit(
-  available: number,
-  fixed: number,
-  items: readonly number[],
-  gap: number,
-  moreWidth: number
-): number {
-  const total = (n: number): number => items.slice(0, n).reduce((t, w) => t + w + gap, 0)
-  if (fixed + total(items.length) <= available) return items.length
-  const room = available - fixed - (moreWidth + gap)
-  let n = 0
-  while (n < items.length && total(n + 1) <= room) n++
-  return n
+
+/** 回す順の中で「選択の欄を詰める」段 */
+export const COMPACT = '@compact'
+
+export interface FitElement {
+  id: string
+  /** 普段の幅 */
+  width: number
+  /** 詰めたときの幅(選択の欄だけ) */
+  narrowWidth?: number
 }
 
-/**
- * 今の帯の幅から、回せない物の幅を出す(今並べている回せる物と「その他」の分を引く)。
- * contentWidth は帯の中身の幅(scrollWidth から左右の余白を引いたもの)
- */
-export function fixedWidthOf(
-  contentWidth: number,
-  shownItems: readonly number[],
-  gap: number,
-  moreShown: boolean,
-  moreWidth: number
-): number {
-  const shown = shownItems.reduce((t, w) => t + w + gap, 0)
-  return Math.max(0, contentWidth - shown - (moreShown ? moreWidth + gap : 0))
-}
-
-/**
- * 帯の並べ方を決める。回せる操作を前から入るだけ並べ、残りは「その他」へ。全部回しても入らない
- * ときだけ、選択の欄を詰める(compact)。contentWidth は詰めていない(普段の)幅で数えた中身の幅
- */
-export function fitToolbar(input: {
+export interface FitInput {
+  /** 帯の中で使える幅 */
   available: number
-  contentWidth: number
-  shownNow: number
-  items: readonly number[]
+  /** 回さない物(題名・拡大縮小・道具 など)が使う幅(間を含む) */
+  fixed: number
+  /** 回せる物(並びの順) */
+  elements: readonly FitElement[]
+  /** 回す順(先に回す物から。COMPACT を含めてよい) */
+  removal: readonly string[]
+  /** 並べた物の間 */
   gap: number
+  /** 「その他 ▾」のボタンの幅 */
   moreWidth: number
-  /** 欄を詰めたら減る幅 */
-  compactSaving: number
-}): { shown: number; compact: boolean } {
-  const { available, contentWidth, shownNow, items, gap, moreWidth, compactSaving } = input
-  const now = Math.min(shownNow, items.length)
-  const fixed = fixedWidthOf(contentWidth, items.slice(0, now), gap, now < items.length, moreWidth)
-  const shown = itemsThatFit(available, fixed, items, gap, moreWidth)
-  if (shown > 0) return { shown, compact: false }
-  const withMore = fixed + (items.length > 0 ? moreWidth + gap : 0)
-  if (withMore <= available) return { shown, compact: false }
-  // 欄を詰めると入るなら、詰めた上で並べ直す
-  const compactFixed = fixed - compactSaving
-  return { shown: itemsThatFit(available, compactFixed, items, gap, moreWidth), compact: true }
+}
+
+export interface FitResult {
+  /** 「その他」へ回す物の id */
+  hidden: string[]
+  /** 選択の欄を詰めるか */
+  compact: boolean
+}
+
+/** その並べ方の幅 */
+export function rowWidth(input: FitInput, hidden: ReadonlySet<string>, compact: boolean): number {
+  const shown = input.elements.filter((e) => !hidden.has(e.id))
+  const items = shown.reduce(
+    (t, e) => t + (compact ? (e.narrowWidth ?? e.width) : e.width) + input.gap,
+    0
+  )
+  return input.fixed + items + (hidden.size > 0 ? input.moreWidth + input.gap : 0)
+}
+
+export function fitByLevels(input: FitInput): FitResult {
+  const present = new Set(input.elements.map((e) => e.id))
+  const steps = input.removal.filter((id) => id === COMPACT || present.has(id))
+  for (let level = 0; level <= steps.length; level++) {
+    const done = steps.slice(0, level)
+    const hidden = new Set(done.filter((id) => id !== COMPACT))
+    const compact = done.includes(COMPACT)
+    if (rowWidth(input, hidden, compact) <= input.available) return { hidden: [...hidden], compact }
+  }
+  return { hidden: steps.filter((id) => id !== COMPACT), compact: steps.includes(COMPACT) }
 }

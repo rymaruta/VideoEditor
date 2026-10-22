@@ -1,6 +1,6 @@
 import { playableOnMain } from '../lib/relinkCheck'
 import { angleAlternatives } from '@shared/roughCut/overrides'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
 import { useMenuCommand } from '../lib/menuCommands'
 import { formatTimecode, rulerStep, rulerTicks } from '../lib/timelineRuler'
@@ -132,6 +132,7 @@ import { spansOfClips } from '@shared/roughCut/overrides'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
 import { useOverflowFit } from '../lib/useOverflowFit'
+import { COMPACT } from '../lib/overflowFit'
 import { OverflowMenu, type OverflowAction } from './OverflowMenu'
 import { TimelineMarks } from './TimelineMarks'
 import { ShortcutHelpDialog } from './ShortcutHelpDialog'
@@ -1803,8 +1804,9 @@ export function Timeline(): React.JSX.Element {
               }
             : null
 
-  // 道具の帯は 1 行に固定し、切り落とさない。右端のコピー・複製・削除は必ず見せ、入らない操作は
-  // 後ろから「その他 ▾」へ回す(帯の幅を ResizeObserver で測る。lib/useOverflowFit)
+  // 道具の帯(選んだクリップの操作)は 1 行に固定し、切り落とさない。帯の幅を測り(lib/useOverflowFit)、
+  // 入らない物を決めた順に「その他 ▾」へ回す: 後ろの操作 → 欄を詰める → 削除・複製・コピー →
+  // 繋ぎ・速度の欄 → カット・トリム → 左右の移動。「その他」は回すときは必ず見える
   const clipExtra: OverflowAction[] = !selectedClip
     ? []
     : [
@@ -1857,40 +1859,199 @@ export function Timeline(): React.JSX.Element {
             ]
           : [])
       ]
+  const sc = selectedClip
+  const toolButtons: (OverflowAction & { iconOnly?: boolean })[] = !sc
+    ? []
+    : [
+        {
+          key: 'left',
+          label: '左に移動',
+          icon: <ChevronLeftIcon width={14} height={14} />,
+          iconOnly: true,
+          onSelect: () => moveClip(sc.id, 'left')
+        },
+        {
+          key: 'right',
+          label: '右に移動',
+          icon: <ChevronRightIcon width={14} height={14} />,
+          iconOnly: true,
+          onSelect: () => moveClip(sc.id, 'right')
+        },
+        { key: 'trim', label: 'トリム', onSelect: () => setTrimClipId(sc.id) },
+        {
+          key: 'cut',
+          label: 'カット',
+          title: `分割 (${keymap.split.display})`,
+          icon: <ScissorsIcon width={13} height={13} />,
+          onSelect: () => splitClipAtTime(sc.id, useProjectStore.getState().playheadTime)
+        },
+        ...clipExtra
+      ]
+  const toolTail: (OverflowAction & { iconOnly?: boolean })[] = !sc
+    ? []
+    : [
+        {
+          key: 'copy',
+          label: 'コピー',
+          title: `コピー (${keymap.copy.display})`,
+          icon: <CopyIcon width={13} height={13} />,
+          iconOnly: true,
+          onSelect: () => copySelectedClip()
+        },
+        {
+          key: 'dup',
+          label: '複製',
+          title: `複製 (${keymap.duplicate.display})`,
+          onSelect: () => duplicateClips([sc.id])
+        },
+        {
+          key: 'del',
+          label: '削除',
+          title: `削除 (${keymap.delete.display})`,
+          icon: <TrashIcon width={14} height={14} />,
+          iconOnly: true,
+          danger: true,
+          onSelect: () => removeClip(sc.id)
+        }
+      ]
+  const toolButton = (
+    a: OverflowAction & { iconOnly?: boolean },
+    /** 帯に並べた物か(測り用の写しでは false) */
+    shown = true
+  ): React.JSX.Element => (
+    <button
+      key={a.key}
+      className={a.iconOnly ? `icon-button ${a.danger ? 'danger' : ''}` : 'small-button'}
+      title={a.title ?? (a.iconOnly ? a.label : undefined)}
+      aria-label={a.iconOnly ? a.label : undefined}
+      onClick={a.onSelect}
+      data-fit-shown={shown || undefined}
+    >
+      {a.icon}
+      {!a.iconOnly && a.label}
+    </button>
+  )
+  const speedField = sc ? (
+    <label
+      className="inline-select"
+      data-fit-compact="speed"
+      title={sc.audioDetached ? '分離した音声にも同じ速度が掛かります' : '再生速度'}
+    >
+      <GaugeIcon width={13} height={13} />
+      <select
+        aria-label="再生速度"
+        value={speedSelectChoices(sc.speed || 1, SPEED_OPTIONS).value}
+        onChange={(e) => updateClipSpeed(sc.id, Number(e.target.value))}
+      >
+        {speedSelectChoices(sc.speed || 1, SPEED_OPTIONS).options.map((v) => (
+          <option key={v} value={v}>
+            {Number(v.toFixed(4))}x
+          </option>
+        ))}
+      </select>
+    </label>
+  ) : null
+  const transitionField =
+    sc && selectedIndex > 0 ? (
+      <span className="timeline-transition-field">
+        <label className="inline-select" data-fit-compact="transition" title="前のクリップとの繋ぎ">
+          <LayersIcon width={13} height={13} />
+          <select
+            aria-label="前のクリップとの繋ぎ"
+            value={sc.transitionIn?.type ?? 'none'}
+            onChange={(e) =>
+              updateClipTransition(
+                sc.id,
+                e.target.value === 'none'
+                  ? undefined
+                  : {
+                      type: e.target.value as TransitionType,
+                      duration: sc.transitionIn?.duration ?? 0.5
+                    }
+              )
+            }
+          >
+            <option value="none">カット</option>
+            <option value="crossfade">クロスフェード</option>
+            <option value="fade">フェード</option>
+            <option value="wipe">ワイプ</option>
+          </select>
+        </label>
+        {sc.transitionIn && (
+          <input
+            className="transition-duration"
+            type="number"
+            min={0.1}
+            max={2}
+            step={0.1}
+            aria-label="繋ぎの長さ(秒)"
+            value={sc.transitionIn.duration}
+            onChange={(e) =>
+              updateClipTransition(sc.id, {
+                type: sc.transitionIn?.type ?? 'crossfade',
+                duration: Number(e.target.value)
+              })
+            }
+            title={transitionDurationTitle(project.clips, sc.id, rulerFps)}
+          />
+        )}
+      </span>
+    ) : null
+  // 並びの順の要素(ボタンと欄)
+  const toolEls: {
+    id: string
+    button?: OverflowAction & { iconOnly?: boolean }
+    field?: React.ReactNode
+  }[] = [
+    ...toolButtons.map((b) => ({ id: b.key, button: b })),
+    ...(speedField ? [{ id: 'speed', field: speedField }] : []),
+    ...(transitionField ? [{ id: 'transition', field: transitionField }] : []),
+    ...toolTail.map((b) => ({ id: b.key, button: b }))
+  ]
+  const toolRemoval = [
+    ...clipExtra.map((a) => a.key).reverse(),
+    COMPACT,
+    'del',
+    'dup',
+    'copy',
+    'transition',
+    'speed',
+    'cut',
+    'trim',
+    'right',
+    'left'
+  ]
   const headerRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLSpanElement>(null)
-  const { shown: clipExtraShown, compact: toolbarCompact } = useOverflowFit(
+  const toolFit = useOverflowFit(
     headerRef,
     measureRef,
-    clipExtra.length,
+    toolRemoval,
     4,
-    `${selectedClip?.id ?? ''}|${clipExtra.map((a) => a.key).join(',')}|${multiSelectedClipIds.length}|${clipboardClips.length}|${project.beatGrid ? 1 : 0}`
+    `${sc?.id ?? ''}|${toolEls.map((e) => e.id).join(',')}|${sc?.transitionIn ? 1 : 0}|${multiSelectedClipIds.length}|${clipboardClips.length}|${project.beatGrid ? 1 : 0}`
   )
+  const toolHidden = new Set(toolFit.hidden)
 
   return (
     <div className="panel timeline-panel">
       {/* 帯に並べる数を測るための、見えない写し(読み上げ・Tab の対象外) */}
       <span className="overflow-measure" ref={measureRef} aria-hidden="true" inert>
-        {clipExtra.map((a) => (
-          <button key={a.key} type="button" tabIndex={-1} className="small-button" data-fit-item>
-            {a.icon}
-            {a.label}
-          </button>
+        {toolEls.map((e) => (
+          <span key={e.id} className="timeline-actions" data-fit-id={e.id}>
+            {e.button ? toolButton(e.button, false) : e.field}
+          </span>
         ))}
-        {(['natural', 'narrow'] as const).flatMap((kind) =>
-          (['speed', 'transition'] as const).map((name) => (
-            <label
-              key={`${kind}-${name}`}
-              className="inline-select"
-              {...{ [`data-fit-${kind}`]: name }}
+        {toolEls
+          .filter((e) => e.field)
+          .map((e) => (
+            <span
+              key={`narrow-${e.id}`}
+              className="timeline-actions compact"
+              data-fit-narrow-id={e.id}
             >
-              <GaugeIcon width={13} height={13} />
-              <select tabIndex={-1} aria-hidden="true">
-                <option>1x</option>
-              </select>
-            </label>
-          ))
-        )}
+              {e.field}
+            </span>
+          ))}
         <button
           type="button"
           tabIndex={-1}
@@ -2049,136 +2210,27 @@ export function Timeline(): React.JSX.Element {
           </div>
         )}
         {multiSelectedClipIds.length <= 1 && selectedClip && (
-          <div className={`timeline-actions ${toolbarCompact ? 'compact' : ''}`}>
-            <button
-              className="icon-button"
-              title="左に移動"
-              onClick={() => moveClip(selectedClip.id, 'left')}
-            >
-              <ChevronLeftIcon width={14} height={14} />
-            </button>
-            <button
-              className="icon-button"
-              title="右に移動"
-              onClick={() => moveClip(selectedClip.id, 'right')}
-            >
-              <ChevronRightIcon width={14} height={14} />
-            </button>
-            <button className="small-button" onClick={() => setTrimClipId(selectedClip.id)}>
-              トリム
-            </button>
-            <button
-              className="small-button"
-              title={`分割 (${keymap.split.display})`}
-              onClick={() =>
-                splitClipAtTime(selectedClip.id, useProjectStore.getState().playheadTime)
-              }
-            >
-              <ScissorsIcon width={13} height={13} />
-              カット
-            </button>
-            {clipExtra.slice(0, clipExtraShown).map((a) => (
-              <button
-                key={a.key}
-                className="small-button"
-                title={a.title}
-                onClick={a.onSelect}
-                data-fit-shown
-              >
-                {a.icon}
-                {a.label}
-              </button>
-            ))}
-            {clipExtraShown < clipExtra.length && (
+          <div className={`timeline-actions ${toolFit.compact ? 'compact' : ''}`} data-fit-row>
+            {toolEls
+              .filter((e) => !toolHidden.has(e.id))
+              .map((e) => (
+                <Fragment key={e.id}>{e.button ? toolButton(e.button) : e.field}</Fragment>
+              ))}
+            {toolHidden.size > 0 && (
               <OverflowMenu
-                actions={clipExtra.slice(clipExtraShown)}
+                actions={toolEls
+                  .filter((e) => toolHidden.has(e.id) && e.button)
+                  .map((e) => e.button!)}
                 menuLabel="クリップのほかの操作(帯に入らない操作)"
                 className="timeline-more"
-              />
-            )}
-            <label
-              className="inline-select"
-              data-fit-compact="speed"
-              title={
-                selectedClip.audioDetached ? '分離した音声にも同じ速度が掛かります' : undefined
-              }
-            >
-              <GaugeIcon width={13} height={13} />
-              <select
-                value={speedSelectChoices(selectedClip.speed || 1, SPEED_OPTIONS).value}
-                onChange={(e) => updateClipSpeed(selectedClip.id, Number(e.target.value))}
               >
-                {speedSelectChoices(selectedClip.speed || 1, SPEED_OPTIONS).options.map((s) => (
-                  <option key={s} value={s}>
-                    {Number(s.toFixed(4))}x
-                  </option>
-                ))}
-              </select>
-            </label>
-            {selectedIndex > 0 && (
-              <>
-                <label className="inline-select" data-fit-compact="transition">
-                  <LayersIcon width={13} height={13} />
-                  <select
-                    value={selectedClip.transitionIn?.type ?? 'none'}
-                    onChange={(e) =>
-                      updateClipTransition(
-                        selectedClip.id,
-                        e.target.value === 'none'
-                          ? undefined
-                          : {
-                              type: e.target.value as TransitionType,
-                              duration: selectedClip.transitionIn?.duration ?? 0.5
-                            }
-                      )
-                    }
-                  >
-                    <option value="none">カット</option>
-                    <option value="crossfade">クロスフェード</option>
-                    <option value="fade">フェード</option>
-                    <option value="wipe">ワイプ</option>
-                  </select>
-                </label>
-                {selectedClip.transitionIn && (
-                  <input
-                    className="transition-duration"
-                    type="number"
-                    min={0.1}
-                    max={2}
-                    step={0.1}
-                    value={selectedClip.transitionIn.duration}
-                    onChange={(e) =>
-                      updateClipTransition(selectedClip.id, {
-                        type: selectedClip.transitionIn?.type ?? 'crossfade',
-                        duration: Number(e.target.value)
-                      })
-                    }
-                    title={transitionDurationTitle(project.clips, selectedClip.id, rulerFps)}
-                  />
-                )}
-              </>
+                {toolEls.some((e) => toolHidden.has(e.id) && e.field)
+                  ? toolEls
+                      .filter((e) => toolHidden.has(e.id) && e.field)
+                      .map((e) => <Fragment key={e.id}>{e.field}</Fragment>)
+                  : null}
+              </OverflowMenu>
             )}
-            <button
-              className="icon-button"
-              title={`コピー (${keymap.copy.display})`}
-              onClick={() => copySelectedClip()}
-            >
-              <CopyIcon width={13} height={13} />
-            </button>
-            <button
-              className="small-button"
-              title={`複製 (${keymap.duplicate.display})`}
-              onClick={() => duplicateClips([selectedClip.id])}
-            >
-              複製
-            </button>
-            <button
-              className="icon-button danger"
-              title={`削除 (${keymap.delete.display})`}
-              onClick={() => removeClip(selectedClip.id)}
-            >
-              <TrashIcon width={14} height={14} />
-            </button>
           </div>
         )}
         {clipboardClips.length > 0 && (

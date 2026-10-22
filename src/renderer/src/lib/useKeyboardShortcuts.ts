@@ -4,6 +4,7 @@ import { useSettingsStore } from '../store/settingsStore'
 import { saveProject } from './projectFileActions'
 import { formatIpcError } from './ipcError'
 import { editorActionFor, getEditorKeymap, getKeymap, matchesBinding } from './keymap'
+import { isComposingKey } from './altMenuKey'
 import { frameSeconds } from '@shared/frameRate'
 import { runEditorAction } from './editorKeyActions'
 import { isShuttling, releaseShuttleK, stopRangePlayback, stopShuttle } from './shuttle'
@@ -62,6 +63,8 @@ export function useKeyboardShortcuts(): void {
     const editorKeymap = getEditorKeymap(keymapScheme)
 
     function handleKeyDown(e: KeyboardEvent): void {
+      // 日本語入力の変換中のキーは、編集の操作に使わない(変換の文字・確定の Enter を奪わない)
+      if (isComposingKey(e)) return
       // 保存は文字を打っている最中・ダイアログの上でも効かせる(メニューの Ctrl+S はここが受け持つので、
       // 欄に入っている間は何も起きなかった)
       if (matchesBinding(e, keymap.save)) {

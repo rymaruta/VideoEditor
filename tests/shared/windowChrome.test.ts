@@ -27,6 +27,10 @@ describe('windowChromeOptions(窓の枠をプラットフォームごとに)', (
     expect(o.titleBarOverlay).toBeUndefined()
     expect(o.trafficLightPosition).toEqual({ x: 14, y: 16 })
   })
+  it.each(['win32', 'linux', 'darwin'])('%s: 窓の最小の大きさは 960×600', (p) => {
+    const o = windowChromeOptions(p)
+    expect([o.minWidth, o.minHeight]).toEqual([960, 600])
+  })
   it('帯の高さは graphite3.css の上の帯と同じ 46px', () => {
     expect(TITLE_BAR_HEIGHT).toBe(46)
   })

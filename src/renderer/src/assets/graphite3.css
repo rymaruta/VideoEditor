@@ -1029,3 +1029,32 @@ textarea {
   flex-shrink: 0;
   white-space: nowrap;
 }
+
+/* 繋ぎの欄と長さの入力は 1 つのまとまり(帯でも「その他」でも一緒に動く) */
+.timeline-transition-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+}
+/* 「その他」に回した選択の欄 */
+.overflow-menu-fields {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ve-space-2);
+  margin-top: var(--ve-space-1);
+  padding: var(--ve-space-2) var(--ve-space-2) var(--ve-space-1);
+  box-shadow: inset 0 1px 0 var(--ve-border-subtle);
+}
+.overflow-menu-item.danger,
+.overflow-menu-item.danger:hover:not(:disabled) {
+  color: var(--ve-danger-ink);
+}
+
+/* 帯の選択の欄はボタンと同じ高さに(上端をそろえる) */
+.timeline-panel .timeline-actions .inline-select {
+  box-sizing: border-box;
+  height: var(--ve-control-md);
+  padding-top: 0;
+  padding-bottom: 0;
+}
