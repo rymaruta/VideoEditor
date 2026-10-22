@@ -150,7 +150,7 @@ textarea {
     0 2px 8px rgba(240, 138, 28, 0.25);
 }
 .workflow-bar-name {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   letter-spacing: 0.01em;
 }
 .workflow-bar-saved {
@@ -158,7 +158,7 @@ textarea {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-3);
 }
 .workflow-bar-saved-dot {
@@ -185,7 +185,7 @@ textarea {
   border-radius: 7px;
   background-image: none;
   box-shadow: none;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
 }
 .workflow-step:hover:not(:disabled) {
   background-image: none;
@@ -257,7 +257,7 @@ textarea {
   height: 26px;
   /* 既定の幅(520px)で 7 つのタブが収まるよう、詰めて並べる(「プリセット」が切れていた) */
   padding: 0 7px;
-  font-size: 11.5px;
+  font-size: var(--ve-fs-12);
   background-image: none;
   box-shadow: none;
   color: #8e949d;
@@ -350,7 +350,7 @@ textarea {
   padding: 1px 6px;
   border-radius: 3px;
   font-family: var(--ve-font-sans);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 700; /* 和文は同梱の 700 に寄せる(600 は無い太さ) */
   line-height: 1.4;
   white-space: nowrap;
@@ -364,14 +364,14 @@ textarea {
   box-shadow: inset 0 1px 0 rgba(150, 165, 255, 0.08);
 }
 .preview-player .time-label.current {
-  font-size: 24px;
+  font-size: var(--ve-fs-24);
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--ve-text-1);
 }
 .preview-player .time-label.total,
 .preview-player .time-label.export-total {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-3);
 }
 .scrub-track {
@@ -424,7 +424,7 @@ textarea {
   font-weight: 700; /* 和文は同梱の 700 に寄せる(600 は無い太さ) */
 }
 .telop-insp-sub {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -439,7 +439,7 @@ textarea {
   height: 24px;
   padding: 0 9px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   background: color-mix(in srgb, var(--spk) 22%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--spk) 50%, transparent);
@@ -472,7 +472,7 @@ textarea {
   margin-bottom: 6px;
   padding: 3px 6px;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   cursor: pointer;
 }
@@ -494,7 +494,7 @@ textarea {
   box-shadow: inset 0 0 0 1px rgba(150, 165, 255, 0.12);
 }
 .telop-metric-label {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 700; /* 和文は同梱の 700 に寄せる(600 は無い太さ) */
   letter-spacing: 0.06em;
 }
@@ -508,7 +508,7 @@ textarea {
   color: #ffc07a;
 }
 .telop-metric-value {
-  font-size: 15px;
+  font-size: var(--ve-fs-14);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -521,7 +521,7 @@ textarea {
   color: var(--ve-primary-ink);
 }
 .telop-metric-unit {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 400;
   color: var(--ve-text-3);
 }
@@ -529,7 +529,7 @@ textarea {
   background: #0d0f16;
   border-radius: 9px;
   font-family: 'Noto Sans JP', var(--ve-font-sans);
-  font-size: 15px;
+  font-size: var(--ve-fs-14);
   /* 同梱の Noto Sans JP は 400・700・900。500 は無い太さなので 400 に寄せる */
   font-weight: 400;
   line-height: 1.7;
@@ -582,12 +582,12 @@ textarea {
 .media-tile .media-col-name {
   grid-area: name;
   font-family: var(--ve-font-mono);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .media-tile .media-col-res {
   grid-area: res;
   font-family: var(--ve-font-sans);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .media-tile-thumb {
@@ -621,7 +621,7 @@ textarea {
   bottom: 5px;
   padding: 1px 5px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-1);
   background: rgba(10, 11, 13, 0.78);
@@ -686,7 +686,7 @@ textarea {
     flex: none;
   }
   .preview-player .time-label.current {
-    font-size: 16px;
+    font-size: var(--ve-fs-16);
   }
   .frame-monitor .play-button {
     width: 30px;

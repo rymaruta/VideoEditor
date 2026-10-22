@@ -7,7 +7,7 @@
    枠(地・線・角・影・見出しの帯)は統一のダイアログ(dialogsG3.css の .shortcut-help-dialog と
    DialogHeader)。ここは中身の格子だけ */
 .shortcut-help-scheme {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-primary-ink);
   background: var(--ve-primary-soft);
   border: 1px solid var(--ve-primary-line);
@@ -20,7 +20,7 @@
   gap: 14px 20px;
 }
 .shortcut-help-section h4 {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--ve-text-3);
@@ -37,7 +37,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 3px 0;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .shortcut-help-row dt {
   color: var(--ve-text-2);
@@ -56,7 +56,7 @@
   padding: 1px 6px;
   text-align: center;
   font-family: var(--ve-font-mono);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-1);
   background-image: var(--ve-surface-3-fill);
   border: 1px solid var(--ve-border);
@@ -66,11 +66,11 @@
 .shortcut-help-or {
   margin: 0 3px;
   color: var(--ve-text-3);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 .shortcut-help-note {
   margin: 14px 0 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 /* ---------- 目盛りの帯: イン〜アウトとマーカー ---------- */

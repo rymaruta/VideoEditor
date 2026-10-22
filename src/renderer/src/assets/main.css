@@ -26,7 +26,7 @@ body {
   background: var(--ve-bg);
   color: var(--ve-text-1);
   /* 本文 13 / 行間はブラウザ既定のまま(狭いパネルの行の高さを変えない) */
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -57,7 +57,7 @@ button {
   color: var(--ve-text-1);
   border-radius: var(--ve-radius-md);
   padding: 7px 13px;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   font-weight: 500;
   font-family: inherit;
   display: inline-flex;
@@ -93,7 +93,7 @@ button:disabled {
 
 .small-button {
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 
 .icon-button {
@@ -123,7 +123,7 @@ button:disabled {
 
 .error-boundary-message {
   color: var(--ve-danger-ink);
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   max-width: 640px;
   word-break: break-all;
 }
@@ -190,7 +190,7 @@ textarea {
   border: 1px solid var(--ve-border);
   border-radius: var(--ve-radius-md);
   padding: 6px 9px;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   font-family: inherit;
   transition:
     border-color var(--ve-dur-fast) var(--ve-ease-out),
@@ -339,7 +339,7 @@ input[type='color'] {
 
 /* ラベル 11 / 500 */
 label {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 500;
   color: var(--ve-text-2);
   display: flex;
@@ -417,7 +417,7 @@ h3 {
 
 .project-menu-error {
   color: var(--ve-danger-ink);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 .recent-projects {
@@ -461,7 +461,7 @@ h3 {
   border: none;
   border-radius: var(--ve-radius-md);
   color: var(--ve-text-1);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   text-align: left;
   cursor: pointer;
 }
@@ -483,7 +483,7 @@ h3 {
 
 .recent-project-missing {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-danger-ink);
 }
 
@@ -511,7 +511,7 @@ h3 {
 
 .brand-name {
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--ve-fs-16);
   letter-spacing: -0.02em;
 }
 
@@ -522,7 +522,7 @@ h3 {
 }
 
 .project-name {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   background: none;
   border: 1px solid transparent;
@@ -538,7 +538,7 @@ h3 {
 }
 
 .project-name-input {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-family: inherit;
   padding: 2px 6px;
   min-width: 160px;
@@ -546,7 +546,7 @@ h3 {
 }
 
 .project-badge {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-2);
   background: var(--ve-surface-3);
@@ -686,7 +686,7 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 
@@ -697,13 +697,13 @@ h3 {
 }
 
 .long-form-plan h4 {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   color: var(--ve-text-1);
   margin-bottom: 4px;
 }
 
 .long-form-hook {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   margin-bottom: 4px;
 }
@@ -727,7 +727,7 @@ h3 {
 }
 
 .long-form-time {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
@@ -747,7 +747,7 @@ h3 {
   padding: 28px 16px;
   text-align: center;
   color: var(--ve-text-3);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: 1.6;
 }
 
@@ -771,7 +771,7 @@ h3 {
 }
 
 .inspector-asset-name {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -790,7 +790,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 
@@ -804,7 +804,7 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 
@@ -823,7 +823,7 @@ h3 {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -867,7 +867,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   min-width: 0;
 }
@@ -902,7 +902,7 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -962,7 +962,7 @@ h3 {
 }
 
 .source-viewer-rate {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-1);
   font-weight: 600;
   min-width: 28px;
@@ -1089,19 +1089,19 @@ h3 {
 }
 
 .panel-header h2 {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   font-weight: 700;
 }
 
 .hint-text {
   color: var(--ve-text-3);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: 1.6;
 }
 
 .error-text {
   color: var(--ve-danger-ink);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   background: var(--ve-danger-soft);
   border-radius: var(--ve-radius-md);
   padding: 6px 9px;
@@ -1110,7 +1110,7 @@ h3 {
 
 .success-text {
   color: var(--ve-success);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   background: var(--ve-success-soft);
   border-radius: var(--ve-radius-md);
   padding: 6px 9px;
@@ -1137,7 +1137,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 600;
   color: var(--ve-text-1);
   margin-bottom: 8px;
@@ -1177,7 +1177,7 @@ h3 {
   border: 1px solid var(--ve-border-subtle);
   border-radius: var(--ve-radius-md);
   padding: 6px 9px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 
 .batch-job-item span:first-child {
@@ -1185,7 +1185,7 @@ h3 {
 }
 
 .batch-job-badge {
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   padding: 2px 7px;
   border-radius: 4px;
   background: var(--ve-surface-3);
@@ -1313,7 +1313,7 @@ h3 {
 .media-track-add select {
   max-width: 90px;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 .media-info {
@@ -1322,7 +1322,7 @@ h3 {
 }
 
 .media-name {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1330,7 +1330,7 @@ h3 {
 }
 
 .media-meta {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   margin-top: 2px;
   display: flex;
@@ -1347,7 +1347,7 @@ h3 {
   background: var(--ve-primary-soft);
   border-radius: 4px;
   padding: 1px 5px;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
 }
 
 .mismatch-badge.missing-badge {
@@ -1378,7 +1378,7 @@ h3 {
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 
 .roughcut-controls input[type='number'] {
@@ -1399,7 +1399,7 @@ h3 {
 }
 
 .roughcut-asset-name {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   font-weight: 600;
   margin: 8px 0 4px;
@@ -1520,7 +1520,7 @@ h3 {
   align-items: center;
   gap: 10px;
   color: var(--ve-text-3);
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   padding: 20px;
   text-align: center;
 }
@@ -1538,7 +1538,7 @@ h3 {
   border-radius: var(--ve-radius-md);
   padding: 10px 12px;
   color: var(--ve-text-1);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: 1.6;
   text-align: left;
 }
@@ -1548,7 +1548,7 @@ h3 {
   flex-direction: column;
   gap: 3px;
   margin-top: 5px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 
@@ -1737,7 +1737,7 @@ h3 {
   position: absolute;
   top: 2px;
   left: 3px;
-  font-size: 9px;
+  font-size: var(--ve-fs-11);
   line-height: 1;
   letter-spacing: 0.04em;
   color: rgba(255, 255, 255, 0.75);
@@ -1858,7 +1858,7 @@ h3 {
 }
 
 .time-label {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1908,7 +1908,7 @@ h3 {
 }
 
 .beat-grid-bpm {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   white-space: nowrap;
 }
@@ -1917,7 +1917,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   white-space: nowrap;
 }
@@ -1925,7 +1925,7 @@ h3 {
 .beat-grid-field input {
   width: 52px;
   padding: 2px 4px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   text-align: right;
 }
 
@@ -1994,14 +1994,14 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   white-space: nowrap;
 }
 
 .shortcut-hint kbd {
   font-family: inherit;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-2);
   background: var(--ve-surface-sunken);
   border: 1px solid var(--ve-border-subtle);
@@ -2043,7 +2043,7 @@ h3 {
   flex-direction: column;
   justify-content: center;
   gap: 3px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   padding: 4px 2px;
 }
@@ -2096,7 +2096,7 @@ h3 {
 
 .track-label-controls select {
   padding: 2px 4px;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   height: 20px;
   width: auto;
   flex: 0 1 auto;
@@ -2159,7 +2159,7 @@ h3 {
   background: var(--ve-track-dialog-clip);
   border: 1px solid var(--ve-track-dialog-clip-line);
   border-radius: var(--ve-radius-md);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-1);
   padding: 0 6px;
   display: flex;
@@ -2244,7 +2244,7 @@ h3 {
   background: var(--ve-trk-pip);
   border: 1px solid var(--ve-trk-pip-line);
   border-radius: var(--ve-radius-md);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-trk-pip-ink);
   padding: 0 6px;
   display: flex;
@@ -2272,7 +2272,7 @@ h3 {
   background: var(--ve-track-telop-clip);
   border: 1px solid var(--ve-track-telop-clip-line);
   border-radius: var(--ve-radius-md);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-1);
   padding: 0 6px;
   display: flex;
@@ -2352,7 +2352,7 @@ h3 {
   border-radius: var(--ve-radius-md);
   padding: 10px 12px;
   line-height: 1.9;
-  font-size: 15px;
+  font-size: var(--ve-fs-14);
 }
 
 .text-edit-word {
@@ -2394,7 +2394,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 
 .audio-clip-inspector input {
@@ -2462,7 +2462,7 @@ h3 {
 .clip-color-swatch.clip-color-none {
   width: auto;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   background: var(--ve-surface-sunken);
   box-shadow: none;
@@ -2532,7 +2532,7 @@ h3 {
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.12);
   color: var(--ve-text-1);
-  font-size: 9px;
+  font-size: var(--ve-fs-10);
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -2542,7 +2542,7 @@ h3 {
 .timeline-clip-label {
   position: relative;
   z-index: 1;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2639,7 +2639,7 @@ h3 {
   flex: 1 1 30%;
   flex-direction: column;
   gap: 3px;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   padding: 7px 4px;
   background: transparent;
   border-color: transparent;
@@ -2707,7 +2707,7 @@ h3 {
 }
 
 .template-card h3 {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   margin-bottom: 5px;
   display: flex;
   align-items: center;
@@ -2720,14 +2720,14 @@ h3 {
 }
 
 .template-card p {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 8px;
   line-height: 1.5;
 }
 
 .template-card ul {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   margin-bottom: 10px;
   padding-left: 2px;
@@ -2788,7 +2788,7 @@ h3 {
 }
 
 .overlay-select-label {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 
 .overlay-item.selected {
@@ -2826,7 +2826,7 @@ h3 {
   display: flex;
   gap: 10px;
   align-items: center;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 /* label にできない項目(色の欄など。label の中だと吹き出しを押すたびに閉じる) */
@@ -2847,7 +2847,7 @@ h3 {
 
 .overlay-preset-name-input {
   flex: 1;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 .toggle-chip {
@@ -2856,7 +2856,7 @@ h3 {
   padding: 0;
   justify-content: center;
   font-weight: 700;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 
 .toggle-chip.italic {
@@ -2881,7 +2881,7 @@ h3 {
 }
 
 .overlay-advanced {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 
@@ -2904,7 +2904,7 @@ h3 {
 }
 
 .youtube-field label {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 .youtube-field input {
@@ -2961,7 +2961,7 @@ h3 {
 }
 
 .youtube-result-title {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2977,7 +2977,7 @@ h3 {
 
 .audio-library-kind-tabs button {
   flex: 1;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   padding: 7px 4px;
   background: var(--ve-surface-sunken);
   border-color: var(--ve-border-subtle);
@@ -3021,7 +3021,7 @@ h3 {
 }
 
 .audio-library-title {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3032,7 +3032,7 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
   width: fit-content;
 }
@@ -3063,7 +3063,7 @@ h3 {
 .game-trend-insights h3,
 .game-trend-tips h3,
 .game-trend-source h3 {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 8px;
 }
@@ -3080,13 +3080,13 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   color: var(--ve-text-1);
   margin-bottom: 4px;
 }
 
 .game-trend-insight-card p {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 6px;
 }
@@ -3101,7 +3101,7 @@ h3 {
 }
 
 .game-trend-evidence li {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -3126,7 +3126,7 @@ h3 {
 }
 
 .game-trend-tips li {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   background: var(--ve-surface-sunken);
   border-radius: var(--ve-radius-md);
@@ -3150,7 +3150,7 @@ h3 {
 }
 
 .game-trend-recommendation h3 {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   display: flex;
   align-items: center;
@@ -3159,14 +3159,14 @@ h3 {
 }
 
 .game-trend-recommendation-name {
-  font-size: 15px;
+  font-size: var(--ve-fs-16);
   font-weight: 700;
   color: var(--ve-text-1);
   margin-bottom: 4px;
 }
 
 .game-trend-recommendation-reason {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   line-height: 1.6;
 }
@@ -3184,7 +3184,7 @@ h3 {
 }
 
 .game-trend-chat h3 {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   display: flex;
   align-items: center;
@@ -3202,7 +3202,7 @@ h3 {
 }
 
 .game-trend-chat-turn {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: 1.65;
   border-radius: var(--ve-radius-md);
   padding: 9px 11px;
@@ -3257,13 +3257,13 @@ h3 {
 }
 
 .game-trend-comparison h3 {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 6px;
 }
 
 .game-trend-comparison p {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   display: flex;
   align-items: center;
@@ -3272,7 +3272,7 @@ h3 {
 }
 
 .trend-comparison-badge {
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   padding: 2px 7px;
   border-radius: 4px;
   flex-shrink: 0;
@@ -3295,7 +3295,7 @@ h3 {
 
 .game-trend-viral h3,
 .game-trend-thumbnail-insight h3 {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 8px;
   display: flex;
@@ -3313,7 +3313,7 @@ h3 {
 
 .game-trend-hook-badge {
   display: inline-block;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   padding: 2px 8px;
   border-radius: 4px;
   background: var(--ve-primary-soft);
@@ -3322,7 +3322,7 @@ h3 {
 }
 
 .game-trend-viral-example {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   white-space: nowrap;
   overflow: hidden;
@@ -3340,7 +3340,7 @@ h3 {
 }
 
 .game-trend-thumbnail-insight li {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   background: var(--ve-surface-sunken);
   border-radius: var(--ve-radius-md);
@@ -3380,7 +3380,7 @@ h3 {
 }
 
 .metadata-section h3 {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 8px;
   display: flex;
@@ -3404,13 +3404,13 @@ h3 {
 }
 
 .metadata-title-text {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   flex: 1;
 }
 
 .metadata-title-count {
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
@@ -3433,7 +3433,7 @@ h3 {
 }
 
 .metadata-hashtag-chip {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   background: var(--ve-surface-sunken);
   border-radius: 4px;
@@ -3450,7 +3450,7 @@ h3 {
 }
 
 .preset-section h3 {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 8px;
   display: flex;
@@ -3486,7 +3486,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   white-space: nowrap;
   overflow: hidden;
@@ -3494,7 +3494,7 @@ h3 {
 }
 
 .preset-caption-preview {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3535,7 +3535,7 @@ h3 {
 }
 
 .keyword-se-keyword {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: #a9c3ff;
   font-weight: 600;
 }
@@ -3556,7 +3556,7 @@ h3 {
 }
 
 .export-field > label {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 600;
   color: var(--ve-text-1);
 }
@@ -3606,7 +3606,7 @@ h3 {
   width: 100%;
   justify-content: center;
   padding: 10px;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
 }
 
 .export-button-row {
@@ -3630,7 +3630,7 @@ h3 {
   border: 1px solid var(--ve-border);
   border-radius: var(--ve-radius-md);
   padding: 8px;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   font-family: inherit;
   resize: vertical;
   margin-bottom: 10px;
@@ -3732,7 +3732,7 @@ h3 {
 
 .progress-bar span {
   position: relative;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   z-index: 1;
   color: white;
@@ -3767,7 +3767,7 @@ h3 {
 }
 
 .modal h3 {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   margin-bottom: 14px;
   display: flex;
   align-items: center;
@@ -3816,7 +3816,7 @@ h3 {
 
 .trim-field label {
   display: block;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   margin-bottom: 5px;
   color: var(--ve-text-2);
 }
@@ -3851,7 +3851,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   background: var(--ve-surface-sunken);
   border-radius: var(--ve-radius-md);
   padding: 6px 9px;
@@ -3868,7 +3868,7 @@ h3 {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 600;
   padding-top: 4px;
   border-top: 1px solid var(--ve-border);
@@ -3919,7 +3919,7 @@ h3 {
 }
 
 .highlight-item-time {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3967,7 +3967,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 
@@ -3975,7 +3975,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   background: var(--ve-surface-sunken);
   border-radius: 999px;
@@ -4027,7 +4027,7 @@ h3 {
   gap: 3px;
   background: var(--ve-auto-soft);
   color: var(--ve-auto-ink);
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 10px;
@@ -4059,7 +4059,7 @@ h3 {
 }
 
 .autoedit-card-title {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   font-weight: 600;
 }
 
@@ -4118,7 +4118,7 @@ h3 {
 }
 
 .file-drop-title {
-  font-size: 15px;
+  font-size: var(--ve-fs-16);
   font-weight: 600;
   color: var(--ve-text-1);
 }
@@ -4180,7 +4180,7 @@ h3 {
   border: none;
   border-radius: var(--ve-radius-md);
   color: var(--ve-text-1);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   text-align: left;
   cursor: pointer;
 }
@@ -4204,7 +4204,7 @@ h3 {
 
 .clip-context-menu-key {
   color: var(--ve-text-3);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 .timeline-drop-error {
@@ -4237,7 +4237,7 @@ h3 {
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--ve-text-2);
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   font-weight: 600;
   cursor: pointer;
 }
@@ -4269,7 +4269,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .library-folder-path span {
@@ -4295,7 +4295,7 @@ h3 {
   border: 1px solid var(--ve-border);
   background: transparent;
   color: var(--ve-text-2);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   cursor: pointer;
 }
 .library-chip.active {
@@ -4305,7 +4305,7 @@ h3 {
 }
 .library-count {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .library-list {
@@ -4360,7 +4360,7 @@ h3 {
 .library-kind {
   width: 22px;
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
   text-align: center;
 }
@@ -4369,19 +4369,19 @@ h3 {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .library-sub {
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .library-size {
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
   flex-shrink: 0;
 }
@@ -4474,7 +4474,7 @@ h3 {
   border-radius: 0;
   background: transparent;
   color: var(--ve-text-2);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 400;
   white-space: nowrap;
   flex-shrink: 0;
@@ -4526,14 +4526,14 @@ h3 {
   background: var(--ve-bg);
   border-top: 1px solid var(--ve-border-subtle);
   color: var(--ve-text-2);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   white-space: nowrap;
 }
 .status-bar .project-name,
 .status-bar .project-name-input {
   height: 20px;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-1);
   background: transparent;
@@ -4600,7 +4600,7 @@ h3 {
 }
 .timeline-timecode {
   font-family: var(--ve-font-mono);
-  font-size: 15px;
+  font-size: var(--ve-fs-16);
   color: var(--ve-text-1);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -4623,7 +4623,7 @@ h3 {
   font-family: var(--ve-font-mono);
   font-variant-numeric: tabular-nums;
   /* 時刻目盛りだけは 10(文字の段の例外) */
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
   white-space: nowrap;
   pointer-events: none;
@@ -4658,7 +4658,7 @@ h3 {
   margin-right: 6px;
   border-radius: 3px;
   font-family: var(--ve-font-mono);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-1);
   flex-shrink: 0;
@@ -4711,7 +4711,7 @@ h3 {
 .timeline-video-overlay-clip {
   border: 0;
   border-radius: var(--ve-radius-sm);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 .timeline-clip {
   background: var(--ve-track-video-clip);
@@ -4846,7 +4846,7 @@ h3 {
 }
 .preview-player .time-label.current {
   color: var(--ve-text-1);
-  font-size: 15px;
+  font-size: var(--ve-fs-16);
 }
 
 /* 素材の読み込みボタンは控えめに(読み込みはメニューの ファイル > 読み込む からも出来る) */
@@ -4882,14 +4882,14 @@ h3 {
   grid-template-columns: minmax(0, 1fr) 92px 84px;
   padding-left: 28px;
   height: 24px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   border-bottom: 1px solid var(--ve-border-subtle);
 }
 .media-row {
   position: relative;
   height: 26px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   cursor: default;
   border-bottom: 1px solid transparent;
@@ -4935,7 +4935,7 @@ h3 {
 .media-col-res {
   text-align: right;
   font-family: var(--ve-font-mono);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   white-space: nowrap;
 }
@@ -4981,7 +4981,7 @@ h3 {
   align-items: center;
   justify-content: space-between;
   padding: 0 8px 0 10px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 .telop-list {
@@ -5000,7 +5000,7 @@ h3 {
   height: 24px;
   padding: 0 10px 0 7px;
   border-left: 3px solid transparent;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   cursor: default;
   user-select: none;
@@ -5016,7 +5016,7 @@ h3 {
   flex-shrink: 0;
   width: 74px;
   font-family: var(--ve-font-mono);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .telop-row-text {
@@ -5032,7 +5032,7 @@ h3 {
   gap: 6px;
   padding: 5px 8px;
   border-top: 1px solid var(--ve-border-subtle);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 .telop-list-foot input {
@@ -5080,12 +5080,12 @@ h3 {
   background: var(--ve-surface-sunken);
   color: var(--ve-text-1);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   line-height: 1.5;
 }
 .prop-heading {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 600;
   color: var(--ve-text-1);
 }
@@ -5098,7 +5098,7 @@ h3 {
 .prop-label {
   flex-shrink: 0;
   width: 76px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 .prop-control {
@@ -5107,7 +5107,7 @@ h3 {
   gap: 6px;
   flex-wrap: wrap;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
 }
 .prop-control select,
@@ -5116,7 +5116,7 @@ h3 {
   max-width: 180px;
   padding: 0 6px;
   line-height: normal;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .prop-control input[type='color'] {
   width: 26px;
@@ -5137,7 +5137,7 @@ h3 {
   width: 70px;
 }
 .prop-unit {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .prop-swatch {
@@ -5187,7 +5187,7 @@ h3 {
   padding: 0 0 0 14px;
   background: var(--ve-surface-1);
   border-bottom: 1px solid var(--ve-border-subtle);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 600;
   color: var(--ve-text-1);
 }
@@ -5199,7 +5199,7 @@ h3 {
   border-radius: 0;
   background: transparent;
   color: var(--ve-text-2);
-  font-size: 15px;
+  font-size: var(--ve-fs-16);
 }
 .dialog-close:hover {
   background: var(--ve-danger);
@@ -5220,7 +5220,7 @@ h3 {
   overflow-y: auto;
 }
 .export-dialog-section {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-3);
 }
@@ -5234,7 +5234,7 @@ h3 {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr);
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .export-dialog-summary dt {
   color: var(--ve-text-2);
@@ -5264,7 +5264,7 @@ h3 {
   align-items: center;
   gap: 10px;
   min-height: 28px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .form-row-top {
   align-items: start;
@@ -5283,7 +5283,7 @@ h3 {
   color: var(--ve-text-1);
 }
 .form-note {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .form-hint {
@@ -5291,7 +5291,7 @@ h3 {
 }
 .form-check {
   margin-left: 120px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .choice-list {
   display: flex;
@@ -5320,11 +5320,11 @@ h3 {
   gap: 2px;
 }
 .choice-label {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
 }
 .choice-note {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .export-queue {
@@ -5336,7 +5336,7 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   margin-bottom: 6px;
 }
@@ -5351,11 +5351,11 @@ h3 {
   align-items: center;
   height: 28px;
   padding: 0 4px 0 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   border-bottom: 1px solid var(--ve-border-subtle);
 }
 .export-queue-status {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .export-queue-item.running .export-queue-status {
@@ -5375,7 +5375,7 @@ h3 {
   padding: 10px 14px;
   border-top: 1px solid var(--ve-border-subtle);
   background: var(--ve-surface-1);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .dialog-footer select {
   height: 26px;
@@ -5464,7 +5464,7 @@ h3 {
   justify-content: center;
   border-radius: 3px;
   background: var(--ve-border-hover);
-  font-size: 18px;
+  font-size: var(--ve-fs-20);
   font-weight: 700;
 }
 .telop-style-meta {
@@ -5473,14 +5473,14 @@ h3 {
   min-width: 0;
 }
 .telop-style-name {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .telop-style-use {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -5520,14 +5520,14 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 .telop-style-auto {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .telop-style-settings {
   min-height: 0;
@@ -5562,7 +5562,7 @@ h3 {
   gap: 14px;
   padding: 16px 18px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .form-stack {
   display: flex;
@@ -5647,7 +5647,7 @@ h3 {
   display: flex;
   flex-direction: column;
   background: var(--ve-bg);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .auto-edit-header {
   height: 34px;
@@ -5717,7 +5717,7 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: var(--ve-fs-10);
   color: #fff;
 }
 .auto-edit-step.done .auto-edit-step-mark {
@@ -5744,7 +5744,7 @@ h3 {
   color: var(--ve-text-1);
 }
 .auto-edit-step-note {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -5755,7 +5755,7 @@ h3 {
   white-space: normal;
 }
 .auto-edit-step-state {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .auto-edit-step.run .auto-edit-step-state {
@@ -5766,7 +5766,7 @@ h3 {
   padding: 6px 8px;
   border: 1px solid var(--ve-border);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: 1.5;
 }
 
@@ -5801,7 +5801,7 @@ h3 {
 .auto-edit-table th {
   text-align: left;
   font-weight: 400;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   padding: 4px 8px;
   border-bottom: 1px solid var(--ve-border-subtle);
@@ -5883,7 +5883,7 @@ h3 {
   position: absolute;
   top: 0;
   font-family: var(--ve-font-mono);
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
   border-left: 1px solid var(--ve-border);
   padding-left: 3px;
@@ -5899,10 +5899,10 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
 }
 .auto-edit-log {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: 1.7;
   user-select: text;
 }
@@ -5929,7 +5929,7 @@ h3 {
 .auto-edit-review-meta {
   display: flex;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .auto-edit-review-kind {
@@ -5984,7 +5984,7 @@ h3 {
   user-select: text;
 }
 .transcript-tag {
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-primary-ink);
   border: 1px solid var(--ve-primary-line);
   border-radius: 2px;
@@ -6006,7 +6006,7 @@ h3 {
   border-bottom: 1px solid var(--ve-border-subtle);
 }
 .structure-controls label {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   gap: 6px;
 }
 .structure-controls input[type='number'] {
@@ -6048,7 +6048,7 @@ h3 {
   opacity: 0.45;
 }
 .structure-kind {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   text-align: center;
   border-radius: 2px;
   padding: 1px 0;
@@ -6091,7 +6091,7 @@ h3 {
 }
 
 .new-episode-target {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   gap: 6px;
 }
 .new-episode-target input {
@@ -6110,7 +6110,7 @@ h3 {
 }
 .dictionary-editor textarea {
   font-family: var(--ve-font-mono);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   resize: vertical;
 }
 
@@ -6347,7 +6347,7 @@ h3 {
 
 .color-popover-error {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-danger);
 }
 
@@ -6360,7 +6360,7 @@ h3 {
 
 .color-popover-channel-name {
   font-family: var(--ve-font-mono);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 
@@ -6378,7 +6378,7 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
   border-top: 1px solid var(--ve-border-subtle);
   padding-top: 8px;
@@ -6386,7 +6386,7 @@ h3 {
 
 .color-popover-empty {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 
@@ -6421,7 +6421,7 @@ h3 {
   width: 14px;
   height: 14px;
   padding: 0;
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   line-height: 12px;
   border-radius: 50%;
   border: 1px solid var(--ve-border);
@@ -6468,7 +6468,7 @@ h3 {
   border-radius: 0;
   background: transparent;
   color: var(--ve-text-1);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 600;
   justify-content: flex-start;
   gap: 6px;
@@ -6498,7 +6498,7 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 400;
   color: var(--ve-text-3);
 }
@@ -6527,7 +6527,7 @@ h3 {
   background: var(--ve-surface-3);
   color: var(--ve-text-1);
   font-family: var(--ve-font-mono);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 .telop-style-fields .prop-label {
   width: 68px;
@@ -6573,7 +6573,7 @@ h3 {
   border-right: 1px solid var(--ve-border);
   background: var(--ve-surface-sunken);
   color: var(--ve-text-2);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 500;
   gap: 5px;
 }
@@ -6605,7 +6605,7 @@ h3 {
   height: 22px;
   padding: 0;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: 1;
   flex-shrink: 0;
 }
@@ -6617,7 +6617,7 @@ h3 {
   border: 0;
   background: transparent;
   color: var(--ve-primary-ink);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 .link-button:hover:not(:disabled) {
   background: transparent;
@@ -6714,12 +6714,12 @@ h3 {
 .grad-row-label {
   width: 34px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .grad-count {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .grad-angle-presets {
@@ -6731,7 +6731,7 @@ h3 {
   height: 20px;
   padding: 0;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 .angle-chip span {
@@ -6777,7 +6777,7 @@ h3 {
   padding: 2px 6px 2px 2px;
   height: 22px;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   background: var(--ve-surface-sunken);
 }
@@ -6808,14 +6808,14 @@ h3 {
 }
 .stroke-card-title,
 .span-card-title {
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 600;
   color: var(--ve-text-1);
 }
 .stroke-card-sub {
   margin-left: 4px;
   font-weight: 400;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .stroke-card-tools {
@@ -6862,7 +6862,7 @@ h3 {
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-3);
 }
@@ -6905,7 +6905,7 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
   text-align: left;
 }
@@ -6977,7 +6977,7 @@ h3 {
   min-width: 0;
   padding-left: 6px;
   padding-right: 6px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   justify-content: center;
 }
 .telop-style-dialog select.telop-style-export {
@@ -7010,7 +7010,7 @@ select.telop-kind-add {
   max-width: 128px;
   min-width: 0;
   padding: 0 4px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: normal;
 }
 .telop-tools {
@@ -7030,7 +7030,7 @@ select.telop-kind-add {
 .telop-tools-row .small-button {
   height: 24px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 .telop-tools .small-button.active {
   background: var(--ve-primary-soft);
@@ -7050,13 +7050,13 @@ select.telop-kind-add {
 .telop-find input[type='text'] {
   height: 26px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   line-height: normal;
   min-width: 0;
 }
 .telop-find-loose {
   gap: 5px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 .telop-find-loose input[type='checkbox'] {
@@ -7071,17 +7071,17 @@ select.telop-kind-add {
 .telop-find-actions .small-button {
   height: 24px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 .telop-find-count {
   margin-right: auto;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   font-variant-numeric: tabular-nums;
 }
 .telop-tools-message {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   line-height: 1.5;
   color: var(--ve-text-2);
   overflow-wrap: anywhere;
@@ -7106,7 +7106,7 @@ select.telop-kind-add {
   border: 1px solid var(--ve-border);
   border-radius: var(--ve-radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
   cursor: default;
 }
@@ -7145,7 +7145,7 @@ select.telop-kind-add {
   border-radius: 7px;
   background: var(--ve-surface-3);
   color: var(--ve-text-1);
-  font-size: 9px;
+  font-size: var(--ve-fs-10);
   font-weight: 700;
   line-height: 13px;
   text-align: center;
@@ -7172,7 +7172,7 @@ select.telop-kind-add {
   color: var(--ve-text-1);
 }
 .section-preset-sub {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   overflow-wrap: anywhere;
 }
@@ -7200,12 +7200,12 @@ select.telop-kind-add {
 }
 .section-preset-warn {
   width: 100%;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-primary-ink);
 }
 .section-preset-empty {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   line-height: 1.5;
   color: var(--ve-text-3);
 }
@@ -7263,14 +7263,14 @@ select.telop-kind-add {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-1);
 }
 .section-preset-note {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .section-preset-check {
@@ -7294,12 +7294,12 @@ select.telop-kind-add {
   padding: 5px 8px;
   border-radius: var(--ve-radius-md);
   background: var(--ve-surface-3);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 .section-preset-message {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 .section-preset-foot {
@@ -7345,7 +7345,7 @@ select.telop-kind-add {
   width: 100%;
   margin-bottom: 4px;
   padding: 0;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-2);
 }
@@ -7356,7 +7356,7 @@ select.telop-kind-add {
 }
 .look-apply-count {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -7373,7 +7373,7 @@ select.telop-kind-add {
   justify-content: space-between;
   gap: 6px;
   background: var(--ve-surface-sunken);
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
   font-weight: 400;
 }
 .font-picker-current {
@@ -7405,7 +7405,7 @@ select.telop-kind-add {
 }
 .font-picker-group {
   padding: 6px 6px 2px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   font-weight: 600;
   color: var(--ve-text-3);
 }
@@ -7425,7 +7425,7 @@ select.telop-kind-add {
   color: #fff;
 }
 .font-picker-sample {
-  font-size: 18px;
+  font-size: var(--ve-fs-16);
   line-height: 1.2;
   white-space: nowrap;
   color: var(--ve-text-1);
@@ -7434,7 +7434,7 @@ select.telop-kind-add {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 .font-picker-check {
@@ -7465,7 +7465,7 @@ select.telop-kind-add {
   border: 0;
   background: transparent;
   box-shadow: none;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .look-search input:focus {
   outline: none;
@@ -7502,7 +7502,7 @@ select.telop-kind-add {
   gap: 5px;
   border-radius: 12px;
   background: var(--ve-surface-sunken);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 500;
   color: var(--ve-text-2);
 }
@@ -7513,7 +7513,7 @@ select.telop-kind-add {
   color: #fff;
 }
 .look-cat-count {
-  font-size: 10px;
+  font-size: var(--ve-fs-10);
   color: var(--ve-text-3);
 }
 .look-cat.active .look-cat-count {
@@ -7565,7 +7565,7 @@ select.telop-kind-add {
   padding: 4px 8px;
   border-radius: var(--ve-radius-md);
   background: rgba(0, 0, 0, 0.55);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-1);
   text-align: center;
   pointer-events: none;
@@ -7583,7 +7583,7 @@ select.telop-kind-add {
 .thumbnail-text textarea {
   width: 100%;
   resize: vertical;
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
 }
 .thumbnail-panel .telop-style-fields {
   margin-top: 4px;
@@ -7601,7 +7601,7 @@ select.telop-kind-add {
   gap: 8px;
   padding: 16px;
   overflow: auto;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 
 .panel-error-title {
@@ -7649,7 +7649,7 @@ select.telop-kind-add {
   gap: 8px 14px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--ve-border-subtle);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .shorts-panel label {
   display: inline-flex;
@@ -7733,7 +7733,7 @@ select.telop-kind-add {
 .workflow-step-count {
   font-family: var(--ve-font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   padding: 0 6px;
   border-radius: 9px;
   background: var(--ve-primary-soft);
@@ -7751,7 +7751,7 @@ select.telop-kind-add {
   gap: 8px;
 }
 .workflow-export-key {
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   opacity: 0.7;
 }
 @media (max-width: 1100px) {
@@ -7791,7 +7791,7 @@ select.telop-kind-add {
   border: 0;
   border-radius: 6px;
   color: var(--ve-text-2);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   font-weight: 500;
 }
 .panel-tab:hover:not(:disabled):not(.active) {
@@ -7810,7 +7810,7 @@ select.telop-kind-add {
   background: var(--ve-bg);
   border-top: 1px solid var(--ve-border-subtle);
   color: var(--ve-text-3);
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
 }
 
 /* 一つを選ぶ切り替え(段)。地は奥、選んだ段は浮き上がり */
@@ -7869,7 +7869,7 @@ select.telop-kind-add {
 
 /* 自動編集の画面も本文 13 */
 .auto-edit-screen {
-  font-size: 13px;
+  font-size: var(--ve-fs-13);
 }
 .progress-bar {
   background: var(--ve-surface-sunken);
