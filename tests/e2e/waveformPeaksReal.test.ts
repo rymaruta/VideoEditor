@@ -75,7 +75,8 @@ describe.skipIf(!has)('細かい波形の値(本物の ffmpeg)', () => {
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
       ffprobePath: ffprobeStatic.path,
-      cacheDir
+      cacheDir,
+      directMaxSec: 0
     })
     const p = await svc.get(wav, 0, 4, 200)
     expect(p.channels).toHaveLength(2)
@@ -87,7 +88,8 @@ describe.skipIf(!has)('細かい波形の値(本物の ffmpeg)', () => {
     const fromDisk = createWaveformPeaksService({
       ffmpegPath: join(dir, 'no-ffmpeg'),
       ffprobePath: join(dir, 'no-ffprobe'),
-      cacheDir
+      cacheDir,
+      directMaxSec: 0
     })
     const again = await fromDisk.get(wav, 1, 3, 100)
     expect(again.columns).toBe(100)
@@ -100,7 +102,8 @@ describe.skipIf(!has)('細かい波形の値(本物の ffmpeg)', () => {
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
       ffprobePath: ffprobeStatic.path,
-      cacheDir: join(dir, 'cache')
+      cacheDir: join(dir, 'cache'),
+      directMaxSec: 0
     })
     // 1 秒に 400 列(素の値の 4 倍)
     const fine = await svc.get(wav, 1, 2, 400)

@@ -245,7 +245,9 @@ function WaveTileCanvas({
 }
 
 /**
- * 値の波形のタイル(2048 列ずつ)の覚え場所。スクロールで戻ったときに頼み直さない。
+ * 値の波形のタイル(2048 列ずつ)の覚え場所。**仮の絵にだけ使う**: 見えたらすぐこれを描き、
+ * main にも毎回頼んで、届いた値で描き直す(同じパスに上書きした素材で古い波形を出し続けない。
+ * main は素の値から集計するだけなので速い)。
  * 上限は大きさの合計(1 枚 2048 列 × 2ch × 3 値 × 4 バイト ≒ 49KB。32MB で約 650 枚)
  */
 const peakTileCache = new ByteLimitedCache<WavePeaks>(32 * 1024 * 1024, 4000)
@@ -306,7 +308,6 @@ function PeakTile({
   // 頼む: 見えている間だけ。掴んで動かしている間(トリム)は落ち着いてから(150ms)
   useEffect(() => {
     if (!visible) return
-    if (peakTileCache.peek(key)) return
     let cancelled = false
     let done = false
     let id = ''
@@ -324,6 +325,7 @@ function PeakTile({
             return
           }
           peakTileCache.set(key, p, wavePeaksBytes(p))
+          // 届いた値で描き直す(仮の絵が上書き前の素材のものでも、ここで今の中身になる)
           setGot({ key, peaks: p })
         })
         .catch((e: unknown) => {
@@ -331,8 +333,9 @@ function PeakTile({
           if (cancelled) return
           const msg = String(e)
           // 止めた・捨てられた頼みでは絵の波形へ切り替えない。見えている間だけ間を空けて頼み直す
+          // (回数で諦めない。諦めると、その波形はずっと空のまま。見えなくなれば頼み自体が止まる)
           if (msg.includes(WAVE_PEAKS_ABORTED) || msg.includes('MEDIA_JOB_DROPPED')) {
-            if (attempt < 5) timer = setTimeout(() => request(attempt + 1), 400 * (attempt + 1))
+            timer = setTimeout(() => request(attempt + 1), Math.min(2000, 400 * (attempt + 1)))
             return
           }
           onFailRef.current()

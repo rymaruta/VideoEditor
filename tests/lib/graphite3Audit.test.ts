@@ -246,7 +246,7 @@ describe('波形の部品の配線(再監査 低8)', () => {
     expect(wave).not.toMatch(/new Map<string, Promise<HTMLImageElement>>/)
   })
   it('値のタイルは見えている間だけ頼み、要らなくなった頼みは止める', () => {
-    expect(wave).toMatch(/if \(!visible\) return\n {4}if \(peakTileCache\.peek\(key\)\) return/)
+    expect(wave).toMatch(/if \(!visible\) return\n {4}let cancelled/)
     expect(wave).toMatch(/cancelWaveformPeaks\?\.\(id\)/)
   })
   it('止めた・捨てられた頼みでは絵の波形へ切り替えない(再監査 低4)', () => {

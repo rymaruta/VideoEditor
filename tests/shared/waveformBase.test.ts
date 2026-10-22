@@ -136,6 +136,12 @@ describe('素の値(WaveBaseBuilder)', () => {
     wrong[4] = 99
     expect(decodeWaveBase(wrong)).toBeNull()
     expect(decodeWaveBase(new Uint8Array(3))).toBeNull()
+    // 頭の細かさ(rate)が今の決まりと違う・0 なら使わない(割り算が狂う)
+    for (const rate of [0, 50]) {
+      const bad = bytes.slice()
+      new DataView(bad.buffer).setUint32(8, rate, true)
+      expect(decodeWaveBase(bad)).toBeNull()
+    }
   })
 
   it('大きさの見積もり: 3 時間・ステレオで約 13MB', () => {

@@ -19,6 +19,11 @@ export interface WavePeaks {
   columns: number
   /** 1 (モノラル) か 2 (L/R) */
   channels: WavePeakChannel[]
+  /**
+   * どの中身の素材から作ったか(main が素材の大きさ・更新時刻・中身の目印から作る鍵)。
+   * 画面はこれが変われば描き直す(同じパスに上書きした素材で、古い波形を出し続けない)
+   */
+  sourceKey?: string
 }
 
 export const WAVE_PEAKS_VERSION = 1
@@ -335,6 +340,27 @@ export function aggregateBase(
   return { version: WAVE_PEAKS_VERSION, columns: cols, channels: out }
 }
 
+/**
+ * 素の値が無いまま読んだ値の左右をどう描くか(左右がほぼ同じ・片方がほぼ無音なら 1 段)。
+ * 列ごとの値の差と大きさから、`decideChannelPick` と同じ決まりで決める
+ */
+export function pickFromPeaks(p: WavePeaks): WaveChannelPick {
+  if (p.channels.length < 2) return 0
+  const [l, r] = p.channels
+  let eL = 0
+  let eR = 0
+  let eD = 0
+  for (let k = 0; k < p.columns; k++) {
+    eL += l.rms[k] * l.rms[k]
+    eR += r.rms[k] * r.rms[k]
+    const a = l.max[k] - r.max[k]
+    const b = l.min[k] - r.min[k]
+    const c = l.rms[k] - r.rms[k]
+    eD += a * a + b * b + c * c
+  }
+  return decideChannelPick(2, eL, eR, eD)
+}
+
 /** 細かく読み直した値(読んだ音の本数ぶん)を、素の値と同じ描き方(1 段 / 2 段)にそろえる */
 export function applyChannelPick(peaks: WavePeaks, pick: WaveChannelPick): WavePeaks {
   if (pick === 'both' || peaks.channels.length < 2) return peaks
@@ -377,6 +403,9 @@ export function decodeWaveBase(bytes: Uint8Array): WaveBase | null {
   if (bytes.byteLength < 24) return null
   const head = new Uint32Array(bytes.slice(0, 24).buffer)
   if (head[0] !== MAGIC || head[1] !== WAVE_BASE_VERSION) return null
+  // 細かさ(1 秒あたりの列)は今の決まりと同じものだけ使う(0 や違う値の壊れた頭で割り算が狂わない)
+  if (head[2] !== WAVE_BASE_RATE) return null
+  if (head[3] !== 1 && head[3] !== 2) return null
   const pickNum = head[4]
   if (pickNum > 2) return null
   const pick: WaveChannelPick = pickNum === 2 ? 'both' : (pickNum as 0 | 1)

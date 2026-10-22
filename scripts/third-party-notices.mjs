@@ -315,7 +315,7 @@ export function renderNotices(input) {
   const fonts = input.packages.filter((p) => p.name.startsWith('@fontsource/'))
   out.push(rule('4. フォント'))
   out.push(
-    'テロップ用のフォントを同梱しています(npm の @fontsource が配る Google Fonts のフォント)。',
+    '画面の文字(Geist)とテロップ用のフォントを同梱しています(npm の @fontsource が配るフォント)。',
     'ライセンスの全文は「7. ライセンスの全文」の各パッケージの欄にあります。',
     ''
   )

@@ -193,10 +193,12 @@ describe('ライセンス表記の生成: このプロジェクト', () => {
       expect(names.has(n)).toBe(false)
   })
 
-  it('フォントは 9 つが OFL-1.1、Kosugi Maru が Apache-2.0', () => {
+  it('フォントは 11 個が OFL-1.1(画面の Geist 2 つを含む)、Kosugi Maru が Apache-2.0', () => {
     const fonts = packages.filter((p) => p.name.startsWith('@fontsource/'))
-    expect(fonts).toHaveLength(10)
-    expect(fonts.filter((f) => f.license === 'OFL-1.1')).toHaveLength(9)
+    expect(fonts).toHaveLength(12)
+    expect(fonts.filter((f) => f.license === 'OFL-1.1')).toHaveLength(11)
+    for (const n of ['@fontsource/geist-sans', '@fontsource/geist-mono'])
+      expect(fonts.find((f) => f.name === n)?.license).toBe('OFL-1.1')
     expect(fonts.find((f) => f.name === '@fontsource/kosugi-maru')?.license).toBe('Apache-2.0')
     for (const f of fonts) expect(f.files.length).toBeGreaterThan(0)
   })
