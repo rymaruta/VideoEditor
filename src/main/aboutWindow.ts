@@ -103,7 +103,7 @@ export async function showAboutDialog(win: BrowserWindow): Promise<void> {
       `Electron ${process.versions.electron} / Chromium ${process.versions.chrome} / Node.js ${process.versions.node}\n\n` +
       'この製品は FFmpeg(GPL)などのオープンソースのソフトウェア・フォント・AI のモデルを使っています。' +
       '著作権と各ライセンスは「サードパーティのライセンス」「Chromium のライセンス」で読めます。',
-    buttons: ['OK', 'サードパーティのライセンス…', 'Chromium のライセンス…'],
+    buttons: ['閉じる', 'サードパーティのライセンス…', 'Chromium のライセンス…'],
     defaultId: 0,
     cancelId: 0,
     noLink: true

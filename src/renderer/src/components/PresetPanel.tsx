@@ -77,7 +77,7 @@ export function PresetPanel(): React.JSX.Element {
   function handleAddCaption(preset: CaptionPreset): void {
     addTextOverlay({
       text: preset.name,
-      // 置く位置の規則は「テキスト」タブの追加と共通(片方だけ尺を超えて置けていた)
+      // 置く位置の規則は「テロップ」タブの追加と共通(片方だけ尺を超えて置けていた)
       ...newOverlayRange(useProjectStore.getState().playheadTime, getTotalDuration(project)),
       style: { ...preset.style },
       source: 'manual'
@@ -165,7 +165,7 @@ export function PresetPanel(): React.JSX.Element {
         <h2>マイプリセット</h2>
       </div>
       <p className="hint-text">
-        よく使うテロップのスタイルや効果音をお気に入り登録しておくと、ここからワンクリックで追加できます。テロップは「テキスト」タブの各テロップ、効果音は「BGM/SE」タブの検索結果から
+        よく使うテロップのスタイルや効果音をお気に入り登録しておくと、ここからワンクリックで追加できます。テロップは「テロップ」タブの各テロップ、効果音は「BGM/SE」タブの検索結果から
         <StarIcon className="inline-icon" width={12} height={12} />
         (お気に入り)のボタンで登録できます。
       </p>

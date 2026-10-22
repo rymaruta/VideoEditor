@@ -175,7 +175,7 @@ export function MetadataPanel(): React.JSX.Element {
           type="password"
           value={geminiApiKey}
           onChange={(e) => setGeminiApiKey(e.target.value)}
-          placeholder="APIキーを入力"
+          placeholder="API キーを入力"
         />
         {envKeySources.geminiApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
@@ -201,7 +201,7 @@ export function MetadataPanel(): React.JSX.Element {
       </div>
       <button className="primary-button" onClick={handleGenerate} disabled={loading}>
         <SparklesIcon width={14} height={14} />
-        {loading ? '生成中...' : result ? '別案を生成' : 'メタデータを生成'}
+        {loading ? '生成中…' : result ? '別案を生成' : 'メタデータを生成'}
       </button>
       {error && <p className="error-text">{error}</p>}
 
@@ -225,7 +225,7 @@ export function MetadataPanel(): React.JSX.Element {
                 title="タイトル案だけを再生成します"
               >
                 <ShuffleIcon width={12} height={12} />
-                {regeneratingTitles ? '再生成中...' : '再生成'}
+                {regeneratingTitles ? '再生成中…' : '再生成'}
               </button>
             </h3>
             {result.titles.map((t, i) => (
@@ -304,7 +304,7 @@ export function MetadataPanel(): React.JSX.Element {
                   title="固定コメント案だけを再生成します"
                 >
                   <ShuffleIcon width={12} height={12} />
-                  {regeneratingPinned ? '再生成中...' : '再生成'}
+                  {regeneratingPinned ? '再生成中…' : '再生成'}
                 </button>
                 <button
                   className="small-button"

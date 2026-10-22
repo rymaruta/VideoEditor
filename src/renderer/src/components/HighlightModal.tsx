@@ -92,7 +92,7 @@ export function HighlightModal({
         </div>
         {loading && (
           <p className="hint-text">
-            シーンチェンジと音量の変化を解析中...(素材の長さによっては数十秒かかる場合があります)
+            シーンチェンジと音量の変化を解析中…(素材の長さによっては数十秒かかる場合があります)
           </p>
         )}
         {error && <p className="error-text">{error}</p>}

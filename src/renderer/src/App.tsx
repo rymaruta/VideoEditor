@@ -77,14 +77,19 @@ const EDIT_TABS: TabDef[] = [
     icon: SparklesIcon,
     description: 'ショート動画のトレンド構成テンプレートを適用'
   },
-  { id: 'text', label: 'テキスト', icon: TypeIcon, description: 'テロップ(字幕)の追加・編集' },
+  { id: 'text', label: 'テロップ', icon: TypeIcon, description: 'テロップの追加・編集' },
   {
     id: 'narration',
     label: 'ボイス',
     icon: MicIcon,
     description: 'VOICEVOXによるナレーション音声合成'
   },
-  { id: 'thumbnail', label: 'サムネ', icon: ImageIcon, description: 'サムネイル画像の自動生成' },
+  {
+    id: 'thumbnail',
+    label: 'サムネイル',
+    icon: ImageIcon,
+    description: 'サムネイル画像の自動生成'
+  },
   {
     id: 'audio',
     label: 'BGM/SE',
@@ -410,7 +415,7 @@ function App(): React.JSX.Element {
                 )}
               </div>
               <div className={`tab-pane ${tab === 'inspector' ? 'active' : ''}`}>
-                <PanelBoundary name="インスペクター">
+                <PanelBoundary name="インスペクタ">
                   <Inspector />
                 </PanelBoundary>
               </div>

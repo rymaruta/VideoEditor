@@ -192,7 +192,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
         </button>
       </div>
       {error && <p className="error-text">{error}</p>}
-      {loading && <p className="hint-text">検索中...</p>}
+      {loading && <p className="hint-text">検索中…</p>}
       <audio ref={audioRef} style={{ display: 'none' }} />
       <div className="audio-library-results">
         {kind === 'music' &&
@@ -242,7 +242,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handleFavorite(t.id, t.audioUrl, `${t.title}.mp3`)}
                 >
-                  {busyId === `fav-${t.id}` ? '...' : <StarIcon width={14} height={14} />}
+                  {busyId === `fav-${t.id}` ? '…' : <StarIcon width={14} height={14} />}
                 </button>
               </div>
             </div>
@@ -294,7 +294,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
                   disabled={busyId !== null}
                   onClick={() => handleFavorite(s.id, s.previewUrl, `${s.name}.mp3`)}
                 >
-                  {busyId === `fav-${s.id}` ? '...' : <StarIcon width={14} height={14} />}
+                  {busyId === `fav-${s.id}` ? '…' : <StarIcon width={14} height={14} />}
                 </button>
               </div>
             </div>

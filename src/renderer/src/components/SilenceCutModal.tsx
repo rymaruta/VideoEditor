@@ -186,7 +186,7 @@ export function SilenceCutModal({
         />
         {running && (
           <p className="hint-text detect-progress">
-            検出中... ({detections.length}/{total})
+            検出中… ({detections.length}/{total})
             <button className="small-button" onClick={() => (abortRef.current = true)}>
               中断
             </button>

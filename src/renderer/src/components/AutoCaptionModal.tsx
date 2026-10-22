@@ -143,11 +143,11 @@ export function AutoCaptionModal({
             onChange={(e) => setKaraoke(e.target.checked)}
             disabled={loading}
           />
-          単語ごとにハイライト(カラオケ字幕)
+          単語ごとにハイライト(カラオケ風のテロップ)
         </label>
         {loading && (
           <p className="hint-text">
-            音声を認識中...(初回はモデルのダウンロードのため数分かかる場合があります。インターネット接続が必要です)
+            音声を認識中…(初回はモデルのダウンロードのため数分かかる場合があります。インターネット接続が必要です)
           </p>
         )}
         {error && <p className="error-text">{error}</p>}

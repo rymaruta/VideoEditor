@@ -91,7 +91,7 @@ export function FillerWordCutModal({
           onClose={onClose}
         />
         {loading && (
-          <p className="hint-text">音声を解析中...(初回はモデルのダウンロードが必要です)</p>
+          <p className="hint-text">音声を解析中…(初回はモデルのダウンロードが必要です)</p>
         )}
         {error && <p className="error-text">{error}</p>}
         {!loading && !error && ranges.length === 0 && (

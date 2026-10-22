@@ -637,7 +637,7 @@ export function TelopStyleDialog(): React.JSX.Element | null {
             onClick={handleOk}
             disabled={speechMode !== null && !selected}
           >
-            {speechMode ? 'この見た目を使う' : 'OK'}
+            {speechMode ? 'この見た目を使う' : '変更を保存'}
           </button>
         </div>
       </div>

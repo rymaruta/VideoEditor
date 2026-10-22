@@ -430,7 +430,7 @@ export function Inspector(): React.JSX.Element {
               </div>
               <div className="inspector-button-row">
                 <button className="small-button" onClick={handleDetectCrop} disabled={detecting}>
-                  {detecting ? '検出中...' : '被写体を自動検出'}
+                  {detecting ? '検出中…' : '被写体を自動検出'}
                 </button>
                 <button
                   className="small-button"

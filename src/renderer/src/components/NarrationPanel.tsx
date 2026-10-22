@@ -86,7 +86,7 @@ export function NarrationPanel(): React.JSX.Element {
       <p className="hint-text">
         VOICEVOX(無料の音声合成ソフト)と連携してナレーションを生成します。事前にVOICEVOXを起動しておいてください。
       </p>
-      {loadingSpeakers && <p className="hint-text">VOICEVOXに接続中...</p>}
+      {loadingSpeakers && <p className="hint-text">VOICEVOXに接続中…</p>}
       {connError && (
         <div className="error-text">
           {connError}
@@ -139,7 +139,7 @@ export function NarrationPanel(): React.JSX.Element {
             {generating ? (
               <>
                 <WandIcon width={14} height={14} />
-                生成中...
+                生成中…
               </>
             ) : (
               <>

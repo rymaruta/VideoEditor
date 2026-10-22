@@ -79,7 +79,7 @@ export function GameTrendPanel(): React.JSX.Element {
     const trending = await fetchTrendingGamingVideos(youtubeApiKey)
     if (trending.length === 0) {
       throw new Error(
-        '急上昇のゲーム動画を取得できませんでした。APIキーと通信環境を確認してください。'
+        '急上昇のゲーム動画を取得できませんでした。API キーと通信環境を確認してください。'
       )
     }
     setVideos(trending)
@@ -191,7 +191,7 @@ export function GameTrendPanel(): React.JSX.Element {
           type="password"
           value={youtubeApiKey}
           onChange={(e) => setYoutubeApiKey(e.target.value)}
-          placeholder="APIキーを入力"
+          placeholder="API キーを入力"
         />
       </div>
       <div className="youtube-field">
@@ -203,7 +203,7 @@ export function GameTrendPanel(): React.JSX.Element {
           type="password"
           value={geminiApiKey}
           onChange={(e) => setGeminiApiKey(e.target.value)}
-          placeholder="APIキーを入力"
+          placeholder="API キーを入力"
         />
         {envKeySources.geminiApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
@@ -225,7 +225,7 @@ export function GameTrendPanel(): React.JSX.Element {
       </div>
       <button className="primary-button" onClick={handleRefresh} disabled={loading || asking}>
         <SparklesIcon width={14} height={14} />
-        {loading ? '分析中...' : '最新トレンドを分析'}
+        {loading ? '分析中…' : '最新トレンドを分析'}
       </button>
       {error && <p className="error-text">{error}</p>}
 
@@ -259,7 +259,7 @@ export function GameTrendPanel(): React.JSX.Element {
             ))}
             {asking && (
               <div className="game-trend-chat-turn model pending">
-                {fetchingForQuestion ? '急上昇データを取得中...' : '回答を作成中...'}
+                {fetchingForQuestion ? '急上昇データを取得中…' : '回答を作成中…'}
               </div>
             )}
           </div>
@@ -301,8 +301,8 @@ export function GameTrendPanel(): React.JSX.Element {
           >
             {asking
               ? fetchingForQuestion
-                ? 'データを取得中...'
-                : '回答を作成中...'
+                ? 'データを取得中…'
+                : '回答を作成中…'
               : hasData
                 ? '質問する'
                 : '取得して質問する'}

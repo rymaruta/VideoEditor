@@ -552,7 +552,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
 
             {running && (
               <div className="long-form-progress">
-                {stage === 'scanning' && <p>音声を解析して候補を探しています...</p>}
+                {stage === 'scanning' && <p>音声を解析して候補を探しています…</p>}
                 {stage === 'transcribing' && (
                   <>
                     <p>
@@ -568,7 +568,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
                     </div>
                   </>
                 )}
-                {stage === 'planning' && <p>AIが構成を決めています...</p>}
+                {stage === 'planning' && <p>AIが構成を決めています…</p>}
                 {stage === 'tightening' && (
                   <p>
                     区間の無音を詰めています {progress.done} / {progress.total}
@@ -638,7 +638,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
 
         <div className="modal-actions">
           <button onClick={onClose} disabled={running}>
-            閉じる
+            キャンセル
           </button>
           {plan ? (
             <>
@@ -656,7 +656,7 @@ export function LongFormShortModal({ onClose }: { onClose: () => void }): React.
               disabled={running || !asset || videoAssets.length === 0}
             >
               <SparklesIcon width={14} height={14} />
-              {running ? '処理中...' : 'ショートを作る'}
+              {running ? '処理中…' : 'ショートを作る'}
             </button>
           )}
         </div>

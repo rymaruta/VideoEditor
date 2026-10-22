@@ -182,7 +182,7 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
             disabled={applying || selected.size === 0}
           >
             <PlusIcon width={14} height={14} />
-            {applying ? '配置中...' : 'タイムラインに配置'}
+            {applying ? '配置中…' : 'タイムラインに配置'}
           </button>
         </div>
       </div>

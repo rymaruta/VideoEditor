@@ -3029,7 +3029,7 @@ export function Timeline(): React.JSX.Element {
                     ) : (
                       <span
                         className="timeline-mismatch-icon"
-                        title="プロジェクトのアスペクト比と異なるため黒帯が入ります"
+                        title="プロジェクトの縦横比と異なるため黒帯が入ります"
                       >
                         <AlertTriangleIcon width={12} height={12} />
                       </span>
@@ -3061,7 +3061,7 @@ export function Timeline(): React.JSX.Element {
             })}
             {timedClips.length === 0 && (
               <p className="hint-text timeline-empty-hint">
-                メディアの素材をここへドラッグして並べてください
+                素材をここへドラッグして並べてください
               </p>
             )}
             <TimelinePlayhead

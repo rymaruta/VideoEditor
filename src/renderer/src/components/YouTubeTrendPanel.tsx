@@ -76,7 +76,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="APIキーを入力"
+          placeholder="API キーを入力"
         />
         {envKeySources.youtubeApiKey && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
@@ -100,7 +100,7 @@ export function YouTubeTrendPanel(): React.JSX.Element {
         </button>
       </div>
       {error && <p className="error-text">{error}</p>}
-      {loading && <p className="hint-text">読み込み中...</p>}
+      {loading && <p className="hint-text">読み込み中…</p>}
       <div className="youtube-results">
         {results.map((v) => (
           <div key={v.id} className="youtube-result-item">

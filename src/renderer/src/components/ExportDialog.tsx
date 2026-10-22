@@ -46,7 +46,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'video', label: '映像' },
   { id: 'audio', label: '音声' },
   { id: 'telop', label: 'テロップ' },
-  { id: 'output', label: '出力先' },
+  { id: 'output', label: '保存先' },
   { id: 'premiere', label: 'Premiere 用 XML' }
 ]
 

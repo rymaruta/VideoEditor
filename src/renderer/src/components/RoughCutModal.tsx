@@ -146,24 +146,24 @@ export function RoughCutModal({ onClose }: { onClose: () => void }): React.JSX.E
         className="modal roughcut-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="複数素材から自動ラフカット"
+        aria-label="複数素材から自動で仮編集"
         onClick={(e) => e.stopPropagation()}
       >
         <DialogHeader
           title={
             <>
               <TargetIcon width={16} height={16} />
-              複数素材から自動ラフカット
+              複数素材から自動で仮編集
             </>
           }
           onClose={onClose}
         />
         <p className="hint-text">
-          メディア内のすべての動画素材からハイライトを検出し、目標の尺に収まるよう自動で候補を選びます。チェックを外したり付けたりして調整してから、タイムラインの末尾に追加できます。
+          読み込んだすべての動画素材からハイライトを検出し、目標の尺に収まるよう自動で候補を選びます。チェックを外したり付けたりして調整してから、タイムラインの末尾に追加できます。
         </p>
         {loading && (
           <p className="hint-text">
-            解析中... ({progress}/{videoAssets.length} 素材)
+            解析中… ({progress}/{videoAssets.length} 素材)
           </p>
         )}
         {error && <p className="error-text">{error}</p>}

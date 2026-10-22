@@ -357,7 +357,7 @@ export function ThumbnailPanel(): React.JSX.Element {
       <div className="thumbnail-generate-buttons">
         <button className="primary-button" onClick={generateCandidates} disabled={loading}>
           <SparklesIcon width={14} height={14} />
-          {loading ? '生成中...' : '均等間隔で生成'}
+          {loading ? '生成中…' : '均等間隔で生成'}
         </button>
         <button className="small-button" onClick={generateHighlightCandidates} disabled={loading}>
           <WandIcon width={14} height={14} />
@@ -365,7 +365,7 @@ export function ThumbnailPanel(): React.JSX.Element {
         </button>
       </div>
       <p className="hint-text">
-        「均等間隔で生成」はタイムラインを一定間隔で抽出、「ハイライトから生成」はAIが検出した音量変化やカット点などの見せ場からフレームを抽出してサムネイルの候補にします。プロジェクトのアスペクト比に合わせて、9:16なら720x1280(縦)、16:9なら1280x720で作ります。
+        「均等間隔で生成」はタイムラインを一定間隔で抽出、「ハイライトから生成」はAIが検出した音量変化やカット点などの見せ場からフレームを抽出してサムネイルの候補にします。プロジェクトの縦横比に合わせて、9:16なら720x1280(縦)、16:9なら1280x720で作ります。
       </p>
       {error && <p className="error-text">{error}</p>}
       {candidates.length > 0 && (

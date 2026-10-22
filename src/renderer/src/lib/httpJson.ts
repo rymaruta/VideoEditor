@@ -71,13 +71,13 @@ function describeApiFailure(apiLabel: string, status: number, body: unknown): st
     return `${apiLabel}の利用上限に達しました。時間をおいてから、もう一度お試しください。`
   }
   if (isKeyProblem && status === 400) {
-    return `${apiLabel}のキーが正しくありません。入力したAPIキーを確認してください。`
+    return `${apiLabel}のキーが正しくありません。入力したAPI キーを確認してください。`
   }
   if (isDisabled || status === 403) {
-    return `${apiLabel}を利用する権限がありません。APIキーの設定と、そのキーでこのAPIが有効になっているかを確認してください。`
+    return `${apiLabel}を利用する権限がありません。API キーの設定と、そのキーでこのAPIが有効になっているかを確認してください。`
   }
   if (status === 401) {
-    return `${apiLabel}のキーが受け付けられませんでした。入力したAPIキーを確認してください。`
+    return `${apiLabel}のキーが受け付けられませんでした。入力したAPI キーを確認してください。`
   }
   if (status >= 500) {
     return `${apiLabel}が一時的に応答できませんでした。しばらく待ってから、もう一度お試しください。`
@@ -100,7 +100,7 @@ export function describeBodyFailure(apiLabel: string, message: unknown): string 
   // (タグ落とし・1行化は判定にも掛ける——タグの中の token 等で誤判定しないため)
   const full = flatten(typeof message === 'string' ? message : '')
   if (/credential|api ?key|client ?id|token|unauthor/i.test(full)) {
-    return `${apiLabel}のキーが受け付けられませんでした。入力したAPIキー(Client ID)を確認してください。`
+    return `${apiLabel}のキーが受け付けられませんでした。入力したAPI キー(Client ID)を確認してください。`
   }
   const raw = truncate(full)
   return raw ? `${apiLabel}がエラーを返しました: ${raw}` : `${apiLabel}がエラーを返しました`

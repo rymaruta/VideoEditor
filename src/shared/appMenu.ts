@@ -237,7 +237,7 @@ export function buildMenuTemplate(
         { label: '自動編集の画面', id: 'auto.screen' },
         SEP,
         { label: 'AIおまかせ全自動編集…', id: 'auto.allInOne' },
-        { label: '複数素材から自動ラフカット…', id: 'auto.roughCut' },
+        { label: '複数素材から自動で仮編集…', id: 'auto.roughCut' },
         { label: '長尺からショートを自動生成…', id: 'auto.longFormShort' }
       ]
     },

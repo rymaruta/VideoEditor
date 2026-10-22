@@ -693,7 +693,7 @@ export function MediaBin(): React.JSX.Element {
       ) : (
         <>
           {/* 自動編集(AIおまかせ・ラフカット・長尺からショート)はメニューバーの「自動編集」から開く */}
-          {importing && <p className="hint-text">読み込み中...</p>}
+          {importing && <p className="hint-text">読み込み中…</p>}
           {error && <p className="error-text">{error}</p>}
           <div className={`media-list ${layout === 'grid' ? 'media-grid' : ''}`}>
             {assets.length === 0 && (

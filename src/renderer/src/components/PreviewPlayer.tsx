@@ -1649,7 +1649,7 @@ export function PreviewPlayer(): React.JSX.Element {
               {project.aspectRatio === '9:16' && (
                 <button
                   className={`icon-button ${showShortsUi ? 'active' : ''}`}
-                  title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIに字幕が隠れないか確認できます)"
+                  title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIにテロップが隠れないか確認できます)"
                   onClick={() => setShowShortsUi((v) => !v)}
                 >
                   <YoutubeIcon width={14} height={14} />

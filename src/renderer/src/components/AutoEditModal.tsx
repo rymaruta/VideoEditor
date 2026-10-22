@@ -147,7 +147,8 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
         />
         <p className="hint-text">
           配置した動画素材からハイライトを検出し、傾向の異なる5パターンの編集案を自動生成します。Gemini
-          APIキーを設定している場合は、候補シーンの画像を見せて盛り上がり度を採点させ、選定精度を高めます。気に入ったものはタイムラインに適用し、
+          API
+          キーを設定している場合は、候補シーンの画像を見せて盛り上がり度を採点させ、選定精度を高めます。気に入ったものはタイムラインに適用し、
           <ThumbsUpIcon className="inline-icon" width={12} height={12} />
           <ThumbsDownIcon className="inline-icon" width={12} height={12} />
           (良い・いまいち)で評価すると次回以降の生成に好みが反映されます。
@@ -156,7 +157,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
         <div className="autoedit-toolbar">
           <button className="small-button" onClick={startRun} disabled={loading}>
             <RefreshIcon width={14} height={14} />
-            {loading ? '生成中...' : '再生成'}
+            {loading ? '生成中…' : '再生成'}
           </button>
           {geminiApiKey && (
             <label className="autoedit-gemini-toggle">
@@ -214,7 +215,7 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
         )}
         {loading && (
           <p className="hint-text">
-            解析中...
+            解析中…
             素材のハイライトを検出しています(この画面は閉じても構いません。生成は続き、終わったら「AIおまかせ全自動編集」からいつでも結果を開けます)
           </p>
         )}
@@ -296,11 +297,11 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                       className="small-button autoedit-finish-button"
                       onClick={() => handleApplyAndFinish(p)}
                       disabled={finishingId !== null || appliedId === p.id}
-                      title="タイムラインに適用した上で、字幕の自動文字起こしと投稿メタデータ生成まで一括で行います"
+                      title="タイムラインに適用した上で、テロップの自動文字起こしと投稿メタデータ生成まで一括で行います"
                     >
                       <MicIcon width={12} height={12} />
                       {finishingId === p.id
-                        ? '字幕・メタデータを生成中...'
+                        ? 'テロップ・メタデータを生成中…'
                         : '適用して自動で仕上げる'}
                     </button>
                     {appliedId === p.id && finishingId === p.id && (
@@ -308,14 +309,14 @@ export function AutoEditModal({ onClose }: { onClose: () => void }): React.JSX.E
                     )}
                     {appliedId === p.id && finishResult && (
                       <p className="hint-text autoedit-finish-result">
-                        字幕を{finishResult.captionCount}件追加しました
+                        テロップを{finishResult.captionCount}件追加しました
                         {finishResult.metadata
                           ? '。メタデータも生成しました。「投稿準備」タブでご確認ください。'
                           : finishResult.metadataError
                             ? '。'
                             : geminiApiKey
                               ? '。メタデータの生成に失敗しました。'
-                              : '。メタデータも生成するにはGemini APIキーを設定してください。'}
+                              : '。メタデータも生成するにはGemini API キーを設定してください。'}
                       </p>
                     )}
                     {appliedId === p.id && finishResult && finishResult.transcribeFailed > 0 && (

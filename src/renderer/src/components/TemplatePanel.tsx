@@ -77,7 +77,7 @@ export function TemplatePanel(): React.JSX.Element {
         <h2>トレンド構成テンプレート</h2>
       </div>
       <p className="hint-text">
-        ショート動画でよく使われる構成パターンです。適用するとアスペクト比が9:16になり、字幕プレースホルダーが自動配置されます(テキストは後で編集できます)。既にテロップがある場合は置き換えられるため、実行前に確認が表示されます。
+        ショート動画でよく使われる構成パターンです。適用すると縦横比が9:16になり、テロップのプレースホルダーが自動配置されます(テキストは後で編集できます)。既にテロップがある場合は置き換えられるため、実行前に確認が表示されます。
       </p>
       {error && <p className="error-text">{error}</p>}
       <div className="template-list">
@@ -107,17 +107,17 @@ export function TemplatePanel(): React.JSX.Element {
                 className="small-button"
                 disabled={videoAssets.length === 0 || autoCutting !== null}
                 onClick={() => handleAutoCut(t.id)}
-                title="メディアの素材からハイライトを検出し、自動でタイムラインを組み立てます"
+                title="読み込んだ素材からハイライトを検出し、自動でタイムラインを組み立てます"
               >
                 <TargetIcon width={14} height={14} />
-                {autoCutting === t.id ? '解析中...' : '素材から自動カット'}
+                {autoCutting === t.id ? '解析中…' : '素材から自動カット'}
               </button>
             </div>
           </div>
         ))}
       </div>
       {clipCount === 0 && videoAssets.length === 0 && (
-        <p className="hint-text">先にメディアを追加してください</p>
+        <p className="hint-text">先に素材を追加してください</p>
       )}
     </div>
   )
