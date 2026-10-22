@@ -59,6 +59,8 @@ import {
   placedAutoTelops
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPlacement'
+import { restorePipelineFromProject } from '../lib/pipelineRestore'
+import { heuristicJudgements } from '@shared/structure/scenes'
 import {
   AI_EFFECT_KINDS,
   AUTO_PLACE_CONFIDENCE,
@@ -244,6 +246,13 @@ interface PipelineState {
   reset: () => void
   /** 自動編集の結果(構成・提案・要確認など)だけを捨てる。取り込んだフォルダは残す */
   resetResults: () => void
+  /**
+   * 開き直した企画に残っている結果(同期・文字起こし・仮編集)から、工程の済み・構成・仮編集の要約を
+   * 作り直す。開き直すと自動編集の画面が空(工程が全部「待機」・構成が空・ショートを作れない)だった
+   */
+  restoreFromProject: () => void
+  /** 開き直した企画から作り直した状態か。企画に残らず作り直せなかったもの(画面に出す) */
+  restored: { missing: string[] } | null
 }
 
 const initialSteps = (): Record<StepId, StepStatus> => ({
@@ -1297,6 +1306,29 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     effectChosen: [],
     lastSpans: [],
     speechTelops: [],
+    restored: null,
+    restoreFromProject: () => {
+      if (get().running || get().scenes.length > 0) return
+      const project = useProjectStore.getState().project
+      // 番組の種類は設定にしか無いので、ゲーム実況で取り込んだ回(カメラの役割がある)はゲーム実況で切る
+      const kind = project.multicam?.sources.some((src) => src.cameraRole)
+        ? 'game'
+        : useSettingsStore.getState().episodeKind
+      const r = restorePipelineFromProject(project, kind)
+      if (!r) return
+      set((s) => ({
+        steps: { ...s.steps, ...r.steps },
+        scenes: r.scenes,
+        judgements: r.judgements,
+        planJudgements: null,
+        judgeSource: 'heuristic',
+        keep: {},
+        hype: [],
+        roughCut: r.roughCut,
+        restored: { missing: r.missing }
+      }))
+      log('保存した企画から、自動編集の結果(工程・構成・仮編集の要約)を読み直しました')
+    },
     setEffectChosen: (id, chosen) => {
       const project = useProjectStore.getState().project
       const spans = project.multicam ? spansOfClips(project.clips, project.multicam) : []
@@ -1475,6 +1507,19 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       runCanceled = false
       set({ running: true })
       try {
+        // 開き直した企画のゲーム実況は、声の盛り上がりを測り直してから(山の前後に絞るのに使う)
+        const project = useProjectStore.getState().project
+        const kind = useSettingsStore.getState().episodeKind
+        if (get().restored && kind === 'game' && get().hype.length === 0 && project.multicam) {
+          setStep('cut', { state: 'run', percent: 0, note: '声の盛り上がりを測っています' })
+          const hype = hypeMomentsFor(
+            project,
+            project.multicam,
+            await activityOf(project, project.multicam)
+          )
+          const scenes = scenesFor(project, project.multicam, { kind, hype })
+          set({ hype, scenes, judgements: heuristicJudgements(scenes, kind) })
+        }
         await buildAndApply()
       } catch (e) {
         const msg = formatIpcError(e)
@@ -1530,7 +1575,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         effects: [],
         effectChosen: [],
         lastSpans: [],
-        speechTelops: []
+        speechTelops: [],
+        restored: null
       }))
     },
 
@@ -1560,7 +1606,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         effects: [],
         effectChosen: [],
         lastSpans: [],
-        speechTelops: []
+        speechTelops: [],
+        restored: null
       })
     },
 
@@ -1967,6 +2014,8 @@ onProjectSwitch(() => {
   // 新しいプロジェクトへ書き込まれるため、切替時はまず処理を中止する。
   if (pipeline.running) pipeline.cancel()
   pipeline.resetResults()
+  // 開いた企画は、知らせの後に入る。入ってから、企画に残っている結果で画面を作り直す
+  queueMicrotask(() => usePipelineStore.getState().restoreFromProject())
 })
 
 // 自動編集の最中は、PC をスリープさせず、タスクバーに進み具合を出す。終わったら知らせる

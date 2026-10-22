@@ -1489,6 +1489,9 @@ h3 {
   color: white;
 }
 
+/* 文字・間隔・アイコンはプレビューの高さ(cqh)に比例させる。固定の px だと、小さいプレビューで
+   帯が上へ伸び、実際(高さの 84〜94%)より上に説明文が来て、上げた発言テロップに重なって見えた。
+   帯・右の列の位置は ShortsUiMockup が実際の比率(shortsUiMockupLayout)で置く */
 .shorts-ui-mockup {
   position: absolute;
   inset: 0;
@@ -1496,32 +1499,37 @@ h3 {
   z-index: 1;
   font-family: sans-serif;
   color: white;
+  container-type: size;
 }
 
 .shorts-ui-badge {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  font-size: 9.5px;
+  top: 1.2cqh;
+  left: 1.2cqh;
+  font-size: 1.4cqh;
   background: rgba(0, 0, 0, 0.55);
-  padding: 3px 7px;
+  padding: 0.4cqh 1cqh;
   border-radius: 4px;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .shorts-ui-rail {
   position: absolute;
-  right: 3%;
-  bottom: 18%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  justify-content: space-between;
+}
+
+.shorts-ui-rail svg {
+  width: 3.6cqh;
+  height: 3.6cqh;
 }
 
 .shorts-ui-avatar {
-  width: 34px;
-  height: 34px;
+  width: 4.6cqh;
+  height: 4.6cqh;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.35);
   border: 2px solid white;
@@ -1531,14 +1539,15 @@ h3 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
+  gap: 0.4cqh;
+  font-size: 1.4cqh;
+  white-space: nowrap;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .shorts-ui-disc {
-  width: 26px;
-  height: 26px;
+  width: 3.6cqh;
+  height: 3.6cqh;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.25);
   border: 2px solid rgba(255, 255, 255, 0.7);
@@ -1546,26 +1555,25 @@ h3 {
 
 .shorts-ui-bottom {
   position: absolute;
-  left: 3%;
-  right: 18%;
-  bottom: 6%;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  justify-content: space-between;
+  overflow: hidden;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .shorts-ui-channel {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 0.8cqh;
+  font-size: 1.7cqh;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .shorts-ui-avatar-small {
-  width: 18px;
-  height: 18px;
+  width: 2.6cqh;
+  height: 2.6cqh;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.35);
   border: 1px solid white;
@@ -1573,24 +1581,33 @@ h3 {
 }
 
 .shorts-ui-follow {
-  font-size: 10px;
+  font-size: 1.4cqh;
   font-weight: 400;
   border: 1px solid white;
   border-radius: 4px;
-  padding: 2px 8px;
-  margin-left: 4px;
+  padding: 0.2cqh 1.1cqh;
+  margin-left: 0.6cqh;
 }
 
 .shorts-ui-desc {
-  font-size: 11px;
+  font-size: 1.55cqh;
   opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .shorts-ui-music {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 10.5px;
+  gap: 0.7cqh;
+  font-size: 1.45cqh;
+  white-space: nowrap;
+}
+
+.shorts-ui-music svg {
+  width: 1.9cqh;
+  height: 1.9cqh;
 }
 
 .shorts-safe-area {
@@ -4683,6 +4700,12 @@ h3 {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.media-name-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .media-col-dur,
 .media-col-res {
   text-align: right;
@@ -5508,6 +5531,24 @@ h3 {
 .auto-edit-step.run .auto-edit-step-state {
   color: #8fb4ff;
 }
+.auto-edit-restored {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.auto-edit-restored p {
+  margin: 0 0 2px;
+}
+
+.auto-edit-restored ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
 .auto-edit-next {
   margin: 4px 14px;
 }

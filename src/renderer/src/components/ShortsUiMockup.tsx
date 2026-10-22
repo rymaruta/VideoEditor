@@ -1,3 +1,5 @@
+import { shortsUiMockupLayout } from '../lib/shortsSafeArea'
+
 function HeartGlyph(): React.JSX.Element {
   return (
     <svg width="26" height="26" viewBox="0 0 24 24" fill="white">
@@ -41,10 +43,12 @@ function MusicNoteGlyph(): React.JSX.Element {
 }
 
 export function ShortsUiMockup(): React.JSX.Element {
+  // 帯・右の列は実際の比率で置く(書き出しで発言テロップを上げる位置と同じ定数)
+  const layout = shortsUiMockupLayout()
   return (
     <div className="shorts-ui-mockup">
       <div className="shorts-ui-badge">Shorts UI プレビュー(参考イメージ)</div>
-      <div className="shorts-ui-rail">
+      <div className="shorts-ui-rail" style={layout.rail}>
         <div className="shorts-ui-avatar" />
         <div className="shorts-ui-rail-item">
           <HeartGlyph />
@@ -62,7 +66,7 @@ export function ShortsUiMockup(): React.JSX.Element {
           <div className="shorts-ui-disc" />
         </div>
       </div>
-      <div className="shorts-ui-bottom">
+      <div className="shorts-ui-bottom" style={layout.band}>
         <div className="shorts-ui-channel">
           <span className="shorts-ui-avatar-small" />
           @channel_name

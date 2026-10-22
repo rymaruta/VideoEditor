@@ -54,7 +54,7 @@ const BASE_KINDS: readonly TelopKindInfo[] = [
     how: 'auto',
     category: 'speech',
     use: '出演者の発言を下に出す(文字起こしから自動)',
-    sample: 'ここの水 めっちゃおいしい!',
+    sample: 'この水 おいしい!',
     seconds: 2.5,
     style: () => defaultTextStyle({ fontSize: 48, outlineWidth: 5, bold: true })
   },
@@ -111,14 +111,7 @@ const BASE_KINDS: readonly TelopKindInfo[] = [
     '宮古駅 __→ 車で20分 →__ 浄土ヶ浜',
     3.5
   ),
-  kind(
-    'narration',
-    'manual',
-    'speech',
-    'ナレーションを明朝で',
-    '一行が向かったのは、島の北端だった。',
-    4
-  ),
+  kind('narration', 'manual', 'speech', 'ナレーションを明朝で', '一行は島の北端へ向かった。', 4),
   kind('quiz', 'manual', 'game', '出演者へのお題・問題', '**Q.** この島の人口は?', 5),
   kind('counter', 'manual', 'game', '食べた数・残り時間などを出し続ける', '完食まで**3皿**', 10),
   kind('hand', 'manual', 'reaction', '画の一部を手書きの文字と矢印で指す', 'ここ注目!', 3)

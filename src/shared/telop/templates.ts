@@ -1612,7 +1612,9 @@ export const TELOP_TEMPLATES: readonly TelopTemplate[] = [
     charAnimation: 'zoom'
   }),
   tpl('play-boss', 'ボス戦', 'play', 'ボスの登場・ボス戦の始まり', 'BOSS\n**炎の番人**', 3.5, {
+    // 上の 3 分の 1 の帯に。真ん中に出す「絶叫」と同時に出すと重なっていた
     position: 'center',
+    customPosition: { x: 0.5, y: 0.27 },
     fontWeight: 900,
     fontSize: 54,
     color: '#ffffff',
@@ -1779,7 +1781,8 @@ export const TELOP_TEMPLATES: readonly TelopTemplate[] = [
     'CHAPTER 3\n__忘れられた砦__',
     6,
     {
-      customPosition: TOP_LEFT,
+      // 左上の「実況者の名前」(出し続ける)の下。同じ左上に置くと、同時に使ったときに重なっていた
+      customPosition: { x: TOP_LEFT.x, y: 0.17 },
       position: 'top',
       fontWeight: 900,
       fontSize: 32,

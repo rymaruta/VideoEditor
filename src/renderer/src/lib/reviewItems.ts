@@ -6,6 +6,7 @@ import type { QcReport } from '../store/qcStore'
 import { placedUtterances } from './transcriptTimeline'
 import { autoTelopKey, placedTelopKeys } from '@shared/telop/manual'
 import { stripTelopMarkup } from '@shared/telop/render'
+import { joinTelopLines } from '@shared/qc/telop'
 
 /**
  * 要確認の一覧(計画書 §5.13)。自動編集の各工程が「自信の低い箇所」をここへ出し、人はここから直す。
@@ -117,7 +118,7 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       key: `telop-face:${r.key ?? r.startTime.toFixed(2)}`,
       area: 'telop',
       kind: 'テロップと顔',
-      text: `「${text.replace(/\n/g, ' ').slice(0, 30)}」— 上下どちらに置いても顔に掛かります。位置を確かめてください`,
+      text: `「${joinTelopLines(text).slice(0, 30)}」— 上下どちらに置いても顔に掛かります。位置を確かめてください`,
       at: overlay?.startTime ?? r.startTime,
       overlayId: overlay?.id
     })

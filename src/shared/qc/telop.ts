@@ -54,9 +54,21 @@ function visibleChars(text: string): number {
  * 英数字どうしの間の空白・改行は1つの空白として残す(「Good morning」を「Goodmorning」にして、
  * 言葉の境目をまたいだ別の言葉に当てない)。探すのは1枚の中だけ(別のテロップどうしはつながない)
  */
+const alnum = (c: string | undefined): boolean => c !== undefined && /[A-Za-z0-9]/.test(c)
+
 function searchText(text: string): string {
-  const alnum = (c: string | undefined): boolean => c !== undefined && /[A-Za-z0-9]/.test(c)
   return text.replace(/\s+/g, (ws: string, at: number, all: string) =>
+    alnum(all[at - 1]) && alnum(all[at + ws.length]) ? ' ' : ''
+  )
+}
+
+/**
+ * 何行かのテロップを、確認の文に引くための1行にする。日本語どうしの改行は詰め、英数字どうしの改行だけ
+ * 空白にする(`searchText` と同じ見分け方。改行を一律に空白にすると「身を 投げて」と日本語の途中に
+ * 空白が入っていた)。行の中の空白はそのまま
+ */
+export function joinTelopLines(text: string): string {
+  return text.replace(/[ \t]*\r?\n[ \t]*/g, (ws: string, at: number, all: string) =>
     alnum(all[at - 1]) && alnum(all[at + ws.length]) ? ' ' : ''
   )
 }
@@ -75,7 +87,7 @@ export function telopIssues(
     const text = stripTelopMarkup(o.text)
     if (!text.trim()) continue
     const base = { start: o.startTime, end: o.endTime, overlayId: o.id }
-    const label = text.replace(/\n/g, ' ').slice(0, 20)
+    const label = joinTelopLines(text).slice(0, 20)
 
     const b = telopBounds(ctx, o, canvas)
     const lo = TITLE_SAFE_MARGIN - SAFE_TOLERANCE

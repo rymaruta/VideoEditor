@@ -179,6 +179,15 @@ export function hudStackBase<
   return telops.some((t, i) => managed[i] && t.style.customPosition?.y === base) ? base : undefined
 }
 
+/**
+ * YouTube Shorts の画面UIの位置(画面の高さ・幅に対する比。実測 402x714px の表示)。
+ * 下部の帯(チャンネル名・説明文・楽曲)は高さの 84〜94%、右の列(いいね・コメント・共有)は
+ * 横 88.5〜97%・縦 46〜82%。プレビューに重ねる画面イメージ(`ShortsUiMockup`)もこの値で置く
+ */
+export const SHORTS_UI_BAND_TOP = 0.84
+export const SHORTS_UI_BAND_BOTTOM = 0.94
+export const SHORTS_UI_RAIL = { left: 0.885, right: 0.97, top: 0.46, bottom: 0.82 } as const
+
 /** 縦型ショートで、下の発言テロップの下端をここ(画面の高さに対する比)より上に置く */
 export const SHORTS_TELOP_BOTTOM = 0.82
 

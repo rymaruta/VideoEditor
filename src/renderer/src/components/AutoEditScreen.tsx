@@ -111,6 +111,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const effectChosen = usePipelineStore((s) => s.effectChosen)
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const editNote = usePipelineStore((s) => s.editNote)
+  const restored = usePipelineStore((s) => s.restored)
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
@@ -275,6 +276,22 @@ export function AutoEditScreen(): React.JSX.Element | null {
               </span>
             </div>
           </div>
+          {restored && (
+            <div className="auto-edit-restored" role="note" aria-label="開き直した企画">
+              <p>保存した企画から、工程・構成・仮編集の結果を読み直しました。</p>
+              <ul>
+                {restored.missing.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+                {!scan && (
+                  <li>
+                    工程を最初からやり直すには、ファイル &gt; 新しい回を作る…
+                    で収録フォルダを指定してください。
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
           <ol className="auto-edit-step-list">
             {STEPS.map((s) => {
               const st = steps[s.id]

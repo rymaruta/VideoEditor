@@ -9,7 +9,7 @@ import { v4 as uuid } from 'uuid'
 import { onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { canPreviewFile, planLoadedAssetPreview } from '../lib/canPreview'
-import { isAspectMismatch } from '../lib/aspect'
+import { hasLetterboxInMain } from '../lib/aspect'
 import { isImagePath, isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
 import { stillAssetFrom } from '../lib/stillAsset'
 import { relinkRefusal } from '../lib/relinkCheck'
@@ -33,6 +33,7 @@ export function MediaBin(): React.JSX.Element {
   const assets = useProjectStore((s) => s.project.assets)
   const projectId = useProjectStore((s) => s.project.id)
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
+  const mainClips = useProjectStore((s) => s.project.clips)
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const videoOverlayTracks = useProjectStore((s) => s.project.videoOverlayTracks)
   const addAssets = useProjectStore((s) => s.addAssets)
@@ -678,7 +679,9 @@ export function MediaBin(): React.JSX.Element {
             )}
             {assets.map((asset) => {
               const isMissing = missingAssetIds.includes(asset.id)
-              const mismatch = asset.hasVideo && !isMissing && isAspectMismatch(asset, aspectRatio)
+              // 黒帯が入るのは本編(V1)に置いた所だけ(ワイプは枠に収めるので入らない)
+              const mismatch =
+                !isMissing && hasLetterboxInMain(asset, { aspectRatio, clips: mainClips })
               return (
                 <div
                   key={asset.id}
@@ -722,7 +725,11 @@ export function MediaBin(): React.JSX.Element {
                         }
                       />
                     )}
-                    {asset.fileName}
+                    {/* 名前は文字だけの箱に入れて省略記号を付ける(flex の中の裸の文字には text-overflow が
+                        効かず、「GAME_0001.ı」のように文字の途中で切れていた)。全体はツールチップで */}
+                    <span className="media-name-text" title={asset.fileName}>
+                      {asset.fileName}
+                    </span>
                   </span>
                   <span className="media-col-dur">
                     {formatTimecode(asset.duration, asset.fps || 30)}

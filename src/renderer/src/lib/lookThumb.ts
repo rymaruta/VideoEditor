@@ -26,6 +26,78 @@ export function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: numbe
   ctx.fillRect(0, 0, w, h)
 }
 
+/** これより長い見本は行に分ける(全角の文字数。半角は約半分に数える) */
+const THUMB_SPLIT_UNITS = 7
+/** 分けたときの1行の長さの目安 */
+const THUMB_LINE_UNITS = 9
+/** 太字・下線などの印(行を分けると印が壊れるので、印のある行は分けない) */
+const MARKUP = /[*_[\]{}~`|<>]/
+
+const NO_LINE_START = /[ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮー、。,.!?！？)）」』…・:：]/
+const PARTICLE = /[はがをにでのもとへ]/
+const HIRA = /[ぁ-ゖ]/
+const KANJI = /[一-龯々]/
+const KANJI_KATA = /[一-龯々ァ-ヺ]/
+const units = (c: string): number => (/[\x20-\x7e]/.test(c) ? 0.55 : 1)
+const isAlnum = (c: string | undefined): boolean => c !== undefined && /[A-Za-z0-9]/.test(c)
+
+/**
+ * 見本の文を、小さな見本でも読める長さの行に分ける。長い1行のまま描くと、枠の横幅に合わせて
+ * 縮めるので文字が潰れて読めなかった(発言テロップ・方言の補足・ナレーションなど)。
+ * 読点・空白の後ろで分けやすくし、英数字の途中では分けない。縦書き・印のある行はそのまま
+ */
+export function thumbSampleText(text: string, style: Pick<TextStyle, 'vertical'>): string {
+  if (style.vertical) return text
+  return text
+    .split('\n')
+    .map((line) => {
+      const chars = [...line]
+      const total = chars.reduce((t, c) => t + units(c), 0)
+      if (MARKUP.test(line) || total <= THUMB_SPLIT_UNITS) return line
+      const n = Math.max(2, Math.min(3, Math.round(total / THUMB_LINE_UNITS)))
+      const out: string[] = []
+      let from = 0
+      for (let k = 1; k < n; k++) {
+        const target = (total * k) / n
+        let best = -1
+        let bestCost = Infinity
+        let acc = 0
+        for (let i = 0; i < chars.length; i++) {
+          acc += units(chars[i])
+          const at = i + 1 // chars[at] の前で分ける
+          if (at <= from || at >= chars.length) continue
+          if (isAlnum(chars[at - 1]) && isAlnum(chars[at])) continue
+          // 行の頭に来てはいけない文字(小さい仮名・長音・句読点・閉じ括弧)の前では分けない
+          if (NO_LINE_START.test(chars[at])) continue
+          const good =
+            /[、。,.!?！？\s)）」』]/.test(chars[at - 1]) || /[\s(（「『]/.test(chars[at])
+          // 助詞の後ろ(「本当に/おいしい」「中華街の/入り口」)・仮名から漢字への変わり目も分けやすい。
+          // 漢字の言葉の途中・送り仮名や仮名の続きの前は分けにくい
+          const prev = chars[at - 1]
+          const next = chars[at]
+          const soft = PARTICLE.test(prev) || (HIRA.test(prev) && KANJI_KATA.test(next))
+          const hard =
+            KANJI.test(prev) && KANJI.test(next)
+              ? 2
+              : HIRA.test(next) && !PARTICLE.test(prev)
+                ? 1
+                : 0
+          const cost = Math.abs(acc - target) - (good ? 3 : soft ? 1.5 : 0) + hard
+          if (cost < bestCost) {
+            bestCost = cost
+            best = at
+          }
+        }
+        if (best < 0) break
+        out.push(chars.slice(from, best).join('').trim())
+        from = best
+      }
+      out.push(chars.slice(from).join('').trim())
+      return out.filter(Boolean).join('\n')
+    })
+    .join('\n')
+}
+
 /**
  * 見本を1枚描く(置き場所は無視して中央に、動きを終えた姿で)。
  * 見た目の一覧のほか、項目ごとのマイ設定の小さな見本にも使う。
@@ -58,7 +130,12 @@ export function drawLookThumb(
   }
   // 見本の枠の縦横比に合わせた仮想キャンバス(横長の見本で縦に潰れないように)
   const base = { w: BASE_CANVAS.h * (w / h), h: BASE_CANVAS.h }
-  const source = { text: text || ' ', startTime: 0, endTime: 1e9, style: centered }
+  const source = {
+    text: thumbSampleText(text, style) || ' ',
+    startTime: 0,
+    endTime: 1e9,
+    style: centered
+  }
   // 小さな見本でも読めるよう、文字の塊が枠の 8 割ほどになるまで寄って描く
   // (仮想キャンバスを小さくする = 拡大。塊が収まる大きさなので折り返しは変わらない)
   const layout = layoutTelop(ctx as unknown as TelopContext, source, base)

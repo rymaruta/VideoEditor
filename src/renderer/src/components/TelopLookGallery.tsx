@@ -131,7 +131,8 @@ function LookThumb({ item, epoch }: { item: LookItem; epoch: number }): React.JS
   }, [visible, item])
   useEffect(() => {
     const c = ref.current
-    if (c && visible) drawLookThumb(c, item.text, item.style)
+    // 文字の小さい型(方言の補足など)も読める大きさまで寄る(4 倍までだと小さいまま潰れていた)
+    if (c && visible) drawLookThumb(c, item.text, item.style, 0.8, 8)
   }, [item, epoch, visible, fontEpoch])
   return (
     <canvas
