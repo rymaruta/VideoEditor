@@ -8,6 +8,7 @@ import { ffmpegPath, ffprobePath } from '@main/ffmpegService'
 import {
   existingPremiereSidecars,
   exportPremiereXml,
+  telopPngsUsedAsAssets,
   type PremiereExportPayload
 } from '@main/premiereExportService'
 import { appendTelopLayerImages, beginTelopLayer, withTelopLayer } from '@main/telopLayerStage'
@@ -267,5 +268,107 @@ describe('exportPremiereXml(main)', () => {
     expect(xml).toContain('premiereTrackType="Mono"')
     expect(xml).not.toContain('currentExplodedTrackIndex')
     expect(xml).toContain('<channelcount>1</channelcount>')
+  })
+
+  it('透過 PNG: 中止・失敗のときは前回の PNG を消さない(一時フォルダに書いて最後に入れ替える)', async () => {
+    const dir = join(work, 'keep_telop')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'telop_000001.png'), 'previous')
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), work, 'png'),
+      outputPath: join(work, 'keep.xml'),
+      telopLayer: layer
+    }
+    // チャンネル数を調べている所(PNG を写し終えた後)で中止する
+    const ac = new AbortController()
+    await expect(
+      withTelopLayer(layer, () =>
+        exportPremiereXml(payload, payload.outputPath, {
+          ffmpegPath,
+          signal: ac.signal,
+          probeChannels: async () => {
+            ac.abort()
+            return 2
+          }
+        })
+      )
+    ).rejects.toThrow('EXPORT_CANCELED')
+    expect(readFileSync(join(dir, 'telop_000001.png'), 'utf-8')).toBe('previous')
+    expect(readdirSync(dir)).toEqual(['telop_000001.png'])
+    // 一時フォルダは残らない
+    expect(readdirSync(work).filter((n) => n.startsWith('keep_telop.partial-'))).toEqual([])
+    // 最後まで行けば入れ替わる
+    const layer2 = await stagedLayer()
+    await withTelopLayer(layer2, () =>
+      exportPremiereXml({ ...payload, telopLayer: layer2 }, payload.outputPath, { ffmpegPath })
+    )
+    expect(readdirSync(dir).sort()).toEqual(['telop_000001.png', 'telop_000002.png'])
+    expect(readFileSync(join(dir, 'telop_000001.png')).subarray(1, 4).toString()).toBe('PNG')
+    expect(readdirSync(work).filter((n) => n.startsWith('keep_telop.partial-'))).toEqual([])
+  })
+
+  it('透過 PNG: そのフォルダの telop_*.png を企画の素材に使っていれば、消さずに止める', async () => {
+    const dir = join(work, 'asset_telop')
+    mkdirSync(dir, { recursive: true })
+    const used = join(dir, 'telop_000003.png')
+    writeFileSync(used, 'asset')
+    const p = project()
+    p.assets.push({
+      id: 'cg',
+      filePath: used,
+      fileName: 'telop_000003.png',
+      duration: 0,
+      width: W,
+      height: H,
+      fps: 30,
+      hasAudio: false,
+      hasVideo: true,
+      still: true
+    })
+    expect(telopPngsUsedAsAssets(dir, p.assets)).toEqual(['telop_000003.png'])
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(p, work, 'png'),
+      outputPath: join(work, 'asset.xml'),
+      telopLayer: layer
+    }
+    await expect(
+      withTelopLayer(layer, () => exportPremiereXml(payload, payload.outputPath, { ffmpegPath }))
+    ).rejects.toThrow(/素材として使われている/)
+    expect(readFileSync(used, 'utf-8')).toBe('asset')
+  })
+
+  it('チャンネル数の ffprobe は同時に 4 つまで', async () => {
+    const p = project()
+    p.assets = Array.from({ length: 10 }, (_, i) => ({
+      ...p.assets[0],
+      id: `a${i}`,
+      filePath: `/media/a${i}.mp4`
+    }))
+    p.clips = p.assets.map((a, i) => ({
+      id: `c${i}`,
+      assetId: a.id,
+      inPoint: 0,
+      outPoint: 0.5,
+      speed: 1
+    }))
+    let running = 0
+    let peak = 0
+    let calls = 0
+    const payload = { ...base(p, work, 'text'), outputPath: join(work, 'probe.xml') }
+    await exportPremiereXml(payload, payload.outputPath, {
+      ffmpegPath,
+      probeChannels: async () => {
+        calls++
+        running++
+        peak = Math.max(peak, running)
+        await new Promise((r) => setTimeout(r, 5))
+        running--
+        return 2
+      }
+    })
+    expect(calls).toBe(10)
+    expect(peak).toBeLessThanOrEqual(4)
   })
 })

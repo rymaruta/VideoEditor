@@ -528,6 +528,61 @@ describe('Apple の仕様の形(Listing 3-15/3-16/3-17)', () => {
     ])
   })
 
+  it('映像に付いていないステレオの音(BGM)も、L と R を groupindex 1 で互いにリンクする', () => {
+    const p = listing317()
+    p.assets.push(
+      asset('bgm', {
+        hasVideo: false,
+        width: 0,
+        height: 0,
+        filePath: '/m/bgm.wav',
+        fileName: 'bgm.wav'
+      })
+    )
+    p.sequence.audioTracks.push({
+      id: 'b',
+      name: 'BGM',
+      muted: false,
+      volume: 1,
+      duckingEnabled: false,
+      items: [
+        {
+          kind: 'audio',
+          id: 'b1',
+          assetId: 'bgm',
+          startFrame: 0,
+          durationFrames: 200,
+          sourceIn: 0,
+          speed: 1,
+          origin: 'auto'
+        }
+      ]
+    })
+    const { xml: bx } = buildPremiereXml(p)
+    const d = new DOMParser().parseFromString(bx, 'text/xml')
+    const ts = Array.from(d.getElementsByTagName('track')) as unknown as Element[]
+    // 映像 1・本編の音 L/R・BGM の L/R
+    expect(ts.length).toBe(5)
+    const [l, r] = [ts[3], ts[4]].map((t) => t.getElementsByTagName('clipitem')[0])
+    const ids = [l.getAttribute('id'), r.getAttribute('id')]
+    for (const c of [l, r]) {
+      const links = Array.from(c.getElementsByTagName('link'))
+      expect(links.map((k) => k.getElementsByTagName('linkclipref')[0].textContent)).toEqual(ids)
+      expect(links.map((k) => k.getElementsByTagName('groupindex')[0]?.textContent)).toEqual([
+        '1',
+        '1'
+      ])
+      expect(links.map((k) => k.getElementsByTagName('trackindex')[0].textContent)).toEqual([
+        '3',
+        '4'
+      ])
+      expect(links.map((k) => k.getElementsByTagName('mediatype')[0].textContent)).toEqual([
+        'audio',
+        'audio'
+      ])
+    }
+  })
+
   it('モノラルの素材は 1 本(channelcount 1・出力を片側に寄せない)', () => {
     const { xml: monoXml } = buildPremiereXml(listing317(), {
       audioChannels: new Map([

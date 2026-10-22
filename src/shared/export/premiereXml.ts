@@ -482,6 +482,8 @@ export function buildPremiereXml(
       v.links.push(v.id, a.id, ...(a.pairId ? [a.pairId] : []))
       a.links = v.links
     }
+    // 映像に付いていないステレオの音(BGM・SE)も、L と R を互いにリンクする(Listing 3-15・3-16)
+    for (const a of plan.clips) if (a.pairId && a.links.length === 0) a.links = [a.id, a.pairId]
   }
 
   // --- ファイルの定義 ---

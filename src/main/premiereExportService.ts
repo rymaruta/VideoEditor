@@ -10,6 +10,7 @@ import {
   writeFileSync
 } from 'fs'
 import { copyFile } from 'fs/promises'
+import { pathKey } from './exportOutputGuard'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, join } from 'path'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
@@ -74,11 +75,33 @@ export function existingPremiereSidecars(xmlPath: string): string[] {
   return [p.srt, p.telopDir, p.telopMov].filter((x) => existsSync(x))
 }
 
+const TELOP_PNG = /^telop_\d{6}\.png$/i
+
 /** 前回の書き出しの PNG(この書き出しが付ける名前のものだけ)を消す */
 function clearOldTelopPngs(dir: string): void {
+  if (!existsSync(dir)) return
   for (const name of readdirSync(dir))
-    if (/^telop_\d{6}\.png$/.test(name)) rmSync(join(dir, name), { force: true })
+    if (TELOP_PNG.test(name)) rmSync(join(dir, name), { force: true })
 }
+
+/**
+ * テロップの PNG のフォルダの `telop_NNNNNN.png` を、この企画の素材として使っていれば、その名前の一覧
+ * (片付けで消すと素材が消えるので、書き出しを止める)
+ */
+export function telopPngsUsedAsAssets(
+  dir: string,
+  assets: readonly { filePath: string; proxyPath?: string; denoisedFrom?: string }[]
+): string[] {
+  const key = pathKey(dir)
+  const out = new Set<string>()
+  for (const a of assets)
+    for (const p of [a.filePath, a.proxyPath, a.denoisedFrom])
+      if (p && TELOP_PNG.test(basename(p)) && pathKey(dirname(p)) === key) out.add(basename(p))
+  return [...out]
+}
+
+/** 素材のチャンネル数を同時に調べる数(長尺で素材が数百あっても ffprobe を一度に起こさない) */
+const PROBE_CONCURRENCY = 4
 
 function defaultFreeBytes(dir: string): number {
   const st = statfsSync(dir)
@@ -150,159 +173,195 @@ export async function exportPremiereXml(
 
   let telopMedia: { width: number; height: number; clips: PremiereOverlayClip[] } | undefined
   let telopPath: string | undefined
-  const layer = payload.telopLayer
-  if (payload.telopMode !== 'text' && layer && layer.runs.length > 0) {
-    if (layer.width !== v2.sequence.width || layer.height !== v2.sequence.height)
-      throw new Error('テロップの層の大きさがシーケンスと食い違っています')
-    const scratch = mkdtempSync(join(tmpdir(), 've-premiere-'))
-    try {
-      const imagePaths = materializeTelopLayer(layer, () => scratch)?.imagePaths ?? []
-      if (payload.telopMode === 'png') {
-        // フォルダの名前は ASCII の決まった後ろ(素材のフォルダに日本語があっても、PNG の名前は短く)
-        const dir = sidecars.telopDir
-        mkdirSync(dir, { recursive: true })
-        // 前回の余り(今回より枚数の多かった書き出しの PNG)を残さない。上書きは保存先を選ぶときに確かめてある
-        clearOldTelopPngs(dir)
-        telopPath = dir
-        // 先に並べ方と写す画像を決め、写すのは後でまとめて(非同期・中止が効くように)
-        const copied = new Map<number, string>()
-        const copies: { src: string; dst: string }[] = []
-        const clips: PremiereOverlayClip[] = []
-        const runs = [...layer.runs].sort((a, b) => a.startFrame - b.startFrame)
-        for (const r of runs) {
-          if (r.image <= 0 || r.endFrame <= r.startFrame) continue
-          let path = copied.get(r.image)
-          if (!path) {
-            const src = imagePaths[r.image]
-            if (!src) throw new Error('テロップの層の画像が見つかりません')
-            path = join(dir, `telop_${String(copied.size + 1).padStart(6, '0')}.png`)
-            copies.push({ src, dst: path })
-            copied.set(r.image, path)
-          }
-          const last = clips[clips.length - 1]
-          // 同じ画像が続く区間は 1 本にまとめる
-          if (last && last.path === path && last.startFrame + last.durationFrames === r.startFrame)
-            last.durationFrames += r.endFrame - r.startFrame
-          else
-            clips.push({
-              path,
-              startFrame: r.startFrame,
-              durationFrames: r.endFrame - r.startFrame,
-              still: true
-            })
-        }
-        for (let i = 0; i < copies.length; i += COPY_BATCH) {
-          if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
-          await Promise.all(copies.slice(i, i + COPY_BATCH).map((c) => copyFile(c.src, c.dst)))
-          const n = Math.min(copies.length, i + COPY_BATCH)
-          progress((n / copies.length) * 90, `テロップの画像を書き出し中(${n}/${copies.length} 枚)`)
-        }
-        if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
-        telopMedia = { width: layer.width, height: layer.height, clips }
-      } else {
-        const movPath = sidecars.telopMov
-        const list = telopConcatList(layer.runs, imagePaths, 0, total, fps)
-        if (list) {
-          // 尺に比例して大きくなる(1080p・3 時間で約 12GB)。書き始める前に空きを確かめる
-          const need = Math.ceil(
-            total * layer.width * layer.height * PRORES_BYTES_PER_PIXEL_FRAME + 256 * 1024 * 1024
-          )
-          const free = (deps.freeBytes ?? defaultFreeBytes)(dirname(movPath))
-          if (free < need)
+  /** PNG を書いている一時フォルダ(最後に本来のフォルダへ入れ替える) */
+  let pngStage: string | null = null
+  try {
+    const layer = payload.telopLayer
+    if (payload.telopMode !== 'text' && layer && layer.runs.length > 0) {
+      if (layer.width !== v2.sequence.width || layer.height !== v2.sequence.height)
+        throw new Error('テロップの層の大きさがシーケンスと食い違っています')
+      const scratch = mkdtempSync(join(tmpdir(), 've-premiere-'))
+      try {
+        const imagePaths = materializeTelopLayer(layer, () => scratch)?.imagePaths ?? []
+        if (payload.telopMode === 'png') {
+          // フォルダの名前は ASCII の決まった後ろ(素材のフォルダに日本語があっても、PNG の名前は短く)
+          const dir = sidecars.telopDir
+          // そのフォルダの telop_*.png を企画の素材として使っていれば、片付けで消さないよう止める
+          const used = telopPngsUsedAsAssets(dir, payload.project.assets)
+          if (used.length > 0)
             throw new Error(
-              `テロップの ProRes 4444 には約 ${(need / 1024 ** 3).toFixed(1)}GB 必要ですが、` +
-                `書き出し先の空きは ${(free / 1024 ** 3).toFixed(1)}GB です。` +
-                '空きを作るか、「透過 PNG」か「文字だけ」を選んでください'
+              `「${basename(dir)}」の ${used.slice(0, 3).join('・')}${used.length > 3 ? ' ほか' : ''} は` +
+                'この企画の素材として使われているため、テロップの PNG で上書きできません。' +
+                'XML を別の名前で書き出してください'
             )
-          const listPath = join(scratch, 'telop.ffconcat')
-          writeFileSync(listPath, list, 'utf-8')
-          progress(5, 'テロップを ProRes 4444(透過)に書き出し中')
-          const partial = join(dirname(movPath), `.${basename(movPath)}.partial.mov`)
-          try {
-            await runFfmpeg(
-              deps.ffmpegPath,
-              [
-                '-f',
-                'concat',
-                '-safe',
-                '0',
-                '-i',
-                listPath,
-                '-vf',
-                `fps=${fps.num}/${fps.den},format=yuva444p10le`,
-                '-frames:v',
-                String(total),
-                '-c:v',
-                'prores_ks',
-                '-profile:v',
-                '4444',
-                '-alpha_bits',
-                '16',
-                '-vendor',
-                'apl0',
-                '-pix_fmt',
-                'yuva444p10le',
-                '-an',
-                partial
-              ],
-              deps.signal
+          // PNG は隣の一時フォルダに書き、XML と SRT を書き終えてから入れ替える(中止・失敗で、前回の XML が
+          // 消えた PNG を指したまま残らないように)
+          mkdirSync(dirname(dir), { recursive: true })
+          pngStage = mkdtempSync(`${dir}.partial-`)
+          const stage = pngStage
+          telopPath = dir
+          // 先に並べ方と写す画像を決め、写すのは後でまとめて(非同期・中止が効くように)
+          const copied = new Map<number, string>()
+          const copies: { src: string; dst: string }[] = []
+          const clips: PremiereOverlayClip[] = []
+          const runs = [...layer.runs].sort((a, b) => a.startFrame - b.startFrame)
+          for (const r of runs) {
+            if (r.image <= 0 || r.endFrame <= r.startFrame) continue
+            let path = copied.get(r.image)
+            if (!path) {
+              const src = imagePaths[r.image]
+              if (!src) throw new Error('テロップの層の画像が見つかりません')
+              const name = `telop_${String(copied.size + 1).padStart(6, '0')}.png`
+              path = join(dir, name)
+              copies.push({ src, dst: join(stage, name) })
+              copied.set(r.image, path)
+            }
+            const last = clips[clips.length - 1]
+            // 同じ画像が続く区間は 1 本にまとめる
+            if (
+              last &&
+              last.path === path &&
+              last.startFrame + last.durationFrames === r.startFrame
             )
-            renameSync(partial, movPath)
-          } finally {
-            rmSync(partial, { force: true })
+              last.durationFrames += r.endFrame - r.startFrame
+            else
+              clips.push({
+                path,
+                startFrame: r.startFrame,
+                durationFrames: r.endFrame - r.startFrame,
+                still: true
+              })
           }
-          telopPath = movPath
-          telopMedia = {
-            width: layer.width,
-            height: layer.height,
-            clips: [
-              {
-                path: movPath,
-                startFrame: 0,
-                durationFrames: total,
-                still: false,
-                sourceInFrame: 0,
-                fileFrames: total
-              }
-            ]
+          for (let i = 0; i < copies.length; i += COPY_BATCH) {
+            if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
+            await Promise.all(copies.slice(i, i + COPY_BATCH).map((c) => copyFile(c.src, c.dst)))
+            const n = Math.min(copies.length, i + COPY_BATCH)
+            progress(
+              (n / copies.length) * 90,
+              `テロップの画像を書き出し中(${n}/${copies.length} 枚)`
+            )
+          }
+          if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
+          telopMedia = { width: layer.width, height: layer.height, clips }
+        } else {
+          const movPath = sidecars.telopMov
+          const list = telopConcatList(layer.runs, imagePaths, 0, total, fps)
+          if (list) {
+            // 尺に比例して大きくなる(1080p・3 時間で約 12GB)。書き始める前に空きを確かめる
+            const need = Math.ceil(
+              total * layer.width * layer.height * PRORES_BYTES_PER_PIXEL_FRAME + 256 * 1024 * 1024
+            )
+            const free = (deps.freeBytes ?? defaultFreeBytes)(dirname(movPath))
+            if (free < need)
+              throw new Error(
+                `テロップの ProRes 4444 には約 ${(need / 1024 ** 3).toFixed(1)}GB 必要ですが、` +
+                  `書き出し先の空きは ${(free / 1024 ** 3).toFixed(1)}GB です。` +
+                  '空きを作るか、「透過 PNG」か「文字だけ」を選んでください'
+              )
+            const listPath = join(scratch, 'telop.ffconcat')
+            writeFileSync(listPath, list, 'utf-8')
+            progress(5, 'テロップを ProRes 4444(透過)に書き出し中')
+            const partial = join(dirname(movPath), `.${basename(movPath)}.partial.mov`)
+            try {
+              await runFfmpeg(
+                deps.ffmpegPath,
+                [
+                  '-f',
+                  'concat',
+                  '-safe',
+                  '0',
+                  '-i',
+                  listPath,
+                  '-vf',
+                  `fps=${fps.num}/${fps.den},format=yuva444p10le`,
+                  '-frames:v',
+                  String(total),
+                  '-c:v',
+                  'prores_ks',
+                  '-profile:v',
+                  '4444',
+                  '-alpha_bits',
+                  '16',
+                  '-vendor',
+                  'apl0',
+                  '-pix_fmt',
+                  'yuva444p10le',
+                  '-an',
+                  partial
+                ],
+                deps.signal
+              )
+              renameSync(partial, movPath)
+            } finally {
+              rmSync(partial, { force: true })
+            }
+            telopPath = movPath
+            telopMedia = {
+              width: layer.width,
+              height: layer.height,
+              clips: [
+                {
+                  path: movPath,
+                  startFrame: 0,
+                  durationFrames: total,
+                  still: false,
+                  sourceInFrame: 0,
+                  fileFrames: total
+                }
+              ]
+            }
           }
         }
+      } finally {
+        rmSync(scratch, { recursive: true, force: true })
       }
-    } finally {
-      rmSync(scratch, { recursive: true, force: true })
     }
-  }
 
-  progress(95, 'XML を書き出し中')
-  // 音声のチャンネル数(モノラルは 1 本、ステレオは L・R の 2 本のトラックに書く)
-  const audioChannels = new Map<string, number>()
-  if (deps.probeChannels) {
-    const used = new Set(v2.sequence.audioTracks.flatMap((t) => t.items.map((i) => i.assetId)))
-    const assets = v2.assets.filter((a) => used.has(a.id) && a.hasAudio)
-    const counts = await Promise.all(
-      assets.map((a) => deps.probeChannels!(a.filePath).catch(() => undefined))
-    )
-    assets.forEach((a, i) => {
-      const n = counts[i]
-      if (n !== undefined) audioChannels.set(a.id, n)
+    progress(95, 'XML を書き出し中')
+    // 音声のチャンネル数(モノラルは 1 本、ステレオは L・R の 2 本のトラックに書く)。
+    // ffprobe は少しずつ起こし、そのたびに中止を見る
+    const audioChannels = new Map<string, number>()
+    if (deps.probeChannels) {
+      const probe = deps.probeChannels
+      const used = new Set(v2.sequence.audioTracks.flatMap((t) => t.items.map((i) => i.assetId)))
+      const assets = v2.assets.filter((a) => used.has(a.id) && a.hasAudio)
+      for (let i = 0; i < assets.length; i += PROBE_CONCURRENCY) {
+        if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
+        const batch = assets.slice(i, i + PROBE_CONCURRENCY)
+        const counts = await Promise.all(batch.map((a) => probe(a.filePath).catch(() => undefined)))
+        batch.forEach((a, k) => {
+          const n = counts[k]
+          if (n !== undefined) audioChannels.set(a.id, n)
+        })
+      }
+      if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
+    }
+    const result = buildPremiereXml(v2, {
+      audioChannels,
+      name: payload.project.name || safeFileBaseName(basename(base)),
+      dropFrame: payload.dropFrame !== false,
+      markers,
+      ...(telopMedia ? { telopMedia } : {})
     })
-  }
-  const result = buildPremiereXml(v2, {
-    audioChannels,
-    name: payload.project.name || safeFileBaseName(basename(base)),
-    dropFrame: payload.dropFrame !== false,
-    markers,
-    ...(telopMedia ? { telopMedia } : {})
-  })
-  writeFileSync(xmlWritePath, result.xml, 'utf-8')
-  // 既存の字幕の書き出しと同じく BOM 付き(Windows の Premiere・メモ帳で文字化けしない)
-  writeFileSync(srtPath, '﻿' + premiereSrt(v2), 'utf-8')
-  progress(100, '完了')
-  return {
-    xmlPath: payload.outputPath,
-    srtPath,
-    ...(telopPath ? { telopPath } : {}),
-    warnings: result.warnings,
-    stats: result.stats
+    writeFileSync(xmlWritePath, result.xml, 'utf-8')
+    // 既存の字幕の書き出しと同じく BOM 付き(Windows の Premiere・メモ帳で文字化けしない)
+    writeFileSync(srtPath, '﻿' + premiereSrt(v2), 'utf-8')
+    if (pngStage) {
+      // ここまで来たら入れ替える: 前回の telop_*.png を消し、今回の PNG を移す
+      const dir = sidecars.telopDir
+      mkdirSync(dir, { recursive: true })
+      clearOldTelopPngs(dir)
+      for (const name of readdirSync(pngStage)) renameSync(join(pngStage, name), join(dir, name))
+    }
+    progress(100, '完了')
+    return {
+      xmlPath: payload.outputPath,
+      srtPath,
+      ...(telopPath ? { telopPath } : {}),
+      warnings: result.warnings,
+      stats: result.stats
+    }
+  } finally {
+    if (pngStage) rmSync(pngStage, { recursive: true, force: true })
   }
 }
