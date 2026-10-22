@@ -2156,7 +2156,9 @@ export function Timeline(): React.JSX.Element {
           {project.audioTracks.map((track, trackIndex) => (
             <div key={track.id} className="track-label">
               <span className="track-label-name" title={track.name}>
-                <span className="track-tag tag-audio">A{trackIndex + 1}</span>
+                <span className={`track-tag tag-audio ${track.autoRole ? 'tag-auto' : ''}`}>
+                  A{trackIndex + 1}
+                </span>
                 {track.name}
               </span>
               <div className="track-label-controls">
@@ -2748,7 +2750,9 @@ export function Timeline(): React.JSX.Element {
               key={track.id}
               data-track-kind="audio"
               data-track-id={track.id}
-              className={`track-lane audio-lane ${draggedAsset?.hasAudio ? 'drop-target' : ''} ${
+              className={`track-lane audio-lane ${track.autoRole ? 'auto' : ''} ${
+                draggedAsset?.hasAudio ? 'drop-target' : ''
+              } ${
                 (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
                 (audioDrag !== null &&
                   audioDrag.hoverTrackId === track.id &&

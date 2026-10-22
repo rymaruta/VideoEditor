@@ -1,31 +1,133 @@
 @import './base.css';
 
 :root {
-  /* グラファイト(Windows の編集ソフトと同じ落ち着いた灰色)。色味を足さない */
-  --bg: #1b1b1b;
-  --bg-elevated: #232323;
-  --bg-elevated-2: #2b2b2b;
-  --bg-elevated-3: #343434;
-  --border: #3a3a3a;
-  --border-soft: #2c2c2c;
-  --text-1: #e4e4e4;
-  --text-2: #a8a8a8;
-  --text-3: #7c7c7c;
-  --accent-1: #4d8eff;
-  --accent-2: #3a7bf0;
-  /* 以前は青緑のグラデーションだった。目立たせる面も単色にする */
-  --accent-gradient: linear-gradient(0deg, #3a7bf0, #3a7bf0);
-  --accent-soft: rgba(77, 142, 255, 0.16);
-  --danger: #e5484d;
-  --danger-soft: rgba(229, 72, 77, 0.14);
-  --success: #4fb37a;
-  --radius-lg: 4px;
-  --radius-md: 3px;
-  --radius-sm: 3px;
+  /* ===== Graphite 2(デザインの決まり。名前は --ve-*) =====
+     絵が主役。地は無彩に近い炭色、確かめるべき所だけを琥珀で灯す。
+     琥珀は「人の番」(主ボタン・確認の印・選択中の枠・オンの切り替え)だけに使う。 */
+  /* 地と面 — 奥から手前へ */
+  --ve-well: #090a0b; /* モニターの周り */
+  --ve-bg: #0c0d0f; /* 地 */
+  --ve-panel: #121418; /* パネル */
+  --ve-field: #181b20; /* 入力欄・カード */
+  --ve-raised: #20242a; /* 浮き上がり・押下・ふつうのボタン */
+  --ve-raised-hover: #272c33;
+  --ve-line: #1c1f24; /* 区切り線 */
+  --ve-line-field: #2a2f36; /* 入力欄の線 */
+  --ve-line-control: #2e333b; /* ボタンの線 */
+  --ve-line-control-hover: #3a4049;
+  --ve-line-strong: #4a5059; /* チェックの枠など */
+  /* 文字 — どの面の上でも 4.5:1 以上(#8A8F97 はパネルの上で 5.4:1。これより暗い灰色は使わない) */
+  --ve-text: #eceae6;
+  --ve-text-2: #a9adb4;
+  --ve-text-3: #8a8f97;
+  /* 意味の色 — 塗り・淡い地・その上の文字 */
+  --ve-accent: #f5a524;
+  --ve-accent-hover: #ffb84a;
+  --ve-accent-press: #d98e14;
+  --ve-accent-soft: #2a2113;
+  --ve-accent-ink: #f7c46a;
+  --ve-accent-line: #5a4520;
+  --ve-on-accent: #1a1205; /* 琥珀の上の文字 */
+  --ve-playhead: #ff5a4e; /* 再生位置だけ。ほかに使わない */
+  --ve-ok: #4cc38a;
+  --ve-ok-soft: #12291f;
+  --ve-ok-ink: #8fe0b8;
+  --ve-danger: #ff6b5e;
+  --ve-danger-soft: #301714;
+  --ve-danger-ink: #ffa49b;
+  --ve-danger-line: #5a2620;
+  --ve-auto: #b79cff; /* 自動で入れたもの */
+  --ve-auto-soft: #221c36;
+  --ve-auto-ink: #cdb9ff;
+  --ve-auto-line: #43386a;
+  /* トラック — 色相だけでなく明るさも変える */
+  --ve-trk-video: #2a4673;
+  --ve-trk-video-line: #3d5f96;
+  --ve-trk-video-ink: #e3ebfc;
+  --ve-trk-video-selected: #34558a;
+  --ve-trk-pip: #1e2d47;
+  --ve-trk-pip-line: #2f4672;
+  --ve-trk-pip-ink: #c9d8fa;
+  --ve-trk-telop: #5a2a45;
+  --ve-trk-telop-line: #7a3a5e;
+  --ve-trk-telop-ink: #fbe3ef;
+  --ve-trk-audio: #1c4030;
+  --ve-trk-audio-line: #2a5a43;
+  --ve-trk-audio-ink: #8fe0b8;
+  --ve-trk-auto: #2a2240;
+  --ve-trk-auto-line: #43386a;
+  --ve-trk-auto-ink: #cdb9ff;
+  /* トラックの名札(V/A/T) */
+  --ve-tag-video: #1e2d47;
+  --ve-tag-video-ink: #a9c3ff;
+  --ve-tag-audio: #173628;
+  --ve-tag-audio-ink: #8fe0b8;
+  --ve-tag-telop: #3d1f31;
+  --ve-tag-telop-ink: #f6a6cc;
+  --ve-tag-auto: #2a2240;
+  --ve-tag-auto-ink: #cdb9ff;
+  /* 波形 — 外側に山(peak)・内側に平均を重ねる */
+  --ve-wave-peak: #2f6b50;
+  --ve-wave-rms: #7bddae;
+  --ve-wave-auto-peak: #3a3060;
+  --ve-wave-auto-rms: #6e5ba8;
+  --ve-wave-video-peak: #34558a;
+  --ve-wave-video-rms: #5878ad;
+  /* 話者(テロップの縁・タイムラインの印・文字起こしの名前で同じ色。最大 8 人) */
+  --ve-speaker-0: #f6a6cc;
+  --ve-speaker-1: #7fa8ff;
+  --ve-speaker-2: #f5c35a;
+  --ve-speaker-3: #6fd3a3;
+  --ve-speaker-4: #ff9a6b;
+  --ve-speaker-5: #b79cff;
+  --ve-speaker-6: #5fd0e0;
+  --ve-speaker-7: #d7db6a;
+  /* 角 — クリップ・モニター 4px、操作 7px、カード・浮く窓 12px */
+  --ve-radius-clip: 4px;
+  --ve-radius-control: 7px;
+  --ve-radius-card: 12px;
+  /* 動き */
+  --ve-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ve-dur-fast: 90ms;
+  --ve-dur: 160ms;
+  --ve-dur-slow: 240ms;
+  /* キーボードで選んだ物の輪(2px の琥珀を 2px 離す) */
+  --ve-focus-ring: 0 0 0 2px var(--ve-bg), 0 0 0 4px var(--ve-accent);
+
+  /* ===== 以前からの名前(全体へ一度に効かせるため、名前はそのまま値を Graphite 2 に) ===== */
+  --bg: var(--ve-bg);
+  --bg-elevated: var(--ve-panel);
+  --bg-elevated-2: var(--ve-field);
+  --bg-elevated-3: var(--ve-raised);
+  --border: var(--ve-line-control);
+  --border-soft: var(--ve-line);
+  --text-1: var(--ve-text);
+  --text-2: var(--ve-text-2);
+  --text-3: var(--ve-text-3);
+  --text-dim: var(--ve-text-3);
+  /* 主の色は琥珀(以前は青)。文字に使うときは読みやすい ink の方を使う */
+  --accent: var(--ve-accent);
+  --accent-1: var(--ve-accent);
+  --accent-2: var(--ve-accent-press);
+  --accent-ink: var(--ve-accent-ink);
+  --accent-gradient: linear-gradient(0deg, var(--ve-accent), var(--ve-accent));
+  --accent-soft: var(--ve-accent-soft);
+  --on-accent: var(--ve-on-accent);
+  --danger: var(--ve-danger);
+  --danger-soft: var(--ve-danger-soft);
+  --danger-ink: var(--ve-danger-ink);
+  --success: var(--ve-ok);
+  --warn: var(--ve-accent);
+  --radius-lg: var(--ve-radius-card);
+  --radius-md: var(--ve-radius-control);
+  --radius-sm: var(--ve-radius-control);
   --shadow-panel: none;
+  --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--ve-line-control);
+  /* UI は IBM Plex Sans JP、数字・時刻は IBM Plex Mono(どちらも同梱。uiFonts.css) */
   --font-sans:
-    'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', 'Hiragino Kaku Gothic ProN', system-ui, sans-serif;
-  --font-mono: 'Consolas', 'Cascadia Mono', 'Menlo', monospace;
+    'IBM Plex Sans JP', 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI', 'Hiragino Kaku Gothic ProN',
+    system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Consolas', 'Cascadia Mono', 'Menlo', monospace;
 
   --color-background: var(--bg);
   --color-text: var(--text-1);
@@ -33,7 +135,7 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--bg-elevated-3) transparent;
+  scrollbar-color: var(--ve-raised) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -42,12 +144,12 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--bg-elevated-3);
+  background: var(--ve-raised);
   border-radius: 8px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #34343f;
+  background: var(--ve-raised-hover);
 }
 
 body {
@@ -56,7 +158,9 @@ body {
   font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text-1);
-  font-size: 12px;
+  /* 本文 13 / 行間はブラウザ既定のまま(狭いパネルの行の高さを変えない) */
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
 }
 
 #root {
@@ -68,43 +172,61 @@ body {
   background: var(--accent-soft);
 }
 
+/* 数字・時刻は等幅(桁を揺らさない) */
+code,
+kbd,
+.tc,
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== ボタン(Graphite 2 の「ふつう」) =====
+   線は 1px の枠のまま(色だけ変える)。状態で太さが変わらないので大きさは動かない。 */
 button {
   cursor: pointer;
-  border: 1px solid var(--border);
-  background-color: var(--bg-elevated-2);
+  border: 1px solid var(--ve-line-control);
+  background-color: var(--ve-raised);
   color: var(--text-1);
   border-radius: var(--radius-sm);
   padding: 7px 13px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   font-family: inherit;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.08s ease,
-    box-shadow 0.15s ease;
+    background-color var(--ve-dur-fast) var(--ve-ease),
+    border-color var(--ve-dur-fast) var(--ve-ease),
+    color var(--ve-dur-fast) var(--ve-ease),
+    box-shadow var(--ve-dur-fast) var(--ve-ease);
 }
 
 button:hover:not(:disabled) {
-  background-color: var(--bg-elevated-3);
-  border-color: #38384a;
+  background-color: var(--ve-raised-hover);
+  border-color: var(--ve-line-control-hover);
 }
 
 button:active:not(:disabled) {
-  transform: scale(0.97);
+  background-color: var(--ve-field);
+  border-color: var(--ve-line-control);
 }
 
 button:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* キーボードで選んだ物には、2px の琥珀の輪を 2px 離して付ける */
+:focus-visible {
+  outline: 2px solid var(--ve-accent);
+  outline-offset: 2px;
 }
 
 .small-button {
   padding: 5px 10px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .icon-button {
@@ -118,7 +240,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #f5b942;
+  color: var(--ve-accent-ink);
 }
 
 .error-boundary {
@@ -133,97 +255,217 @@ button:disabled {
 }
 
 .error-boundary-message {
-  color: var(--danger, #f2495c);
+  color: var(--ve-danger-ink);
   font-size: 13px;
   max-width: 640px;
   word-break: break-all;
 }
 
+/* 音声がつながっている印(飾りなので無彩) */
 .linked-audio-badge {
-  color: var(--accent-1);
-  border-color: rgba(77, 142, 255, 0.4);
-  background-color: var(--accent-soft);
+  color: var(--ve-text);
+  border-color: var(--ve-line-control-hover);
+  background-color: var(--ve-raised);
 }
 
 .linked-audio-badge:hover:not(:disabled) {
-  border-color: var(--accent-1);
+  border-color: var(--ve-text-3);
 }
 
+/* 取り返せない操作 */
 .danger {
-  color: #ffb3bb;
-  border-color: rgba(242, 73, 92, 0.35);
-  background-color: var(--danger-soft);
+  color: var(--ve-danger-ink);
+  border-color: var(--ve-danger-line);
+  background-color: var(--ve-danger-soft);
 }
 
 .danger:hover:not(:disabled) {
-  background-color: rgba(242, 73, 92, 0.24);
-  border-color: var(--danger);
+  color: #ffc0b8;
+  background-color: #3d1c18;
+  border-color: #7a3028;
 }
 
+.danger:active:not(:disabled) {
+  color: #2a0c08;
+  background-color: var(--ve-danger);
+  border-color: var(--ve-danger);
+}
+
+/* 主ボタン(1 画面に 1 つ)。琥珀の地に濃い文字 */
 .primary-button {
-  background: var(--accent-gradient);
-  border-color: transparent;
-  color: white;
+  background: var(--ve-accent);
+  border-color: var(--ve-accent);
+  color: var(--ve-on-accent);
   font-weight: 600;
-  box-shadow: 0 4px 14px rgba(77, 142, 255, 0.35);
+  box-shadow: none;
 }
 
 .primary-button:hover:not(:disabled) {
-  filter: brightness(1.08);
-  box-shadow: 0 6px 18px rgba(77, 142, 255, 0.45);
+  background: var(--ve-accent-hover);
+  border-color: var(--ve-accent-hover);
+}
+
+.primary-button:active:not(:disabled) {
+  background: var(--ve-accent-press);
+  border-color: var(--ve-accent-press);
 }
 
 .primary-button:disabled {
   box-shadow: none;
 }
 
+/* ===== 入力欄・選択 ===== */
 input,
 select,
 textarea {
-  background-color: var(--bg-elevated);
+  background-color: var(--ve-field);
   color: var(--text-1);
-  border: 1px solid var(--border);
+  border: 1px solid var(--ve-line-field);
   border-radius: var(--radius-sm);
   padding: 6px 9px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-family: inherit;
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color var(--ve-dur-fast) var(--ve-ease),
+    box-shadow var(--ve-dur-fast) var(--ve-ease);
+}
+
+input[type='number'] {
+  font-variant-numeric: tabular-nums;
 }
 
 input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--accent-1);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-color: var(--ve-accent);
+  box-shadow: 0 0 0 3px var(--ve-accent-soft);
 }
 
+input[aria-invalid='true'],
+textarea[aria-invalid='true'] {
+  border-color: var(--ve-danger);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+select {
+  cursor: pointer;
+}
+
+/* チェック(残す=琥珀・落とす=線だけ) */
+input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ve-line-strong);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+input[type='checkbox']:checked {
+  background: var(--ve-accent)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231A1205' stroke-width='3.2'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E")
+    center / 11px 11px no-repeat;
+  box-shadow: none;
+}
+
+input[type='checkbox']:indeterminate {
+  background: var(--ve-accent)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231A1205' stroke-width='3.2'%3E%3Cpath d='M6 12h12'/%3E%3C/svg%3E")
+    center / 11px 11px no-repeat;
+  box-shadow: none;
+}
+
+input[type='checkbox']:focus,
+input[type='radio']:focus {
+  border-color: transparent;
+}
+
+input[type='checkbox']:focus:not(:focus-visible),
+input[type='radio']:focus:not(:focus-visible) {
+  box-shadow: inset 0 0 0 1.5px var(--ve-line-strong);
+}
+
+input[type='checkbox']:checked:focus:not(:focus-visible) {
+  box-shadow: none;
+}
+
+input[type='radio'] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ve-line-strong);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+input[type='radio']:checked,
+input[type='radio']:checked:focus:not(:focus-visible) {
+  background: radial-gradient(circle, var(--ve-on-accent) 0 3px, var(--ve-accent) 3.5px);
+  box-shadow: none;
+}
+
+/* スライダー(進んだ所は琥珀・つまみは白に近い丸) */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
+  border: 0;
   padding: 0;
   height: 18px;
+  accent-color: var(--ve-accent);
+}
+
+input[type='range']:focus {
+  box-shadow: none;
 }
 
 input[type='range']::-webkit-slider-runnable-track {
   height: 4px;
-  border-radius: 4px;
-  background: var(--bg-elevated-3);
+  border-radius: 2px;
+  background: var(--ve-line-field);
 }
 
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 15px;
-  height: 15px;
-  margin-top: -5.5px;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
   border-radius: 50%;
-  background: var(--accent-gradient);
-  border: 2px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  background: var(--ve-text);
+  border: 0;
+  box-shadow: 0 0 0 3px var(--ve-bg);
+}
+
+input[type='range']:focus-visible {
+  outline: none;
+}
+
+input[type='range']:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 2px var(--ve-bg),
+    0 0 0 4px var(--ve-accent);
 }
 
 input[type='color'] {
@@ -233,8 +475,10 @@ input[type='color'] {
   cursor: pointer;
 }
 
+/* ラベル 11 / 500 */
 label {
   font-size: 11px;
+  font-weight: 500;
   color: var(--text-2);
   display: flex;
   align-items: center;
@@ -245,7 +489,16 @@ h1,
 h2,
 h3 {
   color: var(--text-1);
-  letter-spacing: -0.01em;
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+  }
 }
 
 /* App shell */
@@ -263,7 +516,7 @@ h3 {
   justify-content: space-between;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-soft);
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--ve-panel);
 }
 
 .top-bar-left {
@@ -301,7 +554,7 @@ h3 {
 }
 
 .project-menu-error {
-  color: #ff8f9a;
+  color: var(--ve-danger-ink);
   font-size: 11px;
 }
 
@@ -346,13 +599,13 @@ h3 {
   border: none;
   border-radius: var(--radius-sm);
   color: var(--text-1);
-  font-size: 11.5px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
 
 .recent-project-open:hover {
-  background: var(--bg-elevated-3, rgb(255 255 255 / 8%));
+  background: var(--bg-elevated-3);
 }
 
 .recent-project-name {
@@ -369,7 +622,7 @@ h3 {
 .recent-project-missing {
   flex-shrink: 0;
   font-size: 10px;
-  color: #ff8f9a;
+  color: var(--ve-danger-ink);
 }
 
 .dirty-dot {
@@ -377,7 +630,7 @@ h3 {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #f5b942;
+  background: var(--ve-accent);
   margin-left: 6px;
   vertical-align: middle;
 }
@@ -386,17 +639,17 @@ h3 {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: var(--accent-gradient);
+  background: var(--ve-raised);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--ve-accent);
   flex-shrink: 0;
 }
 
 .brand-name {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: -0.02em;
 }
 
@@ -431,10 +684,10 @@ h3 {
 }
 
 .project-badge {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--accent-1);
-  background: var(--accent-soft);
+  color: var(--ve-text-2);
+  background: var(--ve-raised);
   border-radius: 999px;
   padding: 3px 9px;
   letter-spacing: 0.02em;
@@ -499,7 +752,7 @@ h3 {
 
 .timeline-tools .small-button.active {
   border-color: var(--accent-1);
-  color: var(--accent-1);
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 
@@ -563,7 +816,7 @@ h3 {
 
 .long-form-targets .small-button.active {
   border-color: var(--accent-1);
-  color: var(--accent-1);
+  color: var(--accent-ink);
   background: var(--accent-soft);
 }
 
@@ -589,7 +842,7 @@ h3 {
 
 .long-form-hook {
   font-size: 12px;
-  color: var(--accent-1);
+  color: var(--ve-text);
   margin-bottom: 4px;
 }
 
@@ -612,7 +865,7 @@ h3 {
 }
 
 .long-form-time {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
@@ -675,7 +928,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
 }
 
@@ -689,7 +942,7 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
 }
 
@@ -787,13 +1040,13 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
 .source-viewer-range {
-  color: var(--accent-1);
+  color: var(--ve-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -842,13 +1095,13 @@ h3 {
 }
 
 .source-viewer-transport .icon-button.active {
-  color: var(--accent-1);
+  color: var(--accent-ink);
   border-color: var(--accent-1);
 }
 
 .source-viewer-rate {
   font-size: 11px;
-  color: var(--accent-1);
+  color: var(--ve-text);
   font-weight: 600;
   min-width: 28px;
 }
@@ -891,7 +1144,7 @@ h3 {
 
 .col-resize-handle:hover,
 .col-resize-handle.active {
-  background: var(--accent-soft);
+  background: var(--ve-raised);
 }
 
 .col-resize-handle::after {
@@ -907,7 +1160,7 @@ h3 {
 
 .col-resize-handle:hover::after,
 .col-resize-handle.active::after {
-  background: var(--accent-1);
+  background: var(--ve-text-3);
   height: 88px;
 }
 
@@ -935,7 +1188,7 @@ h3 {
 
 .row-resize-handle:hover,
 .row-resize-handle.active {
-  background: var(--accent-soft);
+  background: var(--ve-raised);
 }
 
 .row-resize-handle::after {
@@ -951,7 +1204,7 @@ h3 {
 
 .row-resize-handle:hover::after,
 .row-resize-handle.active::after {
-  background: var(--accent-1);
+  background: var(--ve-text-3);
   width: 88px;
 }
 
@@ -980,13 +1233,13 @@ h3 {
 
 .hint-text {
   color: var(--text-3);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
 .error-text {
-  color: #ff8f9a;
-  font-size: 11.5px;
+  color: var(--ve-danger-ink);
+  font-size: 12px;
   background: var(--danger-soft);
   border-radius: var(--radius-sm);
   padding: 6px 9px;
@@ -995,8 +1248,8 @@ h3 {
 
 .success-text {
   color: var(--success);
-  font-size: 11.5px;
-  background: rgba(52, 211, 153, 0.12);
+  font-size: 12px;
+  background: var(--ve-ok-soft);
   border-radius: var(--radius-sm);
   padding: 6px 9px;
   margin-top: 8px;
@@ -1022,7 +1275,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-1);
   margin-bottom: 8px;
@@ -1062,7 +1315,7 @@ h3 {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   padding: 6px 9px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .batch-job-item span:first-child {
@@ -1078,18 +1331,18 @@ h3 {
 }
 
 .batch-job-done .batch-job-badge {
-  background: rgba(52, 211, 153, 0.16);
-  color: #34d399;
+  background: var(--ve-ok-soft);
+  color: var(--ve-ok-ink);
 }
 
 .batch-job-running .batch-job-badge {
-  background: rgba(77, 142, 255, 0.18);
-  color: var(--accent-1);
+  background: var(--ve-accent-soft);
+  color: var(--accent-ink);
 }
 
 .batch-job-error .batch-job-badge {
-  background: rgba(248, 113, 113, 0.16);
-  color: #f87171;
+  background: var(--ve-danger-soft);
+  color: var(--ve-danger-ink);
 }
 
 .empty-state {
@@ -1151,7 +1404,7 @@ h3 {
 }
 
 .media-item-missing {
-  border-color: rgba(242, 73, 92, 0.35);
+  border-color: var(--ve-danger-line);
 }
 
 .media-item-missing .media-thumb {
@@ -1176,7 +1429,7 @@ h3 {
 .media-thumb-placeholder {
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, #23232d, #1a1a22);
+  background: var(--ve-field);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1198,7 +1451,7 @@ h3 {
 .media-track-add select {
   max-width: 90px;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .media-info {
@@ -1215,7 +1468,7 @@ h3 {
 }
 
 .media-meta {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
   margin-top: 2px;
   display: flex;
@@ -1228,15 +1481,15 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: #f5b942;
-  background: rgba(245, 185, 66, 0.14);
+  color: var(--ve-accent-ink);
+  background: var(--ve-accent-soft);
   border-radius: 4px;
   padding: 1px 5px;
-  font-size: 9.5px;
+  font-size: 10px;
 }
 
 .mismatch-badge.missing-badge {
-  color: #ffb3bb;
+  color: var(--ve-danger-ink);
   background: var(--danger-soft);
 }
 
@@ -1263,7 +1516,7 @@ h3 {
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .roughcut-controls input[type='number'] {
@@ -1293,14 +1546,14 @@ h3 {
 .timeline-mismatch-icon {
   position: relative;
   z-index: 1;
-  color: #f5b942;
+  color: var(--ve-accent-ink);
   flex-shrink: 0;
   display: flex;
   align-items: center;
 }
 
 .timeline-crop-icon {
-  color: var(--accent-1);
+  color: var(--ve-text);
 }
 
 /* Preview player */
@@ -1405,7 +1658,7 @@ h3 {
   align-items: center;
   gap: 10px;
   color: var(--text-3);
-  font-size: 12.5px;
+  font-size: 13px;
   padding: 20px;
   text-align: center;
 }
@@ -1418,12 +1671,12 @@ h3 {
   right: 12px;
   bottom: 12px;
   z-index: 6;
-  background: rgba(24, 28, 36, 0.94);
-  border: 1px solid var(--danger, #e5484d);
+  background: rgba(18, 20, 24, 0.94);
+  border: 1px solid var(--danger);
   border-radius: var(--radius-md);
   padding: 10px 12px;
   color: var(--text-1);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   text-align: left;
 }
@@ -1433,7 +1686,7 @@ h3 {
   flex-direction: column;
   gap: 3px;
   margin-top: 5px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
 }
 
@@ -1486,7 +1739,7 @@ h3 {
 .icon-button.active {
   background: var(--accent-gradient);
   border-color: transparent;
-  color: white;
+  color: var(--ve-on-accent);
 }
 
 /* 文字・間隔・アイコンはプレビューの高さ(cqh)に比例させる。固定の px だと、小さいプレビューで
@@ -1687,9 +1940,9 @@ h3 {
   border-radius: 50%;
   padding: 0;
   justify-content: center;
-  background: var(--accent-gradient);
+  background: var(--ve-text);
   border-color: transparent;
-  color: white;
+  color: var(--ve-bg);
   flex-shrink: 0;
 }
 
@@ -1710,7 +1963,7 @@ h3 {
 
 .scrub-fill {
   height: 100%;
-  background: var(--accent-gradient);
+  background: var(--ve-text-3);
   transition: width 0.1s linear;
 }
 
@@ -1844,7 +2097,7 @@ h3 {
    入力欄の隣に小さく添えるので、桁が増えても行が折り返さない幅に留める。 */
 .transition-trimmed {
   white-space: nowrap;
-  color: var(--warn, #e0a33e);
+  color: var(--ve-accent-ink);
 }
 
 .transition-duration {
@@ -1879,7 +2132,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -1928,7 +2181,7 @@ h3 {
   flex-direction: column;
   justify-content: center;
   gap: 3px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-2);
   padding: 4px 2px;
 }
@@ -2041,10 +2294,10 @@ h3 {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  background: linear-gradient(160deg, #2f5c4a, #234436);
-  border: 1px solid rgba(52, 211, 153, 0.4);
+  background: var(--ve-trk-audio);
+  border: 1px solid var(--ve-trk-audio-line);
   border-radius: var(--radius-sm);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-1);
   padding: 0 6px;
   display: flex;
@@ -2061,7 +2314,7 @@ h3 {
 
 .timeline-audio-clip.trimming,
 .timeline-video-overlay-clip.trimming {
-  border-color: #f5b942;
+  border-color: var(--ve-accent);
 }
 
 .timeline-snap-guide {
@@ -2069,7 +2322,7 @@ h3 {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: #f5b942;
+  background: var(--ve-accent);
   z-index: 3;
   pointer-events: none;
 }
@@ -2079,7 +2332,7 @@ h3 {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(156, 140, 246, 0.35);
+  background: rgba(183, 156, 255, 0.35);
   z-index: 1;
   pointer-events: none;
 }
@@ -2108,8 +2361,8 @@ h3 {
 }
 
 .timeline-audio-clip.selected {
-  border-color: var(--success);
-  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25);
+  border-color: var(--ve-accent);
+  box-shadow: inset 0 0 0 2px var(--ve-accent);
 }
 
 .video-overlay-lane {
@@ -2126,11 +2379,11 @@ h3 {
   position: absolute;
   top: 2px;
   bottom: 2px;
-  background: linear-gradient(160deg, var(--accent-1), var(--accent-2));
-  border: 1px solid rgba(77, 142, 255, 0.5);
+  background: var(--ve-trk-pip);
+  border: 1px solid var(--ve-trk-pip-line);
   border-radius: var(--radius-sm);
-  font-size: 10.5px;
-  color: white;
+  font-size: 11px;
+  color: var(--ve-trk-pip-ink);
   padding: 0 6px;
   display: flex;
   align-items: center;
@@ -2145,8 +2398,8 @@ h3 {
 }
 
 .timeline-video-overlay-clip.selected {
-  border-color: white;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+  border-color: var(--ve-accent);
+  box-shadow: inset 0 0 0 2px var(--ve-accent);
 }
 
 /* 縦位置(`top` / `height`)は JSX が段から出す。時間が重なった2枚を縦にずらすため、
@@ -2154,10 +2407,10 @@ h3 {
    同じ位置に来て、下の1枚が掴めなくなる(実測: 3点とも上の1枚しか拾えなかった)。 */
 .timeline-caption-clip {
   position: absolute;
-  background: linear-gradient(160deg, #1f6f8a, #164a5c);
-  border: 1px solid rgba(77, 142, 255, 0.5);
+  background: var(--ve-trk-telop);
+  border: 1px solid var(--ve-trk-telop-line);
   border-radius: var(--radius-sm);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-1);
   padding: 0 6px;
   display: flex;
@@ -2237,7 +2490,7 @@ h3 {
   border-radius: var(--radius-md);
   padding: 10px 12px;
   line-height: 1.9;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .text-edit-word {
@@ -2249,13 +2502,13 @@ h3 {
 }
 
 .text-edit-word:hover {
-  background: var(--accent-soft);
+  background: var(--ve-raised);
 }
 
 .text-edit-word.deleted {
   text-decoration: line-through;
-  color: var(--text-3, #888);
-  background: rgba(220, 60, 60, 0.18);
+  color: var(--text-3);
+  background: var(--ve-danger-soft);
 }
 
 .audio-clip-inspector {
@@ -2279,7 +2532,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .audio-clip-inspector input {
@@ -2297,7 +2550,7 @@ h3 {
   position: absolute;
   top: 0;
   height: 100%;
-  background: linear-gradient(160deg, #37374a, #26262f);
+  background: var(--ve-trk-video);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   display: flex;
@@ -2360,7 +2613,7 @@ h3 {
 }
 
 .timeline-clip.selected {
-  background: linear-gradient(160deg, #4b3fa8, #372f80);
+  background: var(--ve-trk-video-selected);
   border-color: var(--accent-1);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
@@ -2439,7 +2692,7 @@ h3 {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--accent-2);
+  background: var(--ve-playhead);
   pointer-events: none;
   z-index: 2;
 }
@@ -2452,7 +2705,7 @@ h3 {
   width: 14px;
   height: 14px;
   border-radius: 3px 3px 3px 0;
-  background: var(--accent-2);
+  background: var(--ve-playhead);
   pointer-events: auto;
   cursor: ew-resize;
   transition: transform 0.12s ease;
@@ -2489,7 +2742,7 @@ h3 {
 }
 
 .transition-marker.has-transition {
-  background: var(--accent-gradient);
+  background: var(--ve-text-2);
   opacity: 1;
 }
 
@@ -2537,9 +2790,9 @@ h3 {
 }
 
 .tab-bar button.active {
-  background: var(--accent-gradient);
-  color: white;
-  box-shadow: 0 4px 12px rgba(77, 142, 255, 0.3);
+  background: var(--ve-raised);
+  color: var(--ve-text);
+  box-shadow: inset 0 0 0 1px var(--ve-line-control);
 }
 
 .tab-bar-divider {
@@ -2592,7 +2845,7 @@ h3 {
 }
 
 .template-card h3 {
-  font-size: 12.5px;
+  font-size: 13px;
   margin-bottom: 5px;
   display: flex;
   align-items: center;
@@ -2600,19 +2853,19 @@ h3 {
 }
 
 .template-card-icon {
-  color: var(--accent-1);
+  color: var(--ve-text-2);
   flex-shrink: 0;
 }
 
 .template-card p {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   margin-bottom: 8px;
   line-height: 1.5;
 }
 
 .template-card ul {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
   margin-bottom: 10px;
   padding-left: 2px;
@@ -2673,7 +2926,7 @@ h3 {
 }
 
 .overlay-select-label {
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .overlay-item.selected {
@@ -2751,7 +3004,7 @@ h3 {
 .toggle-chip.active {
   background: var(--accent-gradient);
   border-color: transparent;
-  color: white;
+  color: var(--ve-on-accent);
 }
 
 .checkbox-label {
@@ -2772,7 +3025,7 @@ h3 {
 
 .overlay-advanced summary {
   cursor: pointer;
-  color: var(--accent-1);
+  color: var(--ve-text-2);
   padding: 2px 0;
 }
 
@@ -2846,7 +3099,7 @@ h3 {
 }
 
 .youtube-result-title {
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2870,9 +3123,9 @@ h3 {
 }
 
 .audio-library-kind-tabs button.active {
-  background: var(--accent-gradient);
-  color: white;
-  border-color: transparent;
+  background: var(--ve-raised);
+  color: var(--ve-text);
+  border-color: var(--ve-line-control);
 }
 
 .audio-library-results {
@@ -2906,7 +3159,7 @@ h3 {
 }
 
 .audio-library-title {
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2918,7 +3171,7 @@ h3 {
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  color: var(--accent);
+  color: var(--ve-text-3);
   width: fit-content;
 }
 
@@ -2965,13 +3218,13 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-1);
   margin-bottom: 4px;
 }
 
 .game-trend-insight-card p {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   margin-bottom: 6px;
 }
@@ -2986,7 +3239,7 @@ h3 {
 }
 
 .game-trend-evidence li {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -3011,7 +3264,7 @@ h3 {
 }
 
 .game-trend-tips li {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   background: var(--bg-elevated-2);
   border-radius: var(--radius-sm);
@@ -3028,15 +3281,15 @@ h3 {
 
 .game-trend-recommendation {
   margin-top: 14px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-1);
+  background: var(--ve-field);
+  border: 1px solid var(--ve-line-field);
   border-radius: var(--radius-md);
   padding: 12px 14px;
 }
 
 .game-trend-recommendation h3 {
   font-size: 12px;
-  color: var(--accent-1);
+  color: var(--ve-text);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -3044,7 +3297,7 @@ h3 {
 }
 
 .game-trend-recommendation-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-1);
   margin-bottom: 4px;
@@ -3096,8 +3349,8 @@ h3 {
 }
 
 .game-trend-chat-turn.user {
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-1);
+  background: var(--ve-raised);
+  border: 1px solid var(--ve-line-control);
   color: var(--text-1);
   align-self: flex-end;
   max-width: 90%;
@@ -3148,7 +3401,7 @@ h3 {
 }
 
 .game-trend-comparison p {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   display: flex;
   align-items: center;
@@ -3164,13 +3417,13 @@ h3 {
 }
 
 .trend-comparison-badge.new {
-  background: rgba(77, 142, 255, 0.18);
-  color: var(--accent-1);
+  background: var(--ve-ok-soft);
+  color: var(--ve-ok-ink);
 }
 
 .trend-comparison-badge.sustained {
-  background: rgba(52, 211, 153, 0.16);
-  color: #34d399;
+  background: var(--ve-ok-soft);
+  color: var(--ve-ok-ink);
 }
 
 .game-trend-viral,
@@ -3201,13 +3454,13 @@ h3 {
   font-size: 10px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(245, 185, 66, 0.16);
-  color: #f5b942;
+  background: var(--ve-accent-soft);
+  color: var(--ve-accent-ink);
   margin-bottom: 5px;
 }
 
 .game-trend-viral-example {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
@@ -3225,7 +3478,7 @@ h3 {
 }
 
 .game-trend-thumbnail-insight li {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   background: var(--bg-elevated-2);
   border-radius: var(--radius-sm);
@@ -3302,7 +3555,7 @@ h3 {
 }
 
 .metadata-title-count.warn {
-  color: #ff8f9a;
+  color: var(--ve-danger-ink);
 }
 
 .metadata-description-input {
@@ -3319,8 +3572,8 @@ h3 {
 
 .metadata-hashtag-chip {
   font-size: 11px;
-  color: var(--accent-1);
-  background: var(--accent-soft);
+  color: var(--ve-text-2);
+  background: var(--ve-field);
   border-radius: 4px;
   padding: 3px 8px;
 }
@@ -3371,7 +3624,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
@@ -3421,7 +3674,7 @@ h3 {
 
 .keyword-se-keyword {
   font-size: 12px;
-  color: var(--accent-1);
+  color: #a9c3ff;
   font-weight: 600;
 }
 
@@ -3441,7 +3694,7 @@ h3 {
 }
 
 .export-field > label {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-1);
 }
@@ -3515,7 +3768,7 @@ h3 {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-family: inherit;
   resize: vertical;
   margin-bottom: 10px;
@@ -3628,7 +3881,7 @@ h3 {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(5, 5, 8, 0.65);
+  background: rgba(9, 10, 11, 0.65);
   backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
@@ -3652,7 +3905,7 @@ h3 {
 }
 
 .modal h3 {
-  font-size: 13.5px;
+  font-size: 13px;
   margin-bottom: 14px;
   display: flex;
   align-items: center;
@@ -3660,7 +3913,7 @@ h3 {
 }
 
 .modal h3 svg {
-  color: var(--accent-1);
+  color: var(--ve-text-2);
 }
 
 /* 素材ではなく**プロジェクトの縦横比**の枠。ここに収めて初めて、クロップの
@@ -3701,7 +3954,7 @@ h3 {
 
 .trim-field label {
   display: block;
-  font-size: 11.5px;
+  font-size: 12px;
   margin-bottom: 5px;
   color: var(--text-2);
 }
@@ -3753,7 +4006,7 @@ h3 {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   padding-top: 4px;
   border-top: 1px solid var(--border);
@@ -3817,7 +4070,7 @@ h3 {
 
 .highlight-score-fill {
   height: 100%;
-  background: var(--accent-gradient);
+  background: var(--ve-auto);
 }
 
 .autoedit-modal {
@@ -3837,7 +4090,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--accent-1);
+  color: var(--ve-auto-ink);
 }
 
 .autoedit-toolbar {
@@ -3852,7 +4105,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
 }
 
@@ -3860,7 +4113,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-2);
   background: var(--bg-elevated-2);
   border-radius: 999px;
@@ -3888,15 +4141,15 @@ h3 {
 }
 
 .autoedit-card.recommended {
-  box-shadow: 0 0 0 1px var(--accent-1);
+  box-shadow: 0 0 0 1px var(--ve-auto);
 }
 
 .autoedit-card.director {
   grid-column: 1 / -1;
-  border-color: var(--accent-1);
+  border-color: var(--ve-auto);
   box-shadow:
-    0 0 0 1px var(--accent-1),
-    0 8px 24px rgba(77, 142, 255, 0.18);
+    0 0 0 1px var(--ve-auto),
+    0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .autoedit-card.director .autoedit-thumb {
@@ -3910,9 +4163,9 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  background: var(--accent-gradient);
-  color: white;
-  font-size: 9.5px;
+  background: var(--ve-auto-soft);
+  color: var(--ve-auto-ink);
+  font-size: 10px;
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 10px;
@@ -3920,8 +4173,8 @@ h3 {
 }
 
 .autoedit-badge-director {
-  background: linear-gradient(135deg, #d4ff3f, var(--accent-1));
-  color: #0a0e14;
+  background: var(--ve-auto);
+  color: #170f2e;
 }
 
 .autoedit-thumb {
@@ -3944,7 +4197,7 @@ h3 {
 }
 
 .autoedit-card-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -3985,7 +4238,7 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(5, 5, 8, 0.5);
+  background: rgba(9, 10, 11, 0.5);
   pointer-events: none;
 }
 
@@ -3995,15 +4248,15 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 28px 40px;
-  border: 2px dashed var(--accent-1);
+  border: 2px dashed var(--ve-text-3);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow: var(--shadow-panel);
-  color: var(--accent-1);
+  color: var(--ve-text);
 }
 
 .file-drop-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-1);
 }
@@ -4011,7 +4264,7 @@ h3 {
 /* 生成が続いていることが、モーダルを閉じた後もここから分かるようにする */
 .autoedit-trigger.running {
   border-color: var(--accent-1);
-  color: var(--accent-1);
+  color: var(--accent-ink);
 }
 
 /* メディアパネルから素材を引きずっている間の、置けるトラックの示し方 */
@@ -4022,7 +4275,7 @@ h3 {
 }
 
 .track-lane.drop-active {
-  background-image: linear-gradient(rgba(77, 142, 255, 0.22), rgba(77, 142, 255, 0.22));
+  background-image: linear-gradient(rgba(245, 165, 36, 0.16), rgba(245, 165, 36, 0.16));
 }
 
 /* 落とす位置(本編は挿入する切れ目、音声・PiPはその時刻) */
@@ -4033,7 +4286,7 @@ h3 {
   width: 2px;
   margin-left: -1px;
   background: var(--accent-1);
-  box-shadow: 0 0 6px var(--accent-1);
+  box-shadow: none;
   pointer-events: none;
   z-index: 7;
 }
@@ -4071,7 +4324,7 @@ h3 {
 }
 
 .clip-context-menu-item:hover:not(:disabled) {
-  background: var(--accent-soft);
+  background: var(--ve-raised);
 }
 
 .clip-context-menu-item:disabled {
@@ -4128,7 +4381,7 @@ h3 {
 }
 .media-bin-tab.active {
   color: var(--text-1);
-  border-bottom-color: var(--accent-2);
+  border-bottom-color: var(--ve-text);
 }
 
 /* ===== 共通ライブラリ ===== */
@@ -4184,9 +4437,9 @@ h3 {
   cursor: pointer;
 }
 .library-chip.active {
-  border-color: var(--accent-2);
+  border-color: var(--ve-accent-line);
   color: var(--text-1);
-  background: rgba(59, 130, 246, 0.16);
+  background: var(--ve-accent-soft);
 }
 .library-count {
   margin-left: auto;
@@ -4233,7 +4486,7 @@ h3 {
   cursor: pointer;
 }
 .library-star.on {
-  color: #e6a23c;
+  color: var(--ve-accent-ink);
 }
 .library-star.on svg {
   fill: currentColor;
@@ -4332,7 +4585,7 @@ h3 {
 }
 .split-handle:hover,
 .split-handle.active {
-  background: var(--accent-1);
+  background: var(--ve-line-strong);
 }
 
 /* パネルの見出しのタブ(Premiere の「ソース: …」「エフェクトコントロール」と同じ作り) */
@@ -4343,7 +4596,7 @@ h3 {
   height: 28px;
   flex-shrink: 0;
   padding: 0 4px;
-  border-bottom: 1px solid #161616;
+  border-bottom: 1px solid var(--ve-line);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -4371,7 +4624,8 @@ h3 {
 .panel-tab.active {
   color: var(--text-1);
   font-weight: 600;
-  border-bottom-color: var(--accent-1);
+  border-bottom-color: transparent;
+  background: var(--ve-raised);
 }
 .panel-tab:active:not(:disabled) {
   transform: none;
@@ -4407,8 +4661,8 @@ h3 {
   gap: 16px;
   padding: 0 10px;
   margin-top: 4px;
-  background: #202020;
-  border-top: 1px solid #111;
+  background: var(--ve-bg);
+  border-top: 1px solid var(--ve-line);
   color: var(--text-2);
   font-size: 11px;
   white-space: nowrap;
@@ -4433,7 +4687,7 @@ h3 {
   width: 260px;
 }
 .status-save.dirty {
-  color: #e6a23c;
+  color: var(--ve-accent-ink);
 }
 .status-spacer {
   flex: 1;
@@ -4442,7 +4696,7 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #ff8f9a;
+  color: var(--ve-danger-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 50%;
@@ -4454,18 +4708,6 @@ h3 {
   border: 0;
   background: transparent;
   color: var(--text-2);
-}
-
-/* 目立たせていた面(グラデーション・光彩)を、落ち着いた単色にそろえる */
-.primary-button {
-  background: var(--accent-2);
-  border-color: var(--accent-2);
-  box-shadow: none;
-  color: #fff;
-}
-.primary-button:hover:not(:disabled) {
-  background: #4a88f5;
-  border-color: #4a88f5;
 }
 
 /* 上段左のパネルでは、タブに名前が出ているので中の見出しの名前は出さない(ボタンは残す) */
@@ -4481,7 +4723,7 @@ h3 {
 }
 
 .status-busy {
-  color: var(--accent-1);
+  color: var(--accent-ink);
 }
 
 /* =====================================================================
@@ -4497,15 +4739,17 @@ h3 {
 .timeline-timecode {
   font-family: var(--font-mono);
   font-size: 15px;
-  color: var(--accent-1);
+  color: var(--ve-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
 .timeline-ruler {
   position: relative;
   height: 30px;
   flex-shrink: 0;
-  background: #262626;
-  border-bottom: 1px solid #161616;
+  background: var(--ve-panel);
+  border-bottom: 1px solid var(--ve-line);
   cursor: text;
 }
 .timeline-ruler-tick {
@@ -4513,32 +4757,35 @@ h3 {
   top: 0;
   height: 30px;
   padding: 3px 0 0 4px;
-  border-left: 1px solid #5a5a5a;
+  border-left: 1px solid #2a2f36;
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: #b0b0b0;
+  font-variant-numeric: tabular-nums;
+  /* 時刻目盛りだけは 10(文字の段の例外) */
+  font-size: 10px;
+  color: var(--ve-text-3);
   white-space: nowrap;
   pointer-events: none;
 }
 .track-lanes-col {
-  background: #1e1e1e;
+  background: var(--ve-panel);
   border-radius: 0;
   gap: 1px;
 }
 .track-labels-col {
   gap: 1px;
   padding-right: 0;
-  background: #262626;
-  border-right: 1px solid #161616;
+  background: var(--ve-panel);
+  border-right: 1px solid var(--ve-line);
 }
 .track-label {
   padding: 2px 6px;
-  border-bottom: 1px solid #1b1b1b;
-  color: #cfcfcf;
+  border-bottom: 1px solid var(--ve-line);
+  color: var(--ve-text-2);
 }
 .track-label-video {
   font-weight: 500;
 }
+/* トラックの名札(V1 / A1 / T1)。淡い地に明るい文字(デザインの .tag) */
 .track-tag {
   display: inline-flex;
   align-items: center;
@@ -4547,70 +4794,169 @@ h3 {
   height: 18px;
   padding: 0 4px;
   margin-right: 6px;
-  border-radius: 2px;
-  font-size: 10.5px;
-  font-weight: 700;
-  color: #fff;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ve-text);
   flex-shrink: 0;
 }
 .tag-video {
-  background: #3d5a8a;
+  background: var(--ve-tag-video);
+  color: var(--ve-tag-video-ink);
 }
 .tag-audio {
-  background: #3d7a52;
+  background: var(--ve-tag-audio);
+  color: var(--ve-tag-audio-ink);
+}
+.tag-audio.tag-auto {
+  background: var(--ve-tag-auto);
+  color: var(--ve-tag-auto-ink);
 }
 .tag-telop {
-  background: #8a3d62;
+  background: var(--ve-tag-telop);
+  color: var(--ve-tag-telop-ink);
 }
 .track-lane {
-  border-bottom: 1px solid #1b1b1b;
+  border-bottom: 1px solid var(--ve-line);
 }
 .audio-lane {
   background: transparent;
   border-radius: 0;
 }
-/* 再生位置の線は目盛りから全トラックを貫く */
+/* 再生位置の線は目盛りから全トラックを貫く。色は #FF5A4E だけ */
 .timeline-playhead {
   top: -31px;
   bottom: auto;
   height: 4000px;
-  background: var(--accent-1);
+  background: var(--ve-playhead);
+}
+/* つまみは五角形の旗(デザインのタイムラインの再生位置) */
+.timeline-playhead-handle {
+  top: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 0;
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
 }
 
-/* クリップの色は種類で固定(映像=青・ワイプ=水色・音声=緑・テロップ=桃) */
-.timeline-clip {
-  background: #8f9be0;
-  border: 1px solid #b7bff0;
-  border-radius: 2px;
-  color: #141414;
+/* ===== クリップ(Graphite 2 の「タイムラインのクリップ」) =====
+   種類で色を固定する: 映像=紺・ワイプ=濃紺・声と音=深緑・テロップ=臙脂・自動の SE/BGM=紫。
+   線は内側の影で引き(大きさを変えない)、選んだクリップは琥珀の内枠 2px。 */
+.timeline-clip,
+.timeline-audio-clip,
+.timeline-caption-clip,
+.timeline-video-overlay-clip {
+  border: 0;
+  border-radius: var(--ve-radius-clip);
+  font-size: 11px;
 }
-.timeline-clip.selected {
-  border-color: #ffffff;
-  box-shadow: 0 0 0 1px #ffffff inset;
+.timeline-clip {
+  background: var(--ve-trk-video);
+  box-shadow: inset 0 0 0 1px var(--ve-trk-video-line);
+  color: var(--ve-trk-video-ink);
+}
+.timeline-clip:hover {
+  transform: none;
+}
+.timeline-clip.selected,
+.timeline-clip.trimming {
+  background: var(--ve-trk-video-selected);
+  box-shadow: inset 0 0 0 2px var(--ve-accent);
+  color: #fff;
 }
 .timeline-clip * {
   color: inherit;
 }
+.timeline-clip-index {
+  background: rgba(255, 255, 255, 0.14);
+}
+.timeline-clip-handle:hover,
+.timeline-clip.trimming .timeline-clip-handle {
+  background: rgba(245, 165, 36, 0.45);
+}
 .timeline-audio-clip {
-  background: #6fbf86;
-  border: 1px solid #a3dcb3;
-  border-radius: 2px;
-  color: #141414;
+  background: var(--ve-trk-audio);
+  box-shadow: inset 0 0 0 1px var(--ve-trk-audio-line);
+  color: var(--ve-trk-audio-ink);
+}
+/* 自動で置いた SE・BGM のトラック(手で直したら印が外れて、ふつうの音の色に戻る) */
+.audio-lane.auto .timeline-audio-clip {
+  background: var(--ve-trk-auto);
+  box-shadow: inset 0 0 0 1px var(--ve-trk-auto-line);
+  color: var(--ve-trk-auto-ink);
+  --ve-wave-peak: var(--ve-wave-auto-peak);
+  --ve-wave-rms: var(--ve-wave-auto-rms);
+}
+.timeline-audio-clip.selected,
+.timeline-audio-clip.trimming,
+.audio-lane.auto .timeline-audio-clip.selected,
+.audio-lane.auto .timeline-audio-clip.trimming {
+  box-shadow: inset 0 0 0 2px var(--ve-accent);
+  color: #fff;
 }
 .timeline-caption-clip {
-  background: #e59bbd;
-  border: 1px solid #f3c3d8;
-  border-radius: 2px;
-  color: #141414;
+  background: var(--ve-trk-telop);
+  box-shadow: inset 0 0 0 1px var(--ve-trk-telop-line);
+  color: var(--ve-trk-telop-ink);
+}
+/* 文字起こしから自動で並べたテロップ(以前の破線の見分けを、内側の破線で残す) */
+.timeline-caption-clip.auto {
+  border: 0;
+  background-image: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.07) 0 4px,
+    transparent 4px 8px
+  );
+  background-size: 100% 1px;
+  background-repeat: no-repeat;
+  background-position: bottom;
 }
 .timeline-caption-clip.selected {
-  border-color: #ffffff;
+  background-color: var(--ve-trk-telop-line);
+  box-shadow: inset 0 0 0 2px var(--ve-accent);
+  color: #fff0f7;
 }
 .timeline-video-overlay-clip {
-  background: #7fb5d8;
-  border: 1px solid #a9d0ea;
-  border-radius: 2px;
-  color: #141414;
+  background: var(--ve-trk-pip);
+  box-shadow: inset 0 0 0 1px var(--ve-trk-pip-line);
+  color: var(--ve-trk-pip-ink);
+}
+.timeline-video-overlay-clip.selected,
+.timeline-video-overlay-clip.trimming {
+  box-shadow: inset 0 0 0 2px var(--ve-accent);
+  color: #fff;
+}
+/* 本編クリップの波形は映像の色の中に重ねる */
+.timeline-clip {
+  --ve-wave-peak: var(--ve-wave-video-peak);
+  --ve-wave-rms: var(--ve-wave-video-rms);
+}
+.timeline-clip-waveform {
+  opacity: 1;
+}
+/* 名前は左上に寄せ、波形(中央)と重ならないようにする(デザインの A3 レーンの名前) */
+.timeline-audio-clip-label {
+  align-self: flex-start;
+  margin-top: 3px;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+}
+.timeline-clip .timeline-clip-waveform {
+  top: 45%;
+}
+.timeline-clip {
+  align-items: flex-start;
+  padding-top: 4px;
+}
+/* 波形は自分の大きさで描いた絵(Waveform.tsx)を、そのまま重ねる */
+.waveform-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.timeline-video-overlay-clip.dragging,
+.timeline-audio-clip.dragging {
+  opacity: 0.6;
 }
 
 /* ショートカット一覧は既定で隠す。隠している間は帯ごと出さない(ヘルプ > キーボードショートカットで出す) */
@@ -4621,8 +4967,8 @@ h3 {
   font-family: var(--font-mono);
 }
 .preview-player .time-label.current {
-  color: var(--accent-1);
-  font-size: 14px;
+  color: var(--ve-text);
+  font-size: 15px;
 }
 
 /* 素材の読み込みボタンは控えめに(読み込みはメニューの ファイル > 読み込む からも出来る) */
@@ -4636,7 +4982,7 @@ h3 {
 }
 .media-import-buttons .primary-button:hover:not(:disabled) {
   background: var(--bg-elevated-3);
-  border-color: #4a4a4a;
+  border-color: var(--ve-line-control-hover);
 }
 .frame-bin .panel-header {
   margin-bottom: 6px;
@@ -4660,7 +5006,7 @@ h3 {
   height: 24px;
   font-size: 11px;
   color: var(--text-3);
-  border-bottom: 1px solid #1c1c1c;
+  border-bottom: 1px solid var(--ve-line);
 }
 .media-row {
   position: relative;
@@ -4671,14 +5017,15 @@ h3 {
   border-bottom: 1px solid transparent;
 }
 .media-row:hover {
-  background: #2c2c2c;
+  background: var(--ve-raised);
 }
 .media-row.in-source,
 .media-row.menu-open {
-  background: #34414f;
+  background: #1d1a12;
+  box-shadow: inset 2px 0 0 var(--ve-accent);
 }
 .media-row.missing .media-col-name {
-  color: #ff9f6b;
+  color: var(--ve-danger-ink);
 }
 .media-kind {
   width: 10px;
@@ -4686,10 +5033,10 @@ h3 {
   border-radius: 2px;
 }
 .media-kind.video {
-  background: #8f9be0;
+  background: var(--ve-tag-video-ink);
 }
 .media-kind.audio {
-  background: #6fbf86;
+  background: var(--ve-tag-audio-ink);
 }
 .media-col-name {
   display: flex;
@@ -4720,7 +5067,7 @@ h3 {
 }
 .media-warn {
   flex-shrink: 0;
-  color: #e6a23c;
+  color: var(--ve-accent-ink);
 }
 .media-row-progress {
   position: absolute;
@@ -4747,7 +5094,7 @@ h3 {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  border-right: 1px solid #161616;
+  border-right: 1px solid var(--ve-line);
 }
 .telop-list-head {
   height: 30px;
@@ -4776,15 +5123,16 @@ h3 {
   padding: 0 10px 0 7px;
   border-left: 3px solid transparent;
   font-size: 12px;
-  color: #dcdcdc;
+  color: var(--ve-text);
   cursor: default;
   user-select: none;
 }
 .telop-row:hover {
-  background: #2c2c2c;
+  background: var(--ve-raised);
 }
 .telop-row.selected {
-  background: #34414f;
+  background: #1d1a12;
+  box-shadow: inset 2px 0 0 var(--ve-accent);
 }
 .telop-row-tc {
   flex-shrink: 0;
@@ -4805,7 +5153,7 @@ h3 {
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
-  border-top: 1px solid #161616;
+  border-top: 1px solid var(--ve-line);
   font-size: 11px;
   color: var(--text-2);
 }
@@ -4828,7 +5176,7 @@ h3 {
   }
   .telop-list-pane {
     border-right: 0;
-    border-bottom: 1px solid #161616;
+    border-bottom: 1px solid var(--ve-line);
   }
 }
 
@@ -4851,8 +5199,8 @@ h3 {
   padding: 6px 8px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: #1a1a1a;
-  color: #f0f0f0;
+  background: var(--ve-field);
+  color: var(--ve-text);
   font-family: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -4896,7 +5244,7 @@ h3 {
   width: 26px;
   height: 22px;
   padding: 0;
-  border: 1px solid #444;
+  border: 1px solid var(--ve-line-field);
   border-radius: 2px;
   background: transparent;
 }
@@ -4919,7 +5267,7 @@ h3 {
   height: 14px;
   flex-shrink: 0;
   border-radius: 2px;
-  border: 1px solid #444;
+  border: 1px solid var(--ve-line-field);
 }
 .prop-note {
   margin: 0 0 4px 86px;
@@ -4959,8 +5307,8 @@ h3 {
   align-items: center;
   justify-content: space-between;
   padding: 0 0 0 14px;
-  background: #1e1e1e;
-  border-bottom: 1px solid #161616;
+  background: var(--ve-panel);
+  border-bottom: 1px solid var(--ve-line);
   font-size: 12px;
   font-weight: 600;
   color: var(--text-1);
@@ -4973,11 +5321,11 @@ h3 {
   border-radius: 0;
   background: transparent;
   color: var(--text-2);
-  font-size: 16px;
+  font-size: 15px;
 }
 .dialog-close:hover {
-  background: #c42b1c;
-  color: #fff;
+  background: var(--ve-danger);
+  color: #2a0c08;
 }
 .export-dialog-body {
   flex: 1;
@@ -4990,7 +5338,7 @@ h3 {
   flex-direction: column;
   gap: 10px;
   padding: 14px 16px;
-  border-right: 1px solid #161616;
+  border-right: 1px solid var(--ve-line);
   overflow-y: auto;
 }
 .export-dialog-section {
@@ -5133,7 +5481,7 @@ h3 {
   color: var(--text-3);
 }
 .export-queue-item.running .export-queue-status {
-  color: var(--accent-1);
+  color: var(--accent-ink);
 }
 .export-queue-item.done .export-queue-status {
   color: var(--success);
@@ -5147,8 +5495,8 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid #161616;
-  background: #1e1e1e;
+  border-top: 1px solid var(--ve-line);
+  background: var(--ve-panel);
   font-size: 12px;
 }
 .dialog-footer select {
@@ -5202,7 +5550,7 @@ h3 {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid #161616;
+  border-right: 1px solid var(--ve-line);
 }
 .telop-style-list-head {
   padding: 10px 12px 6px;
@@ -5223,10 +5571,11 @@ h3 {
   cursor: default;
 }
 .telop-style-item:hover {
-  background: #2c2c2c;
+  background: var(--ve-raised);
 }
 .telop-style-item.selected {
-  background: #34414f;
+  background: #1d1a12;
+  box-shadow: inset 2px 0 0 var(--ve-accent);
 }
 .telop-style-glyph {
   flex-shrink: 0;
@@ -5236,8 +5585,8 @@ h3 {
   align-items: center;
   justify-content: center;
   border-radius: 3px;
-  background: #4a4a4a;
-  font-size: 19px;
+  background: var(--ve-line-control-hover);
+  font-size: 18px;
   font-weight: 700;
 }
 .telop-style-meta {
@@ -5266,7 +5615,7 @@ h3 {
   display: flex;
   gap: 6px;
   padding: 8px 10px;
-  border-top: 1px solid #161616;
+  border-top: 1px solid var(--ve-line);
 }
 .telop-style-sample-pane {
   display: flex;
@@ -5275,13 +5624,13 @@ h3 {
   padding: 14px 16px;
   min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid #161616;
+  border-right: 1px solid var(--ve-line);
 }
 .telop-style-sample {
   width: 100%;
   max-height: 300px;
   object-fit: contain;
-  background: #111;
+  background: var(--ve-well);
   border-radius: 2px;
 }
 .telop-style-sample-controls {
@@ -5363,7 +5712,7 @@ h3 {
   flex-direction: column;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  background: #1e1e1e;
+  background: var(--ve-panel);
 }
 .new-episode-found-head {
   display: flex;
@@ -5429,8 +5778,8 @@ h3 {
   align-items: center;
   gap: 8px;
   padding: 0 10px 0 14px;
-  border-bottom: 1px solid #111;
-  background: #1e1e1e;
+  border-bottom: 1px solid var(--ve-line);
+  background: var(--ve-panel);
 }
 .auto-edit-title {
   font-weight: 600;
@@ -5457,7 +5806,7 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border-bottom: 1px solid #161616;
+  border-bottom: 1px solid var(--ve-line);
 }
 .auto-edit-overall-row {
   display: flex;
@@ -5478,7 +5827,7 @@ h3 {
   border-left: 3px solid transparent;
 }
 .auto-edit-step.run {
-  background: #2d3540;
+  background: #1d1a12;
   border-left-color: var(--accent-1);
 }
 .auto-edit-step-mark {
@@ -5486,7 +5835,7 @@ h3 {
   height: 14px;
   margin-top: 1px;
   border-radius: 50%;
-  border: 1.5px solid #555;
+  border: 1.5px solid var(--ve-line-strong);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5494,16 +5843,19 @@ h3 {
   color: #fff;
 }
 .auto-edit-step.done .auto-edit-step-mark {
-  background: var(--success);
-  border-color: var(--success);
+  background: var(--ve-ok-soft);
+  border-color: var(--ve-ok-soft);
+  color: var(--ve-ok);
 }
 .auto-edit-step.run .auto-edit-step-mark {
   border-color: var(--accent-1);
   background: radial-gradient(circle, var(--accent-1) 40%, transparent 45%);
 }
 .auto-edit-step.error .auto-edit-step-mark {
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--ve-danger-soft);
+  border-color: var(--ve-danger-soft);
+  border-radius: 4px;
+  color: var(--ve-danger);
 }
 .auto-edit-step-body {
   display: flex;
@@ -5529,14 +5881,14 @@ h3 {
   color: var(--text-3);
 }
 .auto-edit-step.run .auto-edit-step-state {
-  color: #8fb4ff;
+  color: var(--ve-accent-ink);
 }
 .auto-edit-restored {
   margin: 6px 0;
   padding: 6px 8px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border: 1px solid var(--border);
   border-radius: 4px;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -5556,7 +5908,7 @@ h3 {
   display: flex;
   gap: 6px;
   padding: 10px 14px;
-  border-top: 1px solid #161616;
+  border-top: 1px solid var(--ve-line);
 }
 .auto-edit-pane {
   flex: 1;
@@ -5635,7 +5987,7 @@ h3 {
 .sync-lane-track {
   position: relative;
   height: 22px;
-  background: #1c1c1c;
+  background: var(--ve-field);
   border-radius: 2px;
 }
 .sync-bar {
@@ -5655,7 +6007,7 @@ h3 {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-3);
-  border-left: 1px solid #444;
+  border-left: 1px solid var(--ve-line-field);
   padding-left: 3px;
 }
 .auto-edit-stats {
@@ -5703,7 +6055,7 @@ h3 {
   color: var(--text-3);
 }
 .auto-edit-review-kind {
-  color: #e6a23c;
+  color: var(--ve-accent-ink);
 }
 .auto-edit-review-empty {
   padding: 14px;
@@ -5736,11 +6088,11 @@ h3 {
   gap: 10px;
   padding: 6px 14px 6px 11px;
   border-left: 3px solid transparent;
-  border-bottom: 1px solid #262626;
+  border-bottom: 1px solid var(--ve-line);
   cursor: default;
 }
 .transcript-row:hover {
-  background: #2c2c2c;
+  background: var(--ve-raised);
 }
 .transcript-speaker {
   color: var(--text-2);
@@ -5755,8 +6107,8 @@ h3 {
 }
 .transcript-tag {
   font-size: 10px;
-  color: #e6a23c;
-  border: 1px solid #6b5221;
+  color: var(--ve-accent-ink);
+  border: 1px solid var(--ve-accent-line);
   border-radius: 2px;
   padding: 0 4px;
 }
@@ -5811,7 +6163,7 @@ h3 {
   align-items: center;
   gap: 10px;
   padding: 7px 14px;
-  border-bottom: 1px solid #262626;
+  border-bottom: 1px solid var(--ve-line);
 }
 .structure-row.dropped .structure-body,
 .structure-row.dropped .structure-kind {
@@ -5822,27 +6174,27 @@ h3 {
   text-align: center;
   border-radius: 2px;
   padding: 1px 0;
-  background: #333;
+  background: var(--ve-raised);
   color: var(--text-2);
 }
 .structure-kind.highlight {
-  background: #5a3a12;
-  color: #ffcf7a;
+  background: var(--ve-accent-soft);
+  color: var(--ve-accent-ink);
 }
 .structure-kind.unneeded {
-  background: #2a2a2a;
+  background: var(--ve-raised);
   color: var(--text-3);
 }
 .structure-score {
   height: 6px;
-  background: #1c1c1c;
+  background: var(--ve-field);
   border-radius: 3px;
   overflow: hidden;
 }
 .structure-score span {
   display: block;
   height: 100%;
-  background: var(--accent-1);
+  background: var(--ve-auto);
 }
 .structure-body {
   display: flex;
@@ -5915,15 +6267,15 @@ h3 {
 }
 
 .export-qc-summary.ok {
-  color: #7fcf96;
+  color: var(--ve-ok-ink);
 }
 
 .export-qc-summary.warn {
-  color: #e8c46a;
+  color: var(--ve-accent-ink);
 }
 
 .export-qc-summary.error {
-  color: #ef7a7a;
+  color: var(--ve-danger-ink);
 }
 
 .export-qc-words textarea {
@@ -5950,7 +6302,7 @@ h3 {
   width: 100%;
   padding: 3px 6px;
   border: 0;
-  border-left: 3px solid #e8c46a;
+  border-left: 3px solid var(--ve-accent);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -5959,11 +6311,11 @@ h3 {
 }
 
 .export-qc-item.error {
-  border-left-color: #ef7a7a;
+  border-left-color: var(--ve-danger-ink);
 }
 
 .export-qc-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--ve-raised);
 }
 
 .export-qc-time {
@@ -5999,8 +6351,8 @@ h3 {
   border: 0;
   border-radius: 10px;
   padding: 1px 10px;
-  background: #e8c46a;
-  color: #1b1b1b;
+  background: var(--ve-accent);
+  color: var(--ve-on-accent);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -6294,7 +6646,7 @@ h3 {
 .style-note code {
   padding: 0 3px;
   border-radius: 2px;
-  background: #2e2e2e;
+  background: var(--ve-raised);
   color: var(--text-1);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -6341,9 +6693,9 @@ h3 {
   border: 0;
   border-radius: 0;
   border-right: 1px solid var(--border);
-  background: #262626;
+  background: var(--ve-field);
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   gap: 5px;
 }
@@ -6358,7 +6710,8 @@ h3 {
   transform: none;
 }
 .seg-button.active {
-  background: #34414f;
+  background: var(--ve-raised);
+  box-shadow: inset 0 0 0 1px var(--ve-line-control);
   color: #fff;
 }
 .seg-grad-swatch {
@@ -6385,7 +6738,7 @@ h3 {
   padding: 0 2px;
   border: 0;
   background: transparent;
-  color: var(--accent-1);
+  color: var(--ve-accent-ink);
   font-size: 11px;
 }
 .link-button:hover:not(:disabled) {
@@ -6412,7 +6765,7 @@ h3 {
   padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  background: #1f1f1f;
+  background: var(--ve-field);
 }
 .grad-bar-wrap {
   position: relative;
@@ -6508,7 +6861,8 @@ h3 {
   line-height: 1;
 }
 .angle-chip.active {
-  background: #34414f;
+  background: var(--ve-raised);
+  box-shadow: inset 0 0 0 1px var(--ve-line-control);
   color: #fff;
 }
 .angle-dial {
@@ -6524,7 +6878,7 @@ h3 {
   outline-offset: 1px;
 }
 .angle-dial-ring {
-  fill: #262626;
+  fill: var(--ve-field);
   stroke: var(--border);
   stroke-width: 1;
 }
@@ -6534,7 +6888,7 @@ h3 {
   stroke-linecap: round;
 }
 .angle-dial-tip {
-  fill: var(--accent-1);
+  fill: var(--ve-text);
 }
 .grad-presets {
   display: flex;
@@ -6547,7 +6901,7 @@ h3 {
   gap: 4px;
   font-size: 11px;
   color: var(--text-2);
-  background: #262626;
+  background: var(--ve-field);
 }
 .grad-preset-swatch {
   width: 16px;
@@ -6566,7 +6920,7 @@ h3 {
   padding: 6px 8px 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  background: #1f1f1f;
+  background: var(--ve-field);
 }
 .stroke-card-head {
   display: flex;
@@ -6654,7 +7008,7 @@ h3 {
   min-width: 0;
 }
 .look-item:hover:not(:disabled) {
-  background: #2c2c2c;
+  background: var(--ve-raised);
   border-color: var(--border);
 }
 .look-item.active {
@@ -6667,7 +7021,7 @@ h3 {
   aspect-ratio: 16 / 9;
   height: auto;
   border-radius: 2px;
-  background: #3a3a3a;
+  background: var(--ve-line-control);
 }
 .look-name {
   overflow: hidden;
@@ -6694,13 +7048,13 @@ h3 {
   overflow: hidden;
 }
 .look-picker-backdrop {
-  background: rgba(5, 5, 8, 0.4);
+  background: rgba(9, 10, 11, 0.4);
   backdrop-filter: none;
 }
 .look-picker-hint {
   margin: 0;
   padding: 8px 14px;
-  border-bottom: 1px solid #161616;
+  border-bottom: 1px solid var(--ve-line);
 }
 .look-picker-body {
   flex: 1;
@@ -6726,9 +7080,9 @@ h3 {
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
 }
 .telop-style-sample-controls .small-button.active {
-  background: #34414f;
+  background: var(--ve-accent-soft);
   border-color: var(--accent-1);
-  color: #fff;
+  color: var(--ve-accent-ink);
 }
 .motion-fields {
   display: flex;
@@ -6753,7 +7107,7 @@ h3 {
   padding: 0 4px;
 }
 .dialog-footer-label.telop-style-file-error {
-  color: #ff8f9a;
+  color: var(--ve-danger-ink);
 }
 /* ================================================================== テロップの見た目の欄 ここまで */
 
@@ -6778,7 +7132,7 @@ select.telop-kind-add {
   max-width: 128px;
   min-width: 0;
   padding: 0 4px;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: normal;
 }
 .telop-tools {
@@ -6801,9 +7155,9 @@ select.telop-kind-add {
   font-size: 11px;
 }
 .telop-tools .small-button.active {
-  background: #34414f;
+  background: var(--ve-accent-soft);
   border-color: var(--accent-1);
-  color: #fff;
+  color: var(--ve-accent-ink);
 }
 .telop-find {
   display: flex;
@@ -6812,7 +7166,7 @@ select.telop-kind-add {
   padding: 6px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  background: #1f1f1f;
+  background: var(--ve-field);
 }
 .telop-find input[type='search'],
 .telop-find input[type='text'] {
@@ -6900,7 +7254,7 @@ select.telop-kind-add {
 .section-menu-button:hover:not(:disabled),
 .section-menu-button.open {
   border-color: var(--border);
-  background: #2c2c2c;
+  background: var(--ve-raised);
   color: var(--text-1);
 }
 .section-menu-count {
@@ -6911,8 +7265,8 @@ select.telop-kind-add {
   height: 13px;
   padding: 0 3px;
   border-radius: 7px;
-  background: var(--accent-1);
-  color: #fff;
+  background: var(--ve-raised);
+  color: var(--ve-text);
   font-size: 9px;
   font-weight: 700;
   line-height: 13px;
@@ -6969,7 +7323,7 @@ select.telop-kind-add {
 .section-preset-warn {
   width: 100%;
   font-size: 11px;
-  color: var(--warning, #e5a84d);
+  color: var(--ve-accent-ink);
 }
 .section-preset-empty {
   margin: 0;
@@ -7007,7 +7361,7 @@ select.telop-kind-add {
   text-align: left;
 }
 .section-preset-apply:hover:not(:disabled) {
-  background: #2c2c2c;
+  background: var(--ve-raised);
   border-color: var(--border);
 }
 .section-preset-item.active .section-preset-apply {
@@ -7019,7 +7373,7 @@ select.telop-kind-add {
   width: 80px;
   height: 36px;
   border-radius: 2px;
-  background: #3a3a3a;
+  background: var(--ve-line-control);
 }
 .section-preset-meta {
   display: flex;
@@ -7038,13 +7392,13 @@ select.telop-kind-add {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
 }
 .section-preset-check {
   margin-left: auto;
   padding-right: 4px;
-  color: var(--accent-1);
+  color: var(--accent-ink);
   font-weight: 700;
 }
 .section-preset-remove {
@@ -7061,7 +7415,7 @@ select.telop-kind-add {
   gap: 8px;
   padding: 5px 8px;
   border-radius: var(--radius-sm);
-  background: #2a2a2a;
+  background: var(--ve-raised);
   font-size: 11px;
   color: var(--text-2);
 }
@@ -7173,7 +7527,7 @@ select.telop-kind-add {
 }
 .font-picker-group {
   padding: 6px 6px 2px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-3);
 }
@@ -7187,7 +7541,7 @@ select.telop-kind-add {
   cursor: pointer;
 }
 .font-picker-option.cursor {
-  background: #3d3d3d;
+  background: var(--ve-raised-hover);
 }
 .font-picker-option.selected {
   color: #fff;
@@ -7206,7 +7560,7 @@ select.telop-kind-add {
   color: var(--text-2);
 }
 .font-picker-check {
-  color: var(--accent-1);
+  color: var(--accent-ink);
   font-weight: 700;
 }
 
@@ -7269,13 +7623,14 @@ select.telop-kind-add {
   padding: 0 9px;
   gap: 5px;
   border-radius: 12px;
-  background: #262626;
-  font-size: 11.5px;
+  background: var(--ve-field);
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-2);
 }
 .look-cat.active {
-  background: #34414f;
+  background: var(--ve-raised);
+  box-shadow: inset 0 0 0 1px var(--ve-line-control);
   border-color: var(--accent-1);
   color: #fff;
 }
@@ -7284,7 +7639,7 @@ select.telop-kind-add {
   color: var(--text-3);
 }
 .look-cat.active .look-cat-count {
-  color: #c8d6e8;
+  color: var(--ve-text-2);
 }
 .look-empty {
   margin: 8px 0;
@@ -7333,7 +7688,7 @@ select.telop-kind-add {
   border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.55);
   font-size: 11px;
-  color: #ddd;
+  color: var(--ve-text);
   text-align: center;
   pointer-events: none;
   display: flex;
@@ -7376,7 +7731,7 @@ select.telop-kind-add {
 }
 
 .panel-error-message {
-  color: var(--danger, #f2495c);
+  color: var(--danger);
   word-break: break-all;
 }
 
@@ -7425,4 +7780,231 @@ select.telop-kind-add {
 }
 .shorts-title {
   font-weight: 600;
+}
+
+/* =====================================================================
+   Graphite 2: 画面の枠・上の帯・タブ・浮く窓
+   ===================================================================== */
+/* 上の帯(作業の流れ)。今いる所は浮き上がりの面に琥珀の点 */
+.workflow-bar {
+  height: 44px;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 0 10px 0 12px;
+  background: var(--ve-panel);
+  box-shadow: inset 0 -1px 0 var(--ve-line);
+}
+.workflow-bar-project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.workflow-bar-logo {
+  flex-shrink: 0;
+  color: var(--ve-accent);
+}
+.workflow-bar-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workflow-bar-project .dirty-dot {
+  margin-left: -4px;
+}
+.workflow-steps {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--ve-bg);
+  box-shadow: inset 0 0 0 1px #1f2329;
+}
+.workflow-step {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ve-text-2);
+  font-weight: 500;
+  gap: 7px;
+  white-space: nowrap;
+}
+.workflow-step:hover:not(:disabled) {
+  border: 0;
+  background: var(--ve-field);
+  color: var(--ve-text);
+}
+.workflow-step.current,
+.workflow-step.current:hover:not(:disabled) {
+  background: var(--ve-raised);
+  color: var(--ve-text);
+}
+.workflow-step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ve-accent);
+}
+.workflow-step-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--ve-accent-soft);
+  color: var(--ve-accent-ink);
+}
+.workflow-bar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.workflow-export {
+  height: 32px;
+  padding: 0 14px;
+  gap: 8px;
+}
+.workflow-export-key {
+  font-size: 11px;
+  opacity: 0.7;
+}
+@media (max-width: 1100px) {
+  .workflow-export-key {
+    display: none;
+  }
+}
+
+/* 枠(パネル)は炭色の面。モニターの周りはさらに暗く */
+.app-shell {
+  background: var(--ve-bg);
+}
+.frame {
+  background: var(--ve-panel);
+  border-radius: var(--ve-radius-clip);
+  box-shadow: inset 0 0 0 1px var(--ve-line);
+}
+.frame-monitor {
+  background: var(--ve-well);
+}
+.split-handle:hover,
+.split-handle.active {
+  background: var(--ve-line-strong);
+}
+
+/* パネルの見出しのタブ。選んだタブは浮き上がりの面(琥珀にしない) */
+.panel-tabs {
+  height: 32px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--ve-line);
+}
+.panel-tab {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ve-text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+.panel-tab:hover:not(:disabled):not(.active) {
+  background: var(--ve-field);
+  color: var(--ve-text);
+}
+.panel-tab.active {
+  background: var(--ve-raised);
+  color: var(--ve-text);
+  font-weight: 600;
+}
+
+/* ステータスバー */
+.status-bar {
+  height: 28px;
+  background: var(--ve-bg);
+  border-top: 1px solid var(--ve-line);
+  color: var(--ve-text-3);
+  font-size: 11px;
+}
+
+/* 一つを選ぶ切り替え(段)。地は奥、選んだ段は浮き上がり */
+.seg-group {
+  border: 0;
+  border-radius: 9px;
+  padding: 2px;
+  gap: 2px;
+  background: var(--ve-bg);
+  box-shadow: inset 0 0 0 1px #1f2329;
+}
+.seg-button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ve-text-2);
+}
+.seg-button:hover:not(:disabled) {
+  border: 0;
+  background: var(--ve-field);
+  color: var(--ve-text);
+}
+.seg-button.active,
+.seg-button.active:hover:not(:disabled) {
+  background: var(--ve-raised);
+  box-shadow: inset 0 0 0 1px var(--ve-line-control);
+  color: var(--ve-text);
+}
+
+/* 選んだ選択肢(カード)は琥珀の内枠 */
+.choice:has(input:checked) {
+  border-color: var(--ve-accent);
+  background: #1d1a12;
+}
+
+/* 浮く窓(ダイアログ・メニュー)は 12px の角と影 */
+.modal,
+.export-dialog,
+.telop-style-dialog,
+.new-episode-dialog,
+.look-picker {
+  background: var(--ve-panel);
+  border-color: var(--ve-line-control);
+  border-radius: var(--ve-radius-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.clip-context-menu,
+.app-popover,
+.color-popover,
+.recent-projects-list {
+  background: var(--ve-raised);
+  border-color: var(--ve-line-control);
+  border-radius: var(--ve-radius-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* 自動編集の画面も本文 13 */
+.auto-edit-screen {
+  font-size: 13px;
+}
+.progress-bar {
+  background: var(--ve-field);
+  box-shadow: inset 0 0 0 1px var(--ve-line);
+}
+/* 帯は下の 4px に(上の数字は奥の地の上で読む。琥珀の上に白い字を置かない) */
+.progress-bar-fill {
+  top: auto;
+  height: 4px;
+  background: var(--ve-accent);
+}
+.progress-bar span {
+  color: var(--ve-text);
+  font-variant-numeric: tabular-nums;
+  text-shadow: none;
 }

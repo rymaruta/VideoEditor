@@ -1,5 +1,6 @@
 import './assets/main.css'
 import './assets/telopFonts.css'
+import './assets/uiFonts.css'
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

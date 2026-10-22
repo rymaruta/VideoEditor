@@ -19,6 +19,7 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
+import { WorkflowBar } from './components/WorkflowBar'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { useProjectStore } from './store/projectStore'
@@ -144,8 +145,8 @@ const MIN_MONITOR_WIDTH = 360
 const MIN_TIMELINE_WIDTH = 420
 const MIN_BOTTOM_HEIGHT = 180
 const MIN_TOP_HEIGHT = 220
-/** 枠・境目・ステータスバーなど、パネル以外が使う高さ */
-const CHROME_HEIGHT = 60
+/** 枠・境目・上の帯(作業の流れ 44px)・ステータスバーなど、パネル以外が使う高さ */
+const CHROME_HEIGHT = 104
 
 function readStoredSize(key: string, fallback: number): number {
   try {
@@ -364,6 +365,15 @@ function App(): React.JSX.Element {
 
   return (
     <div className="app-shell">
+      <PanelBoundary name="作業の流れ">
+        <WorkflowBar
+          telopOpen={tab === 'text'}
+          onEdit={() => {
+            if (tab === 'text') setTab('inspector')
+          }}
+          onTelop={() => setTab('text')}
+        />
+      </PanelBoundary>
       <div className="workspace">
         {/* ===== 上段: パネル(タブ) / プログラムモニター ===== */}
         <div className="workspace-row" style={{ flex: 1 }}>
