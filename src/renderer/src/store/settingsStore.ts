@@ -30,11 +30,16 @@ import {
   type EpisodeKind
 } from '@shared/structure/kind'
 import { ASR_LANGUAGES, DEFAULT_ASR_LANGUAGE, type AsrLanguage } from '@shared/transcript'
+import {
+  clearedMarkKey,
+  LEGACY_SECRET_STORAGE_KEYS,
+  legacySecretsToMigrate,
+  SECRET_NAMES,
+  type SecretName,
+  type SecretsSnapshot
+} from '@shared/secrets'
 
-const STORAGE_KEY = 've-youtube-api-key'
-const JAMENDO_STORAGE_KEY = 've-jamendo-client-id'
-const FREESOUND_STORAGE_KEY = 've-freesound-api-key'
-const GEMINI_STORAGE_KEY = 've-gemini-api-key'
+// API キーの置き場は `@shared/secrets`(暗号化できる PC では main。前の版の localStorage から移す)
 const KEYMAP_STORAGE_KEY = 've-keymap-scheme'
 const SNAP_ENABLED_KEY = 've-snap-enabled'
 // 初期状態は隠す(常に出ていると邪魔、という声を受けて v2 で既定を変えた)。
@@ -90,6 +95,82 @@ function writeSetting(key: string, value: string): void {
   } catch {
     // 保存できなくても今回の起動の間は効く
   }
+}
+
+function removeSetting(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // 消せなくても、次の起動でまた移す
+  }
+}
+
+/** API キーの置き場。`pending` は main に聞いている途中、`plain` は今までどおり localStorage(平文) */
+export type KeyStorageMode = 'pending' | 'encrypted' | 'plain'
+
+interface SecretsApi {
+  secretsLoad: () => Promise<SecretsSnapshot>
+  secretsSet: (name: SecretName, value: string) => Promise<boolean>
+}
+
+/** 暗号化して保存する口(画面のないテスト・古い preload では無い) */
+function secretsApi(): SecretsApi | null {
+  try {
+    const api = (globalThis as { window?: { api?: Partial<SecretsApi> } }).window?.api
+    return typeof api?.secretsLoad === 'function' && typeof api?.secretsSet === 'function'
+      ? (api as SecretsApi)
+      : null
+  } catch {
+    return null
+  }
+}
+
+let keyStorageMode: KeyStorageMode = secretsApi() ? 'pending' : 'plain'
+/** 起動してから利用者が入れ直した鍵(main から読んだ値で上書きしない) */
+const touchedSecrets = new Set<SecretName>()
+let secretsReady: Promise<void> = Promise.resolve()
+
+/** 鍵を保存する。暗号化できれば main、できなければ今までどおり localStorage */
+function persistSecret(name: SecretName, value: string): void {
+  touchedSecrets.add(name)
+  // 入れ直したら「保存ファイルが壊れていた」の知らせは消す
+  if (useSettingsStore.getState().secretsFileNote)
+    useSettingsStore.setState({ secretsFileNote: '' })
+  // 入れ直したら「読めなかった」の知らせは消す
+  if (useSettingsStore.getState().unreadableKeys.includes(name))
+    useSettingsStore.setState((s) => ({
+      unreadableKeys: s.unreadableKeys.filter((n) => n !== name)
+    }))
+  const legacyKey = LEGACY_SECRET_STORAGE_KEYS[name]
+  // 平文で置くとき、空(利用者が消した)には印を付ける。印が無いと「触っていない」と区別できず、
+  // 暗号化できる起動に戻ったときに main の古い鍵(漏れた鍵かもしれない)が戻る
+  const writePlain = (): void => {
+    writeSetting(legacyKey, value)
+    if (value === '') writeSetting(clearedMarkKey(name), '1')
+    else removeSetting(clearedMarkKey(name))
+  }
+  if (keyStorageMode === 'plain') {
+    writePlain()
+    return
+  }
+  if (keyStorageMode === 'pending') {
+    // 起動直後で置き場がまだ分からない。分かってから、入力の順のまま保存する
+    void secretsReady.then(() => persistSecret(name, value))
+    return
+  }
+  const api = secretsApi()
+  const fallback = writePlain
+  if (!api) return fallback()
+  void Promise.resolve(api.secretsSet(name, value)).then(
+    // 保存できたら、前に退避した平文・消した印を残さない(残ると次の起動で古い値に戻る)
+    (ok) => {
+      if (!ok) return fallback()
+      removeSetting(legacyKey)
+      removeSetting(clearedMarkKey(name))
+    },
+    // 保存できなければ失わないよう今までどおり置く(次の起動でまた移す)
+    fallback
+  )
 }
 
 const RESOLUTION_HEIGHTS: ResolutionHeight[] = [480, 720, 1080, 1440, 2160]
@@ -202,36 +283,47 @@ interface SettingsState {
   setShortNote: (note: string) => void
   envKeySources: EnvKeySources
   loadEnvApiKeys: () => Promise<void>
+  /** API キーの置き場(暗号化できない PC では、設定の欄にその旨を出す) */
+  keyStorage: KeyStorageMode
+  /** 暗号化できない理由(一文) */
+  keyStorageNote: string
+  /** 保存してあるのに読めなかった鍵(欄に「入れ直してください」を出す) */
+  unreadableKeys: SecretName[]
+  unreadableCause: 'decrypt' | 'unavailable' | null
+  /** 鍵の保存ファイルが壊れていたときの一文(無ければ空) */
+  secretsFileNote: string
+  /** 鍵の保存ファイルにこの版では書けないときの一文(新しい版のファイル・読めないファイル。無ければ空) */
+  secretsFileProblemNote: string
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  youtubeApiKey: readSetting(STORAGE_KEY) ?? '',
+  youtubeApiKey: readSetting(LEGACY_SECRET_STORAGE_KEYS.youtubeApiKey) ?? '',
   setYoutubeApiKey: (key) => {
-    writeSetting(STORAGE_KEY, key)
+    persistSecret('youtubeApiKey', key)
     set((s) => ({
       youtubeApiKey: key,
       envKeySources: { ...s.envKeySources, youtubeApiKey: false }
     }))
   },
-  jamendoClientId: readSetting(JAMENDO_STORAGE_KEY) ?? '',
+  jamendoClientId: readSetting(LEGACY_SECRET_STORAGE_KEYS.jamendoClientId) ?? '',
   setJamendoClientId: (key) => {
-    writeSetting(JAMENDO_STORAGE_KEY, key)
+    persistSecret('jamendoClientId', key)
     set((s) => ({
       jamendoClientId: key,
       envKeySources: { ...s.envKeySources, jamendoClientId: false }
     }))
   },
-  freesoundApiKey: readSetting(FREESOUND_STORAGE_KEY) ?? '',
+  freesoundApiKey: readSetting(LEGACY_SECRET_STORAGE_KEYS.freesoundApiKey) ?? '',
   setFreesoundApiKey: (key) => {
-    writeSetting(FREESOUND_STORAGE_KEY, key)
+    persistSecret('freesoundApiKey', key)
     set((s) => ({
       freesoundApiKey: key,
       envKeySources: { ...s.envKeySources, freesoundApiKey: false }
     }))
   },
-  geminiApiKey: readSetting(GEMINI_STORAGE_KEY) ?? '',
+  geminiApiKey: readSetting(LEGACY_SECRET_STORAGE_KEYS.geminiApiKey) ?? '',
   setGeminiApiKey: (key) => {
-    writeSetting(GEMINI_STORAGE_KEY, key)
+    persistSecret('geminiApiKey', key)
     set((s) => ({ geminiApiKey: key, envKeySources: { ...s.envKeySources, geminiApiKey: false } }))
   },
   // 知らない値(壊れた値・"constructor" など)は既定へ
@@ -507,7 +599,15 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     freesoundApiKey: false,
     geminiApiKey: false
   },
+  keyStorage: keyStorageMode,
+  keyStorageNote: '',
+  unreadableKeys: [],
+  unreadableCause: null,
+  secretsFileNote: '',
+  secretsFileProblemNote: '',
   loadEnvApiKeys: async () => {
+    // 暗号化して保存した鍵を読み終えてから(後から読んだ鍵で .env の値を上書きしない)
+    await secretsReady
     try {
       const envKeys = await window.api.getEnvApiKeys()
       set((s) => ({
@@ -543,3 +643,113 @@ function sendAsrLanguage(language: AsrLanguage): void {
   }
 }
 sendAsrLanguage(useSettingsStore.getState().asrLanguage)
+
+/**
+ * 起動時に、暗号化して保存した鍵を main から読み、前の版が localStorage に平文で置いた鍵を移す
+ * (移せたものだけ消す)。暗号化が使えない PC では今までどおり localStorage を使う。
+ */
+/** 保存ファイルが壊れていたときの一文 */
+function fileProblemNote(snapshot: SecretsSnapshot | null): string {
+  if (snapshot?.fileProblem === 'newer')
+    return 'API キーの保存ファイルが新しい版のものなので、この版では暗号化して保存できません(入れた鍵はこの版の設定に平文で置きます)。'
+  if (snapshot?.fileProblem === 'io')
+    return 'API キーの保存ファイルを読めませんでした(権限などを確かめてください)。入れた鍵はこの版の設定に平文で置きます。'
+  return ''
+}
+
+function corruptNote(snapshot: SecretsSnapshot | null): string {
+  if (!snapshot?.corrupt) return ''
+  const where = snapshot.corrupt.backup
+    ? `${snapshot.corrupt.backup} に退避しました`
+    : '読めませんでした'
+  return `API キーの保存ファイルが壊れていたため、${where}。鍵を入れ直してください。`
+}
+
+async function initSecureKeys(api: SecretsApi): Promise<void> {
+  let snapshot: SecretsSnapshot | null = null
+  try {
+    snapshot = await api.secretsLoad()
+  } catch {
+    snapshot = null
+  }
+  if (!snapshot || !snapshot.available) {
+    keyStorageMode = 'plain'
+    useSettingsStore.setState((s) => ({
+      keyStorage: 'plain',
+      keyStorageNote: snapshot?.reason ?? 'API キーを暗号化して保存できません。',
+      // 暗号化して保存した鍵は、この起動では読めないだけ(main はファイルを消さない)。
+      // この起動の localStorage に値があればそれを使っているので知らせない
+      unreadableKeys: (snapshot?.unreadable ?? []).filter((n) => !s[n] && !touchedSecrets.has(n)),
+      unreadableCause: snapshot?.unreadableCause ?? null,
+      secretsFileNote: corruptNote(snapshot),
+      secretsFileProblemNote: fileProblemNote(snapshot)
+    }))
+    return
+  }
+  const values: Partial<Record<SecretName, string>> = { ...snapshot.values }
+  const unreadable = new Set<SecretName>(snapshot.unreadable ?? [])
+  const legacy = legacySecretsToMigrate(readSetting)
+  for (const name of SECRET_NAMES) {
+    const value = legacy[name]
+    const cleared = readSetting(clearedMarkKey(name)) === '1'
+    if (value === undefined && cleared) {
+      // 暗号化できない起動の間に利用者が消した: main の鍵も消す(消せたら印を片付ける)
+      let ok = false
+      try {
+        ok = (await api.secretsSet(name, '')) === true
+      } catch {
+        ok = false
+      }
+      if (ok) {
+        removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+        removeSetting(clearedMarkKey(name))
+      }
+      delete values[name]
+      unreadable.delete(name)
+      continue
+    }
+    if (value === undefined) {
+      // 印の無い空の項目(前の版)は移さずに片付ける(空で main の鍵を消さない)
+      if (readSetting(LEGACY_SECRET_STORAGE_KEYS[name]) === '')
+        removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+      continue
+    }
+    let ok = false
+    try {
+      ok = (await api.secretsSet(name, value)) === true
+    } catch {
+      ok = false
+    }
+    // 暗号化できなかった起動の間に入れ直した値を優先する(読めない古い値もこれで上書き)。
+    // 移せなかったものは localStorage に残し、その値を使う(次の起動でまた移す)
+    if (ok) {
+      removeSetting(LEGACY_SECRET_STORAGE_KEYS[name])
+      removeSetting(clearedMarkKey(name))
+    }
+    values[name] = value
+    unreadable.delete(name)
+  }
+  keyStorageMode = 'encrypted'
+  useSettingsStore.setState(() => {
+    const patch: Partial<Record<SecretName, string>> = {}
+    for (const name of SECRET_NAMES) if (!touchedSecrets.has(name)) patch[name] = values[name] ?? ''
+    return {
+      ...patch,
+      keyStorage: 'encrypted' as const,
+      keyStorageNote: '',
+      unreadableKeys: [...unreadable].filter((n) => !touchedSecrets.has(n)),
+      unreadableCause: unreadable.size > 0 ? (snapshot.unreadableCause ?? 'decrypt') : null,
+      secretsFileNote: corruptNote(snapshot),
+      secretsFileProblemNote: fileProblemNote(snapshot)
+    }
+  })
+}
+
+{
+  const api = secretsApi()
+  if (api)
+    secretsReady = initSecureKeys(api).catch(() => {
+      keyStorageMode = 'plain'
+      useSettingsStore.setState({ keyStorage: 'plain' })
+    })
+}

@@ -1,4 +1,5 @@
 import { utilityProcess, type UtilityProcess } from 'electron'
+import { PRODUCT_NAME } from '@shared/product'
 
 /**
  * utilityProcess で処理を動かし、メッセージを受け取る(childMain の相手側)。
@@ -12,7 +13,7 @@ export function runChild(
 ): UtilityProcess {
   const child = utilityProcess.fork(modulePath, [], {
     stdio: ['ignore', 'ignore', 'pipe'],
-    serviceName: 'VideoEditor 解析'
+    serviceName: `${PRODUCT_NAME} 解析`
   })
   // 異常終了したときに理由を示せるよう、標準エラーの末尾だけ持っておく
   let stderr = ''

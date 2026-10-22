@@ -36,6 +36,8 @@ export const IPC = {
   loadProject: 'project:load',
   downloadAudioAsset: 'audioLibrary:download',
   getEnvApiKeys: 'settings:getEnvApiKeys',
+  secretsLoad: 'settings:secretsLoad',
+  secretsSet: 'settings:secretsSet',
   setDirtyState: 'project:setDirtyState',
   setBusyState: 'app:setBusyState',
   notifyDone: 'app:notifyDone',
@@ -69,6 +71,8 @@ export const IPC = {
   llmRun: 'llm:run',
   llmProgress: 'llm:progress',
   llmCancel: 'llm:cancel',
+  llmLoadFailures: 'llm:loadFailures',
+  llmClearLoadFailures: 'llm:clearLoadFailures',
   qcMeasure: 'qc:measure',
   qcProgress: 'qc:progress',
   qcCancel: 'qc:cancel',
@@ -92,6 +96,7 @@ export const IPC = {
   faceProgress: 'face:progress',
   menuCommand: 'menu:command',
   menuUpdate: 'menu:update',
+  logRendererError: 'diag:logRendererError',
   checkFilesExist: 'media:checkFilesExist',
   selectRelinkFile: 'media:selectRelinkFile'
 } as const

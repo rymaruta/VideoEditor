@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { KeyStorageNote } from './KeyStorageNote'
 import { usePresetStore } from '../store/presetStore'
 import {
   searchJamendoMusic,
@@ -176,6 +177,7 @@ export function AudioLibraryPanel(): React.JSX.Element {
         {(kind === 'music' ? envKeySources.jamendoClientId : envKeySources.freesoundApiKey) && (
           <p className="hint-text">.envファイルの設定値を使用中(入力欄で上書きできます)</p>
         )}
+        <KeyStorageNote names={[kind === 'music' ? 'jamendoClientId' : 'freesoundApiKey']} />
       </div>
       <div className="youtube-search-row">
         <input

@@ -1,3 +1,5 @@
+import { PRODUCT_NAME } from './product'
+
 /**
  * アプリのメニューバー(ファイル / 編集 / クリップ / …)。Windows の編集ソフトと同じ並び。
  *
@@ -43,6 +45,9 @@ export type MenuCommand =
   | 'view.zoomFit'
   | 'help.shortcuts'
   | 'help.about'
+  | 'help.licenses'
+  | 'help.openLogs'
+  | 'help.bugReport'
   | `window.${string}`
 
 /** 画面から受け取る、ショートカットの表示(キー配置で変わるもの) */
@@ -260,11 +265,15 @@ export function buildMenuTemplate(
       submenu: [
         { label: 'キーボードショートカット', id: 'help.shortcuts' },
         SEP,
+        { label: 'ログのフォルダを開く', id: 'help.openLogs' },
+        { label: '不具合の報告用に情報をまとめる…', id: 'help.bugReport' },
+        SEP,
+        { label: 'サードパーティのライセンス', id: 'help.licenses' },
         { label: 'バージョン情報', id: 'help.about' }
       ]
     }
   ]
   return options.isMac
-    ? [{ label: 'VideoEditor', submenu: [{ label: '終了', role: 'quit' }] }, ...menu]
+    ? [{ label: PRODUCT_NAME, submenu: [{ label: '終了', role: 'quit' }] }, ...menu]
     : menu
 }
