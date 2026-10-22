@@ -5,6 +5,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
+  utimesSync,
   writeFileSync
 } from 'fs'
 import { basename, dirname, join } from 'path'
@@ -121,20 +122,29 @@ export class SecretStore {
     } catch {
       return undefined
     }
-    this.pruneBroken()
+    // 移すと元のファイルの時刻のままなので、今にする(古い時刻のままだと、片付けで今移したものを消した)
+    try {
+      const now = new Date()
+      utimesSync(target, now, now)
+    } catch {
+      // 時刻を変えられなくても、移した先は下の片付けで必ず残す
+    }
+    this.pruneBroken(basename(target))
     return basename(target)
   }
 
-  private pruneBroken(): void {
+  /** .broken を新しい5個だけ残す。`keep`(今移した先)は必ず残す */
+  private pruneBroken(keep: string): void {
     try {
       const dir = dirname(this.path)
       const prefix = `${basename(this.path)}.broken`
       const files = readdirSync(dir)
-        .filter((f) => f === prefix || /^\.\d+$/.test(f.slice(prefix.length)))
         .filter((f) => f.startsWith(prefix))
+        .filter((f) => f === prefix || /^\.\d+$/.test(f.slice(prefix.length)))
+        .filter((f) => f !== keep)
         .map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs }))
         .sort((a, b) => b.t - a.t || b.f.localeCompare(a.f, undefined, { numeric: true }))
-      for (const { f } of files.slice(KEEP_BROKEN)) unlinkSync(join(dir, f))
+      for (const { f } of files.slice(KEEP_BROKEN - 1)) unlinkSync(join(dir, f))
     } catch {
       // 片付けられなくても次の機会に
     }
@@ -181,7 +191,9 @@ export class SecretStore {
       const raw = read.data as { secrets?: unknown } | null
       if (!raw || typeof raw.secrets !== 'object' || raw.secrets === null) continue
       const prev = { ...(raw.secrets as Record<string, string>) }
-      if (prev[name]) return
+      // 同じ暗号文はもう残してある。別の暗号文が先に残っていれば、それも消さずに次の .prev.N へ
+      if (prev[name] === enc) return
+      if (prev[name]) continue
       prev[name] = enc
       this.writeJson(target, { version: 1, secrets: prev })
       return

@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync
 } from 'fs'
 import { tmpdir } from 'os'
@@ -338,5 +339,38 @@ describe('保存ファイル: 新しい版・読めない・.prev・.broken(3回
     expect(s.getState().secretsFileNote).toContain('壊れていた')
     s.getState().setGeminiApiKey('AIza-again')
     expect(s.getState().secretsFileNote).toBe('')
+  })
+})
+
+describe('保存ファイル: .broken・.prev(4回目の監査)', () => {
+  it('.broken の片付けで、今移したもの(元の時刻が古い)を消さない', () => {
+    const sub = join(dir, 'p4')
+    mkdirSync(sub)
+    const file = join(sub, 'secrets.json')
+    cipher.on = true
+    for (let i = 0; i < 5; i++) writeFileSync(`${file}.broken${i ? `.${i}` : ''}`, `x${i}`)
+    writeFileSync(file, '{"version":1,"secrets":{"geminiApiKey":"REAL"')
+    const old = new Date('2026-01-01')
+    utimesSync(file, old, old)
+    const snap = new SecretStore(file, cipher).load()
+    expect(snap.corrupt?.backup).toBe('secrets.json.broken.5')
+    expect(readFileSync(join(sub, snap.corrupt!.backup), 'utf-8')).toContain('REAL')
+    expect(readdirSync(sub).filter((f) => f.startsWith('secrets.json.broken'))).toHaveLength(5)
+  })
+
+  it('.prev に同じ名前の別の暗号文があっても、新しく読めない暗号文を捨てず .prev.1 に残す', () => {
+    const file = join(dir, 'q4.json')
+    cipher.on = true
+    cipher.key = 'pc3'
+    writeFileSync(
+      `${file}.prev`,
+      JSON.stringify({ version: 1, secrets: { geminiApiKey: 'PREV-A' } })
+    )
+    const encB = Buffer.from('pc2:B').toString('base64')
+    writeFileSync(file, JSON.stringify({ version: 1, secrets: { geminiApiKey: encB } }))
+    expect(new SecretStore(file, cipher).set('geminiApiKey', 'C')).toBe(true)
+    expect(JSON.parse(readFileSync(`${file}.prev`, 'utf-8')).secrets.geminiApiKey).toBe('PREV-A')
+    expect(JSON.parse(readFileSync(`${file}.prev.1`, 'utf-8')).secrets.geminiApiKey).toBe(encB)
+    cipher.key = 'pc1'
   })
 })
