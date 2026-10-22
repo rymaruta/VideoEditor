@@ -1,6 +1,7 @@
 import { resolve } from 'path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+import product from './src/shared/product.json'
 
 export default defineConfig({
   main: {
@@ -31,6 +32,13 @@ export default defineConfig({
         '@shared': resolve('src/shared')
       }
     },
-    plugins: [react()]
+    plugins: [
+      react(),
+      // 窓の題名(起動直後に出る)を製品名から入れる。製品名は src/shared/product.json の1か所
+      {
+        name: 'product-name-html',
+        transformIndexHtml: (html: string) => html.replaceAll('%PRODUCT_NAME%', product.name)
+      }
+    ]
   }
 })

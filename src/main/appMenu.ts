@@ -6,6 +6,7 @@ import {
   type MenuShortcuts
 } from '@shared/appMenu'
 import { IPC } from '@shared/ipc'
+import { PRODUCT_NAME } from '@shared/product'
 
 /**
  * メニューバーを Electron のメニューにする。項目の形は `@shared/appMenu`。
@@ -26,7 +27,7 @@ function sendCommand(id: string): void {
     void dialog.showMessageBox(win, {
       type: 'info',
       title: 'バージョン情報',
-      message: `VideoEditor ${app.getVersion()}`,
+      message: `${PRODUCT_NAME} ${app.getVersion()}`,
       detail: `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`
     })
     return

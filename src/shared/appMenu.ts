@@ -1,3 +1,5 @@
+import { PRODUCT_NAME } from './product'
+
 /**
  * アプリのメニューバー(ファイル / 編集 / クリップ / …)。Windows の編集ソフトと同じ並び。
  *
@@ -265,6 +267,6 @@ export function buildMenuTemplate(
     }
   ]
   return options.isMac
-    ? [{ label: 'VideoEditor', submenu: [{ label: '終了', role: 'quit' }] }, ...menu]
+    ? [{ label: PRODUCT_NAME, submenu: [{ label: '終了', role: 'quit' }] }, ...menu]
     : menu
 }

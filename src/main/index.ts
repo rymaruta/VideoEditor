@@ -29,6 +29,7 @@ import {
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
+import { APP_ID, PRODUCT_NAME } from '@shared/product'
 import {
   AUDIO_EXTENSIONS,
   IMAGE_EXTENSIONS,
@@ -500,7 +501,7 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectProjectSavePath, async (event, defaultName: string) => {
     const result = await showSaveDialogForSender(event, {
       defaultPath: defaultName,
-      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+      filters: [{ name: `${PRODUCT_NAME}プロジェクト`, extensions: ['veproj'] }]
     })
     if (result.canceled || !result.filePath) return null
     return confirmExtendedPath(event, result.filePath, withVeprojExtension(result.filePath))
@@ -509,7 +510,7 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.selectProjectOpenPath, async (event) => {
     const result = await showOpenDialogForSender(event, {
       properties: ['openFile'],
-      filters: [{ name: 'VideoEditorプロジェクト', extensions: ['veproj'] }]
+      filters: [{ name: `${PRODUCT_NAME}プロジェクト`, extensions: ['veproj'] }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
@@ -659,7 +660,7 @@ if (!hasInstanceLock) {
 
 app.whenReady().then(() => {
   if (!hasInstanceLock) return
-  electronApp.setAppUserModelId('com.videoeditor.app')
+  electronApp.setAppUserModelId(APP_ID)
   startLibraryWatchers()
   // 前回、書き出しの途中で閉じた・落ちたときの一時フォルダ(数 GB になる)を片付ける
   setTimeout(cleanupStaleSegmentDirs, 5000)
@@ -1003,7 +1004,7 @@ app.whenReady().then(() => {
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'プロジェクト・XML', extensions: ['veproj', 'xml'] },
-        { name: 'VideoEditorプロジェクト', extensions: ['veproj'] },
+        { name: `${PRODUCT_NAME}プロジェクト`, extensions: ['veproj'] },
         { name: 'Premiere の XML(FCP7)', extensions: ['xml'] }
       ]
     })
