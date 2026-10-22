@@ -341,15 +341,18 @@ export function aggregateBase(
 }
 
 /**
- * 素の値が無いまま読んだ値の左右をどう描くか(左右がほぼ同じ・片方がほぼ無音なら 1 段)。
- * 列ごとの値の差と大きさから、`decideChannelPick` と同じ決まりで決める
+ * 素の値が無いまま、タイル 1 枚の値だけで左右をどう描くか決める。1 段にするのは
+ * 「左右がほぼ同じ(モノラルを 2ch にしたもの)」か「片側が完全な無音(デジタル無音)」のときだけ。
+ * ほかは 2 段に固定する(片側が弱いノイズの素材で、静かな所のタイルだけ 2 段になって食い違っていた)
  */
-export function pickFromPeaks(p: WavePeaks): WaveChannelPick {
+export function tilePick(p: WavePeaks): WaveChannelPick {
   if (p.channels.length < 2) return 0
   const [l, r] = p.channels
   let eL = 0
   let eR = 0
   let eD = 0
+  let lSilent = true
+  let rSilent = true
   for (let k = 0; k < p.columns; k++) {
     eL += l.rms[k] * l.rms[k]
     eR += r.rms[k] * r.rms[k]
@@ -357,8 +360,15 @@ export function pickFromPeaks(p: WavePeaks): WaveChannelPick {
     const b = l.min[k] - r.min[k]
     const c = l.rms[k] - r.rms[k]
     eD += a * a + b * b + c * c
+    if (l.max[k] !== 0 || l.min[k] !== 0) lSilent = false
+    if (r.max[k] !== 0 || r.min[k] !== 0) rSilent = false
   }
-  return decideChannelPick(2, eL, eR, eD)
+  const total = eL + eR
+  if (total <= 0) return 0
+  if (eD <= 1e-4 * total) return 0
+  if (rSilent) return 0
+  if (lSilent) return 1
+  return 'both'
 }
 
 /** 細かく読み直した値(読んだ音の本数ぶん)を、素の値と同じ描き方(1 段 / 2 段)にそろえる */

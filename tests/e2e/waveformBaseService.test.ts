@@ -240,4 +240,63 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     // 素の値を作る ffmpeg は 1 回だけ(止めて作り直さない)
     expect(spawns() - before).toBe(1)
   }, 60_000)
+
+  it('素の値が無い短い範囲でも、同じ素材のタイルの 1 段 / 2 段は食い違わない', async () => {
+    // L: 大きい所と 1/10 の静かな所が 20 秒ごとに入れ替わる話し声ふう、R: -50dBFS ほどの弱いノイズ
+    for (const [name, right] of [
+      ['lr_quiet.wav', 'anoisesrc=d=120:c=white:a=0.003:r=48000'],
+      ['lr_hiss.wav', 'anoisesrc=d=120:c=white:a=0.0003:r=48000']
+    ]) {
+      const f = join(media, name)
+      execFileSync(ffmpeg, [
+        '-v',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=f=220:d=120:sample_rate=48000',
+        '-f',
+        'lavfi',
+        '-i',
+        right,
+        '-filter_complex',
+        "[0]volume='if(mod(floor(t/20),2),0.28,2.8)':eval=frame[l];[l][1]join=inputs=2:channel_layout=stereo",
+        '-c:a',
+        'pcm_f32le',
+        f
+      ])
+      const svc = createWaveformPeaksService({
+        ffmpegPath: ffmpeg,
+        ffprobePath: ffprobeStatic.path,
+        cacheDir: join(dir, `cache-pick-${name}`)
+      })
+      const lanes: number[] = []
+      for (let a = 0; a + 6.4 <= 120; a += 6.4) {
+        const p = await svc.get(f, a, a + 6.4, 2048)
+        lanes.push(p.channels.length)
+      }
+      expect(new Set(lanes).size).toBe(1)
+    }
+  }, 120_000)
+
+  it('メモリから使ったときも .wpk の更新時刻を触る(1GB の片付けで使用中を消さない)', async () => {
+    const f = join(media, 'touch.wav')
+    tone(f, 280, 10)
+    const cacheDir = join(dir, 'cache-touch')
+    const svc = createWaveformPeaksService({
+      ffmpegPath: ffmpeg,
+      ffprobePath: ffprobeStatic.path,
+      cacheDir,
+      directMaxSec: 0
+    })
+    await svc.get(f, 0, 10, 100)
+    const wpk = join(
+      cacheDir,
+      readdirSync(cacheDir).find((x) => x.endsWith('.wpk'))!
+    )
+    utimesSync(wpk, new Date(0), new Date(0))
+    await svc.get(f, 0, 10, 200)
+    expect(statSync(wpk).mtimeMs).toBeGreaterThan(Date.now() - 60_000)
+  }, 60_000)
 })

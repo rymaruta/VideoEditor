@@ -18,10 +18,11 @@ import {
   decodeWaveBase,
   encodeWaveBase,
   peakSampleRate,
-  pickFromPeaks,
+  tilePick,
   waveBaseBytes,
   wavePeaksBytes,
   type WaveBase,
+  type WaveChannelPick,
   type WavePeaks
 } from '@shared/waveformPeaks'
 
@@ -235,6 +236,13 @@ export function createWaveformPeaksService(opts: {
   /** 走っている読み直しの数と、待っている読み直し */
   let running = 0
   const waiting: (() => void)[] = []
+  /**
+   * 素材ごとの 1 段 / 2 段の判定(鍵ごと)。素の値があればその判定、無ければ最初のタイルで決めたものを
+   * 同じ素材の後のタイルにも使う(タイルごとに 1 段・2 段が食い違わないように)
+   */
+  const pickMemo = new Map<string, WaveChannelPick>()
+  /** .wpk の更新時刻を最後に触った時刻(メモリから使ったときも触る。触るのは 1 分に 1 回まで) */
+  const touchedAt = new Map<string, number>()
   /** 素材ごとの音の本数(読み直しのたびに ffprobe を起こさない) */
   const channelMemo = new Map<string, number>()
   const failed = new Map<string, { error: unknown; until: number }>()
@@ -326,10 +334,15 @@ export function createWaveformPeaksService(opts: {
   /** 同じパスの、今の鍵ではない素の値(上書きする前の素材のもの)を消す */
   const removeStale = (filePath: string, keepFile: string): void => {
     const prefix = `${wavePathPrefix(filePath)}-`
+    const current = keyMemo.get(filePath)?.key
     try {
       for (const f of readdirSync(opts.cacheDir)) {
         const p = join(opts.cacheDir, f)
-        if (f.startsWith(prefix) && f.endsWith('.wpk') && p !== keepFile) rmSync(p, { force: true })
+        if (!f.startsWith(prefix) || !f.endsWith('.wpk') || p === keepFile) continue
+        // 上書きの前後を同時に作っているとき、今の中身(最新の鍵)の方は消さない
+        const key = f.slice(prefix.length, -'.wpk'.length)
+        if (key === current) continue
+        rmSync(p, { force: true })
       }
     } catch {
       // 片付けられなくても動く
@@ -356,6 +369,8 @@ export function createWaveformPeaksService(opts: {
         // ディスクに書けなくても、今回は使える
       }
       remember(job.key, base)
+      // 素の値ができたら、その判定を正とする
+      pickMemo.set(job.key, base.pick)
       job.resolve(base)
     } catch (e) {
       if (!isAbort(e)) failed.set(job.key, { error: e, until: Date.now() + failureMs })
@@ -413,6 +428,13 @@ export function createWaveformPeaksService(opts: {
     if (hit) {
       memory.delete(key)
       memory.set(key, hit)
+      // 使っている素の値は、ディスクの片付け(更新時刻の古いものから)で消されないよう触っておく
+      const now = Date.now()
+      if (now - (touchedAt.get(key) ?? 0) > 60_000) {
+        touchedAt.set(key, now)
+        touch(join(opts.cacheDir, `${wavePathPrefix(filePath)}-${key}.wpk`))
+      }
+      pickMemo.set(key, hit.pick)
       return hit
     }
     const fail = failed.get(key)
@@ -427,6 +449,8 @@ export function createWaveformPeaksService(opts: {
         const disk = decodeWaveBase(new Uint8Array(await readFile(file)))
         if (disk) {
           touch(file)
+          touchedAt.set(key, Date.now())
+          pickMemo.set(key, disk.pick)
           remember(key, disk)
           return disk
         }
@@ -519,6 +543,25 @@ export function createWaveformPeaksService(opts: {
     pump()
   }
 
+  /**
+   * 読み直した値に、素材の判定(1 段 / 2 段)をかける。素の値があればその判定、無ければ覚えた判定、
+   * それも無ければこのタイルの値で決めて覚える(決めるのは「左右がほぼ同じ」「片側が完全な無音」のときだけ
+   * 1 段、ほかは 2 段。静かな所のタイルだけ 2 段になる食い違いを起こさない)
+   */
+  const withPick = (
+    fine: WavePeaks,
+    sourceKey: string | undefined,
+    base: WaveBase | null
+  ): WavePeaks => {
+    let pick: WaveChannelPick | undefined =
+      base?.pick ?? (sourceKey ? pickMemo.get(sourceKey) : undefined)
+    if (pick === undefined) {
+      pick = tilePick(fine)
+      if (sourceKey) pickMemo.set(sourceKey, pick)
+    }
+    return { ...applyChannelPick(fine, pick), sourceKey }
+  }
+
   const rememberFine = (key: string, peaks: WavePeaks): void => {
     const size = wavePeaksBytes(peaks)
     fineCache.set(key, { peaks, size })
@@ -558,7 +601,7 @@ export function createWaveformPeaksService(opts: {
       if (cached) {
         fineCache.delete(fineKey)
         fineCache.set(fineKey, cached)
-        return cached.peaks
+        return withPick(cached.peaks, sourceKey, base)
       }
       let channels = base?.sourceChannels ?? (sourceKey ? channelMemo.get(sourceKey) : undefined)
       if (channels === undefined) {
@@ -571,10 +614,9 @@ export function createWaveformPeaksService(opts: {
           channels,
           signal
         })
-        const pick = base ? base.pick : pickFromPeaks(fine)
-        const peaks = { ...applyChannelPick(fine, pick), sourceKey }
-        rememberFine(fineKey, peaks)
-        return peaks
+        // 覚えるのは判定をかける前の値(後で判定が変わっても、今の判定で返す)
+        rememberFine(fineKey, fine)
+        return withPick(fine, sourceKey, base)
       } catch (e) {
         // 読めなかった素材は短い間覚える(見えるたびに読み直さない)
         if (!isAbort(e) && sourceKey)

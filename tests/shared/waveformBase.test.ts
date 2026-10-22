@@ -8,6 +8,7 @@ import {
   baseIsFineEnough,
   decideChannelPick,
   decodeWaveBase,
+  tilePick,
   encodeWaveBase,
   waveBaseBytes
 } from '@shared/waveformPeaks'
@@ -169,5 +170,26 @@ describe('素の値(WaveBaseBuilder)', () => {
     const p = acc.finish()
     expect(applyChannelPick(p, 'both').channels).toHaveLength(2)
     expect(applyChannelPick(p, 1).channels[0].max[0]).toBeCloseTo(0.9)
+  })
+
+  it('タイルの値だけで決めるときは、左右が同じ・片側が完全な無音のときだけ 1 段', () => {
+    const quietL = (t: number): number => 0.035 * Math.sin(2 * Math.PI * 220 * t)
+    let seed = 1
+    const hiss = (): number => {
+      seed = (seed * 16807) % 2147483647
+      return (seed / 2147483647 - 0.5) * 0.006
+    }
+    const acc = (l: (t: number) => number, r: (t: number) => number): WavePeakAccumulator => {
+      const a = new WavePeakAccumulator(64, 2, RATE)
+      a.push(stereo(1, l, r))
+      return a
+    }
+    // L が静かな話し声・R が弱いノイズ: 2 段のまま(静かな所だけ 1 段/2 段が入れ替わらない)
+    expect(tilePick(acc(quietL, hiss).finish())).toBe('both')
+    expect(tilePick(acc((t) => 10 * quietL(t), hiss).finish())).toBe('both')
+    // 右が完全な無音・左右が同じ・左が完全な無音
+    expect(tilePick(acc(quietL, () => 0).finish())).toBe(0)
+    expect(tilePick(acc(quietL, quietL).finish())).toBe(0)
+    expect(tilePick(acc(() => 0, quietL).finish())).toBe(1)
   })
 })
