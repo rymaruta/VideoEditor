@@ -318,6 +318,8 @@ export function spliceClips<C extends RangeClip & { transitionIn?: unknown }>(
     const hasLeft = t.start < range.start - EPS
     const hasRight = t.end > range.end + EPS
     if (hasLeft) before.push({ ...c, outPoint: at(range.start) })
+    // 丸ごと範囲の中のクリップは同じオブジェクトのまま(ロックの中身はそのまま差し込む)
+    if (!hasLeft && !hasRight) return void inside.push(c)
     inside.push({
       ...c,
       ...(hasLeft ? { id: splitIdOf(c.id), transitionIn: undefined } : {}),
@@ -354,4 +356,50 @@ export function spliceTimed<T extends { startTime: number; endTime: number }>(
   const removed = base.filter(inside)
   const added = replacement.filter(inside)
   return { items: [...base.filter((o) => !inside(o)), ...added], removed, added }
+}
+
+/**
+ * 共通の時刻の窓 → 本編のタイムラインの区間(窓の中を映すクリップが続いて並んでいる所)。
+ * 窓の中を映すクリップのあいだに窓の外を映すクリップが挟まる(並べ替えた)ときは null。
+ * 窓の中を映すクリップが無ければ null
+ */
+export function timelineWindowOf(
+  clips: readonly RangeClip[],
+  info: MulticamInfo,
+  window: Range
+): TimelineRange | null {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const times = clipTimes(clips)
+  let start = Infinity
+  let end = -Infinity
+  let first = -1
+  let last = -1
+  clips.forEach((c, i) => {
+    const f = fileOf.get(c.assetId)
+    if (!f) return
+    const speed = c.speed || 1
+    const a = toCommon(f, c.inPoint)
+    const b = toCommon(f, c.outPoint)
+    const lo = Math.max(a, window.start)
+    const hi = Math.min(b, window.end)
+    if (hi - lo <= EPS) return
+    // 共通の時刻 → このクリップのタイムラインの時刻(素材の速さと本編の速さの比で)
+    const scale = f.rate / speed
+    const ts = times[i].start + (lo - a) * scale
+    const te = times[i].start + (hi - a) * scale
+    start = Math.min(start, ts)
+    end = Math.max(end, te)
+    if (first < 0) first = i
+    last = i
+  })
+  if (first < 0) return null
+  // 間に窓の外を映す収録素材のクリップがあれば、続いていない
+  for (let i = first + 1; i < last; i++) {
+    const f = fileOf.get(clips[i].assetId)
+    if (!f) continue
+    const a = toCommon(f, clips[i].inPoint)
+    const b = toCommon(f, clips[i].outPoint)
+    if (a < window.start - ORDER_SLACK || b > window.end + ORDER_SLACK) return null
+  }
+  return { start, end }
 }

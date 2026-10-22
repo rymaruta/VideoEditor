@@ -22,13 +22,14 @@ import {
   spansOfClips,
   updateOverrides
 } from '@shared/roughCut/overrides'
-import { planCg } from '@shared/finish/cg'
+import { planCg, type PlacedCg } from '@shared/finish/cg'
 import {
   fallbackMood,
   planBgm,
   planSoundEffects,
   timelineRangeOf,
-  type BgmMood
+  type BgmMood,
+  type PlacedSound
 } from '@shared/finish/sound'
 import { planCameraColors } from '../lib/colorMatchPlan'
 import { COLOR_VERDICT_TEXT, describeColorMatch, type ColorMatchVerdict } from '@shared/color/match'
@@ -40,6 +41,8 @@ import type { PlacementMethod } from '@shared/sync/solve'
 import { buildMulticamLayout } from '@shared/sync/multicamLayout'
 import type { MediaAsset } from '@shared/types'
 import {
+  isUntouchedAuto,
+  mergeLocks,
   onProjectSwitch,
   rangedEditProject,
   useProjectStore,
@@ -88,11 +91,13 @@ import {
   clipScenesToWindow,
   clipTimes,
   commonWindowOf,
+  overridesWithPinned,
   overridesWithin,
   pinOverrides,
+  timelineWindowOf,
   type TimelineRange
 } from '@shared/roughCut/range'
-import type { CutOverrides } from '@shared/roughCut/overrides'
+import { subtractRanges, type CutOverrides, type Range } from '@shared/roughCut/overrides'
 import { frameSeconds } from '@shared/frameRate'
 import { snapRangeBoundaries } from '../lib/timelineRange'
 import {
@@ -841,7 +846,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     keptIds: string[],
     spans: { timeline: number; start: number; end: number }[],
     effectTelops: Omit<TextOverlay, 'id'>[],
-    allTelops: Omit<TextOverlay, 'id'>[]
+    allTelops: Omit<TextOverlay, 'id'>[],
+    /** 自動編集で触らない範囲: その所は前の自動の SE・BGM・CG を残す(無ければ今までと同じ) */
+    locked?: LockedSounds
   ): Promise<void> {
     const folder = useSettingsStore.getState().showKitFolder
     if (!folder) {
@@ -869,15 +876,20 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         .map((t) => ({ time: t.startTime, kind: kindOf.get(t.effectId!)!, text: t.text }))
       const style = useSettingsStore.getState().showStyle?.style
       const duration = spans.reduce((t, x) => Math.max(t, x.timeline + (x.end - x.start)), 0)
-      const se = planSoundEffects(
+      let se = planSoundEffects(
         // 本編の終わりより後(人が演出テロップを動かした など)に SE は置かない
         effects.filter((e) => e.time < duration),
         scenes.map((x) => x.start),
         kit,
         style ? { perMinute: style.sePerMinute, durationSec: duration } : undefined
       )
-      const bgm = planBgm(scenes, kit, style?.bgmVolume)
-      const cg = planCg(allTelops, kit.cg)
+      let bgm = planBgm(scenes, kit, style?.bgmVolume)
+      let cg = planCg(allTelops, kit.cg)
+      if (locked) {
+        se = keepLockedSounds(se, locked, 'se')
+        bgm = keepLockedSounds(bgm, locked, 'bgm')
+        cg = keepLockedCg(cg, locked)
+      }
       // 置く素材を読み込む(すでにあるものは使い回す)
       const assets = await loadKitAssets([...se, ...bgm, ...cg].map((x) => x.path))
       // 用意している間に本編が直されたなら置かない(置く時刻は、仮編集を入れたときの本編で決めてある)
@@ -1152,7 +1164,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const activity = await activityOf(project, info)
     // 前に組んだ本編と今の本編を比べ、人が削った・足した区間、替えたカメラを読み取る
     const released = releasedKeep(project)
-    const overrides = releaseOverridesForScenes(
+    // 自動編集で触らない範囲(ロック)。ロックの中は場面の残す/落とすで手の削りを取り消さず、
+    // 今の中身に固定する(ロックが無ければ今までと同じ)
+    const locks = (project.autoEditLocks ?? []).map((l) => ({ start: l.start, end: l.end }))
+    const keptOverrides = releaseOverridesForScenes(
       project.roughCutAuto
         ? updateOverrides(
             project.cutOverrides,
@@ -1160,9 +1175,21 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             coverageOfClips(project.clips, info)
           )
         : project.cutOverrides,
-      released.scenes,
+      locks.length > 0
+        ? released.scenes.flatMap((sc) =>
+            subtractRanges([sc], locks).map((r) => ({ id: sc.id, start: r.start, end: r.end }))
+          )
+        : released.scenes,
       released.keep
     )
+    const overrides =
+      locks.length > 0
+        ? overridesWithPinned(
+            keptOverrides,
+            pinOverrides(locks, coverageOfClips(project.clips, info)),
+            locks
+          )
+        : keptOverrides
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
       targetSec: get().targetMinutes * 60,
@@ -1443,7 +1470,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           ...effectTelops,
           ...carried
         ],
-        overrides
+        overrides,
+        locks.length > 0 ? { windows: locks, overrides: keptOverrides } : undefined
       )
     if (hasOverrides(overrides))
       log(
@@ -1491,7 +1519,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     // SE・CG は、当てた後の企画に置かれたテロップ(人が消したもの・吹き出しにした発言を除き、直した文字の
     // まま)から置く。組んだだけのテロップから置くと、消したツッコミの効果音・CG が作り直すたびに付いていた
     const placedTelops = placedAutoTelops(applied.textOverlays)
-    await placeSounds(plan.selection.kept, live, placedTelops.effects, placedTelops.all)
+    await placeSounds(
+      plan.selection.kept,
+      live,
+      placedTelops.effects,
+      placedTelops.all,
+      locks.length > 0 ? lockedSoundWindows(project, applied, locks) : undefined
+    )
     log(
       `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${telops.length}`
     )
@@ -2240,6 +2274,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const cw = commonWindowOf(project.clips, info, range)
       if (!cw.ok) return { ok: false, reason: cw.reason }
       const win = cw.window
+      if (
+        (project.autoEditLocks ?? []).some(
+          (l) => Math.min(l.end, win.end) - Math.max(l.start, win.start) > 1e-3
+        )
+      )
+        return {
+          ok: false,
+          reason:
+            '範囲に、自動編集で触らない所(ロック)が入っています。ロックを外すか、ロックの外で範囲を選んでください'
+        }
       const steps = options.steps
       const scenes = get().scenes
       const inWindow = clipScenesToWindow(scenes, win)
@@ -2446,6 +2490,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           ok: false,
           reason: '用意している間に本編が直されたため、やめました。もう一度選んでください'
         }
+      // 終わったらロックする: 当てるのと同じ1回の取り消しで戻るよう、当てる企画に入れておく
+      if (options.lockAfter)
+        after = {
+          ...after,
+          autoEditLocks: mergeLocks([
+            ...(after.autoEditLocks ?? []),
+            { id: uuid(), start: win.start, end: win.end }
+          ])
+        }
       const summary = summarizeRangedEdit(project, after, range, result.range, {
         movedHand: result.movedHand,
         insideHand: result.insideHand,
@@ -2536,6 +2589,131 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     markReviewed: (key, reviewed) => useProjectStore.getState().setReviewed(key, reviewed)
   }
 })
+
+/** 自動編集で触らない範囲の、作り直す前と後のタイムラインの区間と、作り直す前の企画 */
+interface LockedSounds {
+  windows: { prev: TimelineRange; now: TimelineRange }[]
+  prev: Project
+}
+
+/** ロックの窓(共通の時刻)の、作り直す前と後の本編での区間 */
+function lockedSoundWindows(
+  prev: Project,
+  applied: Project,
+  locks: readonly Range[]
+): LockedSounds | undefined {
+  const info = applied.multicam
+  const prevInfo = prev.multicam
+  if (!info || !prevInfo) return undefined
+  const windows = locks.flatMap((l) => {
+    const p = timelineWindowOf(prev.clips, prevInfo, l)
+    const n = timelineWindowOf(applied.clips, info, l)
+    return p && n ? [{ prev: p, now: n }] : []
+  })
+  return windows.length > 0 ? { windows, prev } : undefined
+}
+
+/** ロックの境で切った自動の BGM に付けるフェード(秒) */
+const LOCK_EDGE_FADE = 0.5
+
+const startsWithin = (t: number, r: TimelineRange): boolean =>
+  t >= r.start - 1e-6 && t < r.end - 1e-6
+
+/** 音を区間 `r` の中だけ(`inside`)か外だけにする。切った所に短いフェード */
+function clipSoundTo(x: PlacedSound, r: TimelineRange, inside: boolean): PlacedSound[] {
+  const end = x.startTime + (x.outPoint - x.inPoint)
+  const piece = (a: number, b: number, fadeHead: boolean, fadeTail: boolean): PlacedSound[] => {
+    if (b - a <= 1e-3) return []
+    const len = b - a
+    const fadeIn = fadeHead
+      ? Math.min(LOCK_EDGE_FADE, len / 3)
+      : a === x.startTime
+        ? x.fadeIn
+        : undefined
+    const fadeOut = fadeTail ? Math.min(LOCK_EDGE_FADE, len / 3) : b === end ? x.fadeOut : undefined
+    return [
+      {
+        ...x,
+        startTime: a,
+        inPoint: x.inPoint + (a - x.startTime),
+        outPoint: x.inPoint + (b - x.startTime),
+        fadeIn,
+        fadeOut
+      }
+    ]
+  }
+  if (inside) {
+    const a = Math.max(x.startTime, r.start)
+    const b = Math.min(end, r.end)
+    return piece(a, b, a > x.startTime + 1e-6, b < end - 1e-6)
+  }
+  if (end <= r.start + 1e-6 || x.startTime >= r.end - 1e-6) return [x]
+  return [
+    ...piece(x.startTime, Math.min(end, r.start), false, true),
+    ...piece(Math.max(x.startTime, r.end), end, true, false)
+  ]
+}
+
+/** 置く音のうち、ロックの所のものを、作り直す前の自動の音に替える(BGM は境で切ってフェード) */
+function keepLockedSounds(
+  planned: PlacedSound[],
+  locked: LockedSounds,
+  role: 'se' | 'bgm'
+): PlacedSound[] {
+  const track = locked.prev.audioTracks.find((t) => t.autoRole === role && isUntouchedAuto(t))
+  const pathOf = new Map(locked.prev.assets.map((a) => [a.id, a.filePath]))
+  let out = [...planned]
+  for (const w of locked.windows) {
+    const shift = w.now.start - w.prev.start
+    const prevIn: PlacedSound[] = (track?.clips ?? []).flatMap((c) => {
+      const path = pathOf.get(c.assetId)
+      if (!path) return []
+      const sound: PlacedSound = {
+        path,
+        startTime: c.startTime,
+        inPoint: c.inPoint,
+        outPoint: c.outPoint,
+        volume: c.volume ?? 1,
+        ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
+        ...(c.fadeOut ? { fadeOut: c.fadeOut } : {}),
+        reason: '自動編集で触らない範囲'
+      }
+      if (role === 'se') return startsWithin(c.startTime, w.prev) ? [sound] : []
+      return clipSoundTo(sound, w.prev, true)
+    })
+    out =
+      role === 'se'
+        ? out.filter((x) => !startsWithin(x.startTime, w.now))
+        : out.flatMap((x) => clipSoundTo(x, w.now, false))
+    out.push(...prevIn.map((x) => ({ ...x, startTime: x.startTime + shift })))
+  }
+  return out.sort((a, b) => a.startTime - b.startTime)
+}
+
+/** 置く CG のうち、ロックの所のものを、作り直す前の自動の CG に替える */
+function keepLockedCg(planned: PlacedCg[], locked: LockedSounds): PlacedCg[] {
+  const track = locked.prev.videoOverlayTracks.find(
+    (t) => t.autoRole === 'cg' && isUntouchedAuto(t)
+  )
+  const pathOf = new Map(locked.prev.assets.map((a) => [a.id, a.filePath]))
+  let out = [...planned]
+  for (const w of locked.windows) {
+    const shift = w.now.start - w.prev.start
+    out = out.filter((x) => !startsWithin(x.startTime, w.now))
+    for (const c of track?.clips ?? []) {
+      const path = pathOf.get(c.assetId)
+      if (!path || !startsWithin(c.startTime, w.prev)) continue
+      out.push({
+        path,
+        startTime: c.startTime + shift,
+        inPoint: c.inPoint,
+        outPoint: c.outPoint,
+        keyword: ''
+      })
+    }
+  }
+  return out.sort((a, b) => a.startTime - b.startTime)
+}
 
 /** 番組素材フォルダの素材を読み込む(企画にすでにあるファイルは読まない。読めないものは飛ばす) */
 async function loadKitAssets(allPaths: readonly string[]): Promise<MediaAsset[]> {

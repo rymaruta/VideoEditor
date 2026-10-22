@@ -136,6 +136,9 @@ import { rangedEditBlockedReason } from '../lib/rangedAutoEdit'
 import type { TimelineRange } from '@shared/roughCut/range'
 import { RangeAutoEditDialog } from './RangeAutoEditDialog'
 import { RangeReviewBar } from './RangeReviewBar'
+import { AutoEditLockBand, LockGlyph } from './AutoEditLockBand'
+import { commonWindowOf } from '@shared/roughCut/range'
+import { snapRangeBoundaries } from '../lib/timelineRange'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -669,6 +672,7 @@ export function Timeline(): React.JSX.Element {
   /** 範囲の自動編集のダイアログ(開いている範囲) */
   const [rangeDialog, setRangeDialog] = useState<TimelineRange | null>(null)
   const dragRange = useProjectStore((s) => s.dragRange)
+  const hasLocks = (project.autoEditLocks?.length ?? 0) > 0 && Boolean(project.multicam)
   useEffect(() => onRangeAutoEditRequest((r) => setRangeDialog(r)), [])
   const [scrubbing, setScrubbing] = useState(false)
 
@@ -827,13 +831,33 @@ export function Timeline(): React.JSX.Element {
       useProjectStore.getState().project,
       usePipelineStore.getState()
     )
+    const p = useProjectStore.getState().project
     return [
       {
         label: blocked ? `この範囲を自動編集…(${blocked})` : 'この範囲を自動編集…',
         disabled: Boolean(blocked),
         onSelect: () => setRangeDialog(range)
+      },
+      {
+        label: p.multicam
+          ? 'この範囲を手動で編集する(自動編集で触らない)'
+          : 'この範囲を手動で編集する(同期した収録素材の企画で使えます)',
+        disabled: !p.multicam,
+        onSelect: () => lockRange(range)
       }
     ]
+  }
+
+  /** 範囲を自動編集で触らない範囲(ロック)にする。境はフレームへ寄せ、共通の時刻で覚える */
+  function lockRange(range: TimelineRange): void {
+    const p = useProjectStore.getState().project
+    if (!p.multicam) return
+    const cw = commonWindowOf(p.clips, p.multicam, snapRangeBoundaries(p, range, undefined))
+    if (!cw.ok) {
+      setSfxDropError(`ロックできません: ${cw.reason}`)
+      return
+    }
+    useProjectStore.getState().addAutoEditLock(cw.window)
   }
 
   function openRangeMenu(e: React.MouseEvent, range: TimelineRange, what: string): void {
@@ -2279,6 +2303,12 @@ export function Timeline(): React.JSX.Element {
             <TimelineTimecode fps={rulerFps} />
           </div>
           {sceneRanges.length > 0 && <div className="g3-scene-label">場面</div>}
+          {hasLocks && (
+            <div className="g3-lock-label">
+              <LockGlyph />
+              ロック
+            </div>
+          )}
           <div className="track-label track-label-video" data-g3-kind="video">
             <span className="track-tag tag-video">V1</span>本編
           </div>
@@ -2486,7 +2516,7 @@ export function Timeline(): React.JSX.Element {
           </Popover>
         )}
         <div
-          className={`track-lanes-col ${sceneRanges.length > 0 ? 'g3-has-scenes' : ''}`}
+          className={`track-lanes-col ${sceneRanges.length > 0 ? 'g3-has-scenes' : ''} ${hasLocks ? 'g3-has-locks' : ''}`}
           ref={trackLanesColRef}
         >
           {/* 時間目盛り。押した位置へ再生位置を移す(見えている範囲の目盛りだけ描く) */}
@@ -2564,6 +2594,27 @@ export function Timeline(): React.JSX.Element {
               pixelsPerSecond={pixelsPerSecond}
               width={timelineWidth}
               onSceneMenu={(e, r) => openRangeMenu(e, r, 'この場面')}
+            />
+          )}
+          {hasLocks && (
+            <AutoEditLockBand
+              project={project}
+              pixelsPerSecond={pixelsPerSecond}
+              width={timelineWidth}
+              onLockMenu={(e, lock) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  items: [
+                    {
+                      label: 'ロックを外す(自動編集で作り直せるようにする)',
+                      onSelect: () => useProjectStore.getState().removeAutoEditLock(lock.id)
+                    }
+                  ]
+                })
+              }}
             />
           )}
           {project.beatGrid?.enabled &&

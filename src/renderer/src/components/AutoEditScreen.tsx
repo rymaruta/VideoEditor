@@ -816,6 +816,27 @@ export function AutoEditScreen(): React.JSX.Element | null {
                   人の完成版と比べる…
                 </button>
               </div>
+              {(project.autoEditLocks?.length ?? 0) > 0 && (
+                <div className="auto-edit-locks" aria-label="自動編集で触らない範囲">
+                  <span>自動編集で触らない範囲(ロック):</span>
+                  {project.autoEditLocks!.map((l) => (
+                    <span key={l.id} className="lock-chip">
+                      {formatTimecode(l.start, 30).slice(0, 8)}〜
+                      {formatTimecode(l.end, 30).slice(0, 8)}
+                      <button
+                        className="small-button"
+                        title="このロックを外す(全体の作り直しで作り直せるようにする。取り消しは Ctrl+Z)"
+                        onClick={() => useProjectStore.getState().removeAutoEditLock(l.id)}
+                      >
+                        外す
+                      </button>
+                    </span>
+                  ))}
+                  <span className="form-note">
+                    全体の作り直しでも、この中は今のまま残ります(収録の時刻)
+                  </span>
+                </div>
+              )}
               <ShortsPanel disabled={running || scenes.length === 0} />
               {comparison && (
                 <div className="structure-compare" aria-label="人の完成版との比較">

@@ -22,7 +22,7 @@ import {
   type RangedPreview
 } from '@renderer/lib/rangedAutoEdit'
 import type { Project } from '@shared/types'
-import { clipTimes } from '@shared/roughCut/range'
+import { clipTimes, commonWindowOf, timelineWindowOf } from '@shared/roughCut/range'
 import { coverageOfClips, updateOverrides } from '@shared/roughCut/overrides'
 import { cutSignature } from '@shared/autoEdit'
 import { runEpisode } from '../helpers/episodeHarness'
@@ -236,5 +236,41 @@ describe('範囲だけ自動編集する', () => {
       const afterNew = items(after).filter((x) => x.startTime >= b + delta + 1e-3)
       expect(fmt(afterNew, 0)).toEqual(fmt(afterOld, delta))
     }
+  })
+
+  it('ロックした所は、全体を作り直しても声・自動テロップ・SE・BGM が前のまま(置かれた所へずれるだけ)', async () => {
+    await episode()
+    const info = project().multicam!
+    const total = mainLength(project())
+    const cw = commonWindowOf(project().clips, info, { start: total * 0.35, end: total * 0.65 })
+    expect(cw.ok).toBe(true)
+    if (!cw.ok) return
+    useProjectStore.getState().addAutoEditLock(cw.window)
+    const lock = cw.window
+    const snapshot = (): string[] => {
+      const p = project()
+      const w = timelineWindowOf(p.clips, p.multicam!, lock)!
+      const rel = (t: number): string => (t - w.start).toFixed(4)
+      const inW = (t: number): boolean => t >= w.start + 0.05 && t < w.end - 0.05
+      return [
+        ...p.audioTracks.flatMap((t) =>
+          t.clips
+            .filter((c) => inW(c.startTime))
+            .map(
+              (c) =>
+                `${t.autoRole ?? t.multicamSourceId}|${c.assetId}|${rel(c.startTime)}|${c.inPoint.toFixed(4)}`
+            )
+        ),
+        ...p.textOverlays
+          .filter((o) => o.utteranceId && inW((o.startTime + o.endTime) / 2))
+          .map((o) => `t|${o.text}|${rel(o.startTime)}`)
+      ].sort()
+    }
+    const before = snapshot()
+    expect(before.some((x) => x.startsWith('t|'))).toBe(true)
+    // 長さの目標を変えて全体を作り直す(ロックの外の場面の残し方が変わる)
+    usePipelineStore.getState().setTargetMinutes(2.5)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(snapshot()).toEqual(before)
   })
 })

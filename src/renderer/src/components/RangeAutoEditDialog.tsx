@@ -29,7 +29,15 @@ const STEP_LABELS: [keyof RangedEditSteps, string, string][] = [
 const sec = (s: number): string => `${s >= 0 ? '' : '−'}${Math.abs(s).toFixed(1)}秒`
 
 /** 範囲の中の本編の小さな帯(前・後) */
-function Strip({ pieces, length, scale }: { pieces: StripPiece[]; length: number; scale: number }) {
+function Strip({
+  pieces,
+  length,
+  scale
+}: {
+  pieces: StripPiece[]
+  length: number
+  scale: number
+}): React.JSX.Element {
   return (
     <div className="range-strip" style={{ width: `${Math.max(4, length * scale)}%` }}>
       {pieces.map((p, i) => (
@@ -171,6 +179,14 @@ export function RangeAutoEditDialog({
                 onChange={(e) => change({ keepInside: e.target.checked })}
               />
               範囲の中の手直し(削った・足した所、替えたカメラ)を残す
+            </label>
+            <label className="range-auto-edit-check">
+              <input
+                type="checkbox"
+                checked={options.lockAfter}
+                onChange={(e) => change({ lockAfter: e.target.checked })}
+              />
+              終わったら、この範囲を自動編集で触らないようにする(ロック。手で編集はできます)
             </label>
             {error && (
               <p className={askRipple ? 'hint-text' : 'error-text'} role="alert">

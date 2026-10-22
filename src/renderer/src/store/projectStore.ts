@@ -6,11 +6,13 @@ import {
   tracksReplaceAnchorAudio
 } from '@shared/roughCut/build'
 import {
+  clipTimes,
   intersectSegs,
   overridesWithin,
   spliceClips,
   spliceTimed,
   subtractSegs,
+  timelineWindowOf,
   type TimelineRange
 } from '@shared/roughCut/range'
 import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
@@ -75,6 +77,7 @@ import { normalizeAutoEdit, type AutoEditDecisions } from '@shared/autoEdit'
 import type {
   AspectRatio,
   AudioTrack,
+  AutoEditLock,
   AudioTrackClip,
   AutoEditPattern,
   BeatGrid,
@@ -457,7 +460,7 @@ function signatureV2(track: SignedTrack): string {
 }
 
 /** 自動で置いたまま手を付けていないトラックか(作り直しで入れ替えてよい) */
-function isUntouchedAuto(
+export function isUntouchedAuto(
   track: SignedTrack & { autoRole?: string; autoSignature?: string }
 ): boolean {
   if (!track.autoRole || track.autoSignature === undefined) return false
@@ -845,6 +848,8 @@ function normalizeLoadedProjectFields(project: Project): Project {
     roughCutAuto: normalizeSegs(raw.roughCutAuto, true) as CameraSeg[] | undefined,
     cutOverrides: normalizeOverrides(raw.cutOverrides),
     autoEdit: normalizeAutoEdit(raw.autoEdit),
+    // 自動編集で触らない範囲(壊れたものは捨てる)。無い企画には足さない
+    ...('autoEditLocks' in raw ? { autoEditLocks: normalizeLocks(raw.autoEditLocks) } : {}),
     audioEvents: Array.isArray(raw.audioEvents)
       ? (raw.audioEvents as unknown[]).filter(
           (e): e is AudioEventWindow =>
@@ -856,6 +861,39 @@ function normalizeLoadedProjectFields(project: Project): Project {
         )
       : undefined
   }
+}
+
+/** 自動編集で触らない範囲(壊れたものは捨て、重なるものはまとめる)。無ければ undefined */
+function normalizeLocks(raw: unknown): AutoEditLock[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const ok = raw.filter(
+    (r): r is Record<string, unknown> =>
+      Boolean(r) &&
+      typeof r === 'object' &&
+      Number.isFinite((r as Record<string, unknown>).start) &&
+      Number.isFinite((r as Record<string, unknown>).end) &&
+      ((r as Record<string, unknown>).end as number) >
+        ((r as Record<string, unknown>).start as number)
+  )
+  const locks = mergeLocks(
+    ok.map((r) => ({
+      id: typeof r.id === 'string' && r.id ? r.id : uuid(),
+      start: r.start as number,
+      end: r.end as number
+    }))
+  )
+  return locks.length > 0 ? locks : undefined
+}
+
+/** 重なる・つながるロックを1つにまとめる(先のものの id を使う) */
+export function mergeLocks(locks: readonly AutoEditLock[]): AutoEditLock[] {
+  const out: AutoEditLock[] = []
+  for (const l of [...locks].sort((a, b) => a.start - b.start)) {
+    const last = out[out.length - 1]
+    if (last && l.start <= last.end + 1e-3) last.end = Math.max(last.end, l.end)
+    else out.push({ id: l.id, start: l.start, end: l.end })
+  }
+  return out
 }
 
 /** 区間の並び(壊れた要素は捨てる)。`camera` なら cameraId も要る */
@@ -1252,8 +1290,19 @@ interface ProjectState {
   applyRoughCut: (
     cut: RoughCut,
     telops: Omit<TextOverlay, 'id'>[],
-    overrides?: CutOverrides
+    overrides?: CutOverrides,
+    /**
+     * 自動編集で触らない範囲(共通の時刻)。窓の中は前のクリップ(速さ・並び・差し込みも)のまま差し替え、
+     * 窓の中の声・自動テロップも前のものを残す。`overrides` は企画に覚える人の修正(窓の中を今の中身に
+     * 固定した分を除いたもの)。窓の中の組んだ本編の記録は前のまま(ロックを外した後も手直しが分かる)。
+     * 無ければ今までと同じ
+     */
+    pinned?: { windows: readonly Range[]; overrides?: CutOverrides }
   ) => void
+  /** 自動編集で触らない範囲(共通の時刻)を足す。重なるものはまとめる(取り消し1回で戻る) */
+  addAutoEditLock: (window: { start: number; end: number }) => void
+  /** 自動編集で触らない範囲を外す(取り消し1回で戻る) */
+  removeAutoEditLock: (id: string) => void
   /**
    * 範囲の自動編集を当てる(`rangedEditProject` で作った企画に入れ替える)。取り消し1回で戻る。
    * 用意した時の企画(`base`)から、自動編集の判断のほかが変わっていれば当てずに false
@@ -3508,7 +3557,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }
     }),
 
-  applyRoughCut: (cut, telops, overrides) =>
+  applyRoughCut: (cut, telops, overrides, pinned) =>
     set((state) => {
       const rebuilt: Clip[] = cut.main.map((m) => ({
         id: uuid(),
@@ -3521,8 +3570,17 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }))
       // 人が本編に入れた収録素材以外のクリップ(差し込みの画・静止画・タイトル)は消さずに、
       // 直前の収録素材のクリップの続きに入れ直す(同じクリップなので、結び付いたテロップも外れない)
+      // 自動編集で触らない範囲は、前のクリップのまま差し替える(差し込みの画もその中で残す)
+      const pin =
+        pinned && pinned.windows.length > 0 && state.project.multicam
+          ? pinLockedClips(state.project.clips, rebuilt, state.project.multicam, pinned.windows)
+          : null
       const clips = state.project.multicam
-        ? reinsertExtraClips(state.project.clips, rebuilt, state.project.multicam)
+        ? reinsertExtraClips(
+            pin ? pin.previousForExtras : state.project.clips,
+            pin ? pin.clips : rebuilt,
+            state.project.multicam
+          )
         : rebuilt
       // 本編のクリップは作り直すと ID が変わるので、本編に紐づけた手置きのテロップ・分離音声を、
       // 同じ共通の時刻を映す新しいクリップへ紐づけ直す(しないと紐づきが外れ、元の時刻に取り残される)
@@ -3680,9 +3738,20 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ),
         // 作り直すときに今の本編と比べられるよう、組んだ本編を共通の時刻で覚える
         roughCutAuto: state.project.multicam
-          ? coverageOfClips(cut.main, state.project.multicam)
+          ? pin
+            ? [
+                ...subtractSegs(coverageOfClips(cut.main, state.project.multicam), pinned!.windows),
+                ...intersectSegs(state.project.roughCutAuto ?? [], pinned!.windows)
+              ].sort((x, y) => x.start - y.start)
+            : coverageOfClips(cut.main, state.project.multicam)
           : undefined,
-        cutOverrides: hasOverrides(overrides) ? overrides : undefined,
+        cutOverrides: pin
+          ? hasOverrides(pinned!.overrides)
+            ? pinned!.overrides
+            : undefined
+          : hasOverrides(overrides)
+            ? overrides
+            : undefined,
         // 人が直したテロップは文字と見た目を残し、人が消したものは足し直さない。
         // 直した内容はプロジェクトに覚える(場面を落として外れても、戻したときに直した内容で出す)
         editedTelops: rememberEditedTelops(state.project.textOverlays, state.project.editedTelops),
@@ -3704,10 +3773,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           ).map((o) => ({ ...o, id: uuid() }))
         ]
       }
-      const rebuiltProject =
+      const followedProject =
         clips !== rebuilt && state.project.multicam
           ? followMainEdit({ ...fresh, clips: rebuilt }, fresh, true)
           : fresh
+      const rebuiltProject =
+        pin && pin.windows.length > 0
+          ? restoreLockedContent(followedProject, state.project, pin.windows)
+          : followedProject
       return {
         __noFollow: true,
         ...pushHistory(state),
@@ -3715,6 +3788,26 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         multiSelectedClipIds: [],
         selectedOverlayId: null,
         project: rebuiltProject
+      }
+    }),
+
+  addAutoEditLock: (window) =>
+    set((state) => {
+      if (!(window.end - window.start > 1e-3)) return state
+      const locks = mergeLocks([
+        ...(state.project.autoEditLocks ?? []),
+        { id: uuid(), start: window.start, end: window.end }
+      ])
+      return { ...pushHistory(state), project: { ...state.project, autoEditLocks: locks } }
+    }),
+
+  removeAutoEditLock: (id) =>
+    set((state) => {
+      const locks = (state.project.autoEditLocks ?? []).filter((l) => l.id !== id)
+      if (locks.length === (state.project.autoEditLocks ?? []).length) return state
+      return {
+        ...pushHistory(state),
+        project: { ...state.project, autoEditLocks: locks.length > 0 ? locks : undefined }
       }
     }),
 
@@ -6300,6 +6393,161 @@ export function sameExceptAutoEdit(a: Project, b: Project): boolean {
     if (x !== y) return false
   }
   return true
+}
+
+/**
+ * 作り直した本編(`rebuilt`)の、自動編集で触らない範囲(`locks`。共通の時刻)の所を、前の本編の同じ所の
+ * クリップに差し替える。前の本編で窓の中が続いて並んでいない(窓の外のクリップが挟まる)所は差し替えない。
+ * `previousForExtras` は、差し込みの画を入れ直すのに使う前の本編(窓の中に入れた差し込みの画を除く)
+ */
+function pinLockedClips(
+  previous: readonly Clip[],
+  rebuilt: Clip[],
+  info: MulticamInfo,
+  locks: readonly Range[]
+): {
+  clips: Clip[]
+  previousForExtras: Clip[]
+  windows: { lock: Range; prev: TimelineRange }[]
+} {
+  const recorded = new Set(info.files.map((f) => f.assetId))
+  const prevTimes = clipTimes(previous)
+  let clips = rebuilt
+  const windows: { lock: Range; prev: TimelineRange }[] = []
+  const usedExtras = new Set<string>()
+  for (const lock of [...locks].sort((a, b) => a.start - b.start)) {
+    const prevWin = timelineWindowOf(previous, info, lock)
+    const nowWin = timelineWindowOf(clips, info, lock)
+    if (!prevWin || !nowWin) continue
+    const inside = spliceClips(previous, [], prevWin, splitId).inside
+    // 窓に掛かる差し込みの画は窓の中の切れ端として入るので、入れ直さない
+    previous.forEach((c, i) => {
+      if (recorded.has(c.assetId)) return
+      if (prevTimes[i].end > prevWin.start + 1e-6 && prevTimes[i].start < prevWin.end - 1e-6)
+        usedExtras.add(c.id)
+    })
+    const parts = spliceClips(clips, inside, nowWin, splitId)
+    // 窓の境でだけ分かれた続きのクリップ(同じ素材の続いた所)は1本に戻す(境に余計な切れ目を作らない)
+    clips = joinAt(
+      joinAt(parts.clips, parts.before.length - 1),
+      parts.before.length + inside.length - 1
+    )
+    windows.push({ lock, prev: prevWin })
+  }
+  const previousForExtras = previous.filter((c) => recorded.has(c.assetId) || !usedExtras.has(c.id))
+  return { clips, previousForExtras, windows }
+}
+
+/**
+ * 本編の `i` 本目と次のクリップが、同じ素材の続いた所(速さも同じ・次に場面転換が無い)なら1本にする。
+ * 前のクリップの id を残す
+ */
+function joinAt(clips: Clip[], i: number): Clip[] {
+  const a = clips[i]
+  const b = clips[i + 1]
+  if (
+    !a ||
+    !b ||
+    a.assetId !== b.assetId ||
+    Math.abs((a.speed || 1) - (b.speed || 1)) > 1e-9 ||
+    Math.abs(a.outPoint - b.inPoint) > 1e-6 ||
+    b.transitionIn ||
+    JSON.stringify(clipLookOf(a)) !== JSON.stringify(clipLookOf(b))
+  )
+    return clips
+  return [...clips.slice(0, i), { ...a, outPoint: b.outPoint }, ...clips.slice(i + 2)]
+}
+
+/** 時刻のあるクリップの、タイムラインの区間 [a, b) の中の所(掛かるものは境で切る) */
+function insideWindow<
+  C extends { id: string; startTime: number; inPoint: number; outPoint: number; speed?: number }
+>(clips: readonly C[], a: number, b: number): C[] {
+  return clips.flatMap((c) => {
+    const speed = c.speed || 1
+    const end = c.startTime + (c.outPoint - c.inPoint) / speed
+    const s0 = Math.max(a, c.startTime)
+    const e0 = Math.min(b, end)
+    if (e0 - s0 <= 1e-6) return []
+    return [
+      {
+        ...c,
+        startTime: s0,
+        inPoint: c.inPoint + (s0 - c.startTime) * speed,
+        outPoint: c.inPoint + (e0 - c.startTime) * speed
+      }
+    ]
+  })
+}
+
+/**
+ * 自動編集で触らない範囲の、声(収録の音)・顔カメラのワイプ・自動テロップを、作り直す前のもの
+ * (前の本編の同じ所)に戻す。作り直した本編で、その範囲が置かれた所へずらして入れる
+ */
+function restoreLockedContent(
+  project: Project,
+  prev: Project,
+  windows: readonly { lock: Range; prev: TimelineRange }[]
+): Project {
+  const info = project.multicam
+  if (!info) return project
+  const recorded = new Set(info.files.map((f) => f.assetId))
+  let { audioTracks, videoOverlayTracks, textOverlays } = project
+  for (const w of windows) {
+    const now = timelineWindowOf(project.clips, info, w.lock)
+    if (!now) continue
+    const shift = now.start - w.prev.start
+    const moved = <C extends { startTime: number }>(c: C): C => ({
+      ...c,
+      id: uuid(),
+      startTime: c.startTime + shift
+    })
+    audioTracks = audioTracks.map((t) => {
+      if (!t.multicamSourceId) return t
+      const before = prev.audioTracks.find((x) => x.multicamSourceId === t.multicamSourceId)
+      const isVoice = (c: AudioTrackClip): boolean => recorded.has(c.assetId) && !c.linkedClipId
+      const kept = cutOutWindow(t.clips.filter(isVoice), now.start, now.end)
+      const back = before
+        ? insideWindow(before.clips.filter(isVoice), w.prev.start, w.prev.end).map(moved)
+        : []
+      return {
+        ...t,
+        clips: [...kept, ...back, ...t.clips.filter((c) => !isVoice(c))].sort(
+          (x, y) => x.startTime - y.startTime
+        )
+      }
+    })
+    videoOverlayTracks = videoOverlayTracks.map((t) => {
+      if (!t.multicamSourceId) return t
+      const before = prev.videoOverlayTracks.find((x) => x.multicamSourceId === t.multicamSourceId)
+      const isCam = (c: VideoOverlayClip): boolean => recorded.has(c.assetId)
+      const kept = cutOutWindow(t.clips.filter(isCam), now.start, now.end)
+      const back = before
+        ? insideWindow(before.clips.filter(isCam), w.prev.start, w.prev.end).map(moved)
+        : []
+      return {
+        ...t,
+        clips: [...kept, ...back, ...t.clips.filter((c) => !isCam(c))].sort(
+          (x, y) => x.startTime - y.startTime
+        )
+      }
+    })
+    // 自動テロップ: 真ん中の時刻が範囲の中の新しいものは捨て、前のものを残す
+    const isAuto = (o: TextOverlay): boolean => !o.linkedClipId && autoTelopKey(o) !== null
+    const midIn = (o: TextOverlay, r: TimelineRange): boolean => {
+      const m = (o.startTime + o.endTime) / 2
+      return m >= r.start - 1e-6 && m < r.end - 1e-6
+    }
+    const back = prev.textOverlays
+      .filter((o) => isAuto(o) && midIn(o, w.prev))
+      .map((o) => ({
+        ...o,
+        startTime: o.startTime + shift,
+        endTime: o.endTime + shift,
+        words: shiftOverlayWords(o.words, shift)
+      }))
+    textOverlays = [...textOverlays.filter((o) => !(isAuto(o) && midIn(o, now))), ...back]
+  }
+  return { ...project, audioTracks, videoOverlayTracks, textOverlays }
 }
 
 /** 本編の速さの並び(BGM の作り直しの元にしたときの本編) */
