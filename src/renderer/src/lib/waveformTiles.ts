@@ -70,6 +70,38 @@ export function columnLevels(rgba: ArrayLike<number>, w: number, h: number): Flo
   return levels
 }
 
+/**
+ * 1 画面 px あたり何列の絵を頼むか。細かく(1px に 2 本)描くために 2 倍で頼むが、
+ * 絵の幅が canvas の上限を超えるほど長いクリップでは 1 倍に戻す(ffmpeg の絵が重くなりすぎない)
+ */
+export const WAVEFORM_DENSITY = 2
+export const WAVEFORM_DENSE_MAX_WIDTH = CANVAS_MAX_SIDE
+
+export function waveformDensity(screenWidth: number): number {
+  return screenWidth * WAVEFORM_DENSITY <= WAVEFORM_DENSE_MAX_WIDTH ? WAVEFORM_DENSITY : 1
+}
+
+/** 高さの分解能のために、縦も何倍で頼むか(描く時は枠の高さに縮める) */
+export const WAVEFORM_HEIGHT_SCALE = 2
+
+/**
+ * 振幅を平方根で持ち上げる(dB のように丸い塊に潰さず、小さい音も見え、尖りは残る)。
+ * `levels` は中心からの高さ(px)、`half` は半分の高さ(px)。新しい配列を返す
+ */
+export function liftLevels(
+  levels: Float32Array,
+  half: number,
+  exponent: number = 0.5
+): Float32Array {
+  const out = new Float32Array(levels.length)
+  if (half <= 0) return out
+  for (let x = 0; x < levels.length; x++) {
+    const v = Math.min(1, Math.max(0, levels[x] / half))
+    out[x] = v > 0 ? Math.pow(v, exponent) * half : 0
+  }
+  return out
+}
+
 /** 外側の山: 各列について、まわり `reach` 列のうち大きい方 */
 export function peakEnvelope(levels: Float32Array, reach: number = PEAK_REACH): Float32Array {
   const out = new Float32Array(levels.length)

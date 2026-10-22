@@ -4,7 +4,9 @@ import {
   PEAK_REACH,
   WAVEFORM_TILE_WIDTH,
   columnLevels,
+  liftLevels,
   peakEnvelope,
+  waveformDensity,
   tileReadRange,
   waveformTiles
 } from '@renderer/lib/waveformTiles'
@@ -96,5 +98,16 @@ describe('列ごとの大きさと山', () => {
       pieced.push(...Array.from(peak.slice(offset, offset + tile.w)))
     }
     expect(pieced).toEqual(Array.from(whole))
+  })
+})
+
+describe('細かい波形(Graphite 3)', () => {
+  it('平方根で持ち上げる: 小さい音は大きく、満ちた音と無音はそのまま', () => {
+    const out = liftLevels(new Float32Array([0, 2.5, 10, 20]), 10)
+    expect(Array.from(out)).toEqual([0, 5, 10, 10])
+  })
+  it('1px に 2 列で頼む。canvas の上限を超える長さは 1 列に戻す', () => {
+    expect(waveformDensity(1000)).toBe(2)
+    expect(waveformDensity(CANVAS_MAX_SIDE)).toBe(1)
   })
 })

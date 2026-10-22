@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   columnLevels,
+  liftLevels,
   peakEnvelope,
+  waveformDensity,
+  WAVEFORM_HEIGHT_SCALE,
   tileReadRange,
   waveformTiles,
   type WaveTile
@@ -65,7 +68,8 @@ function tileLevels(
   if (!ctx) throw new Error('canvas unavailable')
   ctx.clearRect(0, 0, sw, h)
   ctx.drawImage(img, sx, 0, sw, h, 0, 0, sw, h)
-  const levels = columnLevels(ctx.getImageData(0, 0, sw, h).data, sw, h)
+  // 平方根で持ち上げてから山を取る(小さい音も読め、尖りは残る)
+  const levels = liftLevels(columnLevels(ctx.getImageData(0, 0, sw, h).data, sw, h), (h - 1) / 2)
   const peak = peakEnvelope(levels)
   const result = {
     rms: levels.slice(offset, offset + tile.w),
@@ -90,9 +94,14 @@ function drawTile(canvas: HTMLCanvasElement, img: HTMLImageElement, tile: WaveTi
   const style = getComputedStyle(canvas)
   const mid = h / 2
   ctx.clearRect(0, 0, tile.w, h)
-  ctx.fillStyle = style.getPropertyValue('--ve-wave-peak').trim() || '#2f6b50'
+  // Graphite 3 のレーンの色(--g3-wave-*)があればそれを、無ければ Graphite 2 の色を使う
+  const color = (name: string, fallback: string): string =>
+    style.getPropertyValue(`--g3-wave-${name}`).trim() ||
+    style.getPropertyValue(`--ve-wave-${name}`).trim() ||
+    fallback
+  ctx.fillStyle = color('peak', '#2f6b50')
   for (let x = 0; x < tile.w; x++) if (peak[x] > 0) ctx.fillRect(x, mid - peak[x], 1, peak[x] * 2)
-  ctx.fillStyle = style.getPropertyValue('--ve-wave-rms').trim() || '#7bddae'
+  ctx.fillStyle = color('rms', '#7bddae')
   for (let x = 0; x < tile.w; x++) if (rms[x] > 0) ctx.fillRect(x, mid - rms[x], 1, rms[x] * 2)
 }
 
@@ -205,8 +214,15 @@ export function Waveform({
     // trim-dragging a clip, and firing an ffmpeg subprocess per frame would flood
     // the system. Only the value the drag settles on actually needs a fetch.
     const request = (attempt: number): void => {
+      // 1 画面 px に 2 列・縦も 2 倍の細かい絵を頼む(描く時に枠へ縮める。細い線が並ぶ見え方)
       window.api
-        .generateWaveform(filePath, start, end, Math.round(width), Math.round(height))
+        .generateWaveform(
+          filePath,
+          start,
+          end,
+          Math.round(width * waveformDensity(width)),
+          Math.round(height * WAVEFORM_HEIGHT_SCALE)
+        )
         .then((dataUrl) => {
           if (!cancelled) setUrl(dataUrl)
         })

@@ -1,0 +1,424 @@
+/* =====================================================================
+   Graphite 3 のタイムライン(Timeline.tsx が読む)
+   - レーンに種類の色を薄く敷く(左から右へ薄れる)・見出しの印は種類の色の塗り
+   - 映像=青の名前帯とコマ / テロップ=話者の色 / 台詞=エメラルド / 劇伴=バイオレット /
+     効果音=タンジェリン / グラフィック=シアン / 自動で入れたもの=紫の点
+   - 選んだものは琥珀の内枠と淡い光。時刻は Geist Mono
+   --ve-* は値を変えずに使う。この画面だけの色は --g3-* に置く。
+   ===================================================================== */
+
+.timeline-panel {
+  --g3-mono: 'Geist Mono', var(--font-mono), ui-monospace, monospace;
+  --g3-line: #181b20;
+  --g3-select-ring: inset 0 0 0 1.5px var(--ve-accent);
+  --g3-select-glow: 0 0 0 3px rgba(245, 165, 36, 0.18), 0 0 14px rgba(245, 165, 36, 0.22);
+}
+
+/* 種類の色(--g3-k: 見出しの印、--g3-tint: レーンに敷く色) */
+.timeline-panel [data-g3-kind='video'] {
+  --g3-k: #5b8cff;
+  --g3-tint: #3d6bff;
+}
+.timeline-panel [data-g3-kind='overlay'] {
+  --g3-k: #22d3e6;
+  --g3-tint: #22d3e6;
+}
+.timeline-panel [data-g3-kind='telop'] {
+  --g3-k: #ff5fa2;
+  --g3-tint: #ff5fa2;
+}
+.timeline-panel [data-g3-kind='dialog'] {
+  --g3-k: #2ee59a;
+  --g3-tint: #2ee59a;
+}
+.timeline-panel [data-g3-kind='bgm'] {
+  --g3-k: #9a7bff;
+  --g3-tint: #9a7bff;
+}
+.timeline-panel [data-g3-kind='se'] {
+  --g3-k: #ff8f3d;
+  --g3-tint: #ff8f3d;
+}
+
+/* ---------- 見出しの列 ---------- */
+.timeline-panel .track-labels-col {
+  background: linear-gradient(90deg, #181b30, #13152a);
+  border-right: 1px solid #1c1f25;
+}
+.timeline-panel .track-label {
+  border-bottom-color: var(--g3-line);
+  color: #e3e5e8;
+  font-size: 11.5px;
+}
+.timeline-panel .track-label[data-g3-kind] .track-tag {
+  background: linear-gradient(135deg, var(--g3-k), color-mix(in srgb, var(--g3-k) 78%, #ffffff));
+  color: #0a0b12;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--g3-k) 33%, transparent);
+  font-family: var(--g3-mono);
+  font-size: 10px;
+  height: 17px;
+  min-width: 22px;
+}
+.timeline-panel .timeline-timecode-cell {
+  border-bottom: 1px solid var(--g3-line);
+  padding: 0 10px;
+}
+.timeline-panel .timeline-timecode {
+  font-family: var(--g3-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffcb6b;
+  letter-spacing: 0;
+}
+.timeline-panel .zoom-label {
+  font-family: var(--g3-mono);
+}
+.timeline-panel .g3-scene-label {
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 10.5px;
+  color: var(--ve-text-3);
+  border-bottom: 1px solid var(--g3-line);
+}
+
+/* 高さ: 本編はコマが見えるように高く、音は波形が読めるように少し高く(見出しと揃える) */
+.timeline-panel .track-label[data-g3-kind='video'],
+.timeline-panel .track-lane.video-lane {
+  height: 62px;
+}
+.timeline-panel .track-label[data-g3-kind='dialog'],
+.timeline-panel .track-label[data-g3-kind='bgm'],
+.timeline-panel .track-label[data-g3-kind='se'],
+.timeline-panel .track-lane.audio-lane {
+  height: 52px;
+}
+
+/* ---------- レーン ---------- */
+.timeline-panel .track-lanes-col {
+  background: linear-gradient(180deg, rgba(9, 11, 18, 0.85), rgba(7, 8, 13, 0.9));
+}
+.timeline-panel .track-lane {
+  border-bottom-color: var(--g3-line);
+}
+/* 種類の色を薄く敷く。左端に貼りついたまま(横に送っても見えている所の左から薄れる)。
+   幅はレーンを越えない(横のスクロールの幅を増やさない)。押した所はレーンのまま */
+.timeline-panel .track-lane[data-g3-kind]::before {
+  content: '';
+  position: sticky;
+  left: 0;
+  flex: none;
+  align-self: stretch;
+  width: min(100%, 100vw);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--g3-tint) 12%, transparent),
+    color-mix(in srgb, var(--g3-tint) 3%, transparent) 70%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* ---------- 目盛りの帯 ---------- */
+.timeline-panel .timeline-ruler {
+  background-color: #0f1114;
+  background-image: linear-gradient(90deg, #2a2f37 1px, transparent 1px);
+  background-size: var(--g3-minor, 8px) 6px;
+  background-repeat: repeat-x;
+  background-position: 0 100%;
+  border-bottom-color: var(--g3-line);
+}
+.timeline-panel .timeline-ruler-tick {
+  border-left: 0;
+  padding: 2px 0 0 4px;
+  font-family: var(--g3-mono);
+  font-size: 10px;
+  color: #8a9099;
+}
+.timeline-panel .timeline-ruler-tick::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 15px;
+  background: #3a3f48;
+}
+/* 選んでいるものの範囲(イン〜アウト) */
+.timeline-panel .g3-ruler-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(245, 165, 36, 0.12);
+  box-shadow:
+    inset 1px 0 0 var(--ve-accent),
+    inset -1px 0 0 var(--ve-accent);
+  pointer-events: none;
+}
+/* 確認の印(琥珀のひし形) */
+.timeline-panel .g3-ruler-mark {
+  position: absolute;
+  bottom: 4px;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  transform: rotate(45deg);
+  background: var(--ve-accent);
+  box-shadow: 0 0 0 2px #101215;
+  z-index: 1;
+}
+
+/* ---------- 場面の帯 ---------- */
+.timeline-panel .g3-scene-band {
+  position: relative;
+  height: 22px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--g3-line);
+}
+.timeline-panel .g3-scene {
+  position: absolute;
+  top: 3px;
+  height: 16px;
+  border-radius: 3px;
+  padding-left: 7px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--g3-hue) 18%, transparent),
+    color-mix(in srgb, var(--g3-hue) 4%, transparent)
+  );
+  box-shadow: inset 3px 0 0 var(--g3-hue);
+  font-family: var(--g3-mono);
+  font-size: 10px;
+  line-height: 16px;
+  color: #c9cce0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.timeline-panel .g3-scene.current {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--g3-hue) 33%, transparent),
+    color-mix(in srgb, var(--g3-hue) 9%, transparent)
+  );
+  color: #ffffff;
+}
+.timeline-panel .track-lanes-col.g3-has-scenes .timeline-playhead {
+  top: -54px;
+}
+
+/* ---------- 再生位置 ---------- */
+.timeline-panel .timeline-playhead {
+  background: linear-gradient(180deg, #ff6a4d, #ff3d5e 400px);
+  box-shadow: 0 0 14px rgba(255, 70, 80, 0.6);
+  z-index: 5;
+}
+.timeline-panel .timeline-playhead-handle {
+  width: 16px;
+  height: 16px;
+  background: #ff4d3a;
+}
+
+/* ---------- クリップ共通: 枠は上に重ねて描く(中のコマ・波形に隠れない) ---------- */
+.timeline-panel .timeline-clip::after,
+.timeline-panel .timeline-audio-clip::after,
+.timeline-panel .timeline-video-overlay-clip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--g3-ring, transparent);
+  pointer-events: none;
+  z-index: 3;
+}
+.timeline-panel .timeline-clip.selected,
+.timeline-panel .timeline-clip.trimming,
+.timeline-panel .timeline-tracks .timeline-audio-clip.selected,
+.timeline-panel .timeline-tracks .timeline-audio-clip.trimming,
+.timeline-panel .timeline-video-overlay-clip.selected,
+.timeline-panel .timeline-video-overlay-clip.trimming {
+  box-shadow: var(--g3-select-glow);
+  z-index: 4;
+}
+.timeline-panel .timeline-clip.selected::after,
+.timeline-panel .timeline-clip.trimming::after,
+.timeline-panel .timeline-audio-clip.selected::after,
+.timeline-panel .timeline-audio-clip.trimming::after,
+.timeline-panel .timeline-video-overlay-clip.selected::after,
+.timeline-panel .timeline-video-overlay-clip.trimming::after {
+  box-shadow: inset 0 0 0 2px var(--ve-accent);
+}
+
+/* ---------- 映像(本編) ---------- */
+.timeline-panel .timeline-clip {
+  top: 3px;
+  height: calc(100% - 6px);
+  padding: 0 5px;
+  gap: 5px;
+  align-items: flex-start;
+  background: #14213f;
+  box-shadow: none;
+  color: #f2f5ff;
+  --g3-ring: rgba(120, 160, 255, 0.3);
+  --g3-wave-peak: #2e4bb8;
+  --g3-wave-rms: #9db8ff;
+}
+.timeline-panel .timeline-clip.selected,
+.timeline-panel .timeline-clip.trimming {
+  background: #14213f;
+  color: #ffffff;
+}
+.timeline-panel .g3-clip-head {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 14px;
+  background: linear-gradient(90deg, #3d6bff, #2b4fd6 60%, #3a3ac9);
+  pointer-events: none;
+}
+.timeline-panel .g3-clip-frames {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 14px;
+  bottom: 0;
+  background-repeat: repeat-x;
+  background-size: auto 100%;
+  background-position: 0 0;
+  opacity: 0.92;
+  pointer-events: none;
+}
+.timeline-panel .timeline-clip-color {
+  z-index: 2;
+}
+.timeline-panel .timeline-clip-index {
+  width: auto;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 0;
+  background: rgba(10, 14, 40, 0.35);
+  font-family: var(--g3-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+}
+.timeline-panel .timeline-clip-label {
+  font-family: var(--g3-mono);
+  font-size: 9.5px;
+  line-height: 14px;
+  color: #f2f5ff;
+}
+.timeline-panel .timeline-clip .timeline-mismatch-icon {
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  color: #ffe3a8;
+}
+/* 本編の音は下に細く(コマを隠さない) */
+.timeline-panel .timeline-clip .timeline-clip-waveform {
+  top: auto;
+  bottom: 0;
+  height: 40%;
+  background: linear-gradient(180deg, transparent, rgba(8, 12, 30, 0.7));
+}
+
+/* ---------- テロップ(話者の色) ---------- */
+.timeline-panel .timeline-caption-clip {
+  --g3-spk: #555555;
+  border: 0;
+  padding: 0 6px 0 9px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--g3-spk) 48%, #0b0c14),
+    color-mix(in srgb, var(--g3-spk) 26%, #0b0c14)
+  );
+  box-shadow:
+    inset 3px 0 0 var(--g3-spk),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: #f3f4f6;
+  font-size: 10.5px;
+}
+.timeline-panel .timeline-caption-clip.selected {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--g3-spk) 56%, #0b0c14),
+    color-mix(in srgb, var(--g3-spk) 32%, #0b0c14)
+  );
+  box-shadow:
+    inset 0 0 0 1.5px var(--ve-accent),
+    inset 4px 0 0 var(--g3-spk),
+    var(--g3-select-glow);
+  color: #ffffff;
+  z-index: 4;
+}
+.timeline-panel .timeline-caption-clip.auto::before {
+  width: 5px;
+  height: 5px;
+  margin-right: 4px;
+  background: var(--ve-auto);
+}
+
+/* ---------- 音(種類ごと) ---------- */
+.timeline-panel .timeline-tracks .audio-lane .timeline-audio-clip {
+  top: 3px;
+  bottom: 3px;
+  box-shadow: none;
+}
+.timeline-panel .timeline-tracks .audio-lane[data-g3-kind='dialog'] .timeline-audio-clip {
+  background: linear-gradient(180deg, #0f3b2c, #0a2a20);
+  color: #a6f0cb;
+  --g3-ring: rgba(92, 242, 176, 0.22);
+  --g3-wave-peak: #1e7a55;
+  --g3-wave-rms: #5cf2b0;
+}
+.timeline-panel .timeline-tracks .audio-lane[data-g3-kind='bgm'] .timeline-audio-clip {
+  background: linear-gradient(180deg, #2c1f66, #1c1546);
+  color: #d6ccff;
+  --g3-ring: rgba(185, 166, 255, 0.26);
+  --g3-wave-peak: #4d3bb0;
+  --g3-wave-rms: #b9a6ff;
+}
+.timeline-panel .timeline-tracks .audio-lane[data-g3-kind='se'] .timeline-audio-clip {
+  background: linear-gradient(180deg, #7a3410, #4e2009);
+  color: #ffd0a6;
+  --g3-ring: rgba(255, 143, 61, 0.45);
+  --g3-wave-peak: #a64a14;
+  --g3-wave-rms: #ffa25c;
+}
+.timeline-panel .timeline-audio-clip-label {
+  font-size: 10px;
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.8),
+    0 0 3px rgba(0, 0, 0, 0.8);
+}
+.timeline-panel .timeline-clip-waveform {
+  opacity: 1;
+}
+/* 自動で入れたもの(自動の SE・BGM・版面CG)は紫の点 */
+.timeline-panel .audio-lane.auto .timeline-audio-clip::before,
+.timeline-panel .video-overlay-lane[data-g3-auto] .timeline-video-overlay-clip::before {
+  content: '';
+  position: relative;
+  z-index: 1;
+  flex: none;
+  align-self: flex-start;
+  width: 5px;
+  height: 5px;
+  margin: 7px 4px 0 0;
+  border-radius: 50%;
+  background: var(--ve-auto);
+}
+
+/* ---------- グラフィック・ワイプ(シアン) ---------- */
+.timeline-panel .timeline-video-overlay-clip {
+  top: 3px;
+  bottom: 3px;
+  border: 0;
+  background: linear-gradient(90deg, #0d7484, #0a4b57);
+  box-shadow: none;
+  color: #d8fbff;
+  font-size: 10px;
+  --g3-ring: rgba(51, 214, 232, 0.45);
+}

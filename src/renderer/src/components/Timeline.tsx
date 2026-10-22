@@ -126,6 +126,11 @@ import { stripTelopMarkup } from '@shared/telop/render'
 import { DraftNumber } from './DraftNumber'
 import { Popover } from './Popover'
 import { nextTrackName } from '../lib/trackNames'
+import { speakerColor } from '@shared/speaker'
+import { timelineRangeOf } from '@shared/finish/sound'
+import { spansOfClips } from '@shared/roughCut/overrides'
+import { usePipelineStore } from '../store/pipelineStore'
+import { useReviewItems } from '../lib/useReviewItems'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -329,6 +334,52 @@ function TimelinePlayhead({
           onScrubStart()
         }}
       />
+    </div>
+  )
+}
+
+/** 場面の帯の色(場面ごとに順に使う) */
+const SCENE_HUES = ['#6B7CFF', '#FF5FA2', '#A77BFF', '#2ED3B7'] as const
+
+/** 音声トラックの種類(レーンの色): 自動の BGM=劇伴・自動の SE=効果音・それ以外=台詞 */
+function audioKindOf(track: { autoRole?: 'se' | 'bgm' }): 'bgm' | 'se' | 'dialog' {
+  return track.autoRole === 'bgm' ? 'bgm' : track.autoRole === 'se' ? 'se' : 'dialog'
+}
+
+/**
+ * 場面の帯(解析した場面を今のタイムラインの時刻へ直したもの)。今の場面だけ濃くする。
+ * 再生位置は「今どの場面か」の番号だけを購読する(場面が変わったときだけ描き直す)
+ */
+function TimelineSceneBand({
+  ranges,
+  pixelsPerSecond,
+  width
+}: {
+  ranges: readonly { start: number; end: number }[]
+  pixelsPerSecond: number
+  width: number
+}): React.JSX.Element {
+  const current = useProjectStore((s) =>
+    ranges.findIndex((r) => s.playheadTime >= r.start && s.playheadTime < r.end)
+  )
+  return (
+    <div className="g3-scene-band" style={{ width }}>
+      {ranges.map((r, i) => (
+        <span
+          key={`${r.start}-${i}`}
+          className={`g3-scene ${i === current ? 'current' : ''}`}
+          style={
+            {
+              left: r.start * pixelsPerSecond + 1,
+              width: Math.max(2, (r.end - r.start) * pixelsPerSecond - 2),
+              '--g3-hue': SCENE_HUES[i % SCENE_HUES.length]
+            } as React.CSSProperties
+          }
+          title={`場面 ${i + 1}`}
+        >
+          {String(i + 1).padStart(2, '0')}
+        </span>
+      ))}
     </div>
   )
 }
@@ -795,6 +846,21 @@ export function Timeline(): React.JSX.Element {
   )
   const captionRowTotal = captionRowCount(captionRows)
   const captionLaneH = captionLaneHeight(captionRowTotal)
+  // 場面の帯: 解析した場面(収録の時刻)を、今の本編の並びでタイムラインの時刻へ直す。
+  // 解析していない企画では出さない(無いデータの飾りは作らない)
+  const analyzedScenes = usePipelineStore((s) => s.scenes)
+  const sceneRanges = useMemo(() => {
+    const info = project.multicam
+    if (!info || analyzedScenes.length === 0) return []
+    const spans = spansOfClips(project.clips, info)
+    return analyzedScenes
+      .map((sc) => timelineRangeOf(spans, sc.start, sc.end))
+      .filter((r): r is { start: number; end: number } => r !== null)
+  }, [analyzedScenes, project.multicam, project.clips])
+  // 目盛りの帯の「確認」の印(要確認の一覧のうち、時刻のあるもの)
+  const reviewMarks = useReviewItems().open.filter(
+    (item): item is typeof item & { at: number } => typeof item.at === 'number'
+  )
 
   const snapCandidates = useMemo(() => {
     const times: number[] = [0]
@@ -1699,6 +1765,27 @@ export function Timeline(): React.JSX.Element {
     ? project.assets.find((a) => a.id === selectedVideoOverlayClipData.assetId)
     : undefined
 
+  // 目盛りの帯に出す、選んでいるものの範囲(イン〜アウト)。琥珀の淡い帯で示す
+  const selectedOverlayData = selectedOverlayId
+    ? project.textOverlays.find((o) => o.id === selectedOverlayId)
+    : undefined
+  const selectedRange: { start: number; end: number } | null =
+    selectedIndex >= 0
+      ? { start: timedClips[selectedIndex].start, end: timedClips[selectedIndex].end }
+      : selectedOverlayData
+        ? { start: selectedOverlayData.startTime, end: selectedOverlayData.endTime }
+        : selectedAudioClipData
+          ? {
+              start: selectedAudioClipData.startTime,
+              end: selectedAudioClipData.startTime + audioClipDuration(selectedAudioClipData)
+            }
+          : selectedVideoOverlayClipData
+            ? {
+                start: selectedVideoOverlayClipData.startTime,
+                end: overlayClipEnd(selectedVideoOverlayClipData)
+              }
+            : null
+
   return (
     <div className="panel timeline-panel">
       <div className="panel-header">
@@ -2080,11 +2167,12 @@ export function Timeline(): React.JSX.Element {
           <div className="timeline-timecode-cell">
             <TimelineTimecode fps={rulerFps} />
           </div>
-          <div className="track-label track-label-video">
+          {sceneRanges.length > 0 && <div className="g3-scene-label">場面</div>}
+          <div className="track-label track-label-video" data-g3-kind="video">
             <span className="track-tag tag-video">V1</span>本編
           </div>
           {project.videoOverlayTracks.map((track, trackIndex) => (
-            <div key={track.id} className="track-label">
+            <div key={track.id} className="track-label" data-g3-kind="overlay">
               <span className="track-label-name" title={track.name}>
                 <span className="track-tag tag-video">V{trackIndex + 2}</span>
                 {track.name}
@@ -2154,7 +2242,7 @@ export function Timeline(): React.JSX.Element {
             </div>
           ))}
           {project.audioTracks.map((track, trackIndex) => (
-            <div key={track.id} className="track-label">
+            <div key={track.id} className="track-label" data-g3-kind={audioKindOf(track)}>
               <span className="track-label-name" title={track.name}>
                 <span className={`track-tag tag-audio ${track.autoRole ? 'tag-auto' : ''}`}>
                   A{trackIndex + 1}
@@ -2213,7 +2301,7 @@ export function Timeline(): React.JSX.Element {
             </div>
           ))}
           {project.textOverlays.length > 0 && (
-            <div className="track-label" style={{ height: captionLaneH }}>
+            <div className="track-label" data-g3-kind="telop" style={{ height: captionLaneH }}>
               <span className="track-label-name">
                 <span className="track-tag tag-telop">T1</span>
                 テロップ
@@ -2286,11 +2374,20 @@ export function Timeline(): React.JSX.Element {
             </div>
           </Popover>
         )}
-        <div className="track-lanes-col" ref={trackLanesColRef}>
+        <div
+          className={`track-lanes-col ${sceneRanges.length > 0 ? 'g3-has-scenes' : ''}`}
+          ref={trackLanesColRef}
+        >
           {/* 時間目盛り。押した位置へ再生位置を移す(見えている範囲の目盛りだけ描く) */}
           <div
             className="timeline-ruler"
-            style={{ width: timelineWidth }}
+            style={
+              {
+                width: timelineWidth,
+                // 細かい目盛り(数字の刻みを5つに割る)の間隔
+                '--g3-minor': `${(rulerStepSeconds * pixelsPerSecond) / 5}px`
+              } as React.CSSProperties
+            }
             onMouseDown={(e) => {
               const rect = e.currentTarget.getBoundingClientRect()
               const t = Math.max(0, Math.min(total, (e.clientX - rect.left) / pixelsPerSecond))
@@ -2306,7 +2403,34 @@ export function Timeline(): React.JSX.Element {
                 {formatTimecode(t, rulerFps)}
               </span>
             ))}
+            {selectedRange && selectedRange.end > selectedRange.start && (
+              <span
+                className="g3-ruler-range"
+                aria-hidden="true"
+                style={{
+                  left: selectedRange.start * pixelsPerSecond,
+                  width: (selectedRange.end - selectedRange.start) * pixelsPerSecond
+                }}
+              />
+            )}
+            {reviewMarks.map((item) =>
+              inWindow(visibleWindow, item.at, item.at) ? (
+                <span
+                  key={item.key}
+                  className="g3-ruler-mark review"
+                  style={{ left: item.at * pixelsPerSecond }}
+                  title={`確認 · ${item.text}`}
+                />
+              ) : null
+            )}
           </div>
+          {sceneRanges.length > 0 && (
+            <TimelineSceneBand
+              ranges={sceneRanges}
+              pixelsPerSecond={pixelsPerSecond}
+              width={timelineWidth}
+            />
+          )}
           {project.beatGrid?.enabled &&
             beatTimes.map((t, i) => (
               <div key={i} className="timeline-beat-line" style={{ left: t * pixelsPerSecond }} />
@@ -2319,6 +2443,7 @@ export function Timeline(): React.JSX.Element {
           )}
           <div
             ref={videoLaneRef}
+            data-g3-kind="video"
             className={`track-lane video-lane ${
               draggedAsset?.hasVideo ? 'drop-target' : ''
             } ${dropIndicator?.kind === 'index' ? 'drop-active' : ''}`}
@@ -2521,6 +2646,15 @@ export function Timeline(): React.JSX.Element {
                       style={{ background: clipColorOf(tc.clip.colorLabel) ?? undefined }}
                     />
                   )}
+                  {/* 頭の名前帯と、中のコマ(素材の見本の1コマを並べる。新しく絵は作らない) */}
+                  <span className="g3-clip-head" aria-hidden="true" />
+                  {tc.asset.thumbnailDataUrl && (
+                    <span
+                      className="g3-clip-frames"
+                      aria-hidden="true"
+                      style={{ backgroundImage: `url("${tc.asset.thumbnailDataUrl}")` }}
+                    />
+                  )}
                   <span className="timeline-clip-index">{i + 1}</span>
                   <span className="timeline-clip-label" title={tc.asset.fileName}>
                     {tc.asset.fileName}
@@ -2584,6 +2718,8 @@ export function Timeline(): React.JSX.Element {
               key={track.id}
               data-track-kind="videoOverlay"
               data-track-id={track.id}
+              data-g3-kind="overlay"
+              data-g3-auto={track.autoRole ? 'true' : undefined}
               className={`track-lane video-overlay-lane ${track.hidden ? 'hidden' : ''} ${
                 draggedAsset?.hasVideo ? 'drop-target' : ''
               } ${
@@ -2751,6 +2887,7 @@ export function Timeline(): React.JSX.Element {
               key={track.id}
               data-track-kind="audio"
               data-track-id={track.id}
+              data-g3-kind={audioKindOf(track)}
               className={`track-lane audio-lane ${track.autoRole ? 'auto' : ''} ${
                 draggedAsset?.hasAudio ? 'drop-target' : ''
               } ${
@@ -2940,6 +3077,7 @@ export function Timeline(): React.JSX.Element {
           {project.textOverlays.length > 0 && (
             <div
               className="track-lane caption-lane"
+              data-g3-kind="telop"
               style={{ width: timelineWidth, height: captionLaneH }}
             >
               {project.textOverlays.map((overlay) => {
@@ -2958,11 +3096,15 @@ export function Timeline(): React.JSX.Element {
                     className={`timeline-caption-clip ${overlay.source === 'auto' ? 'auto' : ''} ${
                       selectedOverlayId === overlay.id ? 'selected' : ''
                     } ${isDragging ? 'dragging' : ''}`}
-                    style={{
-                      left: displayStart * pixelsPerSecond,
-                      width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond),
-                      ...captionRowRect(captionRows.get(overlay.id) ?? 0, captionRowTotal)
-                    }}
+                    style={
+                      {
+                        left: displayStart * pixelsPerSecond,
+                        width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond),
+                        ...captionRowRect(captionRows.get(overlay.id) ?? 0, captionRowTotal),
+                        // 話者の色(テロップ一覧と同じ色。話者が無ければ灰)
+                        '--g3-spk': speakerColor(overlay.speaker)
+                      } as React.CSSProperties
+                    }
                     title={stripTelopMarkup(overlay.text)}
                     onMouseDown={(e) => {
                       e.stopPropagation()
