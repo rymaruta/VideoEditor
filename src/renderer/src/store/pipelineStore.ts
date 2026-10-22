@@ -64,7 +64,8 @@ import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPl
 import {
   matchScenesByTime,
   remapSceneFlags,
-  restorePipelineFromProject
+  restorePipelineFromProject,
+  scenesOnTimeline
 } from '../lib/pipelineRestore'
 import type { AutoEditDecisions, SyncSummary } from '@shared/autoEdit'
 import { heuristicJudgements } from '@shared/structure/scenes'
@@ -1057,13 +1058,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 
   /**
    * 本編の修正より優先する「残す / 落とす」。人が手で決めたものだけ(今の本編から読み取った場面で、
-   * 手で削った区間を戻さない)。「残す」は、前の仮編集で落ちていた場面を新しく残すときだけ。
-   * 既に残っている場面の中をその後で手で詰めた所は、作り直すたびに戻さない
+   * 手で削った区間を戻さない)。「残す」は、今の本編に無い(落ちている)場面を新しく残すときだけ。
+   * 既に残っている場面の中をその後で手で詰めた所は、作り直すたびに戻さない。
+   * 今の本編に残っているかは、本編のクリップから読み取る(`scenesOnTimeline`。開き直した古い企画と同じ)。
+   * 前の仮編集の要約(`roughCut.keptIds`)は取り消しで戻らないので、取り消した後の本編と食い違っていた
    */
-  function releasedKeep(): Record<string, boolean> {
-    const before = get().roughCut?.keptIds
-    if (!before) return get().keep
-    const kept = new Set(before)
+  function releasedKeep(project: Project, info: MulticamInfo): Record<string, boolean> {
+    const kept = new Set(scenesOnTimeline(get().scenes, project.clips, info))
     return Object.fromEntries(
       Object.entries(get().keep).filter(([id, keep]) => !keep || !kept.has(id))
     )
@@ -1074,12 +1075,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const info = project.multicam
     if (!info) return
     // 仕上がりの長さが、今の本編から読み取った時(保存した時)と違えば、読み取った場面はやめて
-    // 自動の選び方にする(長さの欄の打鍵の途中では捨てない。数字を入れて消しても読み取った場面のまま)
-    if (
+    // 自動の選び方にする(長さの欄の打鍵の途中では捨てない。数字を入れて消しても読み取った場面のまま)。
+    // 読み取った場面を捨てるのは、作り直しが当たった後だけ(失敗・中止・当てなかったときに捨てると、
+    // 長さを戻して作り直しても読み取った場面が無く、手で落としていた場面が戻っていた)
+    const dropTimelineKeep =
       Object.keys(get().timelineKeep).length > 0 &&
       get().targetMinutes !== get().timelineKeepMinutes
-    )
-      set({ timelineKeep: {} })
+    const timelineKeep = dropTimelineKeep ? {} : get().timelineKeep
     setStep('cut', { state: 'run', percent: 0, note: '音の大きさを読み込み中' })
     const activity = await activityOf(project, info)
     // 前に組んだ本編と今の本編を比べ、人が削った・足した区間、替えたカメラを読み取る
@@ -1092,12 +1094,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           )
         : project.cutOverrides,
       get().scenes,
-      releasedKeep()
+      releasedKeep(project, info)
     )
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
       targetSec: get().targetMinutes * 60,
-      keep: { ...get().timelineKeep, ...get().keep },
+      keep: { ...timelineKeep, ...get().keep },
       styles: usePresetStore.getState().captionPresets,
       speechLook: speechLook(
         useSettingsStore.getState().speechTelopLook,
@@ -1388,7 +1390,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         telops: telops.length
       },
       // 作り直したら、「自動の選び方に戻す」はもう取り消せない(自動の選び方で作った本編)
-      clearedTimelineKeep: null
+      clearedTimelineKeep: null,
+      ...(dropTimelineKeep ? { timelineKeep: {} } : {})
     })
     persistDecisions()
     // SE・BGM・CG は、仮編集を当てた後の本編(人が差し込んだクリップ・削った区間を含む)の時刻で置く。

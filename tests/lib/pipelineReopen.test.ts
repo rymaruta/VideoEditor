@@ -16,7 +16,11 @@ import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import type { Project } from '@shared/types'
 import { spansOfClips } from '@shared/roughCut/overrides'
-import { matchScenesByTime } from '@renderer/lib/pipelineRestore'
+import {
+  inOrderSpans,
+  matchScenesByTime,
+  restorePipelineFromProject
+} from '@renderer/lib/pipelineRestore'
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
@@ -682,4 +686,245 @@ describe('matchScenesByTime', () => {
     const m = matchScenesByTime(prev, next)
     expect([...m.entries()]).toEqual([['s2', 's1']])
   })
+})
+
+describe('監査で見つかった不具合(25b2ade)', () => {
+  /** 目標 1.5 分で作り直し、落ちた場面を1つ返す */
+  async function dropOne(): Promise<{ id: string; start: number; end: number }> {
+    usePipelineStore.getState().setTargetMinutes(1.5)
+    await usePipelineStore.getState().rebuildRoughCut()
+    const s = usePipelineStore.getState()
+    const dropped = s.scenes.filter((sc) => !s.roughCut!.keptIds.includes(sc.id))
+    expect(dropped.length).toBeGreaterThan(0)
+    return dropped[0]
+  }
+
+  /** 同じ収録のカメラ素材から、共通の時刻 `at` からの `len` 秒を本編の `atTime` へ差し込む */
+  function insertFromRecording(at: number, len: number, atTime: number): void {
+    const project = useProjectStore.getState().project
+    const f = project.multicam!.files[0]
+    const src = (at - f.start) * f.rate
+    useProjectStore.getState().insertClipAtTime(f.assetId, src, src + len * f.rate, atTime)
+  }
+
+  it('古い形式の企画で、落とした場面から差し込んだ短いカットで、その場面が戻らない', async () => {
+    await runEpisode()
+    const s1 = await dropOne()
+    const keptIds = usePipelineStore.getState().roughCut!.keptIds
+    const clipsBefore = useProjectStore.getState().project.clips.length
+    insertFromRecording((s1.start + s1.end) / 2, 1.5, 5)
+    expect(useProjectStore.getState().project.clips.length).toBeGreaterThan(clipsBefore)
+    const before = mainDuration()
+    saveAndReopen({ legacy: true })
+    await flush()
+    expect(usePipelineStore.getState().timelineKeep[s1.id]).toBe(false)
+    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().steps.cut.state).toBe('done')
+    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
+    expect(Math.abs(mainDuration() - before)).toBeLessThan(0.2)
+  })
+
+  it('仮編集を取り消した後に作り直しても、「残す」にした場面の昔の削りが戻る', async () => {
+    await runEpisode()
+    const full = mainDuration()
+    const scene = usePipelineStore.getState().scenes[1]
+    const inside = clipsInScene(scene)
+    const longest = inside.reduce((a, c) => (c.end - c.start > a.end - a.start ? c : a))
+    const clip = useProjectStore.getState().project.clips.find((c) => c.id === longest.id)!
+    useProjectStore.getState().updateClipTrim(clip.id, clip.inPoint, clip.outPoint - 3)
+    usePipelineStore.getState().setKeep(scene.id, false)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().roughCut!.keptIds).not.toContain(scene.id)
+    usePipelineStore.getState().setKeep(scene.id, true)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
+    // 取り消すと、場面の落ちた本編に戻る(自動編集の画面の判断・要約は戻らない)
+    useProjectStore.getState().undo()
+    expect(clipsInScene(scene)).toHaveLength(0)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().steps.cut.state).toBe('done')
+    expect(usePipelineStore.getState().roughCut!.keptIds).toContain(scene.id)
+    expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
+  })
+
+  it('古い形式の企画で、長さを変えた作り直しが当たらなかったら、読み取った場面を捨てない', async () => {
+    await runEpisode()
+    await dropOne()
+    const rc = usePipelineStore.getState().roughCut!
+    saveAndReopen({ legacy: true })
+    await flush()
+    const read = usePipelineStore.getState().timelineKeep
+    expect(Object.keys(read).length).toBeGreaterThan(0)
+    usePipelineStore.getState().setTargetMinutes(2)
+    const running = usePipelineStore.getState().rebuildRoughCut()
+    // 作っている最中に本編を直す(作り直しは当たらない)
+    const c = useProjectStore.getState().project.clips[0]
+    useProjectStore.getState().updateClipTrim(c.id, c.inPoint, c.outPoint - 0.5)
+    await running
+    expect(usePipelineStore.getState().steps.cut.state).toBe('error')
+    expect(usePipelineStore.getState().timelineKeep).toEqual(read)
+    // 長さを戻して作り直すと、読み取った場面のまま
+    usePipelineStore.getState().setTargetMinutes(0)
+    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toEqual(read)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().steps.cut.state).toBe('done')
+    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(rc.keptIds)
+    expect(usePipelineStore.getState().timelineKeep).toEqual(read)
+  })
+})
+
+describe('inOrderSpans(古い形式の企画の読み取りに使う、仮編集の並びに沿ったクリップ)', () => {
+  const sp = (start: number, end: number): { start: number; end: number } => ({ start, end })
+  it('前の時刻へ戻る差し込み・別の場面の途中に入った差し込みは入らない', () => {
+    // 0-5 | 差し込み 60-61.5 | 5-30 | 100-120
+    expect(inOrderSpans([sp(0, 5), sp(60, 61.5), sp(5, 30), sp(100, 120)])).toEqual([
+      sp(0, 5),
+      sp(5, 30),
+      sp(100, 120)
+    ])
+    // 前の時刻へ戻る(振り返り)
+    expect(inOrderSpans([sp(0, 20), sp(50, 60), sp(10, 12), sp(60, 80)])).toEqual([
+      sp(0, 20),
+      sp(50, 60),
+      sp(60, 80)
+    ])
+  })
+  it('並びに沿った差し込み・カメラの切り替え(同じ時刻)・一部だけ残した所は入る', () => {
+    const list = [sp(0, 10), sp(10, 12), sp(40, 46.3), sp(46.3, 50), sp(200, 201)]
+    expect(inOrderSpans(list)).toEqual(list)
+    expect(inOrderSpans([])).toEqual([])
+  })
+})
+
+describe('古い形式の企画の読み取り(乱択)', () => {
+  /** 決まった種から作る乱数(mulberry32) */
+  function rng(seed: number): () => number {
+    let a = seed >>> 0
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0
+      let t = a
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+  }
+
+  /** 本編のクリップ(本編の順)と、タイムラインの始まり・共通の時刻 */
+  function clipsWithTimes(): {
+    id: string
+    at: number
+    len: number
+    start: number
+    end: number
+  }[] {
+    const project = useProjectStore.getState().project
+    const spans = spansOfClips(project.clips, project.multicam!)
+    let at = 0
+    return project.clips.map((c, i) => {
+      const len = (c.outPoint - c.inPoint) / (c.speed || 1)
+      const out = { id: c.id, at, len, start: spans[i].start, end: spans[i].end }
+      at += len
+      return out
+    })
+  }
+
+  it('新しい形式で作り直した企画から判断を外して読み取った場面が、実際に残した場面と一致する', async () => {
+    const ROUNDS = 40
+    const kinds: Record<string, number> = {}
+    for (let round = 0; round < ROUNDS; round++) {
+      const rand = rng(1000 + round)
+      const pick = <T>(list: readonly T[]): T => list[Math.floor(rand() * list.length)]
+      await runEpisode()
+      usePipelineStore.getState().setTargetMinutes(pick([0, 1, 1.5, 2, 3]))
+      for (const sc of usePipelineStore.getState().scenes)
+        if (rand() < 0.25) usePipelineStore.getState().setKeep(sc.id, rand() < 0.5)
+      await usePipelineStore.getState().rebuildRoughCut()
+      const st = usePipelineStore.getState()
+      if (st.steps.cut.state !== 'done') continue
+      const kept = st.roughCut!.keptIds
+      const scenes = st.scenes
+      const done: string[] = []
+      // 一部だけ残す(場面の中のクリップを1本だけ残す)
+      if (rand() < 0.5) {
+        const many = scenes.filter((sc) => kept.includes(sc.id) && clipsInScene(sc).length > 1)
+        if (many.length > 0) {
+          const inside = clipsInScene(pick(many))
+          const keepOne = pick(inside.filter((c) => c.end - c.start >= 1))
+          if (keepOne) {
+            useProjectStore
+              .getState()
+              .removeClips(inside.filter((c) => c.id !== keepOne.id).map((c) => c.id))
+            done.push('一部だけ残す')
+          }
+        }
+      }
+      // 手で詰める・速さを変える・トランジション
+      for (const c of clipsWithTimes()) {
+        const clip = useProjectStore.getState().project.clips.find((x) => x.id === c.id)!
+        const r = rand()
+        if (r < 0.15 && c.end - c.start > 4) {
+          const cut = (clip.outPoint - clip.inPoint) * 0.4 * rand()
+          useProjectStore.getState().updateClipTrim(clip.id, clip.inPoint, clip.outPoint - cut)
+          done.push('手で詰める')
+        } else if (r < 0.3) {
+          useProjectStore.getState().updateClipSpeed(clip.id, pick([0.5, 1.5, 2]))
+          done.push('速さ')
+        } else if (r < 0.4) {
+          useProjectStore
+            .getState()
+            .updateClipTransition(clip.id, { type: 'crossfade', duration: 0.5 })
+          done.push('トランジション')
+        }
+      }
+      // 反応のカットを差し込む(落とした場面から・前の時刻から)。長いクリップの途中へ
+      const dropped = scenes.filter((sc) => !kept.includes(sc.id))
+      const inserts = Math.floor(rand() * 3)
+      const used = new Set<string>()
+      for (let k = 0; k < inserts; k++) {
+        const long = clipsWithTimes().filter((c) => c.len > 6 && !used.has(c.id))
+        if (long.length === 0) break
+        const target = pick(long)
+        used.add(target.id)
+        const from =
+          dropped.length > 0 && rand() < 0.6
+            ? pick(dropped)
+            : { start: 0, end: Math.max(2, target.start - 1) }
+        const len = 1 + rand()
+        const at = from.start + (from.end - from.start - len) * rand()
+        if (at < 0 || at + len > from.end + 1e-6) continue
+        const f = useProjectStore.getState().project.multicam!.files[0]
+        const src = (at - f.start) * f.rate
+        const before = useProjectStore.getState().project.clips.length
+        useProjectStore
+          .getState()
+          .insertClipAtTime(f.assetId, src, src + len * f.rate, target.at + target.len / 2)
+        expect(useProjectStore.getState().project.clips.length).toBeGreaterThan(before)
+        done.push('差し込み')
+      }
+      // B ロール(オーバーレイ)
+      if (rand() < 0.3) {
+        useProjectStore.getState().addVideoOverlayTrack('B ロール')
+        const track = useProjectStore.getState().project.videoOverlayTracks.at(-1)!
+        const f = useProjectStore.getState().project.multicam!.files[0]
+        useProjectStore.getState().addClipToVideoOverlayTrack(track.id, f.assetId, 3)
+        done.push('B ロール')
+      }
+      for (const d of done) kinds[d] = (kinds[d] ?? 0) + 1
+      const saved = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
+      delete (saved as { autoEdit?: unknown }).autoEdit
+      const r = restorePipelineFromProject(saved, 'location')!
+      expect([round, done, r.roughCut!.keptIds]).toEqual([round, done, kept])
+    }
+    // 混ぜた手直しが一通り出ていること
+    for (const k of [
+      '一部だけ残す',
+      '手で詰める',
+      '速さ',
+      'トランジション',
+      '差し込み',
+      'B ロール'
+    ])
+      expect([k, (kinds[k] ?? 0) > 0]).toEqual([k, true])
+  }, 120_000)
 })

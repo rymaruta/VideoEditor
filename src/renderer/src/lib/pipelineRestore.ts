@@ -51,6 +51,80 @@ function keptSeconds(scene: Scene, spans: readonly { start: number; end: number 
 }
 
 /**
+ * 本編のクリップのうち、仮編集の並び(共通の時刻が進む順)に沿ったものの区間。並びに沿ったクリップの
+ * 長さの合計が最も長くなる列(重み付きの最長増加列)を選ぶ。並びから外れたクリップ(前のクリップより前の
+ * 時刻へ戻るもの・別の場面の途中に入ったもの = 人が差し込んだ反応のカット・振り返りなど)は入らない。
+ * 仮編集は場面を時刻の順に並べ、手で詰めても・カメラを替えても・速さを変えても並びは崩れないので、
+ * 並びに沿ったクリップが「仮編集で残した所」になる
+ */
+export function inOrderSpans(
+  spans: readonly { start: number; end: number }[]
+): { start: number; end: number }[] {
+  const n = spans.length
+  if (n === 0) return []
+  // 始まりの時刻の順位(ほぼ同じ時刻は同じ順位にし、どちらの順でも並びに沿うとする)
+  const keys: number[] = []
+  for (const t of spans.map((s) => s.start).sort((a, b) => a - b))
+    if (keys.length === 0 || t - keys[keys.length - 1] > 1e-3) keys.push(t)
+  /** `t` + 1e-3 以下の最後の順位(1 始まり) */
+  const rankOf = (t: number): number => {
+    let lo = 0
+    let hi = keys.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (keys[mid] <= t + 1e-3) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+  // 順位ごとの「そこまでで最も長い列」(Fenwick 木で前の順位までの最大を引く)
+  const treeVal = new Float64Array(keys.length + 1)
+  const treeIdx = new Int32Array(keys.length + 1).fill(-1)
+  const best = new Float64Array(n)
+  const prev = new Int32Array(n).fill(-1)
+  for (let i = 0; i < n; i++) {
+    const r = rankOf(spans[i].start)
+    let v = 0
+    let from = -1
+    for (let k = r; k > 0; k -= k & -k)
+      if (treeVal[k] > v) {
+        v = treeVal[k]
+        from = treeIdx[k]
+      }
+    best[i] = v + Math.max(0, spans[i].end - spans[i].start)
+    prev[i] = from
+    for (let k = r; k <= keys.length; k += k & -k)
+      if (best[i] > treeVal[k]) {
+        treeVal[k] = best[i]
+        treeIdx[k] = i
+      }
+  }
+  let last = 0
+  for (let i = 1; i < n; i++) if (best[i] > best[last]) last = i
+  const out: { start: number; end: number }[] = []
+  for (let i = last; i >= 0; i = prev[i]) out.push(spans[i])
+  return out.reverse()
+}
+
+/**
+ * 今の本編に残っている場面(仮編集で残した場面)を、本編のクリップから読み取る。並びに沿ったクリップ
+ * (`inOrderSpans`)だけを数え、その中に少しでも残っていれば残した場面にする(場面の大半を手で削って
+ * 一部だけ残した場面も残す。割合で決めると、その場面ごと落ちて残した部分も消えていた)。
+ * 切れ目を静かな所へ寄せた分(0.12 秒以内)が隣の場面に掛かるだけのものは数えない。
+ * 差し込んだ別の時刻のカットは並びから外れるので数えない(数えると、落とした場面が丸ごと戻っていた)
+ */
+export function scenesOnTimeline(
+  scenes: readonly Scene[],
+  clips: Project['clips'],
+  info: NonNullable<Project['multicam']>
+): string[] {
+  const spans = clips.length > 0 ? inOrderSpans(spansOfClips(clips, info)) : []
+  return scenes
+    .filter((sc) => keptSeconds(sc, spans) >= Math.min(0.5, (sc.end - sc.start) * 0.5))
+    .map((sc) => sc.id)
+}
+
+/**
  * 前の場面の区切り(`prev`)から、今の場面(`next`)へ、時刻がほぼ同じ(重なりが長いほうの 8 割以上)場面の
  * 対応を作る(今の場面の ID → 前の場面の ID)。場面の ID は番号なので、区切りが変わると同じ ID が別の
  * 場面を指す。ID だけで当てると、判定・残す/落とすが別の場面に付く
@@ -153,14 +227,9 @@ export function restorePipelineFromProject(
       '保存した時と場面の区切りが変わりました(文字起こし・同期を直した など)。時刻がほぼ同じ場面だけ前の判定・残す/落とすを引き継ぎ、それ以外の場面は簡易の点数・自動の選び方にしています'
     )
 
-  // 残した場面: 保存したもの。無ければ今の本編に残っている所から読み取る
-  // (少しでも残っていれば残した。場面の大半を手で削って一部だけ残した場面も、残した部分の削りは
-  // 本編の修正で守られるので「残す」にする。割合で決めると、その場面ごと落ちて残した部分も消えていた。
-  // 切れ目を静かな所へ寄せた分(0.12 秒以内)が隣の場面に掛かるだけのものは数えない)
+  // 残した場面: 保存したもの。無ければ今の本編に残っている所から読み取る(`scenesOnTimeline`)
   const spans = project.clips.length > 0 ? spansOfClips(project.clips, info) : []
-  const fromTimeline = scenes
-    .filter((sc) => keptSeconds(sc, spans) >= Math.min(0.5, (sc.end - sc.start) * 0.5))
-    .map((sc) => sc.id)
+  const fromTimeline = scenesOnTimeline(scenes, project.clips, info)
   const savedKept = new Set(saved?.keptIds ?? [])
   const keptIds = saved?.keptIds
     ? scenes.map((sc) => sc.id).filter((id) => savedKept.has(match.get(id) ?? ''))
