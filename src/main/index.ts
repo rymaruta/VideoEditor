@@ -75,7 +75,8 @@ import {
   detectVideoEncoder,
   exportSequenceSegmented
 } from './segmentRenderer'
-import { installAppMenu, updateAppMenu } from './appMenu'
+import { installAppMenu, installMenuPopupIpc, updateAppMenu } from './appMenu'
+import { windowChromeOptions } from '@shared/windowChrome'
 import { RendererCrashGuard } from './rendererRecovery'
 import { collectSystemInfo, installCrashLogging, logRendererError } from './diagnostics'
 import {
@@ -225,8 +226,10 @@ function createWindow(): void {
     x: savedState?.x,
     y: savedState?.y,
     show: false,
-    // メニューバー(ファイル / 編集 / …)を常に出す。Windows の編集ソフトと同じ作り
-    autoHideMenuBar: false,
+    // OS のタイトルバーとメニューバーを出さず、アプリの上の帯 1 本にまとめる(Premiere・DaVinci・
+    // VS Code と同じ)。Windows / Linux は最小化・最大化・閉じるを帯の右端に重ね、メニューは帯の
+    // 「メニュー」ボタンから出す。macOS は信号のボタンを帯の左に重ねる(`@shared/windowChrome`)
+    ...windowChromeOptions(process.platform),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -689,6 +692,7 @@ app.whenReady().then(() => {
   ipcMain.handle(IPC.menuUpdate, (_e, next: Parameters<typeof updateAppMenu>[0]) =>
     updateAppMenu(next ?? {}, is.dev)
   )
+  installMenuPopupIpc(ipcMain)
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

@@ -6,6 +6,12 @@ import { isModalOpen } from '../lib/useKeyboardShortcuts'
 import { modifierLabel, workflowBarUndo } from '../lib/undoAction'
 import { useModalOpen } from '../lib/useModalOpen'
 import { RedoIcon, UndoIcon, UploadIcon } from './icons'
+import { needsMenuButton } from '@shared/windowChrome'
+import { createAltTapDetector } from '../lib/altMenuKey'
+import { usePipelineStore } from '../store/pipelineStore'
+
+/** 動いている OS(preload から。試験・古い preload では空) */
+const platform = (typeof window !== 'undefined' && window.api?.platform) || ''
 
 /**
  * 画面上部の帯(Graphite 2 のヘッダー)。作業の流れを左から右へ並べ、今いる所に印を付ける。
@@ -61,14 +67,80 @@ export function WorkflowBar({
   const remember = (e: React.SyntheticEvent<HTMLElement>): void => {
     openerRef.current = e.currentTarget
   }
+  // Windows / Linux は OS のメニューバーを出さない(帯 1 本にまとめる)。同じメニューを帯のボタンから出す
+  const showMenuButton = needsMenuButton(platform)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const openMenu = (): void => {
+    const b = menuButtonRef.current?.getBoundingClientRect()
+    window.api.popupAppMenu(b ? { x: b.left, y: b.bottom + 2 } : { x: 8, y: 46 })
+  }
+  // Alt を単独で押して離したら、メニューボタンへ(Windows のメニューバーと同じ入り方)。
+  // ダイアログの間は帯ごと inert なので移さない
+  useEffect(() => {
+    if (!showMenuButton) return
+    const alt = createAltTapDetector()
+    const onDown = (e: KeyboardEvent): void => alt.keydown(e)
+    const onUp = (e: KeyboardEvent): void => {
+      if (!alt.keyup(e) || isModalOpen()) return
+      const btn = menuButtonRef.current
+      if (!btn) return
+      e.preventDefault()
+      if (document.activeElement === btn) btn.blur()
+      else btn.focus()
+    }
+    const onCancel = (): void => alt.cancel()
+    window.addEventListener('keydown', onDown, true)
+    window.addEventListener('keyup', onUp, true)
+    window.addEventListener('pointerdown', onCancel, true)
+    window.addEventListener('blur', onCancel)
+    return () => {
+      window.removeEventListener('keydown', onDown, true)
+      window.removeEventListener('keyup', onUp, true)
+      window.removeEventListener('pointerdown', onCancel, true)
+      window.removeEventListener('blur', onCancel)
+    }
+  }, [showMenuButton])
+  // 自動編集の画面を開いている間は、帯の「自動編集」を今いる所にする(画面は帯の下に重なる)
+  const autoOpen = usePipelineStore((s) => s.screenOpen)
+  const closeAutoEdit = (): void => usePipelineStore.getState().setScreenOpen(false)
   const openAutoEdit = (): void => emitMenuCommand('auto.screen')
   const openExport = (e: React.MouseEvent<HTMLElement>): void => {
     remember(e)
     emitMenuCommand('file.export')
   }
   return (
-    <header className="workflow-bar" inert={modalOpen || undefined}>
+    <header
+      className={`workflow-bar ${platform === 'darwin' ? 'mac-inset' : ''}`}
+      inert={modalOpen || undefined}
+    >
       <div className="workflow-bar-project">
+        {showMenuButton && (
+          <button
+            ref={menuButtonRef}
+            type="button"
+            className="icon-button workflow-menu-button"
+            aria-label="メニュー"
+            aria-haspopup="menu"
+            title="メニュー(ファイル・編集・表示…)  Alt"
+            onClick={openMenu}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                openMenu()
+              }
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M4 7h16M4 12h16M4 17h16"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                fill="none"
+              />
+            </svg>
+          </button>
+        )}
         <span className="workflow-bar-logo" aria-hidden="true">
           <svg width="14" height="14" viewBox="0 0 24 24">
             <path d="M7 4.5v15l12.5-7.5z" fill="currentColor" />
@@ -83,7 +155,13 @@ export function WorkflowBar({
         </span>
       </div>
       <nav className="workflow-steps" aria-label="作業の流れ">
-        <button type="button" className="workflow-step" onClick={openAutoEdit}>
+        <button
+          type="button"
+          className={`workflow-step ${autoOpen ? 'current' : ''}`}
+          aria-current={autoOpen ? 'page' : undefined}
+          onClick={openAutoEdit}
+        >
+          {autoOpen && <span className="workflow-step-dot" aria-hidden="true" />}
           自動編集
         </button>
         <button type="button" className="workflow-step" onClick={openAutoEdit}>
@@ -94,20 +172,26 @@ export function WorkflowBar({
         </button>
         <button
           type="button"
-          className={`workflow-step ${telopOpen ? '' : 'current'}`}
-          aria-current={telopOpen ? undefined : 'page'}
-          onClick={onEdit}
+          className={`workflow-step ${telopOpen || autoOpen ? '' : 'current'}`}
+          aria-current={telopOpen || autoOpen ? undefined : 'page'}
+          onClick={() => {
+            closeAutoEdit()
+            onEdit()
+          }}
         >
-          {!telopOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          {!telopOpen && !autoOpen && <span className="workflow-step-dot" aria-hidden="true" />}
           編集
         </button>
         <button
           type="button"
-          className={`workflow-step ${telopOpen ? 'current' : ''}`}
-          aria-current={telopOpen ? 'page' : undefined}
-          onClick={onTelop}
+          className={`workflow-step ${telopOpen && !autoOpen ? 'current' : ''}`}
+          aria-current={telopOpen && !autoOpen ? 'page' : undefined}
+          onClick={() => {
+            closeAutoEdit()
+            onTelop()
+          }}
         >
-          {telopOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          {telopOpen && !autoOpen && <span className="workflow-step-dot" aria-hidden="true" />}
           テロップ
         </button>
         <button type="button" className="workflow-step" onClick={openExport}>

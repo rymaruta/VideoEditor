@@ -281,6 +281,10 @@ const api = {
     windows?: { id: string; label: string }[]
     file?: MenuFileState
   }): Promise<void> => ipcRenderer.invoke(IPC.menuUpdate, next),
+  /** 上の帯のメニューボタン: アプリのメニューを窓の中の (x, y) に出す(Windows / Linux) */
+  popupAppMenu: (at: { x: number; y: number }): void => ipcRenderer.send(IPC.menuPopup, at),
+  /** 窓の枠の作り(帯にメニューボタンを置くか・信号のボタンの分を空けるか)に使う */
+  platform: process.platform as string,
   onLibraryChanged: (callback: () => void): (() => void) => {
     const listener = (): void => callback()
     ipcRenderer.on(IPC.libraryChanged, listener)

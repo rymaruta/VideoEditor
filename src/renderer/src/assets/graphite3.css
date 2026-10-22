@@ -675,3 +675,49 @@ textarea {
     height: 30px;
   }
 }
+
+/* ---------- 窓の枠: OS のタイトルバー・メニューバーを出さず、上の帯 1 本に(@shared/windowChrome) ---------- */
+/* 帯で窓を動かす(ダブルクリックで最大化は OS が受ける)。ボタン・入力は押せるよう no-drag */
+.workflow-bar {
+  -webkit-app-region: drag;
+  /* 右端は、重ねた最小化・最大化・閉じるのボタンの幅を空ける(Windows / Linux。無い OS では 0) */
+  padding-right: calc(12px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+  /* 右端(重ねたボタンの下)は、ボタンの地の色(#0b121a)へ寄せて継ぎ目を見せない */
+  background:
+    linear-gradient(90deg, transparent calc(100% - 220px), #0b121a),
+    linear-gradient(
+      90deg,
+      rgba(255, 138, 31, 0.07),
+      rgba(124, 92, 255, 0.07) 50%,
+      rgba(0, 190, 170, 0.05)
+    );
+}
+.workflow-bar button,
+.workflow-bar a,
+.workflow-bar input,
+.workflow-bar select,
+.workflow-bar [role='tab'],
+.workflow-bar-saved {
+  -webkit-app-region: no-drag;
+}
+/* macOS: 左に信号のボタンの分を空ける */
+.workflow-bar.mac-inset {
+  padding-left: 84px;
+}
+/* ダイアログの間は窓を動かさない(覆いのクリックが窓の移動に取られないように) */
+.modal-backdrop {
+  -webkit-app-region: no-drag;
+}
+.workflow-menu-button {
+  width: 30px;
+  height: 30px;
+  margin-right: -2px;
+  flex-shrink: 0;
+}
+.workflow-menu-button:focus-visible {
+  box-shadow: var(--ve-focus-ring);
+}
+/* 自動編集の画面は帯の下に重ねる(帯は 1 本のまま。窓を動かす・閉じるは帯で) */
+.auto-edit-screen {
+  inset: 46px 0 0 0;
+}

@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
+import { BrowserWindow, Menu, type IpcMain, type MenuItemConstructorOptions } from 'electron'
 import {
   buildMenuTemplate,
   type MenuFileState,
@@ -6,6 +6,7 @@ import {
   type MenuShortcuts
 } from '@shared/appMenu'
 import { IPC } from '@shared/ipc'
+import { menuPopupPosition } from '@shared/windowChrome'
 import { openThirdPartyNotices, showAboutDialog } from './aboutWindow'
 import { openLogFolder, saveBugReport } from './diagnostics'
 
@@ -89,4 +90,24 @@ export function updateAppMenu(
     }
   }
   installAppMenu(isDev)
+}
+
+/**
+ * 上の帯の「メニュー」ボタンから、アプリのメニュー(メニューバーと同じもの)を出す。
+ * Windows / Linux は OS のメニューバーを出さないので、ここから開く(`@shared/windowChrome`)。
+ * 位置はボタンの左下(窓の中の座標)。おかしな値ならマウスの位置
+ */
+export function popupAppMenu(win: BrowserWindow | null | undefined, at?: unknown): boolean {
+  const menu = Menu.getApplicationMenu()
+  if (!menu || !win || win.isDestroyed()) return false
+  const pos = menuPopupPosition(at as { x?: unknown; y?: unknown } | undefined)
+  menu.popup({ window: win, ...(pos ?? {}) })
+  return true
+}
+
+/** メニューボタンの IPC(画面 → main)を受ける */
+export function installMenuPopupIpc(ipc: Pick<IpcMain, 'on'>): void {
+  ipc.on(IPC.menuPopup, (e, at: unknown) => {
+    popupAppMenu(BrowserWindow.fromWebContents(e.sender), at)
+  })
 }
