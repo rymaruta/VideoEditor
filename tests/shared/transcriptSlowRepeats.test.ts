@@ -162,3 +162,39 @@ describe('決まり文句の繰り返し・とても遅い「ん」', () => {
     for (const items of real) expect(kept(items)).toEqual(items.map((x) => x.text))
   })
 })
+
+describe('とても遅い1文字の繰り返しを捨てるのは、引き伸ばした「ん」だけ', () => {
+  it('言葉の時刻の無い片の、ゆっくり数える「1」・マイクテストの「あ」・片をまたいだ「ん。」は残す', () => {
+    const real: TimedText[][] = [
+      [{ text: '1、1、1、1、1', start: 0, end: 10.5 }],
+      [{ text: 'あ、あ、あ、あ、あ。', start: 20, end: 32 }],
+      // 区切りなしに書き起こされたマイクテストも、「ん」でなければ残す
+      [{ text: 'あああああ', start: 34, end: 46 }],
+      Array.from({ length: 5 }, (_, k) => ({
+        text: 'ん。',
+        start: 40 + k * 2.5,
+        end: 42.2 + k * 2.5
+      }))
+    ]
+    for (const items of real) expect(kept(items)).toEqual(items.map((x) => x.text))
+  })
+
+  it('slowLoop の説明で残すとしている例(言葉の時刻の無い片でも)', () => {
+    const real: TimedText[][] = [
+      [{ text: 'はい。はい。はい。', start: 0, end: 4.5 }],
+      [
+        { text: 'うん', start: 10, end: 11.5 },
+        { text: 'うん', start: 12, end: 13.5 },
+        { text: 'うん', start: 14, end: 15.5 }
+      ],
+      [{ text: '1、1、1、1、1', start: 20, end: 25 }],
+      [{ text: 'ラララ ラララ', start: 30, end: 36 }]
+    ]
+    for (const items of real) expect(kept(items)).toEqual(items.map((x) => x.text))
+  })
+
+  it('1つの片の中で引き伸ばした「んんんんん」「ンンンンン」は引き続き捨てる', () => {
+    expect(kept([{ text: 'んんんんんん', start: 0, end: 20 }])).toEqual([])
+    expect(kept([{ text: 'ンンンンン', start: 30, end: 45 }])).toEqual([])
+  })
+})

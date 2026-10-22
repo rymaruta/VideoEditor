@@ -8,6 +8,13 @@
  * 特徴で走って失敗し、合っていた組が「合わない」(offset −739.69)になっていた。
  * - 正しい組(14 分・250ppm・300ppm): 「合う」とし、カメラの頭 30 秒・時計のずれを求める
  * - 同じ周期の BGM を流した別の録音・まばらな物音だけの録音: 「合わない」
+ *
+ * さらに、時計のずれが大きい・拍が強い・拍の立ち上がりが鋭い・拍がクリック(メトロノーム)だと、相関に並ぶ
+ * 拍の周期の山に本当の位置が埋もれ、丸ごとの照合の一番良い位置が両方の特徴とも端の誤った位置
+ * (779.5 秒・−733 秒)に出ていた。合わせ直しはその周りしか探さないので「合わない」になっていた
+ * (利用者の3時間規模の録画では 30 分・60 分で同じことが起きる。ここでは時計のずれを大きくして 14 分で再現する)。
+ * 拍を消した特徴で照らし合わせ直す(correlate の suppressBeat)。拍を消しても、同じ拍の別の録音・
+ * メトロノームだけの録音・別の演奏は「合わない」まま
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, rmSync, statSync } from 'fs'
@@ -47,6 +54,12 @@ function voices(T: number, seed: number, gapMin = 0.3, gapSpan = 1.7): Burst[] {
   return out
 }
 
+/** 拍の音の形。既定は 55Hz のキック(立ち上がり 15ms)。`click` は 1kHz のクリック(メトロノーム) */
+interface KickShape {
+  attackMs?: number
+  click?: boolean
+}
+
 /**
  * その機材で録った音。機材の時刻 tc の音は、共通の時刻 start + tc × rate の音。
  * 共通の時刻 kickPhase + 0.5k に 55Hz のキック(kickAmp 0 なら鳴らさない)。雑音は機材ごとに別
@@ -58,7 +71,8 @@ async function record(
   rate: number,
   noiseSeed: number,
   kickAmp: number,
-  kickPhase = 0.1
+  kickPhase = 0.1,
+  kickShape: KickShape = {}
 ): Promise<Float32Array> {
   const n = Math.round(length * SR)
   const out = new Float32Array(n)
@@ -77,14 +91,18 @@ async function record(
       out[i0 + k] += b.amp * Math.sin((Math.PI * k) / len) * (r() * 2 - 1)
   }
   if (kickAmp > 0) {
-    const klen = Math.round(0.3 * SR)
+    const click = kickShape.click === true
+    const klen = Math.round((click ? 0.05 : 0.3) * SR)
+    const attack = (kickShape.attackMs ?? 15) / 1000
+    const freq = click ? 1000 : 55
+    const decay = click ? 0.01 : 0.12
     for (let t = kickPhase; t < start + length * rate + 1; t += 0.5) {
       const tc = (t - start) / rate
       if (tc < 0 || tc >= length) continue
       const i0 = Math.round(tc * SR)
       for (let k = 0; k < klen && i0 + k < n; k++) {
-        const env = Math.min(1, k / (0.015 * SR)) * Math.exp(-k / SR / 0.12)
-        out[i0 + k] += kickAmp * env * Math.sin((2 * Math.PI * 55 * k) / SR)
+        const env = Math.min(1, k / (attack * SR)) * Math.exp(-k / SR / decay)
+        out[i0 + k] += kickAmp * env * Math.sin((2 * Math.PI * freq * k) / SR)
       }
       if (i0 % YIELD_EVERY < klen) await yieldThread()
     }
@@ -183,6 +201,76 @@ describe.skipIf(!HAVE_FFMPEG)('一定間隔の BGM が鳴る、時計のずれ�
     for (const [name, x] of cases) {
       const p = join(dir, name)
       await writeWav(p, x)
+      const r = await runSyncWorker(
+        [input('mic', micPath, 'mic', T), input('cam', p, 'camera', CAM_LEN)],
+        ffmpegPath,
+        state.cacheDir
+      )
+      rmSync(p, { force: true })
+      expect(
+        r.pairs.every((x) => !x.reliable),
+        `${name}: ${show(r)}`
+      ).toBe(true)
+    }
+  }, 300_000)
+  /** 正しい組を照らし合わせ、「合う」・カメラの頭 30 秒(10ms 以内)・時計のずれを確かめる */
+  const expectMatched = async (
+    name: string,
+    ppm: number,
+    kickAmp: number,
+    shape: KickShape
+  ): Promise<void> => {
+    const p = join(dir, `${name}.wav`)
+    // マイクにも同じ形の拍を入れる(同じ会場の BGM)。既定の形なら beforeAll で作ったものを使う
+    const own = kickAmp !== KICK || shape.attackMs !== undefined || shape.click === true
+    const mic = own ? join(dir, `${name}_mic.wav`) : micPath
+    if (own) await writeWav(mic, await record(voices(T, 5), 0, T, 1, 11, kickAmp, 0.1, shape))
+    await writeWav(
+      p,
+      await record(voices(T, 5), CAM_START, CAM_LEN, 1 + ppm * 1e-6, 21, kickAmp, 0.1, shape)
+    )
+    const r = await runSyncWorker(
+      [input('mic', mic, 'mic', T), input('cam', p, 'camera', CAM_LEN)],
+      ffmpegPath,
+      state.cacheDir
+    )
+    rmSync(p, { force: true })
+    if (own) rmSync(mic, { force: true })
+    const pair = r.pairs[0]
+    expect(pair?.reliable, `${name}: ${show(r)}`).toBe(true)
+    const m = r.placements.find((x) => x.id === 'mic')!
+    const c = r.placements.find((x) => x.id === 'cam')!
+    expect(Math.abs(c.start - m.start - CAM_START), `${name}: ${show(r)}`).toBeLessThan(0.01)
+    expect(Math.abs(Math.abs(pair.driftPpm ?? 0) - ppm), `${name}: ${show(r)}`).toBeLessThan(20)
+  }
+
+  it('時計のずれが大きい・拍が強い・立ち上がりが鋭い・クリックの拍でも、正しい組を「合う」とする', async () => {
+    await expectMatched('ppm500', 500, KICK, {})
+    await expectMatched('loud_sharp', 300, 3, { attackMs: 2 })
+    await expectMatched('metronome', 300, 0.3, { click: true })
+  }, 300_000)
+
+  it('拍を消して照らし合わせ直しても、同じ拍の別の録音・メトロノームだけ・別の演奏は「合わない」', async () => {
+    const cases: [string, () => Promise<Float32Array>][] = [
+      // 同じ拍の BGM・別の話し声(拍を強く・鋭く、時計のずれ 500ppm、位相違い)
+      [
+        'other_bgm_sharp.wav',
+        () => record(voices(CAM_LEN, 77), 0, CAM_LEN, 1 + 500e-6, 31, 3, 0.33, { attackMs: 2 })
+      ],
+      // 同じ周期のクリックだけ(別の部屋のメトロノーム)
+      [
+        'metronome_only.wav',
+        () => record([], 0, CAM_LEN, 1 + 300e-6, 33, 0.3, 0.4, { click: true })
+      ],
+      // 拍だけ同じで、まばらな物音(別の演奏の録音で、客席の物音だけが入っている)
+      [
+        'other_perf_sparse.wav',
+        () => record(voices(CAM_LEN, 79, 3, 6), 0, CAM_LEN, 1 + 300e-6, 34, KICK, 0.3)
+      ]
+    ]
+    for (const [name, make] of cases) {
+      const p = join(dir, name)
+      await writeWav(p, await make())
       const r = await runSyncWorker(
         [input('mic', micPath, 'mic', T), input('cam', p, 'camera', CAM_LEN)],
         ffmpegPath,

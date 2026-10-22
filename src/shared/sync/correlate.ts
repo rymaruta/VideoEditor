@@ -291,6 +291,98 @@ export function matchWholeFileBoth(
   return { ...best, byKind }
 }
 
+/** 一定間隔の音(BGM の拍・メトロノーム)とみなす周期の範囲(包絡線の点数。0.25〜2 秒) */
+const BEAT_MIN_LAG = 25
+const BEAT_MAX_LAG = 200
+/** 特徴の自己相関がこの値以上の周期があれば、一定間隔の音が鳴っているとみなす(話し声だけでは 0.02 ほど) */
+const BEAT_MIN_STRENGTH = 0.15
+/** 拍を消すときに見る、前後の拍の数(片側) */
+const BEAT_NEIGHBORS = 4
+
+/**
+ * 特徴(onsetFeature)に一定間隔の立ち上がり(BGM の拍・メトロノーム)があれば、その周期(点数。小数あり)。
+ * 無ければ null。自己相関がいちばん高い値の 8 割に届く、いちばん短い周期を取る(拍の整数倍を取らない)
+ */
+export function beatPeriod(x: Float32Array): number | null {
+  const n = x.length
+  if (n < BEAT_MAX_LAG * 8) return null
+  let e0 = 0
+  for (let i = 0; i < n; i++) e0 += x[i] * x[i]
+  if (!(e0 > 0)) return null
+  const ac = (lag: number): number => {
+    let s = 0
+    for (let i = 0; i + lag < n; i++) s += x[i] * x[i + lag]
+    return s / e0
+  }
+  const acs = new Float64Array(BEAT_MAX_LAG + 2)
+  let top = -Infinity
+  for (let l = BEAT_MIN_LAG - 1; l <= BEAT_MAX_LAG + 1; l++) {
+    acs[l] = ac(l)
+    if (l >= BEAT_MIN_LAG && l <= BEAT_MAX_LAG) top = Math.max(top, acs[l])
+  }
+  if (top < BEAT_MIN_STRENGTH) return null
+  let lag = 0
+  for (let l = BEAT_MIN_LAG; l <= BEAT_MAX_LAG; l++) {
+    if (acs[l] >= 0.8 * top && acs[l] >= acs[l - 1] && acs[l] >= acs[l + 1]) {
+      lag = l
+      break
+    }
+  }
+  if (lag === 0) return null
+  // 周期は 10ms 単位とは限らない(128 BPM は 46.875 点)。4 拍先の山で細かく求める
+  let best = -Infinity
+  let lag4 = 4 * lag
+  for (let l = 4 * lag - 4; l <= 4 * lag + 4; l++) {
+    const v = ac(l)
+    if (v > best) {
+      best = v
+      lag4 = l
+    }
+  }
+  return lag4 / 4
+}
+
+/**
+ * 一定間隔の立ち上がり(周期 `period` 点)を特徴から消す。各点から、前後 4 拍ずつの同じ位置の値
+ * (拍の位置の揺れを見込んで ±1 点の最大)の中央値を引き、負は 0 にする。拍は前後にも同じ形で
+ * あるので消え、話し声・物音のような一度きりの立ち上がりは前後の拍の位置にふつう無いので残る。
+ *
+ * 一定のビートの BGM が両方に入っていると、拍の分だけ相関に周期の山が並び、時計がずれていると
+ * 本当の位置の山が周期の山に埋もれる(丸ごとの照合の一番良い位置が端の誤った位置に出て、
+ * 窓ごとの合わせ直しも抜け具合 1.4 ほどで基準に届かなかった)。消してから比べると、
+ * 共通の話し声・物音だけで比べられる。消し終えたら平均 0・ばらつき 1 にそろえ直す
+ */
+export function suppressBeat(x: Float32Array, period: number): Float32Array {
+  const n = x.length
+  const out = new Float32Array(n)
+  const shifts: number[] = []
+  for (let j = 1; j <= BEAT_NEIGHBORS; j++)
+    shifts.push(-Math.round(j * period), Math.round(j * period))
+  const refs = new Float64Array(shifts.length)
+  for (let i = 0; i < n; i++) {
+    let m = 0
+    for (const d of shifts) {
+      const k = i + d
+      if (k < 1 || k >= n - 1) continue
+      // 小さい順に差し込む(8 個ほどなので、並べ替えの関数を呼ぶより速い)
+      const v = Math.max(x[k - 1], x[k], x[k + 1])
+      let j = m++
+      for (; j > 0 && refs[j - 1] > v; j--) refs[j] = refs[j - 1]
+      refs[j] = v
+    }
+    const med = m > 0 ? refs[m >> 1] : 0
+    out[i] = Math.max(0, x[i] - med)
+  }
+  let mean = 0
+  for (let i = 0; i < n; i++) mean += out[i]
+  mean /= Math.max(1, n)
+  let varSum = 0
+  for (let i = 0; i < n; i++) varSum += (out[i] - mean) ** 2
+  const sd = Math.sqrt(varSum / Math.max(1, n)) || 1
+  for (let i = 0; i < n; i++) out[i] = (out[i] - mean) / sd
+  return out
+}
+
 /** 窓ごとの合わせで受ける時計のずれの上限(±0.2%。現実の録音機は ±0.01% 前後) */
 const MAX_DRIFT = 2e-3
 

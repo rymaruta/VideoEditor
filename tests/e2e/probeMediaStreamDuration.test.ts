@@ -103,6 +103,41 @@ describe('mediaDurationSeconds — 映像・音声のストリームの長さ', 
     ).toBeCloseTo(8.023991, 5)
   })
 
+  it('編集リストで頭を切った MP4 の、字幕のトラックに引っ張られた映像の長さを使わない', () => {
+    // 同梱の ffprobe の実際の値: 10 秒・30fps・GOP 300・字幕 30 秒の MP4 を -ss 2.4 -c copy で切ったもの
+    // (映像の長さが字幕と同じ 30 秒。最後の絵は 7.57 秒・音声は 7.6 秒)
+    const mov = 'mov,mp4,m4a,3gp,3g2,mj2'
+    const video = {
+      codec_type: 'video',
+      duration: '30.000000',
+      start_time: '0.000000',
+      nb_frames: '300',
+      avg_frame_rate: '30/1'
+    }
+    const subtitle = { codec_type: 'subtitle', duration: '30.000000', start_time: '0.000000' }
+    expect(
+      mediaDurationSeconds({ duration: '30.000000', start_time: '0.000000', format_name: mov }, [
+        video,
+        { codec_type: 'audio', duration: '7.600000', start_time: '0.000000', nb_frames: '432' },
+        subtitle
+      ])
+    ).toBeCloseTo(7.6, 6)
+    // 映像だけなら、枚数と速さの長さ(10 秒)で抑える(切った分の枚も数えているので、まだ長い)
+    expect(
+      mediaDurationSeconds({ duration: '30.000000', format_name: mov }, [
+        { ...video, start_time: 'N/A' },
+        { ...subtitle, start_time: 'N/A' }
+      ])
+    ).toBeCloseTo(10, 6)
+    // 映像の長さが枚数と合っていれば(字幕と同じ長さでも)そのまま
+    expect(
+      mediaDurationSeconds({ duration: '10', start_time: '0', format_name: mov }, [
+        { ...video, duration: '10' },
+        { ...subtitle, duration: '10' }
+      ])
+    ).toBeCloseTo(10, 6)
+  })
+
   it('映像・音声だけの素材・ストリームの長さが分からない素材は、これまでどおり入れ物の長さ', () => {
     expect(
       mediaDurationSeconds({ duration: '12.5' }, [
@@ -250,6 +285,61 @@ describe.skipIf(!existsSync(ffmpegPath))(
       ])
       const probed = await probeMedia(file)
       expect(probed.duration).toBeCloseTo(8, 2)
+    })
+
+    it('編集リストで頭を切った MP4(字幕 30 秒)を、最後の絵・音声の長さ(7.6 秒)で読む', async () => {
+      const srt = join(work, 'cue-cut.srt')
+      writeFileSync(srt, '1\n00:00:00,000 --> 00:00:30,000\nhello\n')
+      const src = join(work, 'cut-src.mp4')
+      execFileSync(ffmpegPath, [
+        '-y',
+        '-v',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=s=64x36:r=30:d=10',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=f=440:d=10',
+        '-i',
+        srt,
+        '-map',
+        '0',
+        '-map',
+        '1',
+        '-map',
+        '2',
+        '-c:v',
+        'libx264',
+        '-g',
+        '300',
+        '-c:a',
+        'aac',
+        '-c:s',
+        'mov_text',
+        src
+      ])
+      // 頭のキーフレームから読み直さずに切る(編集リストで 2.4 秒より前を隠す)
+      const file = join(work, 'cut.mp4')
+      execFileSync(ffmpegPath, [
+        '-y',
+        '-v',
+        'error',
+        '-ss',
+        '2.4',
+        '-i',
+        src,
+        '-map',
+        '0',
+        '-c',
+        'copy',
+        file
+      ])
+      const probed = await probeMedia(file)
+      expect(probed.duration).toBeGreaterThan(7.5)
+      expect(probed.duration).toBeLessThan(7.7)
     })
   }
 )

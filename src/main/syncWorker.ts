@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'worker_threads'
 import { cachedEnvelope, readWindow } from './audioPcm'
 import {
+  beatPeriod,
   isReliableMatch,
   matchWholeFileBoth,
   matchWithDrift,
@@ -8,6 +9,7 @@ import {
   type FeatureMatch,
   onsetFeature,
   refineOffset,
+  suppressBeat,
   type SyncFeatures
 } from '@shared/sync/correlate'
 import { craigSessionEdges, solvePlacements } from '@shared/sync/solve'
@@ -146,14 +148,70 @@ function orphanCameraPairs(
   return pairs
 }
 
+/** 素材ごとの、一定間隔の立ち上がりの周期(特徴ごと。無ければ null)。組ごとに測り直さない */
+const beatCache = new Map<string, Record<keyof SyncFeatures, number | null>>()
+/** 素材ごとの、拍を消した特徴(特徴ごと・周期ごと) */
+const unbeatCache = new Map<string, Float32Array>()
+
+/**
+ * 両方に同じ周期の一定間隔の音(BGM の拍)があれば、それを消した特徴の組。無ければ null(その特徴は
+ * 元のまま)。周期の違いは、時計のずれ(上限 2000ppm)と周期を測る細かさ(0.25 点)の分まで受ける
+ */
+function unbeatPair(
+  a: SyncInputFile,
+  b: SyncInputFile,
+  fa: SyncFeatures,
+  fb: SyncFeatures
+): { fa: SyncFeatures; fb: SyncFeatures } | null {
+  const periods = (
+    f: SyncInputFile,
+    x: SyncFeatures
+  ): Record<keyof SyncFeatures, number | null> => {
+    let p = beatCache.get(f.id)
+    if (!p) {
+      p = { band: beatPeriod(x.band), plain: beatPeriod(x.plain) }
+      beatCache.set(f.id, p)
+    }
+    return p
+  }
+  const pa = periods(a, fa)
+  const pb = periods(b, fb)
+  const unbeat = (
+    f: SyncInputFile,
+    k: keyof SyncFeatures,
+    x: Float32Array,
+    p: number
+  ): Float32Array => {
+    const key = `${f.id}|${k}|${p}`
+    let y = unbeatCache.get(key)
+    if (!y) {
+      y = suppressBeat(x, p)
+      unbeatCache.set(key, y)
+    }
+    return y
+  }
+  const outA = { ...fa }
+  const outB = { ...fb }
+  let any = false
+  for (const k of ['band', 'plain'] as const) {
+    const p = pa[k]
+    const q = pb[k]
+    if (p === null || q === null || Math.abs(p - q) > 0.5 + MAX_DRIFT * p) continue
+    outA[k] = unbeat(a, k, fa[k], p)
+    outB[k] = unbeat(b, k, fb[k], q)
+    any = true
+  }
+  return any ? { fa: outA, fb: outB } : null
+}
+
 /** 1組を照らし合わせる。重なれる位置が無ければ null */
 async function matchPair(
   a: SyncInputFile,
   b: SyncInputFile,
   envelopes: Map<string, SyncFeatures>
 ): Promise<SyncPairResult | null> {
-  const fa = envelopes.get(a.id)!
-  const fb = envelopes.get(b.id)!
+  let fa = envelopes.get(a.id)!
+  let fb = envelopes.get(b.id)!
   const whole = matchWholeFileBoth(fa, fb)
   let m: FeatureMatch | null = whole?.match ?? null
   let reliable = m ? isReliableMatch(m) : false
@@ -186,6 +244,37 @@ async function matchPair(
     if (d) {
       m = d
       reliable = true
+    }
+  }
+  /**
+   * 一定のビートの BGM が両方に入っていて時計がずれていると、相関に拍の周期の山が並び、本当の位置の山が
+   * 埋もれる。丸ごとの照合の一番良い位置が両方の特徴とも端の誤った位置(14 分の組で 779.5 秒・
+   * −733 秒)に出て、その周りしか探さない合わせ直しも合わなかった(30 分・60 分・500ppm などで
+   * 正しい組が「合わない」)。拍を消した特徴で、丸ごとの照合と窓ごとの合わせ直しをやり直す。
+   * 拍を消すと共通の話し声・物音だけで比べるので、同じ拍の BGM を流した別の録音は合わないまま。
+   * 一度合えば、この後の合わせ直し(中ほどで詰められないとき)も拍を消した特徴で行う
+   */
+  if (!reliable) {
+    const u = unbeatPair(a, b, fa, fb)
+    if (u) {
+      const w = matchWholeFileBoth(u.fa, u.fb)
+      const saved = { fa, fb }
+      fa = u.fa
+      fb = u.fb
+      if (w && isReliableMatch(w.match)) {
+        m = w.match
+        reliable = true
+      } else {
+        const d = driftBoth((k) => w?.byKind[k]?.offset ?? w?.match.offset)
+        if (d) {
+          m = d
+          reliable = true
+        }
+      }
+      if (!reliable) {
+        fa = saved.fa
+        fb = saved.fb
+      }
     }
   }
   if (!m) return null

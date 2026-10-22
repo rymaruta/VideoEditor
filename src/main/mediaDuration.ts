@@ -98,12 +98,36 @@ export function mediaDurationSeconds(
     finiteSeconds(media.find((s) => s.codec_type === 'audio')?.duration)
   if (media.length === streams.length) return declared
   const formatStart = finiteSeconds(format?.start_time) ?? 0
+  /**
+   * 字幕・データのトラックの長さに引っ張られた映像の長さか。編集リストで頭を切った MP4(`-ss 2.4 -c copy`)
+   * では、同梱の ffprobe が映像の長さを字幕のトラックと同じ 30 秒と返す(枚数 300・30fps = 10 秒より長く、
+   * 実際の最後の絵は 7.57 秒)。枚数と速さから分かる長さより長く、ほかのトラックの長さと同じなら信じない
+   */
+  const otherLengths = streams
+    .filter((s) => !isMediaStream(s))
+    .map((s) => finiteSeconds(s.duration) ?? tagSeconds(s.tags))
+    .filter((d): d is number => d !== null)
+  const pulled = (s: ProbeStreamLike, d: number): boolean => {
+    const frames = videoFramesSeconds(s)
+    return frames !== null && d > frames + 0.5 && otherLengths.some((o) => Math.abs(o - d) < 0.01)
+  }
+  const lengthOf = (s: ProbeStreamLike): number | null =>
+    finiteSeconds(s.duration) ?? tagSeconds(s.tags)
+  // 引っ張られた映像は、ほかの映像・音声の長さが分かればそれで決め、分からなければ枚数と速さの長さで抑える
+  const trusted = media.filter((s) => {
+    const d = lengthOf(s)
+    return d !== null && !pulled(s, d)
+  })
   const fromZero =
     typeof format?.format_name === 'string' && format.format_name.split(',').includes('mov')
   let end: number | null = null
   for (const s of media) {
-    const d = finiteSeconds(s.duration) ?? tagSeconds(s.tags)
+    let d = lengthOf(s)
     if (d === null) continue
+    if (pulled(s, d)) {
+      if (trusted.length > 0) continue
+      d = videoFramesSeconds(s) ?? d
+    }
     const start = finiteSeconds(s.start_time) ?? formatStart
     // 時刻 0 から数えた長さが頭より短いことは無い。そのときは頭から数えたものとみなす。
     // 編集リストの無い MP4(-use_editlist 0)の映像は、B フレームの遅れの分だけ頭が 0 でなく、長さは頭から

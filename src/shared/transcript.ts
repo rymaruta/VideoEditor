@@ -170,10 +170,14 @@ const SHORT_REPLIES = new Set([
 const SLOW_SINGLE_CHARS_PER_SEC = 1
 /**
  * 1 文字が 5〜7 回でも、1 文字に 2 秒以上かけた繰り返しは作り話(「ん」×6 を 20 秒)。
- * 本当の「んんん」(1 秒に 1 文字ほど)・「んー」(伸ばす記号で別の文字)は当たらない
+ * 本当の「んんん」(1 秒に 1 文字ほど)・「んー」(伸ばす記号で別の文字)は当たらない。
+ * 作り話の形(声にならない1文字を、1つの片の中で区切らずに引き伸ばしたもの)に限る。ゆっくり数える
+ * 「1、1、1、1、1」・マイクテストの「あ、あ、あ」・片をまたいだ「ん。」の連続は本当の言葉(`VERY_SLOW_SINGLE_UNITS`)
  */
 const VERY_SLOW_SINGLE_CHARS_PER_SEC = 0.5
 const VERY_SLOW_SINGLE_REPEATS = 5
+/** とても遅い繰り返しを作り話とみなす1文字(声にならない「ん」) */
+const VERY_SLOW_SINGLE_UNITS = new Set(['ん', 'ン', 'ﾝ'])
 
 /** 繰り返しの一番短い元の単位(「はいはい」→「はい」) */
 function primitiveUnit(unit: readonly string[]): readonly string[] {
@@ -205,11 +209,20 @@ function isShortReplyUnit(unit: readonly string[]): boolean {
  * 2 文字以上の言葉は 4 回以上(「2分間」×4)、1 文字は 8 回以上かつ 1 秒に 1 文字未満
  * (「んんんんんんんんんんん」を 20 秒)を求め、よく言う短い返事は数えない
  */
-function slowLoop(unit: readonly string[], repeats: number, charsPerSec: number): boolean {
+function slowLoop(
+  unit: readonly string[],
+  repeats: number,
+  charsPerSec: number,
+  /** 繰り返しが1つの片の中で、区切り(空白・句読点)なしに続いているか */
+  unbroken: boolean
+): boolean {
   if (new Set(unit).size < 2)
     return (
       (repeats >= 8 && charsPerSec < SLOW_SINGLE_CHARS_PER_SEC) ||
-      (repeats >= VERY_SLOW_SINGLE_REPEATS && charsPerSec < VERY_SLOW_SINGLE_CHARS_PER_SEC)
+      (unbroken &&
+        VERY_SLOW_SINGLE_UNITS.has(unit[0]) &&
+        repeats >= VERY_SLOW_SINGLE_REPEATS &&
+        charsPerSec < VERY_SLOW_SINGLE_CHARS_PER_SEC)
     )
   if (isShortReplyUnit(unit)) return false
   return repeats >= 4
@@ -316,26 +329,39 @@ function loopsAcross(
   const owner: number[] = []
   /** 文字ごとの話している長さ(片の言葉の長さを文字数で割る)。遅さを見るのに使う */
   const sec: number[] = []
+  /** その文字の前(同じ片の中)に区切り(空白・句読点)があるか */
+  const broken: boolean[] = []
   for (const i of group) {
     const cs = normalizedChars(items[i].text)
     // 終わりの分からない片の長さは数えない(遅さの判定で、その片の文字は時間を取らないものとする)
     const per = cs.length > 0 && !items[i].endUnknown ? spans(items[i]).spoken / cs.length : 0
-    for (const c of cs) {
-      chars.push(c)
+    let gap = false
+    for (const ch of items[i].text) {
+      if (SKIP_CHAR.test(ch)) {
+        gap = true
+        continue
+      }
+      chars.push(ch.toLowerCase())
       owner.push(i)
       sec.push(per)
+      broken.push(gap)
+      gap = false
     }
   }
   if (chars.length < 2) return
   const prefix = [0]
   for (const s of sec) prefix.push(prefix[prefix.length - 1] + s)
+  const unbrokenRun = (from: number, to: number): boolean => {
+    for (let k = from + 1; k < to; k++) if (owner[k] !== owner[from] || broken[k]) return false
+    return true
+  }
   const loops = findLoops(chars, (unit, repeats, from, to) => {
     if (strictLoop(unit, repeats)) return true
     const d = prefix[to] - prefix[from]
     return (
       d >= SLOW_MIN_SEC &&
       to - from < SLOW_CHARS_PER_SEC * d &&
-      slowLoop(unit, repeats, (to - from) / d)
+      slowLoop(unit, repeats, (to - from) / d, unbrokenRun(from, to))
     )
   })
   if (loops.length === 0) return
