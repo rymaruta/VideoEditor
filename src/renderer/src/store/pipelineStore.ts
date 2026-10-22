@@ -206,6 +206,10 @@ interface PipelineState {
    * (`keep`)と違い、その場面の中の手で削った区間は戻さない。仕上がりの長さを変えたら捨てる
    */
   timelineKeep: Record<string, boolean>
+  /** `timelineKeep` を読み取った時(保存した時)の仕上がりの長さ。作り直すときに長さが違えば捨てる */
+  timelineKeepMinutes: number
+  /** 「自動の選び方に戻す」でやめた `timelineKeep`。作り直すまでは取り消せる(`restoreTimelineKeep`) */
+  clearedTimelineKeep: Record<string, boolean> | null
   /** 人が直した演出テロップで提案の一覧に無いもの(共通の時刻)。場面を落として戻したときに置き直す */
   carriedTelops: Omit<TextOverlay, 'id'>[]
   /** 場面を切ったときの番組の種類(企画に覚えて、開き直したときに同じ場面に切り直す) */
@@ -242,6 +246,8 @@ interface PipelineState {
   setKeep: (sceneId: string, keep: boolean | undefined) => void
   /** 今の本編から読み取った場面(古い形式の企画)をやめて、自動の選び方に戻す(手で決めた場面はそのまま) */
   clearTimelineKeep: () => void
+  /** 「自動の選び方に戻す」を取り消す(作り直すまで) */
+  restoreTimelineKeep: () => void
   /** 構成の判定はそのままに、カット・アングル・仮編集を作り直す(残す/落とす・長さを変えたとき) */
   rebuildRoughCut: () => Promise<void>
   /** ショート(縦型)づくりの進み具合 */
@@ -971,7 +977,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       ...(s.planJudgements ? { planJudgements: s.planJudgements } : {}),
       judgeSource: s.judgeSource,
       keep: s.keep,
-      ...(Object.keys(s.timelineKeep).length > 0 ? { timelineKeep: s.timelineKeep } : {}),
+      // 企画には、今作り直したら使うものを覚える(長さを変えたら読み取った場面は使わない)
+      ...(Object.keys(s.timelineKeep).length > 0 && s.targetMinutes === s.timelineKeepMinutes
+        ? { timelineKeep: s.timelineKeep }
+        : {}),
       targetMinutes: s.targetMinutes,
       editNote: s.editNote,
       ...(s.roughCut ? { keptIds: s.roughCut.keptIds } : {}),
@@ -1026,6 +1035,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       judgeSource: source,
       keep: {},
       timelineKeep: {},
+      clearedTimelineKeep: null,
       hype: hype ?? [],
       sceneKind: kind
     })
@@ -1045,10 +1055,31 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     await buildAndApply()
   }
 
+  /**
+   * 本編の修正より優先する「残す / 落とす」。人が手で決めたものだけ(今の本編から読み取った場面で、
+   * 手で削った区間を戻さない)。「残す」は、前の仮編集で落ちていた場面を新しく残すときだけ。
+   * 既に残っている場面の中をその後で手で詰めた所は、作り直すたびに戻さない
+   */
+  function releasedKeep(): Record<string, boolean> {
+    const before = get().roughCut?.keptIds
+    if (!before) return get().keep
+    const kept = new Set(before)
+    return Object.fromEntries(
+      Object.entries(get().keep).filter(([id, keep]) => !keep || !kept.has(id))
+    )
+  }
+
   async function buildAndApply(): Promise<void> {
     const project = useProjectStore.getState().project
     const info = project.multicam
     if (!info) return
+    // 仕上がりの長さが、今の本編から読み取った時(保存した時)と違えば、読み取った場面はやめて
+    // 自動の選び方にする(長さの欄の打鍵の途中では捨てない。数字を入れて消しても読み取った場面のまま)
+    if (
+      Object.keys(get().timelineKeep).length > 0 &&
+      get().targetMinutes !== get().timelineKeepMinutes
+    )
+      set({ timelineKeep: {} })
     setStep('cut', { state: 'run', percent: 0, note: '音の大きさを読み込み中' })
     const activity = await activityOf(project, info)
     // 前に組んだ本編と今の本編を比べ、人が削った・足した区間、替えたカメラを読み取る
@@ -1061,8 +1092,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           )
         : project.cutOverrides,
       get().scenes,
-      // 人が手で決めたものだけ(今の本編から読み取った場面で、手で削った区間を戻さない)
-      get().keep
+      releasedKeep()
     )
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
@@ -1356,7 +1386,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         duration: plan.cut.duration,
         shots: switches,
         telops: telops.length
-      }
+      },
+      // 作り直したら、「自動の選び方に戻す」はもう取り消せない(自動の選び方で作った本編)
+      clearedTimelineKeep: null
     })
     persistDecisions()
     // SE・BGM・CG は、仮編集を当てた後の本編(人が差し込んだクリップ・削った区間を含む)の時刻で置く。
@@ -1385,6 +1417,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     hype: [],
     keep: {},
     timelineKeep: {},
+    timelineKeepMinutes: 0,
+    clearedTimelineKeep: null,
     carriedTelops: [],
     sceneKind: null,
     roughCut: null,
@@ -1413,6 +1447,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgeSource: r.judgeSource,
         keep: r.keep,
         timelineKeep: r.timelineKeep,
+        timelineKeepMinutes: r.targetMinutes,
+        clearedTimelineKeep: null,
         carriedTelops: r.carriedTelops,
         sceneKind: project.autoEdit?.kind ?? kind,
         hype: r.hype,
@@ -1500,9 +1536,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     },
     setTargetMinutes: (minutes) => {
       const next = Math.max(0, minutes)
-      // 長さを変えたら、今の本編から読み取った場面(古い形式の企画)はやめて自動の選び方に戻す
-      // (読み取った場面が全部「残す」だと、長さが効かなかった)。手で決めた場面はそのまま
-      set((s) => (s.targetMinutes === next ? {} : { targetMinutes: next, timelineKeep: {} }))
+      // 長さを変えて作り直したら、今の本編から読み取った場面(古い形式の企画)はやめて自動の選び方に
+      // 戻す(読み取った場面が全部「残す」だと、長さが効かなかった)。手で決めた場面はそのまま。
+      // ここでは捨てない(欄は打鍵ごとに呼ぶので、数字を入れて消しただけで読み取った場面が戻らなかった)。
+      // 捨てるのは作り直すとき(`buildAndApply`)で、長さが読み取った時と違うときだけ
+      set((s) => (s.targetMinutes === next ? {} : { targetMinutes: next }))
       persistDecisions()
     },
     setEditNote: (note) => {
@@ -1519,7 +1557,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       persistDecisions()
     },
     clearTimelineKeep: () => {
-      set({ timelineKeep: {} })
+      const read = get().timelineKeep
+      if (Object.keys(read).length === 0) return
+      set({ timelineKeep: {}, clearedTimelineKeep: read })
+      persistDecisions()
+    },
+    restoreTimelineKeep: () => {
+      const read = get().clearedTimelineKeep
+      if (!read) return
+      set({ timelineKeep: read, clearedTimelineKeep: null })
       persistDecisions()
     },
     shorts: { state: 'idle', done: 0, total: 0, files: [] },
@@ -1647,6 +1693,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             judgements: heuristicJudgements(scenes, kind),
             keep: remapSceneFlags(get().keep, match),
             timelineKeep: remapSceneFlags(get().timelineKeep, match),
+            clearedTimelineKeep: get().clearedTimelineKeep
+              ? remapSceneFlags(get().clearedTimelineKeep!, match)
+              : null,
             sceneKind: kind
           })
         }
@@ -1699,6 +1748,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         hype: [],
         keep: {},
         timelineKeep: {},
+        clearedTimelineKeep: null,
         carriedTelops: [],
         sceneKind: null,
         // 仕上がりの長さ・方針は人が入れたものなので、ここでは捨てない(新しい回の画面・自動編集の画面で
@@ -1747,6 +1797,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         hype: [],
         keep: {},
         timelineKeep: {},
+        clearedTimelineKeep: null,
         carriedTelops: [],
         sceneKind: null,
         roughCut: null,

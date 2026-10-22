@@ -120,6 +120,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const editNote = usePipelineStore((s) => s.editNote)
   const restored = usePipelineStore((s) => s.restored)
   const fromTimeline = usePipelineStore((s) => Object.keys(s.timelineKeep).length > 0)
+  const timelineKeepCleared = usePipelineStore((s) => s.clearedTimelineKeep !== null)
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
@@ -356,6 +357,18 @@ export function AutoEditScreen(): React.JSX.Element | null {
                       自動の選び方に戻す
                     </button>
                     (「仮編集を作り直す」で反映。手で決めた場面はそのまま)
+                  </li>
+                )}
+                {timelineKeepCleared && (
+                  <li>
+                    自動の選び方に戻しました(「仮編集を作り直す」で反映)。{' '}
+                    <button
+                      type="button"
+                      disabled={running}
+                      onClick={() => usePipelineStore.getState().restoreTimelineKeep()}
+                    >
+                      取り消す
+                    </button>
                   </li>
                 )}
                 {!scan && (

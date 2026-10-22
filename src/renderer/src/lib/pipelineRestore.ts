@@ -154,10 +154,12 @@ export function restorePipelineFromProject(
     )
 
   // 残した場面: 保存したもの。無ければ今の本編に残っている所から読み取る
-  // (間を詰めた分があるので、3割以上残っていれば残した)
+  // (少しでも残っていれば残した。場面の大半を手で削って一部だけ残した場面も、残した部分の削りは
+  // 本編の修正で守られるので「残す」にする。割合で決めると、その場面ごと落ちて残した部分も消えていた。
+  // 切れ目を静かな所へ寄せた分(0.12 秒以内)が隣の場面に掛かるだけのものは数えない)
   const spans = project.clips.length > 0 ? spansOfClips(project.clips, info) : []
   const fromTimeline = scenes
-    .filter((sc) => keptSeconds(sc, spans) >= Math.max(0.5, (sc.end - sc.start) * 0.3))
+    .filter((sc) => keptSeconds(sc, spans) >= Math.min(0.5, (sc.end - sc.start) * 0.5))
     .map((sc) => sc.id)
   const savedKept = new Set(saved?.keptIds ?? [])
   const keptIds = saved?.keptIds

@@ -536,6 +536,136 @@ describe('監査で見つかった不具合(c5fdddd)', () => {
   })
 })
 
+/** 今の本編のクリップのうち、共通の時刻で `scene` の中に収まるもの(本編の順) */
+function clipsInScene(scene: {
+  start: number
+  end: number
+}): { id: string; start: number; end: number }[] {
+  const project = useProjectStore.getState().project
+  const spans = spansOfClips(project.clips, project.multicam!)
+  expect(spans).toHaveLength(project.clips.length)
+  return project.clips
+    .map((c, i) => ({ id: c.id, start: spans[i].start, end: spans[i].end }))
+    .filter((c) => c.start >= scene.start - 0.2 && c.end <= scene.end + 0.2)
+}
+
+describe('監査で見つかった不具合(b4cd4d9)', () => {
+  it('古い形式の企画で、場面の大半を手で削って一部だけ残しても、作り直しで残した部分が消えない', async () => {
+    await runEpisode()
+    const scenes = usePipelineStore.getState().scenes
+    const scene = scenes[scenes.length - 1]
+    const inside = clipsInScene(scene)
+    expect(inside.length).toBeGreaterThan(1)
+    // 最後の1本だけ残す(場面の 3 割より短い)
+    useProjectStore.getState().removeClips(inside.slice(0, -1).map((c) => c.id))
+    const last = inside[inside.length - 1]
+    expect(last.end - last.start).toBeLessThan((scene.end - scene.start) * 0.3)
+    const before = mainDuration()
+    saveAndReopen({ legacy: true })
+    await flush()
+    expect(usePipelineStore.getState().timelineKeep[scene.id]).toBe(true)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().steps.cut.state).toBe('done')
+    expect(usePipelineStore.getState().roughCut!.keptIds).toContain(scene.id)
+    expect(Math.abs(mainDuration() - before)).toBeLessThan(0.2)
+  })
+
+  for (const reopen of [false, true])
+    it(`手で残した場面の中をその後で手で詰めても、作り直しで戻らない(${reopen ? '開き直し' : 'そのまま'})`, async () => {
+      await runEpisode()
+      const s1 = await keepOneDroppedByHand()
+      if (reopen) {
+        saveAndReopen()
+        await flush()
+      }
+      const scene = usePipelineStore.getState().scenes.find((sc) => sc.id === s1)!
+      const inside = clipsInScene(scene)
+      const longest = inside.reduce((a, c) => (c.end - c.start > a.end - a.start ? c : a))
+      const clip = useProjectStore.getState().project.clips.find((c) => c.id === longest.id)!
+      useProjectStore.getState().updateClipTrim(clip.id, clip.inPoint, clip.outPoint - 3)
+      const trimmed = mainDuration()
+      await usePipelineStore.getState().rebuildRoughCut()
+      expect(usePipelineStore.getState().steps.cut.state).toBe('done')
+      expect(usePipelineStore.getState().roughCut!.keptIds).toContain(s1)
+      expect(Math.abs(mainDuration() - trimmed)).toBeLessThan(0.2)
+      // もう一度作り直しても同じ
+      await usePipelineStore.getState().rebuildRoughCut()
+      expect(Math.abs(mainDuration() - trimmed)).toBeLessThan(0.2)
+    })
+
+  it('場面を一度落として「残す」に戻したときは、前に手で削った所も戻る(10/09 版と同じ)', async () => {
+    await runEpisode()
+    const full = mainDuration()
+    const scene = usePipelineStore.getState().scenes[1]
+    const inside = clipsInScene(scene)
+    const longest = inside.reduce((a, c) => (c.end - c.start > a.end - a.start ? c : a))
+    const clip = useProjectStore.getState().project.clips.find((c) => c.id === longest.id)!
+    useProjectStore.getState().updateClipTrim(clip.id, clip.inPoint, clip.outPoint - 3)
+    usePipelineStore.getState().setKeep(scene.id, false)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().roughCut!.keptIds).not.toContain(scene.id)
+    usePipelineStore.getState().setKeep(scene.id, true)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
+  })
+
+  /** 1.5 分で作り直した(場面の落ちた)回を、古い形式で開き直す。その時の残した場面と長さを返す */
+  async function legacyShortEpisode(): Promise<{ keptIds: string[]; duration: number }> {
+    await runEpisode()
+    usePipelineStore.getState().setTargetMinutes(1.5)
+    await usePipelineStore.getState().rebuildRoughCut()
+    const rc = usePipelineStore.getState().roughCut!
+    expect(rc.dropped).toBeGreaterThan(0)
+    const duration = mainDuration()
+    saveAndReopen({ legacy: true })
+    await flush()
+    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(rc.keptIds)
+    return { keptIds: rc.keptIds, duration }
+  }
+
+  it('古い形式の企画で、長さの欄に数字を入れて消しても、読み取った場面で作り直す', async () => {
+    const { keptIds, duration } = await legacyShortEpisode()
+    usePipelineStore.getState().setTargetMinutes(2)
+    // 打鍵の途中では捨てない(企画には、今作り直したら使うものを覚える)
+    expect(Object.keys(usePipelineStore.getState().timelineKeep).length).toBeGreaterThan(0)
+    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeUndefined()
+    usePipelineStore.getState().setTargetMinutes(0)
+    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeDefined()
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
+    expect(Math.abs(mainDuration() - duration)).toBeLessThan(0.2)
+    expect(Object.keys(usePipelineStore.getState().timelineKeep).length).toBeGreaterThan(0)
+  })
+
+  it('古い形式の企画で「自動の選び方に戻す」を取り消せる(作り直すまで)', async () => {
+    const { keptIds, duration } = await legacyShortEpisode()
+    const read = usePipelineStore.getState().timelineKeep
+    usePipelineStore.getState().clearTimelineKeep()
+    expect(usePipelineStore.getState().timelineKeep).toEqual({})
+    usePipelineStore.getState().restoreTimelineKeep()
+    expect(usePipelineStore.getState().timelineKeep).toEqual(read)
+    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toEqual(read)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(keptIds)
+    expect(Math.abs(mainDuration() - duration)).toBeLessThan(0.2)
+    // 作り直した後は取り消せない(自動の選び方で作ったもの)
+    usePipelineStore.getState().clearTimelineKeep()
+    await usePipelineStore.getState().rebuildRoughCut()
+    usePipelineStore.getState().restoreTimelineKeep()
+    expect(usePipelineStore.getState().timelineKeep).toEqual({})
+  })
+
+  it('古い形式の企画で長さを変えて作り直すと、自動の選び方になる(読み取った場面は捨てる)', async () => {
+    const { keptIds } = await legacyShortEpisode()
+    usePipelineStore.getState().setTargetMinutes(4)
+    await usePipelineStore.getState().rebuildRoughCut()
+    const s = usePipelineStore.getState()
+    expect(s.timelineKeep).toEqual({})
+    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeUndefined()
+    expect(s.roughCut!.keptIds.length).toBeGreaterThan(keptIds.length)
+  })
+})
+
 describe('matchScenesByTime', () => {
   it('時刻がほぼ同じ場面だけを対応させる(ID は見ない)', () => {
     const prev = [
