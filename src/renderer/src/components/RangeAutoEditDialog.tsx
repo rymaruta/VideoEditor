@@ -16,6 +16,7 @@ import { frameSeconds } from '@shared/frameRate'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
 import { WandIcon } from './icons'
 import './rangeAutoEdit.css'
+import { DialogHeader } from './DialogHeader'
 
 const STEP_LABELS: [keyof RangedEditSteps, string, string][] = [
   ['cut', 'カット・間詰め', '切ると、今の残し方のまま'],
@@ -129,172 +130,183 @@ export function RangeAutoEditDialog({
   return (
     <div className="modal-backdrop" ref={backdropRef} onClick={() => !busy && onClose()}>
       <div
-        className="modal range-auto-edit"
+        className="range-auto-edit-dialog range-auto-edit"
         role="dialog"
+        aria-modal="true"
         aria-label="この範囲を自動編集"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>
-          <WandIcon width={15} height={15} />
-          この範囲を自動編集
-          <span className="range-auto-edit-span mono">
-            {formatTimecode(range.start, fps)} 〜 {formatTimecode(range.end, fps)}
-          </span>
-        </h3>
-        {blocked ? (
-          <p className="hint-text">{blocked}</p>
-        ) : (
-          <>
-            <p className="form-note">
-              範囲の中だけを、自動編集と同じやり方で作り直します。範囲の外の本編はそのままです。
-              範囲の中の手直し(削った・足した所、替えたカメラ)は、下の「手直しを残す」を入れない限り
-              自動の結果に置き換わります。
-              {origin === 'marks'
-                ? 'イン点・アウト点の所をそのまま使います。'
-                : '境は近くの静かな所へ寄せます。'}
-            </p>
-            <fieldset className="range-auto-edit-steps">
-              <legend>やり直す工程</legend>
-              {STEP_LABELS.map(([key, label, note]) => (
-                <label key={key} title={note}>
-                  <input
-                    type="checkbox"
-                    checked={options.steps[key]}
-                    onChange={(e) =>
-                      change({ steps: { ...options.steps, [key]: e.target.checked } })
-                    }
-                  />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            <fieldset className="range-auto-edit-after">
-              <legend>範囲より後ろ</legend>
-              <label>
-                <input
-                  type="radio"
-                  name="range-after"
-                  checked={!options.keepLength}
-                  onChange={() => change({ keepLength: false })}
-                />
-                詰める・送る(リップル。後ろの声・テロップ・手で置いたものも一緒に動く)
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="range-after"
-                  checked={options.keepLength}
-                  onChange={() => change({ keepLength: true })}
-                />
-                範囲の長さを保つ(後ろは1フレームも動かさない)
-              </label>
-            </fieldset>
-            <label className="range-auto-edit-check">
-              <input
-                type="checkbox"
-                checked={options.keepInside}
-                onChange={(e) => change({ keepInside: e.target.checked })}
-              />
-              範囲の中の手直し(削った・足した所、替えたカメラ)を残す
-            </label>
-            <label className="range-auto-edit-check">
-              <input
-                type="checkbox"
-                checked={options.lockAfter}
-                onChange={(e) => change({ lockAfter: e.target.checked })}
-              />
-              終わったら、この範囲を自動編集で触らないようにする(ロック。手で編集はできます)
-            </label>
-            {error && (
-              <p className={askRipple ? 'hint-text' : 'error-text'} role="alert">
-                {error}
-                {askRipple && (
-                  <button
-                    className="small-button"
-                    onClick={() => {
-                      const next = { ...options, keepLength: false }
-                      setOptions(next)
-                      void prepare(next)
-                    }}
-                  >
-                    詰める(リップル)で用意する
-                  </button>
-                )}
+        {/* 統一のダイアログの枠(見出しの帯は DialogHeader、幅 560) */}
+        <DialogHeader
+          title={
+            <>
+              <WandIcon width={16} height={16} />
+              この範囲を自動編集
+              <span className="range-auto-edit-span mono">
+                {formatTimecode(range.start, fps)} 〜 {formatTimecode(range.end, fps)}
+              </span>
+            </>
+          }
+          closeTitle={busy ? '用意している間は閉じられません' : '閉じる'}
+          onClose={() => !busy && onClose()}
+        />
+        <div className="range-auto-edit-body">
+          {blocked ? (
+            <p className="hint-text">{blocked}</p>
+          ) : (
+            <>
+              <p className="form-note">
+                範囲の中だけを、自動編集と同じやり方で作り直します。範囲の外の本編はそのままです。
+                範囲の中の手直し(削った・足した所、替えたカメラ)は、下の「手直しを残す」を入れない限り
+                自動の結果に置き換わります。
+                {origin === 'marks'
+                  ? 'イン点・アウト点の所をそのまま使います。'
+                  : '境は近くの静かな所へ寄せます。'}
               </p>
-            )}
-            {sm && (
-              <div className="range-auto-edit-diff" aria-label="当てる前と後の違い">
-                <div className="range-strips">
-                  <span className="form-note">前</span>
-                  <Strip pieces={sm.stripBefore} length={sm.lengthBefore} scale={scale} />
-                  <span className="form-note">後</span>
-                  <Strip pieces={sm.stripAfter} length={sm.lengthAfter} scale={scale} />
+              <fieldset className="range-auto-edit-steps">
+                <legend>やり直す工程</legend>
+                {STEP_LABELS.map(([key, label, note]) => (
+                  <label key={key} title={note}>
+                    <input
+                      type="checkbox"
+                      checked={options.steps[key]}
+                      onChange={(e) =>
+                        change({ steps: { ...options.steps, [key]: e.target.checked } })
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+              <fieldset className="range-auto-edit-after">
+                <legend>範囲より後ろ</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="range-after"
+                    checked={!options.keepLength}
+                    onChange={() => change({ keepLength: false })}
+                  />
+                  詰める・送る(リップル。後ろの声・テロップ・手で置いたものも一緒に動く)
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="range-after"
+                    checked={options.keepLength}
+                    onChange={() => change({ keepLength: true })}
+                  />
+                  範囲の長さを保つ(後ろは1フレームも動かさない)
+                </label>
+              </fieldset>
+              <label className="range-auto-edit-check">
+                <input
+                  type="checkbox"
+                  checked={options.keepInside}
+                  onChange={(e) => change({ keepInside: e.target.checked })}
+                />
+                範囲の中の手直し(削った・足した所、替えたカメラ)を残す
+              </label>
+              <label className="range-auto-edit-check">
+                <input
+                  type="checkbox"
+                  checked={options.lockAfter}
+                  onChange={(e) => change({ lockAfter: e.target.checked })}
+                />
+                終わったら、この範囲を自動編集で触らないようにする(ロック。手で編集はできます)
+              </label>
+              {error && (
+                <p className={askRipple ? 'hint-text' : 'error-text'} role="alert">
+                  {error}
+                  {askRipple && (
+                    <button
+                      className="small-button"
+                      onClick={() => {
+                        const next = { ...options, keepLength: false }
+                        setOptions(next)
+                        void prepare(next)
+                      }}
+                    >
+                      詰める(リップル)で用意する
+                    </button>
+                  )}
+                </p>
+              )}
+              {sm && (
+                <div className="range-auto-edit-diff" aria-label="当てる前と後の違い">
+                  <div className="range-strips">
+                    <span className="form-note">前</span>
+                    <Strip pieces={sm.stripBefore} length={sm.lengthBefore} scale={scale} />
+                    <span className="form-note">後</span>
+                    <Strip pieces={sm.stripAfter} length={sm.lengthAfter} scale={scale} />
+                  </div>
+                  {sm.lengthAfter > sm.lengthBefore * 1.5 + 5 && (
+                    <p className="range-auto-edit-grow" role="alert">
+                      落とした場面の所も作り直すため、範囲が {sec(sm.lengthBefore)} から{' '}
+                      {sec(sm.lengthAfter)} に伸びます(
+                      {options.keepLength
+                        ? '長さを保つ'
+                        : `後ろが ${sec(sm.lengthAfter - sm.lengthBefore)} 送られます`}
+                      )
+                    </p>
+                  )}
+                  <dl>
+                    <dt>範囲の長さ</dt>
+                    <dd>
+                      {sec(sm.lengthBefore)} → {sec(sm.lengthAfter)}(
+                      {sec(sm.lengthAfter - sm.lengthBefore)})
+                    </dd>
+                    <dt>本編の長さ</dt>
+                    <dd>
+                      {formatTimecode(sm.totalBefore, fps)} → {formatTimecode(sm.totalAfter, fps)}
+                    </dd>
+                    <dt>カット</dt>
+                    <dd>
+                      {sm.cutsBefore} → {sm.cutsAfter} 本
+                    </dd>
+                    <dt>自動テロップ</dt>
+                    <dd>
+                      {sm.telopsBefore} → {sm.telopsAfter} 枚
+                    </dd>
+                    <dt>SE / BGM / CG</dt>
+                    <dd>
+                      {sm.se[0]}→{sm.se[1]} / {sm.bgm[0]}→{sm.bgm[1]} / {sm.cg[0]}→{sm.cg[1]}
+                    </dd>
+                  </dl>
+                  <ul className="range-auto-edit-notes">
+                    {sm.movedHand > 0 && (
+                      <li>
+                        範囲より後ろの手置き {sm.movedHand} 個(テロップ・音・画)も一緒に動きます
+                      </li>
+                    )}
+                    {sm.insideHand > 0 && (
+                      <li>範囲の中の手置き {sm.insideHand} 個はそのままの時刻に残ります</li>
+                    )}
+                    {sm.speedChanged > 0 && (
+                      <li className="warn">
+                        範囲の中の速さを変えたクリップ {sm.speedChanged} 本は、素材の速さに戻ります
+                      </li>
+                    )}
+                    {sm.outsideOverlap > 0 && (
+                      <li className="warn">
+                        範囲の外に、範囲の中と同じ時刻を映すクリップが {sm.outsideOverlap}{' '}
+                        本あります(同じ所が2回出ることがあります)
+                      </li>
+                    )}
+                    {sm.skipped.length > 0 && (
+                      <li>
+                        手で直した {sm.skipped.join('・')} のトラックは、範囲で置き直していません
+                      </li>
+                    )}
+                  </ul>
                 </div>
-                {sm.lengthAfter > sm.lengthBefore * 1.5 + 5 && (
-                  <p className="range-auto-edit-grow" role="alert">
-                    落とした場面の所も作り直すため、範囲が {sec(sm.lengthBefore)} から{' '}
-                    {sec(sm.lengthAfter)} に伸びます(
-                    {options.keepLength
-                      ? '長さを保つ'
-                      : `後ろが ${sec(sm.lengthAfter - sm.lengthBefore)} 送られます`}
-                    )
-                  </p>
-                )}
-                <dl>
-                  <dt>範囲の長さ</dt>
-                  <dd>
-                    {sec(sm.lengthBefore)} → {sec(sm.lengthAfter)}(
-                    {sec(sm.lengthAfter - sm.lengthBefore)})
-                  </dd>
-                  <dt>本編の長さ</dt>
-                  <dd>
-                    {formatTimecode(sm.totalBefore, fps)} → {formatTimecode(sm.totalAfter, fps)}
-                  </dd>
-                  <dt>カット</dt>
-                  <dd>
-                    {sm.cutsBefore} → {sm.cutsAfter} 本
-                  </dd>
-                  <dt>自動テロップ</dt>
-                  <dd>
-                    {sm.telopsBefore} → {sm.telopsAfter} 枚
-                  </dd>
-                  <dt>SE / BGM / CG</dt>
-                  <dd>
-                    {sm.se[0]}→{sm.se[1]} / {sm.bgm[0]}→{sm.bgm[1]} / {sm.cg[0]}→{sm.cg[1]}
-                  </dd>
-                </dl>
-                <ul className="range-auto-edit-notes">
-                  {sm.movedHand > 0 && (
-                    <li>
-                      範囲より後ろの手置き {sm.movedHand} 個(テロップ・音・画)も一緒に動きます
-                    </li>
-                  )}
-                  {sm.insideHand > 0 && (
-                    <li>範囲の中の手置き {sm.insideHand} 個はそのままの時刻に残ります</li>
-                  )}
-                  {sm.speedChanged > 0 && (
-                    <li className="warn">
-                      範囲の中の速さを変えたクリップ {sm.speedChanged} 本は、素材の速さに戻ります
-                    </li>
-                  )}
-                  {sm.outsideOverlap > 0 && (
-                    <li className="warn">
-                      範囲の外に、範囲の中と同じ時刻を映すクリップが {sm.outsideOverlap}{' '}
-                      本あります(同じ所が2回出ることがあります)
-                    </li>
-                  )}
-                  {sm.skipped.length > 0 && (
-                    <li>
-                      手で直した {sm.skipped.join('・')} のトラックは、範囲で置き直していません
-                    </li>
-                  )}
-                </ul>
-              </div>
-            )}
-          </>
-        )}
-        <div className="modal-actions">
-          <button onClick={onClose} disabled={busy}>
+              )}
+            </>
+          )}
+        </div>
+        <div className="dialog-footer">
+          <div className="dialog-footer-spacer" />
+          <button className="small-button" onClick={onClose} disabled={busy}>
             閉じる
           </button>
           {!blocked && !preview && (

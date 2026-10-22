@@ -1,28 +1,46 @@
-/* 範囲の自動編集のダイアログ・見比べの帯・ロックの帯(色は main.css / graphite3.css の変数) */
+/* 範囲の自動編集のダイアログ・見比べの帯・ロックの帯(tokens.css の名前で描く)。
+   ダイアログの枠(地・角・影・見出しの帯・足の帯)は統一のダイアログ(dialogsG3.css・DialogHeader) */
 
-.modal.range-auto-edit {
-  width: 540px;
+.range-auto-edit-dialog {
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ve-radius-xl);
+  background: var(--ve-surface-2);
+  box-shadow: var(--ve-shadow-dialog);
+  color: var(--ve-text-1);
+  overflow: hidden;
+}
+.range-auto-edit-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ve-pad-dialog);
+}
+.range-auto-edit-body > :first-child {
+  margin-top: 0;
 }
 .range-auto-edit-span {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
 }
 .range-auto-edit fieldset {
-  border: 1px solid var(--ve-line-field);
-  border-radius: 6px;
+  border: 1px solid var(--ve-border);
+  border-radius: var(--ve-radius-md);
   padding: 8px 10px 10px;
   margin: 10px 0 0;
 }
 .range-auto-edit legend {
   padding: 0 4px;
-  font-size: 11px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
 }
 .range-auto-edit-steps {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 14px;
+  gap: var(--ve-space-2) var(--ve-space-4);
 }
 .range-auto-edit-steps label,
 .range-auto-edit-after label,
@@ -30,8 +48,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: var(--ve-text);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-1);
 }
 .range-auto-edit-after {
   display: flex;
@@ -39,32 +57,32 @@
   gap: 4px;
 }
 .range-auto-edit-check {
-  margin-top: 10px;
+  margin-top: var(--ve-space-3);
 }
 .range-auto-edit .hint-text button,
 .range-auto-edit .error-text button {
   margin-left: 8px;
 }
 .range-auto-edit-diff {
-  margin-top: 12px;
-  padding: 10px;
-  border-radius: 6px;
-  background: var(--ve-field);
-  border: 1px solid var(--ve-line);
+  margin-top: var(--ve-space-3);
+  padding: var(--ve-space-3);
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-sunken);
+  border: 1px solid var(--ve-border-subtle);
 }
 .range-auto-edit-diff dl {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 3px 12px;
   margin: 10px 0 0;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .range-auto-edit-diff dt {
   color: var(--ve-text-3);
 }
 .range-auto-edit-diff dd {
   margin: 0;
-  font-family: var(--font-mono);
+  font-family: var(--ve-font-mono);
   font-variant-numeric: tabular-nums;
 }
 .range-strips {
@@ -78,30 +96,30 @@
   height: 12px;
   border-radius: 3px;
   background: var(--ve-well);
-  box-shadow: inset 0 0 0 1px var(--ve-line-field);
+  box-shadow: inset 0 0 0 1px var(--ve-border);
 }
 .range-strip-piece {
   position: absolute;
   top: 1px;
   bottom: 1px;
   border-radius: 2px;
-  background: var(--ve-trk-video-line);
+  background: var(--ve-track-video-clip-line);
   box-shadow: inset -1px 0 0 var(--ve-well);
 }
 .range-strip-piece.extra {
-  background: var(--ve-trk-pip-line);
+  background: var(--ve-track-overlay-clip-line);
 }
 .range-strip-piece.speed {
-  background: var(--ve-accent-press);
+  background: var(--ve-primary-press);
 }
 .range-auto-edit-notes {
   margin: 8px 0 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 .range-auto-edit-notes .warn {
-  color: var(--ve-accent-ink);
+  color: var(--ve-primary-ink);
 }
 
 /* ---------- 当てた後の見比べの帯 ---------- */
@@ -112,23 +130,23 @@
   padding: 6px 12px;
   border-bottom: 1px solid var(--ve-auto-line);
   background: linear-gradient(90deg, var(--ve-auto-soft), transparent 80%);
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .range-review-title {
   color: var(--ve-auto-ink);
-  font-weight: 600;
+  font-weight: var(--ve-fw-semibold);
 }
 .range-review-toggle {
   display: inline-flex;
-  border: 1px solid var(--ve-line-control);
-  border-radius: 6px;
+  border: 1px solid var(--ve-border);
+  border-radius: var(--ve-radius-md);
   overflow: hidden;
 }
 .range-review-toggle button {
   border: 0;
   border-radius: 0;
   padding: 2px 12px;
-  font-size: 12px;
+  font-size: var(--ve-fs-12);
 }
 .range-review-toggle button.active {
   background-image: none;
@@ -137,11 +155,14 @@
   box-shadow: inset 0 0 0 1px var(--ve-auto-line);
 }
 .range-review-summary {
-  font-family: var(--font-mono);
+  font-family: var(--ve-font-mono);
 }
 
 /* 自動編集の画面の構成の一覧: 「選んだ場面だけ作り直す」の印の列を足す */
 .structure-row:has(.structure-pick) {
+  grid-template-columns: 18px 18px 64px 64px 58px 70px minmax(0, 1fr);
+}
+.structure-row:has(.structure-pick):not(:has(.ae-thumb)) {
   grid-template-columns: 18px 18px 64px 58px 70px minmax(0, 1fr);
 }
 .structure-pick {
@@ -153,7 +174,7 @@
   position: relative;
   height: 16px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--ve-line);
+  border-bottom: 1px solid var(--ve-border-subtle);
 }
 .timeline-panel .g3-lock-label {
   height: 17px;
@@ -162,9 +183,9 @@
   align-items: center;
   gap: 4px;
   padding: 0 10px;
-  font-size: 10.5px;
+  font-size: var(--ve-fs-11);
   color: var(--ve-text-3);
-  border-bottom: 1px solid var(--ve-line);
+  border-bottom: 1px solid var(--ve-border-subtle);
 }
 .timeline-panel .g3-lock {
   position: absolute;
@@ -175,7 +196,7 @@
   align-items: center;
   padding-left: 4px;
   overflow: hidden;
-  color: #c4d0e6;
+  color: var(--ve-text-2);
   background: repeating-linear-gradient(
     135deg,
     rgba(120, 140, 175, 0.42) 0 4px,
@@ -199,30 +220,38 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
-  padding: 6px 14px;
-  font-size: 12px;
+  gap: var(--ve-space-2) var(--ve-space-3);
+  padding: var(--ve-space-3) var(--ve-space-4);
+  box-shadow: inset 0 -1px 0 var(--ve-border-subtle);
+  font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
 .auto-edit-locks .lock-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 4px 2px 8px;
-  border-radius: 999px;
-  color: #c4d0e6;
+  gap: var(--ve-gap-icon);
+  height: var(--ve-control-sm);
+  padding: 0 var(--ve-space-1) 0 var(--ve-space-2);
+  border-radius: var(--ve-radius-pill);
+  color: var(--ve-text-2);
   background: rgba(120, 140, 175, 0.18);
   box-shadow: inset 0 0 0 1px rgba(150, 170, 205, 0.4);
-  font-family: var(--font-mono);
+  font-family: var(--ve-font-mono);
 }
 
 /* 落とした場面をまたいで範囲が大きく伸びるときの知らせ */
 .range-auto-edit-grow {
   margin: 10px 0 0;
   padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--ve-accent-ink);
-  background: var(--ve-accent-soft);
-  box-shadow: inset 0 0 0 1px var(--ve-accent-line);
+  border-radius: var(--ve-radius-md);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-primary-ink);
+  background: var(--ve-primary-soft);
+  box-shadow: inset 0 0 0 1px var(--ve-primary-line);
+}
+
+.auto-edit-locks .lock-chip .small-button {
+  height: 20px;
+  padding: 0 var(--ve-space-2);
+  border-radius: var(--ve-radius-pill);
 }
