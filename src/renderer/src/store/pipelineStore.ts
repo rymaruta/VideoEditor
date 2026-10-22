@@ -1504,7 +1504,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgeSource: r.judgeSource,
         keep: r.keep,
         builtKept: r.builtKept,
-        keepTouched: r.keepTouched,
+        // 付け直しは丸ごと消した場面のものだけ(前の版で保存した企画には、クリップのある場面の付け直しも
+        // 残っている。そのまま使うと、後で丸ごと消したときに付け直さなくても戻る)
+        keepTouched: r.keepTouched.filter((id) => !ownedScenes(project, r.scenes).has(id)),
         carriedTelops: r.carriedTelops,
         sceneKind: project.autoEdit?.kind ?? kind,
         hype: r.hype,
@@ -1611,7 +1613,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         const emptied = !ownedScenes(useProjectStore.getState().project, s.scenes).has(sceneId)
         if (!emptied) return { keep: next }
         keepTouchedAt.set(sceneId, ++keepTouchClock)
-        revivedFrom.delete(sceneId)
+        // 戻した付け直しに触り直しても、元の記録との結び付きは残す(場面にクリップが戻って捨てたら、
+        // 元の記録からも外す。外さないと、やり直しでまた戻る)
         return {
           keep: next,
           keepTouched: s.keepTouched.includes(sceneId) ? s.keepTouched : [...s.keepTouched, sceneId]
@@ -2419,12 +2422,14 @@ useProjectStore.subscribe((state, prev) => {
   const used = usedTouches.get(state.project.clips)
   if (used) {
     const scenes = new Set(usePipelineStore.getState().scenes.map((sc) => sc.id))
-    const back = used.filter((id) => scenes.has(id) && !pending.includes(id))
-    if (back.length > 0) {
-      for (const id of back) revivedFrom.set(id, used)
-      keepTouched = [...pending, ...back]
+    const linked = used.filter((id) => scenes.has(id))
+    const back = linked.filter((id) => !pending.includes(id))
+    // 既に付け直してあった場面も、元の記録と結び付ける(後で場面にクリップが戻って捨てたら、元の
+    // 記録からも外す。外さないと、やり直しでまた戻る)
+    for (const id of linked) revivedFrom.set(id, used)
+    if (linked.length > 0)
       revivedTouches.set(prev.project.clips, { ids: back, clock: keepTouchClock })
-    }
+    if (back.length > 0) keepTouched = [...pending, ...back]
   }
   const revived = revivedTouches.get(state.project.clips)
   if (keepTouched === pending && revived) {
@@ -2437,7 +2442,9 @@ useProjectStore.subscribe((state, prev) => {
   if (keepTouched.length > 0) {
     const owned = ownedScenes(state.project, usePipelineStore.getState().scenes)
     for (const id of keepTouched.filter((x) => owned.has(x))) {
-      const from = revivedFrom.get(id)
+      // やり直しで、その付け直しを使った作り直しの後の本編に来た(使い済みに戻る所)なら、元の記録は
+      // 残す(また取り消せば戻す)
+      const from = revived?.ids.includes(id) ? undefined : revivedFrom.get(id)
       if (from?.includes(id)) from.splice(from.indexOf(id), 1)
       revivedFrom.delete(id)
     }
