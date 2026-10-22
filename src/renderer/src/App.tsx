@@ -369,28 +369,6 @@ function App(): React.JSX.Element {
 
   useKeyboardShortcuts()
 
-  const tabButton = ({
-    id,
-    label,
-    description
-  }: {
-    id: PanelTab
-    label: string
-    description: string
-  }): React.JSX.Element => (
-    <button
-      key={id}
-      type="button"
-      role="tab"
-      aria-selected={tab === id}
-      className={`panel-tab ${tab === id ? 'active' : ''}`}
-      onClick={() => setTab(id)}
-      title={description}
-    >
-      {label}
-    </button>
-  )
-
   return (
     <div className="app-shell">
       <PanelBoundary name="作業の流れ">
@@ -410,13 +388,9 @@ function App(): React.JSX.Element {
               tabs={ALL_TABS}
               current={tab}
               onSelect={(id) => setTab(id as PanelTab)}
-              leading={
+              leadingTab={
                 sourceAssetId
-                  ? tabButton({
-                      id: 'source',
-                      label: 'ソース',
-                      description: '素材をソースで確認する'
-                    })
+                  ? { id: 'source', label: 'ソース', description: '素材をソースで確認する' }
                   : undefined
               }
             />

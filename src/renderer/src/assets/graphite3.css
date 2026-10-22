@@ -749,11 +749,25 @@ textarea {
   flex-shrink: 0;
   white-space: nowrap;
 }
+.panel-tabs-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+.panel-tabs-list > .panel-tab {
+  flex-shrink: 0;
+}
+/* 「その他」は先に場所を取る(縮めない。表のタブは入るだけ並べる) */
 .panel-tab-more {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  margin-left: auto;
+  gap: var(--ve-gap-icon);
+  flex-shrink: 0;
+}
+.panel-tabs-measure {
+  display: flex;
 }
 /* 「その他」から選んだタブ: 表のタブの後ろに、琥珀の点を添えて */
 .panel-tab-more-current::before {

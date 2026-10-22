@@ -76,3 +76,26 @@ export function moveMenuFocus(key: string, index: number, count: number): number
       return null
   }
 }
+
+/**
+ * 表に並べるタブを、帯の幅に入るだけ選ぶ(残りは「その他」へ)。今開いているタブは必ず入れ、
+ * ほかは並びの順に、入らなくなった所から後ろを「その他」へ回す。返すのは並びの順の id
+ */
+export function fitTabs(
+  ids: readonly string[],
+  widths: readonly number[],
+  available: number,
+  current: string
+): string[] {
+  const at = ids.indexOf(current)
+  let budget = available - (at >= 0 ? (widths[at] ?? 0) : 0)
+  const shown = new Set<string>(at >= 0 ? [current] : [])
+  for (let i = 0; i < ids.length; i++) {
+    if (i === at) continue
+    const w = widths[i] ?? 0
+    if (w > budget) break
+    budget -= w
+    shown.add(ids[i])
+  }
+  return ids.filter((id) => shown.has(id))
+}

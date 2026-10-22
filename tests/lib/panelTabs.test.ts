@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   PRIMARY_PANEL_TABS,
+  fitTabs,
   isInMore,
   moveMenuFocus,
   splitPanelTabs,
@@ -78,5 +79,28 @@ describe('moveMenuFocus(「その他」の中の矢印キー)', () => {
     expect(moveMenuFocus('End', 0, 6)).toBe(5)
     expect(moveMenuFocus('a', 0, 6)).toBeNull()
     expect(moveMenuFocus('ArrowDown', 0, 0)).toBeNull()
+  })
+})
+
+describe('fitTabs(帯に入るだけ表に並べる)', () => {
+  const ids = ['source', 'inspector', 'text', 'audio', 'template', 'gametrend']
+  const widths = [50, 80, 60, 60, 80, 100]
+  it('全部入るなら全部', () => {
+    expect(fitTabs(ids, widths, 1000, 'inspector')).toEqual(ids)
+  })
+  it('入らない所から後ろは回す。今開いているタブは必ず残す', () => {
+    // gametrend(100)を先に取り、残り 200 に source・inspector・text(190)まで
+    expect(fitTabs(ids, widths, 300, 'gametrend')).toEqual([
+      'source',
+      'inspector',
+      'text',
+      'gametrend'
+    ])
+  })
+  it('今のタブだけで一杯でも、今のタブは見せる', () => {
+    expect(fitTabs(ids, widths, 40, 'template')).toEqual(['template'])
+  })
+  it('今のタブが並びに無いときは前から', () => {
+    expect(fitTabs(ids, widths, 200, 'narration')).toEqual(['source', 'inspector', 'text'])
   })
 })
