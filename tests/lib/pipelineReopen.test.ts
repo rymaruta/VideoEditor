@@ -16,7 +16,11 @@ import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import type { Project } from '@shared/types'
 import { spansOfClips } from '@shared/roughCut/overrides'
-import { LEGACY_NOTE, matchScenesByTime } from '@renderer/lib/pipelineRestore'
+import {
+  LEGACY_NOTE,
+  LEGACY_NOTE_DECISIONS_KEPT,
+  matchScenesByTime
+} from '@renderer/lib/pipelineRestore'
 import { normalizeAutoEdit } from '@shared/autoEdit'
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
@@ -1006,7 +1010,8 @@ describe('開き直して作り直す回帰(古い形式・新しい形式)', ()
     const st = usePipelineStore.getState()
     expect(useProjectStore.getState().project.autoEdit).not.toHaveProperty('timelineKeep')
     expect(st.restored?.legacy).toBe(true)
-    expect(st.restored?.missing).toContain(LEGACY_NOTE)
+    // その版の企画には手の残す/落とす・AI の判定が残っているので、それに合った案内
+    expect(st.restored?.missing).toContain(LEGACY_NOTE_DECISIONS_KEPT)
     // 画面のチェックは作り直したら残す場面(読み取った s3 だけではない)
     expect(st.roughCut!.keptIds).toEqual(all)
     const r = await rebuild()
@@ -1059,4 +1064,86 @@ describe('古い形式の企画の画面のチェック(乱択)', () => {
       if (r.kept.length === scenes.length) expect(r.duration).toBeLessThan(214.8 - trimmed + 0.2)
     }
   }, 60_000)
+})
+
+describe('監査で見つかった不具合(528dafe)', () => {
+  for (const mode of ['そのまま', '新しい形式', '古い形式'] as const)
+    it(`手で丸ごと消した場面は、チェックを付け直して作り直すと戻る(${mode})`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      const s2 = usePipelineStore.getState().scenes[1]
+      expect(s2.id).toBe('s2')
+      useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+      expect(clipsInScene(s2)).toHaveLength(0)
+      if (mode !== 'そのまま') {
+        saveAndReopen({ legacy: mode === '古い形式' })
+        await flush()
+      }
+      usePipelineStore.getState().setKeep('s2', false)
+      usePipelineStore.getState().setKeep('s2', true)
+      const r = await rebuild()
+      // cee37ec と同じ: 214.8 秒(画面のチェックどおり s2 が戻る)
+      expect(r.kept).toContain('s2')
+      expect(clipsInScene(s2).length).toBeGreaterThan(0)
+      expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
+    })
+
+  it('手で丸ごと消した場面も、チェックを付け直さなければ作り直しで戻らない', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    const removed = mainDuration()
+    expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+    expect(clipsInScene(s2)).toHaveLength(0)
+  })
+
+  /** 前の版(b4cd4d9〜ac0e4c8)の形で保存し直して開く(読み取った残す/落とすあり・残した場面の記録なし) */
+  function reopenAsTimelineKeepVersion(): void {
+    const saved = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
+    const ae = saved.autoEdit as unknown as Record<string, unknown>
+    ae.timelineKeep = Object.fromEntries(
+      usePipelineStore
+        .getState()
+        .scenes.map((sc) => [sc.id, usePipelineStore.getState().roughCut!.keptIds.includes(sc.id)])
+    )
+    delete ae.builtKept
+    useProjectStore.getState().newProject('別の回')
+    useProjectStore.getState().loadProject(saved, '/r/第1回.veproj')
+  }
+
+  it('前の版で保存した企画で、残すにした場面の中を詰めた所は作り直しても戻らない', async () => {
+    await runEpisode()
+    usePipelineStore.getState().setTargetMinutes(1.5)
+    usePipelineStore.getState().setKeep('s1', true)
+    await rebuild()
+    trimInScene(usePipelineStore.getState().scenes[0], 3)
+    const trimmed = mainDuration()
+    reopenAsTimelineKeepVersion()
+    await flush()
+    const st = usePipelineStore.getState()
+    expect(st.keep).toEqual({ s1: true })
+    expect(st.targetMinutes).toBe(1.5)
+    // 画面のチェックも、手で残すにした s1 を残す
+    expect(st.roughCut!.keptIds).toContain('s1')
+    const r = await rebuild()
+    expect(r.kept).toContain('s1')
+    expect(Math.abs(r.duration - trimmed)).toBeLessThan(0.2)
+  })
+
+  it('前の版で保存した企画の案内は、引き継いだ残す/落とす・AI の判定を「残っていない」と言わない', async () => {
+    await runEpisode()
+    usePipelineStore.getState().setKeep('s1', true)
+    await rebuild()
+    reopenAsTimelineKeepVersion()
+    await flush()
+    const st = usePipelineStore.getState()
+    expect(st.keep).toEqual({ s1: true })
+    expect(st.restored?.legacy).toBe(true)
+    expect(st.restored?.missing).not.toContain(LEGACY_NOTE)
+    expect(st.restored?.missing).toContain(LEGACY_NOTE_DECISIONS_KEPT)
+    expect(LEGACY_NOTE_DECISIONS_KEPT).not.toContain('残っていません')
+    // 作り直したら案内は消える
+    await rebuild()
+    expect(usePipelineStore.getState().restored?.missing).not.toContain(LEGACY_NOTE_DECISIONS_KEPT)
+  })
 })

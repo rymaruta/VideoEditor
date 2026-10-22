@@ -63,6 +63,7 @@ import {
 import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPlacement'
 import {
   LEGACY_NOTE,
+  LEGACY_NOTE_DECISIONS_KEPT,
   matchScenesByTime,
   remapSceneFlags,
   restorePipelineFromProject
@@ -1057,15 +1058,26 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
    * (`roughCutAuto`。取り消しで本編と一緒に戻る)と同じ印の回のもの(`builtKept`)。今の本編から
    * 残した場面を推し量らない(場面の入れ替え・一部だけ残す・差し込みで読み違えた)。
    * 同じ印の回が分からない(覚えている回より前まで取り消した など)ときは、手で残すにした場面を全部
-   * (10/09 版と同じ。昔の削りも戻る)
+   * (10/09 版と同じ。昔の削りも戻る)。「残す」の場面の中に今の本編のクリップが1本も無い(人が丸ごと
+   * 消した)ときも渡す(画面のチェックは「残す」のままなので、作り直すと戻す。10/09 版と同じ)
    */
   function releasedKeep(project: Project): Record<string, boolean> {
     const sig = cutSignature(project.roughCutAuto)
     const built = sig ? [...get().builtKept].reverse().find((b) => b.cut === sig) : undefined
     if (!built) return get().keep
     const kept = new Set(built.keptIds)
+    const info = project.multicam
+    const cover = info ? coverageOfClips(project.clips, info) : []
+    const scenes = new Map(get().scenes.map((sc) => [sc.id, sc]))
+    const inMain = (id: string): boolean => {
+      const sc = scenes.get(id)
+      return (
+        !sc ||
+        cover.some((c) => c.start >= sc.start - SCENE_EDGE_SEC && c.end <= sc.end + SCENE_EDGE_SEC)
+      )
+    }
     return Object.fromEntries(
-      Object.entries(get().keep).filter(([id, keep]) => !keep || !kept.has(id))
+      Object.entries(get().keep).filter(([id, keep]) => !keep || !kept.has(id) || !inMain(id))
     )
   }
 
@@ -1391,7 +1403,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         ? {
             ...get().restored!,
             legacy: false,
-            missing: get().restored!.missing.filter((m) => m !== LEGACY_NOTE)
+            missing: get().restored!.missing.filter(
+              (m) => m !== LEGACY_NOTE && m !== LEGACY_NOTE_DECISIONS_KEPT
+            )
           }
         : null
     })
@@ -2141,6 +2155,12 @@ function mapTelopsToTimeline<
     ]
   })
 }
+
+/**
+ * 場面の中のクリップと見なす、場面の境目からのはみ出し(秒)。これより境目をまたぐクリップは、その場面の
+ * クリップに数えない(場面に1本も無ければ、人が丸ごと消した)
+ */
+const SCENE_EDGE_SEC = 0.05
 
 /** 作り直しの回の残した場面を足す(同じ組んだ本編の印の古いものは除き、新しいものを後ろへ) */
 function builtKeptWith(

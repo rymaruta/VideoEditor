@@ -49,6 +49,13 @@ export const LEGACY_NOTE =
   'この企画は前の版で保存されたため、手で決めた残す/落とす(と AI の判定)は残っていません。「仮編集を作り直す」と、残す場面は自動の選び方で選び直します(手で詰めた・消した所は守られます)。画面のチェックは作り直したときに残す場面(の見込み)です。落としたい場面はチェックを外してから作り直してください'
 
 /**
+ * 前の版(b4cd4d9〜ac0e4c8)で保存した企画を開いたときの案内(作り直すまで出す)。その版の企画には
+ * 手で決めた残す/落とすと AI の判定は残っているが、作り直しで残した場面の記録は残っていない
+ */
+export const LEGACY_NOTE_DECISIONS_KEPT =
+  'この企画は前の版で保存されたため、作り直しで残した場面の記録が企画にありません。手で決めた残す/落とすと AI の判定は引き継いでいます。画面のチェックは、それらと保存した仕上がりの長さで作り直したときに残す場面(の見込み)です。「仮編集を作り直す」と、この選び方で選び直します(手で詰めた・消した所は守られます)'
+
+/**
  * 前の場面の区切り(`prev`)から、今の場面(`next`)へ、時刻がほぼ同じ(重なりが長いほうの 8 割以上)場面の
  * 対応を作る(今の場面の ID → 前の場面の ID)。場面の ID は番号なので、区切りが変わると同じ ID が別の
  * 場面を指す。ID だけで当てると、判定・残す/落とすが別の場面に付く
@@ -145,7 +152,7 @@ export function restorePipelineFromProject(
   const planJudgements = saved?.planJudgements ? judgedBy(saved.planJudgements) : null
   const judgeSource = saved?.judgeSource ?? 'heuristic'
   const legacy = !saved || saved.legacyPending === true
-  if (legacy) missing.push(LEGACY_NOTE)
+  if (legacy) missing.push(saved ? LEGACY_NOTE_DECISIONS_KEPT : LEGACY_NOTE)
   if (saved && !sameScenes)
     missing.push(
       '保存した時と場面の区切りが変わりました(文字起こし・同期を直した など)。時刻がほぼ同じ場面だけ前の判定・残す/落とすを引き継ぎ、それ以外の場面は簡易の点数・自動の選び方にしています'
@@ -158,18 +165,29 @@ export function restorePipelineFromProject(
     const set = new Set(ids)
     return scenes.map((sc) => sc.id).filter((id) => set.has(match.get(id) ?? ''))
   }
+  const keep = saved ? remapSceneFlags(saved.keep, match) : {}
+  // 見込みには、引き継いだ手の残す/落とすも当てる(作り直しと同じ。前の版の企画では残っている)
+  const withKeep = (auto: readonly string[]): string[] => {
+    const set = new Set(auto)
+    for (const [id, k] of Object.entries(keep))
+      if (k) set.add(id)
+      else set.delete(id)
+    return scenes.map((sc) => sc.id).filter((id) => set.has(id))
+  }
   const keptIds = saved?.keptIds
     ? toNow(saved.keptIds)
-    : autoKeptScenes(
-        scenes,
-        judgements,
-        plan.kind ?? kind,
-        plan.policy,
-        (saved?.targetMinutes ?? 0) * 60
+    : withKeep(
+        autoKeptScenes(
+          scenes,
+          judgements,
+          plan.kind ?? kind,
+          plan.policy,
+          (saved?.targetMinutes ?? 0) * 60
+        )
       )
-  const keep = saved ? remapSceneFlags(saved.keep, match) : {}
   // 作り直しのたびの残した場面。古い企画では、今の本編を組んだ時の残した場面が分からないので、
-  // 画面に出した残す場面(手で決めた残す/落とすの元)を今の組んだ本編のものとする
+  // 画面に出した残す場面(手で決めた残す/落とすの元)を今の組んだ本編のものとする。手で「残す」に
+  // した場面はそこに入る(その版でも残していた。入れないと、その場面の中を手で詰めた所が戻る)
   const autoSig = cutSignature(project.roughCutAuto)
   const builtKept = saved?.builtKept
     ? saved.builtKept.map((b) => ({ cut: b.cut, keptIds: toNow(b.keptIds) }))
