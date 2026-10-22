@@ -4,6 +4,8 @@ import { totalmem } from 'os'
 import {
   chooseLocalModel,
   judgeLocalModelLoad,
+  sameLoadEnv,
+  type LlmLoadFailure,
   skippedModelMessage,
   type LlmRequest,
   type LlmWorkerMessage
@@ -27,7 +29,9 @@ interface WorkerInput {
   /** 指定があればこのモデル(テスト・設定用) */
   modelUri?: string
   /** 前にこのPCで読み込めなかったモデル(試さない) */
-  skipModels?: string[]
+  skipModels?: LlmLoadFailure[]
+  /** アプリの版(読み込めなかった記録の環境と比べる) */
+  appVersion?: string
 }
 
 childMain<WorkerInput>(async (input, send) => {
@@ -40,10 +44,17 @@ childMain<WorkerInput>(async (input, send) => {
   const choice = chooseLocalModel(vram)
   const uri = input.modelUri ?? choice.uri
   const label = input.modelUri ? uri.replace(/^hf:/, '') : choice.label
-  // 前にこのPCで読み込めなかった(読み込み中に落ちた)モデルは試さない(llmService が覚えている)
-  if (input.skipModels?.includes(uri)) throw new Error(skippedModelMessage(label))
-  // 確実に読み込めない(PC と GPU のメモリを合わせてもモデルより小さい)ときだけ、読み込む前に止める。
-  // それ以外は試す(別プロセスなので、落ちても本体は落ちない)。決まったモデルはダウンロードの前に確かめる
+  // 前に同じ環境(版・GPU・メモリ)で読み込めなかった(読み込み中に落ちた)モデルは試さない
+  const env = {
+    appVersion: input.appVersion ?? '',
+    gpu: llama.gpu || 'cpu',
+    vramGb: vram,
+    ramGb: totalmem() / GB
+  }
+  if (input.skipModels?.some((f) => f.uri === uri && sameLoadEnv(f.env, env)))
+    throw new Error(skippedModelMessage(label))
+  // 読み込めないと分かっているとき(GPU が無くて大きい・メモリが明らかに足りない)だけ、読み込む前に
+  // 止める。それ以外は試す(別プロセスなので、落ちても本体は落ちない)。決まったモデルはダウンロードの前に
   const ensureLoadable = (modelGb: number): void => {
     const decision = judgeLocalModelLoad({
       gpu: llama.gpu,
@@ -74,7 +85,8 @@ childMain<WorkerInput>(async (input, send) => {
     type: 'device',
     device: (llama.gpu || 'cpu') as 'cuda' | 'vulkan' | 'metal' | 'cpu',
     model: label,
-    uri
+    uri,
+    vramGb: vram
   })
   post({ type: 'status', stage: 'load', percent: 50, note: 'AI のモデルを読み込み中' })
   const model = await llama.loadModel({ modelPath })

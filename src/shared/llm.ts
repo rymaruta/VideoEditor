@@ -22,6 +22,8 @@ export type LlmWorkerMessage =
       model: string
       /** 読み込むモデルの URI(読み込みの途中で落ちたら、これを記録して次から試さない) */
       uri?: string
+      /** GPU のメモリの総量(GB。記録の環境に使う) */
+      vramGb?: number
     }
   | { type: 'progress'; done: number; total: number }
   | { type: 'done'; results: (unknown | null)[] }
@@ -54,6 +56,13 @@ export function chooseLocalModel(vramGb: number): (typeof LOCAL_MODELS)[number] 
 /** 読み込みのほかに要るメモリの余裕(文脈の領域・OS・画面。GB) */
 const MEMORY_MARGIN_GB = 1
 
+/**
+ * GPU の無い PC で読み込んでよいモデルの大きさ(GB)。CPU だけでは、3B(約2GB)以上の読み込みで
+ * Electron のメモリ確保(PartitionAlloc)の上限に当たり、解析のプロセスが落ちた(Linux で確認)。
+ * 1.5B(約1GB)は読み込めた。超えるモデルはダウンロードする前に止める(4.7GB を落としてから落ちない)
+ */
+export const CPU_SAFE_MODEL_GB = 1.5
+
 export interface LocalModelLoadEnv {
   /** node-llama-cpp が選んだ GPU(`cuda` `vulkan` `metal`)。無ければ false */
   gpu: string | false
@@ -72,16 +81,23 @@ export interface LocalModelLoadEnv {
 export type LocalModelLoadDecision = { ok: true } | { ok: false; reason: string }
 
 /**
- * このPCの AI のモデルを、読み込む前に止めるか。**確実に読み込めないときだけ止める。**
+ * このPCの AI のモデルを、読み込む前に止めるか。**読み込めないと分かっているときだけ止める。**
  *
  * 読み込みは別プロセス(utilityProcess)なので、落ちてもアプリ本体は落ちない。そこで、空きメモリ
- * (macOS の `os.freemem()` は空きを小さく返す)や「GPU が無い」だけで止めず、まず試す。落ちたら
- * そのモデルを覚え、次からは試さない(`llmLoadFailures`。利用者が「もう一度試す」で試し直せる)。
- * 止めるのは、PC の物理メモリと GPU のメモリを合わせてもモデルより明らかに小さいときだけ。
+ * (macOS の `os.freemem()` は空きを小さく返す)では止めず、まず試す。落ちたらそのモデルを覚え、
+ * 次からは試さない(`llmLoadFailures`。利用者が「もう一度試す」で試し直せる)。
+ * 止めるのは、GPU が無くて確かめた大きさ(`CPU_SAFE_MODEL_GB`)を超えるとき(ダウンロードの前に)と、
+ * PC の物理メモリと GPU のメモリを合わせてもモデルより明らかに小さいときだけ。
  * 理由は場面を問わない一文(「簡易の点数で…」などの続きは呼び出し側が場面に合わせて付ける)。
  */
 export function judgeLocalModelLoad(env: LocalModelLoadEnv): LocalModelLoadDecision {
   const gb = (n: number): string => `${Math.max(0, n).toFixed(1)}GB`
+  if (!env.gpu && env.modelGb > CPU_SAFE_MODEL_GB) {
+    return {
+      ok: false,
+      reason: `GPU が見つからず、CPU だけでは AI のモデル(${env.modelLabel}・約${gb(env.modelGb)})を読み込めないため使いません`
+    }
+  }
   const capacityGb =
     env.ramTotalGb + (env.gpu && !env.unifiedMemory ? Math.max(0, env.vramTotalGb) : 0)
   if (capacityGb < env.modelGb + MEMORY_MARGIN_GB) {
@@ -110,4 +126,24 @@ export interface LlmLoadFailure {
   label: string
   /** 記録した時刻(ISO) */
   at: string
+  /** 落ちたときの環境。どれかが変われば(版を上げた・GPU やメモリを足した)記録は効かない */
+  env: LlmLoadEnvStamp
+}
+
+/** 読み込めなかったときの環境(アプリの版・GPU の種類・GPU のメモリ・PC のメモリ) */
+export interface LlmLoadEnvStamp {
+  appVersion: string
+  gpu: string
+  vramGb: number
+  ramGb: number
+}
+
+/** 記録した環境が今と同じか(GPU・PC のメモリは 0.5GB 未満の違いを同じとみる) */
+export function sameLoadEnv(a: LlmLoadEnvStamp, b: LlmLoadEnvStamp): boolean {
+  return (
+    a.appVersion === b.appVersion &&
+    a.gpu === b.gpu &&
+    Math.abs(a.vramGb - b.vramGb) < 0.5 &&
+    Math.abs(a.ramGb - b.ramGb) < 0.5
+  )
 }

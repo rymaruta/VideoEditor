@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   chooseLocalModel,
+  CPU_SAFE_MODEL_GB,
   judgeLocalModelLoad,
   loadCrashedMessage,
   skippedModelMessage,
@@ -21,9 +22,21 @@ const base: LocalModelLoadEnv = {
 }
 
 describe('このPCの AI を読み込む前に止めるか', () => {
-  it('GPU が無くても、メモリが足りるなら止めない(試す)', () => {
-    expect(judgeLocalModelLoad(base).ok).toBe(true)
-    expect(judgeLocalModelLoad({ ...base, modelGb: chooseLocalModel(0).sizeGb }).ok).toBe(true)
+  it('GPU が無いと、確かめた大きさ(1.5GB)を超えるモデル(既定の 7B)はダウンロードの前に止める', () => {
+    const d = judgeLocalModelLoad({ ...base, modelGb: chooseLocalModel(0).sizeGb })
+    expect(d.ok).toBe(false)
+    if (!d.ok) {
+      expect(d.reason).toContain('GPU が見つからず')
+      expect(d.reason).not.toContain('簡易の点数')
+    }
+    expect(CPU_SAFE_MODEL_GB).toBe(1.5)
+    // 1.5B(約1GB)は GPU が無くても試す。3B(約1.9GB)は止める
+    expect(judgeLocalModelLoad({ ...base, modelGb: 1.0, modelLabel: '1.5B' }).ok).toBe(true)
+    expect(judgeLocalModelLoad({ ...base, modelGb: 1.9, modelLabel: '3B' }).ok).toBe(false)
+  })
+
+  it('GPU があれば、空きメモリでは止めない(試す)', () => {
+    expect(judgeLocalModelLoad({ ...base, gpu: 'vulkan', vramTotalGb: 2 }).ok).toBe(true)
   })
 
   it('Apple Silicon(GPU とメモリが共通)の 8GB でも 7B は止めない。空きメモリでは判断しない', () => {
@@ -39,7 +52,7 @@ describe('このPCの AI を読み込む前に止めるか', () => {
   })
 
   it('PC と GPU のメモリを合わせてもモデルより明らかに小さいときだけ止め、理由は場面を問わない一文', () => {
-    const d = judgeLocalModelLoad({ ...base, ramTotalGb: 4 })
+    const d = judgeLocalModelLoad({ ...base, gpu: 'vulkan', vramTotalGb: 0, ramTotalGb: 4 })
     expect(d.ok).toBe(false)
     if (d.ok) return
     expect(d.reason).toContain('このPCのメモリ(4.0GB)')

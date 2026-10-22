@@ -1,11 +1,17 @@
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
-import type { LlmLoadFailure, LlmWorkerMessage } from '@shared/llm'
+import {
+  sameLoadEnv,
+  type LlmLoadEnvStamp,
+  type LlmLoadFailure,
+  type LlmWorkerMessage
+} from '@shared/llm'
 
 /**
  * このPCで読み込めなかった(読み込みの途中で解析のプロセスが落ちた)AI のモデルの記録。
  * 次からは同じモデルを試さず、すぐ簡易の判定へ回す(毎回ダウンロード・読み込みを待たせて落ちない)。
- * 利用者は自動編集の画面の「このPCの AI をもう一度試す」で消せる(GPU を足した・メモリを増やした等)。
- * 読めない・壊れたファイルは記録なしとして扱う(試すだけなので害はない)。
+ * 記録には落ちたときの環境(アプリの版・GPU の種類・GPU と PC のメモリ)を入れ、変わったら効かない。
+ * 利用者は自動編集の画面の「このPCの AI をもう一度試す」で消せる。
+ * 読めない・壊れたファイル、環境の無い古い記録は記録なしとして扱う(試すだけなので害はない)。
  */
 export class LlmLoadFailures {
   constructor(private readonly path: string) {}
@@ -15,27 +21,23 @@ export class LlmLoadFailures {
       if (!existsSync(this.path)) return []
       const raw = JSON.parse(readFileSync(this.path, 'utf-8')) as unknown
       if (!Array.isArray(raw)) return []
-      return raw.filter(
-        (f): f is LlmLoadFailure =>
-          !!f &&
-          typeof f === 'object' &&
-          typeof (f as LlmLoadFailure).uri === 'string' &&
-          typeof (f as LlmLoadFailure).label === 'string' &&
-          typeof (f as LlmLoadFailure).at === 'string'
-      )
+      return raw.filter(isFailure)
     } catch {
       return []
     }
   }
 
-  has(uri: string): boolean {
-    return this.list().some((f) => f.uri === uri)
+  /** 今の環境で効く記録(版・PC のメモリが同じもの。GPU は解析のプロセスが比べる) */
+  current(appVersion: string, ramGb: number): LlmLoadFailure[] {
+    return this.list().filter(
+      (f) => f.env.appVersion === appVersion && Math.abs(f.env.ramGb - ramGb) < 0.5
+    )
   }
 
-  add(uri: string, label: string, now = new Date()): void {
+  add(uri: string, label: string, env: LlmLoadEnvStamp, now = new Date()): void {
     const next = [
-      ...this.list().filter((f) => f.uri !== uri),
-      { uri, label, at: now.toISOString() }
+      ...this.list().filter((f) => !(f.uri === uri && sameLoadEnv(f.env, env))),
+      { uri, label, at: now.toISOString(), env }
     ].slice(-20)
     this.write(next)
   }
@@ -60,21 +62,58 @@ export class LlmLoadFailures {
   }
 }
 
+function isFailure(f: unknown): f is LlmLoadFailure {
+  if (!f || typeof f !== 'object') return false
+  const x = f as Partial<LlmLoadFailure>
+  const env = x.env as Partial<LlmLoadEnvStamp> | undefined
+  return (
+    typeof x.uri === 'string' &&
+    typeof x.label === 'string' &&
+    typeof x.at === 'string' &&
+    !!env &&
+    typeof env.appVersion === 'string' &&
+    typeof env.gpu === 'string' &&
+    typeof env.vramGb === 'number' &&
+    typeof env.ramGb === 'number'
+  )
+}
+
 /**
  * 解析のプロセスからの知らせを見て、いま読み込み中のモデルを持つ。
  * どのモデルかを知らせた後(device)、読み込み終わり(load の 100%)の前に落ちたら、読み込めなかったモデル。
  * ダウンロード中・答えを作っている途中で落ちたものは、読み込めないモデルとしては覚えない。
  */
 export class LlmLoadTracker {
-  private current: { uri?: string; label: string } | null = null
+  private current: { uri?: string; label: string; gpu: string; vramGb: number } | null = null
 
   observe(m: LlmWorkerMessage): void {
-    if (m.type === 'device') this.current = { uri: m.uri, label: m.model }
+    if (m.type === 'device')
+      this.current = { uri: m.uri, label: m.model, gpu: m.device, vramGb: m.vramGb ?? 0 }
     else if (m.type === 'status' && m.stage === 'load' && m.percent >= 100) this.current = null
   }
 
   /** 落ちたときに読み込み中だったモデル(読み込み中でなければ null) */
-  loading(): { uri?: string; label: string } | null {
+  loading(): { uri?: string; label: string; gpu: string; vramGb: number } | null {
     return this.current
   }
+}
+
+/**
+ * 解析のプロセスが答えずに終わったときの扱い。
+ * - canceled: 利用者が中止した
+ * - quitting: アプリの終了中(終了で閉じられた。読み込めなかったとは覚えない)
+ * - clean: 終了コード 0(落ちたのではない。覚えない)
+ * - crashed: 異常終了。読み込み中なら、そのモデルを読み込めなかったと覚える
+ */
+export type LlmExitKind = 'canceled' | 'quitting' | 'clean' | 'crashed'
+
+export function classifyLlmExit(e: {
+  canceled: boolean
+  quitting: boolean
+  code: number
+}): LlmExitKind {
+  if (e.canceled) return 'canceled'
+  if (e.quitting) return 'quitting'
+  if (e.code === 0) return 'clean'
+  return 'crashed'
 }
