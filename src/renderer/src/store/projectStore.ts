@@ -6713,17 +6713,26 @@ function telopPiece(o: TextOverlay, a: number, b: number): TextOverlay | null {
  * 境(`edges`)で切った同じ発言・同じ枚の切れ端どうし(境で継ぎ目なく続くもの)を1枚に戻す。
  * 分かれたままだと、全文の切れ端と新しい枚が続けて出るうえ、人が片方を消すと同じ鍵で両方とも消えた
  * 扱いになり、次の全体の作り直しでその発言のテロップが丸ごと出なくなった。
- * 文字は長い方(切る前の全文)、人が直した方があればそちらの文字と見た目を使う
+ * 文字は長い方(切る前の全文)、人が直した方があればそちらの文字と見た目を使う。
+ * 境の内側の新しい枚は、発言の切れ目の当て直しで境から少し離れて始まる(終わる)ことがある。片方が境に
+ * 接し、間が `TELOP_EDGE_JOIN_GAP_SEC` 以内なら同じく1枚に戻す(境の手前に全文が 0.1 秒ほど一瞬出て、
+ * 同じ文が出直していた)
  */
+const TELOP_EDGE_JOIN_GAP_SEC = 0.3
 function joinTelopsAtEdges(list: TextOverlay[], edges: readonly number[]): TextOverlay[] {
   const keyOf = (o: TextOverlay): string | null =>
     o.utteranceId && !o.linkedClipId ? `${o.utteranceId}#${o.utteranceChunk ?? 0}` : null
+  const EPS = 0.02
   let out = list
   for (const e of edges) {
+    // 境で終わる(または境の手前の間の中で終わる)切れ端
     const ending = new Map<string, TextOverlay>()
     for (const o of out) {
       const k = keyOf(o)
-      if (k && Math.abs(o.endTime - e) < 0.02) ending.set(k, o)
+      if (k && o.endTime > e - TELOP_EDGE_JOIN_GAP_SEC - EPS && o.endTime < e + EPS) {
+        const had = ending.get(k)
+        if (!had || o.endTime > had.endTime) ending.set(k, o)
+      }
     }
     if (ending.size === 0) continue
     const drop = new Set<TextOverlay>()
@@ -6731,7 +6740,17 @@ function joinTelopsAtEdges(list: TextOverlay[], edges: readonly number[]): TextO
     for (const o of out) {
       const k = keyOf(o)
       const left = k ? ending.get(k) : undefined
-      if (!left || left === o || drop.has(left) || Math.abs(o.startTime - e) >= 0.02) continue
+      if (!left || left === o || drop.has(left)) continue
+      const gap = o.startTime - left.endTime
+      // 右は境から(または境の後ろの間の中で)始まり、左右のどちらかは境に接している
+      if (
+        o.startTime < e - EPS ||
+        o.startTime > e + TELOP_EDGE_JOIN_GAP_SEC + EPS ||
+        gap < -EPS ||
+        gap > TELOP_EDGE_JOIN_GAP_SEC + EPS ||
+        (Math.abs(left.endTime - e) >= EPS && Math.abs(o.startTime - e) >= EPS)
+      )
+        continue
       const base = left.edited ? left : o.edited ? o : left.text.length >= o.text.length ? left : o
       joined.set(left, {
         ...left,
