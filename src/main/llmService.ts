@@ -4,7 +4,13 @@ import { totalmem } from 'os'
 import { join } from 'path'
 import llmWorkerPath from './llmWorker?modulePath'
 import { runChild } from './childRunner'
-import { classifyLlmExit, LlmLoadFailures, LlmLoadTracker, trackQuitting } from './llmLoadFailures'
+import {
+  classifyLlmExit,
+  deleteModelFiles,
+  LlmLoadFailures,
+  LlmLoadTracker,
+  trackQuitting
+} from './llmLoadFailures'
 import {
   loadCrashedMessage,
   type LlmLoadFailure,
@@ -96,13 +102,16 @@ export function runLlm(
         const loading = tracker.loading()
         if (kind === 'clean')
           return reject(new Error('AI が答えを返さずに終わりました(次はもう一度試します)'))
-        if (loading?.uri)
+        if (loading?.uri) {
           loadFailures().add(loading.uri, loading.label, {
             appVersion: app.getVersion(),
             gpu: loading.gpu,
             vramGb: loading.vramGb,
             ramGb: ramGb()
           })
+          // 次からは試さないので、ダウンロードしたファイル(数 GB)は消す
+          if (loading.path) deleteModelFiles(loading.path, cacheDir)
+        }
         reject(new Error(crashMessage(code, stderr, loading)))
       }
     )

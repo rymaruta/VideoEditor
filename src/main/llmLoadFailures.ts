@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import {
   sameLoadEnv,
   type LlmLoadEnvStamp,
@@ -78,22 +79,74 @@ function isFailure(f: unknown): f is LlmLoadFailure {
   )
 }
 
+/** 読み込み中のモデル */
+export interface LoadingModel {
+  uri?: string
+  label: string
+  gpu: string
+  vramGb: number
+  /** モデルのファイル(ダウンロードを終えたもの) */
+  path?: string
+}
+
+/**
+ * 読み込めなかったモデルのファイルを消す(次からは試さないので、数 GB を残さない)。
+ * 消すのはモデルの置き場(`cacheDir`)の中の .gguf だけ。分割したモデル(…-00001-of-00003.gguf)は
+ * 同じ組のファイルを全部消す。ダウンロード中のもの(.gguf 以外の途中のファイル)は触らない。
+ * 消したファイルの名前を返す。
+ */
+export function deleteModelFiles(modelPath: string, cacheDir: string): string[] {
+  const removed: string[] = []
+  try {
+    const dir = resolve(dirname(modelPath))
+    const root = resolve(cacheDir)
+    const rel = relative(root, dir)
+    if (rel.startsWith('..') || isAbsolute(rel)) return removed
+    const name = basename(modelPath)
+    if (!/\.gguf$/i.test(name)) return removed
+    const split = /^(.*)-\d{5}-of-(\d{5})\.gguf$/i.exec(name)
+    const targets = split
+      ? readdirSync(dir).filter((f) => {
+          const m = /^(.*)-\d{5}-of-(\d{5})\.gguf$/i.exec(f)
+          return !!m && m[1] === split[1] && m[2] === split[2]
+        })
+      : [name]
+    for (const f of targets) {
+      try {
+        unlinkSync(join(dir, f))
+        removed.push(f)
+      } catch {
+        // 消せなくても(使用中など)次の起動で困らない
+      }
+    }
+  } catch {
+    // 消せなくても困らない
+  }
+  return removed
+}
+
 /**
  * 解析のプロセスからの知らせを見て、いま読み込み中のモデルを持つ。
  * どのモデルかを知らせた後(device)、読み込み終わり(load の 100%)の前に落ちたら、読み込めなかったモデル。
  * ダウンロード中・答えを作っている途中で落ちたものは、読み込めないモデルとしては覚えない。
  */
 export class LlmLoadTracker {
-  private current: { uri?: string; label: string; gpu: string; vramGb: number } | null = null
+  private current: LoadingModel | null = null
 
   observe(m: LlmWorkerMessage): void {
     if (m.type === 'device')
-      this.current = { uri: m.uri, label: m.model, gpu: m.device, vramGb: m.vramGb ?? 0 }
+      this.current = {
+        uri: m.uri,
+        label: m.model,
+        gpu: m.device,
+        vramGb: m.vramGb ?? 0,
+        path: m.path
+      }
     else if (m.type === 'status' && m.stage === 'load' && m.percent >= 100) this.current = null
   }
 
   /** 落ちたときに読み込み中だったモデル(読み込み中でなければ null) */
-  loading(): { uri?: string; label: string; gpu: string; vramGb: number } | null {
+  loading(): LoadingModel | null {
     return this.current
   }
 }

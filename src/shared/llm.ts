@@ -24,6 +24,8 @@ export type LlmWorkerMessage =
       uri?: string
       /** GPU のメモリの総量(GB。記録の環境に使う) */
       vramGb?: number
+      /** 読み込むモデルのファイル(読み込めなかったら、使わないので消す) */
+      path?: string
     }
   | { type: 'progress'; done: number; total: number }
   | { type: 'done'; results: (unknown | null)[] }
@@ -161,4 +163,39 @@ export function sameLoadEnv(a: LlmLoadEnvStamp, b: LlmLoadEnvStamp): boolean {
     Math.abs(a.vramGb - b.vramGb) < 0.5 &&
     Math.abs(a.ramGb - b.ramGb) < 0.5
   )
+}
+
+/** 使うモデルの選び方の結果。`note` は利用者に見せる一文(軽いモデルを使う理由) */
+export type LocalModelPick =
+  { kind: 'use'; model: LocalModel; note?: string } | { kind: 'skip'; label: string }
+
+/**
+ * 使うモデルを選ぶ。
+ * - GPU が無い PC は CPU 用の 1.5B(「GPU が無いため軽いモデルを使います」)
+ * - GPU のメモリで選んだモデル(7B・14B)が、同じ環境で前に読み込めなかったなら、1.5B に下げる
+ *   (GPU のメモリが小さい PC で、二度と AI を使えなくならないように)
+ * - 1.5B も前に読み込めなかったなら使わない(`skip`)
+ */
+export function pickLocalModel(input: {
+  vramGb: number
+  hasGpu: boolean
+  failures: readonly LlmLoadFailure[]
+  env: LlmLoadEnvStamp
+}): LocalModelPick {
+  const failed = (m: LocalModel): boolean =>
+    input.failures.some((f) => f.uri === m.uri && sameLoadEnv(f.env, input.env))
+  const choice = chooseLocalModel(input.vramGb, input.hasGpu)
+  const light = `軽いモデル(${CPU_LOCAL_MODEL.label})`
+  if (!failed(choice)) {
+    return choice === CPU_LOCAL_MODEL && !input.hasGpu
+      ? { kind: 'use', model: choice, note: `GPU が無いため${light}を使います` }
+      : { kind: 'use', model: choice }
+  }
+  if (choice !== CPU_LOCAL_MODEL && !failed(CPU_LOCAL_MODEL))
+    return {
+      kind: 'use',
+      model: CPU_LOCAL_MODEL,
+      note: `このPCでは前回 ${choice.label} を読み込めなかったため、${light}を使います`
+    }
+  return { kind: 'skip', label: choice.label }
 }

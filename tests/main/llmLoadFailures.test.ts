@@ -1,9 +1,20 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { classifyLlmExit, LlmLoadFailures, LlmLoadTracker } from '@main/llmLoadFailures'
-import { sameLoadEnv, type LlmLoadEnvStamp } from '@shared/llm'
+import {
+  classifyLlmExit,
+  deleteModelFiles,
+  LlmLoadFailures,
+  LlmLoadTracker
+} from '@main/llmLoadFailures'
+import {
+  CPU_LOCAL_MODEL,
+  pickLocalModel,
+  sameLoadEnv,
+  type LlmLoadEnvStamp,
+  type LlmLoadFailure
+} from '@shared/llm'
 
 const dir = mkdtempSync(join(tmpdir(), 've-llmfail-'))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -107,5 +118,105 @@ describe('終了中の印(取り消せる before-quit ではなく will-quit で
     expect(src).toMatch(/trackQuitting\(app\)/)
     expect(src).not.toMatch(/['"]before-quit['"]/)
     expect(src).toMatch(/quitting: isQuitting\(\)/)
+  })
+})
+
+describe('使うモデルの選び方(4回目の監査)', () => {
+  const gpuEnv: LlmLoadEnvStamp = { appVersion: '1.0.0', gpu: 'cuda', vramGb: 8, ramGb: 16 }
+  const failure = (uri: string, e = gpuEnv): LlmLoadFailure => ({
+    uri,
+    label: 'x',
+    at: 't',
+    env: e
+  })
+
+  it('GPU のメモリで選んだ 7B が前に読み込めなかったら、使えなくせず 1.5B に下げる', () => {
+    const pick = pickLocalModel({
+      vramGb: 8,
+      hasGpu: true,
+      failures: [failure('hf:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M')],
+      env: gpuEnv
+    })
+    expect(pick.kind).toBe('use')
+    if (pick.kind !== 'use') return
+    expect(pick.model).toBe(CPU_LOCAL_MODEL)
+    expect(pick.note).toContain('Qwen2.5 7B を読み込めなかったため')
+    expect(pick.note).toContain('軽いモデル')
+  })
+
+  it('1.5B も前に読み込めなかったら使わない', () => {
+    const pick = pickLocalModel({
+      vramGb: 8,
+      hasGpu: true,
+      failures: [failure('hf:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M'), failure(CPU_LOCAL_MODEL.uri)],
+      env: gpuEnv
+    })
+    expect(pick).toEqual({ kind: 'skip', label: 'Qwen2.5 7B' })
+  })
+
+  it('GPU が無い PC は 1.5B のまま、「GPU が無いため軽いモデルを使います」と知らせる', () => {
+    const cpuEnv = { ...gpuEnv, gpu: 'cpu', vramGb: 0 }
+    const pick = pickLocalModel({ vramGb: 0, hasGpu: false, failures: [], env: cpuEnv })
+    expect(pick).toEqual({
+      kind: 'use',
+      model: CPU_LOCAL_MODEL,
+      note: 'GPU が無いため軽いモデル(Qwen2.5 1.5B)を使います'
+    })
+  })
+
+  it('環境の違う記録は効かない(GPU を足した後は 7B を試す)', () => {
+    const pick = pickLocalModel({
+      vramGb: 8,
+      hasGpu: true,
+      failures: [failure('hf:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M', { ...gpuEnv, vramGb: 4 })],
+      env: gpuEnv
+    })
+    expect(pick.kind === 'use' && pick.model.label).toBe('Qwen2.5 7B')
+  })
+})
+
+describe('読み込めなかったモデルのファイルを消す(4回目の監査)', () => {
+  it('置き場の中の .gguf を消し、分割したものは同じ組を全部消す。途中のファイルは触らない', () => {
+    const cache = join(dir, 'models')
+    mkdirSync(cache)
+    for (const f of [
+      'big-00001-of-00003.gguf',
+      'big-00002-of-00003.gguf',
+      'big-00003-of-00003.gguf',
+      'other-00001-of-00002.gguf',
+      'small.gguf',
+      'small.gguf.ipull'
+    ])
+      writeFileSync(join(cache, f), 'x')
+    expect(deleteModelFiles(join(cache, 'big-00001-of-00003.gguf'), cache).sort()).toEqual([
+      'big-00001-of-00003.gguf',
+      'big-00002-of-00003.gguf',
+      'big-00003-of-00003.gguf'
+    ])
+    expect(deleteModelFiles(join(cache, 'small.gguf'), cache)).toEqual(['small.gguf'])
+    expect(readdirSync(cache).sort()).toEqual(['other-00001-of-00002.gguf', 'small.gguf.ipull'])
+  })
+
+  it('置き場の外・.gguf でないものは消さない', () => {
+    const outside = join(dir, 'outside.gguf')
+    writeFileSync(outside, 'x')
+    expect(deleteModelFiles(outside, join(dir, 'models'))).toEqual([])
+    expect(deleteModelFiles(join(dir, 'models', 'small.gguf.ipull'), join(dir, 'models'))).toEqual(
+      []
+    )
+    expect(readdirSync(dir)).toContain('outside.gguf')
+  })
+
+  it('読み込み中の知らせからファイルの場所を持つ', () => {
+    const t = new LlmLoadTracker()
+    t.observe({
+      type: 'device',
+      device: 'cuda',
+      model: 'Qwen2.5 7B',
+      uri: 'hf:x',
+      vramGb: 8,
+      path: '/m/x.gguf'
+    })
+    expect(t.loading()?.path).toBe('/m/x.gguf')
   })
 })
