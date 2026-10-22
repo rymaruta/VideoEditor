@@ -15,7 +15,7 @@ const FONTS = [
   ['shippori-mincho', [400, 700]]
 ]
 const out = [
-  '/* scripts/gen-telop-fonts.mjs が作る。手で直さない。フォントはすべて SIL Open Font License */'
+  '/* scripts/gen-telop-fonts.mjs が作る。手で直さない。フォントは Kosugi Maru が Apache License 2.0、ほかの9つが SIL Open Font License 1.1(全文は resources/THIRD_PARTY_NOTICES.txt) */'
 ]
 for (const [pkg, weights] of FONTS) {
   for (const w of weights) {

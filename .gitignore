@@ -8,3 +8,5 @@ out
 *.tsbuildinfo
 # 調査用の一時テスト(コミットしない)
 tests/zz*.test.ts
+# ビルドのたびに作るライセンス表記(npm run licenses)
+resources/THIRD_PARTY_NOTICES.txt

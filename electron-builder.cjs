@@ -1,8 +1,11 @@
 // インストーラの作り方(electron-builder)。もとは electron-builder.yml。
 // 製品名・ID・販売者を src/shared/product.json の1か所から読むため、JS にした。
 // 製品名を変えるときはこのファイルではなく product.json を直す。
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+/* eslint-disable @typescript-eslint/no-require-imports */
+const { execFileSync } = require('child_process')
+const { join } = require('path')
 const product = require('./src/shared/product.json')
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -83,6 +86,12 @@ module.exports = {
     artifactName: '${name}-${version}.${ext}'
   },
   npmRebuild: false,
+  // 同梱する部品のライセンス表記を、詰める直前に node_modules から作り直す(古い表記・表記なしで出さない)
+  beforePack: () => {
+    execFileSync(process.execPath, [join(__dirname, 'scripts', 'third-party-notices.mjs')], {
+      stdio: 'inherit'
+    })
+  },
   publish: {
     provider: 'generic',
     url: 'https://example.com/auto-updates'

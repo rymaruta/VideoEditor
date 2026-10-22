@@ -45,6 +45,7 @@ export type MenuCommand =
   | 'view.zoomFit'
   | 'help.shortcuts'
   | 'help.about'
+  | 'help.licenses'
   | `window.${string}`
 
 /** 画面から受け取る、ショートカットの表示(キー配置で変わるもの) */
@@ -262,6 +263,7 @@ export function buildMenuTemplate(
       submenu: [
         { label: 'キーボードショートカット', id: 'help.shortcuts' },
         SEP,
+        { label: 'サードパーティのライセンス', id: 'help.licenses' },
         { label: 'バージョン情報', id: 'help.about' }
       ]
     }

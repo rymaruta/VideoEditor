@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, type MenuItemConstructorOptions } from 'electron'
+import { BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
 import {
   buildMenuTemplate,
   type MenuFileState,
@@ -6,7 +6,7 @@ import {
   type MenuShortcuts
 } from '@shared/appMenu'
 import { IPC } from '@shared/ipc'
-import { PRODUCT_NAME } from '@shared/product'
+import { openThirdPartyNotices, showAboutDialog } from './aboutWindow'
 
 /**
  * メニューバーを Electron のメニューにする。項目の形は `@shared/appMenu`。
@@ -23,13 +23,13 @@ let fileState: MenuFileState = { recent: [], canRestoreDiscarded: false }
 function sendCommand(id: string): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   if (!win || win.isDestroyed()) return
+  // バージョン情報・ライセンス表記は main だけで済む(画面へ送らない)
   if (id === 'help.about') {
-    void dialog.showMessageBox(win, {
-      type: 'info',
-      title: 'バージョン情報',
-      message: `${PRODUCT_NAME} ${app.getVersion()}`,
-      detail: `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`
-    })
+    void showAboutDialog(win)
+    return
+  }
+  if (id === 'help.licenses') {
+    openThirdPartyNotices(win)
     return
   }
   win.webContents.send(IPC.menuCommand, id)
