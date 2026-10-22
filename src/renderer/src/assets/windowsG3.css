@@ -2,7 +2,6 @@
    窓の中身と右のパネルの中身を tokens.css の決まりへ寄せる(dialogsG3.css の後に読み込む)。
    - 操作の高さは 24 か 28 に固定(既定 28、詰めた所 24。トラックの見出しの中だけ 20)
    - 窓の幅は 440 / 560 / 800。中の文は本文 13・補足 12、欄の名前はラベル 12/500
-   - 進み具合の棒は、空のときも入力欄に見えないよう「字 + 4px の溝」
    ===================================================================== */
 
 /* ---------- 入力欄・選択の高さ(#11) ---------- */
@@ -191,42 +190,6 @@ textarea:disabled {
   align-items: center;
   gap: var(--ve-space-2);
   color: var(--ve-info-ink);
-}
-
-/* ---------- 進み具合の棒(次点): 字 + 4px の溝。0% でも入力欄に見えない ---------- */
-.progress-bar {
-  position: relative;
-  display: block;
-  height: auto;
-  margin-top: var(--ve-space-3);
-  padding: var(--ve-space-2) var(--ve-space-3) calc(var(--ve-space-2) + 8px);
-  overflow: hidden;
-  border-radius: var(--ve-radius-lg);
-  background:
-    linear-gradient(var(--ve-surface-sunken), var(--ve-surface-sunken)) var(--ve-space-3)
-      calc(100% - var(--ve-space-2)) / calc(100% - var(--ve-space-6)) 4px no-repeat,
-    var(--ve-surface-1);
-  box-shadow: inset 0 0 0 1px var(--ve-border-subtle);
-}
-.progress-bar-fill {
-  top: auto;
-  left: var(--ve-space-3);
-  bottom: var(--ve-space-2);
-  height: 4px;
-  max-width: calc(100% - var(--ve-space-6));
-  border-radius: var(--ve-radius-xs);
-  background: var(--ve-primary);
-}
-.progress-bar span {
-  display: block;
-  font: var(--ve-type-label);
-  color: var(--ve-text-1);
-  text-shadow: none;
-}
-.media-proxy-bar {
-  height: 4px;
-  border-radius: var(--ve-radius-xs);
-  background: var(--ve-surface-sunken);
 }
 
 /* ---------- 右のパネルの中身(ボイス・サムネ・投稿準備・YouTube・ゲームトレンド) ---------- */
