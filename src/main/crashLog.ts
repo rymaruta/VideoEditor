@@ -40,21 +40,26 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** 伏せ字にかける長さの上限(これより長い入力は先に切る。記録の1件は 8,000 字までなので足りる) */
+export const MAX_SANITIZE_CHARS = 64 * 1024
+
 /**
  * 記録に書く前に、利用者名・鍵らしい値を伏せる。
  *
  * - ホームフォルダ → `~`
- * - `名前: 値` の形(JSON・JS のオブジェクト・HTTP のヘッダ。名前はクォートなし・'…'・"…"・
- *   文字列に入った \"…\" のどれも)で、名前が鍵らしいもの(apiKey・x-goog-api-key・sessionToken・
- *   client_secret・password・Authorization・Cookie など。前に何が付いてもよい)の値
- * - `名前=値` の形(URL の ?key= / #access_token=、%3D で符号化されたもの、環境変数の
- *   GEMINI_API_KEY=… など)
- * - Bearer の後ろ、JWT・Google の API キー(AIza…)・OAuth(ya29.…)・sk-…・ghp_… の形
+ * - 鍵らしい名前(単語の境界で区切った最後の語が key・token・secret・password・cookie など、または
+ *   api key・client id・client secret。GEMINI_API_KEY・sessionToken・x-goog-api-key・jamendoClientId は
+ *   当たり、hotkey・monkey・tokens・keyframes は当たらない)の後の値。名前と値の間は `:`(全角も) `=`
+ *   `%3D` `=>`、タブ、クォートした名前なら `,`(['x-goog-api-key', '…'])。名前・値のクォートは
+ *   なし・'…'・"…"・文字列に入った \"…\"(何重でも)のどれも
+ * - none・null・true・false などの値はそのまま(「Stream key: none」「setCookie: true」を消さない)
+ * - Bearer の後ろ、URL の user:password@、JWT・Google の API キー(AIza…)・ya29.…・sk-…・ghp_… の形
  *
- * 正規表現は入れ子の繰り返しを使わず、値の終わりは手で数える(長い入力でも時間が伸びない)。
+ * 入れ子の繰り返し・後戻りのある正規表現を使わず、名前の切り出しと値の終わりは手で数える
+ * (長い入力でも時間が伸びない)。`MAX_SANITIZE_CHARS` を超える入力は先に切る。
  */
 export function sanitizeLogText(text: string, home?: string): string {
-  let out = text
+  let out = text.length > MAX_SANITIZE_CHARS ? `${text.slice(0, MAX_SANITIZE_CHARS)}…(省略)` : text
   if (home && home.length > 1) {
     // Windows はパスの区切りが \ と / のどちらでも来る。大文字小文字も区別しない
     const variants = new Set([home, home.replace(/\\/g, '/'), home.replace(/\//g, '\\')])
@@ -65,8 +70,8 @@ export function sanitizeLogText(text: string, home?: string): string {
   out = redactNamedValues(out)
   return (
     out
-      // `名前=値`(URL・フォーム・環境変数)
-      .replace(PARAM_PATTERN, '$1***')
+      // URL の user:password@
+      .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/gi, '$1***@')
       // Bearer の後ろ
       .replace(/\bbearer[ \t]+[A-Za-z0-9._~+/=-]+/gi, 'Bearer ***')
       // 鍵の形
@@ -78,77 +83,159 @@ export function sanitizeLogText(text: string, home?: string): string {
   )
 }
 
-/** 値を伏せる名前(この前に何が付いてもよい: GEMINI_API_KEY・sessionToken・X-Goog-Api-Key など) */
-const SECRET_NAME = [
-  'api[-_]?key',
+/** 名前を語に分ける(_ - . $ と、小文字→大文字・大文字の連なり→大文字+小文字の境目) */
+function nameWords(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_.$-]+/)
+    .filter(Boolean)
+    .map((w) => w.toLowerCase())
+}
+
+const SECRET_LAST_WORDS = new Set([
   'key',
-  'client[-_]?id',
-  'client[-_]?secret',
+  'apikey',
+  'clientid',
   'token',
   'secret',
   'password',
   'passwd',
   'signature',
-  'sig',
-  'credentials?',
+  'credential',
+  'credentials',
   'authorization',
   'cookie'
-].join('|')
+])
 
-/** `名前: 値` の名前の部分(この後ろから値を手で読む) */
-const NAMED_VALUE = new RegExp(
-  `(?<![A-Za-z0-9_$-])(\\\\*["']?)[A-Za-z0-9_$-]*?(?:${SECRET_NAME})\\1[ \\t]*:[ \\t]*`,
-  'gi'
-)
+/** 名前が鍵らしいか。`sig` は `sig=`(URL の署名)のときだけ */
+function secretName(name: string, sep: string): boolean {
+  const words = nameWords(name)
+  const last = words[words.length - 1]
+  if (!last) return false
+  if (SECRET_LAST_WORDS.has(last)) return true
+  if (last === 'id' && words[words.length - 2] === 'client') return true
+  if (last === 'sig' && sep === '=') return true
+  return false
+}
 
-/** `名前=値`。区切りの後(URL の ? & # / ; 、%3F %26、空白・行頭など)の名前だけ */
-const PARAM_PATTERN = new RegExp(
-  `((?:^|[?&\\s;,/#(:"'\\[{]|%3F|%26)[A-Za-z0-9_-]*?(?:${SECRET_NAME})(?:=|%3D)["']?)(?:(?!%26)[^&\\s"',;)#])+`,
-  'gim'
-)
+/** 値として伏せないもの(鍵ではないと分かるもの) */
+const PLACEHOLDER = /^(?:none|null|undefined|true|false|n\/a|-+|\(none\)|\[\]|\{\})$/i
+
+const IDENT = /[A-Za-z0-9_$][A-Za-z0-9_$.-]*/g
+
+/** `s[pos]` から始まる区切り(名前と値の間)を読む。無ければ null */
+function readSeparator(
+  s: string,
+  pos: number,
+  quoted: boolean
+): { sep: string; next: number } | null {
+  let i = pos
+  while (s[i] === ' ' || s[i] === '\t') i++
+  const ch = s[i]
+  // 全角のコロン(U+FF1A)も区切りとみる
+  if (ch === ':' || ch === '\uFF1A') return { sep: ':', next: i + 1 }
+  if (ch === '=' && s[i + 1] === '>') return { sep: '=>', next: i + 2 }
+  if (ch === '=') return { sep: '=', next: i + 1 }
+  if (ch === '%' && s.slice(i, i + 3).toUpperCase() === '%3D') return { sep: '=', next: i + 3 }
+  if (ch === ',' && quoted) return { sep: ',', next: i + 1 }
+  // タブだけで区切ったもの(apiKey<TAB>値)
+  if (i > pos && s.slice(pos, i).includes('\t') && ch !== undefined && !/[\s,;)}\]]/.test(ch))
+    return { sep: '\t', next: i }
+  return null
+}
 
 /** 値の終わり(`start` は値の始まり)。クォートで囲まれていればその終わりまで、なければ区切りまで */
-function valueEnd(s: string, start: number, name: string): { end: number; quote: string } {
+function valueEnd(
+  s: string,
+  start: number,
+  sep: string,
+  cookie: boolean
+): { end: number; quote: string } {
   let i = start
   while (s[i] === '\\') i++
   const q = s[i]
-  if (q === '"' || q === "'") {
+  if (q === '"' || q === "'" || q === '`') {
     const depth = i - start
     // 同じ深さのクォート(前の \ の数が同じもの)で終わる。それより多い \ の付いたものは中身
     for (let j = i + 1; j < s.length; j++) {
       if (s[j] !== q) continue
       let k = 0
-      while (j - 1 - k > i && s[j - 1 - k] === '\\') k++
+      while (k <= depth && j - 1 - k > i && s[j - 1 - k] === '\\') k++
       if (k === depth) return { end: j + 1, quote: s.slice(start, i + 1) }
     }
     return { end: s.length, quote: s.slice(start, i + 1) }
   }
   if (i > start) return { end: start, quote: '' }
-  // Cookie は行の終わりまで(SID=…; HSID=… と続く)
-  if (/cookie$/i.test(name)) {
-    const nl = s.indexOf('\n', start)
-    return { end: nl < 0 ? s.length : nl, quote: '' }
+  // URL・フォーム・環境変数の値: & # 空白・クォート・閉じかっこ・%26 で終わる
+  if (sep === '=') {
+    let j = start
+    while (j < s.length && !/[&\s"',;)#>`|\]}]/.test(s[j])) {
+      if (s[j] === '%' && s.slice(j, j + 3).toUpperCase() === '%26') break
+      j++
+    }
+    return { end: j, quote: '' }
   }
   let j = start
   // Authorization: Bearer / Token / Basic の後ろの値まで
   const scheme = /^(?:bearer|token|basic|digest)[ \t]+/i.exec(s.slice(start, start + 16))
   if (scheme) j += scheme[0].length
-  while (j < s.length && !/[\s,;}\])"']/.test(s[j])) j++
+  while (j < s.length && !/[\s,;}\])"'`>]/.test(s[j])) j++
+  // Cookie は行の終わりまで(SID=…; HSID=… と続く)。真偽値・数値・なしは除く
+  if (
+    cookie &&
+    !PLACEHOLDER.test(s.slice(start, j)) &&
+    !/^\d+(?:\.\d+)?$/.test(s.slice(start, j))
+  ) {
+    const nl = s.indexOf('\n', start)
+    return { end: nl < 0 ? s.length : nl, quote: '' }
+  }
   return { end: j, quote: '' }
 }
 
 function redactNamedValues(s: string): string {
   const parts: string[] = []
   let last = 0
-  NAMED_VALUE.lastIndex = 0
-  for (let m = NAMED_VALUE.exec(s); m; m = NAMED_VALUE.exec(s)) {
-    const start = m.index + m[0].length
-    const name = m[0].replace(/[\\"'\s:]/g, '')
-    const { end, quote } = valueEnd(s, start, name)
+  IDENT.lastIndex = 0
+  for (let m = IDENT.exec(s); m; m = IDENT.exec(s)) {
+    const identStart = m.index
+    let name = m[0]
+    // %3F・%26 などで符号化された区切りの後ろ(%3Fkey)
+    if (identStart > 0 && s[identStart - 1] === '%' && /^[0-9A-Fa-f]{2}./.test(name))
+      name = name.slice(2)
+    name = name.replace(/[.-]+$/, '')
+    if (!name) continue
+    let after = identStart + m[0].length
+    // 名前のクォート(前の \ と ' " の並び)が後ろにも同じだけあれば、クォートした名前
+    let qs = identStart
+    if (s[qs - 1] === '"' || s[qs - 1] === "'") {
+      qs--
+      while (qs > 0 && s[qs - 1] === '\\') qs--
+    }
+    const openQuote = s.slice(qs, identStart)
+    const quoted = openQuote.length > 0 && s.startsWith(openQuote, after)
+    if (quoted) after += openQuote.length
+    const sep = readSeparator(s, after, quoted)
+    if (!sep || !secretName(name, sep.sep)) continue
+    let start = sep.next
+    while (s[start] === ' ' || s[start] === '\t') start++
+    // 「名前:」の後が改行なら、次の行の頭を値とみる(apiKey:\n値)
+    if (sep.sep === ':' && (s[start] === '\n' || s[start] === '\r')) {
+      start += s[start] === '\r' && s[start + 1] === '\n' ? 2 : 1
+      while (s[start] === ' ' || s[start] === '\t') start++
+    }
+    const words = nameWords(name)
+    const cookie =
+      sep.sep === ':' && (words.join('-') === 'cookie' || words.join('-') === 'set-cookie')
+    const { end, quote } = valueEnd(s, start, sep.sep, cookie)
     if (end <= start) continue
+    const raw = s.slice(start, end)
+    const inner = quote ? raw.slice(quote.length, raw.length - quote.length) : raw
+    if (!quote && PLACEHOLDER.test(inner)) continue
+    if (quote && inner === '') continue
     parts.push(s.slice(last, start), quote ? `${quote}***${quote}` : '***')
     last = end
-    NAMED_VALUE.lastIndex = Math.max(end, NAMED_VALUE.lastIndex)
+    IDENT.lastIndex = Math.max(end, IDENT.lastIndex)
   }
   parts.push(s.slice(last))
   return parts.join('')
@@ -331,5 +418,10 @@ export function buildBugReport(
     recentLog.trim() || '  (記録はありません)',
     ''
   ]
-  return sanitizeLogText(lines.join('\n'), home)
+  // 1行ずつ伏せる(直近の記録は長いので、まとめて伏せると長さの上限で切れる)
+  return lines
+    .join('\n')
+    .split('\n')
+    .map((l) => sanitizeLogText(l, home))
+    .join('\n')
 }
