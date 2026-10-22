@@ -338,7 +338,7 @@ async function matchPair(
       const expect = (t: number): number =>
         known === undefined ? result.offset : result.offset + (1 - known) * (t - center)
       const shift = known === undefined ? driftSearchSec((late - early) / 2) : 0.05
-      const [e, l] = await Promise.all([
+      const [e, l] = await allSettledOrThrow([
         refineAt(a, b, expect(early), early, shift),
         refineAt(a, b, expect(late), late, shift)
       ])

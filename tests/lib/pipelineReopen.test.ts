@@ -18,10 +18,12 @@ import type { Project } from '@shared/types'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import {
   LEGACY_NOTE,
-  LEGACY_NOTE_DECISIONS_KEPT,
+  isLegacyNote,
+  legacyNoteFor,
   matchScenesByTime
 } from '@renderer/lib/pipelineRestore'
 import { normalizeAutoEdit } from '@shared/autoEdit'
+import { releaseRanges, sceneOfSpan } from '@renderer/lib/roughCutPlan'
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
@@ -548,7 +550,10 @@ describe('監査で見つかった不具合(c5fdddd)', () => {
   })
 })
 
-/** 今の本編のクリップのうち、共通の時刻で `scene` の中に収まるもの(本編の順) */
+/**
+ * 今の本編のクリップのうち、`scene` のもの(本編の順)。製品と同じ見分け方(`sceneOfSpan`: いちばん長く
+ * 重なる場面。場面の最後のクリップは次の場面へはみ出す)
+ */
 function clipsInScene(scene: {
   start: number
   end: number
@@ -556,9 +561,12 @@ function clipsInScene(scene: {
   const project = useProjectStore.getState().project
   const spans = spansOfClips(project.clips, project.multicam!)
   expect(spans).toHaveLength(project.clips.length)
+  const scenes = usePipelineStore.getState().scenes
+  const own = scenes.find((sc) => sc.start === scene.start && sc.end === scene.end)
+  expect(own).toBeTruthy()
   return project.clips
     .map((c, i) => ({ id: c.id, start: spans[i].start, end: spans[i].end }))
-    .filter((c) => c.start >= scene.start - 0.2 && c.end <= scene.end + 0.2)
+    .filter((c) => sceneOfSpan(scenes, c) === own!.id)
 }
 
 describe('監査で見つかった不具合(b4cd4d9)', () => {
@@ -1010,8 +1018,8 @@ describe('開き直して作り直す回帰(古い形式・新しい形式)', ()
     const st = usePipelineStore.getState()
     expect(useProjectStore.getState().project.autoEdit).not.toHaveProperty('timelineKeep')
     expect(st.restored?.legacy).toBe(true)
-    // その版の企画には手の残す/落とす・AI の判定が残っているので、それに合った案内
-    expect(st.restored?.missing).toContain(LEGACY_NOTE_DECISIONS_KEPT)
+    // この企画には手の残す/落とすも AI の判定も無い(簡易の点数)ので、引き継いだとは言わない
+    expect(st.restored?.missing).toContain(LEGACY_NOTE)
     // 画面のチェックは作り直したら残す場面(読み取った s3 だけではない)
     expect(st.roughCut!.keptIds).toEqual(all)
     const r = await rebuild()
@@ -1088,14 +1096,25 @@ describe('監査で見つかった不具合(528dafe)', () => {
       expect(Math.abs(r.duration - full)).toBeLessThan(0.2)
     })
 
-  it('手で丸ごと消した場面も、チェックを付け直さなければ作り直しで戻らない', async () => {
-    await runEpisode()
-    const s2 = usePipelineStore.getState().scenes[1]
-    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
-    const removed = mainDuration()
-    expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
-    expect(clipsInScene(s2)).toHaveLength(0)
-  })
+  for (const touch of ['何も触らない', '長さを変える', '別の場面のチェックを変える'] as const)
+    it(`手で「残す」にした場面を丸ごと消しても、その場面のチェックを付け直さなければ作り直しで戻らない(${touch})`, async () => {
+      await runEpisode()
+      usePipelineStore.getState().setKeep('s2', true)
+      await rebuild()
+      expect(usePipelineStore.getState().keep).toEqual({ s2: true })
+      const s2 = usePipelineStore.getState().scenes[1]
+      useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+      expect(clipsInScene(s2)).toHaveLength(0)
+      const removed = mainDuration()
+      if (touch === '長さを変える') usePipelineStore.getState().setTargetMinutes(3)
+      if (touch === '別の場面のチェックを変える') usePipelineStore.getState().setKeep('s1', true)
+      expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+      expect(clipsInScene(s2)).toHaveLength(0)
+      // 保存して開き直して作り直しても同じ
+      saveAndReopen()
+      await flush()
+      expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+    })
 
   /** 前の版(b4cd4d9〜ac0e4c8)の形で保存し直して開く(読み取った残す/落とすあり・残した場面の記録なし) */
   function reopenAsTimelineKeepVersion(): void {
@@ -1140,10 +1159,282 @@ describe('監査で見つかった不具合(528dafe)', () => {
     expect(st.keep).toEqual({ s1: true })
     expect(st.restored?.legacy).toBe(true)
     expect(st.restored?.missing).not.toContain(LEGACY_NOTE)
-    expect(st.restored?.missing).toContain(LEGACY_NOTE_DECISIONS_KEPT)
-    expect(LEGACY_NOTE_DECISIONS_KEPT).not.toContain('残っていません')
+    // 引き継いだのは手の残す/落とす(AI は使わない設定で作った)
+    const note = legacyNoteFor({ keep: true, ai: false })
+    expect(st.restored?.missing).toContain(note)
+    expect(note).not.toContain('残っていません')
+    expect(note).not.toContain('AI の判定')
     // 作り直したら案内は消える
     await rebuild()
-    expect(usePipelineStore.getState().restored?.missing).not.toContain(LEGACY_NOTE_DECISIONS_KEPT)
+    expect(usePipelineStore.getState().restored?.missing.some(isLegacyNote)).toBe(false)
+  })
+})
+
+describe('監査で見つかった不具合(b2f573a)', () => {
+  /** 手で「残す」にした s2 を作り直してから、s2 のクリップを最後の1本(次の場面へはみ出す)だけ残して消す */
+  async function keepS2AndLeaveCrossingClip(): Promise<{ stay: string; partial: number }> {
+    await runEpisode()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const s2 = usePipelineStore.getState().scenes[1]
+    const own = clipsInScene(s2)
+    expect(own.length).toBeGreaterThan(5)
+    const stay = own[own.length - 1]
+    // 自動で組んだ本編では、場面の最後のクリップが次の場面へはみ出す
+    expect(stay.end).toBeGreaterThan(s2.end + 0.05)
+    useProjectStore.getState().removeClips(own.slice(0, -1).map((c) => c.id))
+    expect(clipsInScene(s2).map((c) => c.id)).toEqual([stay.id])
+    return { stay: stay.id, partial: mainDuration() }
+  }
+
+  it('「残す」場面を、次の場面へはみ出すクリップ1本だけ残して削っても、作り直しで戻らない', async () => {
+    const { partial } = await keepS2AndLeaveCrossingClip()
+    // b2f573a では、はみ出すクリップを場面のものに数えず「丸ごと消した」として 80 秒戻していた
+    expect(Math.abs((await rebuild()).duration - partial)).toBeLessThan(0.2)
+    // チェックを付け直しても、場面のクリップが残っているので削りは戻さない(中を詰めたのと同じ)
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    expect(Math.abs((await rebuild()).duration - partial)).toBeLessThan(0.2)
+  })
+
+  for (const reopenAt of ['付け直す前', '付け直した後'] as const)
+    it(`丸ごと消した「残す」場面のチェックを付け直したことは、保存して開き直しても覚えている(${reopenAt}に開き直す)`, async () => {
+      await runEpisode()
+      const full = mainDuration()
+      usePipelineStore.getState().setKeep('s2', true)
+      await rebuild()
+      const s2 = usePipelineStore.getState().scenes[1]
+      useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+      const removed = mainDuration()
+      if (reopenAt === '付け直す前') {
+        saveAndReopen()
+        await flush()
+      }
+      usePipelineStore.getState().setKeep('s2', false)
+      usePipelineStore.getState().setKeep('s2', true)
+      if (reopenAt === '付け直した後') {
+        saveAndReopen()
+        await flush()
+      }
+      expect(Math.abs((await rebuild()).duration - full)).toBeLessThan(0.2)
+      // 作り直したら、付け直した印は消える(もう一度丸ごと消しても、付け直さなければ戻らない)
+      expect(useProjectStore.getState().project.autoEdit?.keepTouched ?? []).toEqual([])
+      useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+      expect(Math.abs(mainDuration() - removed)).toBeLessThan(0.2)
+      expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+    })
+
+  it('付け直した印を覚えていない古い企画の判断も読める', () => {
+    const ae = normalizeAutoEdit({
+      scenes: [],
+      judgements: [],
+      judgeSource: 'heuristic',
+      keep: {},
+      targetMinutes: 0,
+      editNote: '',
+      effects: [],
+      effectChosen: []
+    })
+    expect(ae).toBeTruthy()
+    expect(ae).not.toHaveProperty('keepTouched')
+    expect(
+      normalizeAutoEdit({ ...ae, keepTouched: ['s2', 3, 's1'] } as unknown as Record<
+        string,
+        unknown
+      >)?.keepTouched
+    ).toEqual(['s2', 's1'])
+  })
+
+  it('10/09 版の企画で長さだけ変えて保存し直しても、引き継いでいない残す/落とす・AI の判定を「引き継いだ」と言わない', async () => {
+    await runEpisode()
+    saveAndReopen({ legacy: true })
+    await flush()
+    usePipelineStore.getState().setTargetMinutes(2)
+    expect(useProjectStore.getState().project.autoEdit?.legacyPending).toBe(true)
+    saveAndReopen()
+    await flush()
+    const st = usePipelineStore.getState()
+    expect(st.restored?.legacy).toBe(true)
+    expect(st.keep).toEqual({})
+    expect(st.targetMinutes).toBe(2)
+    expect(st.restored?.missing).toContain(LEGACY_NOTE)
+    expect(st.restored?.missing.join('')).not.toContain('引き継いでいます')
+  })
+})
+
+describe('監査で見つかった不具合(b2f573a の再監査)', () => {
+  /** 手で「残す」にした s2 を作り直し、s2 を丸ごと消してチェックを付け直す */
+  async function emptyAndRetouchS2(): Promise<{ full: number; removed: number }> {
+    await runEpisode()
+    const full = mainDuration()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    const removed = mainDuration()
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    return { full, removed }
+  }
+
+  for (const reopen of [false, true])
+    it(`付け直して作り直した後に Ctrl+Z で戻してから作り直しても、付け直した場面が戻る(${reopen ? '開き直し' : 'そのまま'})`, async () => {
+      const { full, removed } = await emptyAndRetouchS2()
+      expect(Math.abs((await rebuild()).duration - full)).toBeLessThan(0.2)
+      useProjectStore.getState().undo()
+      expect(Math.abs(mainDuration() - removed)).toBeLessThan(0.2)
+      if (reopen) {
+        saveAndReopen()
+        await flush()
+      }
+      // 10/09 版・b2f573a と同じく戻る(取り消しで、付け直しを使った作り直しが本編から外れた)
+      expect(Math.abs((await rebuild()).duration - full)).toBeLessThan(0.2)
+      // 取り消さずにもう一度消せば、付け直さない限り戻らない
+      const s2 = usePipelineStore.getState().scenes[1]
+      useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+      expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+    })
+
+  it('作り直しの途中で触ったチェックの記録は、作り直しの最後に消さない', async () => {
+    await runEpisode()
+    // 本編の読み取り(残す/落とすの記録を使う所)より後の、発言テロップを置く所(顔を探す)で触る
+    let touched = 0
+    const api = (globalThis as unknown as { window: { api: Record<string, unknown> } }).window.api
+    api.faceDetect = async () => {
+      touched++
+      usePipelineStore.getState().setKeep('s3', true)
+      throw new Error('顔は探さない')
+    }
+    await rebuild()
+    expect(touched).toBeGreaterThan(0)
+    expect(usePipelineStore.getState().keepTouched).toContain('s3')
+  })
+
+  it('丸ごと消した場面を戻しても、前の場面のクリップが入り込んだ所の手の削りは取り消さない', async () => {
+    await runEpisode()
+    const full = mainDuration()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const [s1, s2] = usePipelineStore.getState().scenes
+    // s1 の最後のクリップ(s2 へはみ出す)のお尻を 1 秒詰める(詰めた所の一部は s2 の時刻)
+    const last = clipsInScene(s1).slice(-1)[0]
+    expect(last.end).toBeGreaterThan(s2.start + 0.1)
+    const clip = useProjectStore.getState().project.clips.find((c) => c.id === last.id)!
+    useProjectStore.getState().updateClipTrim(clip.id, clip.inPoint, clip.outPoint - 1)
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    const r = await rebuild()
+    expect(r.kept).toContain('s2')
+    expect(Math.abs(r.duration - (full - 1))).toBeLessThan(0.05)
+  })
+
+  it('10/09 版の企画でチェックだけ変えて保存し直しても、無い AI の判定を「引き継いだ」と言わない', async () => {
+    await runEpisode()
+    saveAndReopen({ legacy: true })
+    await flush()
+    usePipelineStore.getState().setKeep('s1', false)
+    saveAndReopen()
+    await flush()
+    const st = usePipelineStore.getState()
+    expect(st.keep).toEqual({ s1: false })
+    expect(st.judgeSource).toBe('heuristic')
+    const note = st.restored!.missing.find(isLegacyNote)!
+    expect(note).toContain('手で決めた残す/落とすは引き継いでいます')
+    expect(note).not.toContain('AI の判定')
+  })
+})
+
+describe('監査で見つかった不具合(b2f573a の3回目の監査)', () => {
+  /** 手で「残す」にした s2 を作り直し、s2 を丸ごと消してチェックを付け直す */
+  async function emptyAndRetouchS2(): Promise<{ full: number; removed: number }> {
+    await runEpisode()
+    const full = mainDuration()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    const removed = mainDuration()
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    return { full, removed }
+  }
+
+  for (const reopen of [false, true])
+    it(`作り直し→取り消し→やり直しの後は、付け直していなければ丸ごと消した場面を戻さない(${reopen ? '開き直し' : 'そのまま'})`, async () => {
+      const { full, removed } = await emptyAndRetouchS2()
+      expect(Math.abs((await rebuild()).duration - full)).toBeLessThan(0.2)
+      useProjectStore.getState().undo()
+      expect(usePipelineStore.getState().keepTouched).toEqual(['s2'])
+      useProjectStore.getState().redo()
+      expect(Math.abs(mainDuration() - full)).toBeLessThan(0.2)
+      // やり直しで、付け直しは使い済みに戻る(企画にも)
+      expect(usePipelineStore.getState().keepTouched).toEqual([])
+      expect(useProjectStore.getState().project.autoEdit?.keepTouched ?? []).toEqual([])
+      if (reopen) {
+        saveAndReopen()
+        await flush()
+      }
+      const s2 = usePipelineStore.getState().scenes[1]
+      useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+      expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+    })
+
+  it('取り消した後に付け直し直したものは、やり直しでも消さない', async () => {
+    await emptyAndRetouchS2()
+    await rebuild()
+    useProjectStore.getState().undo()
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    useProjectStore.getState().redo()
+    expect(usePipelineStore.getState().keepTouched).toEqual(['s2'])
+  })
+
+  it('取り消し・やり直しを繰り返しても、付け直しの記録は重ならない', async () => {
+    await emptyAndRetouchS2()
+    await rebuild()
+    for (let i = 0; i < 3; i++) {
+      useProjectStore.getState().undo()
+      expect(usePipelineStore.getState().keepTouched).toEqual(['s2'])
+      useProjectStore.getState().redo()
+      expect(usePipelineStore.getState().keepTouched).toEqual([])
+    }
+  })
+
+  it('削りを取り消す区間: 戻す場面のはみ出しは入れ、前の場面のクリップが入り込んだ所は除く', () => {
+    const scenes = [
+      { id: 's1', start: 0, end: 10 },
+      { id: 's2', start: 10, end: 20 },
+      { id: 's3', start: 20, end: 30 }
+    ]
+    // s1 の最後のクリップは s2 へ 1.5 秒はみ出し、s2 の最後のクリップは s3 へ 2 秒はみ出す
+    const auto = [
+      { start: 2, end: 11.5 },
+      { start: 13, end: 17 },
+      { start: 17.5, end: 22 },
+      { start: 23, end: 29 }
+    ]
+    const of = (id: string): [number, number][] =>
+      releaseRanges(scenes, auto)
+        .filter((r) => r.id === id)
+        .map((r) => [r.start, r.end])
+    expect(of('s1')).toEqual([[0, 11.5]])
+    expect(of('s2')).toEqual([[11.5, 22]])
+    expect(of('s3')).toEqual([[22, 30]])
+  })
+
+  it('削りを取り消す区間: 組んだ区間どうしが重なる所は、どちらの場面からも外さない', () => {
+    const scenes = [
+      { id: 's1', start: 0, end: 10 },
+      { id: 's2', start: 10, end: 20 }
+    ]
+    const auto = [
+      { start: 5, end: 12 },
+      { start: 11, end: 18 }
+    ]
+    const covered = (id: string, t: number): boolean =>
+      releaseRanges(scenes, auto).some((r) => r.id === id && r.start <= t && t <= r.end)
+    expect(covered('s1', 11.5)).toBe(true)
+    expect(covered('s2', 11.5)).toBe(true)
   })
 })

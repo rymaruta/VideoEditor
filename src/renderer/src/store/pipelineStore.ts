@@ -58,12 +58,14 @@ import {
   scenesFor,
   hypeMomentsFor,
   peakSpans,
-  placedAutoTelops
+  placedAutoTelops,
+  releaseRanges,
+  sceneOfSpan
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPlacement'
 import {
   LEGACY_NOTE,
-  LEGACY_NOTE_DECISIONS_KEPT,
+  isLegacyNote,
   matchScenesByTime,
   remapSceneFlags,
   restorePipelineFromProject
@@ -213,6 +215,12 @@ interface PipelineState {
    * 削りの取り消しに渡す「残す」を、前回の残す/落とすからの変化で決めるのに使う(`releasedKeep`)
    */
   builtKept: { cut: string; keptIds: string[] }[]
+  /**
+   * 画面でチェック(残す / 落とす)を触って、まだ作り直しで使っていない場面
+   * (`AutoEditDecisions.keepTouched`)。人が丸ごと消した「残す」場面は、付け直したとき(ここにあるか、
+   * 使った作り直しを取り消したとき。`usedTouches`)だけ作り直しで戻す(`releasedKeep`)
+   */
+  keepTouched: string[]
   /** 人が直した演出テロップで提案の一覧に無いもの(共通の時刻)。場面を落として戻したときに置き直す */
   carriedTelops: Omit<TextOverlay, 'id'>[]
   /** 場面を切ったときの番組の種類(企画に覚えて、開き直したときに同じ場面に切り直す) */
@@ -980,6 +988,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       editNote: s.editNote,
       ...(s.roughCut ? { keptIds: s.roughCut.keptIds } : {}),
       ...(s.builtKept.length > 0 ? { builtKept: s.builtKept } : {}),
+      ...(s.keepTouched.length > 0 ? { keepTouched: s.keepTouched } : {}),
       ...(s.restored?.legacy ? { legacyPending: true } : {}),
       effects: s.effects,
       effectChosen: s.effectChosen,
@@ -1032,9 +1041,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       judgeSource: source,
       keep: {},
       builtKept: [],
+      keepTouched: [],
       hype: hype ?? [],
       sceneKind: kind
     })
+    forgetUsedTouches()
     setStep('structure', {
       state: 'done',
       percent: 100,
@@ -1058,27 +1069,51 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
    * (`roughCutAuto`。取り消しで本編と一緒に戻る)と同じ印の回のもの(`builtKept`)。今の本編から
    * 残した場面を推し量らない(場面の入れ替え・一部だけ残す・差し込みで読み違えた)。
    * 同じ印の回が分からない(覚えている回より前まで取り消した など)ときは、手で残すにした場面を全部
-   * (10/09 版と同じ。昔の削りも戻る)。「残す」の場面の中に今の本編のクリップが1本も無い(人が丸ごと
-   * 消した)ときも渡す(画面のチェックは「残す」のままなので、作り直すと戻す。10/09 版と同じ)
+   * (10/09 版と同じ。昔の削りも戻る)。「残す」の場面に今の本編のクリップが1本も無い(人が丸ごと
+   * 消した)ときは、その場面のチェックを付け直したときだけ渡す(作り直すと戻す。10/09 版と同じ)。
+   * 付け直したのは、まだ作り直しで使っていない `keepTouched` と、使った作り直しを取り消して、その
+   * 作り直しの前の本編に戻ったときのもの(`usedTouches`)。付け直さなければ、丸ごと
+   * 消したのも手の削りとして守る。クリップがどの場面のものかは、いちばん長く重なる場面
+   * (`sceneOfSpan`。場面の最後のクリップは次の場面へはみ出す)。取り消す区間は `releaseRanges`
    */
-  function releasedKeep(project: Project): Record<string, boolean> {
+  function releasedKeep(project: Project): {
+    keep: Record<string, boolean>
+    scenes: { id: string; start: number; end: number }[]
+    /** 使った付け直し(この作り直しの回に覚える) */
+    touched: string[]
+    /** 使った付け直しを読んだ時(この後に触ったものは、作り直しの後も残す) */
+    readAt: number
+  } {
+    const readAt = keepTouchClock
+    const scenes = get().scenes
+    const auto = project.roughCutAuto ?? []
     const sig = cutSignature(project.roughCutAuto)
     const built = sig ? [...get().builtKept].reverse().find((b) => b.cut === sig) : undefined
-    if (!built) return get().keep
+    // 付け直した場面(使った作り直しを取り消すと、ここへ戻る。`usedTouches`)
+    const touched = new Set(get().keepTouched)
+    if (!built)
+      return {
+        keep: get().keep,
+        scenes: releaseRanges(scenes, auto),
+        touched: [...touched],
+        readAt
+      }
     const kept = new Set(built.keptIds)
     const info = project.multicam
-    const cover = info ? coverageOfClips(project.clips, info) : []
-    const scenes = new Map(get().scenes.map((sc) => [sc.id, sc]))
-    const inMain = (id: string): boolean => {
-      const sc = scenes.get(id)
-      return (
-        !sc ||
-        cover.some((c) => c.start >= sc.start - SCENE_EDGE_SEC && c.end <= sc.end + SCENE_EDGE_SEC)
-      )
-    }
-    return Object.fromEntries(
-      Object.entries(get().keep).filter(([id, keep]) => !keep || !kept.has(id) || !inMain(id))
+    const owned = new Set(
+      info
+        ? coverageOfClips(project.clips, info).map((c) => sceneOfSpan(scenes, c))
+        : scenes.map((sc) => sc.id)
     )
+    const emptied = (id: string): boolean => touched.has(id) && !owned.has(id)
+    return {
+      keep: Object.fromEntries(
+        Object.entries(get().keep).filter(([id, keep]) => !keep || !kept.has(id) || emptied(id))
+      ),
+      scenes: releaseRanges(scenes, auto),
+      touched: [...touched],
+      readAt
+    }
   }
 
   async function buildAndApply(): Promise<void> {
@@ -1088,6 +1123,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     setStep('cut', { state: 'run', percent: 0, note: '音の大きさを読み込み中' })
     const activity = await activityOf(project, info)
     // 前に組んだ本編と今の本編を比べ、人が削った・足した区間、替えたカメラを読み取る
+    const released = releasedKeep(project)
     const overrides = releaseOverridesForScenes(
       project.roughCutAuto
         ? updateOverrides(
@@ -1096,8 +1132,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             coverageOfClips(project.clips, info)
           )
         : project.cutOverrides,
-      get().scenes,
-      releasedKeep(project)
+      released.scenes,
+      released.keep
     )
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
@@ -1383,6 +1419,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       log(
         `本編の手直しを当て直しました(削った区間 ${overrides!.removed.length}・足した区間 ${overrides!.added.length}・替えたカメラ ${overrides!.angles.length})`
       )
+    // 取り消しで作り直しの前の本編に戻ったら、この作り直しで使った付け直しを使い直す
+    if (released.touched.length > 0) usedTouches.set(project.clips, released.touched)
     set({
       roughCut: {
         keptIds: plan.selection.kept,
@@ -1398,14 +1436,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         cutSignature(useProjectStore.getState().project.roughCutAuto),
         plan.selection.kept
       ),
+      // 付け直した印は、この作り直しで使ったものだけ消す(作っている間に触ったものは次に使う)
+      keepTouched: get().keepTouched.filter((id) => (keepTouchedAt.get(id) ?? 0) > released.readAt),
       // 作り直したので、古い形式の企画の案内(手で決めた残す/落とすは残っていない)はもう出さない
       restored: get().restored
         ? {
             ...get().restored!,
             legacy: false,
-            missing: get().restored!.missing.filter(
-              (m) => m !== LEGACY_NOTE && m !== LEGACY_NOTE_DECISIONS_KEPT
-            )
+            missing: get().restored!.missing.filter((m) => !isLegacyNote(m))
           }
         : null
     })
@@ -1436,6 +1474,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     hype: [],
     keep: {},
     builtKept: [],
+    keepTouched: [],
     carriedTelops: [],
     sceneKind: null,
     roughCut: null,
@@ -1467,6 +1506,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgeSource: r.judgeSource,
         keep: r.keep,
         builtKept: r.builtKept,
+        keepTouched: r.keepTouched,
         carriedTelops: r.carriedTelops,
         sceneKind: project.autoEdit?.kind ?? kind,
         hype: r.hype,
@@ -1479,7 +1519,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       }))
       log(
         r.legacy
-          ? '保存した企画から、自動編集の結果(工程・構成・仮編集の要約)を読み直しました(前の版で保存した企画のため、手で決めた残す/落とすは残っていません。作り直すと自動の選び方になります)'
+          ? r.missing.some((m) => isLegacyNote(m) && m !== LEGACY_NOTE)
+            ? '保存した企画から、自動編集の結果(工程・構成・保存されていた残す/落とす・判定・仮編集の要約)を読み直しました(前の版で保存した企画のため、作り直しで残した場面の記録はありません)'
+            : '保存した企画から、自動編集の結果(工程・構成・仮編集の要約)を読み直しました(前の版で保存した企画のため、手で決めた残す/落とすは残っていません。作り直すと自動の選び方になります)'
           : '保存した企画から、自動編集の結果(工程・構成・判定・残す/落とす・仕上がりの長さ・演出テロップの提案)を読み直しました'
       )
     },
@@ -1566,7 +1608,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         const next = { ...s.keep }
         if (keep === undefined) delete next[sceneId]
         else next[sceneId] = keep
-        return { keep: next }
+        keepTouchedAt.set(sceneId, ++keepTouchClock)
+        return {
+          keep: next,
+          keepTouched: s.keepTouched.includes(sceneId) ? s.keepTouched : [...s.keepTouched, sceneId]
+        }
       })
       persistDecisions()
     },
@@ -1698,8 +1744,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               cut: b.cut,
               keptIds: remapKept(b.keptIds, match)
             })),
+            keepTouched: remapKept(get().keepTouched, match),
             sceneKind: kind
           })
+          forgetUsedTouches()
         }
         await buildAndApply()
       } catch (e) {
@@ -1750,6 +1798,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         hype: [],
         keep: {},
         builtKept: [],
+        keepTouched: [],
         carriedTelops: [],
         sceneKind: null,
         // 仕上がりの長さ・方針は人が入れたものなので、ここでは捨てない(新しい回の画面・自動編集の画面で
@@ -1798,6 +1847,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         hype: [],
         keep: {},
         builtKept: [],
+        keepTouched: [],
         carriedTelops: [],
         sceneKind: null,
         roughCut: null,
@@ -2156,12 +2206,6 @@ function mapTelopsToTimeline<
   })
 }
 
-/**
- * 場面の中のクリップと見なす、場面の境目からのはみ出し(秒)。これより境目をまたぐクリップは、その場面の
- * クリップに数えない(場面に1本も無ければ、人が丸ごと消した)
- */
-const SCENE_EDGE_SEC = 0.05
-
 /** 作り直しの回の残した場面を足す(同じ組んだ本編の印の古いものは除き、新しいものを後ろへ) */
 function builtKeptWith(
   list: readonly { cut: string; keptIds: string[] }[],
@@ -2172,6 +2216,26 @@ function builtKeptWith(
   return [...list.filter((b) => b.cut !== cut), { cut, keptIds: [...keptIds] }].slice(
     -BUILT_KEPT_MAX
   )
+}
+
+/** チェックを触った順の番号(作り直しの間に触ったものを、作り直しの最後に消さないため) */
+let keepTouchClock = 0
+const keepTouchedAt = new Map<string, number>()
+/**
+ * 作り直しの前の本編(クリップの並び)→ その作り直しで使った付け直し。取り消し(Ctrl+Z)でその本編に
+ * 戻ったら、付け直しはまだ使っていないことにする(自動編集の判断は取り消しで戻らないので)。
+ * 同じ並びを手で作り直しても別の配列なので当たらない(付け直さなければ戻さない)
+ */
+let usedTouches = new WeakMap<readonly unknown[], string[]>()
+/**
+ * 取り消しで付け直しを戻した時の本編(取り消す前の並び)→ 戻した付け直しと、戻した時のチェックの番号。
+ * やり直し(Ctrl+Y)でその並びに来たら、戻した付け直しを使い済みに戻す(その後に触り直したものは除く)
+ */
+let revivedTouches = new WeakMap<readonly unknown[], { ids: string[]; clock: number }>()
+/** 場面を切り直したら、前の場面の ID の記録は使わない(別の場面に付く。戻さない側に倒す) */
+function forgetUsedTouches(): void {
+  usedTouches = new WeakMap()
+  revivedTouches = new WeakMap()
 }
 
 /** 残した場面の ID を、切り直した場面の ID へ移す(時刻がほぼ同じ場面だけ。`match` は今 → 前) */
@@ -2316,6 +2380,33 @@ export function recordedAtByAsset(
   }
   return out
 }
+
+// 取り消し(Ctrl+Z)で、付け直しを使った作り直しの前の本編に戻ったら、付け直しをまだ使っていないことに
+// する(自動編集の判断は取り消しで戻らないので、ここで戻す。企画にも覚え、保存して開き直しても効く)
+// やり直し(Ctrl+Y)で作り直しの後の本編に戻ったら、戻した付け直しをまた使い済みにする
+useProjectStore.subscribe((state, prev) => {
+  if (state.project.clips === prev.project.clips) return
+  const pending = usePipelineStore.getState().keepTouched
+  let keepTouched: string[] | null = null
+  const used = usedTouches.get(state.project.clips)
+  if (used) {
+    const scenes = new Set(usePipelineStore.getState().scenes.map((sc) => sc.id))
+    const back = used.filter((id) => scenes.has(id) && !pending.includes(id))
+    if (back.length > 0) {
+      keepTouched = [...pending, ...back]
+      revivedTouches.set(prev.project.clips, { ids: back, clock: keepTouchClock })
+    }
+  }
+  const revived = revivedTouches.get(state.project.clips)
+  if (!keepTouched && revived) {
+    const drop = new Set(revived.ids.filter((id) => (keepTouchedAt.get(id) ?? 0) <= revived.clock))
+    if (pending.some((id) => drop.has(id))) keepTouched = pending.filter((id) => !drop.has(id))
+  }
+  if (!keepTouched) return
+  usePipelineStore.setState({ keepTouched })
+  const autoEdit = state.project.autoEdit
+  if (autoEdit) useProjectStore.getState().setAutoEdit({ ...autoEdit, keepTouched })
+})
 
 // 別のプロジェクトを開いた・新しく作ったら、前の回の自動編集の結果を捨てる
 // (残すと「仮編集を作り直す」が前の回の場面の区切りで今の回を切り、要確認にも前の回の項目が出る)

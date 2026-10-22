@@ -23,6 +23,7 @@ import {
 import {
   applyAngleOverrides,
   applyCutOverrides,
+  subtractRanges,
   type CutOverrides
 } from '@shared/roughCut/overrides'
 import type { AspectRatio } from '@shared/types'
@@ -329,6 +330,49 @@ function autoSelection(
     policy.dropUnneeded
   )
   return { auto, checked }
+}
+
+/**
+ * 本編のクリップ(共通の時刻の区間)が、どの場面のものか。いちばん長く重なる場面にする。自動で組んだ
+ * 本編では、場面の最後のクリップが次の場面へ数秒はみ出す(間を残すため)ので、場面に収まるかでは
+ * 決めない。どの場面とも重ならなければ undefined
+ */
+export function sceneOfSpan(
+  scenes: readonly { id: string; start: number; end: number }[],
+  span: { start: number; end: number }
+): string | undefined {
+  let best: { id: string; overlap: number } | undefined
+  for (const sc of scenes) {
+    const overlap = Math.min(span.end, sc.end) - Math.max(span.start, sc.start)
+    if (overlap > 0 && (!best || overlap > best.overlap)) best = { id: sc.id, overlap }
+  }
+  return best?.id
+}
+
+/**
+ * 削りの取り消し(`releaseOverridesForScenes`)に渡す、場面ごとの区間。場面の区間と、組んだ本編
+ * (`roughCutAuto`)でその場面のもの(`sceneOfSpan`)だった区間を合わせ、ほかの場面だけのものだった区間を
+ * 除く。場面の最後のクリップは次の場面へはみ出すので、戻す場面のはみ出した所は戻し、前の場面のクリップが
+ * 入り込んだ所の人の削りは取り消さない。組んだ区間どうしが重なる所は、両方の場面に入れる(どちらの
+ * 場面からも外れないように)
+ */
+export function releaseRanges(
+  scenes: readonly { id: string; start: number; end: number }[],
+  auto: readonly { start: number; end: number }[]
+): { id: string; start: number; end: number }[] {
+  const owner = auto.map((a) => sceneOfSpan(scenes, a))
+  return scenes.flatMap((sc) => {
+    const own = auto.filter((_, i) => owner[i] === sc.id)
+    const others = subtractRanges(
+      auto.filter((_, i) => owner[i] !== undefined && owner[i] !== sc.id),
+      own
+    )
+    return subtractRanges([{ start: sc.start, end: sc.end }, ...own], others).map((r) => ({
+      id: sc.id,
+      start: r.start,
+      end: r.end
+    }))
+  })
 }
 
 /**
