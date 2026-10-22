@@ -1,4 +1,4 @@
-import type { Project } from '@shared/types'
+import type { Project, TextOverlay } from '@shared/types'
 import type { EpisodeKind } from '@shared/structure/kind'
 import { heuristicJudgements, type Scene, type SceneJudgement } from '@shared/structure/scenes'
 import type { HypeMoment } from '@shared/structure/hype'
@@ -16,8 +16,12 @@ export interface RestoredPipeline<Id extends string = string> {
   planJudgements: SceneJudgement[] | null
   judgeSource: 'ai' | 'heuristic'
   hype: HypeMoment[]
-  /** 残す / 落とすの判断(保存した判断。古い企画では今の本編から読み取ったもの) */
+  /** 手で決めた残す / 落とす(保存した判断) */
   keep: Record<string, boolean>
+  /** 古い企画で、今の本編から読み取った残す / 落とす(手で決めたものとは別) */
+  timelineKeep: Record<string, boolean>
+  /** 人が直した演出テロップで提案の一覧に無いもの(共通の時刻) */
+  carriedTelops: Omit<TextOverlay, 'id'>[]
   targetMinutes: number
   editNote: string
   effects: EffectProposal[]
@@ -47,11 +51,51 @@ function keptSeconds(scene: Scene, spans: readonly { start: number; end: number 
 }
 
 /**
+ * 前の場面の区切り(`prev`)から、今の場面(`next`)へ、時刻がほぼ同じ(重なりが長いほうの 8 割以上)場面の
+ * 対応を作る(今の場面の ID → 前の場面の ID)。場面の ID は番号なので、区切りが変わると同じ ID が別の
+ * 場面を指す。ID だけで当てると、判定・残す/落とすが別の場面に付く
+ */
+export function matchScenesByTime(
+  prev: readonly { id: string; start: number; end: number }[],
+  next: readonly { id: string; start: number; end: number }[]
+): Map<string, string> {
+  const out = new Map<string, string>()
+  const used = new Set<string>()
+  for (const n of next) {
+    let best: { id: string; overlap: number } | null = null
+    for (const p of prev) {
+      if (used.has(p.id)) continue
+      const overlap = Math.min(n.end, p.end) - Math.max(n.start, p.start)
+      const longer = Math.max(n.end - n.start, p.end - p.start)
+      if (longer > 0 && overlap >= longer * 0.8 && (!best || overlap > best.overlap))
+        best = { id: p.id, overlap }
+    }
+    if (best) {
+      out.set(n.id, best.id)
+      used.add(best.id)
+    }
+  }
+  return out
+}
+
+/** 場面ごとの印(残す / 落とす)を、前の場面から時刻の対応で今の場面へ移す */
+export function remapSceneFlags(
+  flags: Readonly<Record<string, boolean>>,
+  match: ReadonlyMap<string, string>
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {}
+  for (const [id, prevId] of match) if (flags[prevId] !== undefined) out[id] = flags[prevId]
+  return out
+}
+
+/**
  * 保存した企画(同期の情報・文字起こし・仮編集・テロップ・自動編集の判断)から、自動編集の画面の状態
  * (工程の済み・構成の場面・判定・残す/落とす・仕上がりの長さ・演出テロップの提案・仮編集の要約)を作り直す。
- * 自動編集の判断(`project.autoEdit`)があればそれをそのまま戻す。無い古い企画では、判定は簡易の点数にし、
- * 今の本編に残っている場面を「残す」、無い場面を「落とす」と手で決めたものとして扱う(何も変えずに
- * 作り直したら同じ場面になるように。手で残した場面・AI の判定で残した場面を落とさない)。
+ * 自動編集の判断(`project.autoEdit`)があればそれを戻す(場面の区切りが変わっていたら、時刻がほぼ同じ場面
+ * だけ)。無い古い企画では、判定は簡易の点数にし、今の本編に残っている場面を「残す」、無い場面を「落とす」と
+ * 読み取る(何も変えずに作り直したら同じ場面になるように。手で残した場面・AI の判定で残した場面を
+ * 落とさない)。読み取ったものは手で決めたもの(`keep`)とは別の印(`timelineKeep`)にする(手で決めた
+ * ものにすると、手で削った区間が作り直しで戻り、仕上がりの長さも効かなかった)。
  * 同期と文字起こしが無い企画(手で作った企画)なら null
  */
 export function restorePipelineFromProject(
@@ -77,7 +121,6 @@ export function restorePipelineFromProject(
 
   // 構成の場面は、文字起こしと同期の情報から同じように切り直せる(声の盛り上がりは保存したもの)
   const scenes = scenesFor(project, info, { kind, ...(saved?.hype ? { hype } : {}) })
-  const sceneIds = new Set(scenes.map((sc) => sc.id))
   const sameScenes =
     saved !== undefined &&
     saved.scenes.length === scenes.length &&
@@ -88,21 +131,26 @@ export function restorePipelineFromProject(
         Math.abs(x.end - scenes[i].end) < 1e-3
     )
   const heuristic = heuristicJudgements(scenes, kind)
-  // 保存した判定を場面の ID で当てる(文字起こしを直して場面が変わったら、無い場面は簡易の点数)
-  const judgedBy = (list: readonly { sceneId: string }[] | undefined): SceneJudgement[] => {
+  // 保存した場面と今の場面の対応(時刻がほぼ同じもの)。場面の区切りが変わったら、対応の無い場面は簡易の点数
+  const match = matchScenesByTime(saved?.scenes ?? [], scenes)
+  const judgedBy = (list: readonly SceneJudgement[] | undefined): SceneJudgement[] => {
     const byId = new Map((list ?? []).map((j) => [j.sceneId, j]))
-    return heuristic.map((h) => (byId.get(h.sceneId) as SceneJudgement | undefined) ?? h)
+    return heuristic.map((h) => {
+      const prevId = match.get(h.sceneId)
+      const j = prevId !== undefined ? byId.get(prevId) : undefined
+      return j ? { ...j, sceneId: h.sceneId } : h
+    })
   }
   const judgements = saved ? judgedBy(saved.judgements) : heuristic
   const planJudgements = saved?.planJudgements ? judgedBy(saved.planJudgements) : null
   const judgeSource = saved?.judgeSource ?? 'heuristic'
   if (!saved)
     missing.push(
-      '古い形式の企画のため、構成の判定(AI の判定)は企画に残っていません。簡易の点数で表示し、今の本編に残っている場面を「残す」、無い場面を「落とす」に固定しています(チェックで変えられます)'
+      '古い形式の企画のため、構成の判定(AI の判定)は企画に残っていません。簡易の点数で表示し、残す場面は今の本編に残っている場面にしています(何も変えずに作り直すと同じ場面で、手で詰めた所もそのまま)。仕上がりの長さを変えると自動の選び方に戻ります。場面ごとにチェックで変えることもできます'
     )
   else if (!sameScenes)
     missing.push(
-      '保存した後で文字起こしが変わったため、場面の区切りが変わりました。前と同じ場面の判定・残す/落とすは引き継ぎ、新しい場面は簡易の点数にしています'
+      '保存した時と場面の区切りが変わりました(文字起こし・同期を直した など)。時刻がほぼ同じ場面だけ前の判定・残す/落とすを引き継ぎ、それ以外の場面は簡易の点数・自動の選び方にしています'
     )
 
   // 残した場面: 保存したもの。無ければ今の本編に残っている所から読み取る
@@ -111,13 +159,15 @@ export function restorePipelineFromProject(
   const fromTimeline = scenes
     .filter((sc) => keptSeconds(sc, spans) >= Math.max(0.5, (sc.end - sc.start) * 0.3))
     .map((sc) => sc.id)
-  const keptIds = saved?.keptIds ? saved.keptIds.filter((id) => sceneIds.has(id)) : fromTimeline
-  const keep: Record<string, boolean> = {}
-  if (saved) {
-    for (const [id, v] of Object.entries(saved.keep)) if (sceneIds.has(id)) keep[id] = v
-  } else if (project.clips.length > 0 && project.roughCutAuto) {
-    for (const sc of scenes) keep[sc.id] = keptIds.includes(sc.id)
-  }
+  const savedKept = new Set(saved?.keptIds ?? [])
+  const keptIds = saved?.keptIds
+    ? scenes.map((sc) => sc.id).filter((id) => savedKept.has(match.get(id) ?? ''))
+    : fromTimeline
+  const keep = saved ? remapSceneFlags(saved.keep, match) : {}
+  let timelineKeep: Record<string, boolean> = {}
+  if (saved) timelineKeep = remapSceneFlags(saved.timelineKeep ?? {}, match)
+  else if (project.clips.length > 0 && project.roughCutAuto)
+    for (const sc of scenes) timelineKeep[sc.id] = keptIds.includes(sc.id)
   const speechTelops = project.textOverlays.filter((o) => o.utteranceId).length
   const roughCut =
     project.clips.length > 0 && project.roughCutAuto
@@ -204,6 +254,8 @@ export function restorePipelineFromProject(
     judgeSource,
     hype,
     keep,
+    timelineKeep,
+    carriedTelops: saved?.carriedTelops ?? [],
     targetMinutes: saved?.targetMinutes ?? 0,
     editNote: saved?.editNote ?? '',
     effects,

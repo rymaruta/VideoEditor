@@ -3,6 +3,7 @@ import type { HypeMoment } from './structure/hype'
 import type { EpisodeKind } from './structure/kind'
 import type { SceneJudgement, SceneKind } from './structure/scenes'
 import type { PlacementMethod } from './sync/solve'
+import type { TextOverlay } from './types'
 
 /** 同期の結果の要約(自動編集の画面の「同期の結果」に出す数字)。同期の報告そのものは企画に残らない */
 export interface SyncSummary {
@@ -35,6 +36,11 @@ export interface AutoEditDecisions {
   judgeSource: 'ai' | 'heuristic'
   /** 画面で手で決めた残す / 落とす */
   keep: Record<string, boolean>
+  /**
+   * 古い形式の企画で、今の本編から読み取った残す / 落とす(手で決めたものとは別。場面を選ぶのには使うが、
+   * 手で削った区間は戻さない。仕上がりの長さを変えたら捨てて自動の選び方に戻す)
+   */
+  timelineKeep?: Record<string, boolean>
   /** 仕上がりの長さ(分。0 なら決めない)と編集の方針 */
   targetMinutes: number
   editNote: string
@@ -45,6 +51,11 @@ export interface AutoEditDecisions {
   effectChosen: string[]
   /** AI に演出テロップの提案を頼んだか(頼んでいれば、作り直しでは同じ提案を置き直す) */
   effectsAsked?: boolean
+  /**
+   * 人が直した演出テロップのうち提案の一覧に無いもの(時刻は共通の時刻)。場面を落とすと本編から消えるので、
+   * 覚えておいて、場面を戻したら置き直す
+   */
+  carriedTelops?: Omit<TextOverlay, 'id'>[]
   sync?: SyncSummary
 }
 
@@ -95,9 +106,25 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
       (s): s is Record<string, unknown> => isObj(s) && str(s.id) && num(s.start) && num(s.end)
     )
     .map((s) => ({ id: s.id as string, start: s.start as number, end: s.end as number }))
-  const keep: Record<string, boolean> = {}
-  if (isObj(raw.keep))
-    for (const [k, v] of Object.entries(raw.keep)) if (typeof v === 'boolean') keep[k] = v
+  const flags = (r: unknown): Record<string, boolean> => {
+    const out: Record<string, boolean> = {}
+    if (isObj(r)) for (const [k, v] of Object.entries(r)) if (typeof v === 'boolean') out[k] = v
+    return out
+  }
+  const keep = flags(raw.keep)
+  const timelineKeep = flags(raw.timelineKeep)
+  const carriedTelops = Array.isArray(raw.carriedTelops)
+    ? raw.carriedTelops.filter(
+        (o): o is Omit<TextOverlay, 'id'> =>
+          isObj(o) &&
+          str(o.effectId) &&
+          str(o.text) &&
+          num(o.startTime) &&
+          num(o.endTime) &&
+          o.endTime > o.startTime &&
+          isObj(o.style)
+      )
+    : []
   const effects = Array.isArray(raw.effects)
     ? raw.effects.filter(
         (e): e is EffectProposal =>
@@ -128,12 +155,14 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     ...(planJudgements ? { planJudgements } : {}),
     judgeSource: raw.judgeSource === 'ai' ? 'ai' : 'heuristic',
     keep,
+    ...(Object.keys(timelineKeep).length > 0 ? { timelineKeep } : {}),
     targetMinutes: num(raw.targetMinutes) ? Math.max(0, raw.targetMinutes) : 0,
     editNote: str(raw.editNote) ? raw.editNote : '',
     ...(Array.isArray(raw.keptIds) ? { keptIds: raw.keptIds.filter(str) } : {}),
     effects: effects.map((e) => ({ ...e, reason: str(e.reason) ? e.reason : '' })),
     effectChosen,
     ...(raw.effectsAsked === true ? { effectsAsked: true } : {}),
+    ...(carriedTelops.length > 0 ? { carriedTelops } : {}),
     ...(sync ? { sync } : {})
   }
 }

@@ -119,6 +119,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const editNote = usePipelineStore((s) => s.editNote)
   const restored = usePipelineStore((s) => s.restored)
+  const fromTimeline = usePipelineStore((s) => Object.keys(s.timelineKeep).length > 0)
 
   const [tab, setTab] = useState<CenterTab>('sync')
   const [reviewTab, setReviewTab] = useState<'open' | 'done'>('open')
@@ -344,6 +345,19 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 {restored.missing.map((m) => (
                   <li key={m}>{m}</li>
                 ))}
+                {fromTimeline && (
+                  <li>
+                    残す場面は今の本編から読み取っています。{' '}
+                    <button
+                      type="button"
+                      disabled={running}
+                      onClick={() => usePipelineStore.getState().clearTimelineKeep()}
+                    >
+                      自動の選び方に戻す
+                    </button>
+                    (「仮編集を作り直す」で反映。手で決めた場面はそのまま)
+                  </li>
+                )}
                 {!scan && (
                   <li>
                     工程を最初からやり直すには、ファイル &gt; 新しい回を作る…

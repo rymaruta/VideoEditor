@@ -15,6 +15,8 @@ import { STEPS, usePipelineStore } from '@renderer/store/pipelineStore'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { useSettingsStore } from '@renderer/store/settingsStore'
 import type { Project } from '@shared/types'
+import { spansOfClips } from '@shared/roughCut/overrides'
+import { matchScenesByTime } from '@renderer/lib/pipelineRestore'
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
@@ -82,12 +84,14 @@ function stubApi(): void {
   }
 }
 
-async function runEpisode(): Promise<void> {
+async function runEpisode(beforeRun?: () => void): Promise<void> {
   stubApi()
   effectAnswer = () => null
   useSettingsStore.setState({ aiProvider: 'off', episodeKind: 'location' } as never)
   useProjectStore.getState().newProject('第1回')
   await flush()
+  // 新しい回の画面・自動編集の画面で、始める前に決めたもの(仕上がりの長さ・方針)
+  beforeRun?.()
   usePipelineStore.setState({
     running: false,
     root: '/r',
@@ -291,7 +295,9 @@ describe('自動編集の後に保存して開き直す', () => {
     const after = usePipelineStore.getState()
     expect(after.restored?.legacy).toBe(true)
     expect(after.roughCut?.keptIds).toEqual(keptBefore)
-    expect(after.keep[s1]).toBe(true)
+    // 今の本編から読み取った場面は、手で決めたもの(keep)とは別の印
+    expect(after.timelineKeep[s1]).toBe(true)
+    expect(after.keep).toEqual({})
     expect(after.targetMinutes).toBe(0)
     await usePipelineStore.getState().rebuildRoughCut()
     expect(usePipelineStore.getState().steps.cut.state).toBe('done')
@@ -391,5 +397,159 @@ describe('自動編集の後に保存して開き直す', () => {
     expect(
       STEPS.filter((x) => x.id !== 'ingest').every((x) => s.steps[x.id].state === 'wait')
     ).toBe(true)
+  })
+})
+
+const mainDuration = (): number =>
+  useProjectStore
+    .getState()
+    .project.clips.reduce((t, c) => t + Math.max(0, c.outPoint - c.inPoint) / (c.speed || 1), 0)
+
+/** タイムラインの時刻を共通の時刻にする(今の本編の区間から) */
+function commonTimeOf(t: number): number {
+  const project = useProjectStore.getState().project
+  for (const sp of spansOfClips(project.clips, project.multicam!))
+    if (t >= sp.timeline - 1e-6 && t < sp.timeline + (sp.end - sp.start))
+      return sp.start + (t - sp.timeline)
+  throw new Error(`本編に無い時刻 ${t}`)
+}
+
+describe('監査で見つかった不具合(c5fdddd)', () => {
+  it('新しい回で決めた仕上がりの長さと方針を、すぐ始めても捨てない', async () => {
+    await runEpisode(() => {
+      usePipelineStore.getState().setTargetMinutes(1.5)
+      usePipelineStore.getState().setEditNote('笑いを優先')
+    })
+    const s = usePipelineStore.getState()
+    expect(s.targetMinutes).toBe(1.5)
+    expect(s.editNote).toBe('笑いを優先')
+    expect(s.roughCut!.dropped).toBeGreaterThan(0)
+    expect(s.roughCut!.duration).toBeLessThan(1.5 * 60 + 15)
+    expect(useProjectStore.getState().project.autoEdit?.targetMinutes).toBe(1.5)
+    expect(useProjectStore.getState().project.autoEdit?.editNote).toBe('笑いを優先')
+  })
+
+  for (const legacy of [false, true])
+    it(`手で詰めた本編が、開き直して作り直しても戻らない(${legacy ? '古い形式' : '新しい形式'})`, async () => {
+      await runEpisode()
+      const clips = useProjectStore.getState().project.clips
+      const longest = clips.reduce((a, c) =>
+        c.outPoint - c.inPoint > a.outPoint - a.inPoint ? c : a
+      )
+      const full = mainDuration()
+      useProjectStore.getState().updateClipTrim(longest.id, longest.inPoint, longest.outPoint - 3)
+      const trimmed = mainDuration()
+      expect(full - trimmed).toBeCloseTo(3, 1)
+      saveAndReopen({ legacy })
+      await flush()
+      await usePipelineStore.getState().rebuildRoughCut()
+      expect(usePipelineStore.getState().steps.cut.state).toBe('done')
+      expect(Math.abs(mainDuration() - trimmed)).toBeLessThan(0.2)
+    })
+
+  it('古い形式の企画でも、仕上がりの長さを変えると自動の選び方に戻る(手で変更と出さない)', async () => {
+    await runEpisode()
+    const full = usePipelineStore.getState().roughCut!
+    expect(full.dropped).toBe(0)
+    saveAndReopen({ legacy: true })
+    await flush()
+    // 今の本編から読み取った場面は「手で変更」ではない
+    expect(usePipelineStore.getState().keep).toEqual({})
+    // 何も変えずに作り直したら同じ場面
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(usePipelineStore.getState().roughCut!.keptIds).toEqual(full.keptIds)
+    expect(usePipelineStore.getState().keep).toEqual({})
+    // 作り直して保存した企画を開き直しても、長さを変えれば効く
+    saveAndReopen()
+    await flush()
+    usePipelineStore.getState().setTargetMinutes(1)
+    await usePipelineStore.getState().rebuildRoughCut()
+    const after = usePipelineStore.getState()
+    expect(after.roughCut!.dropped).toBeGreaterThan(0)
+    expect(after.roughCut!.duration).toBeLessThan(full.duration - 30)
+    expect(after.keep).toEqual({})
+  })
+
+  it('古い形式の企画で「自動の選び方に戻す」と、読み取った場面をやめる(企画にも残さない)', async () => {
+    await runEpisode()
+    saveAndReopen({ legacy: true })
+    await flush()
+    expect(Object.keys(usePipelineStore.getState().timelineKeep).length).toBeGreaterThan(0)
+    usePipelineStore.getState().clearTimelineKeep()
+    expect(usePipelineStore.getState().timelineKeep).toEqual({})
+    expect(useProjectStore.getState().project.autoEdit?.timelineKeep).toBeUndefined()
+  })
+
+  it('人が直した演出テロップは、その場面を一度落としても、場面を戻せば戻る', async () => {
+    await runEpisode()
+    await placeAiEffectsAndEditOne()
+    saveAndReopen({ legacy: true })
+    await flush()
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(effectTelops().map((o) => o.text)).toContain('人が直した一言')
+    const edited = useProjectStore
+      .getState()
+      .project.textOverlays.find((o) => o.text === '人が直した一言')!
+    const at = commonTimeOf(edited.startTime + 0.05)
+    const scene = usePipelineStore.getState().scenes.find((sc) => at >= sc.start && at < sc.end)!
+    usePipelineStore.getState().setKeep(scene.id, false)
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(effectTelops().map((o) => o.text)).not.toContain('人が直した一言')
+    // 保存して開き直しても覚えている
+    saveAndReopen()
+    await flush()
+    usePipelineStore.getState().setKeep(scene.id, true)
+    await usePipelineStore.getState().rebuildRoughCut()
+    const back = effectTelops().find((o) => o.text === '人が直した一言')
+    expect(back?.edited).toBe(true)
+    // 二重に置かない
+    await usePipelineStore.getState().rebuildRoughCut()
+    expect(effectTelops().filter((o) => o.text === '人が直した一言')).toHaveLength(1)
+  })
+
+  it('場面の番号がずれても、判定と残す/落とすは時刻の重なる場面に付く', async () => {
+    await runEpisode()
+    const s1 = await keepOneDroppedByHand()
+    const before = usePipelineStore.getState()
+    const keptBefore = before.roughCut!.keptIds
+    const scene1 = before.scenes.find((sc) => sc.id === s1)!
+    const saved = JSON.parse(JSON.stringify(useProjectStore.getState().project)) as Project
+    const ae = saved.autoEdit!
+    const shift = (id: string): string => `s${Number(id.slice(1)) + 1}`
+    ae.scenes = [
+      { id: 's1', start: -60, end: -30 },
+      ...ae.scenes.map((sc) => ({ ...sc, id: shift(sc.id) }))
+    ]
+    ae.keep = Object.fromEntries(Object.entries(ae.keep).map(([k, v]) => [shift(k), v]))
+    ae.judgements = ae.judgements.map((j) => ({ ...j, sceneId: shift(j.sceneId) }))
+    ae.keptIds = ae.keptIds!.map(shift)
+    useProjectStore.getState().newProject('別の回')
+    useProjectStore.getState().loadProject(saved, '/r/第1回.veproj')
+    await flush()
+    const after = usePipelineStore.getState()
+    expect(after.keep).toEqual({ [s1]: true })
+    const kept = after.scenes.find((sc) => sc.id === s1)!
+    expect([kept.start, kept.end]).toEqual([scene1.start, scene1.end])
+    expect(after.roughCut?.keptIds).toEqual(keptBefore)
+    expect(after.judgements.map((j) => j.score)).toEqual(before.judgements.map((j) => j.score))
+    expect(after.restored?.missing.join('')).toContain('場面の区切り')
+  })
+})
+
+describe('matchScenesByTime', () => {
+  it('時刻がほぼ同じ場面だけを対応させる(ID は見ない)', () => {
+    const prev = [
+      { id: 's1', start: 0, end: 100 },
+      { id: 's2', start: 100, end: 200 },
+      { id: 's3', start: 200, end: 300 }
+    ]
+    const next = [
+      { id: 's1', start: -50, end: 0 },
+      { id: 's2', start: 0, end: 98 },
+      { id: 's3', start: 98, end: 150 },
+      { id: 's4', start: 150, end: 300 }
+    ]
+    const m = matchScenesByTime(prev, next)
+    expect([...m.entries()]).toEqual([['s2', 's1']])
   })
 })

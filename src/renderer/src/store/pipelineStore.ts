@@ -61,7 +61,11 @@ import {
   placedAutoTelops
 } from '../lib/roughCutPlan'
 import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPlacement'
-import { restorePipelineFromProject } from '../lib/pipelineRestore'
+import {
+  matchScenesByTime,
+  remapSceneFlags,
+  restorePipelineFromProject
+} from '../lib/pipelineRestore'
 import type { AutoEditDecisions, SyncSummary } from '@shared/autoEdit'
 import { heuristicJudgements } from '@shared/structure/scenes'
 import {
@@ -197,6 +201,13 @@ interface PipelineState {
   hype: HypeMoment[]
   /** 画面で手で決めた「残す / 落とす」 */
   keep: Record<string, boolean>
+  /**
+   * 古い形式の企画で、今の本編から読み取った「残す / 落とす」。場面を選ぶのには使うが、手で決めたもの
+   * (`keep`)と違い、その場面の中の手で削った区間は戻さない。仕上がりの長さを変えたら捨てる
+   */
+  timelineKeep: Record<string, boolean>
+  /** 人が直した演出テロップで提案の一覧に無いもの(共通の時刻)。場面を落として戻したときに置き直す */
+  carriedTelops: Omit<TextOverlay, 'id'>[]
   /** 場面を切ったときの番組の種類(企画に覚えて、開き直したときに同じ場面に切り直す) */
   sceneKind: EpisodeKind | null
   /** 演出テロップの提案(AI)と、置くと決めたもの */
@@ -229,6 +240,8 @@ interface PipelineState {
   /** ログに1行足す(画面の操作の結果を残す) */
   addLog: (text: string) => void
   setKeep: (sceneId: string, keep: boolean | undefined) => void
+  /** 今の本編から読み取った場面(古い形式の企画)をやめて、自動の選び方に戻す(手で決めた場面はそのまま) */
+  clearTimelineKeep: () => void
   /** 構成の判定はそのままに、カット・アングル・仮編集を作り直す(残す/落とす・長さを変えたとき) */
   rebuildRoughCut: () => Promise<void>
   /** ショート(縦型)づくりの進み具合 */
@@ -958,12 +971,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       ...(s.planJudgements ? { planJudgements: s.planJudgements } : {}),
       judgeSource: s.judgeSource,
       keep: s.keep,
+      ...(Object.keys(s.timelineKeep).length > 0 ? { timelineKeep: s.timelineKeep } : {}),
       targetMinutes: s.targetMinutes,
       editNote: s.editNote,
       ...(s.roughCut ? { keptIds: s.roughCut.keptIds } : {}),
       effects: s.effects,
       effectChosen: s.effectChosen,
       ...(s.steps.effects.state === 'done' ? { effectsAsked: true } : {}),
+      ...(s.carriedTelops.length > 0 ? { carriedTelops: s.carriedTelops } : {}),
       ...(sync ? { sync } : {})
     }
     useProjectStore.getState().setAutoEdit(decisions)
@@ -1010,6 +1025,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       planJudgements: null,
       judgeSource: source,
       keep: {},
+      timelineKeep: {},
       hype: hype ?? [],
       sceneKind: kind
     })
@@ -1045,12 +1061,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           )
         : project.cutOverrides,
       get().scenes,
+      // 人が手で決めたものだけ(今の本編から読み取った場面で、手で削った区間を戻さない)
       get().keep
     )
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
       targetSec: get().targetMinutes * 60,
-      keep: get().keep,
+      keep: { ...get().timelineKeep, ...get().keep },
       styles: usePresetStore.getState().captionPresets,
       speechLook: speechLook(
         useSettingsStore.getState().speechTelopLook,
@@ -1304,17 +1321,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     // 人が直したものは必ず(AI の提案は頼み直すと ID が変わり、直した文字が引き継がれなかった)。
     // 直していない AI の提案は、新しい AI の提案が無いとき(AI を使わない・失敗した・古い企画で
     // 提案の一覧が無い)だけ。自動で決まる種類(笑い・章・時刻・吹き出し・人物紹介)は毎回作り直すので写さない
-    const carried = carriedEffectTelops(
+    const { placed: carried, remember } = carriedEffectTelops(
       useProjectStore.getState().project,
       get().effects,
       freshAi,
-      plan.cut.spans
+      plan.cut.spans,
+      get().carriedTelops
     )
     if (carried.length > 0)
       log(
         `演出テロップ: 今の提案に無い ${carried.length} 枚(人が直したもの・前の提案)を置き直しました`
       )
-    set({ lastSpans: plan.cut.spans, speechTelops: telops })
+    set({ lastSpans: plan.cut.spans, speechTelops: telops, carriedTelops: remember })
     useProjectStore
       .getState()
       .applyRoughCut(
@@ -1366,6 +1384,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     judgeSource: null,
     hype: [],
     keep: {},
+    timelineKeep: {},
+    carriedTelops: [],
     sceneKind: null,
     roughCut: null,
     telopReviews: [],
@@ -1392,6 +1412,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         planJudgements: r.planJudgements,
         judgeSource: r.judgeSource,
         keep: r.keep,
+        timelineKeep: r.timelineKeep,
+        carriedTelops: r.carriedTelops,
         sceneKind: project.autoEdit?.kind ?? kind,
         hype: r.hype,
         targetMinutes: r.targetMinutes,
@@ -1477,7 +1499,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         )
     },
     setTargetMinutes: (minutes) => {
-      set({ targetMinutes: Math.max(0, minutes) })
+      const next = Math.max(0, minutes)
+      // 長さを変えたら、今の本編から読み取った場面(古い形式の企画)はやめて自動の選び方に戻す
+      // (読み取った場面が全部「残す」だと、長さが効かなかった)。手で決めた場面はそのまま
+      set((s) => (s.targetMinutes === next ? {} : { targetMinutes: next, timelineKeep: {} }))
       persistDecisions()
     },
     setEditNote: (note) => {
@@ -1491,6 +1516,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         else next[sceneId] = keep
         return { keep: next }
       })
+      persistDecisions()
+    },
+    clearTimelineKeep: () => {
+      set({ timelineKeep: {} })
       persistDecisions()
     },
     shorts: { state: 'idle', done: 0, total: 0, files: [] },
@@ -1610,14 +1639,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             await activityOf(project, project.multicam)
           )
           const scenes = scenesFor(project, project.multicam, { kind, hype })
-          // 切り直した場面に、読み取った残す/落とすを当て直す(同じ ID の場面だけ)
-          const ids = new Set(scenes.map((sc) => sc.id))
-          const keep = Object.fromEntries(Object.entries(get().keep).filter(([id]) => ids.has(id)))
+          // 切り直した場面に、残す/落とすを当て直す(時刻がほぼ同じ場面だけ。ID は番号なので別の場面を指す)
+          const match = matchScenesByTime(get().scenes, scenes)
           set({
             hype,
             scenes,
             judgements: heuristicJudgements(scenes, kind),
-            keep,
+            keep: remapSceneFlags(get().keep, match),
+            timelineKeep: remapSceneFlags(get().timelineKeep, match),
             sceneKind: kind
           })
         }
@@ -1669,10 +1698,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgeSource: null,
         hype: [],
         keep: {},
+        timelineKeep: {},
+        carriedTelops: [],
         sceneKind: null,
-        // 仕上がりの長さ・方針は企画ごと(開いた企画に覚えていれば、読み直すときに戻す)
-        targetMinutes: 0,
-        editNote: '',
+        // 仕上がりの長さ・方針は人が入れたものなので、ここでは捨てない(新しい回の画面・自動編集の画面で
+        // 決めてすぐ始めると、始めるときにここで捨てていた)。企画を替えたときだけ入れ替える
         roughCut: null,
         telopReviews: [],
         colorIssues: [],
@@ -1716,6 +1746,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         judgeSource: null,
         hype: [],
         keep: {},
+        timelineKeep: {},
+        carriedTelops: [],
         sceneKind: null,
         roughCut: null,
         telopReviews: [],
@@ -2099,34 +2131,59 @@ function syncSummaryOf(report: SyncReport, project: Project): SyncSummary {
 /** AI に頼んで決まる演出テロップの ID(自動で決まる種類は、作り直しのたびに同じ ID で作り直す) */
 const AUTO_EFFECT_ID = /^(laugh|chapter|clock|bubble|name)-/
 
+/** タイムラインの時刻 = 共通の時刻 の対応(演出テロップを共通の時刻で覚えるのに使う) */
+const COMMON_TIME: RoughCut['spans'] = [{ timeline: -1e7, start: -1e7, end: 1e7 }]
+
 /**
- * 作り直しで、今置いてある演出テロップのうち提案の一覧に無いものを、新しい仮編集の位置へ写したもの。
- * 人が直したものは必ず写す。直していない AI の提案は、新しい AI の提案が無いときだけ写す
- * (古い形式の企画・AI を使わない設定・AI が失敗した)。人が消したものは写さない
+ * 作り直しで、今置いてある演出テロップのうち提案の一覧に無いものを、新しい仮編集の位置へ写したもの
+ * (`placed`)。人が直したものは必ず写す。直していない AI の提案は、新しい AI の提案が無いときだけ写す
+ * (古い形式の企画・AI を使わない設定・AI が失敗した)。人が消したものは写さない。
+ * 人が直したものは共通の時刻で覚えておき(`remember`)、場面を落として本編から消えても、場面を戻したら
+ * 置き直す(今のタイムラインにあるものしか写さないと、一度落とした場面のものは二度と戻らなかった)
  */
 function carriedEffectTelops(
   project: Project,
   proposals: readonly EffectProposal[],
   freshAi: boolean,
-  to: RoughCut['spans']
-): Omit<TextOverlay, 'id'>[] {
+  to: RoughCut['spans'],
+  remembered: readonly Omit<TextOverlay, 'id'>[]
+): { placed: Omit<TextOverlay, 'id'>[]; remember: Omit<TextOverlay, 'id'>[] } {
   const info = project.multicam
-  if (!info || project.clips.length === 0) return []
+  if (!info || project.clips.length === 0) return { placed: [], remember: [...remembered] }
   const listed = new Set(proposals.map((p) => p.id))
   const dismissed = new Set(project.dismissedTelops ?? [])
+  const usable = (o: { effectId?: string }): boolean =>
+    Boolean(o.effectId) && !listed.has(o.effectId!) && !dismissed.has(`e:${o.effectId}`)
   const carry = project.textOverlays.filter(
+    (o) => usable(o) && (o.edited || (!freshAi && !AUTO_EFFECT_ID.test(o.effectId!)))
+  )
+  const current = spansOfClips(project.clips, info)
+  const onTimeline = new Set(project.textOverlays.map((o) => o.effectId).filter(Boolean))
+  // 覚えているもののうち、場面を落として本編から消えたもの(今の本編に時刻が無い)。
+  // 本編にある所で見当たらないもの(取り消した・別の操作で外れた)は戻さない
+  const lost = remembered.filter(
     (o) =>
-      o.effectId &&
-      !listed.has(o.effectId) &&
-      !dismissed.has(`e:${o.effectId}`) &&
-      (o.edited || (!freshAi && !AUTO_EFFECT_ID.test(o.effectId)))
+      usable(o) &&
+      !onTimeline.has(o.effectId) &&
+      mapTelopsToTimeline([o], COMMON_TIME, current).length === 0
   )
-  if (carry.length === 0) return []
-  return mapTelopsToTimeline(
-    carry.map((o) => omitId(o)),
-    spansOfClips(project.clips, info),
-    to
-  )
+  const placed = [
+    ...mapTelopsToTimeline(
+      carry.map((o) => omitId(o)),
+      current,
+      to
+    ),
+    ...mapTelopsToTimeline(lost, COMMON_TIME, to)
+  ]
+  const remember = [
+    ...mapTelopsToTimeline(
+      carry.filter((o) => o.edited).map((o) => omitId(o)),
+      current,
+      COMMON_TIME
+    ),
+    ...lost
+  ]
+  return { placed, remember }
 }
 
 function omitId(o: TextOverlay): Omit<TextOverlay, 'id'> {
@@ -2194,6 +2251,8 @@ onProjectSwitch((switchKind) => {
   // 新しいプロジェクトへ書き込まれるため、切替時はまず処理を中止する。
   if (pipeline.running) pipeline.cancel()
   pipeline.resetResults()
+  // 仕上がりの長さ・方針は企画ごと。前の企画のものは持ち越さない(開いた企画に覚えていれば、読み直すときに戻す)
+  usePipelineStore.setState({ targetMinutes: 0, editNote: '' })
   // 別の企画を開いたら、前の回の収録フォルダの読み取り(素材の整理・同期にかけた素材)も捨てる。
   // 残すと、開いた企画の取り込みの欄と食い違う(タブに前の回のカメラが並ぶ)。
   // 新しい回では残す(「新しい回を作る」で読んだフォルダを、作った企画で使う)
