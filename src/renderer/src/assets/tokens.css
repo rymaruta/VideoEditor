@@ -54,7 +54,12 @@
   --ve-primary-soft: #2b2312; /* ink 10.4 */
   --ve-primary-ink: #ffcb6b; /* 面1 12.1 */
   --ve-primary-line: rgba(255, 178, 36, 0.38);
-  --ve-selection-fill: rgba(255, 178, 36, 0.16); /* 選んだ範囲・行(今の rgba(245,165,36,…) を寄せる) */
+  --ve-selection-fill: rgba(
+    255,
+    178,
+    36,
+    0.16
+  ); /* 選んだ範囲・行(今の rgba(245,165,36,…) を寄せる) */
   --ve-selection-ring: inset 0 0 0 1.5px var(--ve-primary);
 
   /* 危険(取り返せない操作・失敗) */
@@ -139,6 +144,28 @@
   --ve-wave-music-rms: #9b86e0;
   --ve-wave-video-peak: #5c7cb3;
   --ve-wave-video-rms: #a9c3ff;
+
+  /* タイムラインの旧い見た目(Graphite 2)の名札・ワイプ・自動の地。main.css の :root から移した */
+  --ve-trk-video-selected: #34558a;
+  --ve-trk-pip: #1e2d47;
+  --ve-trk-pip-line: #2f4672;
+  --ve-trk-pip-ink: #c9d8fa;
+  --ve-trk-auto: #2a2240;
+  --ve-trk-auto-line: #43386a;
+  --ve-trk-auto-ink: #cdb9ff;
+  --ve-tag-video: #1e2d47;
+  --ve-tag-video-ink: #a9c3ff;
+  --ve-tag-audio: #173628;
+  --ve-tag-audio-ink: #8fe0b8;
+  --ve-tag-telop: #3d1f31;
+  --ve-tag-telop-ink: #f6a6cc;
+  --ve-tag-auto: #2a2240;
+  --ve-tag-auto-ink: #cdb9ff;
+  --ve-wave-auto-peak: #4b3f7d;
+  --ve-wave-auto-rms: #9b86e0; /* 紫の地(#2A2240)の上で 4.9:1 */
+  /* 波形の既定(レーンの色が無い所。Waveform.tsx が読む) */
+  --ve-wave-peak: var(--ve-wave-dialog-peak);
+  --ve-wave-rms: var(--ve-wave-dialog-rms);
 
   /* 話者(テロップの縁・印・文字起こしの名前。最大 8 人)— 今のまま */
   --ve-speaker-0: #f6a6cc;
@@ -312,85 +339,4 @@
     --ve-dur-exit: 0ms;
     --ve-motion-dialog-from: none;
   }
-}
-
-/* =====================================================================
-   移行用の別名(旧名 → 新名)。旧名の使用 535 か所(--text-1/2/3・--border(-soft)・
-   --bg-elevated-*・--radius-sm/md・--accent-1 など)と --ve-* の旧名を、直すまでの間
-   新しい値へつなぐ。直し終わったら、この塊と base.css の --ev-* を消す。
-   ===================================================================== */
-:root {
-  /* --ve-* の旧名 */
-  --ve-panel: var(--ve-surface-1);
-  --ve-panel-top: var(--ve-surface-2);
-  --ve-panel-fill: var(--ve-surface-1-fill);
-  --ve-panel-shadow: var(--ve-shadow-panel);
-  --ve-field: var(--ve-surface-sunken);
-  --ve-raised: var(--ve-surface-3);
-  --ve-raised-fill: var(--ve-surface-3-fill);
-  --ve-raised-hover: var(--ve-surface-3-hover);
-  --ve-line: var(--ve-border-subtle);
-  --ve-line-field: var(--ve-border);
-  --ve-line-control: var(--ve-border);
-  --ve-line-control-hover: var(--ve-border-hover);
-  --ve-line-strong: var(--ve-border-strong);
-  --ve-text: var(--ve-text-1);
-  --ve-accent: var(--ve-primary);
-  --ve-accent-fill: var(--ve-primary-fill);
-  --ve-accent-hover: var(--ve-primary-hover);
-  --ve-accent-press: var(--ve-primary-press);
-  --ve-accent-soft: var(--ve-primary-soft);
-  --ve-accent-ink: var(--ve-primary-ink);
-  --ve-accent-line: var(--ve-primary-line);
-  --ve-accent-glow: var(--ve-glow-primary);
-  --ve-on-accent: var(--ve-text-on-primary);
-  --ve-ok: var(--ve-success);
-  --ve-ok-soft: var(--ve-success-soft);
-  --ve-ok-ink: var(--ve-success-ink);
-  --ve-radius-clip: var(--ve-radius-sm);
-  --ve-radius-control: var(--ve-radius-md);
-  --ve-radius-card: var(--ve-radius-xl);
-  --ve-ease: var(--ve-ease-out);
-  --ve-dur: var(--ve-dur-base);
-  --ve-trk-video: var(--ve-track-video-clip);
-  --ve-trk-video-line: var(--ve-track-video-clip-line);
-  --ve-trk-video-ink: var(--ve-track-video-clip-ink);
-  --ve-trk-telop: var(--ve-track-telop-clip);
-  --ve-trk-telop-line: var(--ve-track-telop-clip-line);
-  --ve-trk-telop-ink: var(--ve-track-telop-clip-ink);
-  --ve-trk-audio: var(--ve-track-dialog-clip);
-  --ve-trk-audio-line: var(--ve-track-dialog-clip-line);
-  --ve-trk-audio-ink: var(--ve-track-dialog-clip-ink);
-  /* timelineG3.css の --g3-* */
-  --g3-mono: var(--ve-font-mono);
-  --g3-line: var(--ve-border-subtle);
-  --g3-select-ring: var(--ve-selection-ring);
-  /* main.css の旧い短い名前 */
-  --bg: var(--ve-bg);
-  --bg-elevated: var(--ve-surface-1);
-  --bg-elevated-2: var(--ve-surface-sunken);
-  --bg-elevated-3: var(--ve-surface-3);
-  --border: var(--ve-border);
-  --border-soft: var(--ve-border-subtle);
-  --text-1: var(--ve-text-1);
-  --text-2: var(--ve-text-2);
-  --text-3: var(--ve-text-3);
-  --text-dim: var(--ve-text-3);
-  --accent: var(--ve-primary);
-  --accent-1: var(--ve-primary);
-  --accent-2: var(--ve-primary-press);
-  --accent-ink: var(--ve-primary-ink);
-  --accent-soft: var(--ve-primary-soft);
-  --on-accent: var(--ve-text-on-primary);
-  --danger: var(--ve-danger);
-  --danger-soft: var(--ve-danger-soft);
-  --danger-ink: var(--ve-danger-ink);
-  --success: var(--ve-success);
-  --warn: var(--ve-warning); /* 今は琥珀(=主)。注意は黄へ分ける */
-  --radius-sm: var(--ve-radius-md);
-  --radius-md: var(--ve-radius-md);
-  --radius-lg: var(--ve-radius-xl);
-  --shadow-float: var(--ve-shadow-popover);
-  --font-sans: var(--ve-font-sans);
-  --font-mono: var(--ve-font-mono);
 }

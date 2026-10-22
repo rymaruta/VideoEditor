@@ -30,8 +30,8 @@ export function StepIcon({
     case 'done':
       return (
         <svg {...common}>
-          <circle cx="12" cy="12" r="10" fill="var(--ve-ok-soft)" />
-          <path d="m7.5 12 3 3 6-6.5" fill="none" stroke="var(--ve-ok)" strokeWidth="2.4" />
+          <circle cx="12" cy="12" r="10" fill="var(--ve-success-soft)" />
+          <path d="m7.5 12 3 3 6-6.5" fill="none" stroke="var(--ve-success)" strokeWidth="2.4" />
         </svg>
       )
     case 'run': {
@@ -42,11 +42,11 @@ export function StepIcon({
       const y = 12 - 9 * Math.cos(a)
       return (
         <svg {...common}>
-          <circle cx="12" cy="12" r="9" fill="none" stroke="var(--ve-line-field)" strokeWidth="3" />
+          <circle cx="12" cy="12" r="9" fill="none" stroke="var(--ve-border)" strokeWidth="3" />
           <path
             d={`M12 3A9 9 0 ${frac > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}`}
             fill="none"
-            stroke="var(--ve-accent)"
+            stroke="var(--ve-primary)"
             strokeWidth="3"
             strokeLinecap="round"
           />
@@ -61,7 +61,7 @@ export function StepIcon({
             cy="12"
             r="9"
             fill="none"
-            stroke="var(--ve-line-strong)"
+            stroke="var(--ve-border-strong)"
             strokeWidth="2"
           />
           <path d="M8 12h8" stroke="var(--ve-text-3)" strokeWidth="2" />
@@ -87,7 +87,7 @@ export function StepIcon({
             cy="12"
             r="8.5"
             fill="none"
-            stroke="var(--ve-line-strong)"
+            stroke="var(--ve-border-strong)"
             strokeWidth="2"
             strokeDasharray="3 3"
           />

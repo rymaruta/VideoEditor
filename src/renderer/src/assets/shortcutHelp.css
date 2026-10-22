@@ -8,9 +8,9 @@
    DialogHeader)。ここは中身の格子だけ */
 .shortcut-help-scheme {
   font-size: 11px;
-  color: var(--ve-accent-ink);
-  background: var(--ve-accent-soft);
-  border: 1px solid var(--ve-accent-line);
+  color: var(--ve-primary-ink);
+  background: var(--ve-primary-soft);
+  border: 1px solid var(--ve-primary-line);
   border-radius: 999px;
   padding: 1px 8px;
 }
@@ -26,7 +26,7 @@
   color: var(--ve-text-3);
   margin: 0 0 6px;
   padding-bottom: 4px;
-  border-bottom: 1px solid var(--ve-line);
+  border-bottom: 1px solid var(--ve-border-subtle);
 }
 .shortcut-help-section dl {
   margin: 0;
@@ -55,13 +55,13 @@
   min-width: 20px;
   padding: 1px 6px;
   text-align: center;
-  font-family: var(--font-mono);
+  font-family: var(--ve-font-mono);
   font-size: 11px;
-  color: var(--ve-text);
-  background-image: var(--ve-raised-fill);
-  border: 1px solid var(--ve-line-control);
+  color: var(--ve-text-1);
+  background-image: var(--ve-surface-3-fill);
+  border: 1px solid var(--ve-border);
   border-bottom-width: 2px;
-  border-radius: var(--ve-radius-control);
+  border-radius: var(--ve-radius-md);
 }
 .shortcut-help-or {
   margin: 0 3px;
@@ -101,7 +101,7 @@
   margin-left: -5px;
   padding: 0;
   border: 0;
-  background: var(--ve-ok);
+  background: var(--ve-success);
   clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
   cursor: pointer;
   z-index: 2;

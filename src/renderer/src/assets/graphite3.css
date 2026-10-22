@@ -6,7 +6,7 @@
 
 /* ---------- 地と文字 ---------- */
 body {
-  font-family: var(--font-sans);
+  font-family: var(--ve-font-sans);
   line-height: 1.45;
   background:
     radial-gradient(900px 520px at 8% -8%, rgba(124, 92, 255, 0.16), transparent 62%),
@@ -23,32 +23,32 @@ kbd,
 .mono,
 .time-label,
 input[type='number'] {
-  font-family: var(--font-mono);
+  font-family: var(--ve-font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 /* ---------- ボタン ---------- */
 button {
   background-color: transparent;
-  background-image: var(--ve-raised-fill);
-  border-color: var(--ve-line-control);
+  background-image: var(--ve-surface-3-fill);
+  border-color: var(--ve-border);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 button:hover:not(:disabled) {
   background-image: linear-gradient(180deg, #32385a, #262b45);
-  border-color: var(--ve-line-control-hover);
+  border-color: var(--ve-border-hover);
 }
 button:active:not(:disabled) {
   background-image: none;
-  background-color: var(--ve-field);
+  background-color: var(--ve-surface-sunken);
 }
 .primary-button,
 .primary-button:hover:not(:disabled),
 .primary-button:active:not(:disabled) {
-  background-color: var(--ve-accent);
-  background-image: var(--ve-accent-fill);
+  background-color: var(--ve-primary);
+  background-image: var(--ve-primary-fill);
   border-color: transparent;
-  color: var(--ve-on-accent);
+  color: var(--ve-text-on-primary);
   /* 主ボタンの定義はここだけ(tokens.css)。光るのは上の帯の「書き出す」1 つだけ(.workflow-export) */
   box-shadow: var(--ve-shadow-primary);
 }
@@ -81,9 +81,9 @@ button.icon-button:disabled {
 /* 素材の読み込みは控えめのまま(main.css の .media-import-buttons と同じ考え) */
 .media-import-buttons .primary-button,
 .media-import-buttons .primary-button:hover:not(:disabled) {
-  background-image: var(--ve-raised-fill);
-  color: var(--ve-text);
-  border-color: var(--ve-line-control);
+  background-image: var(--ve-surface-3-fill);
+  color: var(--ve-text-1);
+  border-color: var(--ve-border);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   filter: none;
 }
@@ -102,7 +102,7 @@ button.icon-button:disabled {
   background-image: none;
   background-color: #1e2236;
   border-color: transparent;
-  color: var(--ve-text);
+  color: var(--ve-text-1);
 }
 .icon-button.active,
 .icon-button.active:hover:not(:disabled),
@@ -110,13 +110,13 @@ button.icon-button:disabled {
   background-color: transparent;
   background-image: linear-gradient(180deg, rgba(255, 178, 36, 0.2), rgba(255, 138, 31, 0.1));
   border-color: transparent;
-  color: var(--ve-accent-ink);
+  color: var(--ve-primary-ink);
   box-shadow:
-    inset 0 0 0 1px var(--ve-accent-line),
+    inset 0 0 0 1px var(--ve-primary-line),
     0 0 12px rgba(255, 160, 40, 0.12);
 }
 .toggle-chip.active {
-  background-image: var(--ve-accent-fill);
+  background-image: var(--ve-primary-fill);
 }
 input,
 select,
@@ -165,14 +165,14 @@ textarea {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--ve-ok);
+  background: var(--ve-success);
   box-shadow: 0 0 0 3px rgba(76, 195, 138, 0.15);
 }
 .workflow-bar-saved.dirty {
-  color: var(--ve-accent-ink);
+  color: var(--ve-primary-ink);
 }
 .workflow-bar-saved.dirty .workflow-bar-saved-dot {
-  background: var(--ve-accent);
+  background: var(--ve-primary);
   box-shadow: 0 0 0 3px rgba(255, 178, 36, 0.16);
 }
 .workflow-steps {
@@ -233,16 +233,16 @@ textarea {
 .split-handle:hover,
 .split-handle.active {
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--ve-line-strong);
+  box-shadow: inset 0 0 0 1px var(--ve-border-strong);
   border-radius: 3px;
 }
 .frame {
-  background: var(--ve-panel-fill);
+  background: var(--ve-surface-1-fill);
   border-radius: 12px;
-  box-shadow: var(--ve-panel-shadow);
+  box-shadow: var(--ve-shadow-panel);
 }
 .frame-monitor {
-  background: var(--ve-panel-fill);
+  background: var(--ve-surface-1-fill);
 }
 /* パネルの見出し: 36px のごく薄い明るさの帯 */
 .panel-tabs {
@@ -270,7 +270,7 @@ textarea {
   background-color: transparent;
   background-image: linear-gradient(180deg, #2a2f45, #20243a);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  color: var(--ve-text);
+  color: var(--ve-text-1);
 }
 .media-bin-tab,
 .media-bin-tab:hover:not(:disabled) {
@@ -292,9 +292,9 @@ textarea {
 .telop-style-dialog,
 .new-episode-dialog,
 .look-picker {
-  background: var(--ve-panel-fill);
+  background: var(--ve-surface-1-fill);
   border-color: rgba(150, 165, 255, 0.14);
-  box-shadow: var(--ve-panel-shadow);
+  box-shadow: var(--ve-shadow-panel);
 }
 .dialog-titlebar,
 .dialog-footer,
@@ -339,7 +339,7 @@ textarea {
 }
 /* 選んだテロップ: 琥珀の枠と「T1 · 話者」の札 */
 .overlay-text.overlay-hitbox-only.selected {
-  box-shadow: 0 0 0 1.5px var(--ve-accent);
+  box-shadow: 0 0 0 1.5px var(--ve-primary);
   border-radius: 3px;
 }
 .overlay-text.overlay-hitbox-only .overlay-selected-tag {
@@ -349,14 +349,14 @@ textarea {
   margin-bottom: 3px;
   padding: 1px 6px;
   border-radius: 3px;
-  font-family: var(--font-sans);
+  font-family: var(--ve-font-sans);
   font-size: 11px;
   font-weight: 700; /* 和文は同梱の 700 に寄せる(600 は無い太さ) */
   line-height: 1.4;
   white-space: nowrap;
   pointer-events: none;
-  color: var(--ve-on-accent) !important;
-  background: var(--ve-accent) !important;
+  color: var(--ve-text-on-primary) !important;
+  background: var(--ve-primary) !important;
 }
 /* 時刻とトランスポート */
 .frame-monitor .preview-controls {
@@ -367,7 +367,7 @@ textarea {
   font-size: 24px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: var(--ve-text);
+  color: var(--ve-text-1);
 }
 .preview-player .time-label.total,
 .preview-player .time-label.export-total {
@@ -440,7 +440,7 @@ textarea {
   padding: 0 9px;
   border-radius: 12px;
   font-size: 12px;
-  color: var(--ve-text);
+  color: var(--ve-text-1);
   background: color-mix(in srgb, var(--spk) 22%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--spk) 50%, transparent);
 }
@@ -477,8 +477,8 @@ textarea {
   cursor: pointer;
 }
 .telop-insp-metrics-toggle:hover {
-  background: var(--ve-raised);
-  color: var(--ve-text);
+  background: var(--ve-surface-3);
+  color: var(--ve-text-1);
 }
 .telop-insp-metrics-toggle:focus-visible {
   box-shadow: var(--ve-focus-ring);
@@ -515,10 +515,10 @@ textarea {
   text-overflow: ellipsis;
 }
 .telop-metric.speed .telop-metric-value {
-  color: var(--ve-ok-ink);
+  color: var(--ve-success-ink);
 }
 .telop-metric.speed.fast .telop-metric-value {
-  color: var(--ve-accent-ink);
+  color: var(--ve-primary-ink);
 }
 .telop-metric-unit {
   font-size: 11px;
@@ -528,7 +528,7 @@ textarea {
 .telop-inspector .prop-text textarea {
   background: #0d0f16;
   border-radius: 9px;
-  font-family: 'Noto Sans JP', var(--font-sans);
+  font-family: 'Noto Sans JP', var(--ve-font-sans);
   font-size: 15px;
   /* 同梱の Noto Sans JP は 400・700・900。500 は無い太さなので 400 に寄せる */
   font-weight: 400;
@@ -573,7 +573,7 @@ textarea {
 }
 .media-row.media-tile.in-source .media-tile-thumb,
 .media-row.media-tile.menu-open .media-tile-thumb {
-  box-shadow: 0 0 0 1.5px var(--ve-accent);
+  box-shadow: 0 0 0 1.5px var(--ve-primary);
 }
 .media-tile .media-kind,
 .media-tile .media-col-dur {
@@ -581,12 +581,12 @@ textarea {
 }
 .media-tile .media-col-name {
   grid-area: name;
-  font-family: var(--font-mono);
+  font-family: var(--ve-font-mono);
   font-size: 12px;
 }
 .media-tile .media-col-res {
   grid-area: res;
-  font-family: var(--font-sans);
+  font-family: var(--ve-font-sans);
   font-size: 11px;
   color: var(--ve-text-3);
 }
@@ -623,7 +623,7 @@ textarea {
   border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--ve-text);
+  color: var(--ve-text-1);
   background: rgba(10, 11, 13, 0.78);
 }
 .media-tile-used {
@@ -633,7 +633,7 @@ textarea {
   bottom: -3px;
   height: 3px;
   border-radius: 2px;
-  background: var(--ve-accent-fill);
+  background: var(--ve-primary-fill);
 }
 .media-tile .media-row-progress {
   bottom: 22px;

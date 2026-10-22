@@ -10,7 +10,7 @@
   gap: 8px;
   margin-top: 8px;
   font-size: 11px;
-  color: var(--text-dim, #9aa0aa);
+  color: var(--ve-text-3, #9aa0aa);
 }
 .grad-subhead > span {
   display: inline-flex;
@@ -39,7 +39,7 @@
   margin: 4px 0 0;
   font-size: 11px;
   line-height: 1.5;
-  color: var(--text-dim, #9aa0aa);
+  color: var(--ve-text-3, #9aa0aa);
 }
 .grad-favorite {
   position: relative;
@@ -66,6 +66,6 @@
   opacity: 1;
 }
 .grad-preset.active {
-  outline: 2px solid var(--accent, #3b82f6);
+  outline: 2px solid var(--ve-primary, #3b82f6);
   outline-offset: 1px;
 }

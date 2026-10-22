@@ -8,9 +8,6 @@
    ===================================================================== */
 
 .timeline-panel {
-  --g3-mono: 'Geist Mono', var(--font-mono), ui-monospace, monospace;
-  --g3-line: #181b20;
-  --g3-select-ring: inset 0 0 0 1.5px var(--ve-accent);
   --g3-select-glow: 0 0 0 3px rgba(245, 165, 36, 0.18), 0 0 14px rgba(245, 165, 36, 0.22);
 }
 
@@ -46,7 +43,7 @@
   border-right: 1px solid #1c1f25;
 }
 .timeline-panel .track-label {
-  border-bottom-color: var(--g3-line);
+  border-bottom-color: var(--ve-border-subtle);
   color: #e3e5e8;
   font-size: 11.5px;
 }
@@ -54,24 +51,24 @@
   background: linear-gradient(135deg, var(--g3-k), color-mix(in srgb, var(--g3-k) 78%, #ffffff));
   color: #0a0b12;
   box-shadow: 0 0 10px color-mix(in srgb, var(--g3-k) 33%, transparent);
-  font-family: var(--g3-mono);
+  font-family: var(--ve-font-mono);
   font-size: 10px;
   height: 17px;
   min-width: 22px;
 }
 .timeline-panel .timeline-timecode-cell {
-  border-bottom: 1px solid var(--g3-line);
+  border-bottom: 1px solid var(--ve-border-subtle);
   padding: 0 10px;
 }
 .timeline-panel .timeline-timecode {
-  font-family: var(--g3-mono);
+  font-family: var(--ve-font-mono);
   font-size: 15px;
   font-weight: 600;
   color: #ffcb6b;
   letter-spacing: 0;
 }
 .timeline-panel .zoom-label {
-  font-family: var(--g3-mono);
+  font-family: var(--ve-font-mono);
 }
 .timeline-panel .g3-scene-label {
   height: 22px;
@@ -81,7 +78,7 @@
   padding: 0 10px;
   font-size: 10.5px;
   color: var(--ve-text-3);
-  border-bottom: 1px solid var(--g3-line);
+  border-bottom: 1px solid var(--ve-border-subtle);
 }
 
 /* 高さ: 本編はコマが見えるように高く、音は波形が読めるように少し高く(見出しと揃える) */
@@ -101,7 +98,7 @@
   background: linear-gradient(180deg, rgba(9, 11, 18, 0.85), rgba(7, 8, 13, 0.9));
 }
 .timeline-panel .track-lane {
-  border-bottom-color: var(--g3-line);
+  border-bottom-color: var(--ve-border-subtle);
 }
 /* 種類の色を薄く敷く。左端に貼りついたまま(横に送っても見えている所の左から薄れる)。
    幅はレーンを越えない(横のスクロールの幅を増やさない)。押した所はレーンのまま */
@@ -128,12 +125,12 @@
   background-size: var(--g3-minor, 8px) 6px;
   background-repeat: repeat-x;
   background-position: 0 100%;
-  border-bottom-color: var(--g3-line);
+  border-bottom-color: var(--ve-border-subtle);
 }
 .timeline-panel .timeline-ruler-tick {
   border-left: 0;
   padding: 2px 0 0 4px;
-  font-family: var(--g3-mono);
+  font-family: var(--ve-font-mono);
   font-size: 10px;
   color: #8a9099;
 }
@@ -153,8 +150,8 @@
   bottom: 0;
   background: rgba(245, 165, 36, 0.12);
   box-shadow:
-    inset 1px 0 0 var(--ve-accent),
-    inset -1px 0 0 var(--ve-accent);
+    inset 1px 0 0 var(--ve-primary),
+    inset -1px 0 0 var(--ve-primary);
   pointer-events: none;
 }
 /* 確認の印(琥珀のひし形) */
@@ -165,7 +162,7 @@
   height: 9px;
   margin-left: -4.5px;
   transform: rotate(45deg);
-  background: var(--ve-accent);
+  background: var(--ve-primary);
   box-shadow: 0 0 0 2px #101215;
   z-index: 1;
 }
@@ -175,7 +172,7 @@
   position: relative;
   height: 22px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--g3-line);
+  border-bottom: 1px solid var(--ve-border-subtle);
 }
 .timeline-panel .g3-scene {
   position: absolute;
@@ -189,7 +186,7 @@
     color-mix(in srgb, var(--g3-hue) 4%, transparent)
   );
   box-shadow: inset 3px 0 0 var(--g3-hue);
-  font-family: var(--g3-mono);
+  font-family: var(--ve-font-mono);
   font-size: 10px;
   line-height: 16px;
   color: #c9cce0;
@@ -247,7 +244,7 @@
 .timeline-panel .timeline-audio-clip.trimming::after,
 .timeline-panel .timeline-video-overlay-clip.selected::after,
 .timeline-panel .timeline-video-overlay-clip.trimming::after {
-  box-shadow: inset 0 0 0 2px var(--ve-accent);
+  box-shadow: inset 0 0 0 2px var(--ve-primary);
 }
 
 /* ---------- 映像(本編) ---------- */
@@ -301,12 +298,12 @@
   padding: 0 3px;
   border-radius: 0;
   background: rgba(10, 14, 40, 0.35);
-  font-family: var(--g3-mono);
+  font-family: var(--ve-font-mono);
   font-size: 9.5px;
   font-weight: 500;
 }
 .timeline-panel .timeline-clip-label {
-  font-family: var(--g3-mono);
+  font-family: var(--ve-font-mono);
   font-size: 9.5px;
   line-height: 14px;
   color: #f2f5ff;
@@ -348,7 +345,7 @@
     color-mix(in srgb, var(--g3-spk) 32%, #0b0c14)
   );
   box-shadow:
-    inset 0 0 0 1.5px var(--ve-accent),
+    inset 0 0 0 1.5px var(--ve-primary),
     inset 4px 0 0 var(--g3-spk),
     var(--g3-select-glow);
   color: #ffffff;
