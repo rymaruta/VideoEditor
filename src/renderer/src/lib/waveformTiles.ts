@@ -172,6 +172,11 @@ export class ByteLimitedCache<V> {
     return this.map.size
   }
 
+  /** 見るだけ(新しい側へ移さない。描くたびに呼んでよい) */
+  peek(key: string): V | undefined {
+    return this.map.get(key)?.value
+  }
+
   get(key: string): V | undefined {
     const hit = this.map.get(key)
     if (!hit) return undefined

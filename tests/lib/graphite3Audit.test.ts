@@ -15,7 +15,9 @@ globalThis.localStorage = {
   length: 0
 }
 
-import { modifierLabel, performUndoRedo } from '@renderer/lib/undoAction'
+import { modifierLabel, performUndoRedo, workflowBarUndo } from '@renderer/lib/undoAction'
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import {
   readMediaLayout,
   readSafeFrame,
@@ -190,5 +192,66 @@ describe('波形の上限とメモリ', () => {
     cache.set('c', 'C', 1)
     expect(cache.get('b')).toBeUndefined()
     expect(cache.get('a')).toBe('A')
+  })
+})
+
+const src = (rel: string): string =>
+  readFileSync(resolve(__dirname, '../../src/renderer/src', rel), 'utf8')
+
+describe('上の帯の取り消しボタン(再監査 中A)', () => {
+  // 選択欄・数値欄・文字の欄のどれにフォーカスがあっても、ボタンはプロジェクトを取り消す
+  for (const focused of ['SELECT', 'INPUT[type=number]', 'TEXTAREA']) {
+    it(`${focused} にフォーカスがあっても、プロジェクトの取り消し・やり直し`, () => {
+      const undo = vi.fn()
+      const redo = vi.fn()
+      expect(workflowBarUndo('undo', { modalOpen: false, undo, redo })).toBe('project')
+      expect(workflowBarUndo('redo', { modalOpen: false, undo, redo })).toBe('project')
+      expect(undo).toHaveBeenCalledTimes(1)
+      expect(redo).toHaveBeenCalledTimes(1)
+    })
+  }
+  it('ダイアログの上では何もしない', () => {
+    const undo = vi.fn()
+    expect(workflowBarUndo('undo', { modalOpen: true, undo, redo: vi.fn() })).toBe('blocked')
+    expect(undo).not.toHaveBeenCalled()
+  })
+  it('ボタンは欄の取り消し(execCommand・入力中の判定)に回さない', () => {
+    const bar = src('components/WorkflowBar.tsx')
+    expect(bar).toMatch(/workflowBarUndo\('undo'/)
+    expect(bar).toMatch(/workflowBarUndo\('redo'/)
+    expect(bar).not.toMatch(/execCommand|isTypingTarget|performUndoRedo/)
+  })
+  it('ダイアログを閉じたら、開いたボタンへフォーカスを戻す(inert が外れてから)', () => {
+    const bar = src('components/WorkflowBar.tsx')
+    expect(bar).toMatch(/inert=\{modalOpen \|\| undefined\}/)
+    expect(bar).toMatch(/if \(modalOpen\) return[\s\S]*opener\.focus\(\)/)
+  })
+})
+
+describe('波形の部品の配線(再監査 低8)', () => {
+  const wave = src('components/Waveform.tsx')
+  it('見えなくなったタイルで releaseCanvas を呼ぶ(絵のタイル・値のタイルとも)', () => {
+    const branches = wave.match(/if \(!visible\) \{[\s\S]*?\n {4}\}/g) ?? []
+    const releasing = branches.filter((b) => b.includes('releaseCanvas(el)'))
+    expect(releasing.length).toBeGreaterThanOrEqual(2)
+  })
+  it('decodeOnce は ByteLimitedCache(バイト数の上限)で覚える', () => {
+    expect(wave).toMatch(/const decoded = new ByteLimitedCache<Promise<HTMLImageElement>>\(/)
+    const fn = wave.slice(
+      wave.indexOf('function decodeOnce'),
+      wave.indexOf('function decodeOnce') + 800
+    )
+    expect(fn).toMatch(/decoded\.get\(url\)/)
+    expect(fn).toMatch(/decoded\.set\(url, p, url\.length\)/)
+    expect(wave).not.toMatch(/new Map<string, Promise<HTMLImageElement>>/)
+  })
+  it('値のタイルは見えている間だけ頼み、要らなくなった頼みは止める', () => {
+    expect(wave).toMatch(/if \(!visible\) return\n {4}if \(peakTileCache\.peek\(key\)\) return/)
+    expect(wave).toMatch(/cancelWaveformPeaks\?\.\(id\)/)
+  })
+  it('止めた・捨てられた頼みでは絵の波形へ切り替えない(再監査 低4)', () => {
+    const c = wave.slice(wave.indexOf('WAVE_PEAKS_ABORTED) ||'))
+    const block = c.slice(0, c.indexOf('onFailRef.current()'))
+    expect(block).toMatch(/return\n/)
   })
 })

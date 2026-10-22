@@ -9,6 +9,7 @@ export const IPC = {
   generateFrame: 'media:frame',
   generateWaveform: 'media:waveform',
   generateWaveformPeaks: 'media:waveformPeaks',
+  cancelWaveformPeaks: 'media:waveformPeaksCancel',
   detectSilence: 'media:detectSilence',
   detectHighlights: 'media:detectHighlights',
   scanLongFormWindows: 'media:scanLongFormWindows',

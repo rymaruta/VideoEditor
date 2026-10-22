@@ -26,6 +26,20 @@ export function performUndoRedo(kind: 'undo' | 'redo', deps: UndoDeps): UndoRout
   return 'project'
 }
 
+/**
+ * 上の帯の取り消し・やり直しのボタン。フォーカスがどこにあっても(文字の欄・選択欄・数値欄でも)
+ * プロジェクトの取り消しにする。欄の文字単位の取り消しはキーとメニューだけ。ダイアログの上では何もしない
+ */
+export function workflowBarUndo(
+  kind: 'undo' | 'redo',
+  deps: { modalOpen: boolean; undo: () => void; redo: () => void }
+): 'blocked' | 'project' {
+  if (deps.modalOpen) return 'blocked'
+  if (kind === 'undo') deps.undo()
+  else deps.redo()
+  return 'project'
+}
+
 /** ボタンの見出しに出すキー(mac は Cmd、ほかは Ctrl) */
 export function modifierLabel(userAgent: string): 'Cmd' | 'Ctrl' {
   return /Mac/i.test(userAgent) ? 'Cmd' : 'Ctrl'

@@ -338,6 +338,12 @@ function TimelinePlayhead({
   )
 }
 
+/** 見えている時刻が、クリップ(start〜end)の幅のどこか(0〜1)。波形は見えているタイルだけを置く */
+function viewFraction(t: number, start: number, end: number): number {
+  if (end <= start) return 0
+  return Math.max(0, Math.min(1, (t - start) / (end - start)))
+}
+
 /** 場面の帯の色(場面ごとに順に使う) */
 const SCENE_HUES = ['#6B7CFF', '#FF5FA2', '#A77BFF', '#2ED3B7'] as const
 
@@ -2693,6 +2699,8 @@ export function Timeline(): React.JSX.Element {
                         width={clipWidth}
                         height={28}
                         variant="video"
+                        viewFrom={viewFraction(visibleWindow.from, tc.start, tc.end)}
+                        viewTo={viewFraction(visibleWindow.to, tc.start, tc.end)}
                       />
                     </div>
                   )}
@@ -3043,6 +3051,12 @@ export function Timeline(): React.JSX.Element {
                           width={clipWidth}
                           height={30}
                           variant={track.autoRole ? 'auto' : 'audio'}
+                          viewFrom={viewFraction(
+                            visibleWindow.from,
+                            displayStart,
+                            displayStart + dur
+                          )}
+                          viewTo={viewFraction(visibleWindow.to, displayStart, displayStart + dur)}
                         />
                       </div>
                     )}

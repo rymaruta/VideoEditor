@@ -4,8 +4,9 @@ import {
   liftLevels,
   peakColumnSpan,
   peakEnvelope,
-  waveformDensity,
+  WAVEFORM_DENSITY,
   WAVEFORM_HEIGHT_SCALE,
+  WAVEFORM_TILE_WIDTH,
   tileReadRange,
   waveformTiles,
   waveformImageRequestSize,
@@ -13,7 +14,12 @@ import {
   releaseCanvas,
   type WaveTile
 } from '../lib/waveformTiles'
-import { isWavePeaks, type WavePeaks } from '@shared/waveformPeaks'
+import {
+  WAVE_PEAKS_ABORTED,
+  isWavePeaks,
+  wavePeaksBytes,
+  type WavePeaks
+} from '@shared/waveformPeaks'
 
 /** 波形の色の組(CSS の --ve-wave-* を選ぶ)。変われば描き直す */
 export type WaveformVariant = 'audio' | 'auto' | 'video'
@@ -238,13 +244,153 @@ function WaveTileCanvas({
   )
 }
 
+/**
+ * 値の波形のタイル(2048 列ずつ)の覚え場所。スクロールで戻ったときに頼み直さない。
+ * 上限は大きさの合計(1 枚 2048 列 × 2ch × 3 値 × 4 バイト ≒ 49KB。32MB で約 650 枚)
+ */
+const peakTileCache = new ByteLimitedCache<WavePeaks>(32 * 1024 * 1024, 4000)
+let peakRequestSeq = 0
+
+/** 見えている範囲の外に、前後これだけのタイルを余分に置く(送ったときに描き終わっているように) */
+const TILE_MARGIN = 1
+
+/**
+ * 値の波形の 1 タイル。見えている(近い)間だけ、そのタイルの範囲・列数を main に頼んで描く。
+ * 見えなくなったら描いた中身を捨て、走っている頼み(前の拡大の段など)は止める
+ */
+function PeakTile({
+  filePath,
+  t0,
+  t1,
+  x,
+  w,
+  total,
+  height,
+  variant,
+  onFail
+}: {
+  filePath: string
+  /** このタイルが受け持つ素材の時刻(秒) */
+  t0: number
+  t1: number
+  x: number
+  w: number
+  total: number
+  height: number
+  variant: WaveformVariant
+  onFail: () => void
+}): React.JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null)
+  const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver(
+      (entries) => setVisible(entries.some((e) => e.isIntersecting)),
+      {
+        root: scrollRootOf(el),
+        rootMargin: '0px 512px'
+      }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+  const onFailRef = useRef(onFail)
+  useEffect(() => {
+    onFailRef.current = onFail
+  })
+  const key = `${filePath}|${t0}|${t1}|${w}`
+  const [got, setGot] = useState<{ key: string; peaks: WavePeaks } | null>(null)
+  // 描く値: 届いたもの、または覚え場所にあるもの(無ければ前に描いた絵のまま。トリム中に点滅しない)
+  const shown = got && got.key === key ? got.peaks : (peakTileCache.peek(key) ?? null)
+  // 頼む: 見えている間だけ。掴んで動かしている間(トリム)は落ち着いてから(150ms)
+  useEffect(() => {
+    if (!visible) return
+    if (peakTileCache.peek(key)) return
+    let cancelled = false
+    let done = false
+    let id = ''
+    let timer: ReturnType<typeof setTimeout>
+    const request = (attempt: number): void => {
+      id = `wp${++peakRequestSeq}`
+      done = false
+      window.api
+        .generateWaveformPeaks(filePath, t0, t1, w, id)
+        .then((p) => {
+          done = true
+          if (cancelled) return
+          if (!isWavePeaks(p)) {
+            onFailRef.current()
+            return
+          }
+          peakTileCache.set(key, p, wavePeaksBytes(p))
+          setGot({ key, peaks: p })
+        })
+        .catch((e: unknown) => {
+          done = true
+          if (cancelled) return
+          const msg = String(e)
+          // 止めた・捨てられた頼みでは絵の波形へ切り替えない。見えている間だけ間を空けて頼み直す
+          if (msg.includes(WAVE_PEAKS_ABORTED) || msg.includes('MEDIA_JOB_DROPPED')) {
+            if (attempt < 5) timer = setTimeout(() => request(attempt + 1), 400 * (attempt + 1))
+            return
+          }
+          onFailRef.current()
+        })
+    }
+    timer = setTimeout(() => request(0), 150)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      // 要らなくなった頼み(見えなくなった・範囲や拡大の段が変わった)は main で止める
+      if (id && !done) void window.api.cancelWaveformPeaks?.(id).catch(() => {})
+    }
+  }, [visible, key, filePath, t0, t1, w])
+  // 描く・捨てる
+  const drawnRef = useRef(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (!visible) {
+      // 見えなくなったタイルは中身を捨てる(描いた絵の記憶を放す。見えたらまた描く)
+      if (drawnRef.current) {
+        releaseCanvas(el)
+        drawnRef.current = false
+        delete el.dataset.drawn
+      }
+      return
+    }
+    if (!shown) return
+    try {
+      drawPeakTile(el, shown, { x: 0, w: shown.columns }, height)
+      drawnRef.current = true
+      // 何を描いたか(試験・実測で「今の範囲の絵か」を見分ける)
+      el.dataset.drawn = key
+    } catch {
+      onFailRef.current()
+    }
+    // variant が変われば色を読み直して描き直す
+  }, [visible, shown, height, variant, key])
+  return (
+    <canvas
+      ref={ref}
+      data-key={key}
+      className="waveform-tile"
+      aria-hidden="true"
+      style={{ left: `${(x / total) * 100}%`, width: `${(w / total) * 100}%` }}
+    />
+  )
+}
+
 export function Waveform({
   filePath,
   start,
   end,
   width,
   height,
-  variant = 'audio'
+  variant = 'audio',
+  viewFrom = 0,
+  viewTo = 1
 }: {
   filePath: string
   start: number
@@ -253,52 +399,29 @@ export function Waveform({
   height: number
   /** 色の組。自動の SE・BGM は 'auto'、本編クリップは 'video' */
   variant?: WaveformVariant
+  /**
+   * クリップの幅のうち画面に見えている所(0〜1)。見えているタイルだけを置いて頼む
+   * (3 時間のクリップの最大拡大は 1700 枚近いタイルになる)
+   */
+  viewFrom?: number
+  viewTo?: number
 }): React.JSX.Element | null {
   const [url, setUrl] = useState<string | null>(null)
   // ほどいた絵と、二重に描けなかった絵の URL(下の描き直しで使う)
   const [image, setImage] = useState<{ url: string; img: HTMLImageElement } | null>(null)
   const [failedUrl, setFailedUrl] = useState<string | null>(null)
-  // 細かい波形の値(取れたらこちらで描く)と、描けなかった値
-  const [peaks, setPeaks] = useState<WavePeaks | null>(null)
-  const [failedPeaks, setFailedPeaks] = useState<WavePeaks | null>(null)
-  // 値で描けなかった(canvas が使えない等)。以後は絵の波形を頼む
-  const [imageOnly, setImageOnly] = useState(false)
+  // 値の波形が使えない(古い main・音が読めない・描けない)。以後は絵の波形を頼む
+  const [imageOnly, setImageOnly] = useState(
+    () => typeof window.api?.generateWaveformPeaks !== 'function'
+  )
 
   useEffect(() => {
+    if (!imageOnly) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout>
     // Debounced: props (especially start/end) can change on every mousemove while
     // trim-dragging a clip, and firing an ffmpeg subprocess per frame would flood
     // the system. Only the value the drag settles on actually needs a fetch.
-    const columns = Math.round(width * waveformDensity(width))
-    // まず細かい波形の値(列ごとの最大・最小・RMS、L/R 別)を頼む。取れない(古い main・音が読めない・
-    // 形が違う)ときは、今までの絵の波形へ戻る
-    const request = (attempt: number): void => {
-      const fetchPeaks = window.api.generateWaveformPeaks
-      if (imageOnly || typeof fetchPeaks !== 'function') {
-        requestImage(0)
-        return
-      }
-      fetchPeaks(filePath, start, end, columns)
-        .then((p) => {
-          if (cancelled) return
-          if (isWavePeaks(p)) {
-            setPeaks(p)
-          } else {
-            setPeaks(null)
-            requestImage(0)
-          }
-        })
-        .catch((e: unknown) => {
-          if (cancelled) return
-          if (String(e).includes('MEDIA_JOB_DROPPED') && attempt < 5) {
-            timer = setTimeout(() => request(attempt + 1), 400 * (attempt + 1))
-            return
-          }
-          setPeaks(null)
-          requestImage(0)
-        })
-    }
     const requestImage = (attempt: number): void => {
       // 1 画面 px に 2 列・縦も 2 倍の細かい絵を頼む(描く時に枠へ縮める。細い線が並ぶ見え方)。
       // ffmpeg の絵の上限を越えない大きさで頼む(越えると絵が作られず波形が消えていた)
@@ -337,7 +460,7 @@ export function Waveform({
           }
         })
     }
-    timer = setTimeout(() => request(0), 150)
+    timer = setTimeout(() => requestImage(0), 150)
     return () => {
       cancelled = true
       clearTimeout(timer)
@@ -362,26 +485,32 @@ export function Waveform({
     }
   }, [url])
 
-  if (peaks && failedPeaks !== peaks) {
-    const failedFor = peaks
-    const canvasHeight = height * WAVEFORM_HEIGHT_SCALE
+  if (!imageOnly) {
+    // 値の波形: 1 画面 px に 2 列。見えている所(と前後 1 枚)のタイルだけを置く
+    const total = Math.max(1, Math.round(width * WAVEFORM_DENSITY))
+    const span = end - start
+    const tiles = waveformTiles(total)
+    const from = Math.max(0, Math.min(1, viewFrom)) * total
+    const to = Math.max(0, Math.min(1, viewTo)) * total
+    const margin = WAVEFORM_TILE_WIDTH * TILE_MARGIN
     return (
       <div className="waveform-img waveform-tiles" data-variant={variant} data-fine="true">
-        {waveformTiles(peaks.columns).map((tile) => (
-          <WaveTileCanvas
-            key={tile.x}
-            source={peaks}
-            draw={(el, t) => drawPeakTile(el, peaks, t, canvasHeight)}
-            x={tile.x}
-            w={tile.w}
-            total={peaks.columns}
-            variant={variant}
-            onFail={() => {
-              setFailedPeaks(failedFor)
-              setImageOnly(true)
-            }}
-          />
-        ))}
+        {tiles
+          .filter((tile) => tile.x + tile.w >= from - margin && tile.x <= to + margin)
+          .map((tile) => (
+            <PeakTile
+              key={tile.x}
+              filePath={filePath}
+              t0={start + (span * tile.x) / total}
+              t1={start + (span * (tile.x + tile.w)) / total}
+              x={tile.x}
+              w={tile.w}
+              total={total}
+              height={height * WAVEFORM_HEIGHT_SCALE}
+              variant={variant}
+              onFail={() => setImageOnly(true)}
+            />
+          ))}
       </div>
     )
   }

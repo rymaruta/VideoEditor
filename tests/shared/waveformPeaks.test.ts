@@ -5,6 +5,7 @@ import {
   isWavePeaks,
   peakSampleRate,
   wavePeaksBytes,
+  type CancelWaveformPeaks,
   type GenerateWaveformPeaks,
   type WavePeaks
 } from '@shared/waveformPeaks'
@@ -127,12 +128,14 @@ describe('細かい波形の IPC', () => {
     const values = Object.values(IPC)
     expect(IPC.generateWaveformPeaks).toBe('media:waveformPeaks')
     expect(values.filter((v) => v === IPC.generateWaveformPeaks)).toHaveLength(1)
+    expect(values.filter((v) => v === IPC.cancelWaveformPeaks)).toHaveLength(1)
   })
 
   it('preload の関数の形と、structured clone を通った値が使えること', async () => {
     expectTypeOf<GenerateWaveformPeaks>().parameters.toEqualTypeOf<
-      [string, number, number, number]
+      [string, number, number, number, (string | undefined)?]
     >()
+    expectTypeOf<CancelWaveformPeaks>().parameters.toEqualTypeOf<[string]>()
     expectTypeOf<GenerateWaveformPeaks>().returns.resolves.toEqualTypeOf<WavePeaks>()
     const acc = new WavePeakAccumulator(3, 2, 3)
     acc.push(new Float32Array([0.1, -0.2, 0.3, -0.4, 0.5, -0.6]))
@@ -145,6 +148,8 @@ describe('細かい波形の IPC', () => {
 
   it('読む速さは 1 列に数サンプル以上、上限 48kHz', () => {
     expect(peakSampleRate(1000, 10)).toBe(16000)
+    // 長い区間でも 16kHz を下回らない(8kHz では 4kHz を越える音が消える)
+    expect(peakSampleRate(4000, 3 * 3600)).toBe(16000)
     expect(peakSampleRate(60000, 1)).toBe(48000)
     expect(peakSampleRate(4000, 0.5)).toBe(48000)
   })

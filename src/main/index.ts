@@ -37,8 +37,7 @@ import {
 } from '@shared/mediaExtensions'
 import { checkPreviewProxy, ensurePreviewProxy } from './previewProxyService'
 import { MediaJobQueue } from './mediaJobQueue'
-import { generateWaveformPeaks } from './waveformPeaks'
-import { wavePeaksBytes, type WavePeaks } from '@shared/waveformPeaks'
+import { createWaveformPeaksService, type WaveformPeaksService } from './waveformPeaks'
 import { killLiveProcesses } from './liveProcesses'
 import { currentBusy, notifyDone, setBusy, type BusyState } from './busyState'
 import { scanLongFormWindows } from './longFormService'
@@ -51,7 +50,8 @@ import {
   cancelExport,
   runExclusiveExport,
   detectSilence,
-  ffmpegPath
+  ffmpegPath,
+  ffprobePath
 } from './ffmpegService'
 import { transcribeRange, transcribeWordsRange } from './whisperService'
 import { analyzeSmartCropCenter } from './smartCropService'
@@ -109,10 +109,20 @@ import type {
  */
 const timelineImages = new MediaJobQueue<string>(2)
 /**
- * タイムラインの細かい波形の値(列ごとの最大・最小・RMS)。波形の絵と同じ扱い(落としてよい・覚える)。
- * 覚える量は値の大きさ(バイト)で数える
+ * タイムラインの細かい波形の値。素材ごとの素の値を 1 回だけ作ってディスクに覚え、そこから集計する
+ * (waveformPeaks)。userData は起動後に決まるので、最初の頼みで作る
  */
-const timelinePeaks = new MediaJobQueue<WavePeaks>(2, 64, 500, 64 * 1024 * 1024, wavePeaksBytes)
+let wavePeaks: WaveformPeaksService | null = null
+function wavePeaksService(): WaveformPeaksService {
+  wavePeaks ??= createWaveformPeaksService({
+    ffmpegPath,
+    ffprobePath,
+    cacheDir: join(app.getPath('userData'), 'analysis-cache', 'waveform')
+  })
+  return wavePeaks
+}
+/** 止められる頼み(画面の頼みの番号 → 止める合図)。画面が要らなくなった頼みを止める */
+const wavePeakRequests = new Map<string, AbortController>()
 /** サムネイル・フレーム。1回きりの頼み(素材の読み込み・サムネイル作り)なので、落とさない */
 const stillImages = new MediaJobQueue<string>(2, Number.POSITIVE_INFINITY)
 
@@ -748,12 +758,27 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(
     IPC.generateWaveformPeaks,
-    async (_e, filePath: string, rangeStart: number, rangeEnd: number, columns: number) =>
-      timelinePeaks.request(
-        `peaks|${filePath}|${fileStamp(filePath)}|${rangeStart}|${rangeEnd}|${columns}`,
-        () => generateWaveformPeaks(ffmpegPath, filePath, rangeStart, rangeEnd, columns)
-      )
+    async (
+      e,
+      filePath: string,
+      rangeStart: number,
+      rangeEnd: number,
+      columns: number,
+      requestId?: string
+    ) => {
+      const key = requestId ? `${e.sender.id}:${requestId}` : null
+      const ac = new AbortController()
+      if (key) wavePeakRequests.set(key, ac)
+      try {
+        return await wavePeaksService().get(filePath, rangeStart, rangeEnd, columns, ac.signal)
+      } finally {
+        if (key && wavePeakRequests.get(key) === ac) wavePeakRequests.delete(key)
+      }
+    }
   )
+  ipcMain.handle(IPC.cancelWaveformPeaks, (e, requestId: string) => {
+    wavePeakRequests.get(`${e.sender.id}:${requestId}`)?.abort()
+  })
   ipcMain.handle(
     IPC.detectSilence,
     async (_e, filePath: string, rangeStart: number, rangeEnd: number) =>

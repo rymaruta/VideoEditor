@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from 'path'
 import { contentFingerprint } from './fileFingerprint'
 import { describeFfmpegExit } from './ffmpegError'
+import { trackUntilDone } from './liveProcesses'
 import { ENVELOPE_RATE, EnvelopeBuilder, SYNC_BAND_HZ } from '@shared/sync/correlate'
 
 /**
@@ -19,15 +20,37 @@ export interface AudioFileRef {
   mtimeMs: number
 }
 
+/** `signal` で止めたときの失敗(呼ぶ側は「止めた」と見分けて黙って捨てる) */
+export const PCM_ABORTED = 'PCM_ABORTED'
+
 export function readPcm(
   ffmpegPath: string,
   args: string[],
-  onChunk: (samples: Float32Array) => void
+  onChunk: (samples: Float32Array) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(ffmpegPath, ['-hide_banner', '-nostdin', '-v', 'error', ...args], {
-      windowsHide: true
-    })
+    if (signal?.aborted) {
+      reject(new Error(PCM_ABORTED))
+      return
+    }
+    // アプリを閉じるときに止める一覧に入れる(閉じた後も 3 時間の素材を読み続けないように)
+    const child = trackUntilDone(
+      spawn(ffmpegPath, ['-hide_banner', '-nostdin', '-v', 'error', ...args], {
+        windowsHide: true
+      })
+    )
+    let aborted = false
+    const onAbort = (): void => {
+      aborted = true
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // すでに終わっている
+      }
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    child.once('close', () => signal?.removeEventListener('abort', onAbort))
     let rest: Buffer = Buffer.alloc(0)
     let err = ''
     child.stdout.on('data', (chunk: Buffer) => {
@@ -46,7 +69,11 @@ export function readPcm(
     })
     child.on('error', reject)
     // 失敗は利用者に見せられる日本語にする(ffmpeg の最後の英語の1行がそのまま工程の失敗に出ていた)
-    child.on('close', (code) => (code === 0 ? resolve() : reject(describeFfmpegExit(code, err))))
+    child.on('close', (code) => {
+      if (aborted) reject(new Error(PCM_ABORTED))
+      else if (code === 0) resolve()
+      else reject(describeFfmpegExit(code, err))
+    })
   })
 }
 

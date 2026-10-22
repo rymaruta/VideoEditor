@@ -11,7 +11,7 @@ type AsrProgressMessage = Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 
 import type { FootageScan } from '@shared/ingest/classify'
 import type { SyncInputFile, SyncReport } from '@shared/sync/report'
 import type { LoudnessTarget } from '@shared/loudness'
-import type { GenerateWaveformPeaks } from '@shared/waveformPeaks'
+import type { CancelWaveformPeaks, GenerateWaveformPeaks } from '@shared/waveformPeaks'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
@@ -115,14 +115,17 @@ const api = {
   ): Promise<string> =>
     ipcRenderer.invoke(IPC.generateWaveform, filePath, rangeStart, rangeEnd, width, height),
   // 細かい波形の値(列ごとの最大・最小・RMS、L/R 別)。届く値は structured clone の Float32Array
-  generateWaveformPeaks: ((filePath, rangeStart, rangeEnd, columns) =>
+  generateWaveformPeaks: ((filePath, rangeStart, rangeEnd, columns, requestId) =>
     ipcRenderer.invoke(
       IPC.generateWaveformPeaks,
       filePath,
       rangeStart,
       rangeEnd,
-      columns
+      columns,
+      requestId
     )) as GenerateWaveformPeaks,
+  cancelWaveformPeaks: ((requestId) =>
+    ipcRenderer.invoke(IPC.cancelWaveformPeaks, requestId)) as CancelWaveformPeaks,
   detectSilence: (
     filePath: string,
     rangeStart: number,

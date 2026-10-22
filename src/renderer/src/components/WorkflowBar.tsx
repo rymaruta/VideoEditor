@@ -1,8 +1,9 @@
+import { useEffect, useRef } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
-import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
-import { modifierLabel, performUndoRedo } from '../lib/undoAction'
+import { isModalOpen } from '../lib/useKeyboardShortcuts'
+import { modifierLabel, workflowBarUndo } from '../lib/undoAction'
 import { useModalOpen } from '../lib/useModalOpen'
 import { RedoIcon, UndoIcon, UploadIcon } from './icons'
 
@@ -32,25 +33,39 @@ export function WorkflowBar({
   const reviewCount = useReviewItems().open.length
   const canUndo = useProjectStore((s) => s.past.length > 0)
   const canRedo = useProjectStore((s) => s.future.length > 0)
-  // メニューの「元に戻す / やり直す」と同じ: 文字を打っている欄なら欄の取り消し(文字単位)、
-  // ダイアログの上では何もしない。ボタンは押してもフォーカスを奪わない(欄にフォーカスを残す)
-  const run = (kind: 'undo' | 'redo'): void => {
+  // 帯のボタンは、フォーカスがどこにあっても**プロジェクト**の取り消し・やり直し
+  // (欄の文字単位の取り消しはキーとメニューだけ。選択欄・数値欄にフォーカスがあるまま押すと、
+  // 欄の取り消しに回って何も起きなかった)。ダイアログの上では何もしない
+  const undo = (): void => {
     const store = useProjectStore.getState()
-    performUndoRedo(kind, {
-      typing: isTypingTarget(document.activeElement),
-      modalOpen: isModalOpen(),
-      execCommand: (cmd) => document.execCommand(cmd),
-      undo: store.undo,
-      redo: store.redo
-    })
+    workflowBarUndo('undo', { modalOpen: isModalOpen(), undo: store.undo, redo: store.redo })
   }
-  const undo = (): void => run('undo')
-  const redo = (): void => run('redo')
+  const redo = (): void => {
+    const store = useProjectStore.getState()
+    workflowBarUndo('redo', { modalOpen: isModalOpen(), undo: store.undo, redo: store.redo })
+  }
   const mod = modifierLabel(navigator.userAgent)
   // ダイアログを開いている間は帯ごと inert(Tab でダイアログの裏のボタンに届かない)
   const modalOpen = useModalOpen()
+  // ダイアログを開いたボタン。閉じたら(inert が外れてから)そこへフォーカスを戻す
+  // (inert のままだとダイアログが戻そうとしても戻らず、フォーカスが body に落ちていた)
+  const openerRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (modalOpen) return
+    const opener = openerRef.current
+    openerRef.current = null
+    if (!opener || !opener.isConnected) return
+    const active = document.activeElement
+    if (!active || active === document.body) opener.focus()
+  }, [modalOpen])
+  const remember = (e: React.SyntheticEvent<HTMLElement>): void => {
+    openerRef.current = e.currentTarget
+  }
   const openAutoEdit = (): void => emitMenuCommand('auto.screen')
-  const openExport = (): void => emitMenuCommand('file.export')
+  const openExport = (e: React.MouseEvent<HTMLElement>): void => {
+    remember(e)
+    emitMenuCommand('file.export')
+  }
   return (
     <header className="workflow-bar" inert={modalOpen || undefined}>
       <div className="workflow-bar-project">
@@ -106,8 +121,6 @@ export function WorkflowBar({
           title={`元に戻す (${mod}+Z)`}
           aria-label="元に戻す"
           disabled={!canUndo}
-          // 押してもフォーカスを欄に残す(欄の取り消しにするため)
-          onMouseDown={(e) => e.preventDefault()}
           onClick={undo}
         >
           <UndoIcon width={16} height={16} />
@@ -118,8 +131,6 @@ export function WorkflowBar({
           title={`やり直す (${mod}+Shift+Z)`}
           aria-label="やり直す"
           disabled={!canRedo}
-          // 押してもフォーカスを欄に残す(欄の取り消しにするため)
-          onMouseDown={(e) => e.preventDefault()}
           onClick={redo}
         >
           <RedoIcon width={16} height={16} />
