@@ -7,6 +7,7 @@ import {
 } from '@shared/appMenu'
 import { IPC } from '@shared/ipc'
 import { openThirdPartyNotices, showAboutDialog } from './aboutWindow'
+import { openLogFolder, saveBugReport } from './diagnostics'
 
 /**
  * メニューバーを Electron のメニューにする。項目の形は `@shared/appMenu`。
@@ -23,13 +24,21 @@ let fileState: MenuFileState = { recent: [], canRestoreDiscarded: false }
 function sendCommand(id: string): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   if (!win || win.isDestroyed()) return
-  // バージョン情報・ライセンス表記は main だけで済む(画面へ送らない)
+  // バージョン情報・ライセンス表記・記録は main だけで済む(画面へ送らない)
   if (id === 'help.about') {
     void showAboutDialog(win)
     return
   }
   if (id === 'help.licenses') {
     openThirdPartyNotices(win)
+    return
+  }
+  if (id === 'help.openLogs') {
+    void openLogFolder(win)
+    return
+  }
+  if (id === 'help.bugReport') {
+    void saveBugReport(win)
     return
   }
   win.webContents.send(IPC.menuCommand, id)

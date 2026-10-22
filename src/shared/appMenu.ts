@@ -46,6 +46,8 @@ export type MenuCommand =
   | 'help.shortcuts'
   | 'help.about'
   | 'help.licenses'
+  | 'help.openLogs'
+  | 'help.bugReport'
   | `window.${string}`
 
 /** 画面から受け取る、ショートカットの表示(キー配置で変わるもの) */
@@ -262,6 +264,9 @@ export function buildMenuTemplate(
       label: 'ヘルプ(&H)',
       submenu: [
         { label: 'キーボードショートカット', id: 'help.shortcuts' },
+        SEP,
+        { label: 'ログのフォルダを開く', id: 'help.openLogs' },
+        { label: '不具合の報告用に情報をまとめる…', id: 'help.bugReport' },
         SEP,
         { label: 'サードパーティのライセンス', id: 'help.licenses' },
         { label: 'バージョン情報', id: 'help.about' }

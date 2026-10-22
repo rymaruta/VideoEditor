@@ -1,7 +1,6 @@
 import { standardExportFits } from '@shared/exportLimits'
 import { cachedEnvelope } from './audioPcm'
 import { readFile, stat, writeFile } from 'fs/promises'
-import os from 'os'
 import { cancelAsr, runAsr, setAsrLanguage } from './asrService'
 import { detectFaces } from './faceService'
 import { cancelLlm, runLlm } from './llmService'
@@ -74,6 +73,7 @@ import {
 } from './segmentRenderer'
 import { installAppMenu, updateAppMenu } from './appMenu'
 import { RendererCrashGuard } from './rendererRecovery'
+import { collectSystemInfo, installCrashLogging, logRendererError } from './diagnostics'
 import {
   appendTelopLayerImages,
   beginTelopLayer,
@@ -649,6 +649,8 @@ const hasInstanceLock = app.requestSingleInstanceLock()
 if (!hasInstanceLock) {
   app.quit()
 } else {
+  // 未処理の例外・拒否、画面や解析のプロセスが落ちたことを userData/logs に残す(diagnostics)
+  installCrashLogging()
   app.on('second-instance', () => {
     const win = BrowserWindow.getAllWindows()[0]
     if (!win) return
@@ -1019,38 +1021,9 @@ app.whenReady().then(() => {
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
   // 処理の記録に載せる PC の構成
-  ipcMain.handle(IPC.systemInfo, async () => {
-    const cpus = os.cpus()
-    let gpu: string[] = []
-    try {
-      const info = (await app.getGPUInfo('complete')) as {
-        gpuDevice?: {
-          vendorId?: number
-          deviceId?: number
-          active?: boolean
-          driverVersion?: string
-        }[]
-        auxAttributes?: { glRenderer?: string }
-      }
-      gpu = [
-        ...(info.auxAttributes?.glRenderer ? [info.auxAttributes.glRenderer] : []),
-        ...(info.gpuDevice ?? []).map(
-          (d) =>
-            `vendor 0x${(d.vendorId ?? 0).toString(16)} device 0x${(d.deviceId ?? 0).toString(16)}${d.driverVersion ? ` driver ${d.driverVersion}` : ''}${d.active ? '(使用中)' : ''}`
-        )
-      ]
-    } catch {
-      gpu = []
-    }
-    return {
-      os: `${os.type()} ${os.release()} (${os.arch()})`,
-      cpu: cpus[0]?.model?.trim() ?? '不明',
-      cores: cpus.length,
-      memoryGb: Math.round(os.totalmem() / 1024 ** 3),
-      gpu,
-      app: `${app.getName()} ${app.getVersion()} / Electron ${process.versions.electron}`
-    }
-  })
+  ipcMain.handle(IPC.systemInfo, () => collectSystemInfo())
+  // 画面の未処理のエラーを記録に残す(diagnostics。返事は要らない)
+  ipcMain.on(IPC.logRendererError, (_e, payload: unknown) => logRendererError(payload))
   ipcMain.handle(IPC.saveRunReport, async (event, defaultName: string, text: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.SaveDialogOptions = {

@@ -249,6 +249,9 @@ const api = {
     ipcRenderer.invoke(IPC.libraryFiles, folderPath),
   libraryToggleFavorite: (filePath: string): Promise<LibraryState> =>
     ipcRenderer.invoke(IPC.libraryToggleFavorite, filePath),
+  /** 画面の未処理のエラーを main の記録(userData/logs)に残す。返事は待たない */
+  logRendererError: (payload: { kind: string; message?: string; stack?: string }): void =>
+    ipcRenderer.send(IPC.logRendererError, payload),
   onMenuCommand: (callback: (id: string) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, id: string): void => callback(id)
     ipcRenderer.on(IPC.menuCommand, listener)

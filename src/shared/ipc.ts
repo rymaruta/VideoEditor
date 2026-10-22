@@ -90,6 +90,7 @@ export const IPC = {
   faceProgress: 'face:progress',
   menuCommand: 'menu:command',
   menuUpdate: 'menu:update',
+  logRendererError: 'diag:logRendererError',
   checkFilesExist: 'media:checkFilesExist',
   selectRelinkFile: 'media:selectRelinkFile'
 } as const
