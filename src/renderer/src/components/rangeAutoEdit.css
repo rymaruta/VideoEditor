@@ -1,0 +1,149 @@
+/* 範囲の自動編集のダイアログ・見比べの帯・ロックの帯(色は main.css / graphite3.css の変数) */
+
+.modal.range-auto-edit {
+  width: 540px;
+}
+.range-auto-edit-span {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ve-text-2);
+}
+.range-auto-edit fieldset {
+  border: 1px solid var(--ve-line-field);
+  border-radius: 6px;
+  padding: 8px 10px 10px;
+  margin: 10px 0 0;
+}
+.range-auto-edit legend {
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--ve-text-3);
+}
+.range-auto-edit-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.range-auto-edit-steps label,
+.range-auto-edit-after label,
+.range-auto-edit-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ve-text);
+}
+.range-auto-edit-after {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.range-auto-edit-check {
+  margin-top: 10px;
+}
+.range-auto-edit .hint-text button,
+.range-auto-edit .error-text button {
+  margin-left: 8px;
+}
+.range-auto-edit-diff {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--ve-field);
+  border: 1px solid var(--ve-line);
+}
+.range-auto-edit-diff dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+.range-auto-edit-diff dt {
+  color: var(--ve-text-3);
+}
+.range-auto-edit-diff dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.range-strips {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 8px;
+  align-items: center;
+}
+.range-strip {
+  position: relative;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--ve-well);
+  box-shadow: inset 0 0 0 1px var(--ve-line-field);
+}
+.range-strip-piece {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 2px;
+  background: var(--ve-trk-video-line);
+  box-shadow: inset -1px 0 0 var(--ve-well);
+}
+.range-strip-piece.extra {
+  background: var(--ve-trk-pip-line);
+}
+.range-strip-piece.speed {
+  background: var(--ve-accent-press);
+}
+.range-auto-edit-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--ve-text-2);
+}
+.range-auto-edit-notes .warn {
+  color: var(--ve-accent-ink);
+}
+
+/* ---------- 当てた後の見比べの帯 ---------- */
+.range-review-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--ve-auto-line);
+  background: linear-gradient(90deg, var(--ve-auto-soft), transparent 80%);
+  font-size: 12px;
+}
+.range-review-title {
+  color: var(--ve-auto-ink);
+  font-weight: 600;
+}
+.range-review-toggle {
+  display: inline-flex;
+  border: 1px solid var(--ve-line-control);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.range-review-toggle button {
+  border: 0;
+  border-radius: 0;
+  padding: 2px 12px;
+  font-size: 12px;
+}
+.range-review-toggle button.active {
+  background-image: none;
+  background-color: var(--ve-auto-soft);
+  color: var(--ve-auto-ink);
+  box-shadow: inset 0 0 0 1px var(--ve-auto-line);
+}
+.range-review-summary {
+  font-family: var(--font-mono);
+}
+
+/* 自動編集の画面の構成の一覧: 「選んだ場面だけ作り直す」の印の列を足す */
+.structure-row:has(.structure-pick) {
+  grid-template-columns: 18px 18px 64px 58px 70px minmax(0, 1fr);
+}
+.structure-pick {
+  accent-color: var(--ve-auto);
+}

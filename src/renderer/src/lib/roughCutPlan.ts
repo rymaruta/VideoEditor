@@ -52,6 +52,7 @@ import { tightenRanges, totalLength, type CutRange } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
 import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
+import { clampPieces, fitLength } from '@shared/roughCut/range'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { mixResidual } from '@shared/ingest/tracks'
 import {
@@ -214,6 +215,11 @@ export function hypeMomentsFor(
  */
 const levelOfActivity = new WeakMap<Uint8Array, Float32Array>()
 
+/** `loadActivity` で読んだ音の大きさ(範囲の境を静かな所へ寄せるのに使う)。読んでいなければ無し */
+export function levelOf(activity: Uint8Array): Float32Array | undefined {
+  return levelOfActivity.get(activity)
+}
+
 /**
  * 場面ごとの判定。Gemini の鍵があれば AI に、無ければ(または失敗したら)簡易の点数で。
  * AI の答えが無かった場面は簡易の点数で埋める。
@@ -290,6 +296,8 @@ export interface RoughCutPlan {
   telops: Omit<TextOverlay, 'id'>[]
   /** 場面を選ぶのに使った判定(見どころの置き換えの後)。構成の画面はこれを見せる */
   judgements: SceneJudgement[]
+  /** 範囲の長さを保つとき(`window.fitSec`)、窓の中の素材で埋めきれなかった秒 */
+  fitShort?: number
   /**
    * 「見どころ」が多すぎて見分けになっていなかったので、場面の印と点数を点数の判定に置き換えた
    * (`demoteIndiscriminateHighlights`)。見どころの数と場面の数
@@ -422,6 +430,11 @@ export function planRoughCut(
     aspectRatio?: AspectRatio
     /** 全マイクを足した音の大きさ(dB、100Hz)。無ければ `loadActivity` で読んだもの */
     level?: Float32Array
+    /**
+     * 範囲の自動編集: 残す区間をこの窓(共通の時刻)の中に収める。`fitSec` があれば、残す区間の長さの
+     * 合計をその秒にそろえる(範囲の長さを保つ)
+     */
+    window?: { start: number; end: number; fitSec?: number }
   }
 ): RoughCutPlan {
   const kind = options.kind ?? 'location'
@@ -482,7 +495,17 @@ export function planRoughCut(
   // 人が足した・削った区間は人の決めた位置のまま(寄せた後に当てる)
   const level = options.level ?? levelOfActivity.get(activity)
   const snapped = level ? snapCutsToQuiet(tightened, level) : tightened
-  const pieces = options.overrides ? applyCutOverrides(snapped, options.overrides) : snapped
+  const overridden = options.overrides ? applyCutOverrides(snapped, options.overrides) : snapped
+  let fitShort: number | undefined
+  let pieces = overridden
+  if (options.window) {
+    pieces = clampPieces(overridden, options.window)
+    if (options.window.fitSec !== undefined) {
+      const fitted = fitLength(pieces, options.window.fitSec, options.window)
+      pieces = fitted.pieces
+      fitShort = fitted.short
+    }
+  }
   const cameras = info.sources
     // 顔カメラ(ゲーム実況)は切り替えに使わない(ワイプで常に出す)。ただし基準カメラは本編に使う
     // (ゲーム画面の録画が無く、顔カメラだけの回)
@@ -649,7 +672,8 @@ export function planRoughCut(
     cut,
     telops: stacked,
     judgements: checked.judgements,
-    ...(checked.demoted ? { demoted: checked.demoted } : {})
+    ...(checked.demoted ? { demoted: checked.demoted } : {}),
+    ...(fitShort !== undefined ? { fitShort } : {})
   }
 }
 

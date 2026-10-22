@@ -22,7 +22,8 @@ import {
   legacyNoteFor,
   matchScenesByTime
 } from '@renderer/lib/pipelineRestore'
-import { normalizeAutoEdit } from '@shared/autoEdit'
+import { cutSignature, normalizeAutoEdit } from '@shared/autoEdit'
+import { DEFAULT_RANGED_OPTIONS, type RangedPreview } from '@renderer/lib/rangedAutoEdit'
 import { releaseRanges, sceneOfSpan } from '@renderer/lib/roughCutPlan'
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
@@ -1580,5 +1581,56 @@ describe('監査で見つかった不具合(5回目の監査)', () => {
     useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
     const removed = mainDuration()
     expect(Math.abs((await rebuild()).duration - removed)).toBeLessThan(0.2)
+  })
+})
+
+describe('範囲だけ自動編集する(作り直しの記録との食い違い)', () => {
+  const rangedEdit = async (range: { start: number; end: number }): Promise<RangedPreview> => {
+    const r = await usePipelineStore.getState().prepareRangedEdit(range, DEFAULT_RANGED_OPTIONS)
+    if (!r.ok) throw new Error(r.reason)
+    expect(usePipelineStore.getState().applyRangedEdit(r.preview).ok).toBe(true)
+    return r.preview
+  }
+
+  it('範囲を自動編集→取り消し→全体の作り直しでも、取り消した後の本編を組んだ回の残す/落とすと比べる', async () => {
+    await runEpisode()
+    usePipelineStore.getState().setKeep('s2', true)
+    await rebuild()
+    const sig = cutSignature(useProjectStore.getState().project.roughCutAuto)
+    const s2 = usePipelineStore.getState().scenes[1]
+    trimInScene(s2, 3)
+    const trimmed = mainDuration()
+    await rangedEdit({ start: trimmed - 30, end: trimmed - 5 })
+    // 範囲の自動編集は、新しい印の回を1件積む(前の回の記録は残す)
+    const built = usePipelineStore.getState().builtKept
+    expect(built.at(-1)!.cut).toBe(cutSignature(useProjectStore.getState().project.roughCutAuto))
+    expect(built.some((b) => b.cut === sig)).toBe(true)
+    useProjectStore.getState().undo()
+    expect(cutSignature(useProjectStore.getState().project.roughCutAuto)).toBe(sig)
+    // 前の回で s2 は残していたので、s2 の中の手の詰めは戻さない
+    expect(Math.abs((await rebuild()).duration - trimmed)).toBeLessThan(0.2)
+  })
+
+  it('付け直した(丸ごと消した)場面を範囲の自動編集で埋めると付け直しを使い、取り消すと戻る', async () => {
+    await runEpisode()
+    const s2 = usePipelineStore.getState().scenes[1]
+    useProjectStore.getState().removeClips(clipsInScene(s2).map((c) => c.id))
+    usePipelineStore.getState().setKeep('s2', false)
+    usePipelineStore.getState().setKeep('s2', true)
+    expect(usePipelineStore.getState().keepTouched).toContain('s2')
+    // s1 と s3 のつなぎ目の前後
+    const project = useProjectStore.getState().project
+    const spans = spansOfClips(project.clips, project.multicam!)
+    const seam = spans.find((sp) => sp.start >= s2.end - 1)!.timeline
+    const preview = await rangedEdit({ start: seam - 5, end: seam + 5 })
+    expect(preview.usedTouches).toEqual(['s2'])
+    expect(clipsInScene(s2).length).toBeGreaterThan(0)
+    expect(usePipelineStore.getState().keepTouched).not.toContain('s2')
+    useProjectStore.getState().undo()
+    expect(clipsInScene(s2)).toHaveLength(0)
+    expect(usePipelineStore.getState().keepTouched).toContain('s2')
+    // やり直すと、また使い済み
+    useProjectStore.getState().redo()
+    expect(usePipelineStore.getState().keepTouched).not.toContain('s2')
   })
 })

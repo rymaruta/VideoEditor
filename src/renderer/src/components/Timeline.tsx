@@ -131,6 +131,11 @@ import { timelineRangeOf } from '@shared/finish/sound'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
+import { currentTimelineRange, onRangeAutoEditRequest } from '../lib/timelineRange'
+import { rangedEditBlockedReason } from '../lib/rangedAutoEdit'
+import type { TimelineRange } from '@shared/roughCut/range'
+import { RangeAutoEditDialog } from './RangeAutoEditDialog'
+import { RangeReviewBar } from './RangeReviewBar'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -359,11 +364,14 @@ function audioKindOf(track: { autoRole?: 'se' | 'bgm' }): 'bgm' | 'se' | 'dialog
 function TimelineSceneBand({
   ranges,
   pixelsPerSecond,
-  width
+  width,
+  onSceneMenu
 }: {
   ranges: readonly { start: number; end: number }[]
   pixelsPerSecond: number
   width: number
+  /** 場面を右クリックしたとき(その場面の範囲を自動編集する など) */
+  onSceneMenu?: (e: React.MouseEvent, range: { start: number; end: number }) => void
 }): React.JSX.Element {
   const current = useProjectStore((s) =>
     ranges.findIndex((r) => s.playheadTime >= r.start && s.playheadTime < r.end)
@@ -382,6 +390,7 @@ function TimelineSceneBand({
             } as React.CSSProperties
           }
           title={`場面 ${i + 1}`}
+          onContextMenu={onSceneMenu ? (e) => onSceneMenu(e, r) : undefined}
         >
           {String(i + 1).padStart(2, '0')}
         </span>
@@ -657,6 +666,10 @@ export function Timeline(): React.JSX.Element {
   const selectedOverlayId = useProjectStore((s) => s.selectedOverlayId)
   const setSelectedOverlayId = useProjectStore((s) => s.selectOverlay)
   const [transitionPopoverClipId, setTransitionPopoverClipId] = useState<string | null>(null)
+  /** 範囲の自動編集のダイアログ(開いている範囲) */
+  const [rangeDialog, setRangeDialog] = useState<TimelineRange | null>(null)
+  const dragRange = useProjectStore((s) => s.dragRange)
+  useEffect(() => onRangeAutoEditRequest((r) => setRangeDialog(r)), [])
   const [scrubbing, setScrubbing] = useState(false)
 
   function selectOnly(kind: 'clip' | 'audio' | 'videoOverlay' | 'caption'): void {
@@ -768,6 +781,7 @@ export function Timeline(): React.JSX.Element {
           : { label: '音声を分離', onSelect: () => detachClipAudio(clipId) }
       )
     }
+    items.push(...rangeItems(rangeAroundClip(clipId, targets)))
     items.push({
       label: targets.length > 1 ? `削除(${targets.length}件)` : '削除',
       shortcut: keymap.delete.display,
@@ -776,6 +790,95 @@ export function Timeline(): React.JSX.Element {
     })
     void index
     setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
+
+  /** 今選んでいる範囲(イン点・アウト点 → ルーラーの Shift+ドラッグ → 本編の複数選択の外枠) */
+  function currentRange(): ReturnType<typeof currentTimelineRange> {
+    const st = useProjectStore.getState()
+    // イン点・アウト点はキー操作の担当が足す UI 状態(無い版でも動くように読む)
+    const io = st as unknown as { timelineIn?: number | null; timelineOut?: number | null }
+    return currentTimelineRange({
+      timelineIn: io.timelineIn,
+      timelineOut: io.timelineOut,
+      dragRange: st.dragRange,
+      multiSelectedClipIds: st.multiSelectedClipIds,
+      project: st.project
+    })
+  }
+
+  /** 右クリックしたクリップの範囲: 選んでいる範囲がそのクリップに掛かればそれ、無ければ選んだクリップの外枠 */
+  function rangeAroundClip(clipId: string, targets: readonly string[]): TimelineRange | null {
+    const tc = timedClips.find((x) => x.clip.id === clipId)
+    if (!tc) return null
+    const picked = currentRange()?.range
+    if (picked && picked.end > tc.start && picked.start < tc.end) return picked
+    const chosen = timedClips.filter((x) => targets.includes(x.clip.id))
+    if (chosen.length === 0) return { start: tc.start, end: tc.end }
+    return {
+      start: Math.min(...chosen.map((x) => x.start)),
+      end: Math.max(...chosen.map((x) => x.end))
+    }
+  }
+
+  /** 範囲に対する右クリックの項目(使えなければ理由付きで押せなくする) */
+  function rangeItems(range: TimelineRange | null): ContextMenuItem[] {
+    if (!range) return []
+    const blocked = rangedEditBlockedReason(
+      useProjectStore.getState().project,
+      usePipelineStore.getState()
+    )
+    return [
+      {
+        label: blocked ? `この範囲を自動編集…(${blocked})` : 'この範囲を自動編集…',
+        disabled: Boolean(blocked),
+        onSelect: () => setRangeDialog(range)
+      }
+    ]
+  }
+
+  function openRangeMenu(e: React.MouseEvent, range: TimelineRange, what: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    const items = rangeItems(range).map((it) => ({
+      ...it,
+      label: it.label.replace('この範囲', what)
+    }))
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
+
+  /** メニューの「選んだ範囲を自動編集…」: 範囲が無ければ、選んでいるクリップ・再生位置のクリップ */
+  function openRangeAutoEdit(): void {
+    const picked = currentRange()?.range
+    if (picked) return setRangeDialog(picked)
+    const st = useProjectStore.getState()
+    const tc =
+      timedClips.find((x) => x.clip.id === st.selectedClipId) ??
+      findTimedClipAt(timedClips, st.playheadTime)
+    if (tc) setRangeDialog({ start: tc.start, end: tc.end })
+  }
+
+  /** ルーラーの Shift+ドラッグ */
+  function startRulerRangeDrag(
+    clientX0: number,
+    left: number,
+    t0: number,
+    pps: number,
+    end: number
+  ): void {
+    const setDrag = useProjectStore.getState().setDragRange
+    const at = (clientX: number): number => Math.max(0, Math.min(end, (clientX - left) / pps))
+    setDrag(null)
+    const move = (ev: MouseEvent): void => {
+      const t = at(ev.clientX)
+      if (Math.abs(ev.clientX - clientX0) < 3) return
+      setDrag({ start: Math.min(t0, t), end: Math.max(t0, t) })
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
   }
 
   function openAudioClipMenu(e: React.MouseEvent, trackId: string, clipId: string): void {
@@ -1698,6 +1801,7 @@ export function Timeline(): React.JSX.Element {
     else if (id === 'view.zoomOut') setZoom((z) => Math.max(currentMinZoom(), z / 1.4))
     else if (id === 'view.zoomFit') handleZoomToFit()
     else if (id === 'help.shortcuts') setShortcutGuideVisible(true)
+    else if (id === 'edit.rangeAutoEdit') openRangeAutoEdit()
     else if (id === 'telop.auto') {
       // 選んでいるクリップ、無ければ再生位置のクリップの音声からテロップを作る
       const state = useProjectStore.getState()
@@ -2168,6 +2272,7 @@ export function Timeline(): React.JSX.Element {
         </p>
       )}
 
+      <RangeReviewBar />
       <div className="timeline-tracks">
         <div className="track-labels-col">
           <div className="timeline-timecode-cell">
@@ -2397,7 +2502,20 @@ export function Timeline(): React.JSX.Element {
             onMouseDown={(e) => {
               const rect = e.currentTarget.getBoundingClientRect()
               const t = Math.max(0, Math.min(total, (e.clientX - rect.left) / pixelsPerSecond))
+              if (e.shiftKey && e.button === 0) {
+                // Shift+ドラッグで範囲を選ぶ(範囲の自動編集・自動編集で触らない範囲に使う)
+                e.preventDefault()
+                startRulerRangeDrag(e.clientX, rect.left, t, pixelsPerSecond, total)
+                return
+              }
+              if (e.button !== 0) return
+              useProjectStore.getState().setDragRange(null)
               seekTo(t)
+            }}
+            onContextMenu={(e) => {
+              const picked = currentRange()
+              if (!picked) return
+              openRangeMenu(e, picked.range, '選んだ範囲')
             }}
           >
             {rulerTicks(
@@ -2419,6 +2537,16 @@ export function Timeline(): React.JSX.Element {
                 }}
               />
             )}
+            {dragRange && dragRange.end > dragRange.start && (
+              <span
+                className="g3-ruler-range g3-ruler-range-drag"
+                aria-hidden="true"
+                style={{
+                  left: dragRange.start * pixelsPerSecond,
+                  width: (dragRange.end - dragRange.start) * pixelsPerSecond
+                }}
+              />
+            )}
             {reviewMarks.map((item) =>
               inWindow(visibleWindow, item.at, item.at) ? (
                 <span
@@ -2435,6 +2563,7 @@ export function Timeline(): React.JSX.Element {
               ranges={sceneRanges}
               pixelsPerSecond={pixelsPerSecond}
               width={timelineWidth}
+              onSceneMenu={(e, r) => openRangeMenu(e, r, 'この場面')}
             />
           )}
           {project.beatGrid?.enabled &&
@@ -3227,6 +3356,9 @@ export function Timeline(): React.JSX.Element {
           items={contextMenu.items}
           onClose={() => setContextMenu(null)}
         />
+      )}
+      {rangeDialog && (
+        <RangeAutoEditDialog range={rangeDialog} onClose={() => setRangeDialog(null)} />
       )}
 
       {selectedAudioClipData && selectedAudioClip && (

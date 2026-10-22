@@ -1,5 +1,18 @@
 import { playableOnMain, relinkRefusal } from '../lib/relinkCheck'
-import { carriesVoice, silencedTrack, tracksReplaceAnchorAudio } from '@shared/roughCut/build'
+import {
+  carriesVoice,
+  CUT_FADE_SEC,
+  silencedTrack,
+  tracksReplaceAnchorAudio
+} from '@shared/roughCut/build'
+import {
+  intersectSegs,
+  overridesWithin,
+  spliceClips,
+  spliceTimed,
+  subtractSegs,
+  type TimelineRange
+} from '@shared/roughCut/range'
 import { FACE_PIP_POSITION, FACE_PIP_SCALE } from '@shared/pipLayout'
 import { overlayClipDuration, overlayClipEnd } from '@shared/overlayClip'
 import type { CameraRole, TrackRole } from '@shared/ingest/tracks'
@@ -1017,6 +1030,8 @@ interface ProjectState {
   selectedOverlayId: string | null
   clipboardClips: Clip[]
   playheadTime: number
+  /** ルーラーを Shift+ドラッグして選んだ範囲(タイムラインの秒)。無ければ null */
+  dragRange: { start: number; end: number } | null
   isPlaying: boolean
   seekRequest: { time: number; token: number } | null
   /**
@@ -1169,6 +1184,7 @@ interface ProjectState {
   selectClip: (clipId: string | null) => void
   setMultiSelectedClipIds: (clipIds: string[]) => void
   setPlayheadTime: (t: number) => void
+  setDragRange: (range: { start: number; end: number } | null) => void
   setIsPlaying: (p: boolean) => void
   /** 再生/一時停止の切り替え。末尾で止まっているときは先頭へ戻して再生し直す */
   togglePlayback: () => void
@@ -1238,6 +1254,11 @@ interface ProjectState {
     telops: Omit<TextOverlay, 'id'>[],
     overrides?: CutOverrides
   ) => void
+  /**
+   * 範囲の自動編集を当てる(`rangedEditProject` で作った企画に入れ替える)。取り消し1回で戻る。
+   * 用意した時の企画(`base`)から、自動編集の判断のほかが変わっていれば当てずに false
+   */
+  applyRangedProject: (after: Project, base: Project) => boolean
   /** 演出テロップ(提案から置いたもの)を入れ替える(取り消し1回で戻る) */
   /**
    * 演出テロップを入れ替える。`speech` を渡すと、その発言の発言テロップも入れ替える
@@ -1828,6 +1849,7 @@ function projectSwitchReset(): Pick<
   | 'selectedOverlayId'
   | 'clipboardClips'
   | 'playheadTime'
+  | 'dragRange'
   | 'isPlaying'
   | 'seekRequest'
   | 'missingAssetPaths'
@@ -1847,6 +1869,7 @@ function projectSwitchReset(): Pick<
     selectedOverlayId: null,
     clipboardClips: [],
     playheadTime: 0,
+    dragRange: null,
     isPlaying: false,
     seekRequest: null,
     missingAssetPaths: [],
@@ -2055,6 +2078,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   selectedOverlayId: null,
   clipboardClips: [],
   playheadTime: 0,
+  dragRange: null,
   isPlaying: false,
   seekRequest: null,
   missingAssetPaths: [],
@@ -3200,6 +3224,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         : { selectedOverlayId: null }
     ),
   setPlayheadTime: (t) => set({ playheadTime: t }),
+  setDragRange: (range) => set({ dragRange: range }),
   setIsPlaying: (p) => set({ isPlaying: p }),
   togglePlayback: () =>
     set((state) => {
@@ -3505,46 +3530,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 人が本編のクリップに付けた見た目(切り抜き・ぼかし・色ラベル)は、同じ時刻を映す新しいクリップへ
       // 引き継ぐ(作り直すと消えていた)。新しいクリップの真ん中の時刻を映していた前のクリップから取る
       // (前のクリップの頭から探すと、分かれた後ろ・頭を詰めたクリップに付かなかった)
-      const lookOf = (pc: Clip): Partial<Clip> => ({
-        ...(pc.fillCrop !== undefined ? { fillCrop: pc.fillCrop } : {}),
-        ...(pc.cropCenter ? { cropCenter: pc.cropCenter } : {}),
-        ...(pc.blurBackground !== undefined ? { blurBackground: pc.blurBackground } : {}),
-        ...(pc.colorLabel ? { colorLabel: pc.colorLabel } : {})
-      })
-      const info = state.project.multicam
-      const styled = info
-        ? state.project.clips.filter((pc) => Object.keys(lookOf(pc)).length > 0)
-        : []
-      const lookedClips =
-        info && styled.length > 0
-          ? clips.map((c) => {
-              if (!rebuilt.includes(c)) return c
-              const f = info.files.find((x) => x.assetId === c.assetId)
-              if (!f) return c
-              const a = toCommon(f, c.inPoint)
-              const b = toCommon(f, c.outPoint)
-              const mid = (a + b) / 2
-              // 真ん中の時刻を映していた前のクリップ。無ければ(前の切れ目をまたいでつながった)一番長く
-              // 重なっていた前のクリップ
-              let from: Clip | undefined
-              let best = 0
-              for (const pc of styled) {
-                if (pc.assetId !== c.assetId) continue
-                const pa = toCommon(f, pc.inPoint)
-                const pb = toCommon(f, pc.outPoint)
-                if (pa <= mid && mid < pb) {
-                  from = pc
-                  break
-                }
-                const overlap = Math.min(b, pb) - Math.max(a, pa)
-                if (overlap > best) {
-                  best = overlap
-                  from = pc
-                }
-              }
-              return from ? { ...c, ...lookOf(from) } : c
-            })
-          : clips
+      const lookedClips = carryClipLooks(
+        state.project.clips,
+        clips,
+        rebuilt,
+        state.project.multicam
+      )
       const recorded = new Set((state.project.multicam?.files ?? []).map((f) => f.assetId))
       const previousTracks = new Map(
         state.project.audioTracks
@@ -3726,6 +3717,21 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         project: rebuiltProject
       }
     }),
+
+  applyRangedProject: (after, base) => {
+    const state = get()
+    if (!sameExceptAutoEdit(state.project, base)) return false
+    set((s) => ({
+      __noFollow: true,
+      ...pushHistory(s),
+      selectedClipId: null,
+      multiSelectedClipIds: [],
+      selectedOverlayId: null,
+      // 自動編集の判断は用意している間に変わりうる(画面のチェック)。今のものを残す
+      project: { ...after, autoEdit: s.project.autoEdit }
+    }))
+    return true
+  },
 
   setAutoEdit: (autoEdit, session) =>
     set((state) => {
@@ -5770,6 +5776,530 @@ function followMainEdit(
       ? { editedTelops: rememberEditedTelops(droppedEdited, next.editedTelops) }
       : {})
   }
+}
+
+/** 人が本編のクリップに付けた見た目(切り抜き・ぼかし・色ラベル) */
+function clipLookOf(pc: Clip): Partial<Clip> {
+  return {
+    ...(pc.fillCrop !== undefined ? { fillCrop: pc.fillCrop } : {}),
+    ...(pc.cropCenter ? { cropCenter: pc.cropCenter } : {}),
+    ...(pc.blurBackground !== undefined ? { blurBackground: pc.blurBackground } : {}),
+    ...(pc.colorLabel ? { colorLabel: pc.colorLabel } : {})
+  }
+}
+
+/**
+ * 作り直したクリップ(`rebuilt` に入っているもの)に、前のクリップ(`previous`)の見た目を引き継ぐ。
+ * 新しいクリップの真ん中の時刻を映していた前のクリップから取る(無ければ一番長く重なっていたもの)
+ */
+function carryClipLooks(
+  previous: readonly Clip[],
+  clips: Clip[],
+  rebuilt: readonly Clip[],
+  info: MulticamInfo | undefined
+): Clip[] {
+  const styled = info ? previous.filter((pc) => Object.keys(clipLookOf(pc)).length > 0) : []
+  if (!info || styled.length === 0) return clips
+  return clips.map((c) => {
+    if (!rebuilt.includes(c)) return c
+    const f = info.files.find((x) => x.assetId === c.assetId)
+    if (!f) return c
+    const a = toCommon(f, c.inPoint)
+    const b = toCommon(f, c.outPoint)
+    const mid = (a + b) / 2
+    // 真ん中の時刻を映していた前のクリップ。無ければ(前の切れ目をまたいでつながった)一番長く
+    // 重なっていた前のクリップ
+    let from: Clip | undefined
+    let best = 0
+    for (const pc of styled) {
+      if (pc.assetId !== c.assetId) continue
+      const pa = toCommon(f, pc.inPoint)
+      const pb = toCommon(f, pc.outPoint)
+      if (pa <= mid && mid < pb) {
+        from = pc
+        break
+      }
+      const overlap = Math.min(b, pb) - Math.max(a, pa)
+      if (overlap > best) {
+        best = overlap
+        from = pc
+      }
+    }
+    return from ? { ...c, ...clipLookOf(from) } : c
+  })
+}
+
+/** 範囲の自動編集で、範囲の中に入れる中身(`rangedEditProject` に渡す) */
+export interface RangedEditInput {
+  /** 当てる前の本編の範囲(タイムラインの時刻。境は寄せてある) */
+  range: TimelineRange
+  /** 範囲の共通の時刻の窓 */
+  window: Range
+  /** 範囲の中だけで組んだ仮編集(時刻は範囲の頭を 0 とする) */
+  cut: RoughCut
+  /** 発言テロップ・演出テロップ(仮編集の時刻) */
+  telops: Omit<TextOverlay, 'id'>[]
+  /** 範囲の長さを保つ(後ろを動かさない)。false ならリップル(後ろを詰める・送る) */
+  keepLength: boolean
+  /** 範囲の中の手直しを残したときの、窓の中の本編の修正(作り直すときに当て直すため覚える) */
+  keptOverrides?: CutOverrides
+  /**
+   * 範囲の中で入れ替える自動テロップか(既定は発言・演出テロップの全部)。入れ替えない工程の
+   * テロップ・提案の一覧に無い人が直した演出テロップは、本編に付いていくだけにする
+   */
+  replaceTelop?: (o: TextOverlay) => boolean
+}
+
+export interface RangedEditResult {
+  project: Project
+  /** 当てた後の本編の範囲(タイムラインの時刻) */
+  range: TimelineRange
+  /** 範囲の長さの変わり(秒。正なら伸びた) */
+  delta: number
+  /** 範囲より後ろにあって、一緒に動いた手置き(テロップ・音・画)の数 */
+  movedHand: number
+  /** 範囲の中にあって、そのまま残した手置きの数 */
+  insideHand: number
+}
+
+/** 時刻のあるクリップを、タイムラインの区間 [a, b) の外の所だけにする(掛かるものは境で切る) */
+function cutOutWindow<
+  C extends {
+    id: string
+    startTime: number
+    inPoint: number
+    outPoint: number
+    speed?: number
+    fadeIn?: number
+    fadeOut?: number
+  }
+>(clips: readonly C[], a: number, b: number, fade?: (piece: C, side: 'head' | 'tail') => C): C[] {
+  return clips.flatMap((c) => {
+    const speed = c.speed || 1
+    const end = c.startTime + (c.outPoint - c.inPoint) / speed
+    if (end <= a + 1e-6 || c.startTime >= b - 1e-6) return [c]
+    const out: C[] = []
+    if (c.startTime < a - 1e-6) {
+      const left: C = { ...c, outPoint: c.inPoint + (a - c.startTime) * speed, fadeOut: undefined }
+      out.push(fade ? fade(left, 'tail') : left)
+    }
+    if (end > b + 1e-6) {
+      const right: C = {
+        ...c,
+        id: out.length > 0 ? uuid() : c.id,
+        startTime: b,
+        inPoint: c.inPoint + (b - c.startTime) * speed,
+        fadeIn: undefined,
+        ...('loopCross' in c ? { loopCross: undefined } : {})
+      }
+      out.push(fade ? fade(right, 'head') : right)
+    }
+    return out
+  })
+}
+
+/** 範囲の境で、切ったクリップに付けるフェード */
+function edgeFade<C extends { fadeIn?: number; fadeOut?: number }>(
+  c: C,
+  side: 'head' | 'tail',
+  sec: number
+): C {
+  return side === 'tail'
+    ? { ...c, fadeOut: Math.max(c.fadeOut ?? 0, sec) }
+    : { ...c, fadeIn: Math.max(c.fadeIn ?? 0, sec) }
+}
+
+/**
+ * 本編のクリップの id と、その先頭からの秒 → 当てた後の本編で同じ素材の時刻を映すクリップ。
+ * 範囲の境で分けたクリップ(同じ id で長さが変わった)も、素材の時刻が残っていればそのクリップに付ける
+ */
+function relinkAcrossSplice(
+  oldClips: readonly Clip[],
+  newClips: readonly Clip[],
+  info: MulticamInfo
+): (clipId: string, offset: number, sameAsset?: string) => { id: string; offset: number } | null {
+  const newById = new Map(newClips.map((c) => [c.id, c]))
+  const oldById = new Map(oldClips.map((c) => [c.id, c]))
+  return (clipId, offset, sameAsset) => {
+    const old = oldById.get(clipId)
+    const nw = newById.get(clipId)
+    if (old && nw) {
+      if (old === nw) return { id: clipId, offset }
+      const src = old.inPoint + offset * (old.speed || 1)
+      if (src >= nw.inPoint - 1e-9 && src < nw.outPoint)
+        return { id: clipId, offset: (src - nw.inPoint) / (nw.speed || 1) }
+    }
+    // 範囲の中で作り直したクリップへ、同じ共通の時刻で付け直す(境で分けた同じ id のクリップは外して探す)
+    const others = newClips.filter((c) => c.id !== clipId)
+    return relinkToRebuiltClips(oldClips, others, info)(clipId, offset, sameAsset)
+  }
+}
+
+/**
+ * 本編の範囲だけを自動で作り直した企画(純粋な計算。取り消しの履歴には触らない)。
+ * 範囲の外の本編のクリップは同じオブジェクトのまま、範囲の中だけ作り直したクリップに替える。
+ * 声・自動テロップ・自動の SE/BGM/CG は本編に付いていかせ(`followMainEdit`)、範囲の中の声・
+ * 顔カメラ・テロップは仮編集と同じ作りで入れ直す。リップルでは範囲より後ろの手置きも同じだけ動かす
+ */
+export function rangedEditProject(base: Project, input: RangedEditInput): RangedEditResult {
+  const info = base.multicam
+  if (!info) throw new Error('RANGED_EDIT_NO_MULTICAM')
+  const { range, cut } = input
+  const a = range.start
+  const rebuilt: Clip[] = cut.main.map((m) => ({
+    id: uuid(),
+    assetId: m.assetId,
+    inPoint: m.inPoint,
+    outPoint: m.outPoint,
+    speed: m.speed,
+    audioDetached: true
+  }))
+  const parts = spliceClips(base.clips, [], range, splitId)
+  // 範囲の中の差し込みの画(収録素材でないクリップ)は、直前の収録素材の続きに入れ直す
+  const withExtras = reinsertExtraClips(parts.inside, rebuilt, info)
+  let inside = carryClipLooks(parts.inside, withExtras, rebuilt, info)
+  const lenOf = (cs: readonly Clip[]): number =>
+    cs.reduce((t, c) => t + Math.max(0, c.outPoint - c.inPoint) / (c.speed || 1), 0)
+  // 長さを保つ: 素材の丸め・録っていない短い隙間で残る端数を、最後の作り直したクリップで合わせる
+  if (input.keepLength) {
+    const diff = lenOf(inside) - (range.end - range.start)
+    const k = inside.map((c) => rebuilt.includes(c)).lastIndexOf(true)
+    if (k >= 0 && Math.abs(diff) > 1e-9) {
+      const c = inside[k]
+      const outPoint = c.outPoint - diff * (c.speed || 1)
+      if (outPoint - c.inPoint > 0.01)
+        inside = inside.map((x, i) => (i === k ? { ...x, outPoint } : x))
+    }
+  }
+  const newLen = lenOf(inside)
+  const delta = newLen - (range.end - range.start)
+  const after: TimelineRange = { start: a, end: a + newLen }
+  const clips = [...parts.before, ...inside, ...parts.after]
+
+  // 本編に紐づけた手置きのテロップ・分離音声を、同じ素材の時刻を映すクリップへ付け直す
+  const relink = relinkAcrossSplice(base.clips, clips, info)
+  const textOverlays0 = base.textOverlays.map((o) => {
+    if (!o.linkedClipId) return o
+    const to = relink(o.linkedClipId, o.linkOffset ?? 0)
+    if (to && to.id === o.linkedClipId && to.offset === (o.linkOffset ?? 0)) return o
+    return to
+      ? { ...o, linkedClipId: to.id, linkOffset: to.offset }
+      : { ...o, linkedClipId: undefined, linkOffset: undefined }
+  })
+  const audioTracks0 = base.audioTracks.map((t) =>
+    t.clips.some((c) => c.linkedClipId)
+      ? {
+          ...t,
+          clips: t.clips.map((c) => {
+            if (!c.linkedClipId) return c
+            const to = relink(c.linkedClipId, 0, c.assetId)
+            if (to && to.id === c.linkedClipId) return c
+            return to ? { ...c, linkedClipId: to.id } : { ...c, linkedClipId: undefined }
+          })
+        }
+      : t
+  )
+  // 本編に付いていかせる(範囲より後ろは長さの変わりだけ動く。消えた所のものは消える)
+  const followed = followMainEdit(base, {
+    ...base,
+    clips,
+    textOverlays: textOverlays0,
+    audioTracks: audioTracks0
+  })
+
+  const recorded = new Set(info.files.map((f) => f.assetId))
+  const cutAudio = new Map(cut.audio.map((x) => [x.sourceId, x]))
+  const cutOverlays = new Map((cut.overlays ?? []).map((x) => [x.sourceId, x]))
+  // 範囲の中の声を、仮編集と同じ作り(時間の飛ぶ切れ目に短いフェード)で入れ直す
+  const audioTracks = followed.audioTracks.map((t) => {
+    if (!t.multicamSourceId) return t
+    const src = cutAudio.get(t.multicamSourceId)
+    const prev = base.audioTracks.find((x) => x.multicamSourceId === t.multicamSourceId)
+    const isVoice = (c: AudioTrackClip): boolean => recorded.has(c.assetId) && !c.linkedClipId
+    const others = t.clips.filter((c) => !isVoice(c))
+    const outside = cutOutWindow(t.clips.filter(isVoice), after.start, after.end, (c, side) =>
+      edgeFade(c, side, CUT_FADE_SEC)
+    )
+    const added: AudioTrackClip[] = (src?.clips ?? []).map((c) => {
+      const volume = carriedClipVolume(prev, c)
+      return {
+        id: uuid(),
+        assetId: c.assetId,
+        startTime: c.startTime + a,
+        inPoint: c.inPoint,
+        outPoint: c.outPoint,
+        ...(Math.abs(c.speed - 1) > 1e-9 ? { speed: c.speed } : {}),
+        ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
+        ...(c.fadeOut ? { fadeOut: c.fadeOut } : {}),
+        ...(volume !== undefined ? { volume } : {})
+      }
+    })
+    return {
+      ...t,
+      clips: [...outside, ...added, ...others].sort((x, y) => x.startTime - y.startTime)
+    }
+  })
+  // 顔カメラのワイプも同じ区間で入れ直す
+  const videoOverlayTracks = followed.videoOverlayTracks.map((t) => {
+    if (!t.multicamSourceId) return t
+    const src = cutOverlays.get(t.multicamSourceId)
+    if (!src) return t
+    const isCam = (c: VideoOverlayClip): boolean => recorded.has(c.assetId)
+    const outside = cutOutWindow(t.clips.filter(isCam), after.start, after.end)
+    const added: VideoOverlayClip[] = src.clips.map((c) => ({
+      id: uuid(),
+      ...c,
+      startTime: c.startTime + a
+    }))
+    return {
+      ...t,
+      clips: [...outside, ...added, ...t.clips.filter((c) => !isCam(c))].sort(
+        (x, y) => x.startTime - y.startTime
+      )
+    }
+  })
+
+  // 自動テロップ(発言・演出)は、真ん中の時刻が範囲の中のものを入れ替える。人が直したもの・消したものは
+  // 仮編集を作り直すときと同じく当て直す
+  const editedTelops = rememberEditedTelops(followed.textOverlays, followed.editedTelops)
+  const incoming = mergeManualTelops(
+    base.textOverlays,
+    input.telops.map((o) => ({
+      ...o,
+      startTime: o.startTime + a,
+      endTime: o.endTime + a,
+      ...(o.words ? { words: shiftOverlayWords(o.words, a) } : {})
+    })),
+    new Set(base.dismissedTelops ?? []),
+    editedTelops
+  ).map((o) => ({ ...o, id: uuid() }) as TextOverlay)
+  const isAuto = (o: TextOverlay): boolean =>
+    !o.linkedClipId && autoTelopKey(o) !== null && (input.replaceTelop?.(o) ?? true)
+  const autoTelops = spliceTimed(followed.textOverlays.filter(isAuto), incoming, after)
+  let textOverlays = [...followed.textOverlays.filter((o) => !isAuto(o)), ...autoTelops.items]
+
+  // リップル: 範囲より後ろの手置き(自動の印も紐づきも無いもの)も、長さの変わりだけ動かす
+  let movedHand = 0
+  let insideHand = 0
+  const b = range.end
+  const move = <C extends { startTime: number }>(c: C): C => {
+    if (c.startTime >= a - 1e-6 && c.startTime < b - 1e-6) insideHand++
+    if (c.startTime < b - 1e-6 || input.keepLength || Math.abs(delta) <= 1e-9) return c
+    movedHand++
+    return { ...c, startTime: Math.max(0, c.startTime + delta) }
+  }
+  textOverlays = textOverlays.map((o) => {
+    if (o.linkedClipId || autoTelopKey(o) !== null) return o
+    const m = move(o)
+    if (m === o) return o
+    const shift = m.startTime - o.startTime
+    return { ...m, endTime: o.endTime + shift, words: shiftOverlayWords(o.words, shift) }
+  })
+  const handAudio = (t: AudioTrack, c: AudioTrackClip): boolean =>
+    !c.linkedClipId && !t.autoRole && (!t.multicamSourceId || !recorded.has(c.assetId))
+  const audioTracksMoved = audioTracks.map((t) => {
+    if (!t.clips.some((c) => handAudio(t, c))) return t
+    let changed = false
+    const cs = t.clips.map((c) => {
+      if (!handAudio(t, c)) return c
+      const m = move(c)
+      if (m !== c) changed = true
+      return m
+    })
+    return changed ? { ...t, clips: cs } : t
+  })
+  const handOverlay = (t: VideoOverlayTrack, c: VideoOverlayClip): boolean =>
+    !t.autoRole && (!t.multicamSourceId || !recorded.has(c.assetId))
+  const overlaysMoved = videoOverlayTracks.map((t) => {
+    if (!t.clips.some((c) => handOverlay(t, c))) return t
+    let changed = false
+    const cs = t.clips.map((c) => {
+      if (!handOverlay(t, c)) return c
+      const m = move(c)
+      if (m !== c) changed = true
+      return m
+    })
+    return changed ? { ...t, clips: cs } : t
+  })
+
+  // 組んだ本編の記録: 窓の外は前のまま、窓の中は今回組んだもの。人の修正は窓の中を外す
+  // (範囲の中の手直しを残したときは、窓の中の判断を覚え直す)
+  const prevAuto = base.roughCutAuto ?? []
+  const roughCutAuto = [
+    ...subtractSegs(prevAuto, [input.window]),
+    ...intersectSegs(coverageOfClips(cut.main, info), [input.window])
+  ].sort((x, y) => x.start - y.start)
+  const outsideOverrides = overridesWithin(base.cutOverrides, [input.window], false)
+  const insideOverrides = input.keptOverrides
+    ? overridesWithin(input.keptOverrides, [input.window], true)
+    : undefined
+  const cutOverrides: CutOverrides = {
+    removed: [...(outsideOverrides?.removed ?? []), ...(insideOverrides?.removed ?? [])],
+    added: [...(outsideOverrides?.added ?? []), ...(insideOverrides?.added ?? [])],
+    angles: [...(outsideOverrides?.angles ?? []), ...(insideOverrides?.angles ?? [])].sort(
+      (x, y) => x.start - y.start
+    )
+  }
+
+  const project = syncLinkedTextOverlays(
+    syncLinkedAudioClips({
+      ...followed,
+      clips,
+      audioTracks: mergeHandTracks(audioTracksMoved, base.audioTracks),
+      videoOverlayTracks: mergeHandTracks(overlaysMoved, base.videoOverlayTracks),
+      textOverlays,
+      editedTelops,
+      roughCutAuto,
+      cutOverrides: hasOverrides(cutOverrides) ? cutOverrides : undefined
+    })
+  )
+  return { project, range: after, delta, movedHand, insideHand }
+}
+
+/** 範囲の中に置き直す自動の SE・BGM・CG(タイムラインの時刻) */
+export interface RangedSounds {
+  se?: PlacedSound[]
+  /** 入れ直すときだけ(既定は本編に付いていかせるだけ) */
+  bgm?: PlacedSound[]
+  cg?: PlacedCg[]
+}
+
+/** 範囲の境で切った自動の BGM に付けるフェード(秒) */
+export const RANGE_BGM_EDGE_FADE = 1
+
+/**
+ * 範囲の中の自動の SE・CG(と、入れ直すなら BGM)を置き直した企画。SE・CG は範囲の中に始まるものだけ、
+ * BGM は範囲の境で切って(1秒のフェード)範囲の中を入れ直す。人が手を入れた自動のトラックの種類は
+ * 置かずに `skipped` に返す。手を入れていないトラックは、置き直した後も「手を入れていない」のまま
+ */
+export function withRangedSounds(
+  project: Project,
+  range: TimelineRange,
+  sounds: RangedSounds,
+  newAssets: readonly MediaAsset[]
+): {
+  project: Project
+  skipped: ('se' | 'bgm' | 'cg')[]
+  placed: { se: number; bgm: number; cg: number }
+} {
+  const assets = [...project.assets]
+  for (const a of newAssets) if (!assets.some((x) => x.filePath === a.filePath)) assets.push(a)
+  const idOf = new Map(assets.map((a) => [a.filePath, a.id]))
+  const skipped: ('se' | 'bgm' | 'cg')[] = []
+  const placed = { se: 0, bgm: 0, cg: 0 }
+  const startsInside = (c: { startTime: number }): boolean =>
+    c.startTime >= range.start - 1e-6 && c.startTime < range.end - 1e-6
+  const NAMES = { se: 'SE(自動)', bgm: 'BGM(自動)' } as const
+  let audioTracks = project.audioTracks
+  for (const role of ['se', 'bgm'] as const) {
+    const planned = sounds[role]
+    if (!planned) continue
+    const clips: AudioTrackClip[] = planned
+      .filter((c) => idOf.has(c.path))
+      .map((c) => ({
+        id: uuid(),
+        assetId: idOf.get(c.path)!,
+        startTime: c.startTime,
+        inPoint: c.inPoint,
+        outPoint: c.outPoint,
+        volume: c.volume,
+        ...(c.fadeIn ? { fadeIn: c.fadeIn } : {}),
+        ...(c.fadeOut ? { fadeOut: c.fadeOut } : {})
+      }))
+    const at = audioTracks.findIndex((t) => t.autoRole === role)
+    const track = at >= 0 ? audioTracks[at] : undefined
+    if (track && !isUntouchedAuto(track)) {
+      skipped.push(role)
+      continue
+    }
+    placed[role] = clips.length
+    if (!track) {
+      if (clips.length === 0) continue
+      audioTracks = [
+        ...audioTracks,
+        withAutoSignature<AudioTrack>({
+          id: uuid(),
+          name: NAMES[role],
+          muted: false,
+          volume: 1,
+          duckingEnabled: role === 'bgm',
+          autoRole: role,
+          clips
+        })
+      ]
+      continue
+    }
+    const kept =
+      role === 'se'
+        ? track.clips.filter((c) => !startsInside(c))
+        : cutOutWindow(track.clips, range.start, range.end, (c, side) =>
+            edgeFade(c, side, Math.min(RANGE_BGM_EDGE_FADE, bgmLen(c) / 3))
+          )
+    const next = withAutoSignature({
+      ...track,
+      clips: [...kept, ...clips].sort((x, y) => x.startTime - y.startTime)
+    })
+    audioTracks = audioTracks.map((t, i) => (i === at ? next : t))
+  }
+  let videoOverlayTracks = project.videoOverlayTracks
+  if (sounds.cg) {
+    const clips: VideoOverlayClip[] = sounds.cg
+      .filter((c) => idOf.has(c.path))
+      .map((c) => ({
+        id: uuid(),
+        assetId: idOf.get(c.path)!,
+        startTime: c.startTime,
+        inPoint: c.inPoint,
+        outPoint: c.outPoint
+      }))
+    const at = videoOverlayTracks.findIndex((t) => t.autoRole === 'cg')
+    const track = at >= 0 ? videoOverlayTracks[at] : undefined
+    if (track && !isUntouchedAuto(track)) skipped.push('cg')
+    else {
+      placed.cg = clips.length
+      if (!track) {
+        if (clips.length > 0)
+          videoOverlayTracks = [
+            ...videoOverlayTracks,
+            withAutoSignature<VideoOverlayTrack>({
+              id: uuid(),
+              name: 'CG(自動)',
+              hidden: false,
+              position: 'full',
+              scale: 1,
+              autoRole: 'cg',
+              clips
+            })
+          ]
+      } else {
+        const next = withAutoSignature({
+          ...track,
+          clips: [...track.clips.filter((c) => !startsInside(c)), ...clips].sort(
+            (x, y) => x.startTime - y.startTime
+          )
+        })
+        videoOverlayTracks = videoOverlayTracks.map((t, i) => (i === at ? next : t))
+      }
+    }
+  }
+  return {
+    project: { ...project, assets, audioTracks, videoOverlayTracks },
+    skipped,
+    placed
+  }
+}
+
+/** 2つの企画が、自動編集の判断(`autoEdit`)のほかは同じものか(参照で比べる) */
+export function sameExceptAutoEdit(a: Project, b: Project): boolean {
+  if (a === b) return true
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const k of keys) {
+    if (k === 'autoEdit') continue
+    const x = (a as unknown as Record<string, unknown>)[k]
+    const y = (b as unknown as Record<string, unknown>)[k]
+    if (x !== y) return false
+  }
+  return true
 }
 
 /** 本編の速さの並び(BGM の作り直しの元にしたときの本編) */
