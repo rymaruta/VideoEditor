@@ -923,39 +923,56 @@ textarea {
 }
 
 /* ---------- タイムラインの道具の帯は 1 行に固定(1366 幅で 3 行に折り返していた) ----------
-   収まらない操作は「その他 ▾」(OverflowMenu)。広いときは帯に並べ、狭いときはメニューにする */
-.timeline-panel {
-  container-type: inline-size;
-  container-name: timeline;
-}
+   折り返さず、切り落とさない。帯の直下の物は縮めず、入らない操作は後ろから「その他 ▾」へ回す
+   (Timeline.tsx・lib/useOverflowFit が帯の幅を測る)。右端のコピー・複製・削除は必ず見える */
 .timeline-panel .panel-header {
+  position: relative;
   flex-wrap: nowrap;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
-.timeline-panel .timeline-actions {
-  flex-wrap: nowrap;
-  min-width: 0;
-  gap: var(--ve-space-1);
-}
-.timeline-panel .timeline-actions > *,
-.timeline-actions-extra > * {
+.timeline-panel .panel-header > *,
+.timeline-panel .timeline-actions > * {
   flex-shrink: 0;
   white-space: nowrap;
 }
-.timeline-actions-extra {
-  display: contents;
+.timeline-panel .timeline-actions {
+  flex-wrap: nowrap;
+  gap: var(--ve-space-1);
 }
-.timeline-more {
+/* 選択の欄は幅を決めて置く(縮めるのは欄の方。中の文字は欄の中で省く) */
+[data-fit-compact='speed'] select,
+[data-fit-natural='speed'] select {
+  width: 72px;
+}
+[data-fit-compact='transition'] select,
+[data-fit-natural='transition'] select {
+  width: 112px;
+}
+/* 回せる操作を全部「その他」へ回しても入らないときは、欄を詰める */
+.timeline-actions.compact [data-fit-compact='speed'] select,
+[data-fit-narrow='speed'] select {
+  width: 48px;
+}
+.timeline-actions.compact [data-fit-compact='transition'] select,
+[data-fit-narrow='transition'] select {
+  width: 64px;
+}
+/* 詰めたときは欄の頭の印を外す(欄の名前は吹き出しと選んだ値で分かる) */
+.timeline-actions.compact [data-fit-compact] > svg,
+[data-fit-narrow] > svg {
   display: none;
 }
-@container timeline (max-width: 1399px) {
-  .timeline-actions-extra {
-    display: none;
-  }
-  .timeline-more {
-    display: inline-flex;
-  }
+/* 帯に並べる数を測るための見えない写し */
+.overflow-measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: var(--ve-space-1);
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
 }
 .overflow-menu-button {
   display: inline-flex;

@@ -131,6 +131,7 @@ import { timelineRangeOf } from '@shared/finish/sound'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
+import { useOverflowFit } from '../lib/useOverflowFit'
 import { OverflowMenu, type OverflowAction } from './OverflowMenu'
 import { TimelineMarks } from './TimelineMarks'
 import { ShortcutHelpDialog } from './ShortcutHelpDialog'
@@ -1802,9 +1803,105 @@ export function Timeline(): React.JSX.Element {
               }
             : null
 
+  // 道具の帯は 1 行に固定し、切り落とさない。右端のコピー・複製・削除は必ず見せ、入らない操作は
+  // 後ろから「その他 ▾」へ回す(帯の幅を ResizeObserver で測る。lib/useOverflowFit)
+  const clipExtra: OverflowAction[] = !selectedClip
+    ? []
+    : [
+        {
+          key: 'silence',
+          label: '無音カット',
+          icon: <WandIcon width={13} height={13} />,
+          onSelect: () => setSilenceCutClipIds([selectedClip!.id])
+        },
+        {
+          key: 'filler',
+          label: 'フィラーカット',
+          icon: <FillerWordIcon width={13} height={13} />,
+          onSelect: () => setFillerWordClipId(selectedClip!.id)
+        },
+        {
+          key: 'caption',
+          label: '自動テロップ',
+          icon: <MicIcon width={13} height={13} />,
+          onSelect: () => setAutoCaptionClipId(selectedClip!.id)
+        },
+        {
+          key: 'textEdit',
+          label: 'テキストで編集',
+          icon: <TypeIcon width={13} height={13} />,
+          onSelect: () => setTextEditClipId(selectedClip!.id)
+        },
+        ...(timedClips[selectedIndex]?.asset.hasAudio && !selectedClip!.audioDetached
+          ? [
+              {
+                key: 'detach',
+                label: '音声を分離',
+                icon: <MusicIcon width={13} height={13} />,
+                title:
+                  '動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)',
+                onSelect: () => detachClipAudio(selectedClip!.id)
+              }
+            ]
+          : []),
+        ...(selectedClip!.audioDetached
+          ? [
+              {
+                key: 'reattach',
+                label: '音声を戻す',
+                icon: <MusicIcon width={13} height={13} />,
+                title:
+                  '分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください',
+                onSelect: () => reattachClipAudio(selectedClip!.id)
+              }
+            ]
+          : [])
+      ]
+  const headerRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<HTMLSpanElement>(null)
+  const { shown: clipExtraShown, compact: toolbarCompact } = useOverflowFit(
+    headerRef,
+    measureRef,
+    clipExtra.length,
+    4,
+    `${selectedClip?.id ?? ''}|${clipExtra.map((a) => a.key).join(',')}|${multiSelectedClipIds.length}|${clipboardClips.length}|${project.beatGrid ? 1 : 0}`
+  )
+
   return (
     <div className="panel timeline-panel">
-      <div className="panel-header">
+      {/* 帯に並べる数を測るための、見えない写し(読み上げ・Tab の対象外) */}
+      <span className="overflow-measure" ref={measureRef} aria-hidden="true" inert>
+        {clipExtra.map((a) => (
+          <button key={a.key} type="button" tabIndex={-1} className="small-button" data-fit-item>
+            {a.icon}
+            {a.label}
+          </button>
+        ))}
+        {(['natural', 'narrow'] as const).flatMap((kind) =>
+          (['speed', 'transition'] as const).map((name) => (
+            <label
+              key={`${kind}-${name}`}
+              className="inline-select"
+              {...{ [`data-fit-${kind}`]: name }}
+            >
+              <GaugeIcon width={13} height={13} />
+              <select tabIndex={-1} aria-hidden="true">
+                <option>1x</option>
+              </select>
+            </label>
+          ))
+        )}
+        <button
+          type="button"
+          tabIndex={-1}
+          className="small-button overflow-menu-button"
+          data-fit-more
+        >
+          その他
+          <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" />
+        </button>
+      </span>
+      <div className="panel-header" ref={headerRef}>
         <h2>タイムライン</h2>
         <div className="timeline-zoom">
           <button
@@ -1952,7 +2049,7 @@ export function Timeline(): React.JSX.Element {
           </div>
         )}
         {multiSelectedClipIds.length <= 1 && selectedClip && (
-          <div className="timeline-actions">
+          <div className={`timeline-actions ${toolbarCompact ? 'compact' : ''}`}>
             <button
               className="icon-button"
               title="左に移動"
@@ -1980,84 +2077,28 @@ export function Timeline(): React.JSX.Element {
               <ScissorsIcon width={13} height={13} />
               カット
             </button>
-            {(() => {
-              // 道具の帯は 1 行に固定する。狭い窓(タイムラインの幅 1400px 未満)では、この操作を
-              // 「その他 ▾」にまとめる(広い窓では帯に並べる。CSS のコンテナクエリでどちらかだけ見せる)
-              const extra: OverflowAction[] = [
-                {
-                  key: 'silence',
-                  label: '無音カット',
-                  icon: <WandIcon width={13} height={13} />,
-                  onSelect: () => setSilenceCutClipIds([selectedClip.id])
-                },
-                {
-                  key: 'filler',
-                  label: 'フィラーカット',
-                  icon: <FillerWordIcon width={13} height={13} />,
-                  onSelect: () => setFillerWordClipId(selectedClip.id)
-                },
-                {
-                  key: 'caption',
-                  label: '自動テロップ',
-                  icon: <MicIcon width={13} height={13} />,
-                  onSelect: () => setAutoCaptionClipId(selectedClip.id)
-                },
-                {
-                  key: 'textEdit',
-                  label: 'テキストで編集',
-                  icon: <TypeIcon width={13} height={13} />,
-                  onSelect: () => setTextEditClipId(selectedClip.id)
-                },
-                ...(timedClips[selectedIndex]?.asset.hasAudio && !selectedClip.audioDetached
-                  ? [
-                      {
-                        key: 'detach',
-                        label: '音声を分離',
-                        icon: <MusicIcon width={13} height={13} />,
-                        title:
-                          '動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)',
-                        onSelect: () => detachClipAudio(selectedClip.id)
-                      }
-                    ]
-                  : []),
-                ...(selectedClip.audioDetached
-                  ? [
-                      {
-                        key: 'reattach',
-                        label: '音声を戻す',
-                        icon: <MusicIcon width={13} height={13} />,
-                        title:
-                          '分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください',
-                        onSelect: () => reattachClipAudio(selectedClip.id)
-                      }
-                    ]
-                  : [])
-              ]
-              return (
-                <>
-                  <span className="timeline-actions-extra">
-                    {extra.map((a) => (
-                      <button
-                        key={a.key}
-                        className="small-button"
-                        title={a.title}
-                        onClick={a.onSelect}
-                      >
-                        {a.icon}
-                        {a.label}
-                      </button>
-                    ))}
-                  </span>
-                  <OverflowMenu
-                    actions={extra}
-                    menuLabel="クリップのほかの操作(無音カット・フィラーカット・自動テロップ・テキストで編集・音声)"
-                    className="timeline-more"
-                  />
-                </>
-              )
-            })()}
+            {clipExtra.slice(0, clipExtraShown).map((a) => (
+              <button
+                key={a.key}
+                className="small-button"
+                title={a.title}
+                onClick={a.onSelect}
+                data-fit-shown
+              >
+                {a.icon}
+                {a.label}
+              </button>
+            ))}
+            {clipExtraShown < clipExtra.length && (
+              <OverflowMenu
+                actions={clipExtra.slice(clipExtraShown)}
+                menuLabel="クリップのほかの操作(帯に入らない操作)"
+                className="timeline-more"
+              />
+            )}
             <label
               className="inline-select"
+              data-fit-compact="speed"
               title={
                 selectedClip.audioDetached ? '分離した音声にも同じ速度が掛かります' : undefined
               }
@@ -2076,7 +2117,7 @@ export function Timeline(): React.JSX.Element {
             </label>
             {selectedIndex > 0 && (
               <>
-                <label className="inline-select">
+                <label className="inline-select" data-fit-compact="transition">
                   <LayersIcon width={13} height={13} />
                   <select
                     value={selectedClip.transitionIn?.type ?? 'none'}
