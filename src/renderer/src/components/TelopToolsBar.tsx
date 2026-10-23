@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { defaultTextStyle } from '@shared/textStyle'
 import { buildSrt, parseSrt, telopMatches } from '@shared/telop/srt'
 import { safeFileBaseName } from '@shared/fileName'
-import { useProjectStore } from '../store/projectStore'
+import { applyWhenNotTrying, useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 
 /**
@@ -70,14 +70,16 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
         setMessage('字幕が見つかりませんでした(SRT の形か確かめてください)')
         return
       }
-      addTextOverlays(
-        cues.map((c) => ({
-          text: c.text,
-          startTime: c.start,
-          endTime: c.end,
-          style: defaultTextStyle(),
-          source: 'manual' as const
-        }))
+      applyWhenNotTrying(() =>
+        addTextOverlays(
+          cues.map((c) => ({
+            text: c.text,
+            startTime: c.start,
+            endTime: c.end,
+            style: defaultTextStyle(),
+            source: 'manual' as const
+          }))
+        )
       )
       setMessage(`${cues.length} 本の字幕を読み込みました`)
     } catch (e) {

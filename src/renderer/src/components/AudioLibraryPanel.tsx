@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
-import { useProjectStore } from '../store/projectStore'
+import { applyWhenNotTrying, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { KeyStorageNote } from './KeyStorageNote'
 import { usePresetStore } from '../store/presetStore'
@@ -107,19 +107,23 @@ export function AudioLibraryPanel(): React.JSX.Element {
       const { filePath, duration } = await window.api.downloadAudioAsset(url, name)
       // Asset + track + clip as one undoable step, so a single undo doesn't leave
       // an empty track and an unused asset behind.
-      addAudioClipWithAsset(
-        {
-          id: uuid(),
-          filePath,
-          fileName: name,
-          duration,
-          width: 0,
-          height: 0,
-          fps: 0,
-          hasAudio: true,
-          hasVideo: false
-        },
-        { trackName, session }
+      applyWhenNotTrying(
+        () =>
+          addAudioClipWithAsset(
+            {
+              id: uuid(),
+              filePath,
+              fileName: name,
+              duration,
+              width: 0,
+              height: 0,
+              fps: 0,
+              hasAudio: true,
+              hasVideo: false
+            },
+            { trackName, session }
+          ),
+        session
       )
     } catch (e) {
       setError(formatIpcError(e))

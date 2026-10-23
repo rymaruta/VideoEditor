@@ -5435,6 +5435,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
 export const useProjectStore = create<ProjectState>(skipNoOpHistory(projectStateCreator))
 
+useProjectStore.subscribe((state, prev) => {
+  if (prev.trial && !state.trial && afterTrialQueue.length > 0) flushAfterTrial()
+})
+
 /**
  * いくつかの操作(分割→分割→削除 など)を、**1回の取り消しで丸ごと戻る1件**にまとめて書き込む。
  * 中の操作はそれぞれ履歴を積むので、終わったら「始める前の企画」1件に置き換える。
@@ -6705,6 +6709,37 @@ export function withRangedSounds(
 }
 
 /** 2つの企画が、自動編集の判断(`autoEdit`)のほかは同じものか(参照で比べる) */
+/** 試しが終わるのを待っている、裏の処理の結果(試しを始めた企画の番号と、当てる関数) */
+const afterTrialQueue: { session: number; apply: () => void }[] = []
+
+/**
+ * 裏で走っていた処理(ノイズ除去・BPM の解析・素材の読み込み など)の結果を企画に当てる。試しに当てている
+ * 間(範囲の自動編集の「試しに見る」)は編集を断るので、試しが終わる(閉じる・決める)のを待って当てる。
+ * 待つ間に企画を切り替えたら当てない(別の企画に当てない)。`session` は処理を始めた時の企画の番号
+ */
+export function applyWhenNotTrying(
+  apply: () => void,
+  session: number = useProjectStore.getState().projectSession
+): void {
+  const s = useProjectStore.getState()
+  if (s.projectSession !== session) return
+  if (!s.trial) {
+    apply()
+    return
+  }
+  afterTrialQueue.push({ session, apply })
+}
+
+/** 試しが終わったら、待っていた結果を当てる(試しを終える処理が全部済んでから) */
+function flushAfterTrial(): void {
+  queueMicrotask(() => {
+    const s = useProjectStore.getState()
+    if (s.trial) return
+    const queued = afterTrialQueue.splice(0)
+    for (const q of queued) if (q.session === useProjectStore.getState().projectSession) q.apply()
+  })
+}
+
 /**
  * 保存・自動保存で書く企画と未保存の印。試しに当てている間は、試す前の企画(試しの案は書かない)
  */

@@ -1,6 +1,10 @@
 import { TelopInspector } from './TelopInspector'
 import { useState } from 'react'
-import { MIN_CLIP_SOURCE_DURATION, useProjectStore } from '../store/projectStore'
+import {
+  applyWhenNotTrying,
+  MIN_CLIP_SOURCE_DURATION,
+  useProjectStore
+} from '../store/projectStore'
 import { isAspectMismatch } from '../lib/aspect'
 import { buildTimedClips, speedSelectChoices } from '../lib/timelineMath'
 import { CLIP_COLORS } from '../lib/clipColors'
@@ -256,7 +260,7 @@ export function Inspector(): React.JSX.Element {
         targetAspect
       )
       if (useProjectStore.getState().projectSession !== session) return
-      updateClipCrop(clip.id, true, center)
+      applyWhenNotTrying(() => updateClipCrop(clip.id, true, center), session)
     } catch {
       setDetectError('被写体の自動検出に失敗しました')
     } finally {

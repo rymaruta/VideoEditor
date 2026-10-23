@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
-import { getTotalDuration, useProjectStore } from '../store/projectStore'
+import { applyWhenNotTrying, getTotalDuration, useProjectStore } from '../store/projectStore'
 import { usePresetStore, CaptionPreset, SePreset } from '../store/presetStore'
 import { useSfxDictionaryStore } from '../store/sfxDictionaryStore'
 import { SFX_DRAG_TYPE } from '../lib/assetDrag'
@@ -137,20 +137,24 @@ export function PresetPanel(): React.JSX.Element {
       const duration = known?.duration ?? (await window.api.probeMedia(preset.filePath)).duration
       // Asset + track + clip as one undoable step (the store reuses the asset when
       // this sound effect is already in the project).
-      addAudioClipWithAsset(
-        {
-          id: known?.id ?? uuid(),
-          filePath: preset.filePath,
-          fileName: preset.fileName,
-          duration,
-          width: 0,
-          height: 0,
-          fps: 0,
-          hasAudio: true,
-          hasVideo: false
-        },
-        // テロップのプリセットと同じく再生位置へ置く。そこが埋まっていれば直後へずれる。
-        { trackName: 'SE', startTime: useProjectStore.getState().playheadTime, session }
+      applyWhenNotTrying(
+        () =>
+          addAudioClipWithAsset(
+            {
+              id: known?.id ?? uuid(),
+              filePath: preset.filePath,
+              fileName: preset.fileName,
+              duration,
+              width: 0,
+              height: 0,
+              fps: 0,
+              hasAudio: true,
+              hasVideo: false
+            },
+            // テロップのプリセットと同じく再生位置へ置く。そこが埋まっていれば直後へずれる。
+            { trackName: 'SE', startTime: useProjectStore.getState().playheadTime, session }
+          ),
+        session
       )
     } catch (e) {
       setError(formatIpcError(e))

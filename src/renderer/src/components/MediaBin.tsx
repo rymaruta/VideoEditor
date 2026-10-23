@@ -6,7 +6,7 @@ import { formatTimecode } from '../lib/timelineRuler'
 import { useMenuCommand } from '../lib/menuCommands'
 import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
-import { onProjectSwitch, useProjectStore } from '../store/projectStore'
+import { applyWhenNotTrying, onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { canPreviewFile, planLoadedAssetPreview } from '../lib/canPreview'
 import { hasLetterboxInMain } from '../lib/aspect'
@@ -282,7 +282,17 @@ export function MediaBin(): React.JSX.Element {
           setError(refusal)
           return
         }
-        relinkAsset(assetId, filePath, fileNameFromPath(filePath), still, still.thumbnailDataUrl)
+        applyWhenNotTrying(
+          () =>
+            relinkAsset(
+              assetId,
+              filePath,
+              fileNameFromPath(filePath),
+              still,
+              still.thumbnailDataUrl
+            ),
+          session
+        )
         return
       }
       const meta = await window.api.probeMedia(filePath)
@@ -304,7 +314,10 @@ export function MediaBin(): React.JSX.Element {
         }
       }
       if (switched()) return
-      relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl)
+      applyWhenNotTrying(
+        () => relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl),
+        session
+      )
       void ensurePreviewable(
         assetId,
         filePath,
@@ -406,7 +419,8 @@ export function MediaBin(): React.JSX.Element {
     }
     if (generation !== projectGeneration.current) return
     // One history entry for the whole import, not one per file.
-    addAssets(imported)
+    // 範囲の自動編集を試している間に読み終えたら、試しが終わってから入れる
+    applyWhenNotTrying(() => addAssets(imported))
     // 読み込んだフォルダを共通ライブラリに覚える(次の回からは選ぶだけで使える)。
     // 覚えられなくても取り込みそのものは済んでいるので、失敗は黙って捨てる
     if (imported.length > 0) {
@@ -440,13 +454,19 @@ export function MediaBin(): React.JSX.Element {
     try {
       const [r] = await window.api.denoiseRun([asset.filePath])
       if (useProjectStore.getState().projectSession !== session) return
-      if (r?.cleaned)
-        useProjectStore
-          .getState()
-          .setAssetsDenoised(
-            { [asset.id]: r.cleaned },
-            { expectFilePath: { [asset.id]: asset.filePath } }
-          )
+      // 範囲の自動編集を試している間に終わったら、試しが終わってから当てる
+      const cleaned = r?.cleaned
+      if (cleaned)
+        applyWhenNotTrying(
+          () =>
+            useProjectStore
+              .getState()
+              .setAssetsDenoised(
+                { [asset.id]: cleaned },
+                { expectFilePath: { [asset.id]: asset.filePath } }
+              ),
+          session
+        )
       else setError(r?.error ?? 'ノイズ除去ができませんでした')
     } catch (e) {
       setError(formatIpcError(e))

@@ -7,6 +7,7 @@ import { formatTimecode, rulerStep, rulerTicks } from '../lib/timelineRuler'
 import { frameSeconds } from '@shared/frameRate'
 import { v4 as uuid } from 'uuid'
 import {
+  applyWhenNotTrying,
   beginHistoryGesture,
   commitAsOwnStep,
   endHistoryGesture,
@@ -1881,6 +1882,7 @@ export function Timeline(): React.JSX.Element {
     if (!asset) return
     setBpmAnalyzingTrackId(track.id)
     setBpmError(null)
+    const session = useProjectStore.getState().projectSession
     try {
       const result = await window.api.analyzeBpm(
         asset.filePath,
@@ -1889,11 +1891,16 @@ export function Timeline(): React.JSX.Element {
       )
       // 解析が返すのは**素材の秒**。タイムラインの目盛りへ直してから入れる
       // (速度を変えたクリップでは倍率ぶん食い違う。規則は `beatGridFromAnalysis`)。
-      setBeatGrid({
-        ...beatGridFromAnalysis(result, clip),
-        enabled: true,
-        sourceLabel: track.name
-      })
+      // 範囲の自動編集を試している間に終わったら、試しが終わってから入れる
+      applyWhenNotTrying(
+        () =>
+          setBeatGrid({
+            ...beatGridFromAnalysis(result, clip),
+            enabled: true,
+            sourceLabel: track.name
+          }),
+        session
+      )
     } catch (e) {
       setBpmError(formatIpcError(e))
     } finally {
