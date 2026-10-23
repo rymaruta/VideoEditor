@@ -117,7 +117,7 @@ async function openProjectPath(filePath: string): Promise<void> {
 }
 
 function confirmDiscardForOpen(): boolean {
-  const { isDirty } = useProjectStore.getState()
+  const { isDirty } = projectToSave()
   return !isDirty || confirm('保存されていない変更があります。破棄して開きますか?')
 }
 

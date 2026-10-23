@@ -45,6 +45,7 @@ import {
   onProjectSwitch,
   rangedEditProject,
   sameExceptAutoEdit,
+  withTrialWrite,
   useProjectStore,
   withRangedSounds
 } from './projectStore'
@@ -2807,7 +2808,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       quietApply = true
       let r: { ok: boolean; reason?: string }
       try {
-        r = get().applyRangedEdit(preview, variants)
+        r = withTrialWrite(() => get().applyRangedEdit(preview, variants))
       } finally {
         quietApply = false
       }
@@ -2896,21 +2897,53 @@ function revertRangeTrial(): void {
   rangeTrial = null
   if (!t) return
   useProjectStore.getState().setIsPlaying(false)
+  // 自動編集の記録を先に試す前へ戻す(企画を戻すときの購読が、試しの記録で判断を覚え直さないように)
+  const restore = (): void => {
+    if (!saved) return
+    if (saved.usedAtBase) usedTouches.set(saved.baseClips, saved.usedAtBase)
+    else usedTouches.delete(saved.baseClips)
+    revivedFrom.clear()
+    for (const [k, v] of saved.revived) revivedFrom.set(k, v)
+    usePipelineStore.setState({
+      roughCut: saved.roughCut,
+      builtKept: saved.builtKept,
+      rangeRuns: saved.rangeRuns,
+      keepTouched: saved.keepTouched,
+      rangeReview: saved.rangeReview
+    })
+  }
+  restore()
+  // 企画・履歴を試す前へ(裏で届いたプロキシ・検出は endTrial が引き継ぐ)
   useProjectStore.getState().endTrial(false)
-  if (!saved) return
-  if (saved.usedAtBase) usedTouches.set(saved.baseClips, saved.usedAtBase)
-  else usedTouches.delete(saved.baseClips)
-  revivedFrom.clear()
-  for (const [k, v] of saved.revived) revivedFrom.set(k, v)
-  usePipelineStore.setState({
-    roughCut: saved.roughCut,
-    builtKept: saved.builtKept,
-    rangeRuns: saved.rangeRuns,
-    keepTouched: saved.keepTouched,
-    rangeReview: saved.rangeReview
+  restore()
+  // 戻す途中で自動編集の判断を覚え直していても、試す前の判断・未保存の印のまま
+  const now = useProjectStore.getState().project
+  useProjectStore.setState({
+    project: now.autoEdit === t.project.autoEdit ? now : { ...now, autoEdit: t.project.autoEdit },
+    isDirty: t.isDirty
   })
-  // 戻す途中で自動編集の判断を覚え直していても、試す前の企画・未保存の印のまま
-  useProjectStore.setState({ project: t.project, isDirty: t.isDirty })
+}
+
+/**
+ * 範囲の自動編集の取り消し・やり直しで戻す仮編集のまとめ。今のまとめが `from`(当てた時の写し)のままなら
+ * `to` に戻す。当てた後に構成で判断を変えるなどして変わっていれば、今のまとめを基に、残した場面と長さ・
+ * テロップの数だけを `to` と今の本編に合わせる(古い写しへ戻さない)
+ */
+function rebaseRoughCut(
+  from: PipelineState['roughCut'],
+  to: PipelineState['roughCut'],
+  project: Project
+): PipelineState['roughCut'] {
+  const cur = usePipelineStore.getState().roughCut
+  if (cur === from || !cur || !to) return to
+  return {
+    ...cur,
+    keptIds: to.keptIds,
+    kept: to.kept,
+    dropped: to.dropped,
+    duration: mainLength(project),
+    telops: project.textOverlays.filter((o) => o.utteranceId).length
+  }
 }
 
 /** イン点・アウト点・ルーラーの範囲が `from` を指していれば `to` へ移す */
@@ -2935,14 +2968,18 @@ useProjectStore.subscribe((state, prev) => {
   if (undone && undone.baseClips === state.project.clips) {
     const runs = usePipelineStore.getState().rangeRuns
     // 仮編集のまとめ(残した場面・長さ)も当てる前に戻す
-    usePipelineStore.setState({ roughCut: undone.roughCutBefore })
+    usePipelineStore.setState({
+      roughCut: rebaseRoughCut(undone.roughCutAfter, undone.roughCutBefore, state.project)
+    })
     usePipelineStore.getState().setRangeRuns(runs.filter((r) => r !== undone.run))
     moveMarkedRange(undone.newRange, undone.oldRange)
   }
   const redone = rangeApplied.get(state.project.clips)
   if (redone && redone.baseClips === prev.project.clips) {
     const runs = usePipelineStore.getState().rangeRuns
-    usePipelineStore.setState({ roughCut: redone.roughCutAfter })
+    usePipelineStore.setState({
+      roughCut: rebaseRoughCut(redone.roughCutBefore, redone.roughCutAfter, state.project)
+    })
     usePipelineStore
       .getState()
       .setRangeRuns(runs.includes(redone.run) ? runs : [...runs, redone.run].slice(-RANGE_RUNS_MAX))
@@ -3393,6 +3430,8 @@ useProjectStore.subscribe((state, prev) => {
 // (残すと「仮編集を作り直す」が前の回の場面の区切りで今の回を切り、要確認にも前の回の項目が出る)
 onProjectSwitch((switchKind) => {
   const pipeline = usePipelineStore.getState()
+  // 試しに当てていた企画からは離れた(企画の側の試しは切り替えで消える)
+  rangeTrial = null
   // 自動編集の途中で「開く / 新規 / 自動保存を復元」すると、resetResults だけでは
   // 既に走っている main 側の同期・ASR・イベント検出が生き残る。完了後にその古い結果が
   // 新しいプロジェクトへ書き込まれるため、切替時はまず処理を中止する。

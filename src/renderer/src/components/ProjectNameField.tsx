@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useProjectStore } from '../store/projectStore'
+import { projectToSave, useProjectStore } from '../store/projectStore'
 
 /**
  * 上部バーのプロジェクト名。クリックすると編集できる。
@@ -10,7 +10,8 @@ import { useProjectStore } from '../store/projectStore'
  */
 export function ProjectNameField(): React.JSX.Element {
   const projectName = useProjectStore((s) => s.project.name)
-  const isDirty = useProjectStore((s) => s.isDirty)
+  // 試しに当てている間は、試す前の未保存の印
+  const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const setProjectName = useProjectStore((s) => s.setProjectName)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(projectName)

@@ -1081,6 +1081,8 @@ interface ProjectState {
    * 試す前の企画を書く(`projectToSave`)。決めたら履歴を1件だけ積み、やめたら丸ごと戻す
    */
   trial: ProjectTrial | null
+  /** 試しに当てている間に断った編集の数(ダイアログが「決めるか閉じてから」と知らせる) */
+  trialRefused: number
   /** 試しに当て始める(試す前の企画と履歴を覚える)。もう試していれば何もしない */
   beginTrial: () => void
   /**
@@ -2069,6 +2071,20 @@ function pruneSelection(state: ProjectState, patch: Partial<ProjectState>): Part
   }
 }
 
+/** 試しに当てる処理の書き込みか(試しに当てている間でも通す) */
+let trialWriteAllowed = false
+
+/** 試しに当てている間でも、`fn` の中の編集を通す(試しの案を当てる処理だけが使う) */
+export function withTrialWrite<T>(fn: () => T): T {
+  const prev = trialWriteAllowed
+  trialWriteAllowed = true
+  try {
+    return fn()
+  } finally {
+    trialWriteAllowed = prev
+  }
+}
+
 function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<ProjectState> {
   return (set, get, api) => {
     const guardedSet: typeof set = (partial) => {
@@ -2079,6 +2095,12 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         let patch = (typeof partial === 'function' ? partial(state) : partial) as
           Partial<ProjectState> | undefined
         if (!patch || patch.__historyPush !== true) return patch as Partial<ProjectState>
+        // 試しに当てている間は編集を断る(メニュー・ショートカットからの編集を、閉じると黙って捨てる・決めると
+        // 範囲の編集と1件にまとめることになる)。試しを当てる処理だけ通す(`withTrialWrite`)
+        if (state.trial && !trialWriteAllowed) {
+          restoreHistoryCoalescing(coalescingMark)
+          return { trialRefused: state.trialRefused + 1 }
+        }
         const origin = patch.__followFrom
         if (origin) patch = omitKeys(patch, ['__followFrom'])
         if (patch.__noFollow) patch = omitKeys(patch, ['__noFollow'])
@@ -2189,6 +2211,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   past: [],
   future: [],
   trial: null,
+  trialRefused: 0,
   beginTrial: () => {
     resetHistoryCoalescing()
     set((s) =>
@@ -2210,9 +2233,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           isDirty: true
         }
       const idSet = new Set(t.project.clips.map((c) => c.id))
+      // 試している間に裏で届いた結果(プロキシ・検出)は引き継ぐ。自動編集の判断は試す前のもの
+      const project = keepBackgroundResults(t.project, {
+        ...s.project,
+        autoEdit: t.project.autoEdit
+      })
       return {
         trial: null,
-        project: t.project,
+        project,
         past: t.past,
         future: t.future,
         isDirty: t.isDirty,

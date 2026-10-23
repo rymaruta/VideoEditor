@@ -258,6 +258,9 @@ export function RangeAutoEditDialog({
   const [selected, setSelected] = useState<RangedVariantId | null>(null)
   // 試しに当てている案。ローカルの印でなく、本編が今その案の後かで決める(ずれない)
   const inTrial = useProjectStore((s) => s.trial !== null)
+  // 試している間にメニューなどから編集しようとして断った数(試し始めた時の数より増えたら知らせる)
+  const refused = useProjectStore((s) => s.trialRefused)
+  const [refusedBase, setRefusedBase] = useState(0)
   const review = usePipelineStore((s) => s.rangeReview)
   const trial: RangedVariantId | null =
     inTrial && review && project.clips === review.afterClips ? review.current : null
@@ -346,6 +349,7 @@ export function RangeAutoEditDialog({
   /** 試しに当てる(履歴に積まない。別の案なら、試す前に戻してから当てる)。範囲の頭から再生する */
   const tryOut = (p: RangedPreview): void => {
     setSelected(p.variant.id)
+    if (!inTrial) setRefusedBase(useProjectStore.getState().trialRefused)
     if (trial !== p.variant.id) {
       const r = usePipelineStore.getState().tryRangedVariant(p, previews)
       if (!r.ok) return failed(r.reason)
@@ -556,9 +560,11 @@ export function RangeAutoEditDialog({
         <div className="dialog-footer">
           {inTrial && (
             <span className="form-note" role="status">
-              {trial
-                ? '試している間は編集・取り消しはできません。閉じると試す前に戻ります'
-                : '試していた案が本編から外れました。閉じると試す前に戻ります'}
+              {refused > refusedBase
+                ? '試している間は編集できません。この案にするか、閉じてから編集してください'
+                : trial
+                  ? '試している間は編集・取り消しはできません。閉じると試す前に戻ります'
+                  : '試していた案が本編から外れました。閉じると試す前に戻ります'}
             </span>
           )}
           <div className="dialog-footer-spacer" />
