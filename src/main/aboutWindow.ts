@@ -5,7 +5,8 @@ import { PRODUCT_NAME } from '@shared/product'
 import { docNavigation } from './docNavigation'
 
 /**
- * バージョン情報と、サードパーティのライセンス表記。
+ * オープンソースの表記(同梱した部品のライセンス)と Chromium のライセンスの文書の窓。
+ * バージョン情報そのものは画面のダイアログ(AboutDialog)。
  * - resources/THIRD_PARTY_NOTICES.txt: インストーラを作るときに `npm run licenses`
  *   (scripts/third-party-notices.mjs)が作る
  * - resources/LICENSES.chromium.html: 同じスクリプトが Electron から写す(electron-builder は macOS・snap で
@@ -83,31 +84,12 @@ function openDocWindow(file: string, title: string, parent?: BrowserWindow | nul
   void win.loadFile(path)
 }
 
-/** ヘルプ > サードパーティのライセンス */
+/** ヘルプ > オープンソースの表記 */
 export function openThirdPartyNotices(parent?: BrowserWindow | null): void {
-  openDocWindow(NOTICES_FILE, 'サードパーティのライセンス', parent)
+  openDocWindow(NOTICES_FILE, 'オープンソースの表記', parent)
 }
 
 /** Chromium とその部品のライセンス */
 export function openChromiumLicenses(parent?: BrowserWindow | null): void {
   openDocWindow(CHROMIUM_FILE, 'Chromium のライセンス', parent)
-}
-
-/** ヘルプ > バージョン情報 */
-export async function showAboutDialog(win: BrowserWindow): Promise<void> {
-  const { response } = await dialog.showMessageBox(win, {
-    type: 'info',
-    title: 'バージョン情報',
-    message: `${PRODUCT_NAME} ${app.getVersion()}`,
-    detail:
-      `Electron ${process.versions.electron} / Chromium ${process.versions.chrome} / Node.js ${process.versions.node}\n\n` +
-      'この製品は FFmpeg(GPL)などのオープンソースのソフトウェア・フォント・AI のモデルを使っています。' +
-      '著作権と各ライセンスは「サードパーティのライセンス」「Chromium のライセンス」で読めます。',
-    buttons: ['閉じる', 'サードパーティのライセンス…', 'Chromium のライセンス…'],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true
-  })
-  if (response === 1) openThirdPartyNotices(win)
-  if (response === 2) openChromiumLicenses(win)
 }

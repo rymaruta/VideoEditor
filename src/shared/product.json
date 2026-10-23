@@ -1,7 +1,8 @@
 {
-  "name": "VideoEditor",
+  "name": "Tsunagi",
   "appId": "com.videoeditor.app",
   "description": "撮影素材から自動でカット・テロップ・BGM を付けて書き出す、デスクトップの動画編集アプリ",
   "vendor": "TBD",
-  "vendorEmail": "noreply@example.invalid"
+  "vendorEmail": "noreply@example.invalid",
+  "sourceOfferUrl": "TBD"
 }

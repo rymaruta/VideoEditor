@@ -29,7 +29,7 @@ describe('buildRunReport', () => {
         cores: 32,
         memoryGb: 64,
         gpu: ['RTX 5090'],
-        app: 'VideoEditor 1.0.0'
+        app: 'Tsunagi 1.0.0'
       },
       log: [{ time: 0, text: '同期を始めます' }],
       now: new Date(0)

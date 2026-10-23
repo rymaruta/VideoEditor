@@ -14,6 +14,8 @@ import {
   chooseAsrLanguage,
   withLanguageFallback,
   DEFAULT_ASR_LANGUAGE,
+  ASR_MODEL_ID,
+  asrDeviceOrder,
   type AsrDevice,
   type AsrJob,
   type AsrLanguage,
@@ -44,7 +46,6 @@ interface WorkerInput {
 let input: WorkerInput
 let post: (m: AsrWorkerMessage) => void
 
-export const ASR_MODEL_ID = 'onnx-community/whisper-large-v3-turbo_timestamped'
 const SAMPLE_RATE = 16000
 
 const DTYPES: Record<AsrDevice, Record<string, string>> = {
@@ -107,8 +108,7 @@ async function detectLanguage(
 async function loadTranscriber(): Promise<{ asr: Transcriber; device: AsrDevice }> {
   const { pipeline, env } = await import('@huggingface/transformers')
   env.cacheDir = input.cacheDir
-  const order: AsrDevice[] =
-    input.devices ?? (process.platform === 'win32' ? ['dml', 'cpu'] : ['cpu'])
+  const order: AsrDevice[] = input.devices ?? asrDeviceOrder(process.platform)
   const failures: string[] = []
   const files = new Map<string, { loaded: number; total: number }>()
   for (const device of order) {

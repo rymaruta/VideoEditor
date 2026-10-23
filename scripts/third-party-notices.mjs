@@ -210,6 +210,50 @@ function binaryVersion(path) {
   }
 }
 
+/** 未定の値(scripts/release-check.cjs・src/shared/product.ts と同じ判定) */
+function isPlaceholder(value) {
+  const v = String(value ?? '').trim()
+  return (
+    v === '' ||
+    /^tbd$/i.test(v) ||
+    /(^|[@.])example\.(invalid|com|org|net)$/i.test(v) ||
+    /^https?:\/\/([^/]+\.)?example\.(invalid|com|org|net)(\/|$)/i.test(v)
+  )
+}
+
+/**
+ * GPL のソースの提供の申し出(書面による申し出。GPL-3.0 の 6 条 b・GPL-2.0 の 3 条 b)。
+ * 入手先・連絡先は product.json(sourceOfferUrl・vendor・vendorEmail)。未定なら「(未定)」と書く
+ * (未定のままでは配布用のビルドは scripts/release-check.cjs が止める)。
+ */
+export function sourceOfferLines(offer) {
+  const shown = (v) => (isPlaceholder(v) ? '(未定)' : String(v).trim())
+  const vendor = isPlaceholder(offer?.vendor) ? '販売者(未定)' : String(offer?.vendor).trim()
+  const email = shown(offer?.vendorEmail)
+  const url = shown(offer?.sourceOfferUrl)
+  return [
+    'ソースの提供の申し出(書面による申し出)',
+    '',
+    `${vendor} は、本製品に同梱した FFmpeg / FFprobe の実行ファイルについて、それに対応する完全なソース`,
+    '(FFmpeg 本体と、ビルドに使われた x264・x265 などのライブラリのソース、ビルドの設定と手順)を、',
+    '本製品のその版を最後に配布した日から少なくとも 3 年間、本製品を受け取ったどなたにも提供します。',
+    '',
+    `  入手先(ダウンロード): ${url}`,
+    `  媒体での請求: ${email} 宛に、製品名・版・使っている OS を書いてご連絡ください。`,
+    '                媒体と送料の実費のほかに費用はいただきません。',
+    '',
+    'Written offer for source code',
+    '',
+    `For at least three years after the last distribution of each version of this product, ${vendor}`,
+    'will give anyone who received it the complete corresponding source code of the FFmpeg / FFprobe',
+    'executables included with it (FFmpeg itself, the GPL libraries such as x264 and x265 used to build them,',
+    'and the build configuration), for no more than the cost of physically performing the distribution.',
+    '',
+    `  Download: ${url}`,
+    `  Request on a medium: write to ${email}`
+  ]
+}
+
 function rule(title) {
   return `\n${'='.repeat(78)}\n${title}\n${'='.repeat(78)}\n`
 }
@@ -223,6 +267,7 @@ function rule(title) {
  * @param {{ ffmpeg?: { version: string, readme: string, license: string }, ffprobe?: { version: string } }} input.ffmpeg
  * @param {{ version: string, license: string }} input.electron
  * @param {{ name: string, bundled: boolean, license: string, source: string, text?: string }[]} input.models
+ * @param {{ vendor?: string, vendorEmail?: string, sourceOfferUrl?: string }} [input.offer] ソースの提供の申し出の宛先
  */
 export function renderNotices(input) {
   const out = []
@@ -263,6 +308,9 @@ export function renderNotices(input) {
     '      Linux 版のビルド: https://johnvansickle.com/ffmpeg/ (ソース一式も同所で配布)',
     '      Windows 版のビルド: https://www.gyan.dev/ffmpeg/builds/',
     '      macOS 版のビルド: https://evermeet.cx/pub/ffmpeg/ (Intel)、https://osxexperts.net/ (Apple Silicon)',
+    '',
+    '同梱した実行ファイルと同じ版のソース一式は、下の「ソースの提供の申し出」の入手先で配っています',
+    '(作り方: npm run gpl-sources。取得元と SHA-256 を MANIFEST.txt に記録)。',
     ''
   )
   if (input.ffmpeg.ffmpeg) {
@@ -274,6 +322,7 @@ export function renderNotices(input) {
   if (input.ffmpeg.ffprobe?.version) {
     out.push('同梱した ffprobe の版と構成:', indent(input.ffmpeg.ffprobe.version), '')
   }
+  out.push(...sourceOfferLines(input.offer), '')
   if (input.ffmpeg.ffmpeg?.license) {
     out.push('GNU General Public License version 3 の全文:', '', input.ffmpeg.ffmpeg.license, '')
   }
@@ -465,7 +514,12 @@ export function buildNotices(projectDir) {
       ffprobe: ffprobeExe ? { version: ffprobeVersion } : undefined
     },
     electron,
-    models
+    models,
+    offer: {
+      vendor: product.vendor,
+      vendorEmail: product.vendorEmail,
+      sourceOfferUrl: product.sourceOfferUrl
+    }
   })
   return { text, packages, missing, problems, chromiumLicenses }
 }

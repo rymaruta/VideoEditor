@@ -49,6 +49,7 @@ export type MenuCommand =
   | 'help.licenses'
   | 'help.openLogs'
   | 'help.bugReport'
+  | 'help.envCheck'
   | `window.${string}`
 
 /** 画面から受け取る、ショートカットの表示(キー配置で変わるもの) */
@@ -79,6 +80,9 @@ export interface MenuItemSpec {
     | 'togglefullscreen'
     | 'toggleDevTools'
     | 'reload'
+    | 'hide'
+    | 'hideOthers'
+    | 'unhide'
   type?: 'separator'
   enabled?: boolean
   submenu?: MenuItemSpec[]
@@ -271,14 +275,30 @@ export function buildMenuTemplate(
         SEP,
         { label: 'ログのフォルダを開く', id: 'help.openLogs' },
         { label: '不具合の報告用に情報をまとめる…', id: 'help.bugReport' },
+        { label: '環境チェック…', id: 'help.envCheck' },
         SEP,
-        { label: 'サードパーティのライセンス', id: 'help.licenses' },
+        { label: 'オープンソースの表記', id: 'help.licenses' },
         { label: 'バージョン情報', id: 'help.about' }
       ]
     }
   ]
+  // macOS のアプリの欄: バージョン情報・隠す(⌘H)・ほかを隠す(⌥⌘H)・終了(⌘Q)。macOS の決まりの並び
   return options.isMac
-    ? [{ label: PRODUCT_NAME, submenu: [{ label: '終了', role: 'quit' }] }, ...menu]
+    ? [
+        {
+          label: PRODUCT_NAME,
+          submenu: [
+            { label: `${PRODUCT_NAME} について`, id: 'help.about' },
+            SEP,
+            { label: `${PRODUCT_NAME} を隠す`, role: 'hide' },
+            { label: 'ほかを隠す', role: 'hideOthers' },
+            { label: 'すべてを表示', role: 'unhide' },
+            SEP,
+            { label: `${PRODUCT_NAME} を終了`, role: 'quit' }
+          ]
+        },
+        ...menu
+      ]
     : menu
 }
 

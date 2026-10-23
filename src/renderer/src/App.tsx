@@ -26,6 +26,7 @@ import { storedPanelTab } from './lib/panelTabs'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { AboutDialog } from './components/AboutDialog'
+import { EnvCheckDialog } from './components/EnvCheckDialog'
 import { useProjectStore } from './store/projectStore'
 import { formatIpcError } from './lib/ipcError'
 import { useAutosaveStore } from './store/autosaveStore'
@@ -44,6 +45,7 @@ import {
   StarIcon
 } from './components/icons'
 import type { SVGProps } from 'react'
+import { PRODUCT_NAME } from '@shared/product'
 
 type RightTab =
   | 'inspector'
@@ -244,7 +246,7 @@ function App(): React.JSX.Element {
 
   // ウィンドウのタイトルにプロジェクト名と未保存の印を出す(Windows のソフトの決まり)
   useEffect(() => {
-    document.title = `${projectName}${isDirty ? ' *' : ''} — VideoEditor`
+    document.title = `${projectName}${isDirty ? ' *' : ''} — ${PRODUCT_NAME}`
   }, [projectName, isDirty])
 
   useEffect(() => {
@@ -528,6 +530,7 @@ function App(): React.JSX.Element {
       </PanelBoundary>
       <PanelBoundary name="バージョン情報">
         <AboutDialog />
+        <EnvCheckDialog />
       </PanelBoundary>
     </div>
   )

@@ -92,7 +92,7 @@ export async function collectSystemInfo(): Promise<SystemInfo> {
     cores: cpus.length,
     memoryGb: Math.round(os.totalmem() / 1024 ** 3),
     gpu,
-    app: `${app.getName()} ${app.getVersion()} / Electron ${process.versions.electron}`
+    app: `${PRODUCT_NAME} ${app.getVersion()} / Electron ${process.versions.electron}`
   }
 }
 

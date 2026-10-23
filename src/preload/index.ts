@@ -15,6 +15,7 @@ import type { LoudnessTarget } from '@shared/loudness'
 import type { CancelWaveformPeaks, GenerateWaveformPeaks } from '@shared/waveformPeaks'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AboutInfo, LicenseDoc } from '@shared/about'
+import type { EnvCheckProgress, EnvCheckResult } from '@shared/envCheck'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC } from '@shared/ipc'
 import type { TelopLayerPayload, TelopLayerStageApi } from '@shared/telop/layer'
@@ -279,6 +280,17 @@ const api = {
   /** 画面の未処理のエラーを main の記録(userData/logs)に残す。返事は待たない */
   logRendererError: (payload: { kind: string; message?: string; stack?: string }): void =>
     ipcRenderer.send(IPC.logRendererError, payload),
+  /** ヘルプ > 環境チェック: 調べる(1〜2 分)。結果の秘密・利用者名は main が伏せてある */
+  envCheckRun: (): Promise<EnvCheckResult> => ipcRenderer.invoke(IPC.envCheckRun),
+  envCheckCancel: (): void => ipcRenderer.send(IPC.envCheckCancel),
+  /** 結果をテキストで保存する(保存したパス。やめたら null) */
+  envCheckSave: (result: EnvCheckResult): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.envCheckSave, result),
+  onEnvCheckProgress: (callback: (p: EnvCheckProgress) => void): (() => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, p: EnvCheckProgress): void => callback(p)
+    ipcRenderer.on(IPC.envCheckProgress, listener)
+    return () => ipcRenderer.removeListener(IPC.envCheckProgress, listener)
+  },
   onMenuCommand: (callback: (id: string) => void): (() => void) => {
     const listener = (_e: Electron.IpcRendererEvent, id: string): void => callback(id)
     ipcRenderer.on(IPC.menuCommand, listener)

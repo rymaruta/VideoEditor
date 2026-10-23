@@ -237,12 +237,20 @@ function graphArgs(graph: SegmentGraph, graphPath: string): string[] {
 
 let encoderProbe: Promise<VideoEncoder> | null = null
 
+/** 環境変数 VE_VIDEO_ENCODER の値(libx264 だけ受ける。ほかの値・未設定は自動) */
+export function forcedVideoEncoder(value: string | undefined): VideoEncoder | null {
+  return value?.trim().toLowerCase() === 'libx264' ? 'libx264' : null
+}
+
 /**
  * NVENC が**実際に**使えるかを、小さな絵を1回エンコードして確かめる。
  * `-encoders` の一覧に載っていても、ドライバが古い・GPU が無い環境では開けない。
  * 結果はプロセスの間だけ覚える。
  */
 export function detectVideoEncoder(): Promise<VideoEncoder> {
+  // 確かめ用: VE_VIDEO_ENCODER=libx264 で CPU に固定する(GPU と CPU の書き出しの比べ。docs/GPU_TEST.md)
+  if (forcedVideoEncoder(process.env.VE_VIDEO_ENCODER) === 'libx264')
+    return Promise.resolve('libx264')
   if (!encoderProbe) {
     encoderProbe = runFfmpeg([
       '-v',

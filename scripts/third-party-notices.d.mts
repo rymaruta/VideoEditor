@@ -44,7 +44,15 @@ export function renderNotices(input: {
   }
   electron: { version: string; license: string }
   models: NoticeModel[]
+  /** ソースの提供の申し出の宛先(product.json。未定なら「(未定)」と書く) */
+  offer?: SourceOffer
 }): string
+export interface SourceOffer {
+  vendor?: string
+  vendorEmail?: string
+  sourceOfferUrl?: string
+}
+export function sourceOfferLines(offer: SourceOffer | undefined): string[]
 export function buildNotices(projectDir: string): {
   text: string
   packages: NoticePackage[]

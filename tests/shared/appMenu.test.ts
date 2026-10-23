@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildMenuTemplate, displayToAccelerator, type MenuItemSpec } from '@shared/appMenu'
+import { PRODUCT_NAME } from '@shared/product'
 
 const flatten = (items: MenuItemSpec[]): MenuItemSpec[] =>
   items.flatMap((i) => [i, ...(i.submenu ? flatten(i.submenu) : [])])
@@ -56,8 +57,18 @@ describe('appMenu — Windows の編集ソフトと同じメニューバー', ()
     ).toBe(true)
   })
 
-  it('mac では先頭にアプリの欄が付く', () => {
-    expect(buildMenuTemplate({}, [], { isDev: false, isMac: true })[0].label).toBe('VideoEditor')
+  it('mac では先頭にアプリの欄が付く(バージョン情報・隠す・終了)', () => {
+    const app = buildMenuTemplate({}, [], { isDev: false, isMac: true })[0]
+    expect(app.label).toBe(PRODUCT_NAME)
+    const items = app.submenu ?? []
+    expect(items.map((i) => i.role ?? i.id).filter(Boolean)).toEqual([
+      'help.about',
+      'hide',
+      'hideOthers',
+      'unhide',
+      'quit'
+    ])
+    expect(items.find((i) => i.role === 'quit')?.label).toBe(`${PRODUCT_NAME} を終了`)
   })
 })
 

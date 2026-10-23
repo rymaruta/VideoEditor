@@ -17,7 +17,7 @@ function candidateEnvPaths(): string[] {
     if (appImagePath) paths.push(join(dirname(appImagePath), '.env'))
     const exeDir = dirname(app.getPath('exe'))
     paths.push(join(exeDir, '.env'))
-    // macOS の `exe` は `VideoEditor.app/Contents/MacOS/` の中。利用者から見た
+    // macOS の `exe` は `<製品名>.app/Contents/MacOS/`(製品名は PRODUCT_NAME) の中。利用者から見た
     // 「アプリと同じフォルダ」は **.app の隣**なので、そちらも候補にする。
     if (process.platform === 'darwin') paths.push(join(exeDir, '..', '..', '..', '.env'))
   }

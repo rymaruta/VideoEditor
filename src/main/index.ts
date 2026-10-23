@@ -39,7 +39,13 @@ import {
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { IPC } from '@shared/ipc'
-import { APP_ID, PRODUCT_NAME } from '@shared/product'
+import {
+  APP_ID,
+  PRODUCT_NAME,
+  PRODUCT_VENDOR,
+  PRODUCT_VENDOR_EMAIL,
+  SOURCE_OFFER_URL
+} from '@shared/product'
 import {
   AUDIO_EXTENSIONS,
   IMAGE_EXTENSIONS,
@@ -93,6 +99,7 @@ import { isLicenseDoc, type AboutInfo } from '@shared/about'
 import { windowChromeOptions } from '@shared/windowChrome'
 import { RendererCrashGuard } from './rendererRecovery'
 import { collectSystemInfo, installCrashLogging, logRendererError } from './diagnostics'
+import { installEnvCheckIpc } from './envCheckService'
 import {
   appendTelopLayerImages,
   beginTelopLayer,
@@ -762,13 +769,20 @@ app.whenReady().then(() => {
     updateAppMenu(next ?? {}, is.dev)
   )
   installMenuPopupIpc(ipcMain)
+  // ヘルプ > 環境チェック…(GPU・ハードウェアのエンコーダ・ローカル AI の構成を調べる)
+  installEnvCheckIpc(ipcMain)
   // バージョン情報(アプリの中のダイアログ)の中身と、そこから開くライセンスの文書
   ipcMain.handle(IPC.appAbout, (): AboutInfo => ({
     product: PRODUCT_NAME,
     version: app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
-    node: process.versions.node
+    node: process.versions.node,
+    sourceOffer: {
+      vendor: PRODUCT_VENDOR,
+      vendorEmail: PRODUCT_VENDOR_EMAIL,
+      url: SOURCE_OFFER_URL
+    }
   }))
   ipcMain.on(IPC.openLicense, (e, doc: unknown) => {
     if (!isLicenseDoc(doc)) return

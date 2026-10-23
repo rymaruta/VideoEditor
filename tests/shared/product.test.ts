@@ -1,8 +1,16 @@
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync, statSync } from 'fs'
 import { createRequire } from 'module'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
-import { APP_ID, PRODUCT_DESCRIPTION, PRODUCT_NAME, PRODUCT_VENDOR } from '@shared/product'
+import {
+  APP_ID,
+  isPlaceholder,
+  PRODUCT_DESCRIPTION,
+  PRODUCT_NAME,
+  PRODUCT_VENDOR,
+  PRODUCT_VENDOR_EMAIL,
+  SOURCE_OFFER_URL
+} from '@shared/product'
 import { buildMenuTemplate } from '@shared/appMenu'
 
 const root = join(__dirname, '..', '..')
@@ -18,6 +26,40 @@ const builder = createRequire(__filename)(join(root, 'electron-builder.cjs')) as
 }
 
 describe('製品の身元は product.json の1か所から', () => {
+  it('製品名は Tsunagi(product.json から読む)', () => {
+    const json = JSON.parse(readFileSync(join(root, 'src/shared/product.json'), 'utf-8')) as Record<
+      string,
+      string
+    >
+    expect(PRODUCT_NAME).toBe('Tsunagi')
+    expect(PRODUCT_NAME).toBe(json.name)
+    expect(PRODUCT_VENDOR_EMAIL).toBe(json.vendorEmail)
+    expect(SOURCE_OFFER_URL).toBe(json.sourceOfferUrl)
+    // 販売者・ソースの入手先は持ち主が決めるまで未定(配布用のビルドは scripts/release-check.cjs が止める)
+    expect(typeof json.sourceOfferUrl).toBe('string')
+  })
+
+  it('画面・main のコードに古い製品名を直書きしない(PRODUCT_NAME を使う)', () => {
+    const hits: string[] = []
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name)
+        if (statSync(p).isDirectory()) walk(p)
+        else if (/\.(tsx?|css|html)$/.test(name) && /VideoEditor/.test(readFileSync(p, 'utf-8')))
+          hits.push(p.slice(root.length + 1))
+      }
+    }
+    walk(join(root, 'src'))
+    expect(hits).toEqual([])
+  })
+
+  it('未定の値(TBD・空・example の宛先)を見分ける', () => {
+    for (const v of ['TBD', 'tbd', '', '  ', 'noreply@example.invalid', 'https://example.com/x'])
+      expect(isPlaceholder(v)).toBe(true)
+    for (const v of ['山田映像合同会社', 'support@vendor.co.jp', 'https://vendor.co.jp/oss/'])
+      expect(isPlaceholder(v)).toBe(false)
+  })
+
   it('インストーラの名前・ID は product.json のもの', () => {
     expect(builder.productName).toBe(PRODUCT_NAME)
     expect(builder.win.executableName).toBe(PRODUCT_NAME)

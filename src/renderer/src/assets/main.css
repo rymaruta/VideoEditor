@@ -1078,7 +1078,7 @@ h3 {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  box-shadow: none;
+  box-shadow: var(--ve-shadow-panel);
 }
 
 .panel-header {
@@ -1599,7 +1599,7 @@ h3 {
 }
 
 .icon-button.active {
-  background: var(--ve-primary);
+  background: var(--ve-primary-fill);
   border-color: transparent;
   color: var(--ve-text-on-primary);
 }
@@ -3726,7 +3726,7 @@ h3 {
   left: 0;
   top: 0;
   bottom: 0;
-  background: var(--ve-primary);
+  background: var(--ve-primary-fill);
   transition: width var(--ve-dur-base) var(--ve-ease-out);
 }
 
@@ -4113,7 +4113,7 @@ h3 {
   border: 2px dashed var(--ve-text-3);
   border-radius: var(--ve-radius-xl);
   background: var(--ve-surface-1);
-  box-shadow: none;
+  box-shadow: var(--ve-shadow-panel);
   color: var(--ve-text-1);
 }
 
@@ -6999,7 +6999,8 @@ h3 {
   gap: 6px;
 }
 .telop-list-head > span:first-child {
-  flex: 1;
+  /* 件数の見出しは縮めない(1366 幅で「テロップ 8…」と切れていた)。狭いときは「種類から追加」の選択が縮む */
+  flex: 1 0 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7884,7 +7885,7 @@ select.telop-kind-add {
 .progress-bar-fill {
   top: auto;
   height: 4px;
-  background: var(--ve-primary);
+  background: var(--ve-primary-fill);
 }
 .progress-bar span {
   color: var(--ve-text-1);

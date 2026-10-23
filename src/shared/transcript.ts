@@ -29,6 +29,14 @@ export interface AsrJobResult {
 
 export type AsrDevice = 'dml' | 'cuda' | 'cpu'
 
+/** 文字起こしのモデル(asrWorker。環境チェックもこの名前でダウンロード済みかを見る) */
+export const ASR_MODEL_ID = 'onnx-community/whisper-large-v3-turbo_timestamped'
+
+/** 文字起こしで試す装置の順(Windows: DirectML の GPU → CPU、それ以外: CPU) */
+export function asrDeviceOrder(platform: string): AsrDevice[] {
+  return platform === 'win32' ? ['dml', 'cpu'] : ['cpu']
+}
+
 /**
  * 自動編集の文字起こしの言語。`auto` は素材(マイク)ごとに話している言語を判定する。
  * 日本語に固定すると、英語の素材は日本語への訳として出て、テロップが実用にならない

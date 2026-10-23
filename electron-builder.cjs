@@ -5,6 +5,7 @@
 const { execFileSync } = require('child_process')
 const { join } = require('path')
 const product = require('./src/shared/product.json')
+const { assertReleasable, isDistributionBuild } = require('./scripts/release-check.cjs')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /** @type {import('electron-builder').Configuration} */
@@ -40,7 +41,7 @@ module.exports = {
     executableName: product.name
   },
   nsis: {
-    artifactName: '${name}-${version}-setup.${ext}',
+    artifactName: '${productName}-${version}-setup.${ext}',
     shortcutName: '${productName}',
     uninstallDisplayName: '${productName}',
     createDesktopShortcut: 'always'
@@ -74,20 +75,23 @@ module.exports = {
     notarize: false
   },
   dmg: {
-    artifactName: '${name}-${version}.${ext}'
+    artifactName: '${productName}-${version}.${ext}'
   },
   linux: {
     target: ['AppImage', 'snap', 'deb'],
-    // 販売者が決まったら product.json の vendor / vendorEmail を直す
+    // 販売者が決まったら product.json の vendor / vendorEmail を直す(未定のままでは配布用のビルドが止まる)
     maintainer: `${product.vendor} <${product.vendorEmail}>`,
     category: 'Utility'
   },
   appImage: {
-    artifactName: '${name}-${version}.${ext}'
+    artifactName: '${productName}-${version}.${ext}'
   },
   npmRebuild: false,
-  // 同梱する部品のライセンス表記を、詰める直前に node_modules から作り直す(古い表記・表記なしで出さない)
-  beforePack: () => {
+  // 同梱する部品のライセンス表記を、詰める直前に node_modules から作り直す(古い表記・表記なしで出さない)。
+  // 配布用の出力(--dir 以外)なら、販売者・連絡先・GPL のソースの入手先が未定のままでは止める
+  // (scripts/release-check.cjs。npm の build:win などは先にも検査して、長いビルドの前に止める)
+  beforePack: (context) => {
+    if (isDistributionBuild(context && context.targets)) assertReleasable(__dirname)
     execFileSync(process.execPath, [join(__dirname, 'scripts', 'third-party-notices.mjs')], {
       stdio: 'inherit'
     })

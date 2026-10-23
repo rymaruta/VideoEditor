@@ -1,4 +1,6 @@
-# VideoEditor
+# Tsunagi(つなぎ)
+
+製品名は `src/shared/product.json` の1か所で決める(このファイルの見出しは手で合わせる)。
 
 YouTubeショート動画向けの動画編集デスクトップアプリ(Electron + React + TypeScript)。
 

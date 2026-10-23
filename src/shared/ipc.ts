@@ -103,6 +103,10 @@ export const IPC = {
   appAbout: 'app:about',
   openLicense: 'app:openLicense',
   logRendererError: 'diag:logRendererError',
+  envCheckRun: 'diag:envCheckRun',
+  envCheckCancel: 'diag:envCheckCancel',
+  envCheckProgress: 'diag:envCheckProgress',
+  envCheckSave: 'diag:envCheckSave',
   checkFilesExist: 'media:checkFilesExist',
   selectRelinkFile: 'media:selectRelinkFile'
 } as const

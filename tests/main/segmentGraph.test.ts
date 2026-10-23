@@ -13,6 +13,7 @@ import {
 import {
   defaultParallelism,
   encoderLabel,
+  forcedVideoEncoder,
   telopsAsOverlays,
   videoEncodeArgs
 } from '@main/segmentRenderer'
@@ -436,6 +437,12 @@ describe('buildSegmentAudioGraph — 区間の音', () => {
 })
 
 describe('segmentRenderer の小物', () => {
+  it('VE_VIDEO_ENCODER=libx264 だけ CPU に固定する(GPU との比べ用。ほかの値は自動)', () => {
+    expect(forcedVideoEncoder('libx264')).toBe('libx264')
+    expect(forcedVideoEncoder(' LIBX264 ')).toBe('libx264')
+    expect(forcedVideoEncoder('h264_nvenc')).toBeNull()
+    expect(forcedVideoEncoder(undefined)).toBeNull()
+  })
   it('テロップは絶対秒の v1 形式へ戻す(単語もアイテムの頭からの秒を足す)。非表示のトラックは除く', () => {
     const t: TelopItem = {
       kind: 'telop',

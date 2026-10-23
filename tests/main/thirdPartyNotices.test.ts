@@ -9,7 +9,8 @@ import {
   licenseOf,
   productRoots,
   renderNotices,
-  sourceOf
+  sourceOf,
+  sourceOfferLines
 } from '../../scripts/third-party-notices.mjs'
 
 const tmp = mkdtempSync(join(tmpdir(), 've-notices-'))
@@ -254,4 +255,54 @@ describe('ライセンス表記の生成: 欠けたまま作らない', () => {
       )
     }
   )
+})
+
+describe('GPL のソースの提供の申し出(書面)', () => {
+  it('入手先・連絡先・3 年間を日本語と英語で書く', () => {
+    const text = sourceOfferLines({
+      vendor: '山田映像合同会社',
+      vendorEmail: 'support@vendor.co.jp',
+      sourceOfferUrl: 'https://vendor.co.jp/oss/'
+    }).join('\n')
+    expect(text).toContain('少なくとも 3 年間')
+    expect(text).toContain('three years')
+    expect(text).toContain('https://vendor.co.jp/oss/')
+    expect(text).toContain('support@vendor.co.jp')
+    expect(text).toContain('山田映像合同会社 は')
+    expect(text).toMatch(/x264/)
+  })
+
+  it('未定(TBD・example の宛先)は「(未定)」と書き、仮の宛先を載せない', () => {
+    const text = sourceOfferLines({
+      vendor: 'TBD',
+      vendorEmail: 'noreply@example.invalid',
+      sourceOfferUrl: 'TBD'
+    }).join('\n')
+    expect(text).toContain('(未定)')
+    expect(text).toContain('販売者(未定) は')
+    expect(text).not.toContain('example.invalid')
+    expect(text).not.toContain('TBD')
+  })
+
+  it('表記の文書の FFmpeg の欄に申し出が入る(GPL の全文より前)', () => {
+    const text = renderNotices({
+      productName: 'P',
+      productVersion: '1',
+      packages: [],
+      ffmpeg: {
+        ffmpeg: { version: 'ffmpeg version 7', readme: '', license: 'GNU GENERAL PUBLIC LICENSE' }
+      },
+      electron: { version: '1', license: 'MIT' },
+      models: [],
+      offer: {
+        vendor: 'V',
+        vendorEmail: 'v@vendor.co.jp',
+        sourceOfferUrl: 'https://vendor.co.jp/src'
+      }
+    })
+    const offerAt = text.indexOf('ソースの提供の申し出(書面による申し出)')
+    expect(offerAt).toBeGreaterThan(0)
+    expect(offerAt).toBeLessThan(text.indexOf('GNU General Public License version 3 の全文'))
+    expect(text).toContain('npm run gpl-sources')
+  })
 })
