@@ -1064,10 +1064,32 @@ function normalizeTranscript(raw: unknown): TranscriptUtterance[] | undefined {
   return out
 }
 
+/** 試しに当てる前の企画と履歴(範囲の自動編集の「試しに見る」。閉じたら丸ごと戻す) */
+export interface ProjectTrial {
+  project: Project
+  past: Project[]
+  future: Project[]
+  isDirty: boolean
+}
+
 interface ProjectState {
   project: Project
   past: Project[]
   future: Project[]
+  /**
+   * 試しに当てている間の、試す前の企画と履歴。試している間は取り消し・やり直しをせず、保存・自動保存は
+   * 試す前の企画を書く(`projectToSave`)。決めたら履歴を1件だけ積み、やめたら丸ごと戻す
+   */
+  trial: ProjectTrial | null
+  /** 試しに当てている間に断った編集の数(ダイアログが「決めるか閉じてから」と知らせる) */
+  trialRefused: number
+  /** 試しに当て始める(試す前の企画と履歴を覚える)。もう試していれば何もしない */
+  beginTrial: () => void
+  /**
+   * 試しを終える。`commit` なら今の企画を残し、履歴は試す前の企画を1件だけ積む(やり直しの履歴は消す)。
+   * そうでなければ試す前の企画・履歴・未保存の印に丸ごと戻す
+   */
+  endTrial: (commit: boolean) => void
   /**
    * `pushHistory` が付ける目印。**この印が付いた書き込みだけ**が
    * 「中身が変わっていなければ捨てる」関門(`skipNoOpHistory`)を通る。
@@ -1671,7 +1693,9 @@ function keepBackgroundResults(restored: Project, current: Project): Project {
   if (!changed && !events && !autoEdit) return restored
   return {
     ...restored,
-    assets,
+    // 素材の並びは変えたときだけ新しくする(同じなら取り消し前の企画と同じものに。範囲の自動編集の
+    // 案を替える時、取り消した企画が用意した時の企画と同じかを見る)
+    assets: changed ? assets : restored.assets,
     ...(events ? { audioEvents: current.audioEvents } : {}),
     ...(autoEdit ? { autoEdit: current.autoEdit } : {})
   }
@@ -1950,11 +1974,13 @@ function projectSwitchReset(): Pick<
   | 'timelineIn'
   | 'timelineOut'
   | 'projectSession'
+  | 'trial'
 > {
   return {
     projectSession: ++projectSessionCounter,
     past: [],
     future: [],
+    trial: null,
     selectedClipId: null,
     multiSelectedClipIds: [],
     selectedOverlayId: null,
@@ -2045,6 +2071,20 @@ function pruneSelection(state: ProjectState, patch: Partial<ProjectState>): Part
   }
 }
 
+/** 試しに当てる処理の書き込みか(試しに当てている間でも通す) */
+let trialWriteAllowed = false
+
+/** 試しに当てている間でも、`fn` の中の編集を通す(試しの案を当てる処理だけが使う) */
+export function withTrialWrite<T>(fn: () => T): T {
+  const prev = trialWriteAllowed
+  trialWriteAllowed = true
+  try {
+    return fn()
+  } finally {
+    trialWriteAllowed = prev
+  }
+}
+
 function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<ProjectState> {
   return (set, get, api) => {
     const guardedSet: typeof set = (partial) => {
@@ -2055,6 +2095,12 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         let patch = (typeof partial === 'function' ? partial(state) : partial) as
           Partial<ProjectState> | undefined
         if (!patch || patch.__historyPush !== true) return patch as Partial<ProjectState>
+        // 試しに当てている間は編集を断る(メニュー・ショートカットからの編集を、閉じると黙って捨てる・決めると
+        // 範囲の編集と1件にまとめることになる)。試しを当てる処理だけ通す(`withTrialWrite`)
+        if (state.trial && !trialWriteAllowed) {
+          restoreHistoryCoalescing(coalescingMark)
+          return { trialRefused: state.trialRefused + 1 }
+        }
         const origin = patch.__followFrom
         if (origin) patch = omitKeys(patch, ['__followFrom'])
         if (patch.__noFollow) patch = omitKeys(patch, ['__noFollow'])
@@ -2164,6 +2210,47 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   projectSession: 0,
   past: [],
   future: [],
+  trial: null,
+  trialRefused: 0,
+  beginTrial: () => {
+    resetHistoryCoalescing()
+    set((s) =>
+      s.trial
+        ? s
+        : { trial: { project: s.project, past: s.past, future: s.future, isDirty: s.isDirty } }
+    )
+  },
+  endTrial: (commit) => {
+    resetHistoryCoalescing()
+    set((s) => {
+      const t = s.trial
+      if (!t) return s
+      if (commit)
+        return {
+          trial: null,
+          past: [...t.past, t.project].slice(-MAX_HISTORY),
+          future: [],
+          isDirty: true
+        }
+      const idSet = new Set(t.project.clips.map((c) => c.id))
+      // 試している間に裏で届いた結果(プロキシ・検出)は引き継ぐ。自動編集の判断は試す前のもの
+      const project = keepBackgroundResults(t.project, {
+        ...s.project,
+        autoEdit: t.project.autoEdit
+      })
+      return {
+        trial: null,
+        project,
+        past: t.past,
+        future: t.future,
+        isDirty: t.isDirty,
+        selectedClipId: idSet.has(s.selectedClipId ?? '') ? s.selectedClipId : null,
+        multiSelectedClipIds: s.multiSelectedClipIds.filter((id) => idSet.has(id)),
+        selectedOverlayId: overlayStillThere(t.project, s.selectedOverlayId),
+        missingAssetIds: missingIdsFor(t.project, s.missingAssetPaths)
+      }
+    })
+  },
   currentFilePath: null,
   isDirty: false,
   selectedClipId: null,
@@ -2434,6 +2521,13 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 保存している間に別の企画へ切り替えていたら、今の企画には何も付けない(付けると、新しい企画の
       // 次の保存が前の企画のファイルを黙って上書きしていた)。id では見分けられないので番号で見る
       if (session !== undefined && session !== state.projectSession) return state
+      // 試している間に保存したのは試す前の企画(`projectToSave`)。試す前の未保存の印を下ろす
+      if (state.trial && savedProject === state.trial.project)
+        return {
+          currentFilePath: filePath,
+          trial: { ...state.trial, isDirty: false },
+          saveError: null
+        }
       if (state.project.id !== savedProject.id) return state
       // ドラッグ・入力のまとまりの途中で保存したら、まとまりの始まりが保存したものと同じかを測り直す。
       // 始めた所へ戻して離したとき、始まりの「保存済み」をそのまま戻すと、保存したものと違うのに未保存と
@@ -3456,7 +3550,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   undo: () => {
     resetHistoryCoalescing()
     set((state) => {
-      if (state.past.length === 0) return state
+      // 試している間は取り消さない(閉じれば試す前に戻る)
+      if (state.trial || state.past.length === 0) return state
       const previous = state.past[state.past.length - 1]
       const idSet = new Set(previous.clips.map((c) => c.id))
       return {
@@ -3481,7 +3576,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   redo: () => {
     resetHistoryCoalescing()
     set((state) => {
-      if (state.future.length === 0) return state
+      if (state.trial || state.future.length === 0) return state
       const [next, ...rest] = state.future
       const idSet = new Set(next.clips.map((c) => c.id))
       return {
@@ -5340,6 +5435,10 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
 export const useProjectStore = create<ProjectState>(skipNoOpHistory(projectStateCreator))
 
+useProjectStore.subscribe((state, prev) => {
+  if (prev.trial && !state.trial && afterTrialQueue.length > 0) flushAfterTrial()
+})
+
 /**
  * いくつかの操作(分割→分割→削除 など)を、**1回の取り消しで丸ごと戻る1件**にまとめて書き込む。
  * 中の操作はそれぞれ履歴を積むので、終わったら「始める前の企画」1件に置き換える。
@@ -6610,6 +6709,48 @@ export function withRangedSounds(
 }
 
 /** 2つの企画が、自動編集の判断(`autoEdit`)のほかは同じものか(参照で比べる) */
+/** 試しが終わるのを待っている、裏の処理の結果(試しを始めた企画の番号と、当てる関数) */
+const afterTrialQueue: { session: number; apply: () => void }[] = []
+
+/**
+ * 裏で走っていた処理(ノイズ除去・BPM の解析・素材の読み込み など)の結果を企画に当てる。試しに当てている
+ * 間(範囲の自動編集の「試しに見る」)は編集を断るので、試しが終わる(閉じる・決める)のを待って当てる。
+ * 待つ間に企画を切り替えたら当てない(別の企画に当てない)。`session` は処理を始めた時の企画の番号
+ */
+export function applyWhenNotTrying(
+  apply: () => void,
+  session: number = useProjectStore.getState().projectSession
+): void {
+  const s = useProjectStore.getState()
+  if (s.projectSession !== session) return
+  if (!s.trial) {
+    apply()
+    return
+  }
+  afterTrialQueue.push({ session, apply })
+}
+
+/** 試しが終わったら、待っていた結果を当てる(試しを終える処理が全部済んでから) */
+function flushAfterTrial(): void {
+  queueMicrotask(() => {
+    const s = useProjectStore.getState()
+    if (s.trial) return
+    const queued = afterTrialQueue.splice(0)
+    for (const q of queued) if (q.session === useProjectStore.getState().projectSession) q.apply()
+  })
+}
+
+/**
+ * 保存・自動保存で書く企画と未保存の印。試しに当てている間は、試す前の企画(試しの案は書かない)
+ */
+export function projectToSave(
+  state: Pick<ProjectState, 'project' | 'isDirty' | 'trial'> = useProjectStore.getState()
+): { project: Project; isDirty: boolean } {
+  return state.trial
+    ? { project: state.trial.project, isDirty: state.trial.isDirty }
+    : { project: state.project, isDirty: state.isDirty }
+}
+
 export function sameExceptAutoEdit(a: Project, b: Project): boolean {
   if (a === b) return true
   const keys = new Set([...Object.keys(a), ...Object.keys(b)])

@@ -48,7 +48,7 @@ import {
 } from '@shared/structure/llm'
 import type { AiProvider } from '@shared/llm'
 import { askAiJson, type AiProgress } from './ai'
-import { tightenRanges, totalLength, type CutRange } from '@shared/cut/tighten'
+import { tightenRanges, totalLength, type CutRange, type TightenOptions } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
 import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
 import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
@@ -435,17 +435,28 @@ export function planRoughCut(
      * 合計をその秒にそろえる(範囲の長さを保つ)
      */
     window?: { start: number; end: number; fitSec?: number }
+    /**
+     * 間詰めの強さ(範囲の自動編集の案の作り分け)。詰める間・残す間の秒にかける(1 で今のまま。
+     * 小さいほど強く詰める)
+     */
+    pauseScale?: number
   }
 ): RoughCutPlan {
   const kind = options.kind ?? 'location'
   const profile = KIND_PROFILES[kind]
   const policy = POLICY_PROFILES[options.policy ?? DEFAULT_POLICY[kind]]
-  const tighten = {
+  const tighten: TightenOptions = {
     ...profile.insert,
     ...(options.style
       ? { maxPauseSec: options.style.maxPauseSec, keepPauseSec: options.style.keepPauseSec }
       : {}),
     ...policy.tighten
+  }
+  if (options.pauseScale !== undefined && options.pauseScale !== 1) {
+    const k = Math.max(0.1, options.pauseScale)
+    const keepPause = Math.max(0.1, (tighten.keepPauseSec ?? 0.3) * k)
+    tighten.keepPauseSec = keepPause
+    tighten.maxPauseSec = Math.max(keepPause + 0.1, (tighten.maxPauseSec ?? 0.7) * k)
   }
   const lines = timedLines(project, info)
   const speech = lines.map((l) => ({ start: l.start, end: l.end }))

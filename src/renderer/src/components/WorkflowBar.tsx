@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useProjectStore } from '../store/projectStore'
+import { projectToSave, useProjectStore } from '../store/projectStore'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
 import { isModalOpen } from '../lib/useKeyboardShortcuts'
@@ -38,7 +38,8 @@ export function WorkflowBar({
   onTelop: () => void
 }): React.JSX.Element {
   const projectName = useProjectStore((s) => s.project.name)
-  const isDirty = useProjectStore((s) => s.isDirty)
+  // 試しに当てている間は、試す前の未保存の印
+  const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const reviewCount = useReviewItems().open.length
   const canUndo = useProjectStore((s) => s.past.length > 0)
   const canRedo = useProjectStore((s) => s.future.length > 0)

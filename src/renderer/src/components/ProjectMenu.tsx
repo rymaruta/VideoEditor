@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useProjectStore } from '../store/projectStore'
+import { projectToSave, useProjectStore } from '../store/projectStore'
 import { useAutosaveStore } from '../store/autosaveStore'
 import { useRecentProjectsStore, projectFileName } from '../store/recentProjectsStore'
 import { formatIpcError } from '../lib/ipcError'
@@ -24,7 +24,8 @@ import { XIcon } from './icons'
 export function ProjectMenu(): React.JSX.Element | null {
   const saveError = useProjectStore((s) => s.saveError)
   const setSaveError = useProjectStore((s) => s.setSaveError)
-  const isDirty = useProjectStore((s) => s.isDirty)
+  // 試しに当てている間は、試す前の未保存の印
+  const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const restoreAutosave = useProjectStore((s) => s.restoreAutosave)
   const discardedAutosave = useAutosaveStore((s) => s.discarded)
   const recentProjects = useRecentProjectsStore((s) => s.recentProjects)

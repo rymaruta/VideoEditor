@@ -1,7 +1,7 @@
 import { playableOnMain } from '../lib/relinkCheck'
 import { useMemo, useState } from 'react'
 import { editTemplates } from '@shared/templates'
-import { useProjectStore } from '../store/projectStore'
+import { applyWhenNotTrying, useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
 import { SparklesIcon, TargetIcon } from './icons'
 
@@ -63,7 +63,7 @@ export function TemplatePanel(): React.JSX.Element {
             (assetOrder.get(a.assetId) ?? 0) - (assetOrder.get(b.assetId) ?? 0) || a.start - b.start
         )
       if (useProjectStore.getState().projectSession !== session) return
-      autoCutFromCandidates(chosen, template)
+      applyWhenNotTrying(() => autoCutFromCandidates(chosen, template), session)
     } catch (e) {
       setError(formatIpcError(e))
     } finally {

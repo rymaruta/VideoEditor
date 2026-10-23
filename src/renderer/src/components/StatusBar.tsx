@@ -1,4 +1,4 @@
-import { useProjectStore } from '../store/projectStore'
+import { projectToSave, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution } from '@shared/resolution'
 import { ProjectMenu } from './ProjectMenu'
@@ -13,7 +13,8 @@ import { useReviewItems } from '../lib/useReviewItems'
  * 操作のボタンは置かない(操作はメニューバーとパネルにある)。
  */
 export function StatusBar(): React.JSX.Element {
-  const isDirty = useProjectStore((s) => s.isDirty)
+  // 試しに当てている間は、試す前の未保存の印
+  const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const clipCount = useProjectStore((s) => s.project.clips.length)
   const telopCount = useProjectStore((s) => s.project.textOverlays.length)
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
