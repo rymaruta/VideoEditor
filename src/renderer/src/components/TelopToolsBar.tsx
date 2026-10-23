@@ -4,6 +4,7 @@ import { buildSrt, parseSrt, telopMatches } from '@shared/telop/srt'
 import { safeFileBaseName } from '@shared/fileName'
 import { applyWhenNotTrying, useProjectStore } from '../store/projectStore'
 import { formatIpcError } from '../lib/ipcError'
+import { afterTrialNotice, srtImportNotice } from '../lib/afterTrial'
 
 /**
  * テロップの一覧の上の道具: 検索と置換、字幕ファイル(SRT)の読み込み・書き出し。
@@ -70,7 +71,8 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
         setMessage('字幕が見つかりませんでした(SRT の形か確かめてください)')
         return
       }
-      applyWhenNotTrying(() =>
+      // 範囲の自動編集を試している間は、試しを終えてから入れる(知らせもそのとおりに)
+      const status = applyWhenNotTrying(() =>
         addTextOverlays(
           cues.map((c) => ({
             text: c.text,
@@ -81,7 +83,7 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
           }))
         )
       )
-      setMessage(`${cues.length} 本の字幕を読み込みました`)
+      setMessage(afterTrialNotice(status, srtImportNotice(cues.length)))
     } catch (e) {
       setMessage(`読み込めませんでした: ${formatIpcError(e)}`)
     }

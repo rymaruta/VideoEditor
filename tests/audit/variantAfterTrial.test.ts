@@ -19,7 +19,15 @@ import {
   mainLength,
   type RangedPreview
 } from '@renderer/lib/rangedAutoEdit'
-import type { BeatGrid } from '@shared/types'
+import type { BeatGrid, MediaAsset } from '@shared/types'
+import {
+  addAssetsThenPreview,
+  afterTrialNotice,
+  NARRATION_NOTICE,
+  relinkThenPreview,
+  srtImportNotice
+} from '@renderer/lib/afterTrial'
+import { TERM_RULES } from '@renderer/lib/terms'
 import { episode2, project } from './h'
 
 const pipe = (): ReturnType<typeof usePipelineStore.getState> => usePipelineStore.getState()
@@ -111,5 +119,129 @@ describe('試している間に終わった裏の処理の結果', () => {
     expect(ps().trial).toBeNull()
     expect(project().assets.some((a) => a.id === asset.id)).toBe(false)
     expect(project().beatGrid).toBeFalsy()
+  })
+})
+
+describe('当てた後にすること・知らせ(監査 低)', () => {
+  const newAsset = (): MediaAsset => ({
+    id: 'imported-1',
+    filePath: '/r/new.mp4',
+    fileName: 'new.mp4',
+    duration: 10,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    hasAudio: true,
+    hasVideo: true
+  })
+
+  it('読み込み: プロキシの用意は素材を入れた後(試している間は、閉じて入れてから)', async () => {
+    await episode2()
+    const calls: { inProject: boolean }[] = []
+    const ensure = (id: string): void => {
+      calls.push({ inProject: project().assets.some((a) => a.id === id) })
+    }
+    // 試していなければすぐ、入れた後に
+    const a = newAsset()
+    expect(
+      addAssetsThenPreview(
+        [a],
+        [{ asset: a, codecSaysUnplayable: true, audioNeedsFold: false }],
+        ensure
+      )
+    ).toBe('applied')
+    expect(calls).toEqual([{ inProject: true }])
+    // 試している間は待つ
+    calls.length = 0
+    const list = await vars()
+    pipe().tryRangedVariant(list[0], list)
+    const b = { ...newAsset(), id: 'imported-2', filePath: '/r/new2.mp4' }
+    expect(
+      addAssetsThenPreview(
+        [b],
+        [{ asset: b, codecSaysUnplayable: true, audioNeedsFold: false }],
+        ensure
+      )
+    ).toBe('waiting')
+    expect(calls).toEqual([])
+    pipe().cancelRangedTrial()
+    await settle()
+    expect(calls).toEqual([{ inProject: true }])
+  })
+
+  it('つなぎ直し: プロキシの用意は新しいファイルにつなぎ直した後(試している間は、閉じてから)', async () => {
+    await episode2()
+    const asset = project().assets[0]
+    const seen: (string | undefined)[] = []
+    const ensure = (id: string, filePath: string): void => {
+      seen.push(project().assets.find((x) => x.id === id)?.filePath === filePath ? 'new' : 'old')
+    }
+    const list = await vars()
+    pipe().tryRangedVariant(list[0], list)
+    const status = relinkThenPreview(
+      {
+        assetId: asset.id,
+        filePath: '/r/moved.mp4',
+        fileName: 'moved.mp4',
+        probe: {
+          duration: asset.duration,
+          width: asset.width,
+          height: asset.height,
+          fps: asset.fps,
+          hasAudio: asset.hasAudio,
+          hasVideo: asset.hasVideo
+        },
+        thumbnailDataUrl: undefined
+      },
+      { codecSaysUnplayable: true, hasVideo: true },
+      ensure
+    )
+    expect(status).toBe('waiting')
+    expect(seen).toEqual([])
+    pipe().cancelRangedTrial()
+    await settle()
+    expect(seen).toEqual(['new'])
+  })
+
+  it('ナレーション・SRT の知らせは、試している間は「試しを終えたら」。言い回しの決まりに合う', () => {
+    expect(afterTrialNotice('applied', NARRATION_NOTICE)).toBe(
+      'ナレーションを音声トラックに追加しました。'
+    )
+    expect(afterTrialNotice('waiting', NARRATION_NOTICE)).toContain('試しを終えたら')
+    expect(afterTrialNotice('waiting', NARRATION_NOTICE)).not.toContain('追加しました')
+    const srt = srtImportNotice(3)
+    expect(afterTrialNotice('applied', srt)).toBe('3 本の字幕を読み込みました')
+    expect(afterTrialNotice('waiting', srt)).toContain('試しを終えたら')
+    expect(afterTrialNotice('waiting', srt)).not.toContain('読み込みました')
+    const texts = [...Object.values(NARRATION_NOTICE), ...Object.values(srt)]
+    for (const t of texts)
+      for (const r of TERM_RULES)
+        if (r.avoid.test(t) && !(r.allow && r.allow.test(t))) throw new Error(`${t}: ${r.use}`)
+  })
+
+  it('試している間に作ったナレーションは、知らせのとおり閉じた後に入る', async () => {
+    await episode2()
+    const list = await vars()
+    pipe().tryRangedVariant(list[0], list)
+    const n0 = project().audioTracks.length
+    const status = applyWhenNotTrying(() =>
+      ps().addAudioClipWithAsset(
+        {
+          ...newAsset(),
+          id: 'narr',
+          filePath: '/r/narr.wav',
+          hasVideo: false,
+          width: 0,
+          height: 0,
+          fps: 0
+        },
+        { trackName: 'ナレーション' }
+      )
+    )
+    expect(afterTrialNotice(status, NARRATION_NOTICE)).toBe(NARRATION_NOTICE.waiting)
+    pipe().cancelRangedTrial()
+    await settle()
+    expect(project().assets.some((a) => a.id === 'narr')).toBe(true)
+    expect(project().audioTracks.length).toBe(n0 + 1)
   })
 })
