@@ -12,6 +12,8 @@ import './rangeAutoEdit.css'
 export function RangeReviewBar(): React.JSX.Element | null {
   const review = usePipelineStore((s) => s.rangeReview)
   const clips = useProjectStore((s) => s.project.clips)
+  // 試しに当てている間(ダイアログの「試しに見る」)は出さない(ダイアログで決める・やめる)
+  const inTrial = useProjectStore((s) => s.trial !== null)
   // 案を替えられなかった理由(その見比べの間だけ出す)
   const [failed, setFailed] = useState<{ on: unknown; reason: string } | null>(null)
   const switchError = failed && failed.on === review ? failed.reason : null
@@ -22,9 +24,9 @@ export function RangeReviewBar(): React.JSX.Element | null {
         ? 'before'
         : null
   useEffect(() => {
-    if (review && !showing) usePipelineStore.getState().closeRangeReview()
-  }, [review, showing])
-  if (!review || !showing) return null
+    if (review && !showing && !inTrial) usePipelineStore.getState().closeRangeReview()
+  }, [review, showing, inTrial])
+  if (!review || !showing || inTrial) return null
   const store = useProjectStore.getState
   const range = showing === 'after' ? review.range : review.oldRange
   const sm = review.summary

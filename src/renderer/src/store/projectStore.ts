@@ -1064,10 +1064,30 @@ function normalizeTranscript(raw: unknown): TranscriptUtterance[] | undefined {
   return out
 }
 
+/** 試しに当てる前の企画と履歴(範囲の自動編集の「試しに見る」。閉じたら丸ごと戻す) */
+export interface ProjectTrial {
+  project: Project
+  past: Project[]
+  future: Project[]
+  isDirty: boolean
+}
+
 interface ProjectState {
   project: Project
   past: Project[]
   future: Project[]
+  /**
+   * 試しに当てている間の、試す前の企画と履歴。試している間は取り消し・やり直しをせず、保存・自動保存は
+   * 試す前の企画を書く(`projectToSave`)。決めたら履歴を1件だけ積み、やめたら丸ごと戻す
+   */
+  trial: ProjectTrial | null
+  /** 試しに当て始める(試す前の企画と履歴を覚える)。もう試していれば何もしない */
+  beginTrial: () => void
+  /**
+   * 試しを終える。`commit` なら今の企画を残し、履歴は試す前の企画を1件だけ積む(やり直しの履歴は消す)。
+   * そうでなければ試す前の企画・履歴・未保存の印に丸ごと戻す
+   */
+  endTrial: (commit: boolean) => void
   /**
    * `pushHistory` が付ける目印。**この印が付いた書き込みだけ**が
    * 「中身が変わっていなければ捨てる」関門(`skipNoOpHistory`)を通る。
@@ -1952,11 +1972,13 @@ function projectSwitchReset(): Pick<
   | 'timelineIn'
   | 'timelineOut'
   | 'projectSession'
+  | 'trial'
 > {
   return {
     projectSession: ++projectSessionCounter,
     past: [],
     future: [],
+    trial: null,
     selectedClipId: null,
     multiSelectedClipIds: [],
     selectedOverlayId: null,
@@ -2166,6 +2188,41 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   projectSession: 0,
   past: [],
   future: [],
+  trial: null,
+  beginTrial: () => {
+    resetHistoryCoalescing()
+    set((s) =>
+      s.trial
+        ? s
+        : { trial: { project: s.project, past: s.past, future: s.future, isDirty: s.isDirty } }
+    )
+  },
+  endTrial: (commit) => {
+    resetHistoryCoalescing()
+    set((s) => {
+      const t = s.trial
+      if (!t) return s
+      if (commit)
+        return {
+          trial: null,
+          past: [...t.past, t.project].slice(-MAX_HISTORY),
+          future: [],
+          isDirty: true
+        }
+      const idSet = new Set(t.project.clips.map((c) => c.id))
+      return {
+        trial: null,
+        project: t.project,
+        past: t.past,
+        future: t.future,
+        isDirty: t.isDirty,
+        selectedClipId: idSet.has(s.selectedClipId ?? '') ? s.selectedClipId : null,
+        multiSelectedClipIds: s.multiSelectedClipIds.filter((id) => idSet.has(id)),
+        selectedOverlayId: overlayStillThere(t.project, s.selectedOverlayId),
+        missingAssetIds: missingIdsFor(t.project, s.missingAssetPaths)
+      }
+    })
+  },
   currentFilePath: null,
   isDirty: false,
   selectedClipId: null,
@@ -2436,6 +2493,13 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       // 保存している間に別の企画へ切り替えていたら、今の企画には何も付けない(付けると、新しい企画の
       // 次の保存が前の企画のファイルを黙って上書きしていた)。id では見分けられないので番号で見る
       if (session !== undefined && session !== state.projectSession) return state
+      // 試している間に保存したのは試す前の企画(`projectToSave`)。試す前の未保存の印を下ろす
+      if (state.trial && savedProject === state.trial.project)
+        return {
+          currentFilePath: filePath,
+          trial: { ...state.trial, isDirty: false },
+          saveError: null
+        }
       if (state.project.id !== savedProject.id) return state
       // ドラッグ・入力のまとまりの途中で保存したら、まとまりの始まりが保存したものと同じかを測り直す。
       // 始めた所へ戻して離したとき、始まりの「保存済み」をそのまま戻すと、保存したものと違うのに未保存と
@@ -3458,7 +3522,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   undo: () => {
     resetHistoryCoalescing()
     set((state) => {
-      if (state.past.length === 0) return state
+      // 試している間は取り消さない(閉じれば試す前に戻る)
+      if (state.trial || state.past.length === 0) return state
       const previous = state.past[state.past.length - 1]
       const idSet = new Set(previous.clips.map((c) => c.id))
       return {
@@ -3483,7 +3548,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   redo: () => {
     resetHistoryCoalescing()
     set((state) => {
-      if (state.future.length === 0) return state
+      if (state.trial || state.future.length === 0) return state
       const [next, ...rest] = state.future
       const idSet = new Set(next.clips.map((c) => c.id))
       return {
@@ -6612,6 +6677,17 @@ export function withRangedSounds(
 }
 
 /** 2つの企画が、自動編集の判断(`autoEdit`)のほかは同じものか(参照で比べる) */
+/**
+ * 保存・自動保存で書く企画と未保存の印。試しに当てている間は、試す前の企画(試しの案は書かない)
+ */
+export function projectToSave(
+  state: Pick<ProjectState, 'project' | 'isDirty' | 'trial'> = useProjectStore.getState()
+): { project: Project; isDirty: boolean } {
+  return state.trial
+    ? { project: state.trial.project, isDirty: state.trial.isDirty }
+    : { project: state.project, isDirty: state.isDirty }
+}
+
 export function sameExceptAutoEdit(a: Project, b: Project): boolean {
   if (a === b) return true
   const keys = new Set([...Object.keys(a), ...Object.keys(b)])

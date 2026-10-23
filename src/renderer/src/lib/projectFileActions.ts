@@ -1,4 +1,4 @@
-import { useProjectStore } from '../store/projectStore'
+import { projectToSave, useProjectStore } from '../store/projectStore'
 import { useRecentProjectsStore } from '../store/recentProjectsStore'
 import { useAutosaveStore } from '../store/autosaveStore'
 import { safeFileBaseName } from '@shared/fileName'
@@ -65,7 +65,9 @@ export async function checkMissingAssets(): Promise<void> {
 }
 
 export async function saveProjectAs(): Promise<void> {
-  const { project, markSaved, projectSession } = useProjectStore.getState()
+  const { markSaved, projectSession } = useProjectStore.getState()
+  // 試しに当てている間は、試す前の企画を書く
+  const { project } = projectToSave()
   const filePath = await window.api.selectProjectSavePath(
     `${safeFileBaseName(project.name)}.veproj`
   )
@@ -87,7 +89,8 @@ function stillSameProject(session: number): boolean {
 }
 
 export async function saveProject(): Promise<void> {
-  const { project, currentFilePath, markSaved, projectSession } = useProjectStore.getState()
+  const { currentFilePath, markSaved, projectSession } = useProjectStore.getState()
+  const { project } = projectToSave()
   if (!currentFilePath) {
     await saveProjectAs()
     return

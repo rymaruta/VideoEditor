@@ -26,7 +26,7 @@ import { storedPanelTab } from './lib/panelTabs'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
 import { AboutDialog } from './components/AboutDialog'
-import { useProjectStore } from './store/projectStore'
+import { projectToSave, useProjectStore } from './store/projectStore'
 import { formatIpcError } from './lib/ipcError'
 import { useAutosaveStore } from './store/autosaveStore'
 import { useSettingsStore } from './store/settingsStore'
@@ -231,7 +231,8 @@ function App(): React.JSX.Element {
     }
   }, [tab])
   const projectName = useProjectStore((s) => s.project.name)
-  const isDirty = useProjectStore((s) => s.isDirty)
+  // 試しに当てている間は、試す前の未保存の印(試しの案は保存しない)
+  const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const loadEnvApiKeys = useSettingsStore((s) => s.loadEnvApiKeys)
   const refreshAutosave = useAutosaveStore((s) => s.refresh)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
@@ -268,7 +269,7 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const { project, isDirty } = useProjectStore.getState()
+      const { project, isDirty } = projectToSave()
       // 見送った前回の自動保存を上書きする前に退避したときは、メニューの「破棄した自動保存
       // データを戻す」をすぐ使えるようにする。
       if (isDirty) {

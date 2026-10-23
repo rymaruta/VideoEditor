@@ -103,6 +103,10 @@ export interface RangedPreview {
   variant: RangedVariant
   /** 範囲の中で残した所(共通の時刻。案の中身が同じかを見る) */
   content: Range[]
+  /** 当てる前に、範囲に掛かる場面のうち残していた数 */
+  keptBefore: number
+  /** 落としていた場面のうち、この案で戻す場面の数と長さ(秒) */
+  restored: { count: number; seconds: number }
 }
 
 export type RangedVariantId = 'A' | 'B' | 'C'
@@ -224,13 +228,31 @@ export function addRangedVariant(
   )
 }
 
-/** 範囲の中の、残す/落とす場面の数(案ごとに出す) */
-export function variantScenes(p: Pick<RangedPreview, 'keptIds' | 'sceneIds'>): {
+/** 範囲の中の、残す場面の数(当てる前 → 後)と、場面の数(案ごとに出す) */
+export function variantScenes(p: Pick<RangedPreview, 'keptIds' | 'sceneIds' | 'keptBefore'>): {
+  before: number
   kept: number
-  dropped: number
+  total: number
 } {
   const kept = p.sceneIds.filter((id) => p.keptIds.includes(id)).length
-  return { kept, dropped: p.sceneIds.length - kept }
+  return { before: p.keptBefore, kept, total: p.sceneIds.length }
+}
+
+/**
+ * 範囲が大きく伸びる案の知らせ(+10 秒か 1.2 倍から)。落としていた場面を戻すなら、その数と長さも。
+ * 伸びなければ null
+ */
+export function growNote(
+  p: Pick<RangedPreview, 'summary' | 'restored'>,
+  keepLength: boolean
+): string | null {
+  const { lengthBefore: a, lengthAfter: b } = p.summary
+  if (!(b - a >= 10 || b >= a * 1.2) || b - a < 1) return null
+  const grow = `${(b - a).toFixed(1)}秒`
+  const tail = keepLength ? '(長さを保つ)' : '(後ろが送られます)'
+  return p.restored.count > 0
+    ? `落としていた場面 ${p.restored.count}(${p.restored.seconds.toFixed(1)}秒)を戻すため ${grow}伸びます${tail}`
+    : `範囲が ${grow}伸びます${tail}`
 }
 
 export type RangedPrepareResult =

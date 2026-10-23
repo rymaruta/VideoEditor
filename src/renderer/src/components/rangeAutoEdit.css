@@ -244,6 +244,15 @@
   font-family: var(--ve-font-mono);
   font-variant-numeric: tabular-nums;
 }
+.range-variant-grow {
+  margin: 0;
+  padding: var(--ve-space-1) var(--ve-space-2);
+  border-radius: var(--ve-radius-sm);
+  font-size: var(--ve-fs-11);
+  color: var(--ve-primary-ink);
+  background: var(--ve-primary-soft);
+  box-shadow: inset 0 0 0 1px var(--ve-primary-line);
+}
 .range-variant-strips .range-strip {
   height: 8px;
 }
@@ -254,16 +263,13 @@
   align-items: center;
   gap: var(--ve-gap-icon);
 }
-/* 試しに見ている間: 後ろの画面(モニター)が見えるよう、幕を外してダイアログを下へ寄せる */
+/* 試しに見ている間: 後ろの画面(モニター)が見えるよう、幕を外してダイアログを下へ寄せる。
+   後ろは押せない(試している間に編集すると、試す前に戻せない) */
 .modal-backdrop.range-trial {
   align-items: flex-end;
   padding-bottom: var(--ve-space-4);
   background: transparent;
   backdrop-filter: none;
-  pointer-events: none;
-}
-.modal-backdrop.range-trial .range-auto-edit-dialog {
-  pointer-events: auto;
 }
 
 /* ---------- 当てた後の見比べの帯 ---------- */

@@ -378,6 +378,24 @@ interface PipelineState {
    * 当てた後に別の編集をしていたら替えない。まだ当てていなければ(前を見ている)そのまま当てる
    */
   switchRangedVariant: (preview: RangedPreview) => { ok: boolean; reason?: string }
+  /**
+   * 案を試しに当てる(「試しに見る」)。履歴には積まない: 試す前の企画・履歴(projectStore の `trial`)と
+   * 自動編集の記録(残した場面・範囲の記録・付け直し)を覚え、別の案を試すときは試す前に戻してから当てる
+   */
+  tryRangedVariant: (
+    preview: RangedPreview,
+    variants: RangedPreview[]
+  ) => { ok: boolean; reason?: string }
+  /** 試しに当てた案をやめる(試す前の企画・履歴・記録に丸ごと戻す)。試していなければ何もしない */
+  cancelRangedTrial: () => void
+  /**
+   * この案にする。試していれば、その案を残して履歴を1件だけ積む(違う案を試していたら替えてから)。
+   * 試していなければ、ふつうに当てる
+   */
+  commitRangedVariant: (
+    preview: RangedPreview,
+    variants: RangedPreview[]
+  ) => { ok: boolean; reason?: string }
 }
 
 export interface RangeReview {
@@ -1057,6 +1075,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
    * 企画に覚える。保存して開き直したときに、そのまま戻す(覚えていないと、開き直して作り直すと
    * 手で残した場面・AI の判定で残した場面が落ち、演出テロップも消えていた)
    */
+  /**
+   * 今の組んだ本編(`roughCutAuto` の印)で残している場面。前の回の記録から読む(今の本編から推し量らない)
+   */
+  function keptScenesOf(base: Project): string[] {
+    const sig = cutSignature(base.roughCutAuto)
+    return (
+      (sig ? [...get().builtKept].reverse().find((b) => b.cut === sig)?.keptIds : undefined) ??
+      get().roughCut?.keptIds ??
+      []
+    )
+  }
+
   function persistDecisions(): void {
     const s = get()
     const project = useProjectStore.getState().project
@@ -2355,6 +2385,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const fullScenes = scenes
         .filter((sc) => sc.start >= win.start - 1e-6 && sc.end <= win.end + 1e-6)
         .map((sc) => sc.id)
+      // 当てる前に残していた場面(当てる時の記録と同じ読み方)
+      const keptBeforeIds = new Set(keptScenesOf(project))
       // 本編の修正: 範囲の中の手直しを残すなら、作り直しと同じく今の本編から読み取った判断の、窓の中だけ。
       // カットをやり直さないなら今の残し方に、アングルをやり直さないなら今のカメラに固定する
       const current = coverageOfClips(project.clips, info)
@@ -2618,6 +2650,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             fullScenes,
             usedTouches: get().keepTouched.filter((id) => sceneIds.includes(id)),
             variant: { id: spec.id, label: spec.label, note: spec.note, merged: [] },
+            keptBefore: sceneIds.filter((id) => keptBeforeIds.has(id)).length,
+            restored: (() => {
+              const back = inWindow.filter(
+                (sc) => plan.selection.kept.includes(sc.id) && !keptBeforeIds.has(sc.id)
+              )
+              return {
+                count: back.length,
+                seconds: back.reduce((t, sc) => t + (sc.end - sc.start), 0)
+              }
+            })(),
             content: plan.cut.spans.map((x) => ({ start: x.start, end: x.end }))
           }
         }
@@ -2654,6 +2696,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       // 使った付け直しは、当てる時の一覧で決める(用意してから当てるまでに付け直した・外したものも)。
       // 当てると場面にクリップが戻り、付け直しの一覧から外れるので、当てる前に読む
       const usedNow = get().keepTouched.filter((id) => preview.sceneIds.includes(id))
+      const roughCutBefore = get().roughCut
+      // 同じ案をもう一度当てる(案を A → C → A と替えた)と、本編は前に当てた時と同じ並びになる。前の記録が
+      // 残っていると、当てたのを「やり直し」と取り違え、範囲の記録を二重に足していた
+      rangeApplied.delete(preview.after.clips)
       const ok = useProjectStore.getState().applyRangedProject(preview.after, preview.base)
       if (!ok) {
         log(
@@ -2667,11 +2713,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       }
       // 残した場面の記録: 前の回(今の組んだ本編と同じ印)の残した場面のうち、範囲に丸ごと入る場面は
       // 今回の選び方に替え、範囲に掛かる場面は今回残したものを足す(今の本編から推し量らない)
-      const sig = cutSignature(preview.base.roughCutAuto)
-      const prevKept =
-        (sig ? [...get().builtKept].reverse().find((b) => b.cut === sig)?.keptIds : undefined) ??
-        get().roughCut?.keptIds ??
-        []
+      const prevKept = keptScenesOf(preview.base)
       const full = new Set(preview.fullScenes)
       const keptNow = new Set([
         ...prevKept.filter((id) => !full.has(id)),
@@ -2685,12 +2727,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const used = new Set(usedNow)
       const run = { start: preview.window.start, end: preview.window.end, at: Date.now() }
       // 取り消し・やり直しで、範囲の自動編集の記録とイン点・アウト点(ルーラーの範囲)も行き来させる
-      rangeApplied.set(applied.clips, {
+      const entry = {
         run,
         baseClips: preview.base.clips,
         oldRange: preview.range,
-        newRange: preview.newRange
-      })
+        newRange: preview.newRange,
+        roughCutBefore,
+        roughCutAfter: roughCutBefore
+      }
+      rangeApplied.set(applied.clips, entry)
       set((s) => ({
         builtKept: builtKeptWith(s.builtKept, cutSignature(applied.roughCutAuto), keptIds),
         keepTouched: s.keepTouched.filter((id) => !used.has(id)),
@@ -2716,14 +2761,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           current: preview.variant.id
         }
       }))
+      entry.roughCutAfter = get().roughCut
       persistDecisions()
       const sm = preview.summary
-      log(
-        `範囲だけ自動編集しました: ${formatMinutes(sm.lengthBefore)} → ${formatMinutes(sm.lengthAfter)}・カット ${sm.cutsBefore} → ${sm.cutsAfter}・テロップ ${sm.telopsBefore} → ${sm.telopsAfter}${sm.movedHand > 0 ? `・後ろの手置き ${sm.movedHand} 個も動かしました` : ''}(取り消しは Ctrl+Z 1回)`
-      )
+      if (!quietApply)
+        log(
+          `範囲だけ自動編集しました: ${formatMinutes(sm.lengthBefore)} → ${formatMinutes(sm.lengthAfter)}・カット ${sm.cutsBefore} → ${sm.cutsAfter}・テロップ ${sm.telopsBefore} → ${sm.telopsAfter}${sm.movedHand > 0 ? `・後ろの手置き ${sm.movedHand} 個も動かしました` : ''}(取り消しは Ctrl+Z 1回)`
+        )
       return { ok: true }
     },
     switchRangedVariant: (preview) => {
+      if (useProjectStore.getState().trial)
+        return { ok: false, reason: '試している間は替えられません(決めるか閉じてから)' }
       const review = get().rangeReview
       const ps = useProjectStore.getState()
       const variants = review?.variants ?? [preview]
@@ -2750,6 +2799,46 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       if (r.ok) moveMarkedRange(preview.range, preview.newRange)
       return r
     },
+    tryRangedVariant: (preview, variants) => {
+      if (get().running) return { ok: false, reason: '自動編集が動いている間は当てられません' }
+      // 試している案があれば、試す前に戻してから(履歴にも記録にも残さない)
+      if (rangeTrial) revertRangeTrial()
+      beginRangeTrial()
+      quietApply = true
+      let r: { ok: boolean; reason?: string }
+      try {
+        r = get().applyRangedEdit(preview, variants)
+      } finally {
+        quietApply = false
+      }
+      if (!r.ok) revertRangeTrial()
+      return r
+    },
+    cancelRangedTrial: () => {
+      if (rangeTrial) revertRangeTrial()
+    },
+    commitRangedVariant: (preview, variants) => {
+      if (!rangeTrial || !useProjectStore.getState().trial) {
+        rangeTrial = null
+        return get().applyRangedEdit(preview, variants)
+      }
+      const rv = get().rangeReview
+      const showing =
+        rv &&
+        rv.current === preview.variant.id &&
+        useProjectStore.getState().project.clips === rv.afterClips
+      if (!showing) {
+        const r = get().tryRangedVariant(preview, variants)
+        if (!r.ok) return r
+      }
+      rangeTrial = null
+      useProjectStore.getState().endTrial(true)
+      const sm = preview.summary
+      log(
+        `範囲だけ自動編集しました(案${preview.variant.id} ${preview.variant.label}): ${formatMinutes(sm.lengthBefore)} → ${formatMinutes(sm.lengthAfter)}・カット ${sm.cutsBefore} → ${sm.cutsAfter}(取り消しは Ctrl+Z 1回)`
+      )
+      return { ok: true }
+    },
     setRangeRuns: (runs) => {
       set({ rangeRuns: runs })
       persistDecisions()
@@ -2761,8 +2850,68 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
 /** 当てた後の本編(クリップの並び)→ その範囲の自動編集(取り消し・やり直しで記録を行き来させる) */
 const rangeApplied = new WeakMap<
   readonly unknown[],
-  { run: RangeRun; baseClips: readonly unknown[]; oldRange: TimelineRange; newRange: TimelineRange }
+  {
+    run: RangeRun
+    baseClips: readonly unknown[]
+    oldRange: TimelineRange
+    newRange: TimelineRange
+    /** 当てる前・後の仮編集のまとめ(残した場面・長さ)。取り消し・やり直しで行き来させる */
+    roughCutBefore: PipelineState['roughCut']
+    roughCutAfter: PipelineState['roughCut']
+  }
 >()
+
+/** 試しに当てている間(「試しに見る」)の、試す前の自動編集の記録 */
+let rangeTrial:
+  | (Pick<PipelineState, 'roughCut' | 'builtKept' | 'rangeRuns' | 'keepTouched' | 'rangeReview'> & {
+      usedAtBase: string[] | undefined
+      revived: Map<string, string[]>
+      baseClips: readonly unknown[]
+    })
+  | null = null
+/** 試しに当てるときは、当てたことを記録に書かない */
+let quietApply = false
+
+function beginRangeTrial(): void {
+  const ps = useProjectStore.getState()
+  if (ps.trial) return
+  const s = usePipelineStore.getState()
+  rangeTrial = {
+    roughCut: s.roughCut,
+    builtKept: s.builtKept,
+    rangeRuns: s.rangeRuns,
+    keepTouched: s.keepTouched,
+    rangeReview: s.rangeReview,
+    usedAtBase: usedTouches.get(ps.project.clips),
+    revived: new Map(revivedFrom),
+    baseClips: ps.project.clips
+  }
+  ps.beginTrial()
+}
+
+/** 試す前の企画・履歴・自動編集の記録に丸ごと戻す */
+function revertRangeTrial(): void {
+  const saved = rangeTrial
+  const t = useProjectStore.getState().trial
+  rangeTrial = null
+  if (!t) return
+  useProjectStore.getState().setIsPlaying(false)
+  useProjectStore.getState().endTrial(false)
+  if (!saved) return
+  if (saved.usedAtBase) usedTouches.set(saved.baseClips, saved.usedAtBase)
+  else usedTouches.delete(saved.baseClips)
+  revivedFrom.clear()
+  for (const [k, v] of saved.revived) revivedFrom.set(k, v)
+  usePipelineStore.setState({
+    roughCut: saved.roughCut,
+    builtKept: saved.builtKept,
+    rangeRuns: saved.rangeRuns,
+    keepTouched: saved.keepTouched,
+    rangeReview: saved.rangeReview
+  })
+  // 戻す途中で自動編集の判断を覚え直していても、試す前の企画・未保存の印のまま
+  useProjectStore.setState({ project: t.project, isDirty: t.isDirty })
+}
 
 /** イン点・アウト点・ルーラーの範囲が `from` を指していれば `to` へ移す */
 function moveMarkedRange(from: TimelineRange, to: TimelineRange): void {
@@ -2785,15 +2934,18 @@ useProjectStore.subscribe((state, prev) => {
   const undone = rangeApplied.get(prev.project.clips)
   if (undone && undone.baseClips === state.project.clips) {
     const runs = usePipelineStore.getState().rangeRuns
-    if (runs.includes(undone.run))
-      usePipelineStore.getState().setRangeRuns(runs.filter((r) => r !== undone.run))
+    // 仮編集のまとめ(残した場面・長さ)も当てる前に戻す
+    usePipelineStore.setState({ roughCut: undone.roughCutBefore })
+    usePipelineStore.getState().setRangeRuns(runs.filter((r) => r !== undone.run))
     moveMarkedRange(undone.newRange, undone.oldRange)
   }
   const redone = rangeApplied.get(state.project.clips)
   if (redone && redone.baseClips === prev.project.clips) {
     const runs = usePipelineStore.getState().rangeRuns
-    if (!runs.includes(redone.run))
-      usePipelineStore.getState().setRangeRuns([...runs, redone.run].slice(-RANGE_RUNS_MAX))
+    usePipelineStore.setState({ roughCut: redone.roughCutAfter })
+    usePipelineStore
+      .getState()
+      .setRangeRuns(runs.includes(redone.run) ? runs : [...runs, redone.run].slice(-RANGE_RUNS_MAX))
     moveMarkedRange(redone.oldRange, redone.newRange)
   }
 })

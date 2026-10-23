@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePipelineStore } from '../store/pipelineStore'
-import { sameExceptAutoEdit, useProjectStore } from '../store/projectStore'
+import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import {
   DEFAULT_RANGED_OPTIONS,
+  growNote,
   rangedEditBlockedReason,
   rangedVariantSpecs,
   variantScenes,
@@ -73,6 +74,7 @@ function Diff({
 }): React.JSX.Element {
   const sm = preview.summary
   const scale = 100 / Math.max(sm.lengthBefore, sm.lengthAfter, 1e-9)
+  const grow = growNote(preview, keepLength)
   return (
     <div
       className="range-auto-edit-diff"
@@ -84,14 +86,7 @@ function Diff({
         <span className="form-note">後</span>
         <Strip pieces={sm.stripAfter} length={sm.lengthAfter} scale={scale} />
       </div>
-      {sm.lengthAfter > sm.lengthBefore * 1.5 + 5 && (
-        <p className="range-auto-edit-grow" role="alert">
-          落とした場面の所も作り直すため、範囲が {sec(sm.lengthBefore)} から {sec(sm.lengthAfter)}{' '}
-          に伸びます(
-          {keepLength ? '長さを保つ' : `後ろが ${sec(sm.lengthAfter - sm.lengthBefore)} 送られます`}
-          )
-        </p>
-      )}
+      {grow && <p className="range-auto-edit-grow">{grow}</p>}
       <dl>
         <dt>範囲の長さ</dt>
         <dd>
@@ -146,6 +141,7 @@ function VariantCard({
   selected,
   trying,
   canTry,
+  keepLength,
   onSelect,
   onTry
 }: {
@@ -153,12 +149,14 @@ function VariantCard({
   selected: boolean
   trying: boolean
   canTry: boolean
+  keepLength: boolean
   onSelect: () => void
   onTry: () => void
 }): React.JSX.Element {
   const sm = preview.summary
   const v = preview.variant
   const scenes = variantScenes(preview)
+  const grow = growNote(preview, keepLength)
   const scale = 100 / Math.max(sm.lengthBefore, sm.lengthAfter, 1e-9)
   return (
     <div
@@ -179,7 +177,7 @@ function VariantCard({
         <span className="range-variant-name">
           案{v.id} {v.label}
         </span>
-        {trying && <span className="range-variant-badge">試しに当て中</span>}
+        {trying && <span className="range-variant-badge">試し中</span>}
       </div>
       <p className="range-variant-note">{v.note}</p>
       <dl className="range-variant-facts">
@@ -195,9 +193,10 @@ function VariantCard({
         <dd>{signed(sm.telopsAfter - sm.telopsBefore)}</dd>
         <dt>場面</dt>
         <dd>
-          残す {scenes.kept} / 落とす {scenes.dropped}
+          残す {scenes.before} → {scenes.kept}(全 {scenes.total})
         </dd>
       </dl>
+      {grow && <p className="range-variant-grow">{grow}</p>}
       <div className="range-strips range-variant-strips" aria-hidden="true">
         <span className="form-note">前</span>
         <Strip pieces={sm.stripBefore} length={sm.lengthBefore} scale={scale} />
@@ -257,33 +256,28 @@ export function RangeAutoEditDialog({
   const [askRipple, setAskRipple] = useState(false)
   const [previews, setPreviews] = useState<RangedPreview[]>([])
   const [selected, setSelected] = useState<RangedVariantId | null>(null)
-  /** 試しに当てている案(閉じると取り消す) */
-  const [trial, setTrial] = useState<RangedVariantId | null>(null)
+  // 試しに当てている案。ローカルの印でなく、本編が今その案の後かで決める(ずれない)
+  const inTrial = useProjectStore((s) => s.trial !== null)
+  const review = usePipelineStore((s) => s.rangeReview)
+  const trial: RangedVariantId | null =
+    inTrial && review && project.clips === review.afterClips ? review.current : null
   const [showOptions, setShowOptions] = useState(true)
   const abortRef = useRef<{ aborted: boolean } | null>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
   const fps = 1 / frameSeconds(project.clips, project.assets)
   const specs = rangedVariantSpecs(editPolicy).filter((sp) => options.steps.cut || sp.id === 'A')
 
-  // 閉じたら(画面から外れたら)作っている案を止める
+  // 閉じたら(画面から外れたら)作っている案を止め、試しに当てた案をやめる
   useEffect(
     () => () => {
       if (abortRef.current) abortRef.current.aborted = true
+      usePipelineStore.getState().cancelRangedTrial()
     },
     []
   )
 
-  /** 試しに当てた案を取り消す(当てた後に別の編集をしていれば、そのまま) */
-  const revertTrial = (): void => {
-    if (!trial) return
-    const st = useProjectStore.getState()
-    const rv = usePipelineStore.getState().rangeReview
-    st.setIsPlaying(false)
-    if (rv && st.project.clips === rv.afterClips && sameExceptAutoEdit(st.project, rv.afterProject))
-      st.undo()
-    usePipelineStore.getState().closeRangeReview()
-    setTrial(null)
-  }
+  /** 試しに当てた案をやめる(試す前の企画・履歴・記録に丸ごと戻る) */
+  const revertTrial = (): void => usePipelineStore.getState().cancelRangedTrial()
   const close = (): void => {
     if (abortRef.current) abortRef.current.aborted = true
     revertTrial()
@@ -343,37 +337,35 @@ export function RangeAutoEditDialog({
       st.setTimelineIn(p.newRange.start)
     } else st.setDragRange(p.newRange)
   }
-  /** 案を本編に当てる(試しに当てていれば、取り消して替える。履歴は1件のまま) */
-  const put = (p: RangedPreview): boolean => {
-    const pipe = usePipelineStore.getState()
-    const r = trial ? pipe.switchRangedVariant(p) : pipe.applyRangedEdit(p, previews)
-    if (!r.ok) {
-      if (!trial) {
-        setPreviews([])
-        setSelected(null)
-        setShowOptions(true)
-      }
-      setError(r.reason ?? '当てられませんでした')
-      return false
-    }
-    setError(null)
-    showNewRange(p)
-    return true
+  const failed = (reason: string | undefined): void => {
+    setPreviews([])
+    setSelected(null)
+    setShowOptions(true)
+    setError(reason ?? '当てられませんでした')
   }
+  /** 試しに当てる(履歴に積まない。別の案なら、試す前に戻してから当てる)。範囲の頭から再生する */
   const tryOut = (p: RangedPreview): void => {
     setSelected(p.variant.id)
-    if (trial !== p.variant.id && !put(p)) return
-    setTrial(p.variant.id)
+    if (trial !== p.variant.id) {
+      const r = usePipelineStore.getState().tryRangedVariant(p, previews)
+      if (!r.ok) return failed(r.reason)
+      setError(null)
+      showNewRange(p)
+    }
     const st = useProjectStore.getState()
     st.seekTo(Math.max(0, p.newRange.start - 1))
     st.setIsPlaying(true)
   }
+  /** この案にする(履歴は1件。取り消し1回で当てる前に戻る) */
   const choose = (): void => {
     const p = previews.find((x) => x.variant.id === selected)
     if (!p) return
     if (abortRef.current) abortRef.current.aborted = true
-    if (trial !== p.variant.id && !put(p)) return
     useProjectStore.getState().setIsPlaying(false)
+    const showing = trial === p.variant.id
+    const r = usePipelineStore.getState().commitRangedVariant(p, previews)
+    if (!r.ok) return failed(r.reason)
+    if (!showing) showNewRange(p)
     onClose()
   }
 
@@ -386,9 +378,9 @@ export function RangeAutoEditDialog({
     : []
   return (
     <div
-      className={`modal-backdrop${trial ? ' range-trial' : ''}`}
+      className={`modal-backdrop${inTrial ? ' range-trial' : ''}`}
       ref={backdropRef}
-      onClick={() => !trial && close()}
+      onClick={() => !inTrial && close()}
     >
       <div
         className="range-auto-edit-dialog range-auto-edit"
@@ -422,7 +414,7 @@ export function RangeAutoEditDialog({
                 <li className={stage === 2 ? 'current' : ''}>案を選ぶ</li>
                 <li>この案にする</li>
               </ol>
-              {showOptions && !trial ? (
+              {showOptions && !inTrial ? (
                 <>
                   <p className="form-note">
                     範囲の中だけを作り直し、性格の違う案(標準・詰める・残す)を並べます。範囲の外はそのまま。
@@ -497,7 +489,7 @@ export function RangeAutoEditDialog({
                   {options.keepLength ? '・長さを保つ' : ''}
                   {options.keepInside ? '・手直しを残す' : ''}
                   {options.lockAfter ? '・ロック' : ''}
-                  {!trial && !busy && (
+                  {!inTrial && !busy && (
                     <button className="small-button" onClick={() => setShowOptions(true)}>
                       工程を変える
                     </button>
@@ -530,6 +522,7 @@ export function RangeAutoEditDialog({
                       selected={selected === p.variant.id}
                       trying={trial === p.variant.id}
                       canTry={!busy}
+                      keepLength={options.keepLength}
                       onSelect={() => setSelected(p.variant.id)}
                       onTry={() => tryOut(p)}
                     />
@@ -549,17 +542,25 @@ export function RangeAutoEditDialog({
               )}
               {previews.length === 1 && !busy && specs.length > 1 && (
                 <p className="form-note">
-                  範囲が短く、どの案もほぼ同じ中身になったので、1つにまとめました。
+                  {previews[0].variant.merged.length === specs.length - 1
+                    ? 'どの案もほぼ同じ中身になったので、1つにまとめました。'
+                    : 'ほかの案は、この範囲では作れないか、ほぼ同じ中身になりました。'}
                 </p>
               )}
-              {chosen && !trial && (
+              {chosen && !inTrial && (
                 <Diff preview={chosen} fps={fps} keepLength={options.keepLength} />
               )}
             </>
           )}
         </div>
         <div className="dialog-footer">
-          {trial && <span className="form-note">閉じると、試しに当てた案を取り消します</span>}
+          {inTrial && (
+            <span className="form-note" role="status">
+              {trial
+                ? '試している間は編集・取り消しはできません。閉じると試す前に戻ります'
+                : '試していた案が本編から外れました。閉じると試す前に戻ります'}
+            </span>
+          )}
           <div className="dialog-footer-spacer" />
           <button className="small-button" onClick={close}>
             閉じる
