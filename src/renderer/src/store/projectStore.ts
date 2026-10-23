@@ -1671,7 +1671,9 @@ function keepBackgroundResults(restored: Project, current: Project): Project {
   if (!changed && !events && !autoEdit) return restored
   return {
     ...restored,
-    assets,
+    // 素材の並びは変えたときだけ新しくする(同じなら取り消し前の企画と同じものに。範囲の自動編集の
+    // 案を替える時、取り消した企画が用意した時の企画と同じかを見る)
+    assets: changed ? assets : restored.assets,
     ...(events ? { audioEvents: current.audioEvents } : {}),
     ...(autoEdit ? { autoEdit: current.autoEdit } : {})
   }

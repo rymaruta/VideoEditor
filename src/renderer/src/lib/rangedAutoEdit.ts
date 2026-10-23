@@ -2,6 +2,7 @@ import type { Project } from '@shared/types'
 import type { Range } from '@shared/roughCut/overrides'
 import { clipTimes, type TimelineRange } from '@shared/roughCut/range'
 import { autoTelopKey } from '@shared/telop/manual'
+import type { EditPolicy } from '@shared/structure/kind'
 
 /**
  * 範囲の自動編集(選んだ範囲だけを自動で作り直す)の、選べること・確かめに出すもの。
@@ -98,10 +99,147 @@ export interface RangedPreview {
   fullScenes: string[]
   /** この範囲の自動編集で使った付け直し(取り消しで戻す) */
   usedTouches: string[]
+  /** どの案か(標準・詰める・残す) */
+  variant: RangedVariant
+  /** 範囲の中で残した所(共通の時刻。案の中身が同じかを見る) */
+  content: Range[]
+}
+
+export type RangedVariantId = 'A' | 'B' | 'C'
+
+/**
+ * 範囲の作り直しの案の作り方。新しい判定は作らず、今の編集の方針・仕上がりの長さの目標・間詰めの強さを
+ * ずらすだけ(案A は今の設定そのまま)
+ */
+export interface RangedVariantSpec {
+  id: RangedVariantId
+  label: string
+  /** 案の性格(画面に出す) */
+  note: string
+  /** 編集の方針(残す基準) */
+  policy: EditPolicy
+  /** 仕上がりの長さの目標にかける(目標を決めているときだけ。長さを保つときは使わない) */
+  targetScale: number
+  /** 間詰めの強さ(詰める間・残す間の秒にかける。小さいほど強く詰める) */
+  pauseScale: number
+}
+
+export interface RangedVariant {
+  id: RangedVariantId
+  label: string
+  note: string
+  /** 中身がほぼ同じだったので、この案にまとめた案の名前 */
+  merged: string[]
+}
+
+/** 残す基準の厳しさの順(ゆるい → 厳しい) */
+const POLICY_ORDER: readonly EditPolicy[] = ['light', 'tempo', 'highlights']
+
+const shiftPolicy = (p: EditPolicy, by: number): EditPolicy => {
+  const i = POLICY_ORDER.indexOf(p)
+  return POLICY_ORDER[Math.max(0, Math.min(POLICY_ORDER.length - 1, i + by))]
+}
+
+/**
+ * 範囲の作り直しの案(最大3つ)。A「標準」は今の設定。B「詰める」は間詰め強め・残す基準を一段厳しく・
+ * 短め。C「残す」は間詰め控えめ・残す基準を一段ゆるく・長め
+ */
+export function rangedVariantSpecs(policy: EditPolicy): RangedVariantSpec[] {
+  return [
+    { id: 'A', label: '標準', note: '今の設定のまま', policy, targetScale: 1, pauseScale: 1 },
+    {
+      id: 'B',
+      label: '詰める',
+      note: '間を強めに詰め、残す基準を厳しく、短めに',
+      policy: shiftPolicy(policy, 1),
+      targetScale: 0.75,
+      pauseScale: 0.6
+    },
+    {
+      id: 'C',
+      label: '残す',
+      note: '間を控えめに詰め、残す基準をゆるく、長めに',
+      policy: shiftPolicy(policy, -1),
+      targetScale: 1.3,
+      pauseScale: 1.8
+    }
+  ]
+}
+
+/** 区間の並びの合計の長さ(重なりは1回) */
+function coveredLength(list: readonly Range[]): number {
+  const sorted = [...list].sort((a, b) => a.start - b.start)
+  let total = 0
+  let end = -Infinity
+  for (const r of sorted) {
+    const a = Math.max(r.start, end)
+    if (r.end > a) total += r.end - a
+    end = Math.max(end, r.end)
+  }
+  return total
+}
+
+/** 2つの区間の並びの、片方にだけある所の長さ */
+export function contentDifference(a: readonly Range[], b: readonly Range[]): number {
+  const both = coveredLength(a) + coveredLength(b)
+  const union = coveredLength([...a, ...b])
+  // |A △ B| = |A ∪ B| − |A ∩ B| = 2|A ∪ B| − |A| − |B|
+  return Math.max(0, 2 * union - both)
+}
+
+/**
+ * 2つの案の中身がほぼ同じか(片方にだけある所・範囲の長さの差がごく小さく、カットの数も1本以内)。
+ * ほぼ同じ案は1つにまとめる
+ */
+export function sameRangedContent(
+  a: Pick<RangedPreview, 'content' | 'summary'>,
+  b: Pick<RangedPreview, 'content' | 'summary'>
+): boolean {
+  const len = Math.max(a.summary.lengthAfter, b.summary.lengthAfter)
+  const tol = Math.max(0.5, len * 0.03)
+  return (
+    Math.abs(a.summary.lengthAfter - b.summary.lengthAfter) <= tol &&
+    contentDifference(a.content, b.content) <= tol &&
+    Math.abs(a.summary.cutsAfter - b.summary.cutsAfter) <= 1
+  )
+}
+
+/**
+ * 作った案を、出す案の並びに足す。中身がほぼ同じ案が既にあれば、その案にまとめる(名前を覚える)
+ */
+export function addRangedVariant(
+  list: readonly RangedPreview[],
+  next: RangedPreview
+): RangedPreview[] {
+  const i = list.findIndex((p) => sameRangedContent(p, next))
+  if (i < 0) return [...list, next]
+  const kept = list[i]
+  return list.map((p, j) =>
+    j === i
+      ? {
+          ...kept,
+          variant: { ...kept.variant, merged: [...kept.variant.merged, next.variant.label] }
+        }
+      : p
+  )
+}
+
+/** 範囲の中の、残す/落とす場面の数(案ごとに出す) */
+export function variantScenes(p: Pick<RangedPreview, 'keptIds' | 'sceneIds'>): {
+  kept: number
+  dropped: number
+} {
+  const kept = p.sceneIds.filter((id) => p.keptIds.includes(id)).length
+  return { kept, dropped: p.sceneIds.length - kept }
 }
 
 export type RangedPrepareResult =
   { ok: true; preview: RangedPreview } | { ok: false; reason: string; needsRipple?: boolean }
+
+/** 案をまとめて用意した結果。`canceled` は閉じて止めたとき */
+export type RangedVariantsResult =
+  | { ok: true; previews: RangedPreview[] }
+  | { ok: false; reason: string; needsRipple?: boolean; canceled?: boolean }
 
 /** 範囲の中の時刻のもの(頭が範囲の中) */
 const startsIn = (t: number, r: TimelineRange): boolean => t >= r.start - 1e-6 && t < r.end - 1e-6

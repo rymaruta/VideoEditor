@@ -2,7 +2,7 @@
    ダイアログの枠(地・角・影・見出しの帯・足の帯)は統一のダイアログ(dialogsG3.css・DialogHeader) */
 
 .range-auto-edit-dialog {
-  width: 560px;
+  width: 800px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   display: flex;
@@ -122,6 +122,150 @@
   color: var(--ve-primary-ink);
 }
 
+/* ---------- 作り直しの案(作り直す → 案を選ぶ → この案にする) ---------- */
+.range-flow {
+  display: flex;
+  gap: var(--ve-space-2);
+  margin: 0 0 var(--ve-space-3);
+  padding: 0;
+  list-style: none;
+  counter-reset: range-flow;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-3);
+}
+.range-flow li {
+  counter-increment: range-flow;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+}
+.range-flow li::before {
+  content: counter(range-flow);
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--ve-radius-round);
+  font-size: var(--ve-fs-11);
+  box-shadow: inset 0 0 0 1px var(--ve-border-strong);
+}
+.range-flow li + li::after {
+  order: -1;
+  content: '→';
+  margin-right: var(--ve-space-1);
+  color: var(--ve-text-3);
+}
+.range-flow li.current {
+  color: var(--ve-auto-ink);
+  font-weight: var(--ve-fw-semibold);
+}
+.range-flow li.current::before {
+  background: var(--ve-auto-soft);
+  box-shadow: inset 0 0 0 1px var(--ve-auto-line);
+}
+.range-flow li.done {
+  color: var(--ve-text-2);
+}
+.range-options-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ve-space-2);
+}
+.range-variants {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ve-space-3);
+  margin-top: var(--ve-space-3);
+}
+.range-variant {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+  min-width: 0;
+  padding: var(--ve-space-3);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--ve-border);
+  cursor: pointer;
+  transition: box-shadow var(--ve-dur-fast) var(--ve-ease-out);
+}
+.range-variant:hover {
+  box-shadow: inset 0 0 0 1px var(--ve-border-hover);
+}
+.range-variant:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.range-variant.selected {
+  background: var(--ve-primary-soft);
+  box-shadow: inset 0 0 0 2px var(--ve-primary);
+}
+.range-variant.pending {
+  cursor: default;
+  opacity: 0.7;
+}
+.range-variant-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+}
+.range-variant-name {
+  font-size: var(--ve-fs-14);
+  font-weight: var(--ve-fw-semibold);
+  color: var(--ve-text-1);
+}
+.range-variant-badge {
+  margin-left: auto;
+  padding: 0 var(--ve-space-2);
+  border-radius: var(--ve-radius-pill);
+  font-size: var(--ve-fs-11);
+  color: var(--ve-auto-ink);
+  background: var(--ve-auto-soft);
+  box-shadow: inset 0 0 0 1px var(--ve-auto-line);
+}
+.range-variant-note {
+  margin: 0;
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-2);
+}
+.range-variant-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px var(--ve-space-2);
+  margin: 0;
+  font-size: var(--ve-fs-12);
+}
+.range-variant-facts dt {
+  color: var(--ve-text-3);
+}
+.range-variant-facts dd {
+  margin: 0;
+  font-family: var(--ve-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.range-variant-strips .range-strip {
+  height: 8px;
+}
+.range-variant-try {
+  align-self: flex-start;
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-gap-icon);
+}
+/* 試しに見ている間: 後ろの画面(モニター)が見えるよう、幕を外してダイアログを下へ寄せる */
+.modal-backdrop.range-trial {
+  align-items: flex-end;
+  padding-bottom: var(--ve-space-4);
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+.modal-backdrop.range-trial .range-auto-edit-dialog {
+  pointer-events: auto;
+}
+
 /* ---------- 当てた後の見比べの帯 ---------- */
 .range-review-bar {
   display: flex;
@@ -153,6 +297,16 @@
   background-color: var(--ve-auto-soft);
   color: var(--ve-auto-ink);
   box-shadow: inset 0 0 0 1px var(--ve-auto-line);
+}
+.range-review-bar > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.range-review-bar > .range-review-summary {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .range-review-summary {
   font-family: var(--ve-font-mono);

@@ -44,6 +44,7 @@ import {
   isUntouchedAuto,
   onProjectSwitch,
   rangedEditProject,
+  sameExceptAutoEdit,
   useProjectStore,
   withRangedSounds
 } from './projectStore'
@@ -100,13 +101,18 @@ import { subtractRanges, type CutOverrides, type Range } from '@shared/roughCut/
 import { frameSeconds } from '@shared/frameRate'
 import { snapRangeBoundaries } from '../lib/timelineRange'
 import {
+  addRangedVariant,
   mainLength,
   rangedEditBlockedReason,
+  rangedVariantSpecs,
   summarizeRangedEdit,
   type RangedEditOptions,
   type RangedPreview,
   type RangedPrepareResult,
-  type RangedSummary
+  type RangedSummary,
+  type RangedVariantId,
+  type RangedVariantSpec,
+  type RangedVariantsResult
 } from '../lib/rangedAutoEdit'
 import { heuristicJudgements } from '@shared/structure/scenes'
 import {
@@ -344,8 +350,34 @@ interface PipelineState {
     /** `exact`: 境を寄せない(イン点・アウト点で決めた範囲。Shift+Delete と同じ所を使う) */
     how?: { exact?: boolean }
   ) => Promise<RangedPrepareResult>
-  /** 用意した範囲の自動編集を当てる(取り消し1回で戻る)。用意している間に本編が変わっていれば当てない */
-  applyRangedEdit: (preview: RangedPreview) => { ok: boolean; reason?: string }
+  /**
+   * 範囲の作り直しの案(標準・詰める・残す)を1つずつ作る(企画には当てない)。作れた案から
+   * `onVariant` に今の並びを渡す。中身がほぼ同じ案は1つにまとめる。`signal.aborted` で止める
+   */
+  prepareRangedVariants: (
+    range: TimelineRange,
+    options: RangedEditOptions,
+    how?: {
+      exact?: boolean
+      /** この案だけを作る */
+      only?: RangedVariantId
+      signal?: { aborted: boolean }
+      onVariant?: (previews: RangedPreview[]) => void
+    }
+  ) => Promise<RangedVariantsResult>
+  /**
+   * 用意した範囲の自動編集を当てる(取り消し1回で戻る)。用意している間に本編が変わっていれば当てない。
+   * `variants` は一緒に作った案(当てた後の帯から別の案に替えられる)
+   */
+  applyRangedEdit: (
+    preview: RangedPreview,
+    variants?: RangedPreview[]
+  ) => { ok: boolean; reason?: string }
+  /**
+   * 範囲の自動編集の案を替える(当てた案を取り消して別の案を当てるのと同じ。履歴は1件のまま)。
+   * 当てた後に別の編集をしていたら替えない。まだ当てていなければ(前を見ている)そのまま当てる
+   */
+  switchRangedVariant: (preview: RangedPreview) => { ok: boolean; reason?: string }
 }
 
 export interface RangeReview {
@@ -356,6 +388,11 @@ export interface RangeReview {
   /** 当てる前の範囲 */
   oldRange: TimelineRange
   summary: RangedSummary
+  /** 当てた直後の企画(案を替える前に、当てた後に別の編集をしていないかを見る) */
+  afterProject: Project
+  /** 一緒に作った案と、当てている案 */
+  variants: RangedPreview[]
+  current: RangedVariantId
 }
 
 const initialSteps = (): Record<StepId, StepStatus> => ({
@@ -2281,6 +2318,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     rangeReview: null,
     closeRangeReview: () => set({ rangeReview: null }),
     prepareRangedEdit: async (requested, options, how) => {
+      const r = await get().prepareRangedVariants(requested, options, {
+        exact: how?.exact,
+        only: 'A'
+      })
+      return r.ok
+        ? { ok: true, preview: r.previews[0] }
+        : { ok: false, reason: r.reason, ...(r.needsRipple ? { needsRipple: true } : {}) }
+    },
+    prepareRangedVariants: async (requested, options, how) => {
       const project = useProjectStore.getState().project
       const info = project.multicam
       const blocked = rangedEditBlockedReason(project, get())
@@ -2357,212 +2403,253 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const fitSec = Math.max(0, range.end - range.start - extrasLen)
       const sceneLen = (list: readonly { start: number; end: number }[]): number =>
         list.reduce((t, sc) => t + (sc.end - sc.start), 0)
-      const targetSec = options.keepLength
+      const baseTarget = options.keepLength
         ? fitSec
         : get().targetMinutes > 0
           ? (get().targetMinutes * 60 * sceneLen(inWindow)) / Math.max(1e-9, sceneLen(scenes))
           : 0
-      const plan = planRoughCut(project, info, inWindow, get().judgements, activity, {
-        overrides,
-        targetSec,
-        keep: get().keep,
-        styles: usePresetStore.getState().captionPresets,
-        speechLook: speechLook(
-          useSettingsStore.getState().speechTelopLook,
-          usePresetStore.getState().captionPresets
-        ),
-        dictionary: parseDictionary(useSettingsStore.getState().telopDictionary),
-        style: useSettingsStore.getState().showStyle?.style,
-        kind: useSettingsStore.getState().episodeKind,
-        policy: useSettingsStore.getState().editPolicy,
-        peaks: peakSpans(get().hype, project.audioEvents),
-        window: {
-          start: win.start,
-          end: win.end,
-          // カットをやり直さないときも(速さを戻したクリップ・固定した中身で長さが変わる)
-          ...(options.keepLength ? { fitSec } : {})
-        }
-      })
-      if (plan.cut.main.length === 0)
-        return {
-          ok: false,
-          reason:
-            '範囲の中に残す所がありません(構成で範囲の場面を「残す」にするか、範囲を広げてください)'
-        }
-      const frame = frameSeconds(project.clips, project.assets)
-      if (options.keepLength && (plan.fitShort ?? 0) > frame)
-        return {
-          ok: false,
-          needsRipple: true,
-          reason: `範囲の中の素材では、元の長さに ${plan.fitShort!.toFixed(1)} 秒足りません。後ろを詰めて(リップル)当てますか?`
-        }
-      // 発言テロップ: 顔(ゲーム実況なら画面の表示)を避けた位置へ。調べられなければ下のまま
-      let telops = steps.speech ? plan.telops : []
-      if (telops.length > 0) {
-        if (useSettingsStore.getState().episodeKind === 'game')
+      // 番組素材フォルダの中身は案ごとに読まない
+      let kitScan: ReturnType<typeof window.api.showKitScan> | undefined
+      const makeOne = async (spec: RangedVariantSpec): Promise<RangedPrepareResult> => {
+        const targetSec = options.keepLength ? baseTarget : baseTarget * spec.targetScale
+        const plan = planRoughCut(project, info, inWindow, get().judgements, activity, {
+          overrides,
+          targetSec,
+          keep: get().keep,
+          styles: usePresetStore.getState().captionPresets,
+          speechLook: speechLook(
+            useSettingsStore.getState().speechTelopLook,
+            usePresetStore.getState().captionPresets
+          ),
+          dictionary: parseDictionary(useSettingsStore.getState().telopDictionary),
+          style: useSettingsStore.getState().showStyle?.style,
+          kind: useSettingsStore.getState().episodeKind,
+          policy: spec.policy,
+          ...(spec.pauseScale !== 1 ? { pauseScale: spec.pauseScale } : {}),
+          peaks: peakSpans(get().hype, project.audioEvents),
+          window: {
+            start: win.start,
+            end: win.end,
+            // カットをやり直さないときも(速さを戻したクリップ・固定した中身で長さが変わる)
+            ...(options.keepLength ? { fitSec } : {})
+          }
+        })
+        if (plan.cut.main.length === 0)
+          return {
+            ok: false,
+            reason:
+              '範囲の中に残す所がありません(構成で範囲の場面を「残す」にするか、範囲を広げてください)'
+          }
+        const frame = frameSeconds(project.clips, project.assets)
+        if (options.keepLength && (plan.fitShort ?? 0) > frame)
+          return {
+            ok: false,
+            needsRipple: true,
+            reason: `範囲の中の素材では、元の長さに ${plan.fitShort!.toFixed(1)} 秒足りません。後ろを詰めて(リップル)当てますか?`
+          }
+        // 発言テロップ: 顔(ゲーム実況なら画面の表示)を避けた位置へ。調べられなければ下のまま
+        let telops = steps.speech ? plan.telops : []
+        if (telops.length > 0) {
+          if (useSettingsStore.getState().episodeKind === 'game')
+            try {
+              telops = (
+                await placeTelopsAvoidingHud(telops, plan.cut, project.assets, project.aspectRatio)
+              ).telops
+            } catch {
+              // 下のまま
+            }
           try {
             telops = (
-              await placeTelopsAvoidingHud(telops, plan.cut, project.assets, project.aspectRatio)
+              await placeTelopsAvoidingFaces(telops, plan.cut, project.assets, project.aspectRatio)
             ).telops
           } catch {
             // 下のまま
           }
-        try {
-          telops = (
-            await placeTelopsAvoidingFaces(telops, plan.cut, project.assets, project.aspectRatio)
-          ).telops
-        } catch {
-          // 下のまま
         }
-      }
-      const bubbled = bubbledUtterances(get().effects, get().effectChosen, project.dismissedTelops)
-      const proposals = new Set(get().effects.map((e) => e.id))
-      const effectTelops = steps.effects
-        ? effectOverlays(
-            get().effects,
-            new Set(get().effectChosen),
-            project,
-            info,
-            plan.cut.spans,
-            usePresetStore.getState().captionPresets
-          )
-        : []
-      if (useProjectStore.getState().project.clips !== project.clips)
-        return {
-          ok: false,
-          reason: '用意している間に本編が直されたため、やめました。もう一度選んでください'
-        }
-      const result = rangedEditProject(project, {
-        range,
-        window: win,
-        cut: plan.cut,
-        telops: [
-          ...telops.filter((o) => !o.utteranceId || !bubbled.has(o.utteranceId)),
-          ...effectTelops
-        ],
-        keepLength: options.keepLength,
-        keptOverrides: remembered,
-        replaceTelop: (o) =>
-          o.utteranceId ? steps.speech : steps.effects && proposals.has(o.effectId ?? '')
-      })
-      // 長さを保つで、窓の中の素材で埋めきれなかった(素材の終わり・窓の終わりで止めた)ならリップルを勧める
-      if (options.keepLength && result.lengthShort > frame)
-        return {
-          ok: false,
-          needsRipple: true,
-          reason: `範囲の中の素材では、元の長さに ${result.lengthShort.toFixed(1)} 秒足りません。後ろを詰めて(リップル)当てますか?`
-        }
-      let after = result.project
-      const skipped: string[] = []
-      // SE・CG・BGM: 範囲の中だけ置き直す(番組素材フォルダがあるとき)
-      const folder = useSettingsStore.getState().showKitFolder
-      if (folder && (steps.se || steps.cg || steps.bgm)) {
-        try {
-          const kit = await window.api.showKitScan(folder)
-          const nr = result.range
-          const style = useSettingsStore.getState().showStyle?.style
-          const spans = spansOfClips(after.clips, info)
-          const keptScenes = inWindow.filter((sc) => plan.selection.kept.includes(sc.id))
-          const judged = new Map(
-            (get().planJudgements ?? get().judgements).map((j) => [j.sceneId, j])
-          )
-          const sceneRanges = keptScenes
-            .map((sc) => {
-              const r = timelineRangeOf(spans, sc.start, sc.end)
-              const j = judged.get(sc.id)
-              const original = scenes.find((x) => x.id === sc.id)
-              return r
-                ? {
-                    start: Math.max(r.start, nr.start),
-                    end: Math.min(r.end, nr.end),
-                    mood: j?.mood ?? fallbackMood(j?.kind ?? 'normal'),
-                    // 場面の本当の頭か(範囲の境で切った頭には場面転換の SE を置かない)
-                    head: (original?.start ?? sc.start) >= win.start - 1e-6
-                  }
-                : null
-            })
-            .filter((x): x is NonNullable<typeof x> => x !== null && x.end > x.start)
-          const inRange = (t: number): boolean => t >= nr.start - 1e-6 && t < nr.end - 1e-6
-          const placed = placedAutoTelops(after.textOverlays)
-          const kindOf = new Map(get().effects.map((e) => [e.id, e.kind]))
-          const se = steps.se
-            ? planSoundEffects(
-                placed.effects
-                  .filter((t) => t.effectId && kindOf.has(t.effectId) && inRange(t.startTime))
-                  .map((t) => ({
-                    time: t.startTime,
-                    kind: kindOf.get(t.effectId!)!,
-                    text: t.text
-                  })),
-                sceneRanges.filter((x) => x.head).map((x) => x.start),
-                kit,
-                style ? { perMinute: style.sePerMinute, durationSec: nr.end - nr.start } : undefined
-              ).filter((x) => inRange(x.startTime))
-            : undefined
-          const cg = steps.cg
-            ? planCg(
-                placed.all.filter((t) => inRange(t.startTime)),
-                kit.cg
-              )
-            : undefined
-          const bgm = steps.bgm ? planBgm(sceneRanges, kit, style?.bgmVolume) : undefined
-          const assets = await loadKitAssets(
-            [...(se ?? []), ...(cg ?? []), ...(bgm ?? [])].map((x) => x.path)
-          )
-          const r = withRangedSounds(after, nr, { se, cg, bgm }, assets)
-          after = r.project
-          const names = { se: 'SE', bgm: 'BGM', cg: 'CG' } as const
-          skipped.push(...r.skipped.map((k) => names[k]))
-        } catch (e) {
-          log(
-            `範囲の SE・BGM・CG を置けませんでした(本編とテロップは作り直します): ${formatIpcError(e)}`
-          )
-        }
-      }
-      if (useProjectStore.getState().project.clips !== project.clips)
-        return {
-          ok: false,
-          reason: '用意している間に本編が直されたため、やめました。もう一度選んでください'
-        }
-      // 終わったらロックする: 当てるのと同じ1回の取り消しで戻るよう、当てる企画に入れておく
-      // ロックするのは、選んだタイムラインの範囲に当てた後の中身の所だけ(落とした場面をまたいだ窓の
-      // 全体ではない)。ほかのロックとはまとめない
-      if (options.lockAfter) {
-        const lockWin = commonWindowOf(after.clips, info, result.range)
-        const w = lockWin.ok ? lockWin.window : win
-        after = {
-          ...after,
-          autoEditLocks: [
-            ...(after.autoEditLocks ?? []),
-            { id: uuid(), start: w.start, end: w.end }
-          ]
-        }
-      }
-      const summary = summarizeRangedEdit(project, after, range, result.range, {
-        movedHand: result.movedHand,
-        insideHand: result.insideHand,
-        speedChanged: cw.speedChanged,
-        outsideOverlap: cw.outsideOverlap,
-        skipped
-      })
-      return {
-        ok: true,
-        preview: {
-          base: project,
-          after,
+        const bubbled = bubbledUtterances(
+          get().effects,
+          get().effectChosen,
+          project.dismissedTelops
+        )
+        const proposals = new Set(get().effects.map((e) => e.id))
+        const effectTelops = steps.effects
+          ? effectOverlays(
+              get().effects,
+              new Set(get().effectChosen),
+              project,
+              info,
+              plan.cut.spans,
+              usePresetStore.getState().captionPresets
+            )
+          : []
+        if (useProjectStore.getState().project.clips !== project.clips)
+          return {
+            ok: false,
+            reason: '用意している間に本編が直されたため、やめました。もう一度選んでください'
+          }
+        const result = rangedEditProject(project, {
           range,
-          newRange: result.range,
           window: win,
-          options,
-          summary,
-          keptIds: plan.selection.kept,
-          sceneIds,
-          fullScenes,
-          usedTouches: get().keepTouched.filter((id) => sceneIds.includes(id))
+          cut: plan.cut,
+          telops: [
+            ...telops.filter((o) => !o.utteranceId || !bubbled.has(o.utteranceId)),
+            ...effectTelops
+          ],
+          keepLength: options.keepLength,
+          keptOverrides: remembered,
+          replaceTelop: (o) =>
+            o.utteranceId ? steps.speech : steps.effects && proposals.has(o.effectId ?? '')
+        })
+        // 長さを保つで、窓の中の素材で埋めきれなかった(素材の終わり・窓の終わりで止めた)ならリップルを勧める
+        if (options.keepLength && result.lengthShort > frame)
+          return {
+            ok: false,
+            needsRipple: true,
+            reason: `範囲の中の素材では、元の長さに ${result.lengthShort.toFixed(1)} 秒足りません。後ろを詰めて(リップル)当てますか?`
+          }
+        let after = result.project
+        const skipped: string[] = []
+        // SE・CG・BGM: 範囲の中だけ置き直す(番組素材フォルダがあるとき)
+        const folder = useSettingsStore.getState().showKitFolder
+        if (folder && (steps.se || steps.cg || steps.bgm)) {
+          try {
+            kitScan ??= window.api.showKitScan(folder)
+            const kit = await kitScan
+            const nr = result.range
+            const style = useSettingsStore.getState().showStyle?.style
+            const spans = spansOfClips(after.clips, info)
+            const keptScenes = inWindow.filter((sc) => plan.selection.kept.includes(sc.id))
+            const judged = new Map(
+              (get().planJudgements ?? get().judgements).map((j) => [j.sceneId, j])
+            )
+            const sceneRanges = keptScenes
+              .map((sc) => {
+                const r = timelineRangeOf(spans, sc.start, sc.end)
+                const j = judged.get(sc.id)
+                const original = scenes.find((x) => x.id === sc.id)
+                return r
+                  ? {
+                      start: Math.max(r.start, nr.start),
+                      end: Math.min(r.end, nr.end),
+                      mood: j?.mood ?? fallbackMood(j?.kind ?? 'normal'),
+                      // 場面の本当の頭か(範囲の境で切った頭には場面転換の SE を置かない)
+                      head: (original?.start ?? sc.start) >= win.start - 1e-6
+                    }
+                  : null
+              })
+              .filter((x): x is NonNullable<typeof x> => x !== null && x.end > x.start)
+            const inRange = (t: number): boolean => t >= nr.start - 1e-6 && t < nr.end - 1e-6
+            const placed = placedAutoTelops(after.textOverlays)
+            const kindOf = new Map(get().effects.map((e) => [e.id, e.kind]))
+            const se = steps.se
+              ? planSoundEffects(
+                  placed.effects
+                    .filter((t) => t.effectId && kindOf.has(t.effectId) && inRange(t.startTime))
+                    .map((t) => ({
+                      time: t.startTime,
+                      kind: kindOf.get(t.effectId!)!,
+                      text: t.text
+                    })),
+                  sceneRanges.filter((x) => x.head).map((x) => x.start),
+                  kit,
+                  style
+                    ? { perMinute: style.sePerMinute, durationSec: nr.end - nr.start }
+                    : undefined
+                ).filter((x) => inRange(x.startTime))
+              : undefined
+            const cg = steps.cg
+              ? planCg(
+                  placed.all.filter((t) => inRange(t.startTime)),
+                  kit.cg
+                )
+              : undefined
+            const bgm = steps.bgm ? planBgm(sceneRanges, kit, style?.bgmVolume) : undefined
+            const assets = await loadKitAssets(
+              [...(se ?? []), ...(cg ?? []), ...(bgm ?? [])].map((x) => x.path)
+            )
+            const r = withRangedSounds(after, nr, { se, cg, bgm }, assets)
+            after = r.project
+            const names = { se: 'SE', bgm: 'BGM', cg: 'CG' } as const
+            skipped.push(...r.skipped.map((k) => names[k]))
+          } catch (e) {
+            log(
+              `範囲の SE・BGM・CG を置けませんでした(本編とテロップは作り直します): ${formatIpcError(e)}`
+            )
+          }
+        }
+        if (useProjectStore.getState().project.clips !== project.clips)
+          return {
+            ok: false,
+            reason: '用意している間に本編が直されたため、やめました。もう一度選んでください'
+          }
+        // 終わったらロックする: 当てるのと同じ1回の取り消しで戻るよう、当てる企画に入れておく
+        // ロックするのは、選んだタイムラインの範囲に当てた後の中身の所だけ(落とした場面をまたいだ窓の
+        // 全体ではない)。ほかのロックとはまとめない
+        if (options.lockAfter) {
+          const lockWin = commonWindowOf(after.clips, info, result.range)
+          const w = lockWin.ok ? lockWin.window : win
+          after = {
+            ...after,
+            autoEditLocks: [
+              ...(after.autoEditLocks ?? []),
+              { id: uuid(), start: w.start, end: w.end }
+            ]
+          }
+        }
+        const summary = summarizeRangedEdit(project, after, range, result.range, {
+          movedHand: result.movedHand,
+          insideHand: result.insideHand,
+          speedChanged: cw.speedChanged,
+          outsideOverlap: cw.outsideOverlap,
+          skipped
+        })
+        return {
+          ok: true,
+          preview: {
+            base: project,
+            after,
+            range,
+            newRange: result.range,
+            window: win,
+            options,
+            summary,
+            keptIds: plan.selection.kept,
+            sceneIds,
+            fullScenes,
+            usedTouches: get().keepTouched.filter((id) => sceneIds.includes(id)),
+            variant: { id: spec.id, label: spec.label, note: spec.note, merged: [] },
+            content: plan.cut.spans.map((x) => ({ start: x.start, end: x.end }))
+          }
         }
       }
+      // 案A(今の設定)から順に作る。カットをやり直さないなら案は1つ(残し方が今のまま)
+      const specs = rangedVariantSpecs(useSettingsStore.getState().editPolicy).filter((sp) =>
+        how?.only ? sp.id === how.only : steps.cut || sp.id === 'A'
+      )
+      const canceled = {
+        ok: false as const,
+        canceled: true,
+        reason: '止めました'
+      }
+      let previews: RangedPreview[] = []
+      for (const spec of specs) {
+        if (how?.signal?.aborted) return canceled
+        // 前の案を画面に出してから次を作る(固まらないように)
+        if (previews.length > 0) await new Promise((r) => setTimeout(r, 0))
+        if (how?.signal?.aborted) return canceled
+        const r = await makeOne(spec)
+        if (how?.signal?.aborted) return canceled
+        if (!r.ok) {
+          // 案A が作れなければ(今の設定で作れない)理由を返す。ほかの案は出さないだけ
+          if (spec.id === 'A') return r
+          continue
+        }
+        previews = addRangedVariant(previews, r.preview)
+        how?.onVariant?.(previews)
+      }
+      return { ok: true, previews }
     },
-    applyRangedEdit: (preview) => {
+    applyRangedEdit: (preview, variants) => {
       if (get().running) return { ok: false, reason: '自動編集が動いている間は当てられません' }
       // 使った付け直しは、当てる時の一覧で決める(用意してから当てるまでに付け直した・外したものも)。
       // 当てると場面にクリップが戻り、付け直しの一覧から外れるので、当てる前に読む
@@ -2623,7 +2710,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           afterClips: applied.clips,
           range: preview.newRange,
           oldRange: preview.range,
-          summary: preview.summary
+          summary: preview.summary,
+          afterProject: applied,
+          variants: variants && variants.length > 0 ? variants : [preview],
+          current: preview.variant.id
         }
       }))
       persistDecisions()
@@ -2632,6 +2722,33 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         `範囲だけ自動編集しました: ${formatMinutes(sm.lengthBefore)} → ${formatMinutes(sm.lengthAfter)}・カット ${sm.cutsBefore} → ${sm.cutsAfter}・テロップ ${sm.telopsBefore} → ${sm.telopsAfter}${sm.movedHand > 0 ? `・後ろの手置き ${sm.movedHand} 個も動かしました` : ''}(取り消しは Ctrl+Z 1回)`
       )
       return { ok: true }
+    },
+    switchRangedVariant: (preview) => {
+      const review = get().rangeReview
+      const ps = useProjectStore.getState()
+      const variants = review?.variants ?? [preview]
+      const project = ps.project
+      if (review && project.clips === review.afterClips) {
+        if (!sameExceptAutoEdit(project, review.afterProject))
+          return {
+            ok: false,
+            reason: '当てた後に編集したため、案を替えませんでした(取り消してから替えてください)'
+          }
+        if (review.current === preview.variant.id) return { ok: true }
+        // 当てた案を取り消してから別の案を当てる(履歴は1件のまま)
+        ps.undo()
+        const r = get().applyRangedEdit(preview, variants)
+        if (!r.ok) {
+          useProjectStore.getState().redo()
+          return r
+        }
+        moveMarkedRange(preview.range, preview.newRange)
+        return r
+      }
+      // 前(当てる前)を見ている、またはまだ当てていない
+      const r = get().applyRangedEdit(preview, variants)
+      if (r.ok) moveMarkedRange(preview.range, preview.newRange)
+      return r
     },
     setRangeRuns: (runs) => {
       set({ rangeRuns: runs })
