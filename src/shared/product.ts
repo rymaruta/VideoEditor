@@ -9,7 +9,7 @@ import product from './product.json'
  * - 販売者(`vendor`・`vendorEmail`)と、GPL のソースの入手先(`sourceOfferUrl`)はまだ未定(`TBD`)。
  *   決まったら `product.json` を直し、`package.json` の `author` も同じ値にする
  *   (試験 `tests/shared/product.test.ts` が食い違いを止める)。未定のままでは配布用のビルド
- *   (build:win など)が止まる(`scripts/release-check.mjs`。開発用のビルドは止めない)
+ *   (build:win など)が止まる(`scripts/release-check.cjs`。開発用のビルドは止めない)
  * - **`appId` は変えない。** Windows のタスクバー・通知・インストール済みの識別に使われ、変えると
  *   別のアプリとして入る
  * - 設定・自動保存の置き場(userData)は `package.json` の `name`(`video-editor`)で決まり、

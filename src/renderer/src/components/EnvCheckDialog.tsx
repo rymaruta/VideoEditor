@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEscapeToClose } from '../lib/useEscapeToClose'
 import { useMenuCommand } from '../lib/menuCommands'
-import { envCheckSections, type EnvCheckProgress, type EnvCheckResult } from '@shared/envCheck'
+import {
+  envCheckErrorMessage,
+  envCheckSections,
+  type EnvCheckProgress,
+  type EnvCheckResult
+} from '@shared/envCheck'
 import { DialogHeader } from './DialogHeader'
 
 /**
@@ -32,8 +37,7 @@ export function EnvCheckDialog(): React.JSX.Element | null {
         if (runId.current === id) setState({ kind: 'done', result })
       },
       (e: unknown) => {
-        if (runId.current === id)
-          setState({ kind: 'failed', message: e instanceof Error ? e.message : String(e) })
+        if (runId.current === id) setState({ kind: 'failed', message: envCheckErrorMessage(e) })
       }
     )
   }

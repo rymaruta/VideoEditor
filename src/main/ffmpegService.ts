@@ -963,6 +963,11 @@ async function probeUsedAudioChannels(project: Project): Promise<Map<string, num
   return map
 }
 
+/** 書き出し(どの方式でも)が走っているか(環境チェックは書き出し中は断る) */
+export function isExportInProgress(): boolean {
+  return exportInProgress
+}
+
 /** 別の方式の書き出し(`runExclusiveExport`)が走っているときの中断の入口 */
 let externalExportAbort: AbortController | null = null
 

@@ -132,7 +132,7 @@ YouTubeショート動画向けの動画編集デスクトップアプリ(Electr
 
 ### アプリとして使う場合
 
-ビルド済みのインストーラーが欲しい場合は、下記「[セットアップ(開発者向け)](#セットアップ開発者向け)」の手順で `npm install` の後に `npm run build:win` / `build:mac` / `build:linux` のいずれかを実行してください。`dist/` フォルダにOS別のインストーラー(Windowsは `.exe`、macOSは `.dmg`、Linuxは `.AppImage` 等)が生成されるので、それを実行してインストールします。
+ビルド済みのインストーラーが欲しい場合は、下記「[セットアップ(開発者向け)](#セットアップ開発者向け)」の手順で `npm install` の後に `npm run build:win` / `build:mac` / `build:linux` のいずれかを実行してください(販売者などが未定の間は止まります。下記「配布用インストーラーのビルド」)。`dist/` フォルダにOS別のインストーラー(Windowsは `.exe`、macOSは `.dmg`、Linuxは `.AppImage` 等)が生成されるので、それを実行してインストールします。
 
 ### 開発モードですぐ試す場合
 
@@ -187,6 +187,11 @@ npm run build:linux
 ```
 
 ビルドが完了すると `dist/` フォルダにインストーラーが出力されるので、それを実行してインストールしてください。
+
+> **販売者(`src/shared/product.json` の `vendor`・`vendorEmail`)と GPL のソースの入手先(`sourceOfferUrl`)が
+> 未定(`TBD`)の間は、`build:win` / `build:mac` / `build:linux` は最初の検査(`scripts/release-check.cjs`)で止まります**
+> (配布用のため。docs/GPL_COMPLIANCE.md)。確認だけなら `npm run build:win:test`(Windows。`dist/win-unpacked/` に
+> 起動できる形を作る。インストーラーは作らない)か `npm run build:unpack` を使います。
 
 ## 使い方
 

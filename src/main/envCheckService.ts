@@ -5,9 +5,9 @@ import os from 'os'
 import { join } from 'path'
 import envCheckWorkerPath from './envCheckWorker?modulePath'
 import { runChild } from './childRunner'
-import { ffmpegPath } from './ffmpegService'
+import { ffmpegPath, isExportInProgress } from './ffmpegService'
 import { listLlmLoadFailures } from './llmService'
-import { redactResult, runEnvCheck, spawnFfmpeg } from './envCheck'
+import { EnvCheckBusyError, redactResult, runEnvCheck, spawnFfmpeg } from './envCheck'
 import type { EnvCheckWorkerDone } from './envCheckWorker'
 import { sanitizeLogText } from './crashLog'
 import { crashLog } from './diagnostics'
@@ -34,6 +34,9 @@ function probeNative(signal?: AbortSignal): Promise<{
   backends: string[]
   backendsError?: string
 }> {
+  // 止めた後なら別プロセスを立ち上げない
+  if (signal?.aborted)
+    return Promise.resolve({ localAi: { ok: false, error: '止めました' }, backends: [] })
   return new Promise((resolve) => {
     let done = false
     const finish = (v: {
@@ -104,6 +107,12 @@ export async function runEnvCheckNow(onProgress: (p: unknown) => void): Promise<
         chrome: process.versions.chrome
       },
       gpuInfo: () => app.getGPUInfo('complete'),
+      gpuInfoBasic: () => app.getGPUInfo('basic'),
+      // 書き出しと試し書き出し・速さの測定が取り合わないよう、書き出し中は断る
+      busyReason: () =>
+        isExportInProgress()
+          ? '書き出し中は環境チェックをできません(試し書き出しが本物の書き出しと取り合うため)。書き出しが終わってから調べてください'
+          : null,
       gpuFeatures: () => app.getGPUFeatureStatus() as unknown as Record<string, string>,
       localAi: async () => (await nativeOnce()).localAi,
       whisper: async () => {
@@ -111,6 +120,7 @@ export async function runEnvCheckNow(onProgress: (p: unknown) => void): Promise<
         return {
           order: asrDeviceOrder(process.platform),
           backends: n.backends,
+          platform: process.platform,
           model: ASR_MODEL_ID,
           downloaded: asrModelDownloaded(),
           error: n.backendsError
@@ -164,7 +174,8 @@ export function installEnvCheckIpc(ipc: Pick<IpcMain, 'handle' | 'on'>): void {
         if (!e.sender.isDestroyed()) e.sender.send(IPC.envCheckProgress, p)
       })
     } catch (err) {
-      crashLog()?.write('main', '環境チェックに失敗しました', err)
+      if (!(err instanceof EnvCheckBusyError))
+        crashLog()?.write('main', '環境チェックに失敗しました', err)
       throw err
     }
   })

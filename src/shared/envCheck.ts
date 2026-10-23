@@ -97,8 +97,10 @@ export interface LocalAiCheck {
 export interface WhisperCheck {
   /** 試す装置の順(Windows: DirectML → CPU、それ以外: CPU) */
   order: string[]
-  /** onnxruntime が使える装置(取れなければ空) */
+  /** onnxruntime に組み込まれている装置(取れなければ空。この PC で使えるかは別。asrBackendView) */
   backends: string[]
+  /** 調べた PC の OS(process.platform。DirectML・Core ML の見込みに使う) */
+  platform?: string
   model: string
   /** モデルをダウンロード済みか */
   downloaded: boolean
@@ -329,12 +331,7 @@ export function envCheckSections(r: EnvCheckResult): { title: string; rows: [str
       title: '文字起こし(Whisper)',
       rows: [
         ['試す順', r.whisper.order.map(deviceLabel).join(' → ')],
-        [
-          'onnxruntime の装置',
-          r.whisper.backends.length > 0
-            ? r.whisper.backends.map(deviceLabel).join('・')
-            : `不明${r.whisper.error ? `(${r.whisper.error})` : ''}`
-        ],
+        ...whisperBackendRows(r),
         [
           'モデル',
           `${r.whisper.model}(${r.whisper.downloaded ? 'ダウンロード済み' : '未ダウンロード。初回の文字起こしでダウンロード'})`
@@ -440,4 +437,46 @@ export function judgeLocalAi(input: {
     reason: decision.ok ? undefined : decision.reason,
     note: pick.note
   }
+}
+
+/**
+ * onnxruntime に組み込まれている装置を、この PC で使える見込みのものと、組み込まれているだけ
+ * (使えるかは未確認)のものに分ける。CUDA・TensorRT は NVIDIA の GPU があるときだけ、DirectML は
+ * Windows、Core ML は macOS だけ見込みに入れる。CPU はいつも見込み
+ */
+export function asrBackendView(
+  backends: readonly string[],
+  env: { platform?: string; hasNvidia: boolean }
+): { likely: string[]; unverified: string[] } {
+  const likely: string[] = []
+  const unverified: string[] = []
+  for (const b of backends) {
+    const ok =
+      b === 'cpu' ||
+      (b === 'dml' && env.platform === 'win32') ||
+      ((b === 'cuda' || b === 'tensorrt') && env.hasNvidia && env.platform !== 'darwin') ||
+      (b === 'coreml' && env.platform === 'darwin')
+    ;(ok ? likely : unverified).push(b)
+  }
+  return { likely, unverified }
+}
+
+function whisperBackendRows(r: EnvCheckResult): [string, string][] {
+  if (r.whisper.backends.length === 0)
+    return [['onnxruntime の装置', `不明${r.whisper.error ? `(${r.whisper.error})` : ''}`]]
+  const hasNvidia =
+    r.gpus.some((g) => /nvidia/i.test(`${g.vendor} ${g.name}`)) || r.localAi.device === 'cuda'
+  const view = asrBackendView(r.whisper.backends, { platform: r.whisper.platform, hasNvidia })
+  const rows: [string, string][] = [
+    ['この PC で使える見込み', view.likely.map(deviceLabel).join('・') || 'なし']
+  ]
+  if (view.unverified.length > 0)
+    rows.push(['組み込み(使えるかは未確認)', view.unverified.map(deviceLabel).join('・')])
+  return rows
+}
+
+/** main から来た失敗の文(Electron が付ける「Error invoking remote method …」の前置きを外す) */
+export function envCheckErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  return raw.replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, '')
 }

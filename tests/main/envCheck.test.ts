@@ -1,8 +1,10 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import {
+  EnvCheckBusyError,
+  withTimeout,
   checkEncoders,
   measureSpeed,
   redactResult,
@@ -13,6 +15,8 @@ import {
   type FfmpegRunner
 } from '@main/envCheck'
 import {
+  asrBackendView,
+  envCheckErrorMessage,
   buildEnvCheckReport,
   envCheckFileName,
   envCheckSections,
@@ -342,5 +346,120 @@ describe('環境チェック: 結果の組み立てと伏せ字', () => {
     expect(
       help?.submenu?.some((i) => i.id === 'help.envCheck' && i.label === '環境チェック…')
     ).toBe(true)
+  })
+})
+
+describe('環境チェック: 止める・断る・GPU の情報の上限(監査の低)', () => {
+  type Deps = Parameters<typeof runEnvCheck>[0]
+  const baseDeps = (over: Partial<Deps> = {}): Deps => ({
+    run: fakeFfmpeg([]),
+    app: { product: 'Tsunagi', version: '1.0.0', electron: '39', chrome: '142' },
+    gpuInfo: async () => ({ gpuDevice: [{ vendorId: 0x10de, active: true, deviceString: 'RTX' }] }),
+    gpuFeatures: () => ({}),
+    localAi: vi.fn(async () => ({ ok: true, device: 'cpu' })),
+    whisper: vi.fn(async () => ({
+      order: ['cpu'],
+      backends: ['cpu'],
+      model: 'm',
+      downloaded: false
+    })),
+    system: () => ({ os: 'x', cpu: 'c', cores: 1, memoryGb: 1, freeMemoryGb: 1 }),
+    ...over
+  })
+
+  it('止めた後は、ローカル AI・文字起こしの判定(別プロセスを立ち上げるもの)を呼ばない', async () => {
+    const ac = new AbortController()
+    const deps = baseDeps({
+      signal: ac.signal,
+      onProgress: (p) => {
+        if (p.step.startsWith('書き出しの速さ')) ac.abort()
+      }
+    })
+    const r = await runEnvCheck(deps)
+    expect(deps.localAi).not.toHaveBeenCalled()
+    expect(deps.whisper).not.toHaveBeenCalled()
+    expect(r.localAi.error).toBe('止めました')
+    expect(r.whisper.error).toBe('止めました')
+  })
+
+  it('書き出し中なら始めずに理由を付けて断る(ffmpeg も動かさない)', async () => {
+    const calls: string[][] = []
+    await expect(
+      runEnvCheck(
+        baseDeps({
+          run: fakeFfmpeg(calls),
+          busyReason: () => '書き出し中は環境チェックをできません'
+        })
+      )
+    ).rejects.toBeInstanceOf(EnvCheckBusyError)
+    expect(calls).toEqual([])
+    expect(
+      envCheckErrorMessage(
+        new Error(
+          "Error invoking remote method 'diag:envCheckRun': EnvCheckBusyError: 書き出し中は…"
+        )
+      )
+    ).toBe('書き出し中は…')
+  })
+
+  it('GPU の詳しい情報が返らなければ上限で打ち切り、基本の情報で続ける', async () => {
+    const never = (): Promise<unknown> => new Promise(() => {})
+    const r = await runEnvCheck(
+      baseDeps({
+        gpuInfo: never,
+        gpuInfoBasic: async () => ({ gpuDevice: [{ vendorId: 0x8086, active: true }] }),
+        gpuInfoTimeoutMs: 30
+      })
+    )
+    expect(r.gpus[0].vendor).toBe('Intel')
+  })
+
+  it('基本の情報も返らなければ「取得できませんでした」で続ける', async () => {
+    const never = (): Promise<unknown> => new Promise(() => {})
+    const r = await runEnvCheck(
+      baseDeps({ gpuInfo: never, gpuInfoBasic: never, gpuInfoTimeoutMs: 30 })
+    )
+    expect(r.gpus).toEqual([])
+    expect(buildEnvCheckReport(r)).toContain('GPU: 取得できませんでした')
+    expect(r.speed.length).toBeGreaterThan(0)
+  })
+
+  it('GPU の情報を待っている間に「止める」と、上限を待たずに抜ける', async () => {
+    const ac = new AbortController()
+    const started = Date.now()
+    setTimeout(() => ac.abort(), 20)
+    const r = await runEnvCheck(
+      baseDeps({
+        gpuInfo: () => new Promise(() => {}),
+        gpuInfoTimeoutMs: 60_000,
+        signal: ac.signal
+      })
+    )
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(r.gpus).toEqual([])
+  })
+
+  it('withTimeout: 間に合えば値、過ぎれば代わりの値', async () => {
+    expect(await withTimeout(Promise.resolve(1), 1000, 0)).toEqual({ value: 1, timedOut: false })
+    expect(await withTimeout(new Promise<number>(() => {}), 10, 0)).toEqual({
+      value: 0,
+      timedOut: true
+    })
+  })
+})
+
+describe('環境チェック: onnxruntime の装置は「この PC で使える見込み」と「組み込み」に分ける', () => {
+  it('GPU が無ければ CUDA・TensorRT は見込みに入れない', () => {
+    expect(
+      asrBackendView(['cpu', 'webgpu', 'cuda', 'tensorrt'], { platform: 'linux', hasNvidia: false })
+    ).toEqual({ likely: ['cpu'], unverified: ['webgpu', 'cuda', 'tensorrt'] })
+  })
+  it('Windows は DirectML、NVIDIA があれば CUDA も見込み。macOS は Core ML', () => {
+    expect(
+      asrBackendView(['cpu', 'dml', 'cuda'], { platform: 'win32', hasNvidia: true }).likely
+    ).toEqual(['cpu', 'dml', 'cuda'])
+    expect(
+      asrBackendView(['cpu', 'coreml', 'cuda'], { platform: 'darwin', hasNvidia: true })
+    ).toEqual({ likely: ['cpu', 'coreml'], unverified: ['cuda'] })
   })
 })

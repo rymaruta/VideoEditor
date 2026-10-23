@@ -181,7 +181,14 @@ export function redactResult<T>(value: T, home?: string): T {
 export interface EnvCheckDeps {
   run: FfmpegRunner
   app: EnvCheckResult['app']
+  /** GPU の詳しい情報(app.getGPUInfo('complete'))。`gpuInfoTimeoutMs` で打ち切る */
   gpuInfo: () => Promise<unknown>
+  /** 詳しい情報を打ち切ったときの代わり(app.getGPUInfo('basic')) */
+  gpuInfoBasic?: () => Promise<unknown>
+  /** GPU の情報を待つ上限(ミリ秒。既定 10 秒) */
+  gpuInfoTimeoutMs?: number
+  /** 調べてはいけない理由(書き出し中など)。あれば始めずに断る */
+  busyReason?: () => string | null
   gpuFeatures: () => Record<string, string>
   localAi: (signal?: AbortSignal) => Promise<LocalAiCheck>
   whisper: () => Promise<WhisperCheck>
@@ -204,8 +211,50 @@ function systemInfo(): ReturnType<NonNullable<EnvCheckDeps['system']>> {
   }
 }
 
+/** 調べられないとき(書き出し中など)の断り。記録には残さない */
+export class EnvCheckBusyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EnvCheckBusyError'
+  }
+}
+
+export const GPU_INFO_TIMEOUT_MS = 10_000
+
+/**
+ * `p` を待つ。`ms` を過ぎた・止められたら `fallback`(待っている元の処理はそのまま放っておく。
+ * app.getGPUInfo は止められないため)
+ */
+export function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  fallback: T,
+  signal?: AbortSignal
+): Promise<{ value: T; timedOut: boolean }> {
+  if (signal?.aborted) return Promise.resolve({ value: fallback, timedOut: true })
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (value: T, timedOut: boolean): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      resolve({ value, timedOut })
+    }
+    const onAbort = (): void => finish(fallback, true)
+    const timer = setTimeout(() => finish(fallback, true), ms)
+    signal?.addEventListener('abort', onAbort)
+    p.then(
+      (v) => finish(v, false),
+      () => finish(fallback, false)
+    )
+  })
+}
+
 /** 全部を調べる。失敗した所は結果の中に理由を書いて続ける(1 つの失敗で全体を止めない) */
 export async function runEnvCheck(deps: EnvCheckDeps): Promise<EnvCheckResult> {
+  const busy = deps.busyReason?.()
+  if (busy) throw new EnvCheckBusyError(busy)
   const now = deps.now ?? (() => new Date())
   const started = now()
   const signal = deps.signal
@@ -218,12 +267,18 @@ export async function runEnvCheck(deps: EnvCheckDeps): Promise<EnvCheckResult> {
 
   step('PC と GPU を調べています')
   const sys = (deps.system ?? systemInfo)()
-  let gpuInfo: unknown = null
-  try {
-    gpuInfo = await deps.gpuInfo()
-  } catch {
-    gpuInfo = null
+  // 詳しい情報はドライバによって返らないことがある。上限で打ち切り、基本の情報で続ける
+  const limit = deps.gpuInfoTimeoutMs ?? GPU_INFO_TIMEOUT_MS
+  const safeCall = (f: (() => Promise<unknown>) | undefined): Promise<unknown> => {
+    try {
+      return f ? f() : Promise.resolve(null)
+    } catch {
+      return Promise.resolve(null)
+    }
   }
+  let gpuInfo = (await withTimeout(safeCall(deps.gpuInfo), limit, null as unknown, signal)).value
+  if (!gpuInfo && !signal?.aborted && deps.gpuInfoBasic)
+    gpuInfo = (await withTimeout(safeCall(deps.gpuInfoBasic), limit, null as unknown, signal)).value
   let gpuFeatures: Record<string, string> = {}
   try {
     gpuFeatures = deps.gpuFeatures()
@@ -257,7 +312,10 @@ export async function runEnvCheck(deps: EnvCheckDeps): Promise<EnvCheckResult> {
   step('文字起こしの実行方法を調べています')
   let whisper: WhisperCheck
   try {
-    whisper = await deps.whisper()
+    // 止めた後は別プロセス(ローカル AI の判定)を立ち上げない
+    whisper = signal?.aborted
+      ? { order: [], backends: [], model: '', downloaded: false, error: '止めました' }
+      : await deps.whisper()
   } catch (e) {
     whisper = { order: [], backends: [], model: '', downloaded: false, error: String(e) }
   }
