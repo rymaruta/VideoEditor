@@ -7,6 +7,7 @@ import { useMenuCommand } from '../lib/menuCommands'
 import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
 import { applyWhenNotTrying, onProjectSwitch, useProjectStore } from '../store/projectStore'
+import { addAssetsThenPreview, relinkThenPreview } from '../lib/afterTrial'
 import { formatIpcError } from '../lib/ipcError'
 import { canPreviewFile, planLoadedAssetPreview } from '../lib/canPreview'
 import { hasLetterboxInMain } from '../lib/aspect'
@@ -44,7 +45,6 @@ export function MediaBin(): React.JSX.Element {
   const mainClips = useProjectStore((s) => s.project.clips)
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const videoOverlayTracks = useProjectStore((s) => s.project.videoOverlayTracks)
-  const addAssets = useProjectStore((s) => s.addAssets)
   const addClipToTimeline = useProjectStore((s) => s.addClipToTimeline)
   const addClipToAudioTrack = useProjectStore((s) => s.addClipToAudioTrack)
   const addClipToVideoOverlayTrack = useProjectStore((s) => s.addClipToVideoOverlayTrack)
@@ -107,6 +107,17 @@ export function MediaBin(): React.JSX.Element {
   // Transcoding is the expensive fallback, so it only runs once the preview element
   // itself has said it cannot play the file. Chromium can decode HEVC on machines with
   // OS support, where transcoding would be pure waste.
+  /** プレビュー用の素材を裏で用意する(待たない) */
+  function previewInBackground(
+    assetId: string,
+    filePath: string,
+    codecSaysUnplayable: boolean,
+    hasVideo: boolean,
+    audioNeedsFold = false
+  ): void {
+    void ensurePreviewable(assetId, filePath, codecSaysUnplayable, hasVideo, audioNeedsFold)
+  }
+
   async function ensurePreviewable(
     assetId: string,
     filePath: string,
@@ -314,16 +325,22 @@ export function MediaBin(): React.JSX.Element {
         }
       }
       if (switched()) return
-      applyWhenNotTrying(
-        () => relinkAsset(assetId, filePath, fileNameFromPath(filePath), meta, thumbnailDataUrl),
+      // つなぎ直してからプレビュー用の素材を用意する(範囲の自動編集を試している間は、試しを終えてから)
+      relinkThenPreview(
+        {
+          assetId,
+          filePath,
+          fileName: fileNameFromPath(filePath),
+          probe: meta,
+          thumbnailDataUrl
+        },
+        {
+          codecSaysUnplayable: meta.needsPreviewProxy,
+          hasVideo: meta.hasVideo,
+          audioNeedsFold: meta.previewAudioNeedsFold
+        },
+        previewInBackground,
         session
-      )
-      void ensurePreviewable(
-        assetId,
-        filePath,
-        meta.needsPreviewProxy,
-        meta.hasVideo,
-        meta.previewAudioNeedsFold
       )
     } catch (e) {
       setError(formatIpcError(e))
@@ -419,23 +436,14 @@ export function MediaBin(): React.JSX.Element {
     }
     if (generation !== projectGeneration.current) return
     // One history entry for the whole import, not one per file.
-    // 範囲の自動編集を試している間に読み終えたら、試しが終わってから入れる
-    applyWhenNotTrying(() => addAssets(imported))
+    // Assets are added first and the (potentially slow) transcode runs afterwards, so
+    // the media list appears immediately instead of freezing until ffmpeg finishes.
+    // 範囲の自動編集を試している間に読み終えたら、試しが終わってから入れ、入れた後に用意する
+    addAssetsThenPreview(imported, proxyCandidates, previewInBackground)
     // 読み込んだフォルダを共通ライブラリに覚える(次の回からは選ぶだけで使える)。
     // 覚えられなくても取り込みそのものは済んでいるので、失敗は黙って捨てる
     if (imported.length > 0) {
       void window.api.libraryRemember(imported.map((a) => a.filePath)).catch(() => {})
-    }
-    // Assets are added first and the (potentially slow) transcode runs afterwards, so
-    // the media list appears immediately instead of freezing until ffmpeg finishes.
-    for (const { asset, codecSaysUnplayable, audioNeedsFold } of proxyCandidates) {
-      void ensurePreviewable(
-        asset.id,
-        asset.filePath,
-        codecSaysUnplayable,
-        asset.hasVideo,
-        audioNeedsFold
-      )
     }
     const messages: string[] = []
     if (unsupported.length > 0) messages.push(unsupportedMessage(unsupported))

@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { applyWhenNotTrying, useProjectStore } from '../store/projectStore'
 import type { VoicevoxSpeaker } from '@shared/types'
 import { formatIpcError } from '../lib/ipcError'
+import { afterTrialNotice, NARRATION_NOTICE } from '../lib/afterTrial'
 import { MicIcon, WandIcon } from './icons'
 
 function fileNameFromPath(path: string): string {
@@ -56,7 +57,8 @@ export function NarrationPanel(): React.JSX.Element {
       const meta = await window.api.probeMedia(filePath)
       // Asset + track + clip as one undoable step, so a single undo doesn't leave
       // an empty narration track and an unused asset behind.
-      applyWhenNotTrying(
+      // 範囲の自動編集を試している間は、試しを終えてから入れる(知らせもそのとおりに)
+      const status = applyWhenNotTrying(
         () =>
           addAudioClipWithAsset(
             {
@@ -74,7 +76,7 @@ export function NarrationPanel(): React.JSX.Element {
           ),
         session
       )
-      setDoneMessage('ナレーションを音声トラックに追加しました。')
+      setDoneMessage(afterTrialNotice(status, NARRATION_NOTICE))
     } catch (e) {
       setError(formatIpcError(e))
     } finally {

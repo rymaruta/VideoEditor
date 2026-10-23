@@ -6715,20 +6715,28 @@ const afterTrialQueue: { session: number; apply: () => void }[] = []
 /**
  * 裏で走っていた処理(ノイズ除去・BPM の解析・素材の読み込み など)の結果を企画に当てる。試しに当てている
  * 間(範囲の自動編集の「試しに見る」)は編集を断るので、試しが終わる(閉じる・決める)のを待って当てる。
- * 待つ間に企画を切り替えたら当てない(別の企画に当てない)。`session` は処理を始めた時の企画の番号
+ * 待つ間に企画を切り替えたら当てない(別の企画に当てない)。`session` は処理を始めた時の企画の番号。
+ * 当てた後に続けてすること(プロキシの用意など)は `apply` の中に書く(待つ間に先に走らせない)
  */
 export function applyWhenNotTrying(
   apply: () => void,
   session: number = useProjectStore.getState().projectSession
-): void {
+): AfterTrialStatus {
   const s = useProjectStore.getState()
-  if (s.projectSession !== session) return
+  if (s.projectSession !== session) return 'dropped'
   if (!s.trial) {
     apply()
-    return
+    return 'applied'
   }
   afterTrialQueue.push({ session, apply })
+  return 'waiting'
 }
+
+/**
+ * `applyWhenNotTrying` の結果。applied: すぐ当てた / waiting: 試しが終わってから当てる /
+ * dropped: 企画を切り替えたので当てない
+ */
+export type AfterTrialStatus = 'applied' | 'waiting' | 'dropped'
 
 /** 試しが終わったら、待っていた結果を当てる(試しを終える処理が全部済んでから) */
 function flushAfterTrial(): void {
