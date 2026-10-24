@@ -11,8 +11,8 @@ import {
   overridesWithin,
   spliceClips,
   matchLockBlocks,
-  placeAfterAnchors,
   timelineBlocksOf,
+  type TimelineBlock,
   subtractSegs,
   timelineWindowOf,
   type TimelineRange
@@ -35,6 +35,7 @@ import {
   coverageOfClips,
   hasOverrides,
   reinsertExtraClips,
+  subtractRanges,
   type CameraSeg,
   type CutOverrides,
   type Range
@@ -6780,10 +6781,21 @@ const ORDER_SLACK_SEC = 0.05
 /**
  * 作り直した本編(`rebuilt`)の、自動編集で触らない範囲(`locks`。共通の時刻)の所を、前の本編の同じ所の
  * クリップに差し替える。前の本編で窓の中が続いて並んでいない(複製・並べ替えで、窓の外のクリップが挟まる)
- * ときは、続いて並ぶ塊ごとにそのまま差し戻す。元の所の塊(前後と共通の時刻の順に並ぶ塊のうち、いちばん
- * 長いもの)は作り直した本編の窓の所へ。ほかの塊(離れた所に置いた複製など)は、前の本編で直前にあった
- * 収録素材のクリップの終わり(共通の時刻)を目印に、作り直した本編でその時刻より前に始まる最後のクリップの
- * 後ろへ(差し込みの画と同じ置き方。目印が無ければ頭。差し戻した塊の途中には入れない)。
+ * ときも、続いて並ぶ塊ごとにそのまま差し戻す。
+ *
+ * - 前の本編で隣り合う塊(ほかのロックの塊とも。間にどのロックの塊でもない収録素材のクリップが無いもの)は、
+ *   1つの並び(グループ)として、並びのまま動かす
+ * - 前後・目印は、どのロックの塊にも入っていない収録素材のクリップの所(自由な所)だけで見る
+ * - 中が共通の時刻の順に並び、前後の自由な所とも順に並ぶグループ(並べ替えていない元の所)は、作り直した
+ *   本編の窓の所へ(グループの中でそのロックの塊がいちばん長いものを、そのロックの元の所とする)。ただし
+ *   前の本編の順と窓の所の順が食い違わない組(長さの合計がいちばん長いもの)だけ
+ * - 作り直した本編の窓の所は、どのロックもみな外す。元の所のグループが無いロックは、窓の所へは何も入れない
+ *   (ロックは触らない約束なので、並べ替えた所へ戻さない)
+ * - ほかのグループ(離れた所に置いた複製など)は、前の本編で直前にあった自由な所の終わり(共通の時刻)を目印に、
+ *   作り直した本編でその時刻より前に始まる最後のクリップの後ろへ(差し込みの画と同じ置き方。目印が無ければ
+ *   頭)。前の本編の順を保つよう、前のグループより前へ・次に窓の所へ戻すグループより後ろへは置かない。
+ *   窓の所を外した本編へ入れるので、差し戻したグループの途中には入らない
+ *
  * `previousForExtras` は、差し込みの画を入れ直すのに使う前の本編(窓の中に入れた差し込みの画を除く)
  */
 function pinLockedClips(
@@ -6799,73 +6811,153 @@ function pinLockedClips(
 } {
   const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
   const prevTimes = clipTimes(previous)
-  let clips = rebuilt
-  const pinned: Range[] = []
-  const usedExtras = new Set<string>()
-  const moves: { clips: Clip[]; anchor: number }[] = []
-  /** 前の本編で、タイムラインの `t` より前にあった最後の収録素材のクリップの終わり(共通の時刻) */
+  const sorted = [...locks].sort((a, b) => a.start - b.start)
+  const prevBlocks = sorted.map((lock) => timelineBlocksOf(previous, info, lock))
+  // 前の本編の、どのロックの塊にも入っていない収録素材のクリップの所(タイムラインの区間と共通の時刻)
+  const free: { ts: number; te: number; cs: number; ce: number }[] = []
+  previous.forEach((c, i) => {
+    const f = fileOf.get(c.assetId)
+    if (!f) return
+    const speed = c.speed || 1
+    const at = (t: number): number => toCommon(f, c.inPoint + (t - prevTimes[i].start) * speed)
+    for (const r of subtractRanges([prevTimes[i]], prevBlocks.flat()))
+      free.push({ ts: r.start, te: r.end, cs: at(r.start), ce: at(r.end) })
+  })
+  free.sort((a, b) => a.ts - b.ts)
+  /** タイムラインの `t` より前にあった最後の自由な所の終わり(共通の時刻) */
   const anchorBefore = (t: number): number => {
     let anchor = -Infinity
-    previous.forEach((c, i) => {
-      const f = fileOf.get(c.assetId)
-      if (!f || prevTimes[i].start >= t - 1e-6) return
-      const end = Math.min(prevTimes[i].end, t)
-      anchor = toCommon(f, c.inPoint + (end - prevTimes[i].start) * (c.speed || 1))
-    })
+    for (const x of free) if (x.ts < t - 1e-6 && x.te <= t + 1e-6) anchor = x.ce
     return anchor
   }
-  /** 前の本編で、タイムラインの `t` より後ろにあった最初の収録素材のクリップの頭(共通の時刻) */
-  const startAfter = (t: number): number => {
-    for (let i = 0; i < previous.length; i++) {
-      const c = previous[i]
-      const f = fileOf.get(c.assetId)
-      if (!f || prevTimes[i].end <= t + 1e-6) continue
-      const from = Math.max(prevTimes[i].start, t)
-      return toCommon(f, c.inPoint + (from - prevTimes[i].start) * (c.speed || 1))
+  /** タイムラインの `t` より後ろにあった最初の自由な所の頭(共通の時刻) */
+  const startAfter = (t: number): number => free.find((x) => x.ts >= t - 1e-6)?.cs ?? Infinity
+
+  // 隣り合う塊をグループに(前の本編の並びの順)
+  type Item = { li: number; b: TimelineBlock }
+  const items: Item[] = prevBlocks
+    .flatMap((bs, li) => bs.map((b) => ({ li, b })))
+    .sort((x, y) => x.b.start - y.b.start)
+  const groups: Item[][] = []
+  for (const x of items) {
+    const g = groups[groups.length - 1]
+    const last = g?.[g.length - 1]
+    const apart = !last || free.some((f) => f.ts >= last.b.end - 1e-6 && f.ts < x.b.start - 1e-6)
+    if (apart) groups.push([x])
+    else g.push(x)
+  }
+  const rangeOf = (g: Item[]): TimelineRange => ({
+    start: g[0].b.start,
+    end: g[g.length - 1].b.end
+  })
+  /** 中が共通の時刻の順に並び、前後の自由な所とも順に並ぶ(並べ替えていない元の所) */
+  const inPlace = (g: Item[]): boolean => {
+    for (let k = 1; k < g.length; k++) {
+      const a = g[k - 1].b.segs
+      if (a[a.length - 1].end > g[k].b.segs[0].start + ORDER_SLACK_SEC) return false
     }
-    return Infinity
+    const r = rangeOf(g)
+    const last = g[g.length - 1].b.segs
+    return (
+      anchorBefore(r.start) <= g[0].b.segs[0].start + ORDER_SLACK_SEC &&
+      startAfter(r.end) >= last[last.length - 1].end - ORDER_SLACK_SEC
+    )
   }
-  for (const lock of [...locks].sort((a, b) => a.start - b.start)) {
-    const blocks = timelineBlocksOf(previous, info, lock)
-    const nowWin = timelineWindowOf(clips, info, lock)
-    if (blocks.length === 0 || !nowWin) continue
-    // 塊に掛かる差し込みの画は塊の中の切れ端として入るので、入れ直さない
-    for (const b of blocks)
-      previous.forEach((c, i) => {
-        if (fileOf.has(c.assetId)) return
-        if (prevTimes[i].end > b.start + 1e-6 && prevTimes[i].start < b.end - 1e-6)
-          usedExtras.add(c.id)
-      })
-    // 窓の所へ戻す塊: 前後のクリップと共通の時刻の順に並んでいる塊(並べ替えていない元の所)のうち、
-    // いちばん長いもの(順に並ぶ塊が無ければ、いちばん長いもの)。同じ長さの複製を頭に置いたときに、
-    // 頭の複製を窓の所へ動かさないように
-    const inOrder = blocks.filter(
-      (b) =>
-        anchorBefore(b.start) <= lock.start + ORDER_SLACK_SEC &&
-        startAfter(b.end) >= lock.end - ORDER_SLACK_SEC
-    )
-    const main = (inOrder.length > 0 ? inOrder : blocks).reduce((m, b) =>
-      b.end - b.start > m.end - m.start + 1e-9 ? b : m
-    )
-    const inside = spliceClips(previous, [], main, splitId).inside
-    const parts = spliceClips(clips, inside, nowWin, splitId)
-    // 窓の境でだけ分かれた続きのクリップ(同じ素材の続いた所)は1本に戻す(境に余計な切れ目を作らない)
-    clips = joinAt(
-      joinAt(parts.clips, parts.before.length - 1),
-      parts.before.length + inside.length - 1
-    )
-    for (const b of blocks)
-      if (b !== main)
-        moves.push({
-          clips: spliceClips(previous, [], b, splitId).inside,
-          anchor: anchorBefore(b.start)
-        })
+  // ロックごとの元の所のグループ(そのロックの塊がいちばん長いもの)
+  const mainOf = new Map<number, Item[]>()
+  for (const g of groups) {
+    if (!inPlace(g)) continue
+    for (const x of g) {
+      const had = mainOf.get(x.li)
+      const lenIn = (h: Item[]): number =>
+        h.filter((y) => y.li === x.li).reduce((t, y) => Math.max(t, y.b.end - y.b.start), 0)
+      if (!had || lenIn(g) > lenIn(had) + 1e-9) mainOf.set(x.li, g)
+    }
+  }
+
+  // 作り直した本編の窓の所を外し、外した所(クリップの番号)を覚える
+  let clips = rebuilt
+  const pinned: Range[] = []
+  const slotOf = new Map<number, number>()
+  sorted.forEach((lock, li) => {
+    if (prevBlocks[li].length === 0) return
     pinned.push(lock)
+    const nowWin = timelineWindowOf(clips, info, lock)
+    if (!nowWin) return
+    const parts = spliceClips(clips, [], nowWin, splitId)
+    clips = parts.clips
+    slotOf.set(li, parts.before.length)
+  })
+  // 元の所のグループは、それを元の所とするロックのうち、いちばん前の窓の所へ
+  const windowSlot = new Map<Item[], number>()
+  for (const [li, g] of [...mainOf].sort((a, b) => a[0] - b[0])) {
+    const slot = slotOf.get(li)
+    if (slot !== undefined && !windowSlot.has(g)) windowSlot.set(g, slot)
   }
-  // ほかの塊は、ロックをみな差し戻してから置く(先に置くと、次のロックの窓が続かなくなる)
-  // 差し戻した塊(どのロックのものも)の途中には置かない
-  const keep = pinned.flatMap((l) => timelineBlocksOf(clips, info, l))
-  clips = placeAfterAnchors(clips, moves, info, keep)
+  // 窓の所へ戻すグループは、前の本編の順と窓の所の順が食い違わないもの(長さの合計がいちばん長い組)だけ。
+  // 食い違うもの(人が並べ替えたクリップの中のロック)を窓の所へ戻すと、ロックした塊どうしの前後が入れ替わった
+  const cand = groups.filter((g) => windowSlot.has(g))
+  const weight = (g: Item[]): number => rangeOf(g).end - rangeOf(g).start
+  const best = cand.map((g) => ({ w: weight(g), from: -1 }))
+  cand.forEach((g, k) => {
+    for (let m = 0; m < k; m++)
+      if (
+        windowSlot.get(cand[m])! <= windowSlot.get(g)! &&
+        best[m].w + weight(g) > best[k].w + 1e-9
+      )
+        best[k] = { w: best[m].w + weight(g), from: m }
+  })
+  const atWindow = new Set<Item[]>()
+  let k = best.reduce((m, x, idx) => (m < 0 || x.w > best[m].w + 1e-9 ? idx : m), -1)
+  while (k >= 0) {
+    atWindow.add(cand[k])
+    k = best[k].from
+  }
+  // ほかのグループは、前の本編で直前にあった自由な所の終わりを目印に、作り直した本編でその時刻より前に始まる
+  // 最後のクリップの後ろへ(差し込みの画と同じ置き方。目印が無ければ頭)。前の本編の順を保つよう、前の
+  // グループより前へ・次に窓の所へ戻すグループより後ろへは置かない
+  const startsNow = clips.map((c) => {
+    const f = fileOf.get(c.assetId)
+    return f ? toCommon(f, c.inPoint) : -Infinity
+  })
+  const anchorPos = (anchor: number): number => {
+    let idx = -1
+    for (let n = 0; n < clips.length; n++) if (startsNow[n] < anchor - 0.02) idx = n
+    return idx + 1
+  }
+  const posOf = new Map<Item[], number>()
+  let lo = 0
+  groups.forEach((g, gi) => {
+    let pos: number
+    if (atWindow.has(g)) pos = windowSlot.get(g)!
+    else {
+      const nextWin = groups.slice(gi + 1).find((h) => atWindow.has(h))
+      const hi = nextWin ? windowSlot.get(nextWin)! : clips.length
+      pos = Math.min(hi, Math.max(lo, anchorPos(anchorBefore(rangeOf(g).start))))
+    }
+    posOf.set(g, pos)
+    lo = pos
+  })
+  const usedExtras = new Set<string>()
+  const clipsOf = (g: Item[]): Clip[] => {
+    const r = rangeOf(g)
+    // グループに掛かる差し込みの画はグループの中の切れ端として入るので、入れ直さない
+    previous.forEach((c, n) => {
+      if (fileOf.has(c.assetId)) return
+      if (prevTimes[n].end > r.start + 1e-6 && prevTimes[n].start < r.end - 1e-6)
+        usedExtras.add(c.id)
+    })
+    return spliceClips(previous, [], r, splitId).inside
+  }
+  // 後ろの所から入れる(前の所の番号が変わらないように)。同じ所に入るグループは前の本編の順に
+  const positions = [...new Set([...posOf.values(), ...slotOf.values()])].sort((a, b) => b - a)
+  for (const pos of positions) {
+    const here = groups.filter((g) => posOf.get(g) === pos)
+    const inside = here.flatMap(clipsOf)
+    clips = [...clips.slice(0, pos), ...inside, ...clips.slice(pos)]
+    // 入れた所の境(何も入れなければ、外した窓の所の前後)で、同じ素材の続いた所は1本に戻す
+    clips = joinAt(joinAt(clips, pos + inside.length - 1), pos - 1)
+  }
   const previousForExtras = previous.filter((c) => fileOf.has(c.assetId) || !usedExtras.has(c.id))
   return { clips, previousForExtras, locks: pinned }
 }

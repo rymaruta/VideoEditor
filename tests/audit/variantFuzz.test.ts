@@ -38,7 +38,7 @@ import {
 import type { Project } from '@shared/types'
 import { autoTelopKey } from '@shared/telop/manual'
 import { markIn, markOut, rippleDelete } from '@renderer/lib/editCommands'
-import { cov, episode2, inter, len, memory, project } from './h'
+import { cov, episode2, inter, len, lockOrder, memory, project } from './h'
 
 const SEEDS = (process.env.SEEDS ?? '1,2,3,4,5,6,7,8').split(',').map(Number)
 const STEPS = Number(process.env.NSTEPS ?? 25)
@@ -487,6 +487,7 @@ describe('audit fuzz', () => {
           const before = project()
           const mem = memory(before)
           const locks = before.autoEditLocks ?? []
+          const order0 = lockOrder(before)
           const lockCov = locks.map((l) => ({
             l,
             segs: inter(cov(before), [l])
@@ -589,6 +590,9 @@ describe('audit fuzz', () => {
               const d = len(subtractRanges(r0, r1)) + len(subtractRanges(r1, r0))
               if (d > 0.05) log.push(`  !!L speech telop time inside lock changed ${d.toFixed(2)}`)
             }
+          // ロックした塊の、タイムラインの順の中身の並びは変わらない(matchLockBlocks を使わない確かめ)
+          if (lockOrder(now) !== order0)
+            fail(`lock order changed\nbefore=${order0}\nafter =${lockOrder(now)}`)
           for (const { l, segs } of lockCov) {
             const segsNow = inter(c, [l])
             const diff = len(subtractRanges(segs, segsNow)) + len(subtractRanges(segsNow, segs))

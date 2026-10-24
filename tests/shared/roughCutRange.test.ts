@@ -6,6 +6,7 @@ import {
   commonWindowOf,
   fitLength,
   intersectSegs,
+  matchLockBlocks,
   overridesWithPinned,
   overridesWithin,
   pinOverrides,
@@ -297,6 +298,31 @@ describe('preferDecidedCameras(a5dbe9c の監査 zPrefer から)', () => {
     expect(
       pinOverrides([{ start: 10, end: 20 }], [seg(10, 20, 'B'), seg(10, 20, 'A')], []).angles
     ).toEqual([seg(10, 20, 'B'), seg(10, 20, 'A')])
+  })
+})
+
+describe('matchLockBlocks(塊の対応は前の本編での並びの順を使う。df19fea の監査)', () => {
+  const W = { start: 10, end: 20 }
+  it('中身がまったく同じ塊は、前の本編での並びの順に対応する', () => {
+    // 前: [10-20][50-60][10-20] / 今: 前に別のクリップが入って、どれもずれた
+    const prev = [clip('a', 10, 20), clip('a', 50, 60), clip('a', 10, 20)]
+    const now = [clip('a', 30, 33), clip('a', 10, 20), clip('a', 50, 60), clip('a', 10, 20)]
+    const pairs = matchLockBlocks(prev, now, INFO, W)
+    expect(pairs.map((x) => [x.prev.start, x.now.start])).toEqual([
+      [0, 3],
+      [20, 23]
+    ])
+  })
+
+  it('頭の部分が同じ塊(短い塊が長い塊の頭と同じ)も、並びの順に対応する', () => {
+    // 前: [10-15] … [10-20](10-15 は A、15-20 は B) / 今: 同じ並び
+    const prev = [clip('a', 10, 15), clip('a', 50, 60), clip('a', 10, 15), clip('b', 13, 18)]
+    const now = [...prev]
+    const pairs = matchLockBlocks(prev, now, INFO, W)
+    expect(pairs.map((x) => [x.prev.start, x.now.start, x.now.end - x.now.start])).toEqual([
+      [0, 0, 5],
+      [15, 15, 10]
+    ])
   })
 })
 

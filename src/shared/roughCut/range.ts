@@ -530,8 +530,6 @@ export function timelineBlocksOf(
 }
 
 const SEG_TOL = 1e-3
-/** 目印より前に始まるかの余裕(`reinsertExtraClips` と同じ) */
-const EPS_ANCHOR = 0.02
 
 /** 続いた同じカメラの区間をまとめる(窓の境で分けて差し戻したクリップがつながっても同じに見る) */
 function mergedSegs(segs: readonly CameraSeg[]): CameraSeg[] {
@@ -561,6 +559,7 @@ export function matchLockBlocks(
     segs: mergedSegs(b.segs)
   }))
   const used = new Set<number>()
+  let lastMatched = -1
   const out: { prev: TimelineBlock; now: TimelineRange }[] = []
   for (const nb of timelineBlocksOf(current, info, window)) {
     const segs = mergedSegs(nb.segs)
@@ -585,13 +584,22 @@ export function matchLockBlocks(
     while (i < segs.length) {
       let found = -1
       let next: { i: number; at: number } | null = null
-      for (let k = 0; k < prevBlocks.length && found < 0; k++) {
-        if (used.has(k)) continue
+      // 前の本編での並びの順(直前に対応させた塊の次から)を先に試す。中身がまったく同じ塊・頭が同じ塊を、
+      // 中身だけで先に合ったものに対応させると、塊どうしの前後を取り違えた
+      const order = prevBlocks
+        .map((_, k) => k)
+        .filter((k) => !used.has(k))
+        .sort((a, b) => Number(a <= lastMatched) - Number(b <= lastMatched) || a - b)
+      for (const k of order) {
         next = fits(prevBlocks[k].segs)
-        if (next) found = k
+        if (next) {
+          found = k
+          break
+        }
       }
       if (found < 0 || !next) break
       used.add(found)
+      lastMatched = found
       const pb = prevBlocks[found].b
       const len = pb.end - pb.start
       out.push({ prev: pb, now: { start: t, end: t + len } })
@@ -600,39 +608,5 @@ export function matchLockBlocks(
       at = next.at
     }
   }
-  return out
-}
-
-/**
- * クリップの並び(`items`)を、目印(共通の時刻)より前に始まる最後のクリップの後ろへ入れる
- * (目印が無い・どのクリップより前なら頭)。同じ所に入るものは並びの順のまま。
- * `keep`(クリップの番号の塊)の途中には入れず、その塊の後ろへ入れる
- */
-export function placeAfterAnchors<C extends { assetId: string; inPoint: number }>(
-  clips: readonly C[],
-  items: readonly { clips: readonly C[]; anchor: number }[],
-  info: MulticamInfo,
-  keep: readonly { first: number; last: number }[] = []
-): C[] {
-  if (items.length === 0) return [...clips]
-  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
-  const starts = clips.map((c) => {
-    const f = fileOf.get(c.assetId)
-    return f ? toCommon(f, c.inPoint) : -Infinity
-  })
-  const after = new Map<number, C[]>()
-  for (const e of items) {
-    let idx = -1
-    for (let i = 0; i < clips.length; i++) if (starts[i] < e.anchor - EPS_ANCHOR) idx = i
-    for (const k of keep) if (idx >= k.first && idx < k.last) idx = k.last
-    const list = after.get(idx) ?? []
-    list.push(...e.clips)
-    after.set(idx, list)
-  }
-  const out: C[] = [...(after.get(-1) ?? [])]
-  clips.forEach((c, i) => {
-    out.push(c)
-    out.push(...(after.get(i) ?? []))
-  })
   return out
 }

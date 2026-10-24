@@ -11,6 +11,7 @@ import {
   type CutOverrides
 } from '@shared/roughCut/overrides'
 import type { Project } from '@shared/types'
+import { timelineBlocksOf } from '@shared/roughCut/range'
 
 export const KIT = {
   se: {
@@ -98,4 +99,33 @@ export const len = (rs: { start: number; end: number }[]): number =>
 export const minus = subtractRanges
 export function inter(a: { start: number; end: number }[], b: { start: number; end: number }[]) {
   return subtractRanges(unionRanges(a), subtractRanges(unionRanges(a), unionRanges(b)))
+}
+
+/**
+ * ロックした塊の、タイムラインの順の中身の並び(どのロックか・共通の時刻・カメラ)。すべてのロックの塊を
+ * タイムラインの順に並べ、同じロックの続いた同じカメラの所はまとめる(`matchLockBlocks` を使わない確かめ)
+ */
+export function lockOrder(p: Project = project()): string {
+  const info = p.multicam
+  if (!info) return ''
+  const items = (p.autoEditLocks ?? []).flatMap((l, li) =>
+    timelineBlocksOf(p.clips, info, l).map((b) => ({ li, b }))
+  )
+  items.sort((x, y) => x.b.start - y.b.start)
+  const out: { li: number; start: number; end: number; cameraId: string }[] = []
+  for (const { li, b } of items)
+    for (const s of b.segs) {
+      const last = out[out.length - 1]
+      if (
+        last &&
+        last.li === li &&
+        last.cameraId === s.cameraId &&
+        Math.abs(last.end - s.start) < 1e-3
+      )
+        last.end = s.end
+      else out.push({ li, start: s.start, end: s.end, cameraId: s.cameraId })
+    }
+  return out
+    .map((s) => `${s.li}:${s.cameraId}[${s.start.toFixed(2)},${s.end.toFixed(2)}]`)
+    .join(' ')
 }
