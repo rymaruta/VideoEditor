@@ -20,7 +20,8 @@ import {
   hasOverrides,
   releaseOverridesForScenes,
   spansOfClips,
-  updateOverrides
+  updateOverrides,
+  type CameraSeg
 } from '@shared/roughCut/overrides'
 import { planCg, type PlacedCg } from '@shared/finish/cg'
 import {
@@ -2421,7 +2422,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         : undefined
       let overrides = kept
       if (!steps.cut || !steps.angles) {
-        const pin = pinOverrides([win], current, project.roughCutAuto)
+        // 固定するのは範囲の中の今の中身だけ(範囲の外にある、窓の中の時刻を映すクリップ(複製・並べ替え)
+        // まで入れると、外の複製のカメラ・区間で範囲の中が替わっていた)
+        const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+        const insideNow: CameraSeg[] = cw.pieces.flatMap((pc) => {
+          const f = fileOf.get(project.clips[pc.clipIndex].assetId)
+          return f ? [{ start: pc.start, end: pc.end, cameraId: f.sourceId }] : []
+        })
+        const pin = pinOverrides([win], insideNow)
         overrides = {
           removed: steps.cut ? (kept?.removed ?? []) : pin.removed,
           added: steps.cut ? (kept?.added ?? []) : pin.added,

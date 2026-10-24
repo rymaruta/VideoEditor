@@ -252,6 +252,54 @@ describe('pinOverrides', () => {
   })
 })
 
+describe('preferDecidedCameras(a5dbe9c の監査 zPrefer から)', () => {
+  const seg = (start: number, end: number, cameraId: string): CameraSeg => ({
+    start,
+    end,
+    cameraId
+  })
+  it('U1 人が決めたカメラが2つあれば、組んだ本編のままの方だけ外す', () => {
+    expect(
+      preferDecidedCameras(
+        [seg(10, 20, 'B'), seg(10, 20, 'A'), seg(10, 20, 'C')],
+        [seg(10, 20, 'A')]
+      )
+    ).toEqual([seg(10, 20, 'B'), seg(10, 20, 'C')])
+  })
+  it('U2 一部だけ重なる複製は、重なる所だけ外す', () => {
+    expect(preferDecidedCameras([seg(10, 20, 'A'), seg(15, 25, 'B')], [seg(10, 30, 'A')])).toEqual([
+      seg(10, 15, 'A'),
+      seg(15, 25, 'B')
+    ])
+  })
+  it('U3 組んだ本編の切れ目の丸め(0.01 秒)は、人の判断と読まない', () => {
+    expect(
+      preferDecidedCameras(
+        [seg(10, 20, 'A'), seg(10, 20, 'B')],
+        [seg(10, 19.99, 'A'), seg(19.99, 30, 'B')]
+      )
+    ).toEqual([seg(10, 20, 'B')])
+  })
+  it('U4 約1コマ(0.03 秒)のはみ出しは人の判断と読まず、ちらつく切れ端を残さない', () => {
+    expect(
+      preferDecidedCameras(
+        [seg(10, 20.03, 'A'), seg(15, 25, 'B')],
+        [seg(10, 20, 'A'), seg(20, 30, 'B')]
+      )
+    ).toEqual([seg(10, 15, 'A'), seg(15, 25, 'B')])
+  })
+  it('U5 複製の無い隣どうし(0.04 秒の重なり)は、人が決めた方を残す', () => {
+    expect(preferDecidedCameras([seg(0, 10.04, 'A'), seg(10, 20, 'B')], [seg(0, 20, 'A')])).toEqual(
+      [seg(0, 10, 'A'), seg(10, 20, 'B')]
+    )
+  })
+  it('U6 組んだ本編が空なら、並びはそのまま(後ろが勝つ)', () => {
+    expect(
+      pinOverrides([{ start: 10, end: 20 }], [seg(10, 20, 'B'), seg(10, 20, 'A')], []).angles
+    ).toEqual([seg(10, 20, 'B'), seg(10, 20, 'A')])
+  })
+})
+
 describe('fitLength', () => {
   const W = { start: 0, end: 100 }
   it('長すぎれば後ろから削る', () => {

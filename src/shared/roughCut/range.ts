@@ -191,31 +191,47 @@ export function pinOverrides(
   }
 }
 
+/** 人が決めたカメラと読む最短の切れ端(秒)。これより短い違いは丸め・約1コマのはみ出し */
+const DECIDED_MIN_SEC = 0.1
+
+/** 区間どうしの重なり */
+const overlapOf = (a: readonly Range[], b: readonly Range[]): Range[] =>
+  subtractRanges(a, subtractRanges(unionRanges(a), unionRanges(b)))
+
 /**
  * 同じ共通の時刻を違うカメラで映す区間が重なるとき、前に組んだ本編(`auto`)のままのカメラの区間から、
- * 人が決めたカメラ(組んだ本編と違うカメラ・組んだ本編に無い所)の区間と重なる所を外す。
+ * 人が決めたカメラ(組んだ本編と違うカメラ・組んだ本編に無い所。`DECIDED_MIN_SEC` 以上)の区間と
+ * 重なる所を外す。組んだ本編と違うがごく短い切れ端(区間の端の丸めのはみ出し)は人の判断と読まず、
+ * ほかのカメラの区間と重なる所は外す(残すと、並べ替えたときに切れ端が後ろに当たってちらつく)。
  * 重ならない区間は同じ形のまま(複製の無い本編では何も変えない)
  */
 export function preferDecidedCameras(
   segs: readonly CameraSeg[],
   auto: readonly CameraSeg[]
 ): CameraSeg[] {
-  const autoOf = (cameraId: string): Range[] => auto.filter((a) => a.cameraId === cameraId)
-  // 区間ごとの、組んだ本編のままの所と、人が決めた所
   const parts = segs.map((s) => {
-    const same = autoOf(s.cameraId)
-    return { s, plain: intersectSegs([s], same), decided: subtractRanges([s], same) }
+    const same = auto.filter((a) => a.cameraId === s.cameraId)
+    const differs = subtractRanges([s], same)
+    return {
+      s,
+      plain: intersectSegs([s], same),
+      decided: differs.filter((r) => r.end - r.start >= DECIDED_MIN_SEC),
+      slivers: differs.filter((r) => r.end - r.start < DECIDED_MIN_SEC)
+    }
   })
   if (parts.every((p) => p.decided.length === 0)) return [...segs]
-  return parts.flatMap(({ s, plain }) => {
-    if (plain.length === 0) return [s]
-    const decidedElsewhere = parts
-      .filter((q) => q.s !== s && q.s.cameraId !== s.cameraId)
-      .flatMap((q) => q.decided)
-    const drop = subtractRanges(
-      plain,
-      subtractRanges(unionRanges(plain), unionRanges(decidedElsewhere))
-    )
+  return parts.flatMap(({ s, plain, slivers }) => {
+    const others = parts.filter((q) => q.s !== s && q.s.cameraId !== s.cameraId)
+    const drop = unionRanges([
+      ...overlapOf(
+        plain,
+        others.flatMap((q) => q.decided)
+      ),
+      ...overlapOf(
+        slivers,
+        others.map((q) => q.s)
+      )
+    ])
     return drop.length === 0 ? [s] : subtractSegs([s], drop)
   })
 }
