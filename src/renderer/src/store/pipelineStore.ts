@@ -1263,7 +1263,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       locks.length > 0
         ? overridesWithPinned(
             keptOverrides,
-            pinOverrides(locks, coverageOfClips(project.clips, info)),
+            // 同じ時刻を2回映す本編(複製・並べ替え)は、組んだ本編と違うカメラ(人が決めた方)を残す
+            pinOverrides(locks, coverageOfClips(project.clips, info), project.roughCutAuto),
             locks
           )
         : keptOverrides
@@ -2419,7 +2420,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         : undefined
       let overrides = kept
       if (!steps.cut || !steps.angles) {
-        const pin = pinOverrides([win], current)
+        const pin = pinOverrides([win], current, project.roughCutAuto)
         overrides = {
           removed: steps.cut ? (kept?.removed ?? []) : pin.removed,
           added: steps.cut ? (kept?.added ?? []) : pin.added,

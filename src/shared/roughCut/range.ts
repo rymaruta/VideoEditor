@@ -169,19 +169,55 @@ export function intersectSegs(segs: readonly CameraSeg[], windows: readonly Rang
 
 /**
  * 窓の中を今の中身(`current`。今の本編の共通の時刻とカメラ)に固定する本編の修正。
- * 窓の中で今の本編に無い所は削り、ある所は足し(詰めずに残す)、カメラは今のカメラにする
+ * 窓の中で今の本編に無い所は削り、ある所は足し(詰めずに残す)、カメラは今のカメラにする。
+ *
+ * 作り直した本編は同じ共通の時刻を1回しか映せないので、今の本編が同じ時刻を2回以上(複製・並べ替え)
+ * 違うカメラで映していると、カメラは1つに潰れる。そのとき前に組んだ本編(`auto`)を渡せば、組んだ本編と
+ * 違うカメラ(人が替えた方)を残し、組んだ本編のままのカメラはその時間から外す(`updateOverrides` と同じ
+ * 読み方。渡さなければ、後ろに並んだ方が勝つ)。人が替えた方が並びの前にあると、手で決めたカメラが
+ * ロックの作り直しで消えていた
  */
 export function pinOverrides(
   windows: readonly Range[],
-  current: readonly CameraSeg[]
+  current: readonly CameraSeg[],
+  auto?: readonly CameraSeg[]
 ): CutOverrides {
   const ws = unionRanges(windows)
   const inside = intersectSegs(current, ws)
   return {
     removed: subtractRanges(ws, inside),
     added: unionRanges(inside),
-    angles: inside
+    angles: auto ? preferDecidedCameras(inside, auto) : inside
   }
+}
+
+/**
+ * 同じ共通の時刻を違うカメラで映す区間が重なるとき、前に組んだ本編(`auto`)のままのカメラの区間から、
+ * 人が決めたカメラ(組んだ本編と違うカメラ・組んだ本編に無い所)の区間と重なる所を外す。
+ * 重ならない区間は同じ形のまま(複製の無い本編では何も変えない)
+ */
+export function preferDecidedCameras(
+  segs: readonly CameraSeg[],
+  auto: readonly CameraSeg[]
+): CameraSeg[] {
+  const autoOf = (cameraId: string): Range[] => auto.filter((a) => a.cameraId === cameraId)
+  // 区間ごとの、組んだ本編のままの所と、人が決めた所
+  const parts = segs.map((s) => {
+    const same = autoOf(s.cameraId)
+    return { s, plain: intersectSegs([s], same), decided: subtractRanges([s], same) }
+  })
+  if (parts.every((p) => p.decided.length === 0)) return [...segs]
+  return parts.flatMap(({ s, plain }) => {
+    if (plain.length === 0) return [s]
+    const decidedElsewhere = parts
+      .filter((q) => q.s !== s && q.s.cameraId !== s.cameraId)
+      .flatMap((q) => q.decided)
+    const drop = subtractRanges(
+      plain,
+      subtractRanges(unionRanges(plain), unionRanges(decidedElsewhere))
+    )
+    return drop.length === 0 ? [s] : subtractSegs([s], drop)
+  })
 }
 
 /** `base` の窓の中を `pinned` で置き換える(窓の外の判断はそのまま、窓の中は `pinned` が勝つ) */

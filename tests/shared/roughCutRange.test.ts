@@ -9,6 +9,7 @@ import {
   overridesWithPinned,
   overridesWithin,
   pinOverrides,
+  preferDecidedCameras,
   spliceClips,
   spliceTimed,
   type RangeClip
@@ -208,6 +209,46 @@ describe('pinOverrides', () => {
     expect(overridesWithin(o, [{ start: 10, end: 20 }], false)?.added).toEqual([
       { start: 50, end: 55 }
     ])
+  })
+
+  it('同じ時刻を2回映す本編(複製)は、組んだ本編と違うカメラ(人が決めた方)を残す。並びの順によらない', () => {
+    const auto: CameraSeg[] = [{ start: 10, end: 20, cameraId: 'A' }]
+    const hand = { start: 10, end: 20, cameraId: 'B' }
+    const plain = { start: 10, end: 20, cameraId: 'A' }
+    for (const current of [
+      [hand, plain],
+      [plain, hand]
+    ]) {
+      const pin = pinOverrides([{ start: 10, end: 20 }], current, auto)
+      expect(pin.angles).toEqual([hand])
+      expect(pin.added).toEqual([{ start: 10, end: 20 }])
+      expect(pin.removed).toEqual([])
+    }
+    // 組んだ本編を渡さなければ、今までどおり(後ろに並んだ方が勝つ並び)
+    expect(pinOverrides([{ start: 10, end: 20 }], [hand, plain]).angles).toEqual([hand, plain])
+  })
+
+  it('人が決めたカメラと重なる所だけ外し、重ならない区間・複製の無い本編はそのまま', () => {
+    const auto: CameraSeg[] = [
+      { start: 0, end: 30, cameraId: 'A' },
+      { start: 30, end: 40, cameraId: 'B' }
+    ]
+    const current: CameraSeg[] = [
+      { start: 12, end: 15, cameraId: 'B' },
+      { start: 10, end: 20, cameraId: 'A' },
+      { start: 30, end: 40, cameraId: 'B' }
+    ]
+    expect(preferDecidedCameras(current, auto)).toEqual([
+      { start: 12, end: 15, cameraId: 'B' },
+      { start: 10, end: 12, cameraId: 'A' },
+      { start: 15, end: 20, cameraId: 'A' },
+      { start: 30, end: 40, cameraId: 'B' }
+    ])
+    const noDup: CameraSeg[] = [
+      { start: 0, end: 10, cameraId: 'B' },
+      { start: 10, end: 20, cameraId: 'A' }
+    ]
+    expect(preferDecidedCameras(noDup, auto)).toEqual(noDup)
   })
 })
 
