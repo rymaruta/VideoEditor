@@ -97,7 +97,7 @@ import {
   overridesWithPinned,
   overridesWithin,
   pinOverrides,
-  timelineWindowOf,
+  matchLockBlocks,
   type TimelineRange
 } from '@shared/roughCut/range'
 import { subtractRanges, type CutOverrides, type Range } from '@shared/roughCut/overrides'
@@ -3029,11 +3029,13 @@ function lockedSoundWindows(
   const info = applied.multicam
   const prevInfo = prev.multicam
   if (!info || !prevInfo) return undefined
-  const windows = locks.flatMap((l) => {
-    const p = timelineWindowOf(prev.clips, prevInfo, l)
-    const n = timelineWindowOf(applied.clips, info, l)
-    return p && n ? [{ prev: p, now: n }] : []
-  })
+  // 塊ごと(離れた所に差し戻した複製も、その塊の置かれた所へずらす)
+  const windows = locks.flatMap((l) =>
+    matchLockBlocks(prev.clips, applied.clips, info, l).map((w) => ({
+      prev: { start: w.prev.start, end: w.prev.end },
+      now: w.now
+    }))
+  )
   return windows.length > 0 ? { windows, prev } : undefined
 }
 

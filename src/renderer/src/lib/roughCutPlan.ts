@@ -678,13 +678,15 @@ export function planRoughCut(
     if (next.startTime >= (voiceEnds.get(t) ?? Infinity) - 1e-6) t.endTime = next.startTime
   }
   // 短い切れ目をつなぎ、読み切れない枚を延ばす(時間の飛ぶカットの切れ目と、本編の終わりは越えない)
-  // ロックの境(区間の切れ目に重なる境は、もう時間の飛ぶカットの切れ目)
+  // ロックの、仮編集のタイムラインの区間(終わりが区間の中にある所。区間の切れ目に重なる終わりは、もう
+  // 時間の飛ぶカットの切れ目)
   const fences = (options.locks ?? []).flatMap((l) =>
-    cut.spans.flatMap((sp) =>
-      [l.start, l.end]
-        .filter((e) => e > sp.start + 1e-6 && e < sp.end - 1e-6)
-        .map((e) => sp.timeline + (e - sp.start))
-    )
+    cut.spans
+      .filter((sp) => l.end > sp.start + 1e-6 && l.end < sp.end - 1e-6)
+      .map((sp) => ({
+        start: sp.timeline + Math.max(0, l.start - sp.start),
+        end: sp.timeline + (l.end - sp.start)
+      }))
   )
   const settled = settleTelopTimes(
     telops,

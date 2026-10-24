@@ -22,7 +22,13 @@ import {
   type RangedEditOptions,
   type RangedPreview
 } from '@renderer/lib/rangedAutoEdit'
-import { clipTimes, commonWindowOf, timelineWindowOf } from '@shared/roughCut/range'
+import {
+  clipTimes,
+  commonWindowOf,
+  matchLockBlocks,
+  timelineBlocksOf,
+  timelineWindowOf
+} from '@shared/roughCut/range'
 import {
   angleAlternatives,
   subtractRanges,
@@ -483,8 +489,7 @@ describe('audit fuzz', () => {
           const locks = before.autoEditLocks ?? []
           const lockCov = locks.map((l) => ({
             l,
-            segs: inter(cov(before), [l]),
-            tw: timelineWindowOf(before.clips, before.multicam!, l)
+            segs: inter(cov(before), [l])
           }))
           await usePipelineStore.getState().rebuildRoughCut()
           const now = project()
@@ -547,41 +552,62 @@ describe('audit fuzz', () => {
               }))
               .filter((x) => x.end > x.start)
           )
-          for (const a of realAngles)
-            for (const s of c) {
-              const lo = Math.max(a.start, s.start),
-                hi = Math.min(a.end, s.end)
-              if (hi - lo > 1e-3 && s.cameraId !== a.cameraId) angleLost += hi - lo
-            }
+          // 同じ時刻を複製で2回映すときは、どれかの複製に手で決めたカメラが残っていれば失っていない
+          // (ロックの中の複製は、カメラを1つに潰さずにそのまま差し戻す)
+          for (const a of realAngles) {
+            const shown = inter(c, [a])
+            const kept = inter(
+              c.filter((s) => s.cameraId === a.cameraId),
+              [a]
+            )
+            angleLost += len(subtractRanges(shown, kept))
+          }
           if (angleLost > 0.1)
             fail(
               `hand angle lost ${angleLost.toFixed(2)} angles=${fmtSegs(mem.angles)}\nlocks=${JSON.stringify(locks)}\nbefore=${fmtSegs(cov(before))}\nauto=${fmtSegs(before.roughCutAuto ?? [])}\nover=${JSON.stringify(before.cutOverrides)}\nafter=${fmtSegs(c)}`
             )
-          for (const { l, tw } of lockCov) {
-            if (!tw) continue
-            const tn = timelineWindowOf(now.clips, now.multicam!, l)
-            if (!tn) continue
-            const rel = (pp: typeof before, w: { start: number; end: number }) =>
-              unionRanges(
-                pp.textOverlays
-                  .filter((x) => x.utteranceId)
-                  .map((x) => ({
-                    start: Math.max(w.start, x.startTime) - w.start,
-                    end: Math.min(w.end, x.endTime) - w.start
-                  }))
-                  .filter((x) => x.end > x.start + 1e-6)
-              )
-            const r0 = rel(before, tw),
-              r1 = rel(now, tn)
-            const d = len(subtractRanges(r0, r1)) + len(subtractRanges(r1, r0))
-            if (d > 0.05) log.push(`  !!L speech telop time inside lock changed ${d.toFixed(2)}`)
-          }
-          for (const { l, segs, tw } of lockCov) {
-            if (!tw) continue
+          // ロックの中の発言テロップの時刻は、塊ごとに変わらない(続かないロックも。離れた塊は置かれた所へずれるだけ)
+          for (const { l } of lockCov)
+            for (const { prev: tw, now: tn } of matchLockBlocks(
+              before.clips,
+              now.clips,
+              now.multicam!,
+              l
+            )) {
+              const rel = (pp: typeof before, w: { start: number; end: number }) =>
+                unionRanges(
+                  pp.textOverlays
+                    .filter((x) => x.utteranceId)
+                    .map((x) => ({
+                      start: Math.max(w.start, x.startTime) - w.start,
+                      end: Math.min(w.end, x.endTime) - w.start
+                    }))
+                    .filter((x) => x.end > x.start + 1e-6)
+                )
+              const r0 = rel(before, tw),
+                r1 = rel(now, tn)
+              const d = len(subtractRanges(r0, r1)) + len(subtractRanges(r1, r0))
+              if (d > 0.05) log.push(`  !!L speech telop time inside lock changed ${d.toFixed(2)}`)
+            }
+          for (const { l, segs } of lockCov) {
             const segsNow = inter(c, [l])
             const diff = len(subtractRanges(segs, segsNow)) + len(subtractRanges(segsNow, segs))
             if (diff > 0.05)
               fail(`lock content changed ${diff.toFixed(2)} lock ${l.start}-${l.end}`)
+            // 塊ごと(続かないロックも): 前の塊がみな同じ中身(時刻・カメラの並び)で残り、塊でない中身は増えない
+            const blocks0 = timelineBlocksOf(before.clips, before.multicam!, l)
+            const pairs = matchLockBlocks(before.clips, now.clips, now.multicam!, l)
+            if (pairs.length !== blocks0.length)
+              fail(
+                `lock block lost ${blocks0.length}->${pairs.length} lock ${l.start}-${l.end}\nbefore=${fmtSegs(cov(before))}\nafter=${fmtSegs(c)}`
+              )
+            const nowLen = timelineBlocksOf(now.clips, now.multicam!, l).reduce(
+              (t, b) => t + b.end - b.start,
+              0
+            )
+            const pairLen = pairs.reduce((t, x) => t + x.now.end - x.now.start, 0)
+            if (Math.abs(nowLen - pairLen) > 0.05)
+              fail(`lock content added ${(nowLen - pairLen).toFixed(2)} lock ${l.start}-${l.end}`)
           }
           // 作り直した直後は、人の手直しの記憶と組んだ本編が合う(作り直しの結果を手直しと誤認しない)
           const m2 = memory(now)

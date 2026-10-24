@@ -10,6 +10,9 @@ import {
   intersectSegs,
   overridesWithin,
   spliceClips,
+  matchLockBlocks,
+  placeAfterAnchors,
+  timelineBlocksOf,
   subtractSegs,
   timelineWindowOf,
   type TimelineRange
@@ -3973,8 +3976,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           ? followMainEdit({ ...fresh, clips: rebuilt }, fresh, true)
           : fresh
       const rebuiltProject =
-        pin && pin.windows.length > 0
-          ? restoreLockedContent(followedProject, state.project, pin.windows)
+        pin && pin.locks.length > 0
+          ? restoreLockedContent(followedProject, state.project, pin.locks)
           : followedProject
       return {
         __noFollow: true,
@@ -6771,9 +6774,16 @@ export function sameExceptAutoEdit(a: Project, b: Project): boolean {
   return true
 }
 
+/** 前後のクリップが共通の時刻の順に並んでいるかを見るときの余裕(丸め・分割ファイルのつなぎ目) */
+const ORDER_SLACK_SEC = 0.05
+
 /**
  * 作り直した本編(`rebuilt`)の、自動編集で触らない範囲(`locks`。共通の時刻)の所を、前の本編の同じ所の
- * クリップに差し替える。前の本編で窓の中が続いて並んでいない(窓の外のクリップが挟まる)所は差し替えない。
+ * クリップに差し替える。前の本編で窓の中が続いて並んでいない(複製・並べ替えで、窓の外のクリップが挟まる)
+ * ときは、続いて並ぶ塊ごとにそのまま差し戻す。元の所の塊(前後と共通の時刻の順に並ぶ塊のうち、いちばん
+ * 長いもの)は作り直した本編の窓の所へ。ほかの塊(離れた所に置いた複製など)は、前の本編で直前にあった
+ * 収録素材のクリップの終わり(共通の時刻)を目印に、作り直した本編でその時刻より前に始まる最後のクリップの
+ * 後ろへ(差し込みの画と同じ置き方。目印が無ければ頭。差し戻した塊の途中には入れない)。
  * `previousForExtras` は、差し込みの画を入れ直すのに使う前の本編(窓の中に入れた差し込みの画を除く)
  */
 function pinLockedClips(
@@ -6784,34 +6794,80 @@ function pinLockedClips(
 ): {
   clips: Clip[]
   previousForExtras: Clip[]
-  windows: { lock: Range; prev: TimelineRange }[]
+  /** 差し戻したロック */
+  locks: Range[]
 } {
-  const recorded = new Set(info.files.map((f) => f.assetId))
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
   const prevTimes = clipTimes(previous)
   let clips = rebuilt
-  const windows: { lock: Range; prev: TimelineRange }[] = []
+  const pinned: Range[] = []
   const usedExtras = new Set<string>()
-  for (const lock of [...locks].sort((a, b) => a.start - b.start)) {
-    const prevWin = timelineWindowOf(previous, info, lock)
-    const nowWin = timelineWindowOf(clips, info, lock)
-    if (!prevWin || !nowWin) continue
-    const inside = spliceClips(previous, [], prevWin, splitId).inside
-    // 窓に掛かる差し込みの画は窓の中の切れ端として入るので、入れ直さない
+  const moves: { clips: Clip[]; anchor: number }[] = []
+  /** 前の本編で、タイムラインの `t` より前にあった最後の収録素材のクリップの終わり(共通の時刻) */
+  const anchorBefore = (t: number): number => {
+    let anchor = -Infinity
     previous.forEach((c, i) => {
-      if (recorded.has(c.assetId)) return
-      if (prevTimes[i].end > prevWin.start + 1e-6 && prevTimes[i].start < prevWin.end - 1e-6)
-        usedExtras.add(c.id)
+      const f = fileOf.get(c.assetId)
+      if (!f || prevTimes[i].start >= t - 1e-6) return
+      const end = Math.min(prevTimes[i].end, t)
+      anchor = toCommon(f, c.inPoint + (end - prevTimes[i].start) * (c.speed || 1))
     })
+    return anchor
+  }
+  /** 前の本編で、タイムラインの `t` より後ろにあった最初の収録素材のクリップの頭(共通の時刻) */
+  const startAfter = (t: number): number => {
+    for (let i = 0; i < previous.length; i++) {
+      const c = previous[i]
+      const f = fileOf.get(c.assetId)
+      if (!f || prevTimes[i].end <= t + 1e-6) continue
+      const from = Math.max(prevTimes[i].start, t)
+      return toCommon(f, c.inPoint + (from - prevTimes[i].start) * (c.speed || 1))
+    }
+    return Infinity
+  }
+  for (const lock of [...locks].sort((a, b) => a.start - b.start)) {
+    const blocks = timelineBlocksOf(previous, info, lock)
+    const nowWin = timelineWindowOf(clips, info, lock)
+    if (blocks.length === 0 || !nowWin) continue
+    // 塊に掛かる差し込みの画は塊の中の切れ端として入るので、入れ直さない
+    for (const b of blocks)
+      previous.forEach((c, i) => {
+        if (fileOf.has(c.assetId)) return
+        if (prevTimes[i].end > b.start + 1e-6 && prevTimes[i].start < b.end - 1e-6)
+          usedExtras.add(c.id)
+      })
+    // 窓の所へ戻す塊: 前後のクリップと共通の時刻の順に並んでいる塊(並べ替えていない元の所)のうち、
+    // いちばん長いもの(順に並ぶ塊が無ければ、いちばん長いもの)。同じ長さの複製を頭に置いたときに、
+    // 頭の複製を窓の所へ動かさないように
+    const inOrder = blocks.filter(
+      (b) =>
+        anchorBefore(b.start) <= lock.start + ORDER_SLACK_SEC &&
+        startAfter(b.end) >= lock.end - ORDER_SLACK_SEC
+    )
+    const main = (inOrder.length > 0 ? inOrder : blocks).reduce((m, b) =>
+      b.end - b.start > m.end - m.start + 1e-9 ? b : m
+    )
+    const inside = spliceClips(previous, [], main, splitId).inside
     const parts = spliceClips(clips, inside, nowWin, splitId)
     // 窓の境でだけ分かれた続きのクリップ(同じ素材の続いた所)は1本に戻す(境に余計な切れ目を作らない)
     clips = joinAt(
       joinAt(parts.clips, parts.before.length - 1),
       parts.before.length + inside.length - 1
     )
-    windows.push({ lock, prev: prevWin })
+    for (const b of blocks)
+      if (b !== main)
+        moves.push({
+          clips: spliceClips(previous, [], b, splitId).inside,
+          anchor: anchorBefore(b.start)
+        })
+    pinned.push(lock)
   }
-  const previousForExtras = previous.filter((c) => recorded.has(c.assetId) || !usedExtras.has(c.id))
-  return { clips, previousForExtras, windows }
+  // ほかの塊は、ロックをみな差し戻してから置く(先に置くと、次のロックの窓が続かなくなる)
+  // 差し戻した塊(どのロックのものも)の途中には置かない
+  const keep = pinned.flatMap((l) => timelineBlocksOf(clips, info, l))
+  clips = placeAfterAnchors(clips, moves, info, keep)
+  const previousForExtras = previous.filter((c) => fileOf.has(c.assetId) || !usedExtras.has(c.id))
+  return { clips, previousForExtras, locks: pinned }
 }
 
 /**
@@ -6865,10 +6921,16 @@ function telopPiece(o: TextOverlay, a: number, b: number): TextOverlay | null {
  * 文字は長い方(切る前の全文)、人が直した方があればそちらの文字と見た目を使う。
  * 境の内側の新しい枚は、発言の切れ目の当て直しで境から少し離れて始まる(終わる)ことがある。片方が境に
  * 接し、間が `TELOP_EDGE_JOIN_GAP_SEC` 以内なら同じく1枚に戻す(境の手前に全文が 0.1 秒ほど一瞬出て、
- * 同じ文が出直していた)
+ * 同じ文が出直していた)。
+ * `locked`(ロックの中に戻した所)を渡すと、つなぐ間がその中に掛かるときはつながない(ロックの中の枚が
+ * 境に接していないのにつなぐと、ロックの中の枚の終わりから境までが埋まり、ロックの中の時刻が変わった)
  */
 const TELOP_EDGE_JOIN_GAP_SEC = 0.3
-function joinTelopsAtEdges(list: TextOverlay[], edges: readonly number[]): TextOverlay[] {
+function joinTelopsAtEdges(
+  list: TextOverlay[],
+  edges: readonly number[],
+  locked?: TimelineRange
+): TextOverlay[] {
   const keyOf = (o: TextOverlay): string | null =>
     o.utteranceId && !o.linkedClipId ? `${o.utteranceId}#${o.utteranceChunk ?? 0}` : null
   const EPS = 0.02
@@ -6897,7 +6959,8 @@ function joinTelopsAtEdges(list: TextOverlay[], edges: readonly number[]): TextO
         o.startTime > e + TELOP_EDGE_JOIN_GAP_SEC + EPS ||
         gap < -EPS ||
         gap > TELOP_EDGE_JOIN_GAP_SEC + EPS ||
-        (Math.abs(left.endTime - e) >= EPS && Math.abs(o.startTime - e) >= EPS)
+        (Math.abs(left.endTime - e) >= EPS && Math.abs(o.startTime - e) >= EPS) ||
+        (locked && Math.min(o.startTime, locked.end) - Math.max(left.endTime, locked.start) > 1e-6)
       )
         continue
       const base = left.edited ? left : o.edited ? o : left.text.length >= o.text.length ? left : o
@@ -6964,18 +7027,15 @@ function insideWindow<
  * 自動編集で触らない範囲の、声(収録の音)・顔カメラのワイプ・自動テロップを、作り直す前のもの
  * (前の本編の同じ所)に戻す。作り直した本編で、その範囲が置かれた所へずらして入れる
  */
-function restoreLockedContent(
-  project: Project,
-  prev: Project,
-  windows: readonly { lock: Range; prev: TimelineRange }[]
-): Project {
+function restoreLockedContent(project: Project, prev: Project, locks: readonly Range[]): Project {
   const info = project.multicam
   if (!info) return project
   const recorded = new Set(info.files.map((f) => f.assetId))
   let { audioTracks, videoOverlayTracks, textOverlays } = project
+  // 塊ごとに(離れた所に差し戻した複製も、その塊の置かれた所へずらす)
+  const windows = locks.flatMap((lock) => matchLockBlocks(prev.clips, project.clips, info, lock))
   for (const w of windows) {
-    const now = timelineWindowOf(project.clips, info, w.lock)
-    if (!now) continue
+    const now = w.now
     const shift = now.start - w.prev.start
     const moved = <C extends { startTime: number }>(c: C): C => ({
       ...c,
@@ -7031,7 +7091,8 @@ function restoreLockedContent(
         ...textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, now)),
         ...back
       ],
-      [now.start, now.end]
+      [now.start, now.end],
+      now
     )
   }
   return { ...project, audioTracks, videoOverlayTracks, textOverlays }

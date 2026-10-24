@@ -217,24 +217,38 @@ describe('settleTelopTimes — タイムラインに置いたテロップの時�
     expect(c.endTime).toBeCloseTo(1.1, 9)
   })
 
-  it('ロックの境(fences)は延ばしても越えない。カットの切れ目と違い、頭は境へ寄せない', () => {
+  it('ロック(fences)の中で始まる枚は、ロックの終わりを越えて延ばさない。頭は境へ寄せない', () => {
     const text = 'どうもありがとうございました' // 14 文字 → 1.4 秒
-    const [a] = settleTelopTimes([t(text, 0, 1.08)], [], { fences: [1.15] })
+    const [a] = settleTelopTimes([t(text, 0, 1.08)], [], { fences: [{ start: 0, end: 1.15 }] })
     expect(a.endTime).toBeCloseTo(1.15, 9)
-    // 次の枚の頭へつなぐのも、境を越えるならしない
-    const [b] = settleTelopTimes([t(text, 0, 1.4), t('はい', 1.6, 2)], [], { fences: [1.5] })
+    // 次の枚の頭へつなぐのも、ロックの終わりを越えるならしない
+    const [b] = settleTelopTimes([t(text, 0, 1.4), t('はい', 1.6, 2)], [], {
+      fences: [{ start: 0, end: 1.5 }]
+    })
     expect(b.endTime).toBe(1.4)
-    // 境の直後に出る枚は、そのまま(境から出さない)
+    // ロックの終わりの直後に出る枚は、そのまま(境から出さない)
     const late = settleTelopTimes([t('こんにちは', 8, 9.5), t('どうも', 10.07, 12)], [], {
-      fences: [10]
+      fences: [{ start: 5, end: 10 }]
     })
     expect(late.map((x) => [x.startTime, x.endTime])).toEqual([
       [8, 9.5],
       [10.07, 12]
     ])
-    // 境を渡さなければ今までどおり
+    // ロックを渡さなければ今までどおり
     const [c] = settleTelopTimes([t(text, 0, 1.08)], [])
     expect(c.endTime).toBeCloseTo(1.4, 5)
+  })
+
+  it('ロックの外で始まる枚は、ロックに関わらず延ばす(監査 zFence: ロックの頭の境は渡さない)', () => {
+    const ts = [t('あいうえおかきくけこ', 9.5, 9.7), t('さしすせそ', 10.0, 11)]
+    const none = settleTelopTimes(ts, [20])
+    expect(none[0].endTime).toBe(10)
+    // ロックが 9.8 から始まるなら、9.5 に始まる枚は延ばしてつなぐ(隙間を作らない)
+    const after = settleTelopTimes(ts, [20], { fences: [{ start: 9.8, end: 15 }] })
+    expect(after[0].endTime).toBe(10)
+    // ロックの中で始まる枚だけ、ロックの終わり(9.8)で止まる
+    const inside = settleTelopTimes(ts, [20], { fences: [{ start: 9, end: 9.8 }] })
+    expect(inside[0].endTime).toBeCloseTo(9.8, 9)
   })
 
   it('声が重なって同時に出ているテロップは延ばさない', () => {

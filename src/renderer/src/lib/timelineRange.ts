@@ -1,8 +1,6 @@
 import type { AutoEditLock, Project } from '@shared/types'
-import { spansOfClips } from '@shared/roughCut/overrides'
-import { timelineRangeOf } from '@shared/finish/sound'
 import { frameSeconds } from '@shared/frameRate'
-import { clipTimes, timelineWindowOf, type TimelineRange } from '@shared/roughCut/range'
+import { clipTimes, timelineBlocksOf, type TimelineRange } from '@shared/roughCut/range'
 import { toCommon } from '@shared/sync/multicam'
 import { TURN_RATE } from '@shared/diarize/micTurns'
 
@@ -123,17 +121,21 @@ export function onRangeAutoEditRequest(handler: (range: TimelineRange) => void):
   return () => window.removeEventListener(RANGE_REQUEST_EVENT, listener)
 }
 
-/** ロック(共通の時刻)の、今の本編での区間。続いて並んでいなければ最初〜最後 */
+/**
+ * ロック(共通の時刻)の、今の本編での区間。続いて並んでいなければ(複製・並べ替え)、続いて並ぶ塊ごとに
+ * 1つずつ(作り直しは塊ごとにそのまま差し戻す)。`key` は帯の印(ロックと塊の順)
+ */
 export function lockRangesOf(
   project: Pick<Project, 'clips' | 'multicam' | 'autoEditLocks'>
-): { lock: AutoEditLock; range: TimelineRange }[] {
+): { lock: AutoEditLock; range: TimelineRange; key: string }[] {
   const info = project.multicam
   const locks = project.autoEditLocks ?? []
   if (!info || locks.length === 0) return []
-  const spans = spansOfClips(project.clips, info)
-  return locks.flatMap((lock) => {
-    const range =
-      timelineWindowOf(project.clips, info, lock) ?? timelineRangeOf(spans, lock.start, lock.end)
-    return range ? [{ lock, range }] : []
-  })
+  return locks.flatMap((lock) =>
+    timelineBlocksOf(project.clips, info, lock).map((b, i) => ({
+      lock,
+      range: { start: b.start, end: b.end },
+      key: `${lock.id}#${i}`
+    }))
+  )
 }

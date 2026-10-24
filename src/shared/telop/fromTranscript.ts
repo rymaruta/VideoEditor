@@ -877,11 +877,12 @@ export interface SettleOptions {
   /** 最短の表示時間(秒) */
   minSec?: number
   /**
-   * 延ばしても越えない時刻(タイムラインの秒)。カットの切れ目と違い、頭はここへ寄せない。
-   * 自動編集で触らない範囲(ロック)の境に使う(ロックの中の声の枚を延ばした分がロックの外へはみ出すと、
-   * ロックの中を前の枚に戻したあとに外の切れ端と1枚につながり、ロックの中のテロップの時刻が変わっていた)
+   * 自動編集で触らない範囲(ロック)のタイムラインの区間。ロックの中で始まる枚は、ロックの終わりを越えて
+   * 延ばさない(延ばした分がロックの外に残ると、ロックの中を前の枚に戻したあとに外の切れ端と1枚に
+   * つながり、ロックの中のテロップの時刻が変わっていた)。カットの切れ目と違い、頭は寄せない。
+   * ロックの外で始まる枚・ロックの頭は変えない(ロックの中は前の枚に戻すので、延ばしても残らない)
    */
-  fences?: readonly number[]
+  fences?: readonly { start: number; end: number }[]
 }
 
 /** 前のテロップを延ばしてつなぐ切れ目の上限(秒) */
@@ -910,7 +911,7 @@ export function settleTelopTimes<T extends { text: string; startTime: number; en
   const cps = options.charsPerSec ?? READ_CHARS_PER_SEC
   const minSec = options.minSec ?? MIN_DISPLAY_SEC
   const cuts = [...hardCuts].sort((a, b) => a - b)
-  const stops = [...cuts, ...(options.fences ?? [])].sort((a, b) => a - b)
+  const fences = options.fences ?? []
   const out = [...telops].sort((a, b) => a.startTime - b.startTime).map((t) => ({ ...t }))
   // 切れ目のすぐ後に出るテロップは、切れ目(画の替わる瞬間)から出す
   let prevEnd = -Infinity
@@ -923,7 +924,12 @@ export function settleTelopTimes<T extends { text: string; startTime: number; en
   }
   for (let i = 0; i < out.length; i++) {
     const t = out[i]
-    const cut = stops.find((c) => c > t.startTime + 1e-6) ?? Infinity
+    const fence = fences.reduce(
+      (m, f) =>
+        t.startTime >= f.start - 1e-6 && t.startTime < f.end - 1e-6 ? Math.min(m, f.end) : m,
+      Infinity
+    )
+    const cut = Math.min(cuts.find((c) => c > t.startTime + 1e-6) ?? Infinity, fence)
     const next = out[i + 1]?.startTime ?? Infinity
     // 次のテロップがすでに重なっている(声の重なりで積んだ)なら延ばさない
     if (next < t.endTime - 1e-6) continue

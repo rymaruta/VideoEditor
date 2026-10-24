@@ -42,9 +42,9 @@ export function AutoEditLockBand({
   )
   return (
     <div className="g3-lock-band" style={{ width }}>
-      {ranges.map(({ lock, range }) => (
+      {ranges.map(({ lock, range, key }) => (
         <span
-          key={lock.id}
+          key={key}
           className="g3-lock"
           style={{
             left: range.start * pixelsPerSecond,

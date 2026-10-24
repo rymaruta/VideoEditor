@@ -475,3 +475,164 @@ export function timelineWindowOf(
   }
   return { start, end }
 }
+
+/** 本編の塊(窓の中を映すクリップが続いて並ぶ所)の、タイムラインの区間と中身 */
+export interface TimelineBlock extends TimelineRange {
+  /** 窓の中の所の共通の時刻とカメラ(並びの順) */
+  segs: CameraSeg[]
+  /** 塊の最初と最後のクリップの番号 */
+  first: number
+  last: number
+}
+
+/**
+ * 共通の時刻の窓 → 本編のタイムラインの塊(窓の中を映すクリップが続いて並ぶ所)の並び。
+ * 窓の外を映す収録素材のクリップが挟まる所で分ける(差し込みの画は分けない)。
+ * 塊が1つなら `timelineWindowOf` と同じ区間。窓の中を映すクリップが無ければ空
+ */
+export function timelineBlocksOf(
+  clips: readonly RangeClip[],
+  info: MulticamInfo,
+  window: Range
+): TimelineBlock[] {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const times = clipTimes(clips)
+  const out: TimelineBlock[] = []
+  let cur: TimelineBlock | null = null
+  const close = (): void => {
+    if (cur) out.push(cur)
+    cur = null
+  }
+  clips.forEach((c, i) => {
+    const f = fileOf.get(c.assetId)
+    if (!f) return
+    const speed = c.speed || 1
+    const a = toCommon(f, c.inPoint)
+    const b = toCommon(f, c.outPoint)
+    const lo = Math.max(a, window.start)
+    const hi = Math.min(b, window.end)
+    if (hi - lo <= EPS) return close()
+    const scale = f.rate / speed
+    const ts = times[i].start + (lo - a) * scale
+    const te = times[i].start + (hi - a) * scale
+    // 窓の頭より前から映すクリップは新しい塊の頭、窓の終わりより後ろまで映すクリップは塊の終わり
+    if (a < window.start - ORDER_SLACK) close()
+    const seg = { start: lo, end: hi, cameraId: f.sourceId }
+    if (cur) {
+      cur.end = te
+      cur.last = i
+      cur.segs.push(seg)
+    } else cur = { start: ts, end: te, segs: [seg], first: i, last: i }
+    if (b > window.end + ORDER_SLACK) close()
+  })
+  close()
+  return out
+}
+
+const SEG_TOL = 1e-3
+/** 目印より前に始まるかの余裕(`reinsertExtraClips` と同じ) */
+const EPS_ANCHOR = 0.02
+
+/** 続いた同じカメラの区間をまとめる(窓の境で分けて差し戻したクリップがつながっても同じに見る) */
+function mergedSegs(segs: readonly CameraSeg[]): CameraSeg[] {
+  const out: CameraSeg[] = []
+  for (const s of segs) {
+    const last = out[out.length - 1]
+    if (last && last.cameraId === s.cameraId && Math.abs(last.end - s.start) <= SEG_TOL)
+      last.end = s.end
+    else out.push({ ...s })
+  }
+  return out
+}
+
+/**
+ * 前の本編(`previous`)の塊と、今の本編(`current`)の塊の対応(ロックの中身をそのまま差し戻したもの)。
+ * 今の本編の塊を、前の本編の塊の中身(共通の時刻とカメラの並び)で頭から敷き詰める(差し戻した塊どうしが
+ * 隣り合ってつながっても分けられる)。中身の合わない塊は対応させない
+ */
+export function matchLockBlocks(
+  previous: readonly RangeClip[],
+  current: readonly RangeClip[],
+  info: MulticamInfo,
+  window: Range
+): { prev: TimelineBlock; now: TimelineRange }[] {
+  const prevBlocks = timelineBlocksOf(previous, info, window).map((b) => ({
+    b,
+    segs: mergedSegs(b.segs)
+  }))
+  const used = new Set<number>()
+  const out: { prev: TimelineBlock; now: TimelineRange }[] = []
+  for (const nb of timelineBlocksOf(current, info, window)) {
+    const segs = mergedSegs(nb.segs)
+    let i = 0
+    let at = segs[0]?.start ?? 0
+    let t = nb.start
+    /** 塊の中身が、今の位置から続くか。続けば次の位置 */
+    const fits = (want: readonly CameraSeg[]): { i: number; at: number } | null => {
+      let ci = i
+      let ca = at
+      for (const s of want) {
+        const c = segs[ci]
+        if (!c || c.cameraId !== s.cameraId || Math.abs(ca - s.start) > SEG_TOL) return null
+        if (c.end < s.end - SEG_TOL) return null
+        if (Math.abs(c.end - s.end) <= SEG_TOL) {
+          ci++
+          ca = segs[ci]?.start ?? 0
+        } else ca = s.end
+      }
+      return { i: ci, at: ca }
+    }
+    while (i < segs.length) {
+      let found = -1
+      let next: { i: number; at: number } | null = null
+      for (let k = 0; k < prevBlocks.length && found < 0; k++) {
+        if (used.has(k)) continue
+        next = fits(prevBlocks[k].segs)
+        if (next) found = k
+      }
+      if (found < 0 || !next) break
+      used.add(found)
+      const pb = prevBlocks[found].b
+      const len = pb.end - pb.start
+      out.push({ prev: pb, now: { start: t, end: t + len } })
+      t += len
+      i = next.i
+      at = next.at
+    }
+  }
+  return out
+}
+
+/**
+ * クリップの並び(`items`)を、目印(共通の時刻)より前に始まる最後のクリップの後ろへ入れる
+ * (目印が無い・どのクリップより前なら頭)。同じ所に入るものは並びの順のまま。
+ * `keep`(クリップの番号の塊)の途中には入れず、その塊の後ろへ入れる
+ */
+export function placeAfterAnchors<C extends { assetId: string; inPoint: number }>(
+  clips: readonly C[],
+  items: readonly { clips: readonly C[]; anchor: number }[],
+  info: MulticamInfo,
+  keep: readonly { first: number; last: number }[] = []
+): C[] {
+  if (items.length === 0) return [...clips]
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const starts = clips.map((c) => {
+    const f = fileOf.get(c.assetId)
+    return f ? toCommon(f, c.inPoint) : -Infinity
+  })
+  const after = new Map<number, C[]>()
+  for (const e of items) {
+    let idx = -1
+    for (let i = 0; i < clips.length; i++) if (starts[i] < e.anchor - EPS_ANCHOR) idx = i
+    for (const k of keep) if (idx >= k.first && idx < k.last) idx = k.last
+    const list = after.get(idx) ?? []
+    list.push(...e.clips)
+    after.set(idx, list)
+  }
+  const out: C[] = [...(after.get(-1) ?? [])]
+  clips.forEach((c, i) => {
+    out.push(c)
+    out.push(...(after.get(i) ?? []))
+  })
+  return out
+}

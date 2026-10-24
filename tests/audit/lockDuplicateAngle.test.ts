@@ -1,8 +1,9 @@
 // 同じ共通の時刻を本編が2回映す(クリップを複製した)とき、片方だけ手でカメラを替えてロックし、
-// 作り直しても手で決めたカメラが残る(variantFuzz の seed 52・129 で見つかった)。
-// ロックの窓が本編で続いて並んでいない(複製が離れた所にある)と、ロックの中は前のクリップの差し替えに
-// ならず、窓の中の今の中身(区間とカメラ)を固定して組み直す。そのとき同じ時刻の2つのカメラが1つに
-// 潰れ、並びの後ろの方(組んだ本編のままのカメラ)が勝って、手で決めたカメラが消えていた
+// 作り直しても、複製は両方とも、中身・カメラ・置いた所のまま残る(variantFuzz の seed 52・129 で見つかった)。
+// ロックの窓が本編で続いて並んでいない(複製が離れた所にある)と、前はロックの中を前のクリップに差し替えず、
+// 窓の中の今の中身(区間とカメラ)を固定して組み直していた。作り直した本編は同じ時刻を1回しか映せないので、
+// 複製は1本に減り、カメラも1つに潰れて手で決めたカメラが消えていた。今はロックの中のクリップを、続いて並ぶ
+// 塊ごとにそのまま差し戻す(離れた塊は、前の本編で直前にあったクリップの終わりを目印に置き直す)
 import { describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => {
   const store = new Map<string, string>()
@@ -51,7 +52,7 @@ const showing = (seg: CameraSeg): CameraSeg[] =>
 
 describe('同じ時刻を2回映す本編で、片方だけ手で決めたカメラをロックして作り直す', () => {
   for (const which of ['前に並んだ複製', '後ろに並んだ複製'] as const)
-    it(`離れて並んだ2つのうち${which}のカメラを替えても、作り直しで手のカメラが残る`, async () => {
+    it(`離れて並んだ2つのうち${which}のカメラを替えても、作り直しで複製が両方、中身もカメラもそのまま残る`, async () => {
       await episode2()
       const { clip, seg, other } = pickClip()
       const s = useProjectStore.getState()
@@ -62,19 +63,29 @@ describe('同じ時刻を2回映す本編で、片方だけ手で決めたカメ
       expect(project().clips[0].id).toBe(copyId)
       const target = which === '前に並んだ複製' ? copyId : clip.id
       useProjectStore.getState().switchClipAngle(target, other)
-      // 同じ時刻を、手で替えたカメラと組んだ本編のままのカメラの両方で映している
+      // 同じ時刻を、手で替えたカメラと組んだ本編のままのカメラの両方で映している(並びの順)
       const before = showing(seg)
       expect(before.map((x) => x.cameraId).sort()).toEqual([other, seg.cameraId].sort())
+      const headCam = before[0].cameraId
       useProjectStore.getState().addAutoEditLock({ start: seg.start, end: seg.end })
       await usePipelineStore.getState().rebuildRoughCut()
-      const after = showing(seg)
-      // ロックの中身(区間)は保たれ、カメラは手で決めた方
-      expect(len(after)).toBeCloseTo(seg.end - seg.start, 1)
-      expect(after.length).toBeGreaterThan(0)
-      for (const x of after) expect(x.cameraId).toBe(other)
+      // 複製は両方とも残り、並びの順・区間・カメラは前のまま
+      const same = (): void => {
+        const after = showing(seg)
+        expect(after.map((x) => x.cameraId)).toEqual(before.map((x) => x.cameraId))
+        after.forEach((x, k) => {
+          expect(x.start).toBeCloseTo(before[k].start, 3)
+          expect(x.end).toBeCloseTo(before[k].end, 3)
+        })
+        // 頭に置いた複製は頭のまま(ロックの所へ寄せない)
+        const head = coverageOfClips([project().clips[0]], project().multicam!)[0]
+        expect(head.cameraId).toBe(headCam)
+        expect(head.start).toBeCloseTo(seg.start, 3)
+      }
+      same()
       // もう一度作り直しても変わらない
       await usePipelineStore.getState().rebuildRoughCut()
-      for (const x of showing(seg)) expect(x.cameraId).toBe(other)
+      same()
     })
 
   it('続いて並んだ2つ(ロックの窓が本編で続く)なら、2つともそのままのカメラで残る', async () => {
@@ -132,10 +143,10 @@ describe('同じ時刻を2回映す本編の監査', () => {
     })
 
   // S2: ロックの中の複製の片方を「組んだ本編と同じカメラ」へ戻した判断は、今の記録(組んだ本編・
-  // 覚えている手直し)からは「手を付けていない方」と見分けられない(ロックの中は、ロックする前の手のカメラを
-  // 記録に残さない設計)。ロックの中のクリップを複製ごとそのまま差し戻す(監査の 4)と直る
+  // 覚えている手直し)からは「手を付けていない方」と見分けられない。ロックの中のクリップを複製ごとそのまま
+  // 差し戻すので、カメラを選ばずに両方残る
   for (const where of ['頭', '終わり'] as const)
-    it.skip(`S2 ロック: 手で替えて作り直した後、複製(${where})を組んだ本編のカメラへ戻すと、戻した判断が残る`, async () => {
+    it(`S2 ロック: 手で替えて作り直した後、複製(${where})を組んだ本編のカメラへ戻すと、戻した判断が残る`, async () => {
       await episode2()
       const { clip, seg, other } = pickClip()
       useProjectStore.getState().switchClipAngle(clip.id, other)
@@ -152,8 +163,15 @@ describe('同じ時刻を2回映す本編の監査', () => {
         .getState()
         .moveClipToIndex(copyId, where === '頭' ? 0 : project().clips.length - 1)
       useProjectStore.getState().switchClipAngle(copyId, seg.cameraId)
+      const before = showing(seg).map((x) => x.cameraId)
+      expect(before.sort()).toEqual([other, seg.cameraId].sort())
       await usePipelineStore.getState().rebuildRoughCut()
-      expect(showing(seg).map((x) => x.cameraId)).toContain(seg.cameraId)
+      // 戻した判断(組んだ本編のカメラ)も、前に手で替えたカメラも残る
+      expect(
+        showing(seg)
+          .map((x) => x.cameraId)
+          .sort()
+      ).toEqual(before)
     })
 
   it('S3 速さを変えた複製を手で替えてロックしても、手のカメラが残る', async () => {
@@ -167,8 +185,12 @@ describe('同じ時刻を2回映す本編の監査', () => {
     expect(project().clips[0].speed).toBe(2)
     useProjectStore.getState().addAutoEditLock({ start: seg.start, end: seg.end })
     await usePipelineStore.getState().rebuildRoughCut()
+    // 速さを変えた複製(頭)も、そのままの速さ・カメラで頭に残る。元のクリップも残る
+    const head = project().clips[0]
+    expect(head.speed).toBe(2)
+    expect(coverageOfClips([head], project().multicam!)[0].cameraId).toBe(other)
     const after = showing(seg)
-    expect(len(after)).toBeCloseTo(seg.end - seg.start, 1)
-    for (const x of after) expect(x.cameraId).toBe(other)
+    expect(after.map((x) => x.cameraId)).toEqual([other, seg.cameraId])
+    for (const x of after) expect(len([x])).toBeCloseTo(seg.end - seg.start, 1)
   })
 })
