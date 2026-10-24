@@ -1270,6 +1270,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         : keptOverrides
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
+      ...(locks.length > 0 ? { locks } : {}),
       targetSec: get().targetMinutes * 60,
       keep: get().keep,
       styles: usePresetStore.getState().captionPresets,

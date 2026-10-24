@@ -440,6 +440,11 @@ export function planRoughCut(
      * 小さいほど強く詰める)
      */
     pauseScale?: number
+    /**
+     * 自動編集で触らない範囲(ロック。共通の時刻)。発言テロップを読み切れる長さへ延ばすとき、その境を
+     * 越えない(ロックの中は作り直す前のテロップに戻すので、延ばした分だけがロックの外に残らないように)
+     */
+    locks?: readonly { start: number; end: number }[]
   }
 ): RoughCutPlan {
   const kind = options.kind ?? 'location'
@@ -673,10 +678,19 @@ export function planRoughCut(
     if (next.startTime >= (voiceEnds.get(t) ?? Infinity) - 1e-6) t.endTime = next.startTime
   }
   // 短い切れ目をつなぎ、読み切れない枚を延ばす(時間の飛ぶカットの切れ目と、本編の終わりは越えない)
-  const settled = settleTelopTimes(telops, [
-    ...cut.spans.slice(1).map((sp) => sp.timeline),
-    cut.duration
-  ])
+  // ロックの境(区間の切れ目に重なる境は、もう時間の飛ぶカットの切れ目)
+  const fences = (options.locks ?? []).flatMap((l) =>
+    cut.spans.flatMap((sp) =>
+      [l.start, l.end]
+        .filter((e) => e > sp.start + 1e-6 && e < sp.end - 1e-6)
+        .map((e) => sp.timeline + (e - sp.start))
+    )
+  )
+  const settled = settleTelopTimes(
+    telops,
+    [...cut.spans.slice(1).map((sp) => sp.timeline), cut.duration],
+    fences.length > 0 ? { fences } : {}
+  )
   // 声が重なった所は、後から出たテロップを1段上へ
   const stacked = stackSimultaneousTelops(
     settled,

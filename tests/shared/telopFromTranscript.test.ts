@@ -217,6 +217,26 @@ describe('settleTelopTimes — タイムラインに置いたテロップの時�
     expect(c.endTime).toBeCloseTo(1.1, 9)
   })
 
+  it('ロックの境(fences)は延ばしても越えない。カットの切れ目と違い、頭は境へ寄せない', () => {
+    const text = 'どうもありがとうございました' // 14 文字 → 1.4 秒
+    const [a] = settleTelopTimes([t(text, 0, 1.08)], [], { fences: [1.15] })
+    expect(a.endTime).toBeCloseTo(1.15, 9)
+    // 次の枚の頭へつなぐのも、境を越えるならしない
+    const [b] = settleTelopTimes([t(text, 0, 1.4), t('はい', 1.6, 2)], [], { fences: [1.5] })
+    expect(b.endTime).toBe(1.4)
+    // 境の直後に出る枚は、そのまま(境から出さない)
+    const late = settleTelopTimes([t('こんにちは', 8, 9.5), t('どうも', 10.07, 12)], [], {
+      fences: [10]
+    })
+    expect(late.map((x) => [x.startTime, x.endTime])).toEqual([
+      [8, 9.5],
+      [10.07, 12]
+    ])
+    // 境を渡さなければ今までどおり
+    const [c] = settleTelopTimes([t(text, 0, 1.08)], [])
+    expect(c.endTime).toBeCloseTo(1.4, 5)
+  })
+
   it('声が重なって同時に出ているテロップは延ばさない', () => {
     const out = settleTelopTimes([t('ええ', 0, 0.3), t('ほんとに', 0.1, 2)], [])
     expect(out[0].endTime).toBe(0.3)
