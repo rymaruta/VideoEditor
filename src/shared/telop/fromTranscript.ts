@@ -285,10 +285,16 @@ function phraseLineEnds(chars: readonly string[], max: number): number[] {
   const before = balancedLineEnds(chars, max)
   const inside = (ends: readonly number[]): number =>
     ends.slice(0, -1).filter((e) => lineBreakScore(chars, e) < 0).length
+  // 悪さの重み: 語の途中(「科学 / 的」)は付属語の前(「もの / だけ」)より重い。数だけで比べると、どちらも
+  // 1つで同じになり、語の途中の改行が残っていた(試し編集 第3回)
+  const badness = (ends: readonly number[]): number =>
+    ends.slice(0, -1).reduce((t, e) => t - Math.min(0, lineBreakScore(chars, e)), 0)
   const bad = inside(before)
   if (bad === 0) return before
   const after = balancedLineEnds(chars, max, undefined, true)
-  return after.length === before.length && inside(after) < bad ? after : before
+  return after.length === before.length && inside(after) <= bad && badness(after) < badness(before)
+    ? after
+    : before
 }
 
 /** 言いよどみを除き、辞書で直し、表示用に整える */
