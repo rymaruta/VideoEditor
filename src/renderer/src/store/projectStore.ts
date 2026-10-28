@@ -2172,21 +2172,15 @@ export function checkLockedTracks(
 ): { project: Project | null; names: string[] } {
   if (before.mainTrackLocked && !sameJson(before.clips, after.clips))
     return { project: null, names: ['本編'] }
+  // 本編のクリップに紐づくもの(分離した音声・追従するテロップ)は、この書き込みで本編が変わったときだけ
+  // 本編と一緒に動き・消え・切れる(同期を優先する)。本編が変わらない書き込みで紐づいたものだけを
+  // 動かす・紐づきを外すのは断る
+  const mainChanged = !sameJson(before.clips, after.clips)
   const names: string[] = []
-  // 本編のクリップに紐づくもの(分離した音声・追従するテロップ)は、固定していても本編と一緒に
-  // 動き・消え・切れる(同期を優先する)。守るのは紐づかない中身だけ
-  const own = <T extends { linkedClipId?: string }>(xs: readonly T[]): T[] =>
-    xs.filter((x) => !x.linkedClipId)
-  const linked = <T extends { linkedClipId?: string }>(xs: readonly T[]): T[] =>
-    xs.filter((x) => x.linkedClipId)
   let out = after
-  if (before.telopTrackLocked && !sameJson(own(before.textOverlays), own(after.textOverlays))) {
-    out = {
-      ...out,
-      textOverlays: [...own(before.textOverlays), ...linked(after.textOverlays)].sort(
-        (a, b) => a.startTime - b.startTime
-      )
-    }
+  const telops = guardLockedItems(before.textOverlays, after.textOverlays, mainChanged)
+  if (before.telopTrackLocked && telops !== after.textOverlays) {
+    out = { ...out, textOverlays: telops }
     names.push('テロップ')
   }
   for (const t of before.videoOverlayTracks) {
@@ -2207,10 +2201,8 @@ export function checkLockedTracks(
     if (!t.locked) continue
     const now = out.audioTracks.find((x) => x.id === t.id)
     if (!now) return { project: null, names: [t.name] }
-    if (!sameJson(own(t.clips), own(now.clips))) {
-      const clips = [...own(t.clips), ...linked(now.clips)].sort(
-        (a, b) => a.startTime - b.startTime
-      )
+    const clips = guardLockedItems(t.clips, now.clips, mainChanged)
+    if (clips !== now.clips) {
       out = {
         ...out,
         audioTracks: out.audioTracks.map((x) => (x.id === t.id ? { ...x, clips } : x))
@@ -2225,11 +2217,48 @@ export function checkLockedTracks(
       .filter((t) => t.locked && t.clips.some((c) => !assetIds.has(c.assetId)))
       .map((t) => t.name),
     ...before.audioTracks
-      .filter((t) => t.locked && own(t.clips).some((c) => !assetIds.has(c.assetId)))
+      .filter((t) => t.locked && t.clips.some((c) => !c.linkedClipId && !assetIds.has(c.assetId)))
       .map((t) => t.name)
   ]
   if (orphan.length > 0) return { project: null, names: orphan }
   return { project: out, names }
+}
+
+/**
+ * 固定したトラックの並び(テロップ・音声のクリップ)を守る。**前の中身の並びを土台に**組み直す
+ * (時刻順に並べ直すと、重なりの上下が変わって「変わった」ことになっていた)。
+ * - 前に紐づいていなかったもの: 前のまま
+ * - 前に紐づいていたもの: 本編が変わった書き込みなら、後の中身から id で拾う(消えていれば消す)。
+ *   後で紐づきが外れたもの・本編が変わらない書き込みは、前のまま(単独で動かす・外すのは断る)
+ * - 後で新しく現れた紐づくもの(本編の分割で切れた断片): 本編が変わったときだけ、後の並びの直前の物の後ろへ
+ * 守った結果が後の中身と同じなら、後の中身(同じ参照)をそのまま返す(断っていない)
+ */
+function guardLockedItems<T extends { id: string; linkedClipId?: string }>(
+  before: readonly T[],
+  after: readonly T[],
+  mainChanged: boolean
+): T[] {
+  const afterById = new Map(after.map((x) => [x.id, x]))
+  const beforeIds = new Set(before.map((x) => x.id))
+  const result: T[] = []
+  for (const b of before) {
+    if (!b.linkedClipId || !mainChanged) {
+      result.push(b)
+      continue
+    }
+    const a = afterById.get(b.id)
+    if (!a) continue
+    result.push(a.linkedClipId ? a : b)
+  }
+  if (mainChanged) {
+    after.forEach((a, index) => {
+      if (beforeIds.has(a.id) || !a.linkedClipId) return
+      const prevId = index > 0 ? after[index - 1].id : null
+      const at = prevId === null ? -1 : result.findIndex((x) => x.id === prevId)
+      result.splice(at + 1, 0, a)
+    })
+  }
+  return sameJson(result, after) ? (after as T[]) : result
 }
 
 /** 固定しているトラックの名前(作り直しの前の確かめ・押せない理由に使う) */
@@ -8171,6 +8200,20 @@ useProjectStore.subscribe((state, prevState) => {
   if (synced !== state.project) {
     useProjectStore.setState({ project: synced })
   }
+})
+
+// 固定したトラックの選びは外す(固定する操作だけでなく、取り消し・やり直しで固定に戻ったときも)
+useProjectStore.subscribe((state, prevState) => {
+  if (state.project === prevState.project) return
+  const clearMain =
+    state.project.mainTrackLocked &&
+    (state.selectedClipId !== null || state.multiSelectedClipIds.length > 0)
+  const clearTelop = state.project.telopTrackLocked && state.selectedOverlayId !== null
+  if (!clearMain && !clearTelop) return
+  useProjectStore.setState({
+    ...(clearMain ? { selectedClipId: null, multiSelectedClipIds: [] } : {}),
+    ...(clearTelop ? { selectedOverlayId: null } : {})
+  })
 })
 
 export function getTotalDuration(project: Project): number {
