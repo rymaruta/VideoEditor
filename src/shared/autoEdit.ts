@@ -86,6 +86,11 @@ export interface AutoEditDecisions {
    */
   effectsSkipped?: string
   /**
+   * 今の仮編集で場面を選んだときの方針(落とした理由・数を、作った時の方針で出す。作り直す前に設定を
+   * 変えても、文言が今の仮編集とずれないように)
+   */
+  dropBasis?: DropBasis
+  /**
    * 範囲だけ自動編集した所(共通の時刻。新しいものが後ろ)。全体を作り直すと、ここも作り直されることを
    * 作り直す前に知らせる(残したい所はロックする)。全体を作り直したら空にする
    */
@@ -252,6 +257,7 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     ...(sync ? { sync } : {}),
     ...(str(raw.colorDone) ? { colorDone: raw.colorDone } : {}),
     ...(typeof raw.effectsSkipped === 'string' ? { effectsSkipped: raw.effectsSkipped } : {}),
+    ...(normalizeDropBasis(raw.dropBasis) ? { dropBasis: normalizeDropBasis(raw.dropBasis)! } : {}),
     ...(raw.soundDone &&
     typeof raw.soundDone === 'object' &&
     ((raw.soundDone as { state?: unknown }).state === 'done' ||
@@ -266,5 +272,33 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
         }
       : {}),
     ...(rangeRuns.length > 0 ? { rangeRuns } : {})
+  }
+}
+
+/** 仮編集で場面を選んだときの方針(`AutoEditDecisions.dropBasis`) */
+export interface DropBasis {
+  /** 「不要」を落とした */
+  dropUnneeded: boolean
+  /** 長さの目標(秒。0 は目標を使わなかった) */
+  targetSec: number
+  /** 点数の下限で落としたときの下限(下げた後の値)。使わなければ null */
+  minScore: number | null
+  /** 下限を越える場面が無く、下限を下げた */
+  relaxed: boolean
+  /** 見どころが多すぎて、場面を選ぶ判定を点数の判定に置き換えた */
+  replaced: boolean
+}
+
+export function normalizeDropBasis(raw: unknown): DropBasis | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  if (typeof r.dropUnneeded !== 'boolean' || typeof r.targetSec !== 'number') return undefined
+  if (!Number.isFinite(r.targetSec)) return undefined
+  return {
+    dropUnneeded: r.dropUnneeded,
+    targetSec: Math.max(0, r.targetSec),
+    minScore: typeof r.minScore === 'number' && Number.isFinite(r.minScore) ? r.minScore : null,
+    relaxed: r.relaxed === true,
+    replaced: r.replaced === true
   }
 }

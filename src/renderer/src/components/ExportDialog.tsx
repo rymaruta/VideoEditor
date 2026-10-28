@@ -6,6 +6,7 @@ import { useSettingsStore, type ExportLoudness, type VerticalFraming } from '../
 import {
   framesOnFaces,
   prepareVerticalFill,
+  verticalSampleKey,
   verticalSamples,
   type VerticalSample
 } from '../lib/verticalFraming'
@@ -15,6 +16,7 @@ import { formatIpcError } from '../lib/ipcError'
 import { formatTimecode } from '../lib/timelineRuler'
 import { buildTimedClips, findTimedClipAt, totalExportDuration } from '../lib/timelineMath'
 import { prepareTelopLayerForExport } from '../lib/telopRaster'
+import type { EpisodeKind } from '@shared/structure/kind'
 import { currentTimelineRange } from '../lib/timelineRange'
 import { timelineAudioPieces, useWaveLevels } from '../lib/timelineWave'
 import {
@@ -246,29 +248,44 @@ function PreviewThumb({ project, at }: { project: Project; at: number }): React.
  * (顔に寄せる・人が決めた切り抜き・黒帯)。前は見本を真ん中で切っていて、書き出しの絵と違っていた
  */
 const verticalSampleCache = new Map<string, Promise<VerticalSample[]>>()
+/** 覚えておく見本の数の上限(古いものから捨てる) */
+const VERTICAL_SAMPLE_CACHE_MAX = 16
+function rememberVerticalSamples(key: string, p: Promise<VerticalSample[]>): void {
+  verticalSampleCache.set(key, p)
+  while (verticalSampleCache.size > VERTICAL_SAMPLE_CACHE_MAX)
+    verticalSampleCache.delete(verticalSampleCache.keys().next().value!)
+}
 function VerticalSampleThumbs({
   project,
   start,
   end,
-  onFaces
+  fill,
+  findFaces
 }: {
   project: Project
   start: number
   end: number
-  onFaces: boolean
+  fill: boolean
+  findFaces: boolean
 }): React.JSX.Element {
   const times = useMemo(() => {
     const len = Math.max(0, end - start)
     return [start, start + len * 0.5, start + len * 0.9].map((t) => Math.min(t, end - 1e-3))
   }, [start, end])
-  const key = `${onFaces}|${times.map((t) => t.toFixed(1)).join(',')}|${project.clips.length}`
+  // 鍵には企画と、見本の時刻に掛かるクリップの中身(素材・区間・速さ・見え方)を入れる(別の企画・直した
+  // クリップで前の見本を出さない)
+  const key = verticalSampleKey(project, times, fill, findFaces)
   const [shown, setShown] = useState<{ key: string; list: (VerticalSample & { url: string })[] }>()
   useEffect(() => {
     let alive = true
     let p = verticalSampleCache.get(key)
     if (!p) {
-      p = verticalSamples(project, times, onFaces)
+      p = verticalSamples(project, times, fill, findFaces)
       p.catch(() => verticalSampleCache.delete(key))
+      rememberVerticalSamples(key, p)
+    } else {
+      // 使ったものは新しい方へ(古いものから捨てる)
+      verticalSampleCache.delete(key)
       verticalSampleCache.set(key, p)
     }
     p.then(async (samples) => {
@@ -322,7 +339,8 @@ function ExportPreview({
   end,
   audioOnly,
   vertical,
-  onFaces,
+  fill,
+  findFaces,
   fps
 }: {
   project: Project
@@ -331,8 +349,10 @@ function ExportPreview({
   audioOnly: boolean
   /** 縦(9:16)で書き出す: 見本も縦に切り出して見せる */
   vertical: boolean
-  /** 縦の書き出しで顔に寄せて切り出す(見本も書き出しと同じ切り出しで見せる) */
-  onFaces: boolean
+  /** 縦の書き出しで枠を埋めて切り出す(見本も書き出しと同じ切り出しで見せる) */
+  fill: boolean
+  /** 顔を探して寄せる(ゲーム実況は真ん中) */
+  findFaces: boolean
   fps: number
 }): React.JSX.Element {
   const pieces = useMemo(() => timelineAudioPieces(project, start, end), [project, start, end])
@@ -344,7 +364,13 @@ function ExportPreview({
       >
         {!audioOnly &&
           (vertical ? (
-            <VerticalSampleThumbs project={project} start={start} end={end} onFaces={onFaces} />
+            <VerticalSampleThumbs
+              project={project}
+              start={start}
+              end={end}
+              fill={fill}
+              findFaces={findFaces}
+            />
           ) : (
             <PreviewThumb project={project} at={start} />
           ))}
@@ -477,6 +503,10 @@ export function ExportDialog(): React.JSX.Element | null {
   const engine = useSettingsStore((s) => s.exportEngine)
   const verticalFraming = useSettingsStore((s) => s.verticalFraming)
   const setVerticalFraming = useSettingsStore((s) => s.setVerticalFraming)
+  const sceneKind = usePipelineStore((s) => s.sceneKind)
+  const episodeKind = useSettingsStore((s) => s.episodeKind)
+  /** 企画に番組の種類が無い(古い企画)ときの種類(自動のショートと同じ決め方) */
+  const kindFallback = (): EpisodeKind => sceneKind ?? episodeKind
   const setEngine = useSettingsStore((s) => s.setExportEngine)
   const openFolderAfter = useSettingsStore((s) => s.exportOpenFolderAfter)
   const setOpenFolderAfter = useSettingsStore((s) => s.setExportOpenFolderAfter)
@@ -688,17 +718,14 @@ export function ExportDialog(): React.JSX.Element | null {
     setProgress({ percent: 0, stage: '準備中' })
     // 縦(9:16)で書き出すときは、既定で横長の絵を人物に寄せて縦いっぱいに切り出す(書き出し用の写しだけ。
     // 企画のクリップは変えない)。設定で「上下に黒帯」を選べば、今までどおり縮めて収める
-    // ゲーム実況(企画の種類)はゲーム画面なので顔に寄せない(今までどおり)。顔探しは素材ごとの代表の画だけで、
-    // 進み具合を出し、中止も効く
+    // ゲーム実況(企画の種類)はゲーム画面なので顔は探さず、真ん中で埋める(今までどおり)。顔探しは素材ごとの
+    // 代表の画だけで、進み具合を出し、中止も効く
     let source = project
-    if (
-      job.aspectRatio === '9:16' &&
-      job.format !== 'wav' &&
-      verticalFraming === 'fill' &&
-      framesOnFaces(project)
-    ) {
-      setProgress({ percent: 0, stage: '人物の位置を探しています' })
+    if (job.aspectRatio === '9:16' && job.format !== 'wav' && verticalFraming === 'fill') {
+      const findFaces = framesOnFaces(project, kindFallback())
+      setProgress({ percent: 0, stage: findFaces ? '人物の位置を探しています' : '準備中' })
       const fill = await prepareVerticalFill(project, {
+        findFaces,
         ...(job.range ? { range: job.range } : {}),
         signal: abortRef.current?.signal,
         onProgress: (done, total) =>
@@ -1368,7 +1395,9 @@ export function ExportDialog(): React.JSX.Element | null {
                           title="横長の素材を縦で書き出すときの収め方。人がクリップに決めた切り抜きはそのまま使います"
                           onChange={(e) => setVerticalFraming(e.target.value as VerticalFraming)}
                         >
-                          <option value="fill">人物に寄せて切り出す(画面いっぱい)</option>
+                          <option value="fill">
+                            画面いっぱいに切り出す(人物に寄せる。ゲーム実況は真ん中)
+                          </option>
                           <option value="letterbox">横の絵をそのまま(上下に黒帯)</option>
                         </Select>
                       </FieldRow>
@@ -1611,7 +1640,8 @@ export function ExportDialog(): React.JSX.Element | null {
                   end={span.end}
                   audioOnly={format === 'wav'}
                   vertical={project.aspectRatio === '9:16'}
-                  onFaces={verticalFraming === 'fill' && framesOnFaces(project)}
+                  fill={verticalFraming === 'fill'}
+                  findFaces={framesOnFaces(project, kindFallback())}
                   fps={fps}
                 />
               )}

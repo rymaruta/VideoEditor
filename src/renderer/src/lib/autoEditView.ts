@@ -4,6 +4,7 @@
  */
 import type { Project } from '@shared/types'
 import { POLICY_PROFILES, type EditPolicy } from '@shared/structure/kind'
+import type { DropBasis } from '@shared/autoEdit'
 import {
   describeCues,
   indistinctJudgements,
@@ -353,5 +354,19 @@ export function dropPolicyOf(policyName: EditPolicy, targetMinutes: number): Dro
     dropUnneeded: p.dropUnneeded,
     targetSec,
     minScore: targetSec > 0 ? -Infinity : p.minScoreWithoutTarget
+  }
+}
+
+/** 仮編集を作った時の方針(`AutoEditDecisions.dropBasis`)から。記録が無い(古い企画)ときは今の設定から */
+export function dropPolicyFor(
+  basis: DropBasis | undefined,
+  policyName: EditPolicy,
+  targetMinutes: number
+): DropPolicy {
+  if (!basis) return dropPolicyOf(policyName, targetMinutes)
+  return {
+    dropUnneeded: basis.dropUnneeded,
+    targetSec: basis.targetSec,
+    minScore: basis.minScore ?? -Infinity
   }
 }

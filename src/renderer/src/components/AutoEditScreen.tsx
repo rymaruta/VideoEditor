@@ -43,7 +43,7 @@ import {
 import {
   commonSpan,
   droppedSceneReason,
-  dropPolicyOf,
+  dropPolicyFor,
   formatDuration,
   overallProgress,
   sceneChips,
@@ -1227,7 +1227,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                                   j,
                                   judgements,
                                   keep[sc.id] === false,
-                                  dropPolicyOf(editPolicy, targetMinutes)
+                                  dropPolicyFor(roughCut.basis, editPolicy, targetMinutes)
                                 )}
                               </span>
                             )}

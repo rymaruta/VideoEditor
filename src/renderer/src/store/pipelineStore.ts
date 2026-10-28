@@ -1,6 +1,6 @@
 import { speechLook } from '@shared/telop/styles'
 import type { HypeMoment } from '@shared/structure/hype'
-import type { EpisodeKind } from '@shared/structure/kind'
+import { POLICY_PROFILES, type EditPolicy, type EpisodeKind } from '@shared/structure/kind'
 import type { ShortOptions } from '@shared/structure/shorts'
 import { buildShortProject, shortWindowsFor } from '../lib/gameShorts'
 import { prepareTelopLayerForExport } from '../lib/telopRaster'
@@ -87,6 +87,7 @@ import {
   RANGE_RUNS_MAX,
   cutSignature,
   type AutoEditDecisions,
+  type DropBasis,
   type RangeRun,
   type SyncSummary
 } from '@shared/autoEdit'
@@ -118,7 +119,7 @@ import {
   type RangedVariantsResult
 } from '../lib/rangedAutoEdit'
 import { heuristicJudgements, indistinctJudgements } from '@shared/structure/scenes'
-import { prepareVerticalFill } from '../lib/verticalFraming'
+import { framesOnFaces, prepareVerticalFill } from '../lib/verticalFraming'
 import {
   AI_EFFECT_KINDS,
   AUTO_PLACE_CONFIDENCE,
@@ -153,6 +154,7 @@ import {
   hallucinatedIndices,
   isLikelyHallucination,
   joinSplitNumbers,
+  singleSpeaker,
   SPLIT_NUMBER_GAP_SEC,
   SPLIT_NUMBER_GAP_SINGLE_MIC_SEC,
   type AsrDevice,
@@ -300,6 +302,8 @@ interface PipelineState {
     duration: number
     shots: number
     telops: number
+    /** 場面を選んだときの方針(落とした理由・数の文言に使う。古い企画では無い) */
+    basis?: DropBasis
   } | null
   setTargetMinutes: (minutes: number) => void
   setEditNote: (note: string) => void
@@ -807,10 +811,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       })
     }
     // 数字と単位(「約4」「%弱…」)の間で分かれた発話はつなぐ
-    // マイク1本(話者を分けられない)の回は、別の人の発言をつながないよう、短い間だけ
+    // 話者が1人しかいない(マイク1本などで話者を分けられない)回は、別の人の発言をつながないよう、短い間だけ。
+    // 話者分けが効いている回は、同じ話者どうしだけをつなぐので今までの間のまま
     const joined = joinSplitNumbers(
       utterances,
-      mics.length <= 1 ? SPLIT_NUMBER_GAP_SINGLE_MIC_SEC : SPLIT_NUMBER_GAP_SEC
+      singleSpeaker(utterances) ? SPLIT_NUMBER_GAP_SINGLE_MIC_SEC : SPLIT_NUMBER_GAP_SEC
     )
     useProjectStore.getState().setTranscript(joined)
     setStep('transcribe', {
@@ -1133,6 +1138,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       targetMinutes: s.targetMinutes,
       editNote: s.editNote,
       ...(s.roughCut ? { keptIds: s.roughCut.keptIds } : {}),
+      ...(s.roughCut?.basis ? { dropBasis: s.roughCut.basis } : {}),
       ...(s.builtKept.length > 0 ? { builtKept: s.builtKept } : {}),
       ...(s.keepTouched.length > 0 ? { keepTouched: s.keepTouched } : {}),
       ...(s.restored?.legacy ? { legacyPending: true } : {}),
@@ -1632,7 +1638,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         dropped: plan.selection.dropped.length,
         duration: plan.cut.duration,
         shots: switches,
-        telops: telops.length
+        telops: telops.length,
+        basis: dropBasisOf(plan, get().targetMinutes * 60, useSettingsStore.getState().editPolicy)
       },
       // この回の残した場面を、組んだ本編の印と一緒に覚える(次の作り直しで、残す/落とすの変化を見る)
       builtKept: builtKeptWith(
@@ -1886,10 +1893,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               note: `${i + 1}/${windows.length} 本目を書き出し中`
             }
           })
-          // 企画の種類(企画に覚えたもの)で決める。設定の番組の種類は、別の回を作るときに替わる
+          // 企画の種類(企画に覚えたもの → 自動編集の画面 → 設定。書き出しと同じ決め方)で決める
           const onFaces =
             settings.verticalFraming === 'fill' &&
-            (project.autoEdit?.kind ?? get().sceneKind ?? settings.episodeKind) !== 'game'
+            framesOnFaces(project, get().sceneKind ?? settings.episodeKind)
           let short = buildShortProject(
             {
               project,
@@ -3670,4 +3677,20 @@ function trackParentSource(s: EditableSource, all: readonly EditableSource[]): s
   const parent = s.files.find((f) => f.track)?.track?.parentPath
   if (!parent) return undefined
   return all.find((x) => x.files.some((f) => f.path === parent))?.id
+}
+
+/** 仮編集で場面を選んだときの方針(`autoSelection` と同じ決め方。落とした理由・数の文言に使う) */
+function dropBasisOf(
+  plan: { selection: { relaxed?: boolean; minScore?: number }; demoted?: unknown },
+  targetSec: number,
+  policyName: EditPolicy
+): DropBasis {
+  const p = POLICY_PROFILES[policyName] ?? POLICY_PROFILES.tempo
+  return {
+    dropUnneeded: p.dropUnneeded,
+    targetSec: p.useTarget ? Math.max(0, targetSec) : 0,
+    minScore: plan.selection.minScore ?? null,
+    relaxed: Boolean(plan.selection.relaxed),
+    replaced: Boolean(plan.demoted)
+  }
 }

@@ -151,13 +151,28 @@ export function breakScore(chars: readonly string[], k: number): number {
 }
 
 /** 文の終わりらしい形(句点の無い話し言葉の文末) */
+/**
+ * 文の終わりと確実に言える形(丁寧の「ます・です」の文末)。「った・ない・んだ」は「行ったら」「ないし」
+ * 「なんだろう」の途中にもなるので入れない(入れると「雨が降った / ら」と切っていた)
+ */
 const SENTENCE_END =
-  /(?:ます|です|ました|でした|ません|ませんでした|ましょう|でしょう|ください|ですね|ますね|ですよ|ますよ|ですか|ますか|よね|った|んだ|んです|のだ|うだ|ない|ありがとう|ございます)$/u
+  /(?:ます|ました|ません|ませんでした|ましょう|です|でした|でしょう|ください|ございます|ございました|ですね|ますね|ですよ|ますよ|ですか|ますか)$/u
+/** 文の終わりの形の直後でも、これで始まれば言葉の続き(「ですか / ら」「ます / けど」「でした / し」) */
+const CONTINUES_AFTER_END =
+  /^(?:[らろしけじがねよなかわさぞとのでもへにをはっゃゅょー]|まま|まで|けど|から|ので|のに|って)/u
 
-/** chars[k] の手前が、文の終わりらしい形で終わっているか */
+/**
+ * 前にくっつく仮名で始まっても、それだけで立つ言葉(副詞・「なる」・言い直しの「ですね」)。助詞の後ろなら
+ * ここで改行してよい(「明細に / なります」「営業的には / だいぶ」)
+ */
+const FREE_HEAD =
+  /^(?:です[ねよ]|な[りっるれろら]|だいぶ|だんだん|たくさん|たぶん|たとえば|ただ|なかなか|なるべく|なんか|なんとか|なぜ|かなり|もう|もっと|まだ|まず|まあ|やはり|やっぱり|よく)/u
+
+/** chars[k] の手前が、文の終わりらしい形で終わっているか(次の字が言葉の続きなら終わりではない) */
 function endsSentence(chars: readonly string[], k: number): boolean {
   const tail = chars.slice(Math.max(0, k - 6), k).join('')
-  return SENTENCE_END.test(tail)
+  if (!SENTENCE_END.test(tail)) return false
+  return !CONTINUES_AFTER_END.test(chars.slice(k, k + 3).join(''))
 }
 
 /**
@@ -185,6 +200,10 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
     (HIRAGANA.test(next) || KANJI.test(next)) &&
     !ATTACHES.test(next) &&
     !(prev === 'で' && next === 'す') &&
+    // 「もう」「はず」など、助詞の字で始まる言葉の途中ではない
+    !/^(?:もう|もっ|もち|もの|はず|はっ|はじ|がん|でき|とて|とに|とり|との)/u.test(
+      chars.slice(k - 1, k + 1).join('')
+    ) &&
     wordBoundaries(chars)?.has(k - 1) === true
   )
     base = 2
@@ -198,7 +217,9 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
       (ATTACHES.test(next) || /[しすさせ]/u.test(next))
     )
       return Math.min(base, INSIDE_WORD_SCORE)
-    if (HIRAGANA.test(prev) && (!PHRASE_END.test(prev) || ATTACHES.test(next)))
+    // 「…て / ですね」の「ですね」は前にくっつかない(言い直しの間の決まり文句)
+    const filler = FREE_HEAD.test(chars.slice(k, k + 4).join(''))
+    if (HIRAGANA.test(prev) && (!PHRASE_END.test(prev) || (ATTACHES.test(next) && !filler)))
       return Math.min(base, INSIDE_WORD_SCORE)
   }
   // 「お」「ご」+漢字(「お聞かせ」「ご案内」)の間

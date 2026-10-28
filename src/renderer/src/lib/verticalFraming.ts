@@ -8,6 +8,7 @@ import {
 import { liftAboveShortsUi } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
 import type { Clip, MediaAsset, Project, TextOverlay } from '@shared/types'
+import type { EpisodeKind } from '@shared/structure/kind'
 
 /**
  * 横長の録画を縦(9:16)で書き出すときの、絵の切り出し(ショート・リール)。
@@ -247,28 +248,46 @@ export interface FacePlan {
  */
 export function planFaceFrames(project: Project, options: VerticalFillOptions = {}): FacePlan {
   const assets = new Map(project.assets.map((a) => [a.id, a]))
-  const byAsset = new Map<string, { id: string; mid: number }[]>()
+  const byAsset = new Map<string, { id: string; mid: number; len: number }[]>()
   for (const { clip } of clipsInRange(project.clips, options.range)) {
     const asset = assets.get(clip.assetId)
     if (!fillsVertical(clip, asset, ASPECT, options.refineAutoFill) || clip.cropCenter) continue
     const list = byAsset.get(clip.assetId) ?? []
-    list.push({ id: clip.id, mid: (clip.inPoint + clip.outPoint) / 2 })
+    list.push({
+      id: clip.id,
+      mid: (clip.inPoint + clip.outPoint) / 2,
+      len: (clip.outPoint - clip.inPoint) / (clip.speed || 1)
+    })
     byAsset.set(clip.assetId, list)
   }
   const requests: FacePlan['requests'] = []
   const perClip = new Map<string, number[]>()
+  // 全体の上限を必ず守る。素材が多ければ素材ごとに1枚、それでも上限を超えれば、本編で長く使う素材から
+  // (下限を素材ごとに守ると、60 素材で 120 枚になっていた)。探さない素材のクリップは真ん中で埋める
+  const usedLength = (list: { len: number }[]): number => list.reduce((t, x) => t + x.len, 0)
+  const assetsByUse = [...byAsset.entries()]
+    .sort((a, b) => usedLength(b[1]) - usedLength(a[1]))
+    .slice(0, MAX_FACE_FRAMES)
   const perAsset = Math.max(
-    MIN_PER_ASSET,
-    Math.min(MAX_PER_ASSET, Math.floor(MAX_FACE_FRAMES / Math.max(1, byAsset.size)))
+    1,
+    Math.min(
+      MAX_PER_ASSET,
+      Math.floor(MAX_FACE_FRAMES / Math.max(1, assetsByUse.length)),
+      assetsByUse.length * MIN_PER_ASSET <= MAX_FACE_FRAMES ? Infinity : 1
+    )
   )
-  for (const [assetId, list] of byAsset) {
+  for (const [assetId, list] of assetsByUse) {
     const asset = assets.get(assetId)!
     const mids = list.map((x) => x.mid).sort((a, b) => a - b)
     const span = mids[mids.length - 1] - mids[0]
     const gap = Math.max(MIN_SAMPLE_GAP_SEC, span / Math.max(1, perAsset - 1))
     const times: number[] = []
-    for (const m of mids)
-      if (times.length === 0 || m - times[times.length - 1] >= gap) times.push(m)
+    if (perAsset === 1) times.push(mids[Math.floor(mids.length / 2)])
+    else
+      for (const m of mids)
+        if (times.length === 0 || m - times[times.length - 1] >= gap) times.push(m)
+    // 間隔で選んでも、素材ごとの枚数は超えない
+    times.splice(perAsset)
     const base = requests.length
     for (const time of times)
       requests.push({ path: asset.filePath, time, width: asset.width, height: asset.height })
@@ -320,8 +339,11 @@ export async function prepareVerticalFill(
   options: VerticalFillOptions & {
     signal?: AbortSignal
     onProgress?: (done: number, total: number) => void
+    /** 顔を探して寄せる(false はゲーム実況: 顔は探さず真ん中で埋める) */
+    findFaces?: boolean
   } = {}
 ): Promise<VerticalFillResult> {
+  if (options.findFaces === false) return applyVerticalFill(project, new Map(), options)
   const plan = planFaceFrames(project, options)
   const found = await detectFaceFrames(plan.requests, options)
   const faces = new Map<string, FaceSample[]>()
@@ -333,9 +355,13 @@ export async function prepareVerticalFill(
   return applyVerticalFill(project, faces, options)
 }
 
-/** 縦の書き出しで、顔に寄せて切り出すか(ゲーム実況はゲーム画面の真ん中のまま) */
-export function framesOnFaces(project: Project): boolean {
-  return project.autoEdit?.kind !== 'game'
+/**
+ * 縦の書き出しで、顔を探して寄せるか。ゲーム実況はゲーム画面なので顔は探さず、真ん中で埋める(今までどおり)。
+ * `fallbackKind` は企画に種類が無いとき(古い企画)の種類。自動編集の画面の種類 → 設定の順で渡す
+ * (書き出しと自動のショートで同じ決め方)
+ */
+export function framesOnFaces(project: Project, fallbackKind?: EpisodeKind | null): boolean {
+  return (project.autoEdit?.kind ?? fallbackKind) !== 'game'
 }
 
 /** 書き出し画面の、縦の画の見本の1コマ */
@@ -359,7 +385,10 @@ export interface VerticalSample {
 export async function verticalSamples(
   project: Project,
   times: readonly number[],
-  onFaces: boolean,
+  /** 枠を埋めて切り出す設定(false は黒帯) */
+  fill: boolean,
+  /** 顔を探して寄せる(false はゲーム実況: 真ん中) */
+  findFaces = true,
   signal?: AbortSignal
 ): Promise<VerticalSample[]> {
   const assets = new Map(project.assets.map((a) => [a.id, a]))
@@ -370,11 +399,11 @@ export async function verticalSamples(
   const wanted = picks.map(({ at, p }) => {
     const asset = assets.get(p.clip.assetId)
     const time = asset?.still ? 0 : p.clip.inPoint + (at - p.start) * (p.clip.speed || 1)
-    const auto = onFaces && fillsVertical(p.clip, asset, ASPECT)
+    const auto = fill && fillsVertical(p.clip, asset, ASPECT)
     return { at, p, asset, time, auto }
   })
   const requests = wanted
-    .filter((w) => w.auto && !w.p.clip.cropCenter)
+    .filter((w) => findFaces && w.auto && !w.p.clip.cropCenter)
     .map((w) => ({
       path: w.asset!.filePath,
       time: w.time,
@@ -388,7 +417,7 @@ export async function verticalSamples(
     .map((w) => {
       const asset = w.asset!
       let center = w.p.clip.cropCenter ?? { x: 0.5, y: 0.5 }
-      if (w.auto && !w.p.clip.cropCenter)
+      if (findFaces && w.auto && !w.p.clip.cropCenter)
         center = framingCenter([found[k++] ?? null], windowFraction(asset, ASPECT)) ?? center
       return {
         at: w.at,
@@ -400,4 +429,41 @@ export async function verticalSamples(
         center
       }
     })
+}
+
+/**
+ * 書き出し画面の見本の覚え方の鍵。企画・設定と、見本の時刻に掛かるクリップの中身(素材・区間・速さ・
+ * 見え方)の指紋(企画の中身が変われば別の鍵)
+ */
+export function verticalSampleKey(
+  project: Project,
+  times: readonly number[],
+  fill: boolean,
+  findFaces: boolean
+): string {
+  const placed = clipsInRange(project.clips)
+  const parts = times.map((t) => {
+    const p = placed.find((x) => t >= x.start && t < x.end)
+    if (!p) return `${t.toFixed(2)}:-`
+    const c = p.clip
+    return [
+      t.toFixed(2),
+      p.start.toFixed(3),
+      c.id,
+      c.assetId,
+      c.inPoint,
+      c.outPoint,
+      c.speed ?? 1,
+      c.fillCrop ?? '',
+      c.cropCenter ? `${c.cropCenter.x},${c.cropCenter.y}` : '',
+      c.blurBackground ?? ''
+    ].join(':')
+  })
+  let h = 0x811c9dc5
+  const text = parts.join('|')
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return `${project.id}|${fill}|${findFaces}|${h.toString(16)}`
 }
