@@ -18,7 +18,7 @@ import {
   type FaceSample
 } from '@renderer/lib/verticalFraming'
 import type { FaceBox } from '@shared/telop/avoidFaces'
-import { telopBlockHeight } from '@shared/telop/stack'
+import { stackSimultaneousTelops, telopBlockHeight } from '@shared/telop/stack'
 import { stackTopHeight } from '@shared/videoFrame'
 import { defaultTextStyle, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import type { Project, TextOverlay } from '@shared/types'
@@ -169,3 +169,38 @@ describe('上下2段のショートの発言テロップは継ぎ目に置き、
 function telopsStyle(): TextOverlay['style'] {
   return telops()[0].style
 }
+
+describe('上下2段で同じ時間に出る2人のテロップ(第4回の直しの監査の指摘 5)', () => {
+  // 掛け合いで声が重なり、組み立てが段に積んだ2枚(後の発言が1段上の自由配置)
+  const pairProject = (): Project => {
+    const base = telops().slice(0, 2)
+    const a = { ...base[0], startTime: 2, endTime: 5 }
+    const b = { ...base[1], startTime: 3, endTime: 6 }
+    const stacked = stackSimultaneousTelops([a, b], CANVAS.h)
+    expect(stacked[1].style.customPosition).toBeDefined()
+    return { ...project(), textOverlays: stacked }
+  }
+
+  it('継ぎ目の上下に並べる(先の発言が上・後の発言が下)。重ならない', () => {
+    const r = applyVerticalFill(
+      pairProject(),
+      new Map([['c1', samplesFor([face(0.15), face(0.75)])]])
+    )
+    const [first, second] = r.project.textOverlays.map(span)
+    expect(first.bottom).toBeLessThanOrEqual(SEAM)
+    expect(second.top).toBeGreaterThanOrEqual(SEAM)
+    expect(first.bottom).toBeGreaterThan(SEAM - 0.05)
+    expect(second.top).toBeLessThan(SEAM + 0.05)
+  })
+
+  it('手で置いた枚は、同じ時間に出ていても動かさない', () => {
+    const p = pairProject()
+    const manual = {
+      ...p.textOverlays[1],
+      style: { ...p.textOverlays[1].style, customPosition: { x: 0.5, y: 0.3 } }
+    }
+    const q = { ...p, textOverlays: [p.textOverlays[0], manual] }
+    const r = applyVerticalFill(q, new Map([['c1', samplesFor([face(0.15), face(0.75)])]]))
+    expect(r.project.textOverlays[1].style.customPosition).toEqual({ x: 0.5, y: 0.3 })
+  })
+})
