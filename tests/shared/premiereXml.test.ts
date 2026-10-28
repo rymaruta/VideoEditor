@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { spawnSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, win32 } from 'path'
 import { DOMParser } from '@xmldom/xmldom'
 import type { MediaAsset, Project } from '@shared/types'
 import { defaultTextStyle } from '@shared/textStyle'
@@ -811,6 +811,7 @@ describe('素材のパスの符号化', () => {
     for (const path of [
       '/Users/山田/Movies/ロケ #1/100% 完成?.mov',
       'C:/収録/カメラB #2/100%.MP4',
+      '//nas/共有/a b.mov',
       '/home/u/a&b;c=d+e(1).mp4'
     ]) {
       const v2: ProjectV2 = {
@@ -894,6 +895,30 @@ describe('見た目どおりのテロップ(透過の画像・動画)', () => {
     expect(top[2].path).toBe('/out/x_テロップ/telop_000001.png')
     expect((xml.match(/<file id="file-\d+">/g) ?? []).length).toBe(
       new Set(xml.match(/<file id="file-\d+"/g)).size
+    )
+  })
+
+  it('Windows のパス(\\ 区切り)の PNG も、Premiere が読む pathurl(C%3a・/ 区切り)で書き、読み戻すと C:/…', () => {
+    // Windows の CI の一時フォルダと同じ形(path.win32 で組み立て、Linux でも Windows の場合を確かめる)
+    const dir = win32.join('C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\ve-premiere-x', 'png_telop')
+    const png = win32.join(dir, 'telop_000001.png')
+    expect(png).toBe(
+      'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\ve-premiere-x\\png_telop\\telop_000001.png'
+    )
+    const { xml } = buildPremiereXml(projectV1ToV2(sampleProject()), {
+      telopMedia: {
+        width: 1920,
+        height: 1080,
+        clips: [{ path: png, startFrame: 0, durationFrames: 10, still: true }]
+      }
+    })
+    expect(xml).toContain(
+      '<pathurl>file://localhost/C%3a/Users/RUNNER~1/AppData/Local/Temp/ve-premiere-x/png_telop/telop_000001.png</pathurl>'
+    )
+    expect(xml).not.toContain('%5C')
+    const seq = parse(xml)
+    expect(seq.video[seq.video.length - 1][0].path).toBe(
+      'C:/Users/RUNNER~1/AppData/Local/Temp/ve-premiere-x/png_telop/telop_000001.png'
     )
   })
 
