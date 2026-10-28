@@ -4,7 +4,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useQcStore } from '../store/qcStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { POLICY_PROFILES } from '@shared/structure/kind'
-import { dropPolicyOf } from './autoEditView'
+import { dropPolicyFor } from './autoEditView'
 import {
   buildReviewItems,
   structureIndistinctOf,
@@ -72,6 +72,7 @@ export function useReviewItems(): ReviewLists {
   const qc = useQcStore((s) => s.report)
   const judgements = usePipelineStore((s) => s.judgements)
   const keptIds = usePipelineStore((s) => s.roughCut?.keptIds)
+  const basis = usePipelineStore((s) => s.roughCut?.basis)
   const keep = usePipelineStore((s) => s.keep)
   const judgeSource = usePipelineStore((s) => s.judgeSource)
   const planJudgements = usePipelineStore((s) => s.planJudgements)
@@ -99,7 +100,8 @@ export function useReviewItems(): ReviewLists {
       judgeSource,
       planJudgements,
       targetMinutes,
-      policyName
+      policyName,
+      basis
     ]
     return sharedLists(deps, () => {
       const sourceOf = new Map(syncedFiles.map((f) => [f.id, f.sourceId]))
@@ -124,7 +126,7 @@ export function useReviewItems(): ReviewLists {
           planJudgements,
           keptIds,
           keep,
-          dropPolicyOf(policyName, targetMinutes),
+          dropPolicyFor(basis, policyName, targetMinutes),
           judgeSource
         )
       })
@@ -152,6 +154,7 @@ export function useReviewItems(): ReviewLists {
     judgeSource,
     planJudgements,
     targetMinutes,
-    policyName
+    policyName,
+    basis
   ])
 }

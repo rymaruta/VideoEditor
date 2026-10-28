@@ -238,7 +238,8 @@ export function restorePipelineFromProject(
             0
           ),
           shots: project.clips.length,
-          telops: speechTelops
+          telops: speechTelops,
+          ...(saved?.dropBasis ? { basis: saved.dropBasis } : {})
         }
       : null
 

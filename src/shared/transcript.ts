@@ -183,11 +183,12 @@ export interface TranscriptUtterance {
  */
 const UNIT_HEAD = /^[、,\s]*(?:[%％‰円割倍万億兆歳個件]|パーセント)/u
 /**
- * 単位の字で始まっても、言葉の続き(単位ではない)もの。「答えは3」+「個人的には」を「3個人的には」、
+ * 単位の字で始まっても、言葉の続き(単位ではない)もの(慣用だけ。「割に」「割高」「割引」「個別」は数字の後なら
+ * 単位として続ける: 「約3割に達しました」「5割引き」)。「答えは3」+「個人的には」を「3個人的には」、
  * 「今年で10」+「割と忙しい」を「10割と忙しい」とつないでいた
  */
 const NOT_UNIT_HEAD =
-  /^[、,\s]*(?:個人|個性|個別|個々|割と|割に|割り|割合|割引|割高|割安|万が一|万一|万全|万能|万歳|円滑|円満|円形|億劫|歳月|件名|倍増し)/u
+  /^[、,\s]*(?:個人|個性|個々|割と|割に合|割り切|割合|万が一|万一|万全|万能|万歳|円滑|円満|円形|億劫|歳月|件名)/u
 /** 数字で終わる(後ろの句読点・空白は除く) */
 const DIGIT_TAIL = /[0-9０-９][\s、,]*$/u
 /** 数字と単位を分けた発話をつなぐ、前の発話の終わりから次の頭までの間の上限(秒) */
@@ -203,6 +204,11 @@ export const SPLIT_NUMBER_GAP_SINGLE_MIC_SEC = 0.6
  * 少し間を置いて「%弱ぐらいの賃上げを」と続けると別の発話になり、文字起こしの文・発言テロップが「約4」だけで
  * 1秒出ていた(試し編集 第2回)。同じ素材・同じ話者で、間が `SPLIT_NUMBER_GAP_SEC` 以内のものだけ
  */
+/** 全部の発話が同じ話者(話者が分かれていない) */
+export function singleSpeaker(list: readonly Pick<TranscriptUtterance, 'speaker'>[]): boolean {
+  return new Set(list.map((u) => u.speaker ?? '')).size <= 1
+}
+
 export function joinSplitNumbers(
   list: readonly TranscriptUtterance[],
   /** 間の上限(秒)。マイク1本の回は `SPLIT_NUMBER_GAP_SINGLE_MIC_SEC` */

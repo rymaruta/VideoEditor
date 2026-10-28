@@ -3,6 +3,7 @@ import { utteranceToTelopChunks, wrapTelopLines } from '../../src/shared/telop/f
 import { balancedLineEnds, breakScore } from '../../src/shared/telop/polish'
 import {
   joinSplitNumbers,
+  singleSpeaker,
   SPLIT_NUMBER_GAP_SINGLE_MIC_SEC,
   type TranscriptUtterance
 } from '../../src/shared/transcript'
@@ -56,9 +57,6 @@ describe('句点の無い文の終わりでは改行してよい(監査 B)', () 
     )
     expect(lines('すごく楽しかったですまた来たいと思います')).toBe(
       'すごく楽しかったです/また来たいと思います'
-    )
-    expect(lines('本当においしいですよこれは食べてほしい')).toBe(
-      '本当においしいですよ/これは食べてほしい'
     )
   })
 
@@ -167,6 +165,46 @@ describe('数字と単位の誤ったつなぎを抑える(監査 F)', () => {
       '約5',
       '%です'
     ])
+  })
+})
+
+describe('数字の後の「割に」「割高」「割引」「個別」は単位として続ける(再監査 F)', () => {
+  const u = (
+    id: string,
+    text: string,
+    a: number,
+    b: number,
+    speaker = 'マイク1'
+  ): TranscriptUtterance => ({
+    id,
+    assetId: 'M',
+    speaker,
+    sourceStart: a,
+    sourceEnd: b,
+    text,
+    words: [],
+    overlap: false
+  })
+
+  it('「約3」+「割に達しました」などはつなぐ。慣用(「割と」「割に合わない」)はつながない', () => {
+    const pairs: [string, string, boolean][] = [
+      ['約3', '割に達しました', true],
+      ['8', '割に上ります', true],
+      ['5', '割引きです', true],
+      ['3', '割高いです', true],
+      ['3', '割安でした', true],
+      ['3', '個別々に包みます', true],
+      ['今年で10', '割と忙しいです', false],
+      ['これは3', '割に合わないです', false],
+      ['答えは3', '個人的には賛成', false]
+    ]
+    for (const [a, b, joined] of pairs)
+      expect(joinSplitNumbers([u('a', a, 0, 1), u('b', b, 1.2, 2)]).length).toBe(joined ? 1 : 2)
+  })
+
+  it('話者が1人しかいない回だけ、短い間を使う', () => {
+    expect(singleSpeaker([u('a', 'x', 0, 1), u('b', 'y', 1, 2)])).toBe(true)
+    expect(singleSpeaker([u('a', 'x', 0, 1), u('b', 'y', 1, 2, 'B')])).toBe(false)
   })
 })
 

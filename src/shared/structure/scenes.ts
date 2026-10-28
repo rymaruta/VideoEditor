@@ -375,6 +375,8 @@ export interface Selection {
    * (静かな回で「面白い所だけ」が空の仮編集にならないように)
    */
   relaxed?: boolean
+  /** 点数の下限で場面を落としたときの、使った下限(下げた後の値。目標の長さで選んだときは無い) */
+  minScore?: number
   /**
    * 判定が全部の場面を「不要」にしたので、点数・発話の割合の上位の場面を仮に残した(要確認)。
    * 空の仮編集にすると、自動編集がカットで止まる(小さい AI が聞き取れない文字起こしで全部を不要にした)。
@@ -515,6 +517,7 @@ export function selectScenes(
     dropped,
     estimated: total,
     ...(relaxed ? { relaxed } : {}),
+    ...(Number.isFinite(minScore) ? { minScore } : {}),
     ...(rescue ? { rescued: { kept: keep.size, total: scenes.length } } : {})
   }
 }

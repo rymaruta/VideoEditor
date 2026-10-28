@@ -2,6 +2,7 @@ import type { AsrWord, TranscriptUtterance } from '../transcript'
 import {
   applyDictionary,
   balancedLineEnds,
+  lineBreakScore,
   dictionaryNoCut,
   dictionaryPattern,
   FILLER,
@@ -265,13 +266,29 @@ function spreadZeroWords(out: TimedChar[], words: readonly AsrWord[]): void {
 export function wrapTelopLines(text: string, maxLineChars: number): string[] {
   const chars = [...text]
   let from = 0
-  return balancedLineEnds(chars, maxLineChars, undefined, true)
+  return phraseLineEnds(chars, maxLineChars)
     .map((end) => {
       const line = chars.slice(from, end).join('').trim()
       from = end
       return line
     })
     .filter((l) => l.length > 0)
+}
+
+/**
+ * 改行の位置。まず今までの選び方(`breakScore`)で決め、その改行が文節の見当(`lineBreakScore`)で語の途中と
+ * 見えるときだけ、文節の見当で選び直した位置を使う(語の途中と見える改行が減り、行の数が変わらないときだけ)。
+ * 文節の見当で全部を選び直すと、今まで語の切れ目で切れていた文まで動き、別の所で語の途中に切れていた
+ * (「一生懸 / 命」「た / くさん」)
+ */
+function phraseLineEnds(chars: readonly string[], max: number): number[] {
+  const before = balancedLineEnds(chars, max)
+  const inside = (ends: readonly number[]): number =>
+    ends.slice(0, -1).filter((e) => lineBreakScore(chars, e) < 0).length
+  const bad = inside(before)
+  if (bad === 0) return before
+  const after = balancedLineEnds(chars, max, undefined, true)
+  return after.length === before.length && inside(after) < bad ? after : before
 }
 
 /** 言いよどみを除き、辞書で直し、表示用に整える */
