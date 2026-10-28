@@ -138,6 +138,30 @@ export type AsrWorkerMessage =
   | { type: 'done' }
   | { type: 'error'; message: string }
 
+/**
+ * 文字起こしの工程の進み具合(%)と説明を、認識の知らせから決める。工程の % は発話を読んだ割合だけ。
+ * モデルの準備(ダウンロード・読み込み)の % は説明に出す。準備の % をそのまま工程の % にすると、
+ * ダウンロード済みのモデルを読むだけでも 100% になり、続いて認識が始まると 0% 近くへ戻っていた
+ * (試し編集 第2回: 0% → 100% → 8%)
+ */
+export function asrStepProgress(
+  m: Exclude<AsrWorkerMessage, { type: 'result' | 'done' | 'error' | 'device' }>,
+  /** 今出している工程の % */
+  current: number
+): { percent: number; note: string } {
+  if (m.type === 'status') {
+    const pct = Math.max(0, Math.min(100, m.percent))
+    return {
+      percent: current,
+      note: m.stage === 'download' && pct > 0 ? `${m.note} ${Math.floor(pct)}%` : m.note
+    }
+  }
+  return {
+    percent: Math.max(current, (m.done / Math.max(1, m.total)) * 100),
+    note: `${m.done}/${m.total}`
+  }
+}
+
 export interface TranscriptUtterance {
   id: string
   /** 声を拾った素材(ピンマイクがあればその人のマイク) */
@@ -151,6 +175,55 @@ export interface TranscriptUtterance {
   words: AsrWord[]
   /** ほかの人と声が重なっている */
   overlap: boolean
+}
+
+/**
+ * 数字の直後に付く単位(これで始まる発話は、数字で終わる前の発話の続き)。「人」「年」「分」「日」は言葉の頭にも
+ * なる(「人生」「分かる」「日本」)ので入れない
+ */
+const UNIT_HEAD = /^[、,\s]*(?:[%％‰円割倍万億兆歳個件]|パーセント)/u
+/** 数字で終わる(後ろの句読点・空白は除く) */
+const DIGIT_TAIL = /[0-9０-９][\s、,]*$/u
+/** 数字と単位を分けた発話をつなぐ、前の発話の終わりから次の頭までの間の上限(秒) */
+export const SPLIT_NUMBER_GAP_SEC = 1.5
+
+/**
+ * 数字と単位(「%」「円」など)の間で分かれた発話をつなぐ。発話は声の間で区切るので、「約4」と言って
+ * 少し間を置いて「%弱ぐらいの賃上げを」と続けると別の発話になり、文字起こしの文・発言テロップが「約4」だけで
+ * 1秒出ていた(試し編集 第2回)。同じ素材・同じ話者で、間が `SPLIT_NUMBER_GAP_SEC` 以内のものだけ
+ */
+export function joinSplitNumbers(list: readonly TranscriptUtterance[]): TranscriptUtterance[] {
+  const order = [...list].sort((a, b) => a.sourceStart - b.sourceStart)
+  const merged = new Map<TranscriptUtterance, TranscriptUtterance>()
+  const dropped = new Set<TranscriptUtterance>()
+  const lastOf = new Map<string, TranscriptUtterance>()
+  for (const u of order) {
+    const key = `${u.assetId}\u0000${u.speaker ?? ''}`
+    const prevU = lastOf.get(key)
+    const prev = prevU ? (merged.get(prevU) ?? prevU) : undefined
+    if (
+      prevU &&
+      prev &&
+      !prev.overlap &&
+      !u.overlap &&
+      DIGIT_TAIL.test(prev.text) &&
+      UNIT_HEAD.test(u.text) &&
+      u.sourceStart - prev.sourceEnd <= SPLIT_NUMBER_GAP_SEC
+    ) {
+      const head = u.text.replace(/^[、,\s]+/u, '')
+      merged.set(prevU, {
+        ...prev,
+        text: `${prev.text.replace(/[\s、,]+$/u, '')}${head}`,
+        sourceEnd: Math.max(prev.sourceEnd, u.sourceEnd),
+        words: [...prev.words, ...u.words]
+      })
+      dropped.add(u)
+      continue
+    }
+    lastOf.set(key, u)
+  }
+  if (dropped.size === 0) return [...list]
+  return list.filter((u) => !dropped.has(u)).map((u) => merged.get(u) ?? u)
 }
 
 /**

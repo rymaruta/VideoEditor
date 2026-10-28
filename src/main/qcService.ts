@@ -82,6 +82,10 @@ async function measure(
     running = null
   })
   if (rest) parser.push(rest)
+  // 止めたときは、終わり方(シグナルなら null、ffmpeg が SIGTERM を受けて自分で終わると 255)に関わらず
+  // 「止めた」と返す。次の書き出しの確認を始めるときに前の確認を止めると、255 で終わり
+  // 「自動確認に失敗しました(255)」と記録されていた
+  if (cancelRequested) throw new Error('QC_CANCELED')
   if (code !== 0) throw new Error(code === null ? 'QC_CANCELED' : `自動確認に失敗しました(${code})`)
   return parser.result(info.duration)
 }

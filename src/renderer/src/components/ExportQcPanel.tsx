@@ -60,6 +60,12 @@ export function ExportQcPanel({ onJump }: { onJump: () => void }): React.JSX.Ele
           <textarea rows={4} value={qcWords} onChange={(e) => setQcWords(e.target.value)} />
         </label>
       )}
+      {report.stopped && (
+        <p className="form-note">
+          前の書き出し({report.stopped.split(/[/\\]/).pop()}
+          )の確認は、この書き出しの確認を始めたので 止めました(止めた確認の結果はありません)
+        </p>
+      )}
       {report.error && <p className="error-text">{report.error}</p>}
       {report.measurement?.loudness && (
         <p className="form-note export-qc-loudness">

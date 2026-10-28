@@ -17,7 +17,10 @@ import { useSettingsStore } from '@renderer/store/settingsStore'
 import { projectFingerprint, runEpisode } from '../helpers/episodeHarness'
 
 /**
- * 範囲の自動編集・ロックを足す前(91ce266)の作り直しの結果の指紋。ロックも範囲も使わない企画では、
+ * 範囲の自動編集・ロックを足す前(91ce266)の作り直しの結果の指紋。
+ * (試し編集 第2回の直しで、企画に覚える自動編集の判断に「SE・BGM・CG の工程の終わり方」(`soundDone`)と
+ * 「演出テロップの提案を省いた理由」(`effectsSkipped`)が増えた分だけ値を直した。この2つを除いた指紋は
+ * 前の値 29386:61599fc6 9779:bb562d7 19224:7625a6b7 のまま)ロックも範囲も使わない企画では、
  * 作り直しの道が1つも変わらないことを確かめる(変わったら、このファイルの値を直す前に理由を確かめる)
  */
 const KIT = {
@@ -82,6 +85,6 @@ async function scenario(): Promise<string> {
 describe('ロックも範囲も使わない作り直しは、足す前と同じ', () => {
   it('作り直しの結果の指紋が 91ce266 と一致する', async () => {
     const got = await scenario()
-    expect(got).toBe('29386:61599fc6 9779:bb562d7 19224:7625a6b7')
+    expect(got).toBe('29478:9eb3a69d 9871:b46015f4 19316:10de5e97')
   })
 })

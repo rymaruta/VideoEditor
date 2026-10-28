@@ -3,7 +3,13 @@
  * 状態から組み立てる純関数。**実際にあるデータだけ**を返す(無いものは空)。
  */
 import type { Project } from '@shared/types'
-import type { Scene, SceneJudgement } from '@shared/structure/scenes'
+import {
+  describeCues,
+  indistinctJudgements,
+  sceneCues,
+  type Scene,
+  type SceneJudgement
+} from '@shared/structure/scenes'
 import { CHEER_THRESHOLD, LAUGH_THRESHOLD } from '@shared/events/audioEvents'
 
 export type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
@@ -267,4 +273,26 @@ export function rulerTicks(span: number): number[] {
   const out: number[] = []
   for (let t = 0; t <= span * 0.85; t += step) out.push(t)
   return out
+}
+
+/**
+ * 落とした場面の、落とした理由(構成の一覧に出す)。人が落とした・「不要」の判定・長さに合わせた、のどれか。
+ * 長さに合わせて落とした場面は、点数と中身の手掛かりも添える。判定が場面を区別できていない(全部に同じ点数)
+ * ときは、中身の手掛かりで選んだことを書く(試し編集 第2回: 落とした理由が画面に出ず、「見どころ」の印のまま
+ * 「残す」のチェックが外れているだけだった)
+ */
+export function droppedSceneReason(
+  scene: Scene,
+  judgement: SceneJudgement | undefined,
+  judgements: readonly SceneJudgement[],
+  /** 人が「残す」を外した */
+  manual: boolean
+): string {
+  if (manual) return '手で落としました'
+  if (judgement?.kind === 'unneeded') return '「不要」の判定で落としました'
+  const cues = describeCues(sceneCues(scene))
+  const same = indistinctJudgements(judgements)
+  if (same && judgement && judgement.score === same.score)
+    return `仕上がりの長さに合わせて落としました。判定がどの場面も同じ点(${same.score} 点)なので、中身の手掛かりの少ない場面から選びました(${cues})`
+  return `仕上がりの長さに合わせて、点数の低い場面から落としました(${judgement ? `${judgement.score} 点 · ` : ''}${cues})`
 }

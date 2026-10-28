@@ -748,6 +748,12 @@
 .structure-reason {
   line-height: 1.5;
 }
+/* 落とした場面の、落とした理由(長さに合わせた・不要・手で) */
+.structure-dropped-why {
+  display: block;
+  line-height: 1.5;
+  color: var(--ve-text-2);
+}
 
 /* ---------- 同期の結果・素材の整理・文字起こし・ログ ---------- */
 .sync-lane-track {

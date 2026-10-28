@@ -117,7 +117,8 @@ import {
   type RangedVariantSpec,
   type RangedVariantsResult
 } from '../lib/rangedAutoEdit'
-import { heuristicJudgements } from '@shared/structure/scenes'
+import { heuristicJudgements, indistinctJudgements } from '@shared/structure/scenes'
+import { prepareVerticalFill } from '../lib/verticalFraming'
 import {
   AI_EFFECT_KINDS,
   AUTO_PLACE_CONFIDENCE,
@@ -148,8 +149,10 @@ import {
 } from '@shared/diarize/micTurns'
 import { turnsToJobs } from '@shared/diarize/turnJobs'
 import {
+  asrStepProgress,
   hallucinatedIndices,
   isLikelyHallucination,
+  joinSplitNumbers,
   type AsrDevice,
   type AsrJobResult,
   type TranscriptUtterance
@@ -203,6 +206,9 @@ export interface EditableSource {
   /** ゲーム実況のカメラの役割(ゲーム画面・顔カメラ) */
   cameraRole?: CameraRole
 }
+
+/** マイク1本の回の、話者の判定の結果に添える文(話者は分けない) */
+export const SINGLE_MIC_NOTE = 'マイク1本では話者を分けられません'
 
 export const STEPS: { id: StepId; label: string }[] = [
   { id: 'ingest', label: '取り込み・整理' },
@@ -696,10 +702,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       state: 'done',
       percent: 100,
       note:
-        mics.length > 0
+        mics.length > 1 || speakerSources.length > 1
           ? `発話 ${turns.length} · 重なり ${overlapCount}`
-          : `発話 ${turns.length} · ピンマイクが無いため話者は未判定`
+          : mics.length === 1
+            ? `発話 ${turns.length} · ${SINGLE_MIC_NOTE}`
+            : `発話 ${turns.length} · ピンマイクが無いため話者は未判定`
     })
+    // マイク1本(一人で話す・複数の人を1本で録った)では、話者を分けない(仕様)。複数の人が話す回で、
+    // 話者が分かれないことが画面から分からなかった(試し編集 第2回)
+    if (mics.length === 1 && speakerSources.length === 1)
+      log(
+        `話者の判定: ${SINGLE_MIC_NOTE}(文字起こし・テロップの話者はすべて「${mics[0].name}」になります)`
+      )
     log(
       mics.length > 0
         ? `話者を判定しました: ${mics
@@ -722,8 +736,9 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     setStep('transcribe', { state: 'run', percent: 0, note: `${jobs.length} 件の発話` })
     log(`文字起こしを始めます(${jobs.length} 件)`)
     const t0 = Date.now()
+    let asrPercent = 0
     const off = window.api.onAsrProgress((m) => {
-      if (m.type === 'status') setStep('transcribe', { percent: m.percent, note: m.note })
+      if (m.type === 'status') setStep('transcribe', asrStepProgress(m, asrPercent))
       else if (m.type === 'device') {
         set({ asrDevice: m.device })
         log(
@@ -733,9 +748,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       } else if (m.type === 'progress') {
         const left =
           m.done > 0 ? (((Date.now() - t0) / m.done) * (m.total - m.done)) / 1000 : undefined
+        const next = asrStepProgress(m, asrPercent)
+        asrPercent = next.percent
         setStep('transcribe', {
-          percent: (m.done / Math.max(1, m.total)) * 100,
-          note: `${m.done}/${m.total}${left !== undefined ? ` · 残り約 ${Math.ceil(left / 60)} 分` : ''}`
+          percent: next.percent,
+          note: `${next.note}${left !== undefined ? ` · 残り約 ${Math.ceil(left / 60)} 分` : ''}`
         })
       }
     })
@@ -787,13 +804,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         overlap: j.turn.overlap
       })
     }
-    useProjectStore.getState().setTranscript(utterances)
+    // 数字と単位(「約4」「%弱…」)の間で分かれた発話はつなぐ
+    const joined = joinSplitNumbers(utterances)
+    useProjectStore.getState().setTranscript(joined)
     setStep('transcribe', {
       state: 'done',
       percent: 100,
-      note: `${utterances.length} 件 · ${Math.round((Date.now() - t0) / 1000)} 秒`
+      note: `${joined.length} 件 · ${Math.round((Date.now() - t0) / 1000)} 秒`
     })
-    log(`文字起こしが終わりました(${utterances.length} 件)`)
+    log(`文字起こしが終わりました(${joined.length} 件)`)
   }
 
   /** カメラの色を基準カメラに合わせる。失敗しても編集は続ける(色が揃わないだけ) */
@@ -1114,10 +1133,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       effects: s.effects,
       effectChosen: s.effectChosen,
       ...(s.steps.effects.state === 'done' ? { effectsAsked: true } : {}),
+      ...(s.steps.effects.state === 'skipped'
+        ? { effectsSkipped: s.steps.effects.note ?? '' }
+        : {}),
       ...(s.carriedTelops.length > 0 ? { carriedTelops: s.carriedTelops } : {}),
       ...(sync ? { sync } : {}),
       // 色合わせが済んだこと(合わせる必要が無かった回は素材に印が残らないため。開き直して「済み」と出す)
       ...(s.steps.color.state === 'done' ? { colorDone: s.steps.color.note ?? '' } : {}),
+      // SE・BGM・CG の工程が済んだ・省いたこと(置く物が無ければ自動のトラックが残らないため)
+      ...(s.steps.sound.state === 'done' || s.steps.sound.state === 'skipped'
+        ? { soundDone: { state: s.steps.sound.state, note: s.steps.sound.note ?? '' } }
+        : {}),
       ...(s.rangeRuns.length > 0 ? { rangeRuns: s.rangeRuns } : {})
     }
     useProjectStore.getState().setAutoEdit(decisions)
@@ -1337,6 +1363,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       )
     if (plan.selection.relaxed)
       log('声の山・笑いのはっきりした場面が無かったため、点数の上位の場面を残しました(静かな回)')
+    {
+      // 判定が場面を区別できていない(全部に同じ点数)なら、長さで落とした場面は中身の手掛かりで選んだ
+      const same = indistinctJudgements(plan.judgements)
+      const byLength = plan.selection.dropped.filter((d) => d.why === 'length').length
+      if (same)
+        log(
+          `構成: 判定が ${same.total} 場面すべてに同じ点(${same.score} 点)を付け、場面を区別できていません(要確認)${byLength > 0 ? `。長さに合わせて落とした ${byLength} 場面は、発話の密度・話者の数・数字や固有名詞の多さで選びました` : ''}`
+        )
+    }
     const raw = plan.selection.kept.reduce((t, id) => {
       const sc = get().scenes.find((x) => x.id === id)
       return t + (sc ? sc.end - sc.start : 0)
@@ -1630,6 +1665,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       placedTelops.all,
       locks.length > 0 ? lockedSoundWindows(project, applied, locks) : undefined
     )
+    // SE・BGM・CG の工程の終わり方も覚える(開き直したとき「待機」にしない)
+    persistDecisions()
     log(
       `仮編集を作りました: ${plan.selection.kept.length} 場面 · ${formatMinutes(plan.cut.duration)} · ショット ${switches} · 発言テロップ ${telops.length}`
     )
@@ -1843,7 +1880,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               note: `${i + 1}/${windows.length} 本目を書き出し中`
             }
           })
-          const short = buildShortProject(
+          let short = buildShortProject(
             {
               project,
               info,
@@ -1857,6 +1894,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             windows[i],
             i
           )
+          // ロケ・対談の回は、真ん中ではなく人物(顔)に寄せて縦に切り出す(ゲーム実況はゲーム画面の真ん中)
+          if (settings.episodeKind !== 'game' && settings.verticalFraming === 'fill')
+            short = (
+              await prepareVerticalFill({
+                ...short,
+                clips: short.clips.map((c) => ({ ...c, fillCrop: undefined }))
+              })
+            ).project
           const base = await freeShortBase(`${folder}/${safeFileBaseName(short.name)}`)
           await window.api.saveProject(`${base}.veproj`, short)
           const telopLayer = await prepareTelopLayerForExport(short, '9:16', 1080)

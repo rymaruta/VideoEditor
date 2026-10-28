@@ -7,6 +7,7 @@ import { placedUtterances } from './transcriptTimeline'
 import { autoTelopKey, placedTelopKeys } from '@shared/telop/manual'
 import { stripTelopMarkup } from '@shared/telop/render'
 import { joinTelopLines } from '@shared/qc/telop'
+import { indistinctJudgements, type SceneJudgement, type SceneKind } from '@shared/structure/scenes'
 
 /**
  * 要確認の一覧(計画書 §5.13)。自動編集の各工程が「自信の低い箇所」をここへ出し、人はここから直す。
@@ -49,6 +50,38 @@ export interface ReviewSources {
   qc: QcReport | null
   /** 構成が全部の場面を「不要」にしたので、仮に残した場面の数(`structureRescueOf`)。無ければ null */
   structureRescue?: { kept: number; total: number } | null
+  /** 構成の判定が場面を区別できていない(`structureIndistinctOf`)。無ければ null */
+  structureIndistinct?: StructureIndistinct | null
+}
+
+/** 構成の判定が場面を区別できていないことの知らせ */
+export interface StructureIndistinct {
+  /** 同じ点数・印を付けた場面の数 */
+  total: number
+  score: number
+  kind: SceneKind
+  /** 長さに合わせて落とした場面の数 */
+  droppedByLength: number
+  source: 'ai' | 'heuristic' | null
+}
+
+/**
+ * 構成の判定が「不要」以外の全部の場面に同じ点数・同じ印を付けたか(`indistinctJudgements`)。付けていれば、
+ * 長さに合わせて落とした場面は中身の手掛かり(発話の密度・話者の数・数字や固有名詞)で選んでいるので、
+ * 人に確かめてもらう
+ */
+export function structureIndistinctOf(
+  judgements: readonly SceneJudgement[],
+  keptIds: readonly string[] | undefined,
+  source: 'ai' | 'heuristic' | null
+): StructureIndistinct | null {
+  const same = indistinctJudgements(judgements)
+  if (!same) return null
+  const kept = new Set(keptIds ?? [])
+  const droppedByLength = keptIds
+    ? judgements.filter((j) => j.kind !== 'unneeded' && !kept.has(j.sceneId)).length
+    : 0
+  return { ...same, droppedByLength, source }
 }
 
 /**
@@ -186,6 +219,24 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       text: `構成の判定が全 ${s.structureRescue.total} 場面を「不要」にしたため、点数・発話の多い ${s.structureRescue.kept} 場面を仮に残しました。「構成」タブで残す場面を確かめてください`,
       tab: 'structure'
     })
+
+  if (s.structureIndistinct) {
+    const x = s.structureIndistinct
+    const kindLabel = x.kind === 'highlight' ? '見どころ' : '普通'
+    items.push({
+      // 作り直すたびに出直さないよう、鍵は固定
+      key: 'structure-indistinct',
+      area: 'structure',
+      kind: '構成',
+      text:
+        `構成の${x.source === 'ai' ? ' AI ' : ''}判定が ${x.total} 場面すべてに同じ点(${x.score} 点・${kindLabel})を付けていて、場面の良し悪しを区別できていません。` +
+        (x.droppedByLength > 0
+          ? `長さに合わせて落とした ${x.droppedByLength} 場面は、発話の密度・話者の数・数字や固有名詞の多さで選びました。`
+          : '') +
+        '「構成」タブで残す場面と落とした理由を確かめてください',
+      tab: 'structure'
+    })
+  }
 
   if (s.qc && s.qc.state === 'done')
     for (const q of s.qc.issues)

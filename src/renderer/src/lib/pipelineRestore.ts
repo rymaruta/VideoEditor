@@ -272,7 +272,11 @@ export function restorePipelineFromProject(
           ? done()
           : unknown,
     speakers: done(
-      transcript.some((u) => u.speaker) ? undefined : 'ピンマイクが無いため話者は未判定'
+      mics.length === 1
+        ? 'マイク1本では話者を分けられません'
+        : transcript.some((u) => u.speaker)
+          ? undefined
+          : 'ピンマイクが無いため話者は未判定'
     ),
     transcribe: done(`${transcript.length} 件`),
     events: project.audioEvents ? done() : unknown,
@@ -287,16 +291,24 @@ export function restorePipelineFromProject(
     // 作り直しでは今置いてある演出テロップを置き直す
     effects: saved?.effectsAsked
       ? done(`提案 ${effects.length} · 置いている ${effectChosen.length}`)
-      : effects.length > 0 || effectTelops.length > 0
-        ? {
-            state: 'wait',
-            percent: 0,
-            note: saved
-              ? `AI を使わない提案 ${effects.length} · 置いている ${effectChosen.length}`
-              : `置いた演出テロップ ${effectTelops.length}(提案の一覧は古い形式の企画に残りません)`
-          }
-        : unknown,
-    sound: autoSound ? done() : unknown
+      : saved?.effectsSkipped !== undefined
+        ? { state: 'skipped', percent: 0, note: saved.effectsSkipped }
+        : effects.length > 0 || effectTelops.length > 0
+          ? {
+              state: 'wait',
+              percent: 0,
+              note: saved
+                ? `AI を使わない提案 ${effects.length} · 置いている ${effectChosen.length}`
+                : `置いた演出テロップ ${effectTelops.length}(提案の一覧は古い形式の企画に残りません)`
+            }
+          : unknown,
+    sound: autoSound
+      ? done(saved?.soundDone?.state === 'done' ? saved.soundDone.note || undefined : undefined)
+      : saved?.soundDone
+        ? saved.soundDone.state === 'done'
+          ? done(saved.soundDone.note || undefined)
+          : { state: 'skipped', percent: 0, note: saved.soundDone.note }
+        : unknown
   }
   if (!saved && effectTelops.length > 0)
     missing.push(
