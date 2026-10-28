@@ -125,6 +125,10 @@ describe('テロップの改行: 語の途中で切る数が前より増えな�
     expect(lineOverflowFits({ ...style, fontSize: 64 }, '9:16', 14)).toBe(false)
     expect(lineOverflowFits({ ...style, fontSize: 64 }, '16:9', 14)).toBe(true)
     expect(lineOverflowFits({ ...style, fontSize: 64, vertical: true }, '16:9', 14)).toBe(false)
+    // 背景の箱の余白も足す(再監査の指摘 5): 15 字 × 54px = 810px に左右 20px の余白で 850px > 831px
+    const boxed = { ...style, fontSize: 54, background: true, backgroundPadding: { x: 20, y: 8 } }
+    expect(lineOverflowFits(boxed, '9:16', 14)).toBe(false)
+    expect(lineOverflowFits({ ...boxed, backgroundPadding: { x: 8, y: 8 } }, '9:16', 14)).toBe(true)
   })
 
   it('改善した例は保つ(文の終わりで切る)', () => {
