@@ -22,6 +22,8 @@ export const IPC = {
   voicevoxSynthesize: 'voicevox:synthesize',
   selectExportPath: 'export:selectPath',
   selectExportFolder: 'export:selectFolder',
+  /** 書き出し先のドライブの空き(バイト。測れなければ null) */
+  exportDiskFree: 'export:diskFree',
   exportProject: 'export:run',
   selectPremiereXmlPath: 'export:selectPremiereXmlPath',
   exportPremiereXml: 'export:premiereXml',

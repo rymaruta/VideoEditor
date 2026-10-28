@@ -98,6 +98,7 @@ import { restartLoopAtEnd } from '../lib/loopPlayback'
 import { useProgramView, zoomFrameWidth } from '../lib/programView'
 import { getSharedAudioContext, noteElementGainNode } from '../lib/previewAudio'
 import { ProgramMeter } from './ProgramMeter'
+import { useProgramDock } from '../lib/programDock'
 import {
   activeSoloIds,
   nonTrackAudioSilencedBySolo,
@@ -796,6 +797,8 @@ export function PreviewPlayer(): React.JSX.Element {
   const isPlaying = useProjectStore((s) => s.isPlaying)
   // 音声トラックのソロ(モニター用。書き出しには効かない)。1 本でもあれば本編・ワイプの音も止める
   const programZoom = useProgramView((s) => s.zoom)
+  // 確認の画面の右の枠へ重ねて出す(作り直さずに位置だけ移す。lib/programDock)
+  const dock = useProgramDock((s) => s.rect)
   // 画質(軽い版)が替わったら、いまの位置で読み直す(本編は `seekTo` で入れ直す)
   const lightKey = useProgramView((s) =>
     s.quality === 'light' ? Object.keys(s.lightProxies).length : -1
@@ -1438,16 +1441,35 @@ export function PreviewPlayer(): React.JSX.Element {
 
   const aspectClass = project.aspectRatio === '9:16' ? 'aspect-9-16' : 'aspect-16-9'
   // プログラムの見出しの「全体を表示 ▾」(実寸に対する倍率。全体を表示なら枠に収める)
-  const zoomWidth = isExpanded ? null : zoomFrameWidth(programZoom, project.aspectRatio)
+  const zoomWidth = isExpanded || dock ? null : zoomFrameWidth(programZoom, project.aspectRatio)
   // カメラ間の色合わせ(本編・ぼかし背景・クロスフェードに同じ補正を掛ける)
   const activeAsset = findTimedClipAt(timedClips, playheadTime)?.asset
 
   return (
     <>
-      {isExpanded && (
+      {isExpanded && !dock && (
         <div className="preview-expanded-backdrop" onClick={() => setIsExpanded(false)} />
       )}
-      <div className={`panel preview-player ${isExpanded ? 'expanded' : ''}`}>
+      <div
+        className={`panel preview-player ${dock ? 've-program-docked' : isExpanded ? 'expanded' : ''}`}
+        style={
+          dock
+            ? {
+                left: dock.left,
+                top: dock.top,
+                width: dock.width,
+                height: dock.height,
+                // 右の列を縦に送って列の外へはみ出した所は切り取る
+                ...(dock.clipTop > 0 || dock.clipBottom > 0
+                  ? { clipPath: `inset(${dock.clipTop}px 0 ${dock.clipBottom}px 0)` }
+                  : {}),
+                ...(dock.clipTop + dock.clipBottom >= dock.height
+                  ? { visibility: 'hidden' as const }
+                  : {})
+              }
+            : undefined
+        }
+      >
         {/* 映像と、その右の縦の音量計(L/R) */}
         <div className="ve-program-stage">
           <div className={`preview-frame-wrapper ${zoomWidth !== null ? 'is-zoomed' : ''}`}>

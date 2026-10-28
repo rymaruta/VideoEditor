@@ -16,6 +16,8 @@
  * - トラックの固定: 言葉は「固定」、アイコンはピン(固定したトラックのクリップは変えられない)。
  *   「ロック」は範囲の自動編集で「作り直さない」印のことだけに使い、アイコンは鍵。
  *   トラックには「ロック」も鍵も使わない
+ * - 範囲を自動で作り直す操作は「この範囲を再編集」(ボタン・ダイアログの題・メニューで同じ)
+ * - カメラは「カメラ C(手元)」の形(名前と、誰を映すか)。本編の切れの数は「クリップ」(「カット」と数えない)
  */
 export const TERMS = {
   telop: 'テロップ',
@@ -31,7 +33,10 @@ export const TERMS = {
   cancel: 'キャンセル',
   close: '閉じる',
   ellipsis: '…',
-  trackLock: 'トラックの固定'
+  trackLock: 'トラックの固定',
+  rangeReEdit: 'この範囲を再編集',
+  camera: 'カメラ',
+  clipCount: 'クリップ'
 } as const
 
 /** 使わない言い方(見つけたら `use` に直す)。`allow` に当たる行は除く */
@@ -50,5 +55,6 @@ export const TERM_RULES: readonly { avoid: RegExp; use: string; allow?: RegExp }
   { avoid: /[\u3040-\u30ff\u3400-\u9fff)）]\.\.\./, use: TERMS.ellipsis },
   { avoid: /出力先/, use: TERMS.exportTarget },
   { avoid: /トラック(の|を)ロック|ロックした(トラック|本編|テロップ)/, use: TERMS.trackLock },
-  { avoid: />\s*OK\s*<|'OK'/, use: '結果の動詞(保存する・適用 など)' }
+  { avoid: />\s*OK\s*<|'OK'/, use: '結果の動詞(保存する・適用 など)' },
+  { avoid: /この範囲を自動編集(?!で)/, use: TERMS.rangeReEdit }
 ]

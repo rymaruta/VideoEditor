@@ -458,6 +458,22 @@ export type ResolutionHeight = 480 | 720 | 1080 | 1440 | 2160
  */
 export type ExportEngine = 'standard' | 'segmented'
 
+/**
+ * 書き出す形式。
+ * - `mp4`: H.264 + AAC の MP4(既定)
+ * - `prores`: Apple ProRes 422 + PCM 24bit の QuickTime(.mov)。保存用の高画質
+ * - `wav`: 音声だけの WAV(PCM 24bit・48kHz・ステレオ)
+ * MP4 以外は、区間に分けて書き出す方式で作る(形式ごとの入れ物の違いをそこで受ける)
+ */
+export type ExportFormat = 'mp4' | 'prores' | 'wav'
+
+/** 形式ごとの拡張子(ドットなし) */
+export const EXPORT_FORMAT_EXT: Record<ExportFormat, string> = {
+  mp4: 'mp4',
+  prores: 'mov',
+  wav: 'wav'
+}
+
 export interface ExportSettings {
   aspectRatio: AspectRatio
   resolutionHeight: ResolutionHeight

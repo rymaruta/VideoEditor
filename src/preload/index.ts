@@ -27,6 +27,7 @@ import type {
   BpmAnalysisResult,
   EnvApiKeys,
   ExportEngine,
+  ExportFormat,
   ExportProgress,
   HighlightCandidate,
   HighlightSensitivity,
@@ -178,9 +179,13 @@ const api = {
       sourceHeight,
       targetAspect
     ),
-  selectExportPath: (defaultName: string): Promise<string | null> =>
-    ipcRenderer.invoke(IPC.selectExportPath, defaultName),
+  /** 書き出しの保存先を選ぶ(形式の拡張子を補う。`defaultName` はフォルダつきでもよい) */
+  selectExportPath: (defaultName: string, format: ExportFormat = 'mp4'): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.selectExportPath, defaultName, format),
   selectExportFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectExportFolder),
+  /** 書き出し先のドライブの空き(バイト)。測れなければ null */
+  exportDiskFree: (folder: string): Promise<number | null> =>
+    ipcRenderer.invoke(IPC.exportDiskFree, folder),
   exportProject: (payload: {
     project: Project
     aspectRatio: AspectRatio
@@ -191,7 +196,15 @@ const api = {
     loudnessTarget?: LoudnessTarget
     engine?: ExportEngine
     telopLayer?: TelopLayerPayload | null
-  }): Promise<{ success: boolean }> => ipcRenderer.invoke(IPC.exportProject, payload),
+    /** 形式(既定は MP4) */
+    format?: ExportFormat
+    /** 書き出す範囲(タイムラインの秒)。省略は全体 */
+    range?: { start: number; end: number }
+  }): Promise<{
+    success: boolean
+    /** 範囲のとき、実際に書き出した範囲の始まり(書き出しの秒。繋ぎに掛かると前へ広がる) */
+    rangeStartSec?: number
+  }> => ipcRenderer.invoke(IPC.exportProject, payload),
   /** Premiere 用 XML の保存先を選ぶ(.xml を補う) */
   selectPremiereXmlPath: (defaultName: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectPremiereXmlPath, defaultName),

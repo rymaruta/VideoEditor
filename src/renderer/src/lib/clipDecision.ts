@@ -102,3 +102,72 @@ export function decisionForClip(
     judgeSource: analysis.judgeSource
   }
 }
+
+/** カメラの呼び名(「カメラ C(手元)」の形。名前がもう「カメラ」で始まれば足さない) */
+export function cameraLabel(name: string, subject?: string): string {
+  const n = name.trim()
+  const base = /^カメラ/.test(n) ? n : `カメラ ${n}`
+  return subject ? `${base}(${subject})` : base
+}
+
+/**
+ * 判定の理由の文(「発話 49% · 掛け合い 7回/分 · 声の重なり 1」)を、数の表(名前と値)と残りの文に分ける。
+ * AI の理由(ふつうの文)は表にせず、そのまま残りの文にする
+ */
+export function reasonStats(reason: string | null | undefined): {
+  stats: [string, string][]
+  rest: string[]
+} {
+  const stats: [string, string][] = []
+  const rest: string[] = []
+  for (const part of (reason ?? '').split(/\s*·\s*/)) {
+    const t = part.trim()
+    if (!t) continue
+    const m = t.match(/^(\S+?)\s+(\d[\d.,]*\s*(?:%|回\/分|秒|回)?)$/)
+    if (m) stats.push([m[1], m[2]])
+    else rest.push(t)
+  }
+  return { stats, rest }
+}
+
+/** 理由の表の値(数)を取り出す(無ければ null) */
+function statValue(stats: readonly [string, string][], name: string): number | null {
+  const hit = stats.find(([k]) => k === name)
+  if (!hit) return null
+  const v = parseFloat(hit[1])
+  return Number.isFinite(v) ? v : null
+}
+
+/** いちばん長く重なる場面 */
+export function mainScene(d: ClipDecision): SceneDecision | null {
+  return [...d.scenes].sort((a, b) => b.overlap - a.overlap)[0] ?? null
+}
+
+/**
+ * AI の判断の 1 行目: 結論の文(例「掛け合いが多く盛り上がる場面なので残しました」)。
+ * いちばん長く重なる場面の判定・手の判断・理由の数から作る(新しく推測はしない)
+ */
+export function decisionConclusion(d: ClipDecision): string {
+  const main = mainScene(d)
+  if (!main) {
+    if (d.manualAdded) return '手で足した所なので、そのまま残しています'
+    return 'この所に重なる場面の判定はありません'
+  }
+  if (main.keep === true) return '画面で「残す」に決めた場面なので残しました'
+  if (main.keep === false) return '画面で「落とす」に決めた場面ですが、この所は本編に残っています'
+  const { stats } = reasonStats(main.reason)
+  const turns = statValue(stats, '掛け合い')
+  const laughs = (statValue(stats, '笑い') ?? 0) + (statValue(stats, '歓声') ?? 0)
+  switch (main.kind) {
+    case 'highlight':
+      if (laughs > 0) return '笑いや歓声が起きた見どころの場面なので残しました'
+      if (turns !== null && turns >= 6) return '掛け合いが多く盛り上がる場面なので残しました'
+      return '見どころと判定した場面なので残しました'
+    case 'normal':
+      return '普通の場面として残しました(尺を詰めるときは先に削る候補です)'
+    case 'unneeded':
+      return '会話の少ない場面ですが、つなぎとして残っています'
+    default:
+      return '判定の記録がある場面です'
+  }
+}

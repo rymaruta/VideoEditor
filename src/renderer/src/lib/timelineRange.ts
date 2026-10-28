@@ -109,14 +109,35 @@ export function snapRangeBoundaries(
 
 const RANGE_REQUEST_EVENT = 've:range-auto-edit'
 
-/** ほかの画面(自動編集の画面の「選んだ場面だけ作り直す」)から、範囲の自動編集のダイアログを開く */
-export function requestRangeAutoEdit(range: TimelineRange): void {
-  window.dispatchEvent(new CustomEvent(RANGE_REQUEST_EVENT, { detail: range }))
+/** ほかの画面から範囲の自動編集を頼むときの添え書き */
+export interface RangeAutoEditRequestOptions {
+  /** どこで決めた範囲か(省略は場面) */
+  origin?: RangeOrigin
+  /** 最初に選んでおく案(確認の画面の「残す」は案C) */
+  prefer?: 'A' | 'B' | 'C'
+}
+
+/**
+ * ほかの画面(自動編集の画面の「選んだ場面だけ作り直す」・確認の画面の「この範囲を再編集」「残す」)から、
+ * 範囲の自動編集のダイアログを開く
+ */
+export function requestRangeAutoEdit(
+  range: TimelineRange,
+  options: RangeAutoEditRequestOptions = {}
+): void {
+  window.dispatchEvent(new CustomEvent(RANGE_REQUEST_EVENT, { detail: { range, ...options } }))
 }
 
 /** タイムラインが受ける(ダイアログはタイムラインが持つ) */
-export function onRangeAutoEditRequest(handler: (range: TimelineRange) => void): () => void {
-  const listener = (e: Event): void => handler((e as CustomEvent<TimelineRange>).detail)
+export function onRangeAutoEditRequest(
+  handler: (range: TimelineRange, options: RangeAutoEditRequestOptions) => void
+): () => void {
+  const listener = (e: Event): void => {
+    const { range, ...options } = (
+      e as CustomEvent<{ range: TimelineRange } & RangeAutoEditRequestOptions>
+    ).detail
+    handler(range, options)
+  }
   window.addEventListener(RANGE_REQUEST_EVENT, listener)
   return () => window.removeEventListener(RANGE_REQUEST_EVENT, listener)
 }

@@ -203,3 +203,54 @@ export function planSegments(sequence: Sequence, options: SegmentPlanOptions): S
   }
   return segments
 }
+
+/**
+ * 書き出す範囲の境(フレーム)を、繋ぎを割らない位置へ広げる。境が繋ぎの途中・両端ちょうどに来たら、
+ * 始まりは繋ぎの始まりの手前へ、終わりは繋ぎの終わりの次へ寄せる(区間の境と同じ決まり。理由は上の 1.)。
+ * 尺の外は尺に収める。範囲が空なら null
+ */
+export function snapExportRange(
+  sequence: Sequence,
+  startFrame: number,
+  endFrame: number
+): { startFrame: number; endFrame: number } | null {
+  const total = sequenceDurationFrames(sequence)
+  if (!Number.isFinite(startFrame) || !Number.isFinite(endFrame)) return null
+  let a = Math.max(0, Math.min(total, Math.round(Math.min(startFrame, endFrame))))
+  let b = Math.max(0, Math.min(total, Math.round(Math.max(startFrame, endFrame))))
+  const forbidden: [number, number][] = []
+  for (const track of sequence.videoTracks)
+    for (const item of track.items)
+      if (item.kind === 'media' && item.transitionIn && item.transitionIn.durationFrames > 0)
+        forbidden.push([item.startFrame, item.startFrame + item.transitionIn.durationFrames])
+  for (let guard = 0; guard < 1000; guard++) {
+    const hit = forbidden.find(([s, e]) => a > 0 && a >= s && a <= e)
+    if (!hit) break
+    a = Math.max(0, hit[0] - 1)
+  }
+  for (let guard = 0; guard < 1000; guard++) {
+    const hit = forbidden.find(([s, e]) => b < total && b >= s && b <= e)
+    if (!hit) break
+    b = Math.min(total, hit[1] + 1)
+  }
+  return b > a ? { startFrame: a, endFrame: b } : null
+}
+
+/**
+ * 全体の区間の並び(`planSegments`)から、範囲 [startFrame, endFrame) に掛かる所だけを切り出す。
+ * 範囲の境は `snapExportRange` で寄せたものを渡す。番号は 0 から振り直す
+ */
+export function segmentsInRange(
+  segments: readonly Segment[],
+  startFrame: number,
+  endFrame: number
+): Segment[] {
+  return segments
+    .filter((s) => s.endFrame > startFrame && s.startFrame < endFrame)
+    .map((s, i) => ({
+      ...s,
+      index: i,
+      startFrame: Math.max(s.startFrame, startFrame),
+      endFrame: Math.min(s.endFrame, endFrame)
+    }))
+}

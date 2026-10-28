@@ -3,7 +3,8 @@ import { useProjectStore } from '../store/projectStore'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useTimelineSubSelection } from '../lib/timelineSelection'
 import { useInspectorTab, INSPECTOR_TABS } from '../lib/inspectorTab'
-import { decisionForClip, SCENE_KIND_LABEL } from '../lib/clipDecision'
+import { cameraLabel, decisionForClip } from '../lib/clipDecision'
+import { DecisionSummary } from './DecisionSummary'
 import { emitMenuCommand } from '../lib/menuCommands'
 import { rangedEditBlockedReason } from '../lib/rangedAutoEdit'
 import {
@@ -323,31 +324,7 @@ export function InspectorDecision(): React.JSX.Element {
               : 'このクリップに重なる場面はありません。'}
           </p>
         ) : (
-          <ul className="ve-decision-scenes">
-            {d.scenes.map((sc) => (
-              <li key={sc.id} className="ve-decision-scene">
-                <div className="ve-decision-scene-head">
-                  {sc.kind && (
-                    <span className={`structure-kind ${sc.kind}`}>{SCENE_KIND_LABEL[sc.kind]}</span>
-                  )}
-                  <span className="ve-decision-title">{sc.title ?? '場面'}</span>
-                  {sc.score !== null && (
-                    <span className="ve-decision-score" title="残したい度合い(0〜100)">
-                      {Math.round(sc.score)}点
-                    </span>
-                  )}
-                </div>
-                {sc.reason && <p className="ve-decision-reason">{sc.reason}</p>}
-                {sc.keep !== undefined && (
-                  <p className="hint-text">
-                    {sc.keep
-                      ? '画面で「残す」に決めた場面です。'
-                      : '画面で「落とす」に決めた場面です。'}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
+          <DecisionSummary decision={d} withNotes={false} />
         )}
       </div>
       <div className="inspector-section">
@@ -358,7 +335,7 @@ export function InspectorDecision(): React.JSX.Element {
         <dl className="ve-decision-facts">
           <dt>カメラ</dt>
           <dd>
-            {d.camera ? `${d.camera.name}${d.camera.subject ? `(${d.camera.subject})` : ''}` : '—'}
+            {d.camera ? cameraLabel(d.camera.name, d.camera.subject) : '—'}
             {d.manualAngle ? '・手で替えた' : ''}
           </dd>
           <dt>手の修正</dt>

@@ -28,6 +28,7 @@ import {
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 import { LocalAiRetry } from './LocalAiRetry'
 import { ShortsPanel } from './ShortsPanel'
+import { ReviewScreen } from './ReviewScreen'
 import './rangeAutoEdit.css'
 import { requestRangeAutoEdit } from '../lib/timelineRange'
 import { spansOfClips } from '@shared/roughCut/overrides'
@@ -207,6 +208,17 @@ export function AutoEditScreen(): React.JSX.Element | null {
 
   if (!open) return null
 
+  // 上の帯の「確認」: 要確認・文字起こし・プログラムを並べた確認の画面(デザイン案の Review)
+  if (view === 'review')
+    return (
+      <ReviewScreen
+        onFixTab={(t) => {
+          usePipelineStore.getState().setScreenView('auto')
+          setTab(t)
+        }}
+      />
+    )
+
   const doneCount = STEPS.filter((s) => steps[s.id].state === 'done').length
   const overall =
     STEPS.reduce((t, s) => t + (steps[s.id].state === 'done' ? 100 : steps[s.id].percent), 0) /
@@ -239,6 +251,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   /** 要確認の一覧の最初の項目(無ければ一覧のタブ)へフォーカスする */
   function focusReview(): void {
     const target =
+      document.querySelector<HTMLElement>('.ve-review-card') ??
       reviewRef.current?.querySelector<HTMLElement>('.auto-edit-review-item button') ??
       document.querySelector<HTMLElement>('.auto-edit-review [role="tab"]')
     target?.focus()
@@ -436,14 +449,10 @@ export function AutoEditScreen(): React.JSX.Element | null {
       : []
 
   return (
-    <div
-      className={`auto-edit-screen ${view === 'review' ? 'review-mode' : ''}`}
-      role="region"
-      aria-label={view === 'review' ? '確認' : '自動編集'}
-    >
+    <div className="auto-edit-screen" role="region" aria-label="自動編集">
       <div className="auto-edit-header">
         <span className="auto-edit-title">
-          {view === 'review' ? '確認' : '自動編集'}
+          自動編集
           <span className="auto-edit-title-sub">{projectName}</span>
         </span>
         <span className={`auto-edit-badge ${action.kind}`}>

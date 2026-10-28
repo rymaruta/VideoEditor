@@ -18,7 +18,7 @@ import {
 import type { TelopGradient, TextStyle } from '@shared/types'
 import { create } from 'zustand'
 import type { KeymapScheme } from '../lib/keymap'
-import type { ExportEngine, QualityPreset, ResolutionHeight } from '@shared/types'
+import type { ExportEngine, ExportFormat, QualityPreset, ResolutionHeight } from '@shared/types'
 import type { LoudnessTarget } from '@shared/loudness'
 import type { AiProvider } from '@shared/llm'
 import { DEFAULT_SPEECH_LOOK } from '@shared/telop/styles'
@@ -51,6 +51,11 @@ const EXPORT_ENGINE_KEY = 've-export-engine'
 const EXPORT_QUALITY_KEY = 've-export-quality'
 const EXPORT_LOUDNESS_KEY = 've-export-loudness'
 const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
+const EXPORT_FORMAT_KEY = 've-export-format'
+const EXPORT_XML_KEY = 've-export-xml'
+const EXPORT_FOLDER_KEY = 've-export-folder'
+const EXPORT_QC_AFTER_KEY = 've-export-qc-after'
+const EXPORT_SPEED_KEY = 've-export-speed'
 const TELOP_DICTIONARY_KEY = 've-telop-dictionary'
 const QC_WORDS_KEY = 've-qc-words'
 const SHOW_KIT_KEY = 've-show-kit-folder'
@@ -182,6 +187,22 @@ function readExportResolution(): ResolutionHeight {
   return RESOLUTION_HEIGHTS.includes(n as ResolutionHeight) ? (n as ResolutionHeight) : 1080
 }
 
+/** 前に書き出した速さ(壊れていれば空) */
+function readExportSpeed(): Partial<Record<ExportFormat, number>> {
+  try {
+    const raw = JSON.parse(readSetting(EXPORT_SPEED_KEY) ?? '{}') as unknown
+    if (!raw || typeof raw !== 'object') return {}
+    const out: Partial<Record<ExportFormat, number>> = {}
+    for (const k of ['mp4', 'prores', 'wav'] as const) {
+      const v = (raw as Record<string, unknown>)[k]
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = v
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
 function readExportEngine(): ExportEngine {
   try {
     return readSetting(EXPORT_ENGINE_KEY) === 'segmented' ? 'segmented' : 'standard'
@@ -227,6 +248,24 @@ interface SettingsState {
   setExportLoudness: (loudness: ExportLoudness) => void
   exportOpenFolderAfter: boolean
   setExportOpenFolderAfter: (open: boolean) => void
+  /** 書き出す形式(MP4 / ProRes 422 の .mov / 音声だけの WAV) */
+  exportFormat: ExportFormat
+  setExportFormat: (format: ExportFormat) => void
+  /** 行き先に「Premiere Pro 用 XML」を選んでいる */
+  exportXml: boolean
+  setExportXml: (xml: boolean) => void
+  /** 書き出しの保存先のフォルダ(保存のダイアログの最初の場所)。空は未設定 */
+  exportFolder: string
+  setExportFolder: (folder: string) => void
+  /** 書き出しの後に、音量と映像の乱れを点検する */
+  exportQcAfter: boolean
+  setExportQcAfter: (on: boolean) => void
+  /**
+   * 前に書き出したときの速さ(書き出した秒 ÷ かかった秒)。形式ごと。画面の「推定時間」に使う
+   * (まだ書き出していない形式は分からないので出さない)
+   */
+  exportSpeed: Partial<Record<ExportFormat, number>>
+  recordExportSpeed: (format: ExportFormat, speed: number) => void
   /**
    * 用語の辞書(「誤 → 正」を1行ずつ)。発言テロップを作るときに当てる。
    * 番組をまたいで使う(出演者名・地名・番組用語)
@@ -382,6 +421,35 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setExportOpenFolderAfter: (open) => {
     writeSetting(EXPORT_OPEN_FOLDER_KEY, String(open))
     set({ exportOpenFolderAfter: open })
+  },
+  exportFormat: readChoice<ExportFormat>(EXPORT_FORMAT_KEY, ['mp4', 'prores', 'wav'], 'mp4'),
+  setExportFormat: (format) => {
+    writeSetting(EXPORT_FORMAT_KEY, format)
+    set({ exportFormat: format })
+  },
+  exportXml: readChoice(EXPORT_XML_KEY, ['true', 'false'], 'false') === 'true',
+  setExportXml: (xml) => {
+    writeSetting(EXPORT_XML_KEY, String(xml))
+    set({ exportXml: xml })
+  },
+  exportFolder: readSetting(EXPORT_FOLDER_KEY) ?? '',
+  setExportFolder: (folder) => {
+    writeSetting(EXPORT_FOLDER_KEY, folder)
+    set({ exportFolder: folder })
+  },
+  exportQcAfter: readChoice(EXPORT_QC_AFTER_KEY, ['true', 'false'], 'true') === 'true',
+  setExportQcAfter: (on) => {
+    writeSetting(EXPORT_QC_AFTER_KEY, String(on))
+    set({ exportQcAfter: on })
+  },
+  exportSpeed: readExportSpeed(),
+  recordExportSpeed: (format, speed) => {
+    if (!Number.isFinite(speed) || speed <= 0) return
+    set((s) => {
+      const next = { ...s.exportSpeed, [format]: speed }
+      writeSetting(EXPORT_SPEED_KEY, JSON.stringify(next))
+      return { exportSpeed: next }
+    })
   },
   telopDictionary: (() => {
     try {

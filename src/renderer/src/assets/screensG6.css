@@ -1,0 +1,1509 @@
+/* =====================================================================
+   第3段: 確認の画面(design1/project/Review.dc.html)と書き出しのダイアログ(Export.dc.html)。
+   色・字・寸法は tokens.css の名前だけを使う(直書きしない)。
+   ===================================================================== */
+
+/* ---------- 共通: 切り替え(28×16) ---------- */
+.ve-switch {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ve-radius-pill);
+  background: var(--ve-surface-raised-hover);
+  box-shadow: inset 0 0 0 1px var(--ve-stroke-field);
+  cursor: pointer;
+}
+.ve-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--ve-radius-round);
+  background: var(--ve-text-2);
+  transition: left var(--ve-dur-fast) var(--ve-ease-out);
+}
+.ve-switch[aria-checked='true'] {
+  background: var(--ve-primary);
+  box-shadow: none;
+}
+.ve-switch[aria-checked='true'] .ve-switch-knob {
+  left: 14px;
+  background: var(--ve-white);
+}
+.ve-switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ve-switch:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+
+/* 小さな波形(WaveBars) */
+.ve-wave-bars {
+  display: block;
+  width: 100%;
+}
+/* 山(外側)は淡く、平均(内側)は濃く。同じ 1 色の濃さで分ける(タイムラインの波形と同じ) */
+.ve-wave-bars .ve-wave-peak {
+  fill: var(--ve-wave-outer);
+}
+.ve-wave-bars .ve-wave-rms {
+  fill: var(--ve-wave-inner);
+}
+
+/* =====================================================================
+   確認の画面
+   ===================================================================== */
+.ve-review {
+  background: var(--ve-gutter);
+  position: fixed;
+  inset: var(--ve-bar-workflow) 0 0 0;
+  z-index: 90;
+  display: grid;
+  /* 右の列は広い窓で広げ、プログラムとカメラを大きく見せる(1366 幅では 456px のまま) */
+  grid-template-columns: 300px minmax(0, 1fr) clamp(456px, 32vw, 640px);
+  word-break: auto-phrase;
+  grid-template-rows: minmax(0, 1fr) 96px;
+  gap: 1px;
+  font-size: var(--ve-fs-13);
+  color: var(--ve-text-1);
+}
+.ve-review-left,
+.ve-review-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ve-surface-panel);
+}
+.ve-review-center {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--ve-surface-ground);
+}
+.ve-review-head {
+  height: var(--ve-bar-panel-head);
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-3);
+  padding: 0 var(--ve-space-3);
+  border-bottom: 1px solid var(--ve-gutter);
+  background: var(--ve-surface-panel);
+}
+.ve-review-center > .ve-review-head {
+  padding-left: var(--ve-space-4);
+}
+.ve-review-left > .ve-review-head {
+  justify-content: space-between;
+}
+.ve-review-title {
+  font-weight: var(--ve-fw-bold);
+  white-space: nowrap;
+}
+.ve-review-count {
+  color: var(--ve-warning-ink);
+}
+.ve-review-hint {
+  color: var(--ve-text-3);
+  font-size: var(--ve-fs-12);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ve-review-spacer {
+  flex: 1;
+}
+.ve-review-switch-label {
+  color: var(--ve-text-2);
+  font-size: var(--ve-fs-12);
+  white-space: nowrap;
+}
+.ve-review-link {
+  height: var(--ve-control-sm);
+  padding: 0 var(--ve-space-1);
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background: transparent;
+  color: var(--ve-text-3);
+  font-size: var(--ve-fs-12);
+  cursor: pointer;
+}
+.ve-review-link:hover {
+  color: var(--ve-text-1);
+  background: var(--ve-surface-card);
+}
+.ve-review-section {
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-bold);
+  color: var(--ve-text-3);
+  letter-spacing: 0.04em;
+}
+
+/* 操作のボタン(24px の副ボタン・枠だけ・平ら) */
+.ve-review-button {
+  height: var(--ve-control-sm);
+  padding: var(--ve-control-pad-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  border-radius: var(--ve-radius-md);
+  border: 1px solid var(--ve-stroke-control);
+  background: var(--ve-surface-raised);
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-12);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ve-review-button:hover:not(:disabled) {
+  background: var(--ve-surface-raised-hover);
+}
+.ve-review-button.ghost {
+  background: transparent;
+  color: var(--ve-text-2);
+}
+.ve-review-button.ghost:hover:not(:disabled) {
+  background: var(--ve-surface-card);
+  color: var(--ve-text-1);
+}
+.ve-review-button.strong,
+.ve-review-button.flat {
+  height: var(--ve-control-md);
+  padding: var(--ve-control-pad-md);
+}
+.ve-review-button.strong {
+  font-weight: var(--ve-fw-bold);
+}
+.ve-review-button.flat {
+  border-color: transparent;
+  background: transparent;
+}
+.ve-review-button.flat:hover:not(:disabled) {
+  background: var(--ve-surface-card);
+}
+.ve-review-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ve-review-ai-icon {
+  color: var(--ve-auto);
+}
+
+/* ---------- 左: 要確認のカード ---------- */
+.ve-review-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: var(--ve-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+}
+.ve-review-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+  padding: var(--ve-space-3);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-card);
+  cursor: pointer;
+}
+.ve-review-card.on {
+  box-shadow: inset 0 0 0 2px var(--ve-text-1);
+}
+.ve-review-card:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.ve-review-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+}
+.ve-review-card-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--ve-radius-round);
+  background: var(--ve-warning);
+}
+.ve-review-card-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--ve-fw-bold);
+}
+.ve-review-card-at {
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-review-card-body {
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-prose);
+  color: var(--ve-text-2);
+}
+.ve-review-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ve-space-2);
+}
+.ve-review-empty {
+  margin: 0;
+  color: var(--ve-text-3);
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-prose);
+}
+.ve-review-stats {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+  padding: var(--ve-space-3);
+  border-top: 1px solid var(--ve-gutter);
+}
+.ve-review-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ve-space-2);
+}
+.ve-review-stat-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-hair);
+}
+.ve-review-stat-grid .mono {
+  font-size: var(--ve-fs-15);
+}
+.ve-review-stat-grid > div > span:last-child {
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+
+/* ---------- 中央: 文字起こし ---------- */
+.ve-review-lines {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--ve-space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-4);
+}
+.ve-review-line-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-4);
+}
+.ve-review-line {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: var(--ve-space-4);
+}
+/* 文字起こしは 720px までの幅で、列の中ほどに置く */
+.ve-review-line-group,
+.ve-review-lines > .ve-review-empty {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+.ve-review-line-who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  padding-top: var(--ve-space-1);
+  min-width: 0;
+}
+.ve-review-speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  font-size: var(--ve-fs-12);
+  font-weight: var(--ve-fw-bold);
+  color: var(--ve-text-1);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ve-review-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--ve-radius-round);
+}
+.ve-review-line-at {
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-review-line-text {
+  position: relative;
+  margin: 0;
+  padding: 0 var(--ve-space-1);
+  font-size: var(--ve-fs-15);
+  line-height: 28px;
+  color: var(--ve-text-1);
+  border-radius: var(--ve-radius-xs);
+  cursor: pointer;
+}
+.ve-review-line-text:hover {
+  background: var(--ve-selection-tint);
+}
+.ve-review-line-text:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.ve-review-cut {
+  color: var(--ve-text-icon);
+  text-decoration: line-through;
+  text-decoration-color: var(--ve-text-icon);
+}
+.ve-review-tag {
+  margin-left: var(--ve-space-2);
+  padding: 0 var(--ve-space-1);
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-surface-card);
+  color: var(--ve-text-3);
+  font-size: var(--ve-fs-11);
+  vertical-align: 2px;
+  line-height: var(--ve-lh-11);
+}
+/* 選んだ文: 1本の下地でつなぐ(次の行も選んでいれば、行の間の 16px も下地で埋める) */
+.ve-review-line.picked .ve-review-line-text {
+  background: var(--ve-primary-soft);
+  color: var(--ve-white);
+  border-radius: 0;
+}
+.ve-review-line.picked .ve-review-cut {
+  color: var(--ve-text-3);
+}
+.ve-review-line.picked.continues .ve-review-line-text::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--ve-space-4);
+  background: var(--ve-primary-soft);
+}
+.ve-review-line.all-cut .ve-review-line-at {
+  color: var(--ve-text-icon);
+}
+
+/* 選んだ範囲の操作の帯 */
+.ve-review-rangebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ve-space-1);
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--ve-space-1);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-card);
+  border: 1px solid var(--ve-stroke-control);
+  box-shadow: var(--ve-drop-md);
+}
+.ve-review-rangebar-tc {
+  white-space: nowrap;
+  padding: 0 var(--ve-space-2);
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-2);
+}
+/* 中央が狭い窓(1366 幅など)では、操作の帯を話者の列の下からも使う(折り返さない) */
+.ve-review-lines {
+  container-type: inline-size;
+}
+.ve-tc-short {
+  display: none;
+}
+@container (max-width: 660px) {
+  .ve-review-rangebar {
+    flex-wrap: nowrap;
+  }
+  .ve-review-rangebar .ve-tc-full {
+    display: none;
+  }
+  .ve-review-rangebar .ve-tc-short {
+    display: inline;
+  }
+  .ve-review-rangebar .ve-review-button.strong,
+  .ve-review-rangebar .ve-review-button.flat {
+    padding: var(--ve-control-pad-sm);
+  }
+  .ve-review-rangebar-tc {
+    padding: 0 var(--ve-space-1);
+  }
+}
+
+.ve-review-note {
+  margin: 0;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+
+/* ---------- 右: プログラム ---------- */
+.ve-review-right {
+  overflow: hidden;
+}
+/* 見出しの帯は残し、中だけを縦に送る(重ねたプログラムは送った所に付いていき、外は切り取る) */
+.ve-review-right-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-3);
+  padding: var(--ve-space-3);
+}
+.ve-review-program-slot {
+  flex: none;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--ve-black);
+}
+.ve-review-camera-label {
+  position: fixed;
+  z-index: 96;
+  padding: 0 var(--ve-space-2);
+  line-height: 20px;
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-clip-label-bg);
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-11);
+  pointer-events: none;
+}
+.ve-review-wave {
+  position: relative;
+  height: 24px;
+  flex: none;
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-surface-deep);
+  overflow: hidden;
+  cursor: pointer;
+}
+.ve-review-wave .ve-wave-bars {
+  height: 24px;
+  opacity: 0.8;
+}
+.ve-review-wave:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.ve-review-wave-none {
+  display: block;
+  padding: 0 var(--ve-space-2);
+  line-height: 24px;
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-review-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ve-playhead);
+  pointer-events: none;
+}
+.ve-review-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+}
+.ve-review-play {
+  width: var(--ve-control-lg);
+  height: var(--ve-control-lg);
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ve-radius-round);
+  background: var(--ve-text-1);
+  color: var(--ve-surface-ground);
+  cursor: pointer;
+}
+.ve-review-play:hover {
+  background: var(--ve-white);
+}
+.ve-review-play:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.ve-review-tc {
+  font-size: var(--ve-fs-15);
+}
+.ve-review-cameras {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+}
+.ve-review-camera-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ve-space-2);
+}
+.ve-review-camera {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-1);
+  border: 0;
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-card);
+  color: var(--ve-text-2);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.ve-review-camera.on {
+  box-shadow: inset 0 0 0 2px var(--ve-clip-selected-ring);
+  color: var(--ve-text-1);
+}
+.ve-review-camera:hover:not(.on):not(:disabled) {
+  background: var(--ve-surface-raised);
+}
+.ve-review-camera:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ve-review-camera:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.ve-review-camera-media {
+  display: block;
+  border-radius: var(--ve-radius-xs);
+  overflow: hidden;
+  background: var(--ve-black);
+}
+.ve-review-camera-thumb {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+}
+.ve-review-camera-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ve-review-camera-none {
+  padding: var(--ve-space-1);
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+  text-align: center;
+}
+.ve-review-camera-wave {
+  height: 12px;
+  background: var(--ve-surface-deep);
+}
+.ve-review-camera-name {
+  padding: 0 var(--ve-space-hair);
+  font-size: var(--ve-fs-12);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ve-review-camera.on .ve-review-camera-name {
+  font-weight: var(--ve-fw-bold);
+}
+.ve-review-ai {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+  padding: var(--ve-space-3);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-card);
+}
+.ve-review-ai-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-bold);
+  color: var(--ve-auto);
+  letter-spacing: 0.04em;
+}
+.ve-review-ai-src {
+  margin-left: var(--ve-space-1);
+  font-weight: var(--ve-fw-regular);
+  color: var(--ve-text-3);
+}
+.ve-review-ai-text {
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-prose);
+  color: var(--ve-text-2);
+}
+
+/* プログラム(PreviewPlayer)を右の枠へ重ねる(lib/programDock)。操作の帯・音量計は確認の画面のものを使う */
+.panel.preview-player.ve-program-docked {
+  position: fixed;
+  z-index: 95;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--ve-black);
+  box-shadow: none;
+}
+.preview-player.ve-program-docked .preview-controls,
+.preview-player.ve-program-docked .ve-meter {
+  display: none;
+}
+.preview-player.ve-program-docked .preview-frame-wrapper {
+  background: var(--ve-black);
+}
+.tab-pane.ve-program-pane:has(.ve-program-docked) {
+  display: flex;
+}
+
+/* ---------- 下: 全体の帯 ---------- */
+.ve-review-overview {
+  grid-column: 1 / -1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+  padding: var(--ve-space-2) var(--ve-space-4);
+  background: var(--ve-surface-band);
+  min-width: 0;
+}
+.ve-review-ov-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-3);
+}
+.ve-review-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-4);
+}
+.ve-review-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+}
+.ve-review-legend-cut {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-clip-main);
+}
+.ve-review-legend-mark {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid var(--ve-warning);
+}
+.ve-review-legend-range {
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid var(--ve-clip-selected-ring);
+  border-radius: var(--ve-radius-xs);
+}
+.ve-review-ov-strip {
+  position: relative;
+  height: 48px;
+  border-radius: var(--ve-radius-sm);
+  background: var(--ve-surface-deep);
+  overflow: hidden;
+  cursor: pointer;
+}
+.ve-review-ov-wave {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  height: 16px;
+  opacity: 0.8;
+}
+.ve-review-ov-cut {
+  position: absolute;
+  top: 8px;
+  height: 18px;
+  box-sizing: border-box;
+  border-left: 1px solid var(--ve-surface-deep);
+  border-right: 1px solid var(--ve-surface-deep);
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-clip-main);
+}
+.ve-review-ov-mark {
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  margin-left: -5px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid var(--ve-warning);
+}
+.ve-review-ov-range {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  min-width: 4px;
+  box-sizing: border-box;
+  border: 2px solid var(--ve-clip-selected-ring);
+  border-radius: var(--ve-radius-sm);
+  pointer-events: none;
+}
+.ve-review-ov-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ve-playhead);
+  box-shadow: var(--ve-playhead-glow);
+  pointer-events: none;
+}
+
+/* =====================================================================
+   書き出しのダイアログ
+   ===================================================================== */
+.ve-export {
+  width: min(960px, calc(100vw - 32px));
+  height: min(760px, calc(100vh - 80px));
+  display: flex;
+  flex-direction: column;
+  background: var(--ve-surface-panel);
+  border: 1px solid var(--ve-gutter);
+  border-radius: var(--ve-radius-xl);
+  overflow: hidden;
+  box-shadow: var(--ve-drop-lg);
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-13);
+}
+.ve-export-head {
+  height: 44px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--ve-space-2) 0 var(--ve-space-4);
+  background: var(--ve-surface-band);
+  border-bottom: 1px solid var(--ve-gutter);
+}
+.ve-export-title {
+  font-size: var(--ve-fs-15);
+  font-weight: var(--ve-fw-bold);
+}
+.ve-export-close {
+  width: var(--ve-control-md);
+  height: var(--ve-control-md);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background: transparent;
+  color: var(--ve-text-2);
+  cursor: pointer;
+}
+.ve-export-close:hover {
+  background: var(--ve-surface-card);
+  color: var(--ve-text-1);
+}
+.ve-export-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* 左: 行き先 */
+.ve-export-nav {
+  width: 256px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-3) var(--ve-space-2);
+  background: var(--ve-surface-band);
+  border-right: 1px solid var(--ve-gutter);
+  overflow-y: auto;
+}
+.ve-export-section {
+  padding: 0 var(--ve-space-2) var(--ve-space-1);
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-bold);
+  color: var(--ve-text-3);
+  letter-spacing: 0.04em;
+}
+.ve-export-col > .ve-export-section {
+  padding-left: 0;
+}
+.ve-export-section-gap {
+  padding-top: var(--ve-space-3);
+}
+.ve-export-dest {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  width: 100%;
+  min-width: 0;
+  padding: var(--ve-space-2);
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background: transparent;
+  color: var(--ve-text-1);
+  text-align: left;
+  cursor: pointer;
+}
+.ve-export-dest:hover:not(:disabled) {
+  background: var(--ve-surface-card);
+}
+.ve-export-dest.on {
+  background: var(--ve-surface-raised);
+}
+.ve-export-dest:disabled {
+  cursor: not-allowed;
+}
+.ve-export-dest:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+.ve-export-dest-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-card);
+  color: var(--ve-text-2);
+}
+.ve-export-dest-icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+.ve-export-dest.on .ve-export-dest-icon {
+  color: var(--ve-primary);
+}
+.ve-export-dest-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-hair);
+  min-width: 0;
+}
+.ve-export-dest-name {
+  font-size: var(--ve-fs-13);
+}
+.ve-export-dest.on .ve-export-dest-name {
+  font-weight: var(--ve-fw-bold);
+}
+.ve-export-dest-sub {
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ve-export-dest.on .ve-export-dest-sub {
+  color: var(--ve-text-2);
+}
+.ve-export-nav-note {
+  padding: 0 var(--ve-space-2);
+  font-size: var(--ve-fs-11);
+  line-height: var(--ve-lh-prose);
+  color: var(--ve-text-3);
+}
+.ve-export-preset {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+}
+.ve-export-preset .ve-export-dest {
+  flex: 1;
+}
+.ve-export-save-preset {
+  align-self: flex-start;
+  margin: var(--ve-space-1) var(--ve-space-2) 0;
+}
+.ve-export-preset-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  padding: 0 var(--ve-space-2);
+}
+.ve-export-preset-actions {
+  display: flex;
+  gap: var(--ve-space-1);
+}
+
+/* 右 */
+.ve-export-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-4);
+  padding: var(--ve-space-4) var(--ve-space-6);
+  overflow-y: auto;
+}
+.ve-export-top {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--ve-space-2) var(--ve-space-3);
+  align-items: center;
+}
+.ve-export-row-label {
+  color: var(--ve-text-2);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-field {
+  height: var(--ve-control-md);
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  padding: 0 var(--ve-space-2);
+  display: flex;
+  align-items: center;
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-field);
+  border: 1px solid var(--ve-stroke-field);
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-12);
+}
+select.ve-export-field {
+  display: block;
+  padding: 0 var(--ve-space-1);
+  background-color: var(--ve-surface-field);
+  border-color: var(--ve-stroke-field);
+}
+select.ve-export-field:hover:not(:disabled) {
+  border-color: var(--ve-stroke-field-hover);
+}
+.ve-export-field.fixed {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: 26px;
+}
+.ve-export-field.fixed.empty {
+  color: var(--ve-text-3);
+}
+.ve-export-field.disabled,
+select.ve-export-field:disabled {
+  background: var(--ve-surface-band);
+  border-color: var(--ve-stroke-control);
+  color: var(--ve-text-icon);
+  opacity: 1;
+}
+.ve-export-name {
+  padding: 0;
+}
+.ve-export-name input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--ve-space-2);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-13);
+}
+.ve-export-name input:focus {
+  box-shadow: none;
+}
+.ve-export-name:focus-within {
+  border-color: var(--ve-primary);
+}
+.ve-export-ext {
+  padding: 0 var(--ve-space-2);
+  color: var(--ve-text-3);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-folder {
+  display: flex;
+  gap: var(--ve-space-2);
+  min-width: 0;
+}
+.ve-export-folder .ve-export-field {
+  flex: 1;
+  color: var(--ve-text-2);
+}
+.ve-export-folder .small-button {
+  height: var(--ve-control-md);
+}
+.ve-export-segmented {
+  display: flex;
+  gap: var(--ve-space-hair);
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--ve-space-hair);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-field);
+}
+.ve-export-segmented button {
+  height: var(--ve-control-sm);
+  padding: var(--ve-control-pad-md);
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background: transparent;
+  color: var(--ve-text-2);
+  font-size: var(--ve-fs-12);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ve-export-segmented button.on {
+  background: var(--ve-surface-raised);
+  color: var(--ve-text-1);
+  font-weight: var(--ve-fw-bold);
+}
+.ve-export-segmented button:hover:not(.on):not(:disabled) {
+  background: var(--ve-surface-card);
+  color: var(--ve-text-1);
+}
+.ve-export-segmented button:disabled {
+  color: var(--ve-text-icon);
+  cursor: not-allowed;
+}
+.ve-export-divider {
+  height: 1px;
+  flex: none;
+  background: var(--ve-gutter);
+}
+.ve-export-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ve-space-6);
+}
+.ve-export-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  min-width: 0;
+}
+.ve-export-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ve-space-3);
+}
+.ve-export-switch-row {
+  min-height: var(--ve-control-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ve-space-3);
+  color: var(--ve-text-2);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+}
+.ve-export-status:empty {
+  display: none;
+}
+.ve-export-status p {
+  margin: 0;
+}
+.ve-export-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-2);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-band);
+  border: 1px solid var(--ve-gutter);
+}
+.ve-export-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+.ve-export-queue ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ve-export-bottom {
+  margin-top: auto;
+  display: flex;
+  gap: var(--ve-space-3);
+  align-items: stretch;
+}
+.ve-export-sample {
+  width: 128px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+}
+.ve-export-sample-box {
+  display: block;
+  width: 128px;
+  border-radius: var(--ve-radius-xs);
+  overflow: hidden;
+  background: var(--ve-black);
+}
+.ve-export-thumb {
+  display: block;
+  width: 128px;
+  height: 72px;
+}
+.ve-export-thumb img {
+  width: 128px;
+  height: 72px;
+  object-fit: cover;
+  display: block;
+}
+.ve-export-sample-wave {
+  height: 12px;
+  background: var(--ve-surface-deep);
+}
+.ve-export-sample-wave.tall {
+  height: 84px;
+}
+.ve-export-sample-time {
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-export-summary {
+  flex: 1;
+  margin: 0;
+  display: grid;
+  /* 出せない欄(推定時間)は隠すので、欄の数で等分する */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-band);
+  border: 1px solid var(--ve-gutter);
+  overflow: hidden;
+}
+.ve-export-summary > div {
+  padding: var(--ve-space-3);
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: center;
+  gap: var(--ve-space-1);
+  min-width: 0;
+}
+.ve-export-summary > div + div {
+  border-left: 1px solid var(--ve-gutter);
+}
+.ve-export-summary dt {
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-export-summary dd {
+  margin: 0;
+  font-size: var(--ve-fs-15);
+  color: var(--ve-text-1);
+  white-space: nowrap;
+}
+.ve-export-foot {
+  height: var(--ve-bar-dialog-foot);
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  padding: 0 var(--ve-space-4);
+  background: var(--ve-surface-band);
+  border-top: 1px solid var(--ve-gutter);
+}
+.ve-export-foot-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--ve-text-3);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-button {
+  height: var(--ve-control-lg);
+  padding: var(--ve-control-pad-lg);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-raised);
+  border: 1px solid var(--ve-stroke-control);
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-13);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ve-export-button:hover:not(:disabled) {
+  background: var(--ve-surface-raised-hover);
+}
+.ve-export-button.primary {
+  background: var(--ve-primary-solid);
+  border-color: var(--ve-primary-solid);
+  color: var(--ve-text-on-primary);
+  font-weight: var(--ve-fw-bold);
+}
+.ve-export-button.primary:hover:not(:disabled) {
+  background: var(--ve-primary-solid-hover);
+}
+.ve-export-button.danger {
+  background: var(--ve-danger-soft);
+  border-color: var(--ve-danger-line);
+  color: var(--ve-danger-ink);
+}
+.ve-export-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ve-export-button:focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+
+/* 低い窓(1366×768 など): 下の見本と要約は詰め、設定の欄は送れるように */
+@media (max-height: 800px) {
+  .ve-export-main {
+    gap: var(--ve-space-3);
+    padding-top: var(--ve-space-3);
+    padding-bottom: var(--ve-space-3);
+  }
+}
+
+/* 選んだ文が本編で離れて並ぶとき: 下地を縞にして、つながっていないことを見せる */
+.ve-review-line.picked.apart .ve-review-line-text,
+.ve-review-line.picked.apart.continues .ve-review-line-text::after {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--ve-primary-soft) 0 8px,
+    var(--ve-surface-ground) 8px 12px
+  );
+}
+.ve-review-ov-range.apart {
+  border-style: dashed;
+}
+.ve-review-rangebar-warn {
+  flex-basis: 100%;
+  padding: var(--ve-space-1) var(--ve-space-2) 0;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-warning-ink);
+}
+
+/* プログラムを重ねたとき: 枠の中いっぱいに出す(周りの余白・枠を足さない) */
+.preview-player.ve-program-docked .ve-program-stage,
+.preview-player.ve-program-docked .preview-frame-wrapper {
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  border: 0;
+}
+.preview-player.ve-program-docked .preview-frame {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.ve-review-program-slot {
+  background: transparent;
+}
+
+/* ---------- AI の判断のまとめ(確認の画面とインスペクタで同じ) ---------- */
+.ve-decision-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+}
+.ve-decision-conclusion {
+  margin: 0;
+  font-size: var(--ve-fs-13);
+  line-height: var(--ve-lh-13);
+  color: var(--ve-text-1);
+}
+.ve-decision-scene-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+}
+.ve-decision-scene-name {
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+.ve-decision-table {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: var(--ve-space-hair) var(--ve-space-4);
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-12);
+}
+.ve-decision-table > div {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--ve-space-2);
+  min-width: 0;
+}
+.ve-decision-table dt {
+  color: var(--ve-text-3);
+  white-space: nowrap;
+}
+.ve-decision-table dd {
+  margin: 0;
+  color: var(--ve-text-1);
+  font-family: var(--ve-font-mono);
+  white-space: nowrap;
+}
+.ve-decision-text {
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-prose);
+  color: var(--ve-text-2);
+}
+
+/* ---------- 書き出し: 決まった値(枠を付けない字)と選ぶ欄(枠と ▾) ---------- */
+.ve-export {
+  word-break: auto-phrase;
+}
+.ve-export-fixed {
+  height: var(--ve-control-md);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-1);
+}
+.ve-export-fixed-value {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ve-export-fixed-note {
+  flex: none;
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+select.ve-select-input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0 var(--ve-space-6) 0 var(--ve-space-2);
+}
+.ve-select-chevron {
+  position: absolute;
+  right: var(--ve-space-2);
+  top: 50%;
+  margin-top: -5px;
+  color: var(--ve-text-2);
+  pointer-events: none;
+}
+.ve-select.disabled .ve-select-chevron {
+  color: var(--ve-text-icon);
+}
+.ve-export-warn {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  padding: var(--ve-space-2) var(--ve-space-3);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-warning-soft);
+  border: 1px solid var(--ve-warning-line);
+  color: var(--ve-warning-ink);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-warn > span {
+  flex: 1;
+}
+.ve-export-warn .ve-icon {
+  flex: none;
+  color: var(--ve-warning);
+}
+.ve-export-nav .ve-export-queue {
+  margin-top: var(--ve-space-3);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-nav .ve-export-queue-head {
+  flex-wrap: wrap;
+  gap: var(--ve-space-1);
+}
+.ve-export-nav .export-queue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-1) 0;
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-2);
+}
+.ve-export-nav .export-queue-item > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.ve-export-sample-box.vertical {
+  display: flex;
+  justify-content: center;
+}
+.ve-export-sample-box.vertical .ve-export-thumb,
+.ve-export-sample-box.vertical .ve-export-thumb img {
+  width: 41px;
+  height: 72px;
+}
+.ve-export-sample-box.vertical {
+  flex-wrap: wrap;
+}
+
+/* ---------- この範囲を再編集(範囲の自動編集のダイアログ): 書き出しのダイアログと同じ面・部品 ---------- */
+.range-auto-edit-dialog {
+  background: var(--ve-surface-panel);
+  border: 1px solid var(--ve-gutter);
+  box-shadow: var(--ve-drop-lg);
+  word-break: auto-phrase;
+}
+.range-auto-edit-dialog .dialog-titlebar {
+  height: 44px;
+  background: var(--ve-surface-band);
+  border-bottom: 1px solid var(--ve-gutter);
+}
+.range-auto-edit-dialog .range-auto-edit-body {
+  padding: var(--ve-space-4) var(--ve-space-6);
+}
+.range-auto-edit-dialog fieldset {
+  margin: var(--ve-space-3) 0 0;
+  padding: var(--ve-space-3);
+  border: 0;
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-card);
+}
+.range-auto-edit-dialog legend {
+  float: left;
+  width: 100%;
+  padding: 0 0 var(--ve-space-2);
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-bold);
+  letter-spacing: 0.04em;
+  color: var(--ve-text-3);
+}
+.range-auto-edit-dialog .dialog-footer {
+  height: var(--ve-bar-dialog-foot);
+  box-sizing: border-box;
+  padding: 0 var(--ve-space-4);
+  gap: var(--ve-space-2);
+  background: var(--ve-surface-band);
+  border-top: 1px solid var(--ve-gutter);
+}
+
+/* 離れて並ぶ知らせがあるときは、帯を折り返して知らせを下の行に出す */
+.ve-review-rangebar:has(.ve-review-rangebar-warn) {
+  flex-wrap: wrap;
+}

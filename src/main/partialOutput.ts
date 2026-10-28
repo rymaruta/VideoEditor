@@ -31,7 +31,13 @@ export function partialPathFor(outputPath: string): string {
  * 全部書き終えた最後に英語のエラーで失敗していた
  */
 export function withMp4Extension(outputPath: string): string {
-  return extname(outputPath).toLowerCase() === '.mp4' ? outputPath : `${outputPath}.mp4`
+  return withExtension(outputPath, 'mp4')
+}
+
+/** 書き出し先の名前を、その形式の拡張子(`mp4` / `mov` / `wav`)で終わらせる(理由は `withMp4Extension`) */
+export function withExtension(outputPath: string, ext: string): string {
+  const want = `.${ext.toLowerCase()}`
+  return extname(outputPath).toLowerCase() === want ? outputPath : `${outputPath}${want}`
 }
 
 /**
