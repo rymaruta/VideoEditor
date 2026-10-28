@@ -17,7 +17,7 @@ import {
   styleForSpeaker,
   type TelopStyleDef
 } from '@shared/telop/styles'
-import { lineOverflowFits, stackSimultaneousTelops } from '@shared/telop/stack'
+import { stackSimultaneousTelops } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
 import type { DictionaryEntry } from '@shared/telop/polish'
 import { buildTimedClips } from './timelineMath'
@@ -119,13 +119,7 @@ export function telopsFromTranscript(
     const chunks = utteranceToTelopChunks(u, {
       dictionary,
       maxLineChars: telop?.lineChars,
-      minDurationSec: telop?.minSec,
-      // 語の切れ目で切るための1字のはみ出しは、描画の枠に収まるときだけ(仮編集と同じ)
-      overflowFits: lineOverflowFits(
-        speechTelopStyle(def ? def.style : look.style),
-        project.aspectRatio,
-        telop?.lineChars ?? 14
-      )
+      minDurationSec: telop?.minSec
     })
     for (const [ci, chunk] of chunks.entries()) {
       const r = utteranceTimelineRange(

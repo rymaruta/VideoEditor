@@ -1,4 +1,9 @@
 /**
+ * push 済みの f02d6be の改行の関数の写し(src/shared/telop/polish.ts の全体と、fromTranscript.ts の
+ * wrapTelopLines・phraseLineEnds)。今の版の改行がこれと完全に一致することを確かめるのに使う
+ * (手作りの規則での改行の直しは打ち切り、f02d6be の挙動に戻した。改善は後で別のやり方で行う)
+ */
+/**
  * 発言テロップの文の整え(計画書 §5.8)。
  *
  * - 言いよどみ(えー・あのー・えっと 等)を除く。**発言の頭か、区切り(読点・空白)の後に、
@@ -77,6 +82,13 @@ const PUNCT = /[、。！？!?,.\s]/u
 const PARTICLE = /[はがをにでともへやのね]/u
 const KANA = /[぀-ヿ]/u
 const KANJI = /[一-鿿々]/u
+const HIRAGANA = /[ぁ-ゟ]/u
+const KATAKANA = /[ァ-ヿ]/u
+const DIGIT = /[0-9０-９]/u
+/** 文節の終わりになる仮名(助詞・接続の「て」「ば」など)。この後ろは区切ってよい */
+const PHRASE_END = /[はがをにでともへやのねよてばどら]/u
+/** 前の言葉にくっつく仮名(助詞・助動詞・活用の頭・小さい仮名)。この前では区切らない */
+const ATTACHES = /[はがをにでともへやのねよかばてただなんるっゃゅょぁぃぅぇぉゎー]/u
 
 /**
  * k 文字目の手前で区切る良さ(大きいほど良い)。区切れない所は -Infinity。
@@ -131,6 +143,8 @@ export function breakScore(chars: readonly string[], k: number): number {
   // 「お会計は2,」/「800円」と分かれたうえ、行末のカンマは整えるときに落ちて「2」「800円」と出ていた
   if (/[,.，．]/u.test(prev) && /[0-9０-９]/u.test(chars[k - 2] ?? '') && /[0-9０-９]/u.test(next))
     return -Infinity
+  // 数字の途中・数字と「%」の間(「200 / 0円」「約4 / %弱」)では切らない
+  if (DIGIT.test(prev) && (DIGIT.test(next) || /[%％‰]/u.test(next))) return -Infinity
   if (PUNCT.test(prev)) return 3
   // 単語の途中(「カ / ラス」「で / すね」「み / たい」)では、ほかに区切れる所があれば切らない。
   // 実写の素材(12分の食べ歩き)では、テロップの境目・改行 248 か所のうち 45 か所が単語の途中だった
@@ -141,17 +155,102 @@ export function breakScore(chars: readonly string[], k: number): number {
   return 0
 }
 
+/** 文の終わりらしい形(句点の無い話し言葉の文末) */
+/**
+ * 文の終わりと確実に言える形(丁寧の「ます・です」の文末)。「った・ない・んだ」は「行ったら」「ないし」
+ * 「なんだろう」の途中にもなるので入れない(入れると「雨が降った / ら」と切っていた)
+ */
+const SENTENCE_END =
+  /(?:ます|ました|ません|ませんでした|ましょう|です|でした|でしょう|ください|ございます|ございました|ですね|ますね|ですよ|ますよ|ですか|ますか)$/u
+/** 文の終わりの形の直後でも、これで始まれば言葉の続き(「ですか / ら」「ます / けど」「でした / し」) */
+const CONTINUES_AFTER_END =
+  /^(?:[らろしけじがねよなかわさぞとのでもへにをはっゃゅょー]|まま|まで|けど|から|ので|のに|って)/u
+
+/**
+ * 前にくっつく仮名で始まっても、それだけで立つ言葉(副詞・「なる」・言い直しの「ですね」)。助詞の後ろなら
+ * ここで改行してよい(「明細に / なります」「営業的には / だいぶ」)
+ */
+const FREE_HEAD =
+  /^(?:です[ねよ]|な[りっるれろら]|だいぶ|だんだん|たくさん|たぶん|たとえば|ただ|なかなか|なるべく|なんか|なんとか|なぜ|かなり|もう|もっと|まだ|まず|まあ|やはり|やっぱり|よく)/u
+
+/** chars[k] の手前が、文の終わりらしい形で終わっているか(次の字が言葉の続きなら終わりではない) */
+function endsSentence(chars: readonly string[], k: number): boolean {
+  const tail = chars.slice(Math.max(0, k - 6), k).join('')
+  if (!SENTENCE_END.test(tail)) return false
+  return !CONTINUES_AFTER_END.test(chars.slice(k, k + 3).join(''))
+}
+
+/**
+ * 改行・テロップの境目の位置としての良さ(`breakScore` に、日本語の文節の切れ目の見当を足したもの)。
+ * `Intl.Segmenter` の日本語の単語の区切りは活用・複合語を細かく切る(「思い|切|っ|た」「聞|か|せい|ただ|きた|い」
+ * 「もつ|な|が|って」)ので、それだけに頼ると「会長の思い / 切った」「お聞かせいただ / きたい」「つな / がって」
+ * のように語の途中で改行していた(試し編集 第2回)。仮名の並びの中は、文節の終わりの仮名(助詞・「て」)の
+ * 後ろで、次が前にくっつく仮名でない所だけを区切りとし、漢字・カタカナの後ろの仮名(送り仮名・助詞)の前と、
+ * 漢字+送り仮名1文字+漢字(「思い切る」「受け入れ」「話し合い」)の途中は単語の途中と同じ扱いにする
+ */
+export function lineBreakScore(chars: readonly string[], k: number): number {
+  let base = breakScore(chars, k)
+  if (base === -Infinity || base >= 3) return base
+  const prev = chars[k - 1]
+  const next = chars[k]
+  const before = chars[k - 2] ?? ''
+  // 単語の区切りが助詞を後ろの言葉の頭に付けて分けた所(「皆様|がい|ら」「に|もつ|な|が」)は、助詞の後ろを
+  // 語の切れ目とみなす。名詞(漢字・カタカナ)の後ろの助詞と、助詞に続く「を」「も」「は」だけ
+  if (
+    base === INSIDE_WORD_SCORE &&
+    /[はがをにでとものへや]/u.test(prev) &&
+    (KANJI.test(before) ||
+      KATAKANA.test(before) ||
+      (PARTICLE.test(before) && /[をもは]/u.test(prev))) &&
+    (HIRAGANA.test(next) || KANJI.test(next)) &&
+    !ATTACHES.test(next) &&
+    !(prev === 'で' && next === 'す') &&
+    // 「もう」「はず」など、助詞の字で始まる言葉の途中ではない
+    !/^(?:もう|もっ|もち|もの|はず|はっ|はじ|がん|でき|とて|とに|とり|との)/u.test(
+      chars.slice(k - 1, k + 1).join('')
+    ) &&
+    wordBoundaries(chars)?.has(k - 1) === true
+  )
+    base = 2
+  // 句点が無くても文の終わりらしい所(「…ました / それでは」「…ですね / 以前」)は、次が前にくっつく仮名で
+  // なければ切ってよい(仮名の並びの中を全部語の途中とみなすと「ありがとうございまし / た…」になった)
+  if (base > -Infinity && !ATTACHES.test(next) && endsSentence(chars, k)) return Math.max(base, 2)
+  if (HIRAGANA.test(next)) {
+    // 漢字・カタカナ・数字の後ろの助詞・送り仮名・「する」の活用(「経済 / にとって」「競合 / しない」)
+    if (
+      (KANJI.test(prev) || KATAKANA.test(prev) || DIGIT.test(prev)) &&
+      (ATTACHES.test(next) || /[しすさせ]/u.test(next))
+    )
+      return Math.min(base, INSIDE_WORD_SCORE)
+    // 「…て / ですね」の「ですね」は前にくっつかない(言い直しの間の決まり文句)
+    const filler = FREE_HEAD.test(chars.slice(k, k + 4).join(''))
+    if (HIRAGANA.test(prev) && (!PHRASE_END.test(prev) || (ATTACHES.test(next) && !filler)))
+      return Math.min(base, INSIDE_WORD_SCORE)
+  }
+  // 「お」「ご」+漢字(「お聞かせ」「ご案内」)の間
+  if (KANJI.test(next) && /[おご]/u.test(prev)) return Math.min(base, INSIDE_WORD_SCORE)
+  // 漢字+送り仮名1文字+漢字(複合語の途中)
+  if (KANJI.test(next) && HIRAGANA.test(prev) && !PARTICLE.test(prev) && KANJI.test(before))
+    return Math.min(base, INSIDE_WORD_SCORE)
+  return base
+}
+
 /**
  * 長さ `max` 以内で、良い区切りを探す。後ろ半分の中から点数の高い所(同点なら後ろ)を選ぶ。
  * どこも区切れなければ、禁則の文字を1つだけ前の行にぶら下げる。
  */
-export function findBreak(chars: readonly string[], from: number, max: number): number {
+export function findBreak(
+  chars: readonly string[],
+  from: number,
+  max: number,
+  score: (chars: readonly string[], k: number) => number = breakScore
+): number {
   const limit = Math.min(chars.length, from + max)
   if (limit >= chars.length) return chars.length
   let best = -1
   let bestScore = -Infinity
   for (let k = limit; k > from + Math.floor(max / 2); k--) {
-    const sc = breakScore(chars, k)
+    const sc = score(chars, k)
     if (sc > bestScore) {
       best = k
       bestScore = sc
@@ -178,8 +277,14 @@ export function balancedLineEnds(
   chars: readonly string[],
   maxLine: number,
   /** 切ってはいけない位置(辞書で直す言葉の途中など) */
-  noCut?: (index: number) => boolean
+  noCut?: (index: number) => boolean,
+  /**
+   * 文節の切れ目の見当(`lineBreakScore`)で選ぶ。語の途中でしか切れないときは、1行増やしてでも語の切れ目で
+   * 切る(テロップの1枚の中の改行。行が増えた分は次の枚になる)
+   */
+  phrases = false
 ): number[] {
+  const score = phrases ? lineBreakScore : breakScore
   const ends: number[] = []
   const max = Math.max(1, Math.floor(maxLine))
   let from = 0
@@ -200,7 +305,7 @@ export function balancedLineEnds(
     let bestDist = Infinity
     for (let len = Math.min(max, target + slack); len >= lo; len--) {
       if (noCut?.(from + len)) continue
-      const sc = breakScore(chars, from + len)
+      const sc = score(chars, from + len)
       if (sc === -Infinity) continue
       const dist = Math.abs(len - target)
       const value = sc - dist * 0.5
@@ -211,7 +316,25 @@ export function balancedLineEnds(
         bestDist = dist
       }
     }
-    const cut = best > from ? best : findBreak(chars, from, max)
+    // 平均の長さの近くでは語の途中でしか切れないなら、行の数を変えずに切れる範囲の全部から、語の切れ目を探す
+    // (「ぜひお聞かせいただ / きたいなと思います」より「…いただきたいなと / 思います」)。行の数は変えない
+    // (1枚に入る行の数を超えると枚が増え、何枚目かで覚えた人の修正・消した印が別の枚に当たる)
+    if (phrases && best > from && lineBreakScore(chars, best) < 0) {
+      let alt = -1
+      let altValue = -Infinity
+      for (let len = max; len >= Math.max(1, remaining - max * (lines - 1)); len--) {
+        if (noCut?.(from + len)) continue
+        const sc = lineBreakScore(chars, from + len)
+        if (sc < 0) continue
+        const value = sc - Math.abs(len - target) * 0.5
+        if (value > altValue) {
+          alt = from + len
+          altValue = value
+        }
+      }
+      if (alt > from) best = alt
+    }
+    const cut = best > from ? best : findBreak(chars, from, max, score)
     ends.push(cut)
     from = cut
   }
@@ -237,4 +360,33 @@ export function dictionaryNoCut(
     }
   }
   return (index) => inside.has(index)
+}
+
+/** 1行に収まるよう改行を入れる(f02d6be の fromTranscript.ts から) */
+export function wrapTelopLines(text: string, maxLineChars: number): string[] {
+  const chars = [...text]
+  let from = 0
+  return phraseLineEnds(chars, maxLineChars)
+    .map((end) => {
+      const line = chars.slice(from, end).join('').trim()
+      from = end
+      return line
+    })
+    .filter((l) => l.length > 0)
+}
+
+/**
+ * 改行の位置。まず今までの選び方(`breakScore`)で決め、その改行が文節の見当(`lineBreakScore`)で語の途中と
+ * 見えるときだけ、文節の見当で選び直した位置を使う(語の途中と見える改行が減り、行の数が変わらないときだけ)。
+ * 文節の見当で全部を選び直すと、今まで語の切れ目で切れていた文まで動き、別の所で語の途中に切れていた
+ * (「一生懸 / 命」「た / くさん」)
+ */
+function phraseLineEnds(chars: readonly string[], max: number): number[] {
+  const before = balancedLineEnds(chars, max)
+  const inside = (ends: readonly number[]): number =>
+    ends.slice(0, -1).filter((e) => lineBreakScore(chars, e) < 0).length
+  const bad = inside(before)
+  if (bad === 0) return before
+  const after = balancedLineEnds(chars, max, undefined, true)
+  return after.length === before.length && inside(after) < bad ? after : before
 }

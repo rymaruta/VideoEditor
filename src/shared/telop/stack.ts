@@ -1,13 +1,6 @@
-import type { AspectRatio, TextOverlay, TextStyle } from '../types'
-import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '../textStyle'
-import { textCanvasSize } from '../resolution'
-import {
-  bubbleTailReach,
-  TELOP_LINE_HEIGHT_EM,
-  telopBackgroundPadding,
-  telopHitBounds,
-  type TelopContext
-} from './render'
+import type { TextOverlay } from '../types'
+import { TEXT_MARGIN_V_RATIO } from '../textStyle'
+import { bubbleTailReach, TELOP_LINE_HEIGHT_EM, telopHitBounds, type TelopContext } from './render'
 
 /**
  * 同時に出ている下のテロップを、段に積んで重ならないようにする(計画書 §5.8 の「テロップ同士の重なりを避ける」)。
@@ -233,27 +226,4 @@ export function liftAboveShortsUi<
     if (Math.abs(fitted - pos.y) <= 1e-12) return t
     return { ...t, style: { ...t.style, customPosition: { ...pos, y: fitted } } }
   })
-}
-
-/**
- * 発言テロップの1行を `maxLineChars + 1` 字にしても描画の枠に収まるか(改行で語の途中を避けるために1字
- * はみ出してよいか)。枠は画面の幅から左右の余白を除いた所(9:16 なら 972px)、縦(9:16)はさらに Shorts の
- * 右のボタンの列(`SHORTS_UI_RAIL`)に掛からない幅(真ん中揃えで 0.77 倍)。字の幅は全角で文字の大きさ
- * + 字間、縁取りと背景の箱の余白は両側に足す。縦書きは対象外(false)
- */
-export function lineOverflowFits(
-  style: TextStyle,
-  aspect: AspectRatio,
-  maxLineChars: number
-): boolean {
-  if (style.vertical || !(style.fontSize > 0) || !(maxLineChars > 0)) return false
-  const canvas = textCanvasSize(aspect)
-  let limit = canvas.w * (1 - 2 * TEXT_MARGIN_H_RATIO)
-  if (aspect === '9:16') limit = Math.min(limit, (SHORTS_UI_RAIL.left - 0.5) * 2 * canvas.w)
-  const width =
-    (maxLineChars + 1) * (style.fontSize + Math.max(0, style.letterSpacing || 0)) +
-    (style.outline ? 2 * Math.max(0, style.outlineWidth || 0) : 0) +
-    // 背景の箱の左右の余白(箱は文字より外へ広がる)
-    (style.background ? 2 * Math.max(0, telopBackgroundPadding(style, style.fontSize).x) : 0)
-  return width <= limit
 }
