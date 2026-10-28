@@ -726,3 +726,63 @@
 .timeline-panel .timeline-drop-marker {
   background: var(--ve-primary);
 }
+
+/* ---------- 縦に送っても目盛りの帯と時刻の欄は固定 ----------
+   縦の送りはレーンの列が持つ(横と縦の両方)。見出しの列は自分では送らず、レーンの縦の送りに合わせる
+   (Timeline.tsx の onScroll)。目盛りの帯はレーンの列の中で sticky(横はレーンと一緒に動く) */
+.timeline-panel .timeline-tracks {
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
+}
+.timeline-panel .track-labels-col {
+  min-height: 0;
+  overflow: hidden;
+}
+.timeline-panel .track-lanes-col {
+  min-height: 0;
+  overflow: auto;
+}
+.ve-lanes-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 100%;
+}
+.timeline-panel .timeline-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 7;
+}
+.timeline-panel .timeline-timecode-cell {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--ve-surface-band);
+}
+/* レーンの再生位置の線は、中身の高さだけ(目盛りの帯の下を通る) */
+.timeline-panel .track-lanes-col .timeline-playhead {
+  top: 0;
+  bottom: 0;
+  height: auto;
+}
+/* 目盛りの帯の中の再生位置: 旗と帯の高さの線 */
+.ve-ruler-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ve-playhead);
+  z-index: 3;
+  pointer-events: none;
+}
+.ve-ruler-playhead .timeline-playhead-handle {
+  pointer-events: auto;
+}
+/* 見出しの列の「+ トラック ▾」の段と同じ高さの空き */
+.ve-lanes-add-spacer {
+  flex-shrink: 0;
+  height: 32px;
+}
