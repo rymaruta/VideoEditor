@@ -310,7 +310,15 @@ export function fillsVertical(
  * (つないだクリップは1本目の位置)
  */
 function sameClipSettings(a: Clip, b: Clip): boolean {
-  const skip = new Set(['id', 'inPoint', 'outPoint', 'cropCenter', 'transitionIn', 'splitStack'])
+  const skip = new Set([
+    'id',
+    'inPoint',
+    'outPoint',
+    'cropCenter',
+    'autoCropCenter',
+    'transitionIn',
+    'splitStack'
+  ])
   const keys = new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => !skip.has(k)))
   for (const k of keys) {
     const x = (a as unknown as Record<string, unknown>)[k]
@@ -318,6 +326,18 @@ function sameClipSettings(a: Clip, b: Clip): boolean {
     if (JSON.stringify(x ?? null) !== JSON.stringify(y ?? null)) return false
   }
   return true
+}
+
+/**
+ * 切り抜きの位置が、自動で分けたときのままか(人が動かしていない)。自動で分けた位置は縦が真ん中(0.5)で、
+ * 分けたときの位置(`autoCropCenter`)と同じ。人が動かした位置のクリップはつながない(位置を保つ)
+ */
+function autoCrop(c: Clip): boolean {
+  const cc = c.cropCenter
+  if (!cc) return true
+  if (Math.abs(cc.y - 0.5) > 1e-9) return false
+  const a = c.autoCropCenter
+  return !a || (Math.abs(a.x - cc.x) < 1e-9 && Math.abs(a.y - cc.y) < 1e-9)
 }
 
 export function withoutVerticalSplits(project: Project): Project {
@@ -332,6 +352,8 @@ export function withoutVerticalSplits(project: Project): Project {
       prev.id === base &&
       !c.transitionIn &&
       sameClipSettings(prev, c) &&
+      autoCrop(prev) &&
+      autoCrop(c) &&
       Math.abs(prev.outPoint - c.inPoint) < 1e-6
     ) {
       out[out.length - 1] = { ...prev, outPoint: c.outPoint }
@@ -592,7 +614,8 @@ export function applyVerticalFill(
               inPoint: sourceAt[i],
               outPoint: i + 1 < sourceAt.length ? sourceAt[i + 1] : c.outPoint,
               fillCrop: true,
-              cropCenter: { x: person.cx, y: 0.5 }
+              cropCenter: { x: person.cx, y: 0.5 },
+              autoCropCenter: { x: person.cx, y: 0.5 }
             }
             if (i > 0) delete piece.transitionIn
             return piece

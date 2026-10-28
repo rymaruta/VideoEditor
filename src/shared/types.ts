@@ -65,6 +65,11 @@ export interface Clip {
    * 書き出しは `fillCrop`・`cropCenter` より優先する。画面のプレビューは `cropCenter`(上の人)で見せる
    */
   splitStack?: StackSplit
+  /**
+   * 話す人の切り替えで自動で分けたときに付けた切り抜きの位置(`cropCenter` と同じ値で付ける)。`cropCenter` が
+   * これと違えば人が動かした位置なので、元の形に戻すときにつながない
+   */
+  autoCropCenter?: { x: number; y: number }
   audioDetached?: boolean
   colorLabel?: ClipColorLabel
 }
