@@ -1,0 +1,395 @@
+/* ==========================================================================
+   第2段: ソロ・トラックの固定・ループ・音量計・右の帯のタブ・素材の検索・プログラムの見出し
+   色は tokens.css の名前だけを使う(直書きしない)
+   ========================================================================== */
+
+/* ---------- トラックの見出し ---------- */
+/* 右のトグルは右端にそろえる(鍵はどの段も右端、目は音声の S と同じ列)。
+   映像の段はトグルが 2 つなので、空いた分を名前に回す(「テロップ」が切れない) */
+.ve-track-toggles {
+  width: auto;
+}
+/* トラックの名前はボタン。押すとトラックの設定が開く */
+.ve-track-name-button,
+.ve-track-name-button:hover:not(:disabled) {
+  flex: 1;
+  min-width: 0;
+  height: var(--ve-control-xs);
+  padding: 0 var(--ve-space-1);
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background-image: none;
+  box-shadow: none;
+  text-align: left;
+}
+.ve-track-name-button {
+  background-color: transparent;
+}
+.ve-track-name-button:hover:not(:disabled),
+.ve-track-name-button.open {
+  background-color: var(--ve-surface-card);
+}
+.ve-track-name-button:hover:not(:disabled) .track-label-name,
+.ve-track-name-button.open .track-label-name {
+  color: var(--ve-text-1);
+}
+/* 固定したトラック: 鍵は黄色、レーンのクリップは薄く・触れない印 */
+.ve-track-toggle.ve-track-lock[aria-pressed='true'],
+.ve-track-toggle.ve-track-lock[aria-pressed='true']:hover:not(:disabled) {
+  color: var(--ve-warning);
+}
+.track-label.is-locked .track-tag {
+  opacity: 0.6;
+}
+.track-lane.is-locked .timeline-clip,
+.track-lane.is-locked .timeline-audio-clip,
+.track-lane.is-locked .timeline-video-overlay-clip,
+.track-lane.is-locked .timeline-caption-clip {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.track-lane.is-locked .timeline-clip-handle,
+.track-lane.is-locked .timeline-caption-handle,
+.track-lane.is-locked .timeline-roll-handle {
+  display: none;
+}
+
+/* ---------- プログラムの右の縦の音量計(L/R) ---------- */
+.ve-program-stage {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+}
+.ve-program-stage > .preview-frame-wrapper {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.ve-meter {
+  flex: none;
+  width: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-2) var(--ve-space-1);
+  background: var(--ve-surface-ground);
+  border-left: 1px solid var(--ve-gutter);
+  user-select: none;
+}
+.ve-meter-peak-label {
+  display: block;
+  text-align: right;
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-10);
+  color: var(--ve-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.ve-meter-peak-label[data-zone='warn'] {
+  color: var(--ve-meter-warn);
+}
+.ve-meter-peak-label[data-zone='over'] {
+  color: var(--ve-meter-over);
+}
+.ve-meter-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  /* 目盛りの数字の上下がはみ出さないよう */
+  margin: var(--ve-space-1) 0;
+}
+.ve-meter-scale {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+}
+.ve-meter-scale > span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-10);
+  line-height: 1;
+  color: var(--ve-text-faint);
+}
+/* 色の帯: 下から 90%(−6 dBFS)までは緑、95%(−3 dBFS)までは黄、上は赤 */
+.ve-meter-channel {
+  position: relative;
+  width: 6px;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 1px;
+  background: linear-gradient(
+    to top,
+    var(--ve-meter-ok) 0%,
+    var(--ve-meter-ok) 90%,
+    var(--ve-meter-warn) 90%,
+    var(--ve-meter-warn) 95%,
+    var(--ve-meter-over) 95%
+  );
+}
+/* 点いていない上の側を覆う(覆いを縮めると点く) */
+.ve-meter-unlit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 100%;
+  background: var(--ve-surface-field);
+  opacity: 0.88;
+}
+.ve-meter-hold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  transform: translateY(50%);
+  background: var(--ve-meter-ok);
+  visibility: hidden;
+}
+.ve-meter-hold[data-zone='warn'] {
+  background: var(--ve-meter-warn);
+}
+.ve-meter-hold[data-zone='over'] {
+  background: var(--ve-meter-over);
+}
+.ve-meter-legend {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  font-size: var(--ve-fs-10);
+  line-height: 1;
+  color: var(--ve-text-3);
+}
+.ve-meter-legend > span {
+  width: 6px;
+  text-align: center;
+}
+
+/* ---------- プログラムの見出しの右: 全体を表示 ▾・画質 ▾ ---------- */
+.ve-program-head-menus {
+  margin-left: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+}
+.ve-program-head-menus .ve-program-head-menu {
+  height: var(--ve-control-sm);
+  padding: 0 var(--ve-space-2);
+  font-size: var(--ve-fs-12);
+  white-space: nowrap;
+}
+.ve-program-head-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-menu-check-space {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+}
+/* 実寸に対する倍率で見るとき: 収まらない分は送って見る(左上が切れないよう safe で寄せる) */
+.preview-frame-wrapper.is-zoomed {
+  overflow: auto;
+  justify-content: safe center;
+  align-items: safe center;
+}
+.preview-frame-wrapper.is-zoomed > .preview-frame {
+  flex: none;
+  max-width: none;
+  max-height: none;
+}
+
+/* ---------- インスペクタの見出しのタブ(プロパティ / 色 / AI の判断) ---------- */
+.ve-inspector-tabs {
+  overflow: hidden;
+}
+
+/* 色: チャンネルごとの倍率と足し込み */
+.ve-color-channel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-1) 0;
+  border-bottom: 1px solid var(--ve-border-subtle);
+}
+.ve-color-slider {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: var(--ve-space-2);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+.ve-color-slider input[type='range'] {
+  min-width: 0;
+  width: 100%;
+}
+.ve-color-slider-value {
+  text-align: right;
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-1);
+}
+
+/* AI の判断 */
+.ve-decision-source {
+  margin-left: auto;
+  padding: 0 var(--ve-space-1);
+  border-radius: var(--ve-radius-sm);
+  background: var(--ve-auto-soft);
+  color: var(--ve-auto-ink);
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-regular);
+}
+.ve-decision-scenes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+}
+.ve-decision-scene {
+  padding: var(--ve-space-2);
+  border: 1px solid var(--ve-border-subtle);
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-card);
+}
+.ve-decision-scene-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  min-width: 0;
+}
+.ve-decision-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-1);
+}
+.ve-decision-score {
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-2);
+}
+.ve-decision-reason {
+  margin: var(--ve-space-1) 0 0;
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-12);
+  color: var(--ve-text-2);
+}
+.ve-decision-facts {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--ve-space-1) var(--ve-space-2);
+  margin: 0 0 var(--ve-space-2);
+  font-size: var(--ve-fs-12);
+}
+.ve-decision-facts dt {
+  color: var(--ve-text-3);
+}
+.ve-decision-facts dd {
+  margin: 0;
+  color: var(--ve-text-1);
+}
+
+/* ソロの書き出しの知らせ */
+.ve-export-solo-note {
+  color: var(--ve-warning-ink);
+}
+.ve-decision-scene-head .structure-kind {
+  flex: none;
+  padding: 1px var(--ve-space-2);
+  font-size: var(--ve-fs-11);
+}
+
+/* ---------- 素材の検索と種類の絞り込み ---------- */
+.ve-media-filter {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-1) var(--ve-space-2) var(--ve-space-2);
+}
+.ve-media-search {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  height: var(--ve-control-sm);
+  padding: 0 var(--ve-space-2);
+  border: 1px solid var(--ve-border);
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-field);
+  color: var(--ve-text-icon);
+}
+.ve-media-search:focus-within {
+  border-color: var(--ve-primary);
+}
+.ve-media-search input,
+.ve-media-search input:focus {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-12);
+}
+.ve-media-kinds {
+  display: flex;
+  gap: var(--ve-space-1);
+  flex-wrap: wrap;
+}
+.ve-media-kind,
+.ve-media-kind:hover:not(:disabled) {
+  height: 22px;
+  padding: 0 var(--ve-space-2);
+  border: 1px solid var(--ve-border);
+  border-radius: var(--ve-radius-pill);
+  background-image: none;
+  box-shadow: none;
+  font-size: var(--ve-fs-11);
+}
+.ve-media-kind {
+  background-color: transparent;
+  color: var(--ve-text-2);
+}
+.ve-media-kind:hover:not(:disabled) {
+  background-color: var(--ve-surface-card);
+  color: var(--ve-text-1);
+}
+.ve-media-kind[aria-pressed='true'],
+.ve-media-kind[aria-pressed='true']:hover:not(:disabled) {
+  border-color: var(--ve-primary);
+  background-color: var(--ve-primary-soft);
+  color: var(--ve-primary-ink);
+}
+.ve-media-kind:disabled {
+  opacity: 0.45;
+}
+.ve-media-none {
+  padding: var(--ve-space-3);
+  text-align: center;
+}

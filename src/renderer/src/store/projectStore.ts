@@ -638,6 +638,7 @@ function normalizeAudioTrack(
     id: asNonEmptyString(raw.id, uuid()),
     name: asNonEmptyString(raw.name, '音声トラック'),
     muted: asBoolean(raw.muted, false),
+    ...('locked' in raw ? { locked: raw.locked === true ? true : undefined } : {}),
     duckingEnabled: asBoolean(raw.duckingEnabled, false),
     voice: raw.voice === true ? true : undefined,
     autoRole: raw.autoRole === 'se' || raw.autoRole === 'bgm' ? raw.autoRole : undefined,
@@ -698,6 +699,7 @@ function normalizeVideoOverlayTrack(
     id: asNonEmptyString(raw.id, uuid()),
     name: asNonEmptyString(raw.name, 'PiP'),
     hidden: asBoolean(raw.hidden, false),
+    ...('locked' in raw ? { locked: raw.locked === true ? true : undefined } : {}),
     audioMuted: raw.audioMuted === true ? true : undefined,
     position: asOneOf(raw.position, PIP_POSITIONS, 'top-right'),
     // 0以下だと `scale=0:-2` で書き出しが失敗する。1超は枠からはみ出す。
@@ -852,6 +854,12 @@ function normalizeLoadedProjectFields(project: Project): Project {
       : {}),
     ...('telopTrackHidden' in raw
       ? { telopTrackHidden: raw.telopTrackHidden === true ? true : undefined }
+      : {}),
+    ...('mainTrackLocked' in raw
+      ? { mainTrackLocked: raw.mainTrackLocked === true ? true : undefined }
+      : {}),
+    ...('telopTrackLocked' in raw
+      ? { telopTrackLocked: raw.telopTrackLocked === true ? true : undefined }
       : {}),
     transcript: normalizeTranscript(raw.transcript),
     multicam: normalizeMulticam(raw.multicam),
@@ -1132,6 +1140,13 @@ interface ProjectState {
   /** ルーラーを Shift+ドラッグして選んだ範囲(タイムラインの秒)。無ければ null */
   dragRange: { start: number; end: number } | null
   isPlaying: boolean
+  /**
+   * ソロにしている音声トラック(モニター用。企画には保存せず、取り消しにも積まない。書き出しには効かない)。
+   * 1 本でもあれば、プレビューの音はソロのトラックだけ(本編・ワイプの音も鳴らさない)
+   */
+  soloTrackIds: string[]
+  /** ループ再生(イン〜アウト、無ければ全体を繰り返す)。モニター用で保存しない */
+  loopPlayback: boolean
   seekRequest: { time: number; token: number } | null
   /**
    * 実在しないと分かっている素材の**パス**。
@@ -1422,6 +1437,16 @@ interface ProjectState {
   addAudioTrack: (name: string) => void
   removeAudioTrack: (trackId: string) => void
   toggleAudioTrackMute: (trackId: string) => void
+  /** 音声トラックのソロ(モニター用) */
+  toggleAudioTrackSolo: (trackId: string) => void
+  setLoopPlayback: (on: boolean) => void
+  /**
+   * トラックの固定(鍵)。固定したトラックで選んでいたクリップ・テロップの選びは外す。
+   * 取り消しに積む(企画に保存する)
+   */
+  toggleTrackLocked: (
+    target: { kind: 'main' } | { kind: 'telop' } | { kind: 'audio' | 'overlay'; id: string }
+  ) => void
   toggleAudioTrackDucking: (trackId: string) => void
   setAudioTrackVolume: (trackId: string, volume: number) => void
   addClipToAudioTrack: (trackId: string, assetId: string) => void
@@ -2285,6 +2310,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   sourceOut: null,
   timelineIn: null,
   timelineOut: null,
+  soloTrackIds: [],
+  loopPlayback: false,
   draggingAssetId: null,
   setDraggingAssetId: (assetId) => set({ draggingAssetId: assetId }),
   // Marks reset with the clip: they describe a range inside one asset and mean
@@ -3260,6 +3287,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   splitClipAtTime: (clipId, absoluteTime) =>
     set((state) => {
+      if (state.project.mainTrackLocked) return state
       let elapsed = 0
       let didSplit = false
       let secondHalfId: string | null = null
@@ -3343,19 +3371,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   removeClip: (clipId) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        clips: state.project.clips.filter((c) => c.id !== clipId),
-        audioTracks: removeLinkedAudioFor(state.project.audioTracks, new Set([clipId]))
-      },
-      selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
-      multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => id !== clipId)
-    })),
+    set((state) =>
+      state.project.mainTrackLocked
+        ? state
+        : {
+            ...pushHistory(state),
+            project: {
+              ...state.project,
+              clips: state.project.clips.filter((c) => c.id !== clipId),
+              audioTracks: removeLinkedAudioFor(state.project.audioTracks, new Set([clipId]))
+            },
+            selectedClipId: state.selectedClipId === clipId ? null : state.selectedClipId,
+            multiSelectedClipIds: state.multiSelectedClipIds.filter((id) => id !== clipId)
+          }
+    ),
 
   removeClips: (clipIds) =>
     set((state) => {
+      if (state.project.mainTrackLocked) return state
       const idSet = new Set(clipIds)
       return {
         ...pushHistory(state),
@@ -3372,6 +3405,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   duplicateClips: (clipIds) =>
     set((state) => {
+      if (state.project.mainTrackLocked) return state
       const idSet = new Set(clipIds)
       const indices = state.project.clips
         .map((c, i) => (idSet.has(c.id) ? i : -1))
@@ -3447,6 +3481,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
    */
   moveClipToIndex: (clipId, targetIndex) =>
     set((state) => {
+      if (state.project.mainTrackLocked) return state
       const clips = [...state.project.clips]
       const fromIndex = clips.findIndex((c) => c.id === clipId)
       if (fromIndex === -1) return state
@@ -3522,6 +3557,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   pasteClip: () =>
     set((state) => {
       if (state.clipboardClips.length === 0) return state
+      // 本編(V1)を固定していたら貼り付けの対象にしない
+      if (state.project.mainTrackLocked) return state
       // **コピーした後に素材が消えることがある。** クリップボードは素材IDしか覚えていない
       // ので、コピー後にその素材を削除してから貼り付けると、タイムラインにもプレビューにも
       // 出ない（buildTimedClips が素材の無いクリップを捨てる）クリップが project.clips
@@ -4409,18 +4446,23 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     }),
 
   removeTextOverlay: (id) =>
-    set((state) => ({
-      ...pushHistory(state),
-      selectedOverlayId: state.selectedOverlayId === id ? null : state.selectedOverlayId,
-      project: {
-        ...state.project,
-        textOverlays: state.project.textOverlays.filter((o) => o.id !== id),
-        dismissedTelops: withDismissed(
-          state.project.dismissedTelops,
-          state.project.textOverlays.find((o) => o.id === id)
-        )
-      }
-    })),
+    set((state) =>
+      // 固定したテロップ(T1)は消さない(トラックの固定)
+      state.project.telopTrackLocked
+        ? state
+        : {
+            ...pushHistory(state),
+            selectedOverlayId: state.selectedOverlayId === id ? null : state.selectedOverlayId,
+            project: {
+              ...state.project,
+              textOverlays: state.project.textOverlays.filter((o) => o.id !== id),
+              dismissedTelops: withDismissed(
+                state.project.dismissedTelops,
+                state.project.textOverlays.find((o) => o.id === id)
+              )
+            }
+          }
+    ),
 
   /**
    * 全テロップをまとめてずらす。**頭打ちは1件ずつではなく、まとまり全体に掛ける。**
@@ -4503,6 +4545,45 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           },
           unlinked
         )
+      }
+    }),
+
+  toggleAudioTrackSolo: (trackId) =>
+    set((state) => ({
+      soloTrackIds: state.soloTrackIds.includes(trackId)
+        ? state.soloTrackIds.filter((id) => id !== trackId)
+        : [...state.soloTrackIds, trackId]
+    })),
+
+  setLoopPlayback: (on) => set({ loopPlayback: on }),
+
+  toggleTrackLocked: (target) =>
+    set((state) => {
+      const p = state.project
+      if (target.kind === 'main') {
+        const locked = !p.mainTrackLocked
+        return {
+          ...pushHistory(state),
+          project: { ...p, mainTrackLocked: locked ? true : undefined },
+          ...(locked ? { selectedClipId: null, multiSelectedClipIds: [] } : {})
+        }
+      }
+      if (target.kind === 'telop') {
+        const locked = !p.telopTrackLocked
+        return {
+          ...pushHistory(state),
+          project: { ...p, telopTrackLocked: locked ? true : undefined },
+          ...(locked ? { selectedOverlayId: null } : {})
+        }
+      }
+      const flip = <T extends { id: string; locked?: boolean }>(t: T): T =>
+        t.id === target.id ? { ...t, locked: t.locked ? undefined : true } : t
+      return {
+        ...pushHistory(state),
+        project:
+          target.kind === 'audio'
+            ? { ...p, audioTracks: p.audioTracks.map(flip) }
+            : { ...p, videoOverlayTracks: p.videoOverlayTracks.map(flip) }
       }
     }),
 
@@ -4596,6 +4677,13 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   // トリムした瞬間に戻ってきてしまう)。
   moveAudioClipToTrack: (fromTrackId, clipId, toTrackId, startTime) =>
     set((state) => {
+      // 固定したトラックからも、固定したトラックへも動かさない
+      if (
+        state.project.audioTracks.some(
+          (t) => (t.id === fromTrackId || t.id === toTrackId) && t.locked
+        )
+      )
+        return state
       // 数値でない値(空欄・1e309 など)は書かない。NaN は取り消しの重複判定もすり抜ける
       if (!Number.isFinite(startTime)) return state
       const from = state.project.audioTracks.find((t) => t.id === fromTrackId)
@@ -4766,6 +4854,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   removeAudioClip: (trackId, clipId) =>
     set((state) => {
+      if (state.project.audioTracks.some((t) => t.id === trackId && t.locked)) return state
       const removed = state.project.audioTracks
         .find((t) => t.id === trackId)
         ?.clips.find((c) => c.id === clipId)
@@ -4786,6 +4875,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   splitAudioClipAtTime: (trackId, clipId, absoluteTime) =>
     set((state) => {
+      if (state.project.audioTracks.some((t) => t.id === trackId && t.locked)) return state
       // 数値でない値(空欄・1e309 など)は書かない。NaN は取り消しの重複判定もすり抜ける
       if (!Number.isFinite(absoluteTime)) return state
       let didSplit = false
@@ -4967,6 +5057,12 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
 
   moveVideoOverlayClipToTrack: (fromTrackId, clipId, toTrackId, startTime) =>
     set((state) => {
+      if (
+        state.project.videoOverlayTracks.some(
+          (t) => (t.id === fromTrackId || t.id === toTrackId) && t.locked
+        )
+      )
+        return state
       if (!Number.isFinite(startTime)) return state
       const from = state.project.videoOverlayTracks.find((t) => t.id === fromTrackId)
       const clip = from?.clips.find((c) => c.id === clipId)
@@ -5067,18 +5163,23 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })),
 
   removeVideoOverlayClip: (trackId, clipId) =>
-    set((state) => ({
-      ...pushHistory(state),
-      project: {
-        ...state.project,
-        videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
-          t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
-        )
-      }
-    })),
+    set((state) =>
+      state.project.videoOverlayTracks.some((t) => t.id === trackId && t.locked)
+        ? state
+        : {
+            ...pushHistory(state),
+            project: {
+              ...state.project,
+              videoOverlayTracks: state.project.videoOverlayTracks.map((t) =>
+                t.id === trackId ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) } : t
+              )
+            }
+          }
+    ),
 
   splitVideoOverlayClipAtTime: (trackId, clipId, absoluteTime) =>
     set((state) => {
+      if (state.project.videoOverlayTracks.some((t) => t.id === trackId && t.locked)) return state
       // 数値でない値(空欄・1e309 など)は書かない。NaN は取り消しの重複判定もすり抜ける
       if (!Number.isFinite(absoluteTime)) return state
       let didSplit = false

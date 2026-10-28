@@ -13,6 +13,8 @@
  *   当てる窓は「閉じる」。「OK」は使わず、結果の動詞(保存する・適用 など)にする
  * - 処理中の「…」は全角の三点リーダ 1 字(「...」は使わない)
  * - シーケンスは Premiere に渡す物とメニューの名前だけ(ほかはタイムライン)
+ * - トラックの固定: トラックの鍵(クリップを触らせない)。「ロック」は範囲の自動編集で
+ *   「作り直さない」印のことだけに使い、トラックには使わない
  */
 export const TERMS = {
   telop: 'テロップ',
@@ -27,7 +29,8 @@ export const TERMS = {
   asset: '素材',
   cancel: 'キャンセル',
   close: '閉じる',
-  ellipsis: '…'
+  ellipsis: '…',
+  trackLock: 'トラックの固定'
 } as const
 
 /** 使わない言い方(見つけたら `use` に直す)。`allow` に当たる行は除く */
@@ -45,5 +48,6 @@ export const TERM_RULES: readonly { avoid: RegExp; use: string; allow?: RegExp }
   },
   { avoid: /[\u3040-\u30ff\u3400-\u9fff)）]\.\.\./, use: TERMS.ellipsis },
   { avoid: /出力先/, use: TERMS.exportTarget },
+  { avoid: /トラック(の|を)ロック|ロックした(トラック|本編|テロップ)/, use: TERMS.trackLock },
   { avoid: />\s*OK\s*<|'OK'/, use: '結果の動詞(保存する・適用 など)' }
 ]

@@ -652,6 +652,18 @@ export function LockIcon(props: IconProps): React.JSX.Element {
   )
 }
 
+/** ループ(繰り返し再生) */
+export function RepeatIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M17 2l3 3-3 3" />
+      <path d="M4 11V9a4 4 0 0 1 4-4h12" />
+      <path d="M7 22l-3-3 3-3" />
+      <path d="M20 13v2a4 4 0 0 1-4 4H4" />
+    </svg>
+  )
+}
+
 /** つまみ(トラックの音量) */
 export function KnobIcon(props: IconProps): React.JSX.Element {
   return (

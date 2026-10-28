@@ -23,6 +23,8 @@ import {
 import { TimecodeField } from './TimecodeField'
 import { formatTimecode } from '../lib/timelineRuler'
 import { emitMenuCommand } from '../lib/menuCommands'
+import { useInspectorTab } from '../lib/inspectorTab'
+import { InspectorColor, InspectorDecision } from './InspectorTabs'
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
 
@@ -111,6 +113,17 @@ function DraftRange({
  * toolbar (speed, transition, audio), with no single place showing a clip's actual state.
  */
 export function Inspector(): React.JSX.Element {
+  // 見出しのタブ(プロパティ / 色 / AI の判断)。テロップを選んでいるときはテロップの設定だけ
+  const tab = useInspectorTab((s) => s.tab)
+  const telopSelected = useProjectStore(
+    (s) => s.selectedClipId === null && s.selectedOverlayId !== null
+  )
+  if (tab === 'color' && !telopSelected) return <InspectorColor />
+  if (tab === 'decision' && !telopSelected) return <InspectorDecision />
+  return <InspectorProperties />
+}
+
+function InspectorProperties(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const selectedClipId = useProjectStore((s) => s.selectedClipId)
   const multiSelectedClipIds = useProjectStore((s) => s.multiSelectedClipIds)

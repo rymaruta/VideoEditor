@@ -1,5 +1,5 @@
 import { describeColorMatch } from '@shared/color/match'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { LibraryPanel } from './LibraryPanel'
 import { Waveform } from './Waveform'
 import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
@@ -13,6 +13,12 @@ import { formatIpcError } from '../lib/ipcError'
 import { canPreviewFile, planLoadedAssetPreview } from '../lib/canPreview'
 import { hasLetterboxInMain } from '../lib/aspect'
 import { isImagePath, isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
+import {
+  countByKind,
+  filterAssets,
+  MEDIA_KIND_FILTERS,
+  type MediaKindFilter
+} from '../lib/mediaFilter'
 import { stillAssetFrom } from '../lib/stillAsset'
 import { relinkRefusal } from '../lib/relinkCheck'
 import { ASSET_DRAG_TYPE } from '../lib/assetDrag'
@@ -28,7 +34,8 @@ import {
   AlertTriangleIcon,
   ImageIcon,
   LayersIcon,
-  PlusIcon
+  PlusIcon,
+  SearchIcon
 } from './icons'
 import { readMediaLayout, storeMediaLayout } from '../lib/uiPrefs'
 
@@ -84,6 +91,14 @@ export function MediaBin(): React.JSX.Element {
   )
   // 「プロジェクト」(この企画の素材)と「ライブラリ」(全プロジェクト共通)の切り替え
   const [view, setView] = useState<'project' | 'library'>('project')
+  // 素材の検索と種類(すべて / 動画 / 音声 / 画像)の絞り込み
+  const [query, setQuery] = useState('')
+  const [kindFilter, setKindFilter] = useState<MediaKindFilter>('all')
+  const shownAssets = useMemo(
+    () => filterAssets(assets, query, kindFilter),
+    [assets, query, kindFilter]
+  )
+  const kindCounts = useMemo(() => countByKind(assets), [assets])
   // 素材の右クリックメニュー(操作のボタンを行に並べないため)
   const [assetMenu, setAssetMenu] = useState<{ asset: MediaAsset; x: number; y: number } | null>(
     null
@@ -733,7 +748,45 @@ export function MediaBin(): React.JSX.Element {
           {/* 自動編集(AIおまかせ・ラフカット・長尺からショート)はメニューバーの「自動編集」から開く */}
           {importing && <p className="hint-text">読み込み中…</p>}
           {error && <p className="error-text">{error}</p>}
+          {assets.length > 0 && (
+            <div className="ve-media-filter">
+              <label className="ve-media-search">
+                <SearchIcon width={12} height={12} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={query}
+                  placeholder="素材を検索"
+                  aria-label="素材を検索"
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && query) {
+                      e.stopPropagation()
+                      setQuery('')
+                    }
+                  }}
+                />
+              </label>
+              <div className="ve-media-kinds" role="group" aria-label="素材の種類">
+                {MEDIA_KIND_FILTERS.map((k) => (
+                  <button
+                    key={k.id}
+                    type="button"
+                    className="ve-media-kind"
+                    aria-pressed={kindFilter === k.id}
+                    disabled={k.id !== 'all' && kindFilter !== k.id && kindCounts[k.id] === 0}
+                    title={`${k.label}(${kindCounts[k.id]})`}
+                    onClick={() => setKindFilter(k.id)}
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className={`media-list ${layout === 'grid' ? 'media-grid' : ''}`}>
+            {assets.length > 0 && shownAssets.length === 0 && (
+              <p className="hint-text ve-media-none">条件に合う素材はありません</p>
+            )}
             {assets.length === 0 && (
               <div className="empty-state">
                 <ClapperboardIcon width={32} height={32} />
@@ -741,14 +794,14 @@ export function MediaBin(): React.JSX.Element {
                 <p className="hint-text">ファイルをこのウィンドウにドロップしても追加できます</p>
               </div>
             )}
-            {assets.length > 0 && layout === 'list' && (
+            {shownAssets.length > 0 && layout === 'list' && (
               <div className="media-list-head" aria-hidden>
                 <span className="media-col-name">名前</span>
                 <span className="media-col-dur">デュレーション</span>
                 <span className="media-col-res">解像度</span>
               </div>
             )}
-            {assets.map((asset) => {
+            {shownAssets.map((asset) => {
               const isMissing = missingAssetIds.includes(asset.id)
               // 黒帯が入るのは本編(V1)に置いた所だけ(ワイプは枠に収めるので入らない)
               const mismatch =

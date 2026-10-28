@@ -118,7 +118,7 @@ import {
   MusicIcon,
   SparklesIcon,
   Volume2Icon,
-  MoreVerticalIcon
+  LockIcon
 } from './icons'
 import { stripTelopMarkup } from '@shared/telop/render'
 import { DraftNumber } from './DraftNumber'
@@ -193,7 +193,8 @@ const SNAP_PIXELS = 8
  */
 function laneTrackIdAt(x: number, y: number, kind: 'audio' | 'videoOverlay'): string | null {
   const el = document.elementFromPoint(x, y)
-  const lane = el?.closest(`[data-track-kind="${kind}"]`)
+  // 固定したトラック(data-locked)は移し先にしない(トラックの固定)
+  const lane = el?.closest(`[data-track-kind="${kind}"]:not([data-locked])`)
   return lane?.getAttribute('data-track-id') ?? null
 }
 
@@ -304,11 +305,15 @@ function TrackHeadPopover({
   label,
   title,
   icon,
+  name,
   children
 }: {
   label: string
   title?: string
-  icon: React.ReactNode
+  /** 20px のトグルのアイコン(name を渡したときは使わない) */
+  icon?: React.ReactNode
+  /** トラックの名前のボタンにする(押すとトラックの設定が開く) */
+  name?: string
   children: React.ReactNode
 }): React.JSX.Element {
   const ref = useRef<HTMLButtonElement>(null)
@@ -318,14 +323,18 @@ function TrackHeadPopover({
       <button
         ref={ref}
         type="button"
-        className={`ve-track-toggle ${open ? 'open' : ''}`}
+        className={
+          name !== undefined
+            ? `ve-track-name-button ${open ? 'open' : ''}`
+            : `ve-track-toggle ${open ? 'open' : ''}`
+        }
         aria-label={label}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={title ?? label}
         onClick={() => setOpen((v) => !v)}
       >
-        {icon}
+        {name !== undefined ? <span className="track-label-name">{name}</span> : icon}
       </button>
       {open && (
         <Popover
@@ -338,6 +347,34 @@ function TrackHeadPopover({
         </Popover>
       )}
     </>
+  )
+}
+
+/** トラックの固定(鍵)のトグル。固定したトラックのクリップは選ぶ・動かす・切る・削除・貼り付けの対象にしない */
+function TrackLockToggle({
+  name,
+  locked,
+  onToggle
+}: {
+  name: string
+  locked: boolean
+  onToggle: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className="ve-track-toggle ve-track-lock"
+      aria-label={`${name}を固定`}
+      aria-pressed={locked}
+      title={
+        locked
+          ? 'トラックの固定を外す'
+          : 'トラックを固定(クリップを選ぶ・動かす・切る・削除・貼り付けをしない)'
+      }
+      onClick={onToggle}
+    >
+      <LockIcon width={12} height={12} />
+    </button>
   )
 }
 
@@ -644,6 +681,9 @@ export function Timeline({
   const addAudioTrack = useProjectStore((s) => s.addAudioTrack)
   const removeAudioTrack = useProjectStore((s) => s.removeAudioTrack)
   const toggleAudioTrackMute = useProjectStore((s) => s.toggleAudioTrackMute)
+  const toggleAudioTrackSolo = useProjectStore((s) => s.toggleAudioTrackSolo)
+  const soloTrackIds = useProjectStore((s) => s.soloTrackIds)
+  const toggleTrackLocked = useProjectStore((s) => s.toggleTrackLocked)
   const toggleAudioTrackDucking = useProjectStore((s) => s.toggleAudioTrackDucking)
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
@@ -987,6 +1027,17 @@ export function Timeline({
       timedClips.find((x) => x.clip.id === st.selectedClipId) ??
       findTimedClipAt(timedClips, st.playheadTime)
     if (tc) setRangeDialog({ range: { start: tc.start, end: tc.end }, origin: 'selection' })
+  }
+
+  /** インスペクタの「ロック」: 選んでいる範囲、無ければ選んでいるクリップ・再生位置のクリップ */
+  function lockSelectedRange(): void {
+    const picked = currentRange()
+    if (picked) return lockRange(picked.range, picked.origin === 'marks')
+    const st = useProjectStore.getState()
+    const tc =
+      timedClips.find((x) => x.clip.id === st.selectedClipId) ??
+      findTimedClipAt(timedClips, st.playheadTime)
+    if (tc) lockRange({ start: tc.start, end: tc.end }, false)
   }
 
   /** ルーラーの Shift+ドラッグ */
@@ -1688,6 +1739,8 @@ export function Timeline({
   ): void {
     e.stopPropagation()
     e.preventDefault()
+    // 固定した本編はトリムしない(トラックの固定)
+    if (useProjectStore.getState().project.mainTrackLocked) return
     setTrimDrag({
       clipId: clip.id,
       edge,
@@ -1942,6 +1995,7 @@ export function Timeline({
     else if (id === 'view.zoomFit') handleZoomToFit()
     else if (id === 'help.shortcuts') useShortcutHelpStore.getState().setOpen(true)
     else if (id === 'edit.rangeAutoEdit') openRangeAutoEdit()
+    else if (id === 'edit.rangeLock') lockSelectedRange()
     else if (id === 'clip.trimDialog') {
       // インスペクタの「トリム…」: 選んでいるクリップのトリムの窓
       const target = useProjectStore.getState().selectedClipId
@@ -2390,11 +2444,79 @@ export function Timeline({
             .map(({ track, trackIndex }) => {
               const tag = `V${trackIndex + 2}`
               return (
-                <div key={track.id} className="track-label" data-g3-kind="overlay">
+                <div
+                  key={track.id}
+                  className={`track-label ${track.locked ? 'is-locked' : ''}`}
+                  data-g3-kind="overlay"
+                >
                   <span className="track-tag tag-video">{tag}</span>
-                  <span className="track-label-name" title={track.name}>
-                    {track.name}
-                  </span>
+                  <TrackHeadPopover
+                    label={`${track.name}の設定`}
+                    title={`${track.name}(押すと設定)`}
+                    name={track.name}
+                  >
+                    <div className="ve-track-settings">
+                      <label className="ve-track-setting">
+                        <span>{track.name}の音</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          className="ve-switch"
+                          aria-checked={!track.audioMuted}
+                          title={
+                            track.audioMuted
+                              ? 'ワイプの音を鳴らす(いまは絵だけ。顔カメラの声はマイクの音声トラックで鳴らしています)'
+                              : 'ワイプの音を鳴らさない(絵は出したまま)'
+                          }
+                          onClick={() => toggleVideoOverlayTrackAudio(track.id)}
+                        />
+                      </label>
+                      <label className="ve-track-setting">
+                        <span>表示位置</span>
+                        <select
+                          value={track.position}
+                          onChange={(e) =>
+                            setVideoOverlayTrackPosition(track.id, e.target.value as PipPosition)
+                          }
+                        >
+                          {(Object.keys(PIP_POSITION_LABELS) as PipPosition[]).map((p) => (
+                            <option key={p} value={p}>
+                              {PIP_POSITION_LABELS[p]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="ve-track-setting">
+                        <span>サイズ</span>
+                        <input
+                          type="range"
+                          min={0.15}
+                          max={0.5}
+                          step={0.01}
+                          value={track.scale}
+                          aria-valuetext={`${Math.round(track.scale * 100)}%`}
+                          onChange={(e) =>
+                            setVideoOverlayTrackScale(track.id, Number(e.target.value))
+                          }
+                        />
+                        <span className="ve-track-setting-value">
+                          {Math.round(track.scale * 100)}%
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        className="small-button danger"
+                        onClick={() => {
+                          if (confirmRemoveTrack(track.name, track.clips.length)) {
+                            removeVideoOverlayTrack(track.id)
+                          }
+                        }}
+                      >
+                        <TrashIcon width={12} height={12} />
+                        トラックを削除
+                      </button>
+                    </div>
+                  </TrackHeadPopover>
                   <span className="ve-track-toggles">
                     <button
                       type="button"
@@ -2410,79 +2532,42 @@ export function Timeline({
                         <EyeIcon width={12} height={12} />
                       )}
                     </button>
-                    <TrackHeadPopover
-                      label={`${track.name}の設定`}
-                      icon={<MoreVerticalIcon width={12} height={12} />}
-                    >
-                      <div className="ve-track-settings">
-                        <label className="ve-track-setting">
-                          <span>{track.name}の音</span>
-                          <button
-                            type="button"
-                            role="switch"
-                            className="ve-switch"
-                            aria-checked={!track.audioMuted}
-                            title={
-                              track.audioMuted
-                                ? 'ワイプの音を鳴らす(いまは絵だけ。顔カメラの声はマイクの音声トラックで鳴らしています)'
-                                : 'ワイプの音を鳴らさない(絵は出したまま)'
-                            }
-                            onClick={() => toggleVideoOverlayTrackAudio(track.id)}
-                          />
-                        </label>
-                        <label className="ve-track-setting">
-                          <span>表示位置</span>
-                          <select
-                            value={track.position}
-                            onChange={(e) =>
-                              setVideoOverlayTrackPosition(track.id, e.target.value as PipPosition)
-                            }
-                          >
-                            {(Object.keys(PIP_POSITION_LABELS) as PipPosition[]).map((p) => (
-                              <option key={p} value={p}>
-                                {PIP_POSITION_LABELS[p]}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="ve-track-setting">
-                          <span>サイズ</span>
-                          <input
-                            type="range"
-                            min={0.15}
-                            max={0.5}
-                            step={0.01}
-                            value={track.scale}
-                            aria-valuetext={`${Math.round(track.scale * 100)}%`}
-                            onChange={(e) =>
-                              setVideoOverlayTrackScale(track.id, Number(e.target.value))
-                            }
-                          />
-                          <span className="ve-track-setting-value">
-                            {Math.round(track.scale * 100)}%
-                          </span>
-                        </label>
-                        <button
-                          type="button"
-                          className="small-button danger"
-                          onClick={() => {
-                            if (confirmRemoveTrack(track.name, track.clips.length)) {
-                              removeVideoOverlayTrack(track.id)
-                            }
-                          }}
-                        >
-                          <TrashIcon width={12} height={12} />
-                          トラックを削除
-                        </button>
-                      </div>
-                    </TrackHeadPopover>
+                    <TrackLockToggle
+                      name={track.name}
+                      locked={track.locked === true}
+                      onToggle={() => {
+                        // 固定したら、そのトラックで選んでいたクリップの選びを外す
+                        if (!track.locked && selectedVideoOverlayClip?.trackId === track.id)
+                          setSelectedVideoOverlayClip(null)
+                        toggleTrackLocked({ kind: 'overlay', id: track.id })
+                      }}
+                    />
                   </span>
                 </div>
               )
             })}
-          <div className="track-label track-label-video" data-g3-kind="video">
+          <div
+            className={`track-label track-label-video ${project.mainTrackLocked ? 'is-locked' : ''}`}
+            data-g3-kind="video"
+          >
             <span className="track-tag tag-video">V1</span>
-            <span className="track-label-name">本編</span>
+            <TrackHeadPopover label="本編の設定" title="本編(押すと設定)" name="本編">
+              <div className="ve-track-settings">
+                <label className="ve-track-setting">
+                  <span>本編の絵を表示</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    className="ve-switch"
+                    aria-checked={!project.mainVideoHidden}
+                    onClick={() => toggleMainVideoHidden()}
+                  />
+                </label>
+                <p className="hint-text">
+                  隠した本編は書き出しでも黒になります(音は鳴ります。ワイプとテロップは重なります)。
+                </p>
+              </div>
+            </TrackHeadPopover>
             <span className="ve-track-toggles">
               <button
                 type="button"
@@ -2502,32 +2587,42 @@ export function Timeline({
                   <EyeIcon width={12} height={12} />
                 )}
               </button>
-              <TrackHeadPopover
-                label="本編の設定"
-                icon={<MoreVerticalIcon width={12} height={12} />}
-              >
+              <TrackLockToggle
+                name="本編"
+                locked={project.mainTrackLocked === true}
+                onToggle={() => toggleTrackLocked({ kind: 'main' })}
+              />
+            </span>
+          </div>
+          {hasTelopLane && (
+            <div
+              className={`track-label ${project.telopTrackLocked ? 'is-locked' : ''}`}
+              data-g3-kind="telop"
+              style={{ height: captionLaneH }}
+            >
+              <span className="track-tag tag-telop">T1</span>
+              <TrackHeadPopover label="テロップの設定" title="テロップ(押すと設定)" name="テロップ">
                 <div className="ve-track-settings">
                   <label className="ve-track-setting">
-                    <span>本編の絵を表示</span>
+                    <span>テロップを表示</span>
                     <button
                       type="button"
                       role="switch"
                       className="ve-switch"
-                      aria-checked={!project.mainVideoHidden}
-                      onClick={() => toggleMainVideoHidden()}
+                      aria-checked={!project.telopTrackHidden}
+                      onClick={() => toggleTelopTrackHidden()}
                     />
                   </label>
-                  <p className="hint-text">
-                    隠した本編は書き出しでも黒になります(音は鳴ります。ワイプとテロップは重なります)。
-                  </p>
+                  <p className="hint-text">隠したテロップは書き出しでも焼き込みません。</p>
+                  <button
+                    type="button"
+                    className="small-button"
+                    onClick={() => emitMenuCommand('window.text')}
+                  >
+                    テロップの一覧を開く
+                  </button>
                 </div>
               </TrackHeadPopover>
-            </span>
-          </div>
-          {hasTelopLane && (
-            <div className="track-label" data-g3-kind="telop" style={{ height: captionLaneH }}>
-              <span className="track-tag tag-telop">T1</span>
-              <span className="track-label-name">テロップ</span>
               <span className="ve-track-toggles">
                 <button
                   type="button"
@@ -2547,44 +2642,101 @@ export function Timeline({
                     <EyeIcon width={12} height={12} />
                   )}
                 </button>
-                <TrackHeadPopover
-                  label="テロップの設定"
-                  icon={<MoreVerticalIcon width={12} height={12} />}
-                >
-                  <div className="ve-track-settings">
-                    <label className="ve-track-setting">
-                      <span>テロップを表示</span>
-                      <button
-                        type="button"
-                        role="switch"
-                        className="ve-switch"
-                        aria-checked={!project.telopTrackHidden}
-                        onClick={() => toggleTelopTrackHidden()}
-                      />
-                    </label>
-                    <p className="hint-text">隠したテロップは書き出しでも焼き込みません。</p>
-                    <button
-                      type="button"
-                      className="small-button"
-                      onClick={() => emitMenuCommand('window.text')}
-                    >
-                      テロップの一覧を開く
-                    </button>
-                  </div>
-                </TrackHeadPopover>
+                <TrackLockToggle
+                  name="テロップ"
+                  locked={project.telopTrackLocked === true}
+                  onToggle={() => toggleTrackLocked({ kind: 'telop' })}
+                />
               </span>
             </div>
           )}
           {project.audioTracks.map((track, trackIndex) => {
             const tag = `A${trackIndex + 1}`
             return (
-              <div key={track.id} className="track-label" data-g3-kind={audioKindOf(track)}>
+              <div
+                key={track.id}
+                className={`track-label ${track.locked ? 'is-locked' : ''}`}
+                data-g3-kind={audioKindOf(track)}
+              >
                 <span className={`track-tag tag-audio ${track.autoRole ? 'tag-auto' : ''}`}>
                   {tag}
                 </span>
-                <span className="track-label-name" title={track.name}>
-                  {track.name}
-                </span>
+                <TrackHeadPopover
+                  label={`${track.name}の設定`}
+                  title={`${track.name}(押すと設定)`}
+                  name={track.name}
+                >
+                  <div className="ve-track-settings">
+                    <label className="ve-track-setting">
+                      <span title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる">
+                        ダッキング
+                      </span>
+                      <button
+                        type="button"
+                        role="switch"
+                        className="ve-switch"
+                        aria-checked={track.duckingEnabled}
+                        title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる"
+                        onClick={() => toggleAudioTrackDucking(track.id)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="small-button"
+                      title="このトラックの音声からBPMを解析してビートグリッドを表示"
+                      disabled={bpmAnalyzingTrackId === track.id || track.clips.length === 0}
+                      onClick={() => handleAnalyzeBpm(track)}
+                    >
+                      <ActivityIcon width={12} height={12} />
+                      {bpmAnalyzingTrackId === track.id ? 'BPM を解析中…' : 'BPM を解析'}
+                    </button>
+                    {project.beatGrid && (
+                      <div
+                        className="beat-grid-info"
+                        title={`解析元: ${project.beatGrid.sourceLabel}`}
+                      >
+                        <button
+                          className={`icon-button ${project.beatGrid.enabled ? 'active' : ''}`}
+                          aria-pressed={project.beatGrid.enabled}
+                          aria-label="ビートグリッドを表示"
+                          title={
+                            project.beatGrid.enabled
+                              ? 'ビートグリッドを非表示(スナップも無効化)'
+                              : 'ビートグリッドを表示(スナップも有効化)'
+                          }
+                          onClick={() => toggleBeatGridEnabled()}
+                        >
+                          <ActivityIcon width={14} height={14} />
+                        </button>
+                        <BeatGridControls
+                          bpm={project.beatGrid.bpm}
+                          offsetSeconds={project.beatGrid.offsetSeconds}
+                          onChange={updateBeatGrid}
+                        />
+                        <button
+                          className="icon-button danger"
+                          aria-label="ビートグリッドを削除"
+                          title="ビートグリッドを削除"
+                          onClick={() => clearBeatGrid()}
+                        >
+                          <TrashIcon width={12} height={12} />
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="small-button danger"
+                      onClick={() => {
+                        if (confirmRemoveTrack(track.name, track.clips.length)) {
+                          removeAudioTrack(track.id)
+                        }
+                      }}
+                    >
+                      <TrashIcon width={12} height={12} />
+                      トラックを削除
+                    </button>
+                  </div>
+                </TrackHeadPopover>
                 <span className="ve-track-toggles">
                   <TrackHeadPopover
                     label={`${track.name}の音量`}
@@ -2620,81 +2772,31 @@ export function Timeline({
                       M
                     </span>
                   </button>
-                  <TrackHeadPopover
-                    label={`${track.name}の設定`}
-                    icon={<MoreVerticalIcon width={12} height={12} />}
+                  <button
+                    type="button"
+                    className="ve-track-toggle"
+                    aria-label={`${track.name}をソロ`}
+                    aria-pressed={soloTrackIds.includes(track.id)}
+                    title={
+                      soloTrackIds.includes(track.id)
+                        ? 'ソロを外す'
+                        : 'ソロ(プレビューでこのトラックだけを聞く。書き出しには効きません)'
+                    }
+                    onClick={() => toggleAudioTrackSolo(track.id)}
                   >
-                    <div className="ve-track-settings">
-                      <label className="ve-track-setting">
-                        <span title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる">
-                          ダッキング
-                        </span>
-                        <button
-                          type="button"
-                          role="switch"
-                          className="ve-switch"
-                          aria-checked={track.duckingEnabled}
-                          title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる"
-                          onClick={() => toggleAudioTrackDucking(track.id)}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="small-button"
-                        title="このトラックの音声からBPMを解析してビートグリッドを表示"
-                        disabled={bpmAnalyzingTrackId === track.id || track.clips.length === 0}
-                        onClick={() => handleAnalyzeBpm(track)}
-                      >
-                        <ActivityIcon width={12} height={12} />
-                        {bpmAnalyzingTrackId === track.id ? 'BPM を解析中…' : 'BPM を解析'}
-                      </button>
-                      {project.beatGrid && (
-                        <div
-                          className="beat-grid-info"
-                          title={`解析元: ${project.beatGrid.sourceLabel}`}
-                        >
-                          <button
-                            className={`icon-button ${project.beatGrid.enabled ? 'active' : ''}`}
-                            aria-pressed={project.beatGrid.enabled}
-                            aria-label="ビートグリッドを表示"
-                            title={
-                              project.beatGrid.enabled
-                                ? 'ビートグリッドを非表示(スナップも無効化)'
-                                : 'ビートグリッドを表示(スナップも有効化)'
-                            }
-                            onClick={() => toggleBeatGridEnabled()}
-                          >
-                            <ActivityIcon width={14} height={14} />
-                          </button>
-                          <BeatGridControls
-                            bpm={project.beatGrid.bpm}
-                            offsetSeconds={project.beatGrid.offsetSeconds}
-                            onChange={updateBeatGrid}
-                          />
-                          <button
-                            className="icon-button danger"
-                            aria-label="ビートグリッドを削除"
-                            title="ビートグリッドを削除"
-                            onClick={() => clearBeatGrid()}
-                          >
-                            <TrashIcon width={12} height={12} />
-                          </button>
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        className="small-button danger"
-                        onClick={() => {
-                          if (confirmRemoveTrack(track.name, track.clips.length)) {
-                            removeAudioTrack(track.id)
-                          }
-                        }}
-                      >
-                        <TrashIcon width={12} height={12} />
-                        トラックを削除
-                      </button>
-                    </div>
-                  </TrackHeadPopover>
+                    <span className="ve-track-toggle-text" aria-hidden="true">
+                      S
+                    </span>
+                  </button>
+                  <TrackLockToggle
+                    name={track.name}
+                    locked={track.locked === true}
+                    onToggle={() => {
+                      if (!track.locked && selectedAudioClip?.trackId === track.id)
+                        setSelectedAudioClip(null)
+                      toggleTrackLocked({ kind: 'audio', id: track.id })
+                    }}
+                  />
                 </span>
               </div>
             )
@@ -2943,9 +3045,10 @@ export function Timeline({
                   key={track.id}
                   data-track-kind="videoOverlay"
                   data-track-id={track.id}
+                  data-locked={track.locked ? 'true' : undefined}
                   data-g3-kind="overlay"
                   data-g3-auto={track.autoRole ? 'true' : undefined}
-                  className={`track-lane video-overlay-lane ${laneAlt(nOverlayLanes - 1 - trackIndex)} ${track.hidden ? 'hidden' : ''} ${
+                  className={`track-lane video-overlay-lane ${laneAlt(nOverlayLanes - 1 - trackIndex)} ${track.hidden ? 'hidden' : ''} ${track.locked ? 'is-locked' : ''} ${
                     draggedAsset?.hasVideo ? 'drop-target' : ''
                   } ${
                     (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
@@ -2958,6 +3061,7 @@ export function Timeline({
                   style={{ width: timelineWidth }}
                   onDragOver={(e) => {
                     if (isSourceRangeDrag(e.dataTransfer.types)) return
+                    if (track.locked) return
                     if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo) return
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'copy'
@@ -2974,7 +3078,7 @@ export function Timeline({
                     const startTime = dropTimeAt(e)
                     endAssetDrag()
                     const asset = project.assets.find((a) => a.id === assetId)
-                    if (!assetId || !asset?.hasVideo) return
+                    if (!assetId || !asset?.hasVideo || track.locked) return
                     addClipToVideoOverlayTrack(track.id, assetId, startTime)
                   }}
                 >
@@ -3018,11 +3122,20 @@ export function Timeline({
                           left: displayStart * pixelsPerSecond,
                           width: clipWidth
                         }}
-                        onContextMenu={(e) => openVideoOverlayClipMenu(e, track.id, clip.id)}
+                        onContextMenu={(e) => {
+                          if (track.locked) {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            return
+                          }
+                          openVideoOverlayClipMenu(e, track.id, clip.id)
+                        }}
                         onMouseDown={(e) => {
                           // 右クリックはメニュー用。ここで掴むとメニューを出しながらクリップが動く。
                           if (e.button !== 0) return
                           e.stopPropagation()
+                          // 固定したトラックのクリップは掴ませない
+                          if (track.locked) return
                           // カミソリ中は掴ませない(音声クリップと同じ理由)。
                           if (editTool === 'razor') return
                           videoOverlayHoverTrackRef.current = track.id
@@ -3039,6 +3152,7 @@ export function Timeline({
                         }}
                         onClick={(e) => {
                           e.stopPropagation()
+                          if (track.locked) return
                           // カミソリは押した位置で切る(本編クリップと同じ規則)。
                           if (editTool === 'razor') {
                             const rect = e.currentTarget.getBoundingClientRect()
@@ -3059,6 +3173,7 @@ export function Timeline({
                           className="timeline-clip-handle timeline-clip-handle-left"
                           onMouseDown={(e) => {
                             e.stopPropagation()
+                            if (track.locked) return
                             setMediaTrimDrag({
                               kind: 'videoOverlay',
                               trackId: track.id,
@@ -3109,6 +3224,7 @@ export function Timeline({
                           className="timeline-clip-handle timeline-clip-handle-right"
                           onMouseDown={(e) => {
                             e.stopPropagation()
+                            if (track.locked) return
                             setMediaTrimDrag({
                               kind: 'videoOverlay',
                               trackId: track.id,
@@ -3136,7 +3252,8 @@ export function Timeline({
             <div
               ref={videoLaneRef}
               data-g3-kind="video"
-              className={`track-lane video-lane ${laneAlt(nOverlayLanes)} ${project.mainVideoHidden ? 'hidden' : ''} ${
+              data-locked={project.mainTrackLocked ? 'true' : undefined}
+              className={`track-lane video-lane ${laneAlt(nOverlayLanes)} ${project.mainVideoHidden ? 'hidden' : ''} ${project.mainTrackLocked ? 'is-locked' : ''} ${
                 draggedAsset?.hasVideo ? 'drop-target' : ''
               } ${dropIndicator?.kind === 'index' ? 'drop-active' : ''}`}
               style={{ width: timelineWidth }}
@@ -3144,6 +3261,8 @@ export function Timeline({
               onDragOver={(e) => {
                 // 並べ替えも素材の追加も**同じ「挿す位置」の印**で受ける。片方だけ別の
                 // 出し方にすると、線の位置と実際に入る位置が食い違う(理由は下の onDrop)。
+                // 固定した本編には足さない・並べ替えない(トラックの固定)
+                if (project.mainTrackLocked) return
                 const reordering = !isAssetDrag(e.dataTransfer.types) && draggedClipId !== null
                 // 映像を持たない素材(BGM等)は本編トラックに置けない。受けない印として
                 // dropEffect を none にすると、カーソルもそう変わる。
@@ -3165,6 +3284,13 @@ export function Timeline({
               onDrop={(e) => {
                 const reorderingId = isAssetDrag(e.dataTransfer.types) ? null : draggedClipId
                 if (!reorderingId && !isAssetDrag(e.dataTransfer.types)) return
+                if (project.mainTrackLocked) {
+                  e.preventDefault()
+                  endAssetDrag()
+                  setDraggedClipId(null)
+                  setDropIndicator(null)
+                  return
+                }
                 e.preventDefault()
                 e.stopPropagation()
                 const index = dropIndexAt(e)
@@ -3231,9 +3357,11 @@ export function Timeline({
                       trimDrag?.clipId === tc.clip.id ? 'trimming' : ''
                     } tool-${editTool}`}
                     style={{ left: tc.start * pixelsPerSecond, width: clipWidth }}
-                    draggable={editTool === 'select'}
+                    draggable={editTool === 'select' && !project.mainTrackLocked}
                     onClick={(e) => {
                       e.stopPropagation()
+                      // 固定した本編のクリップは選ばない・切らない
+                      if (project.mainTrackLocked) return
                       // Razor turns a plain click into a cut at the clicked position,
                       // which is what the tool is for — selection is unchanged.
                       if (editTool === 'razor') {
@@ -3262,7 +3390,14 @@ export function Timeline({
                         lastClickedClipIdRef.current = tc.clip.id
                       }
                     }}
-                    onContextMenu={(e) => openClipMenu(e, tc.clip.id, i)}
+                    onContextMenu={(e) => {
+                      if (project.mainTrackLocked) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        return
+                      }
+                      openClipMenu(e, tc.clip.id, i)
+                    }}
                     onDragStart={(e) => {
                       e.dataTransfer.effectAllowed = 'move'
                       setDraggedClipId(tc.clip.id)
@@ -3276,7 +3411,7 @@ export function Timeline({
                       setDropIndicator(null)
                     }}
                   >
-                    {editTool === 'trim' && i > 0 && (
+                    {editTool === 'trim' && i > 0 && !project.mainTrackLocked && (
                       <div
                         className="timeline-roll-handle"
                         draggable={false}
@@ -3328,6 +3463,7 @@ export function Timeline({
                         }
                         onClick={(e) => {
                           e.stopPropagation()
+                          if (project.mainTrackLocked) return
                           setTransitionPopoverClipId((prev) =>
                             prev === tc.clip.id ? null : tc.clip.id
                           )
@@ -3406,7 +3542,8 @@ export function Timeline({
 
             {hasTelopLane && (
               <div
-                className={`track-lane caption-lane ${laneAlt(nOverlayLanes + 1)} ${project.telopTrackHidden ? 'hidden' : ''}`}
+                data-locked={project.telopTrackLocked ? 'true' : undefined}
+                className={`track-lane caption-lane ${laneAlt(nOverlayLanes + 1)} ${project.telopTrackHidden ? 'hidden' : ''} ${project.telopTrackLocked ? 'is-locked' : ''}`}
                 data-g3-kind="telop"
                 style={{ width: timelineWidth, height: captionLaneH }}
               >
@@ -3438,6 +3575,8 @@ export function Timeline({
                       title={stripTelopMarkup(overlay.text)}
                       onMouseDown={(e) => {
                         e.stopPropagation()
+                        // 固定したテロップは選ばない・動かさない(トラックの固定)
+                        if (project.telopTrackLocked) return
                         // 端のつまみと同じく、他の種類の選択を外してから選ぶ。
                         // ここだけ外していなかったため、本編クリップを選んだあとテロップを
                         // 掴むと**両方が選ばれたまま**になり、Delete を1回押すと
@@ -3461,6 +3600,7 @@ export function Timeline({
                         className="timeline-caption-handle timeline-caption-handle-left"
                         onMouseDown={(e) => {
                           e.stopPropagation()
+                          if (project.telopTrackLocked) return
                           selectOnly('caption')
                           setSelectedOverlayId(overlay.id)
                           setOverlayDrag({
@@ -3481,6 +3621,7 @@ export function Timeline({
                         className="timeline-caption-handle timeline-caption-handle-right"
                         onMouseDown={(e) => {
                           e.stopPropagation()
+                          if (project.telopTrackLocked) return
                           selectOnly('caption')
                           setSelectedOverlayId(overlay.id)
                           setOverlayDrag({
@@ -3505,8 +3646,9 @@ export function Timeline({
                 key={track.id}
                 data-track-kind="audio"
                 data-track-id={track.id}
+                data-locked={track.locked ? 'true' : undefined}
                 data-g3-kind={audioKindOf(track)}
-                className={`track-lane audio-lane ${laneAlt(nOverlayLanes + (hasTelopLane ? 2 : 1) + trackIndex)} ${track.autoRole ? 'auto' : ''} ${
+                className={`track-lane audio-lane ${laneAlt(nOverlayLanes + (hasTelopLane ? 2 : 1) + trackIndex)} ${track.autoRole ? 'auto' : ''} ${track.locked ? 'is-locked' : ''} ${
                   draggedAsset?.hasAudio ? 'drop-target' : ''
                 } ${
                   (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
@@ -3518,6 +3660,7 @@ export function Timeline({
                 }`}
                 style={{ width: timelineWidth }}
                 onDragOver={(e) => {
+                  if (track.locked) return
                   const sfx = isSfxDrag(e.dataTransfer.types)
                   if (!sfx && (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasAudio))
                     return
@@ -3535,6 +3678,11 @@ export function Timeline({
                     : null
                   if (!sfxPayload && !isAssetDrag(e.dataTransfer.types)) return
                   e.preventDefault()
+                  if (track.locked) {
+                    endAssetDrag()
+                    setDropIndicator(null)
+                    return
+                  }
                   const assetId = assetIdFromDrop(e)
                   const startTime = dropTimeAt(e)
                   endAssetDrag()
@@ -3596,10 +3744,19 @@ export function Timeline({
                         left: displayStart * pixelsPerSecond,
                         width: clipWidth
                       }}
-                      onContextMenu={(e) => openAudioClipMenu(e, track.id, clip.id)}
+                      onContextMenu={(e) => {
+                        if (track.locked) {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          return
+                        }
+                        openAudioClipMenu(e, track.id, clip.id)
+                      }}
                       onMouseDown={(e) => {
                         if (e.button !== 0) return
                         e.stopPropagation()
+                        // 固定したトラックのクリップは掴ませない
+                        if (track.locked) return
                         // カミソリ中は掴ませない(本編クリップが `draggable` を切っているのと
                         // 同じ理由)。切るつもりの数ピクセルの揺れでクリップが動いてしまう。
                         if (editTool === 'razor') return
@@ -3617,6 +3774,7 @@ export function Timeline({
                       }}
                       onClick={(e) => {
                         e.stopPropagation()
+                        if (track.locked) return
                         // カミソリは押した位置で切る(本編クリップと同じ規則)。
                         if (editTool === 'razor') {
                           const rect = e.currentTarget.getBoundingClientRect()
@@ -3633,6 +3791,7 @@ export function Timeline({
                         className="timeline-clip-handle timeline-clip-handle-left"
                         onMouseDown={(e) => {
                           e.stopPropagation()
+                          if (track.locked) return
                           setMediaTrimDrag({
                             kind: 'audio',
                             trackId: track.id,
@@ -3680,6 +3839,7 @@ export function Timeline({
                         className="timeline-clip-handle timeline-clip-handle-right"
                         onMouseDown={(e) => {
                           e.stopPropagation()
+                          if (track.locked) return
                           setMediaTrimDrag({
                             kind: 'audio',
                             trackId: track.id,
