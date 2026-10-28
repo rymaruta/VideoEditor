@@ -190,3 +190,54 @@ describe('ほぼ同点・全部同点のときの場面の選び方(N2・N3)', (
     }
   })
 })
+
+describe('質問〜答えでも場面を長くしすぎない(監査の指摘 6)', () => {
+  /** 決まった種から作る乱数 */
+  const rng = (seed: number): (() => number) => {
+    let a = seed >>> 0
+    return () => {
+      a = (a + 0x6d2b79f5) >>> 0
+      let t = a
+      t = Math.imul(t ^ (t >>> 15), t | 1)
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+  }
+  const TEXTS = [
+    'それで現場ではいろいろな工夫をしてきまして',
+    'やはり思い切って価格を上げたというのは',
+    'そのあたりについてどういった背景から可能となったのか',
+    'ぜひお聞かせいただきたいなと思います',
+    '人手の確保について現場ではどういったことをされているのでしょうか',
+    '私どもでは採用の方法を変えまして',
+    '地元の高校との結び付きを強めてきました',
+    'ものすごい挑戦だったというふうに思うんです'
+  ]
+
+  it('合成 300 回: どの場面も長さの目安(90 秒)の 1.5 倍に収まる(1 行ぶんの余裕)', () => {
+    let longest = 0
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = rng(seed)
+      const lines: TimedLine[] = []
+      let t = 0
+      while (t < 900) {
+        const d = 1 + r() * 6
+        lines.push({
+          id: `l${lines.length}`,
+          start: t,
+          end: t + d,
+          text: TEXTS[Math.floor(r() * TEXTS.length)],
+          overlap: false
+        })
+        // 間はたいてい短く、ときどき 1〜3 秒(長い無言は無い)
+        t += d + (r() < 0.8 ? 0.1 + r() * 0.8 : 1 + r() * 2)
+      }
+      for (const sc of buildScenes(lines, { start: 0, end: t })) {
+        const len = sc.end - sc.start
+        longest = Math.max(longest, len)
+        expect(len, `seed ${seed} ${sc.id}`).toBeLessThanOrEqual(90 * 1.5 + 10)
+      }
+    }
+    expect(longest).toBeGreaterThan(90)
+  })
+})

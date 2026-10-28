@@ -90,6 +90,11 @@ const BACK_REFERENCE =
   /^(?:そのあたり|その辺|その点|そこ|それ|そういった|そういう|この点|このあたり|こうした)/u
 /** 質問(前置き〜疑問・依頼の文末)の長さの上限(秒)。これより前へは広げない */
 const MAX_QUESTION_SEC = 45
+/**
+ * 場面の長さの上限(長さの目安に対する倍率)。質問〜答えの頭をつなぐときも、文の途中で分けるときも、
+ * これを超えたら分ける
+ */
+const HOLD_MAX_RATIO = 1.5
 /** 質問とみなす文(前置き〜疑問の文末)の字数の下限(依頼の形は短くても質問) */
 const MIN_QUESTION_CHARS = 20
 /** 質問の後、答えの頭からこの秒数は同じ場面に入れる(質問と答えを分けない) */
@@ -182,8 +187,6 @@ export function buildScenes(
   const groups: TimedLine[][] = []
   /** 長さだけで分けた(話は続いている)まとまりの頭 */
   const splitByLength = new Set<TimedLine[]>()
-  /** 質問の頭で分けたまとまり(短くても前へ戻さない。戻すと質問が前の話の途中に入る) */
-  const atQuestion = new Set<TimedLine[]>()
   // まとまりの終わりは足しながら持つ(1行ごとに全部をなめると、1万行で1秒かかっていた)
   const ends = new Map<TimedLine[], number>()
   for (const l of sorted) {
@@ -193,16 +196,25 @@ export function buildScenes(
       const gap = l.start - gEnd
       const len = gEnd - g[0].start
       // 長さで分けるのは、文の切れ目(続きのある形で終わっていない)か、長めの間のある所だけ。
-      // 長さの目安の倍を超えたら、文の途中でも分ける(場面が際限なく長くならないように)
+      // 長さの目安の 1.5 倍を超えたら、文の途中でも分ける(場面が際限なく長くならないように)
       const last = g[g.length - 1]
       const long =
         len >= maxScene &&
-        (len >= maxScene * 2 || gap >= LONG_PAUSE_SEC || !continuesSentence(last.text))
-      // 質問〜答えの頭の中: 長い無言でなければつなぐ(長さの目安の倍を超えたら分ける)
+        (len >= maxScene * HOLD_MAX_RATIO || gap >= LONG_PAUSE_SEC || !continuesSentence(last.text))
+      // 質問〜答えの頭の中: 長い無言でなければつなぐ(長さの目安の 1.5 倍を超えたら分ける)
       const inside = holds.some((h) => h.start < l.start - 1e-9 && l.start <= h.end)
-      if (inside && gap < quiet && len < maxScene * 2) {
+      if (inside && gap < quiet && len < maxScene * HOLD_MAX_RATIO) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
+        continue
+      }
+      // 質問〜答えの中で長さの目安の 1.5 倍を超えたら、間が短くても分ける(前は倍まで・間 8 秒までつなぎ、
+      // 合成 300 回で最長 191 秒の場面ができた)
+      if (inside && len >= maxScene * HOLD_MAX_RATIO) {
+        const fresh = [l]
+        groups.push(fresh)
+        ends.set(fresh, l.end)
+        splitByLength.add(fresh)
         continue
       }
       // 質問の頭: 質問〜答えの頭まで入れると長さの目安を超えるなら、ここで分ける(間が短くても)
@@ -216,10 +228,11 @@ export function buildScenes(
         const fresh = [l]
         groups.push(fresh)
         ends.set(fresh, l.end)
-        atQuestion.add(fresh)
         continue
       }
-      if (gap < joinGap && !(long && gap >= 1)) {
+      // 長さの目安の 1.5 倍を超えたら、文の途中・間が短くても分ける(場面が際限なく長くならないように)
+      const tooLong = len >= maxScene * HOLD_MAX_RATIO
+      if (gap < joinGap && !(long && gap >= 1) && !tooLong) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
         continue
@@ -246,7 +259,8 @@ export function buildScenes(
     const next = groups[i + 1]
     // 後ろも話が続いている(さらに長さで分けた)なら、残りではない
     if (next && splitByLength.has(next)) continue
-    if (gEnd - g[0].start < minTail) {
+    // 戻すと上限(長さの目安の 1.5 倍)を超えるなら戻さない
+    if (gEnd - g[0].start < minTail && gEnd - groups[i - 1][0].start <= maxScene * HOLD_MAX_RATIO) {
       groups[i - 1].push(...g)
       groups.splice(i, 1)
     }
