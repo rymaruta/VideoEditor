@@ -1,5 +1,7 @@
 import { childMain } from './childMain'
+import { existsSync } from 'fs'
 import { totalmem } from 'os'
+import { dirname, join } from 'path'
 import { judgeLocalAi, type LocalAiCheck } from '@shared/envCheck'
 import type { LlmLoadFailure } from '@shared/llm'
 
@@ -51,10 +53,30 @@ childMain<WorkerInput>(async (input, post) => {
     const ort = (await import('onnxruntime-node')) as unknown as {
       listSupportedBackends?: () => { name: string }[]
     }
-    backends = (ort.listSupportedBackends?.() ?? []).map((b) => b.name)
+    backends = (ort.listSupportedBackends?.() ?? [])
+      .map((b) => b.name)
+      .filter((name) => providerShipped(name))
   } catch (e) {
     backendsError = e instanceof Error ? e.message : String(e)
   }
   const done: EnvCheckWorkerDone = { type: 'done', localAi, backends, backendsError }
   post(done)
 })
+
+/**
+ * Linux の配布物は CUDA・TensorRT の部品(libonnxruntime_providers_*.so)を外している
+ * (electron-builder.cjs)。listSupportedBackends はビルド時の一覧を返すだけなので、部品が
+ * 無いものは「使える」に並べない。部品の場所が分からないときは一覧のまま残す。
+ */
+function providerShipped(name: string): boolean {
+  if (process.platform !== 'linux' || (name !== 'cuda' && name !== 'tensorrt')) return true
+  try {
+    const binding = require.resolve(
+      `onnxruntime-node/bin/napi-v6/linux/${process.arch}/onnxruntime_binding.node`
+    )
+    const dir = dirname(binding).replace('app.asar' + '/', 'app.asar.unpacked/')
+    return existsSync(join(dir, `libonnxruntime_providers_${name}.so`))
+  } catch {
+    return true
+  }
+}
