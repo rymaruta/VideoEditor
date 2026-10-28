@@ -20,7 +20,8 @@ import {
   LEGACY_NOTE,
   isLegacyNote,
   legacyNoteFor,
-  matchScenesByTime
+  matchScenesByTime,
+  remapSceneFlags
 } from '@renderer/lib/pipelineRestore'
 import { cutSignature, normalizeAutoEdit } from '@shared/autoEdit'
 import { DEFAULT_RANGED_OPTIONS, type RangedPreview } from '@renderer/lib/rangedAutoEdit'
@@ -644,7 +645,33 @@ describe('matchScenesByTime', () => {
       { id: 's4', start: 150, end: 300 }
     ]
     const m = matchScenesByTime(prev, next)
-    expect([...m.entries()]).toEqual([['s2', 's1']])
+    // s3(98〜150)は 96% が古い s2(100〜200)の中: 古い1つの場面が分かれたものとして受け継ぐ(再監査の指摘 6)
+    expect([...m.entries()]).toEqual([
+      ['s2', 's1'],
+      ['s3', 's2']
+    ])
+  })
+
+  it('古い長い場面が上限で分かれても、分かれた場面がみな古い場面の判定・残す/落とすを受け継ぐ', () => {
+    const prev = [
+      { id: 's1', start: 0, end: 60 },
+      { id: 's2', start: 60, end: 260 },
+      { id: 's3', start: 260, end: 300 }
+    ]
+    const next = [
+      { id: 's1', start: 0, end: 60 },
+      { id: 's2', start: 60, end: 160 },
+      { id: 's3', start: 160, end: 260 },
+      { id: 's4', start: 260, end: 300 }
+    ]
+    const m = matchScenesByTime(prev, next)
+    expect(Object.fromEntries(m)).toEqual({ s1: 's1', s2: 's2', s3: 's2', s4: 's3' })
+    expect(remapSceneFlags({ s1: true, s2: false, s3: true }, m)).toEqual({
+      s1: true,
+      s2: false,
+      s3: false,
+      s4: true
+    })
   })
 })
 

@@ -104,6 +104,20 @@ export function matchScenesByTime(
       used.add(best.id)
     }
   }
+  // 古い1つの場面が新しい場面に分かれた(場面の長さの上限で長い場面が分かれた など): 新しい場面の 8 割
+  // 以上が古い場面に重なれば、その古い場面の判定・残す/落とすを受け継ぐ(1つの古い場面から幾つでも)。
+  // 前は対応が付かず、保存した企画の「残す」の印が外れていた
+  for (const n of next) {
+    if (out.has(n.id)) continue
+    const len = n.end - n.start
+    if (!(len > 0)) continue
+    let best: { id: string; overlap: number } | null = null
+    for (const p of prev) {
+      const overlap = Math.min(n.end, p.end) - Math.max(n.start, p.start)
+      if (overlap >= len * 0.8 && (!best || overlap > best.overlap)) best = { id: p.id, overlap }
+    }
+    if (best) out.set(n.id, best.id)
+  }
   return out
 }
 
