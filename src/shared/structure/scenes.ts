@@ -478,6 +478,7 @@ export function selectScenes(
   let total = candidates.reduce((t, s) => t + estimate(s), 0)
   const score = (s: Scene): number => judge.get(s.id)?.score ?? 50
   const substanceOf = new Map(scenes.map((s) => [s.id, sceneSubstance(s)]))
+  const indistinct = indistinctJudgements(judgements) !== null
   const substance = (s: Scene): number => substanceOf.get(s.id) ?? 0
   const index = new Map(scenes.map((s, i) => [s.id, i]))
   /** 前後の場面がすでに落ちている(落としても時間の飛ぶ所が増えない) */
@@ -491,16 +492,19 @@ export function selectScenes(
     // 点数の同じ場面どうしでは、(1) 番組の頭と終わり(残っている最初と最後の場面)は残し、
     // (2) 前後がすでに落ちている場面を先に落とす(話の途中へ飛ぶ所を増やさない)。
     // 以前は時刻の早い順に落ちたため、点数がそろう簡易の判定では番組の頭(出演者・場所の紹介)から消えていた
-    // (3) 点数で区別が付かない場面どうしは、中身の手掛かり(発話の密度・話者の数・数字や固有名詞の多さ)の
-    // 少ない方から落とす(AI が全部の場面に同じ点数を付けると、並び順だけで決まっていた)
+    // (3) 中身の手掛かり(発話の密度・話者の数・数字や固有名詞の多さ)の少ない方から落とす。判定が場面を
+    // 区別できていない(全部に同じ点数)ときは (2) より先に見る(AI が全部の場面に同じ点数を付けると、
+    // 並び順だけで決まっていた)。区別できている判定では (2) の後(たまたま同点の場面どうしの決め手だけ)
     const edge = (s: Scene): number => (s === left[0] || s === left[left.length - 1] ? 1 : 0)
+    const beside = (a: Scene, b: Scene): number =>
+      Number(besideDropped(b)) - Number(besideDropped(a))
+    const byCues = (a: Scene, b: Scene): number => substance(a) - substance(b)
     const s = left
       .filter((x) => score(x) === low)
-      .sort(
-        (a, b) =>
-          edge(a) - edge(b) ||
-          substance(a) - substance(b) ||
-          Number(besideDropped(b)) - Number(besideDropped(a))
+      .sort((a, b) =>
+        indistinct
+          ? edge(a) - edge(b) || byCues(a, b) || beside(a, b)
+          : edge(a) - edge(b) || beside(a, b) || byCues(a, b)
       )[0]
     keep.delete(s.id)
     total -= estimate(s)

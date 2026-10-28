@@ -150,6 +150,16 @@ export function breakScore(chars: readonly string[], k: number): number {
   return 0
 }
 
+/** 文の終わりらしい形(句点の無い話し言葉の文末) */
+const SENTENCE_END =
+  /(?:ます|です|ました|でした|ません|ませんでした|ましょう|でしょう|ください|ですね|ますね|ですよ|ますよ|ですか|ますか|よね|った|んだ|んです|のだ|うだ|ない|ありがとう|ございます)$/u
+
+/** chars[k] の手前が、文の終わりらしい形で終わっているか */
+function endsSentence(chars: readonly string[], k: number): boolean {
+  const tail = chars.slice(Math.max(0, k - 6), k).join('')
+  return SENTENCE_END.test(tail)
+}
+
 /**
  * 改行・テロップの境目の位置としての良さ(`breakScore` に、日本語の文節の切れ目の見当を足したもの)。
  * `Intl.Segmenter` の日本語の単語の区切りは活用・複合語を細かく切る(「思い|切|っ|た」「聞|か|せい|ただ|きた|い」
@@ -178,6 +188,9 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
     wordBoundaries(chars)?.has(k - 1) === true
   )
     base = 2
+  // 句点が無くても文の終わりらしい所(「…ました / それでは」「…ですね / 以前」)は、次が前にくっつく仮名で
+  // なければ切ってよい(仮名の並びの中を全部語の途中とみなすと「ありがとうございまし / た…」になった)
+  if (base > -Infinity && !ATTACHES.test(next) && endsSentence(chars, k)) return Math.max(base, 2)
   if (HIRAGANA.test(next)) {
     // 漢字・カタカナ・数字の後ろの助詞・送り仮名・「する」の活用(「経済 / にとって」「競合 / しない」)
     if (

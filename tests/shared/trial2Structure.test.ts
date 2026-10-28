@@ -70,6 +70,36 @@ describe('AI が全部の場面に同じ点を付けたとき(不具合 2)', () 
   })
 })
 
+describe('判定が区別できている回は「前後が落ちた場面から落とす」が先(監査 D1)', () => {
+  it('同点の場面どうしでは、中身の手掛かりより前後が落ちているかを先に見る', () => {
+    const sc = (i: number, rich: boolean): Scene => {
+      const t = i * 60
+      const lines = rich
+        ? [line(t + 1, t + 50, '日立建機の千崎社長と30社・5%・2024年の交渉')]
+        : [line(t + 1, t + 20, 'そうですね')]
+      return { id: `s${i + 1}`, start: t, end: t + 60, lines, speech: rich ? 49 : 19 }
+    }
+    // s2 が最も低い(先に落ちる)。次に同点 40 の s3(s2 の隣・中身が濃い)と s5(離れている・中身が薄い)
+    const scenes = [
+      sc(0, false),
+      sc(1, false),
+      sc(2, true),
+      sc(3, false),
+      sc(4, false),
+      sc(5, false)
+    ]
+    const scores = [90, 30, 40, 70, 40, 90]
+    const j: SceneJudgement[] = scenes.map((s, i) => ({
+      sceneId: s.id,
+      score: scores[i],
+      kind: 'normal',
+      reason: ''
+    }))
+    const r = selectScenes(scenes, j, 4 * 60)
+    expect(r.dropped.map((d) => d.sceneId)).toEqual(['s2', 's3'])
+  })
+})
+
 describe('場面の区切りを文の途中に入れない(不具合 3)', () => {
   it('続きのある形で終わる発話(「…というのは」)の後ろでは、長さで分けない', () => {
     expect(continuesSentence('思い切って10%価格を上げたというのは')).toBe(true)

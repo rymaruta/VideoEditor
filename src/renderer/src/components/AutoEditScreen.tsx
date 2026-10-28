@@ -43,6 +43,7 @@ import {
 import {
   commonSpan,
   droppedSceneReason,
+  dropPolicyOf,
   formatDuration,
   overallProgress,
   sceneChips,
@@ -1221,7 +1222,13 @@ export function AutoEditScreen(): React.JSX.Element | null {
                             {!kept && roughCut && (
                               <span className="form-note structure-dropped-why">
                                 落とした理由:{' '}
-                                {droppedSceneReason(sc, j, judgements, keep[sc.id] === false)}
+                                {droppedSceneReason(
+                                  sc,
+                                  j,
+                                  judgements,
+                                  keep[sc.id] === false,
+                                  dropPolicyOf(editPolicy, targetMinutes)
+                                )}
                               </span>
                             )}
                           </span>

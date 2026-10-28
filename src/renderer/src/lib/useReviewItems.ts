@@ -4,6 +4,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useQcStore } from '../store/qcStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { POLICY_PROFILES } from '@shared/structure/kind'
+import { dropPolicyOf } from './autoEditView'
 import {
   buildReviewItems,
   structureIndistinctOf,
@@ -73,6 +74,9 @@ export function useReviewItems(): ReviewLists {
   const keptIds = usePipelineStore((s) => s.roughCut?.keptIds)
   const keep = usePipelineStore((s) => s.keep)
   const judgeSource = usePipelineStore((s) => s.judgeSource)
+  const planJudgements = usePipelineStore((s) => s.planJudgements)
+  const targetMinutes = usePipelineStore((s) => s.targetMinutes)
+  const policyName = useSettingsStore((s) => s.editPolicy)
   // 仮編集を作るときと同じ方針(pipelineStore は設定の editPolicy で作る)
   const dropUnneeded = useSettingsStore((s) => POLICY_PROFILES[s.editPolicy]?.dropUnneeded ?? true)
 
@@ -92,7 +96,10 @@ export function useReviewItems(): ReviewLists {
       keptIds,
       keep,
       dropUnneeded,
-      judgeSource
+      judgeSource,
+      planJudgements,
+      targetMinutes,
+      policyName
     ]
     return sharedLists(deps, () => {
       const sourceOf = new Map(syncedFiles.map((f) => [f.id, f.sourceId]))
@@ -112,7 +119,14 @@ export function useReviewItems(): ReviewLists {
         effectChosen,
         qc,
         structureRescue: structureRescueOf(judgements, keptIds, keep, dropUnneeded),
-        structureIndistinct: structureIndistinctOf(judgements, keptIds, judgeSource)
+        structureIndistinct: structureIndistinctOf(
+          judgements,
+          planJudgements,
+          keptIds,
+          keep,
+          dropPolicyOf(policyName, targetMinutes),
+          judgeSource
+        )
       })
       const done = new Set(project.reviewed ?? [])
       return {
@@ -135,6 +149,9 @@ export function useReviewItems(): ReviewLists {
     keptIds,
     keep,
     dropUnneeded,
-    judgeSource
+    judgeSource,
+    planJudgements,
+    targetMinutes,
+    policyName
   ])
 }

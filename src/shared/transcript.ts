@@ -182,17 +182,32 @@ export interface TranscriptUtterance {
  * なる(「人生」「分かる」「日本」)ので入れない
  */
 const UNIT_HEAD = /^[、,\s]*(?:[%％‰円割倍万億兆歳個件]|パーセント)/u
+/**
+ * 単位の字で始まっても、言葉の続き(単位ではない)もの。「答えは3」+「個人的には」を「3個人的には」、
+ * 「今年で10」+「割と忙しい」を「10割と忙しい」とつないでいた
+ */
+const NOT_UNIT_HEAD =
+  /^[、,\s]*(?:個人|個性|個別|個々|割と|割に|割り|割合|割引|割高|割安|万が一|万一|万全|万能|万歳|円滑|円満|円形|億劫|歳月|件名|倍増し)/u
 /** 数字で終わる(後ろの句読点・空白は除く) */
 const DIGIT_TAIL = /[0-9０-９][\s、,]*$/u
 /** 数字と単位を分けた発話をつなぐ、前の発話の終わりから次の頭までの間の上限(秒) */
 export const SPLIT_NUMBER_GAP_SEC = 1.5
+/**
+ * マイクが1本(話者を分けられない)ときの間の上限(秒)。別の人の発言(「答えは3」と「個人的には…」)を
+ * 同じ人の続きと見分けられないので、言い淀みの短い間だけにする
+ */
+export const SPLIT_NUMBER_GAP_SINGLE_MIC_SEC = 0.6
 
 /**
  * 数字と単位(「%」「円」など)の間で分かれた発話をつなぐ。発話は声の間で区切るので、「約4」と言って
  * 少し間を置いて「%弱ぐらいの賃上げを」と続けると別の発話になり、文字起こしの文・発言テロップが「約4」だけで
  * 1秒出ていた(試し編集 第2回)。同じ素材・同じ話者で、間が `SPLIT_NUMBER_GAP_SEC` 以内のものだけ
  */
-export function joinSplitNumbers(list: readonly TranscriptUtterance[]): TranscriptUtterance[] {
+export function joinSplitNumbers(
+  list: readonly TranscriptUtterance[],
+  /** 間の上限(秒)。マイク1本の回は `SPLIT_NUMBER_GAP_SINGLE_MIC_SEC` */
+  maxGapSec = SPLIT_NUMBER_GAP_SEC
+): TranscriptUtterance[] {
   const order = [...list].sort((a, b) => a.sourceStart - b.sourceStart)
   const merged = new Map<TranscriptUtterance, TranscriptUtterance>()
   const dropped = new Set<TranscriptUtterance>()
@@ -208,7 +223,8 @@ export function joinSplitNumbers(list: readonly TranscriptUtterance[]): Transcri
       !u.overlap &&
       DIGIT_TAIL.test(prev.text) &&
       UNIT_HEAD.test(u.text) &&
-      u.sourceStart - prev.sourceEnd <= SPLIT_NUMBER_GAP_SEC
+      !NOT_UNIT_HEAD.test(u.text) &&
+      u.sourceStart - prev.sourceEnd <= maxGapSec
     ) {
       const head = u.text.replace(/^[、,\s]+/u, '')
       merged.set(prevU, {

@@ -159,4 +159,33 @@ describe('確認の画面で文を削除したら、その文の発言テロッ�
     expect(u1[0].startTime).toBeCloseTo(4.7, 6)
     expect(u1[0].endTime).toBeCloseTo(6.6, 6)
   })
+
+  // 監査 A: 速さを変えたクリップでは、タイムラインの秒と素材の秒が 1:1 でない
+  it('速さ 2 のクリップでも、言葉の残る枚は消さない', () => {
+    setup()
+    const P = useProjectStore
+    P.getState().updateClipSpeed(P.getState().project.clips[0].id, 2)
+    const u2 = P.getState().project.textOverlays.find((o) => o.utteranceId === 'u2')!
+    // u2 の声(素材 12.1〜14.9 秒)はタイムラインの 6.05〜7.45 秒。7.0〜7.6 を抜いても頭の 1 秒は残る
+    expect(u2.startTime).toBeCloseTo(6, 6)
+    expect(rippleDeleteRange(7.0, 7.6)).toBe(true)
+    const after = P.getState().project.textOverlays.filter((o) => o.utteranceId === 'u2')
+    expect(after).toHaveLength(1)
+    expect(after[0].endTime).toBeCloseTo(7.0, 6)
+  })
+
+  it('速さ 0.5 のクリップでも、言葉の残る枚は消さない(声の前だけ残る枚は消す)', () => {
+    setup()
+    const P = useProjectStore
+    P.getState().updateClipSpeed(P.getState().project.clips[0].id, 0.5)
+    const u2 = P.getState().project.textOverlays.find((o) => o.utteranceId === 'u2')!
+    expect(u2.startTime).toBeCloseTo(24, 6)
+    // 素材 12.1〜14.9 秒の声はタイムラインの 24.2〜29.8 秒。25.5〜30.5 を抜くと頭の 1.5 秒(言葉あり)が残る
+    expect(rippleDeleteRange(25.5, 30.5)).toBe(true)
+    expect(P.getState().project.textOverlays.filter((o) => o.utteranceId === 'u2')).toHaveLength(1)
+    // u1 の 2 枚目(素材 8.2〜11.5 秒 = タイムライン 16.4〜23.6 秒)を、言葉の所ごと抜くと消える
+    expect(rippleDeleteRange(16.4, 23.0)).toBe(true)
+    const u1 = P.getState().project.textOverlays.filter((o) => o.utteranceId === 'u1')
+    expect(u1.map((o) => o.utteranceChunk)).toEqual([0])
+  })
 })

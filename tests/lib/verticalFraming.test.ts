@@ -114,7 +114,16 @@ describe('縦の書き出し用の写し', () => {
 
   it('人が決めていないクリップを、顔に寄せて絵で埋める(人の決めた切り抜きと企画はそのまま)', () => {
     const before = JSON.stringify(project)
-    const faces = new Map([['c1', [[face(0.62)], [face(0.63)], [face(0.62)]]]])
+    const faces = new Map([
+      [
+        'c1',
+        [
+          { time: 280, faces: [face(0.62)] },
+          { time: 288, faces: [face(0.63)] },
+          { time: 296, faces: [face(0.62)] }
+        ]
+      ]
+    ])
     const r = applyVerticalFill(project, faces)
     expect(JSON.stringify(project)).toBe(before)
     const [c1, c2, c3] = r.project.clips
@@ -132,7 +141,10 @@ describe('縦の書き出し用の写し', () => {
   it('発言テロップは、切り出した絵の顔を避け、Shorts の下の帯に隠れない高さへ', () => {
     // c1 の顔が下の方まで大きく映る(切り出すと画面の下に掛かる)
     const low: FaceBox = { x: 0.55, y: 0.62, w: 0.12, h: 0.3, score: 0.95 }
-    const r = applyVerticalFill(project, new Map([['c1', [[low], [low], [low]]]]))
+    const r = applyVerticalFill(
+      project,
+      new Map([['c1', [280, 288, 296].map((time) => ({ time, faces: [low] }))]])
+    )
     const [t1, t2] = r.project.textOverlays
     expect(t1.style.position).toBe('top')
     expect(r.movedTelops).toBe(1)
@@ -153,10 +165,16 @@ describe('縦の書き出し用の写し', () => {
       }
     }
     const r = await prepareVerticalFill(project)
-    // c1 と c3 の 3 か所ずつ(人の決めた c2 は探さない)
-    expect(calls).toHaveLength(6)
+    // 素材ごとの代表の画だけ(c1・c3 の真ん中。人の決めた c2 は探さない)
+    expect(calls).toHaveLength(2)
     expect(r.project.clips[0].cropCenter!.x).toBeLessThan(0.45)
-    expect(r.project.clips[2].cropCenter).toEqual({ x: 0.5, y: 0.5 })
+    // 同じカメラの近い時刻の画の顔も使う(顔の位置はカメラごとにほぼ一定)
+    expect(r.project.clips[2].cropCenter!.x).toBeLessThan(0.45)
+    // 顔がどこにも無ければ真ん中
+    ;(globalThis as unknown as { window: { api: Record<string, unknown> } }).window.api.faceDetect =
+      async (requests: unknown[]) => requests.map(() => [])
+    const none = await prepareVerticalFill(project)
+    expect(none.project.clips[2].cropCenter).toEqual({ x: 0.5, y: 0.5 })
   })
 
   it('既定は「人物に寄せて切り出す」。黒帯の形は設定で選べる', () => {
