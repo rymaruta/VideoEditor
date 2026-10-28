@@ -83,6 +83,17 @@ describe('N4: 言いかけの短い場面を最後に残さないで落とした
     const text = droppedSceneReason(s, j, [j], false, dropPolicyOf('tempo', 7.5), [], 'fragment')
     expect(text).toContain('言いかけで終わる')
     expect(text).not.toContain('点数の低い')
+    // 目標なし(点数の下限で選ぶ方針)で見ても、切れ端として落とした理由を書く
+    const noTarget = droppedSceneReason(
+      s,
+      { ...j, kind: 'normal', score: 40 },
+      [j],
+      false,
+      { dropUnneeded: true, targetSec: 0, minScore: 60 },
+      [],
+      'fragment'
+    )
+    expect(noTarget).toContain('言いかけで終わる')
   })
 })
 

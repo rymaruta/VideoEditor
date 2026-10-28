@@ -78,8 +78,9 @@ import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPl
 import {
   LEGACY_NOTE,
   isLegacyNote,
-  matchScenesByTime,
   remapSceneFlags,
+  remapSceneIds,
+  sceneOriginsByTime,
   restorePipelineFromProject
 } from '../lib/pipelineRestore'
 import {
@@ -1179,11 +1180,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const kind = useSettingsStore.getState().episodeKind
     // ゲーム実況は、声の盛り上がり(叫び・大声)を面白い所の印にする
     let hype: HypeMoment[] | undefined
+    // 音の大きさ(発話の中の質問の頭で分けるとき、字数から見積もった切れ目を静かな所へ寄せる)
+    const activity = await activityOf(project, info)
     if (kind === 'game') {
-      hype = hypeMomentsFor(project, info, await activityOf(project, info))
+      hype = hypeMomentsFor(project, info, activity)
       log(`声の盛り上がり(叫び・大声): ${hype.length} 回`)
     }
-    const scenes = scenesFor(project, info, { kind, hype })
+    const scenes = scenesFor(project, info, { kind, hype, level: levelOf(activity) })
     const range = cameraRange(info)
     const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
     const { judgements, source, failure, model, device } = await judgeScenes(
@@ -1984,24 +1987,26 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           project.multicam
         ) {
           setStep('cut', { state: 'run', percent: 0, note: '声の盛り上がりを測っています' })
-          const hype = hypeMomentsFor(
-            project,
-            project.multicam,
-            await activityOf(project, project.multicam)
-          )
-          const scenes = scenesFor(project, project.multicam, { kind, hype })
+          const activity = await activityOf(project, project.multicam)
+          const hype = hypeMomentsFor(project, project.multicam, activity)
+          const scenes = scenesFor(project, project.multicam, {
+            kind,
+            hype,
+            level: levelOf(activity)
+          })
           // 切り直した場面に、残す/落とすを当て直す(時刻がほぼ同じ場面だけ。ID は番号なので別の場面を指す)
-          const match = matchScenesByTime(get().scenes, scenes)
+          const origins = sceneOriginsByTime(get().scenes, scenes)
+          const match = new Map([...origins].map(([id, from]) => [id, from[0]]))
           set({
             hype,
             scenes,
             judgements: heuristicJudgements(scenes, kind),
-            keep: remapSceneFlags(get().keep, match),
+            keep: remapSceneFlags(get().keep, match, origins),
             builtKept: get().builtKept.map((b) => ({
               cut: b.cut,
-              keptIds: remapKept(b.keptIds, match)
+              keptIds: remapSceneIds(b.keptIds, origins)
             })),
-            keepTouched: remapKept(get().keepTouched, match),
+            keepTouched: remapSceneIds(get().keepTouched, origins),
             sceneKind: kind
           })
           recut = true
@@ -3340,11 +3345,6 @@ function forgetUsedTouches(): void {
 }
 
 /** 残した場面の ID を、切り直した場面の ID へ移す(時刻がほぼ同じ場面だけ。`match` は今 → 前) */
-function remapKept(ids: readonly string[], match: ReadonlyMap<string, string>): string[] {
-  const set = new Set(ids)
-  return [...match].filter(([, prev]) => set.has(prev)).map(([id]) => id)
-}
-
 /** 同期の報告から、企画に覚える要約を作る(素材ごとの位置の決め方は、企画の素材の ID で) */
 function syncSummaryOf(report: SyncReport, project: Project): SyncSummary {
   const drift = report.pairs

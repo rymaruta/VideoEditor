@@ -5,7 +5,12 @@ import {
   type FaceBox,
   type Rect
 } from '@shared/telop/avoidFaces'
-import { liftAboveShortsUi, SHORTS_TELOP_BOTTOM, telopBlockHeight } from '@shared/telop/stack'
+import {
+  liftAboveShortsUi,
+  SHORTS_TELOP_BOTTOM,
+  stackedBottomTelops,
+  telopBlockHeight
+} from '@shared/telop/stack'
 import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { textCanvasSize } from '@shared/resolution'
 import { computeMainTrackLayout } from '@shared/mainTrackLayout'
@@ -63,6 +68,8 @@ export const MIN_SHOT_SEC = 2
  * この帯の中で掛からない所へずらす
  */
 const SEAM_BAND = 0.12
+/** 上下に積んだ所で同時に出た2枚を、継ぎ目の上下に並べるときの間(画面の高さに対する比) */
+const STACK_PAIR_GAP = 0.012
 /** 継ぎ目の帯の中で顔を避けるとき、顔の何割に掛かったら避けるか(あごに掛かるのも避ける) */
 const SEAM_FACE_RATIO = 0.04
 
@@ -713,10 +720,65 @@ export function applyVerticalFill(
     Boolean(o.utteranceId) && o.style.position === 'bottom' && !o.style.customPosition
   const lifted = liftAboveShortsUi(project.textOverlays, canvas.h, { canvasW: canvas.w })
   const seamY = stackTopHeight(canvas.h) / canvas.h
+  // 同時に出た発言テロップを段に積んだ枚(`stackSimultaneousTelops` が置いた自由配置)は、積み直すと同じ位置に
+  // なることで見分ける(手で置いた枚は外れる)。上下に積んだ所では、段の枚も継ぎ目に並べ直す(前は段の枚が
+  // 自由配置のため動かず、1枚目だけが継ぎ目へ移って上下が逆になった。第4回の直しの監査の指摘 5)
+  const tiered = stackedBottomTelops(project.textOverlays, canvas.h)
+  const telopInRange = (o: TextOverlay): boolean =>
+    !range || (o.endTime > range.start && o.startTime < range.end)
+  const onStack = project.textOverlays.map(
+    (o, i) =>
+      Boolean(o.utteranceId) &&
+      o.style.position === 'bottom' &&
+      (!o.style.customPosition || tiered[i]) &&
+      telopInRange(o) &&
+      faceAt((o.startTime + o.endTime) / 2).stack
+  )
+  // 上下に積んだ所で同時に出ている枚の組(時刻の重なりでつながる枚)。2枚以上なら継ぎ目の上下に並べる
+  const pairPos = new Map<number, number>()
+  {
+    const order = project.textOverlays
+      .map((o, i) => ({ o, i }))
+      .filter(({ i }) => onStack[i])
+      .sort((a, b) => a.o.startTime - b.o.startTime || a.i - b.i)
+    let group: { o: TextOverlay; i: number }[] = []
+    let groupEnd = -Infinity
+    const flush = (): void => {
+      if (group.length >= 2) {
+        // 先の発言を継ぎ目の上(下端を継ぎ目の少し上)、後の発言を継ぎ目の下へ順に
+        let below = seamY + STACK_PAIR_GAP / 2
+        group.forEach(({ o, i }, k) => {
+          const h = telopBlockHeight(o, canvas.h, canvas.w)
+          if (k === 0) pairPos.set(i, seamY - STACK_PAIR_GAP / 2 - h / 2)
+          else {
+            pairPos.set(i, below + h / 2)
+            below += h + STACK_PAIR_GAP
+          }
+        })
+      }
+      group = []
+      groupEnd = -Infinity
+    }
+    for (const x of order) {
+      if (x.o.startTime >= groupEnd - 1e-6) flush()
+      group.push(x)
+      groupEnd = Math.max(groupEnd, x.o.endTime)
+    }
+    flush()
+  }
   let movedTelops = 0
   const textOverlays = project.textOverlays.map((o, i) => {
-    // 自動のショートは、組み立てが上げていた枚(下のテロップ全部)を今までどおり上げる
-    if (!speech(o)) return options.alwaysLift ? lifted[i] : o
+    const paired = pairPos.get(i)
+    if (paired !== undefined)
+      return {
+        ...o,
+        style: {
+          ...o.style,
+          customPosition: { x: o.style.customPosition?.x ?? 0.5, y: paired }
+        }
+      }
+    // 段に積んだ枚(上下に積んだ所)も継ぎ目へ
+    if (!speech(o) && !onStack[i]) return options.alwaysLift ? lifted[i] : o
     if (range && (o.endTime <= range.start || o.startTime >= range.end)) return o
     const { faces: faceList, stack } = faceAt((o.startTime + o.endTime) / 2)
     const up = lifted[i]
@@ -731,7 +793,10 @@ export function applyVerticalFill(
       if (Math.abs(bottom - (seamY + two / 2)) > 1e-9) movedTelops++
       return {
         ...o,
-        style: { ...o.style, customPosition: { x: pos?.x ?? 0.5, y: bottom - h / 2 } }
+        style: {
+          ...o.style,
+          customPosition: { x: o.style.customPosition?.x ?? pos?.x ?? 0.5, y: bottom - h / 2 }
+        }
       }
     }
     if (faceList.length > 0 && coversFace(rect, faceList)) {

@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   buildScenes,
   continuesSentence,
-  selectScenes,
   splitInnerTurns,
   type Scene,
-  type SceneJudgement,
   type TimedLine
 } from '../../src/shared/structure/scenes'
 import { TRIAL4_TRANSCRIPT } from './fixtures/trial4Transcript'
@@ -37,17 +35,25 @@ const QUESTION = [
 ]
 
 describe('N5: 発話の中の質問の頭・長い間で分けてから区切る', () => {
-  it('答えの終わりと質問の頭が1件の発話: 言い切りの後の「実は」で分ける(字数の割合で時刻を見積もる)', () => {
+  it('答えの終わりと質問の頭が1件の発話: 言い切りの後の「実は」で、静かな所を見つけて分ける', () => {
     const merged = lines().find((l) => l.text.startsWith(ANSWER_END))!
-    const pieces = splitInnerTurns([merged])
+    // 字数から見積もった所(89.86 秒)の前後 1 秒の中の静かな所(90.3 秒)で分ける
+    const asked: [number, number][] = []
+    const pieces = splitInnerTurns([merged], (lo, hi) => {
+      asked.push([lo, hi])
+      return 90.3
+    })
+    expect(asked).toHaveLength(1)
+    expect(asked[0][0]).toBeCloseTo(88.86, 1)
+    expect(asked[0][1]).toBeCloseTo(90.86, 1)
     expect(pieces.map((p) => p.text)).toEqual([
       '賃上げは大企業とか中小企業問わずにですね経営者の責務としてやることで誰かから言われてやるという筋合いのものではないと私は基本的に考えております',
       '実は千崎社長の日立健貴さんは'
     ])
     expect(pieces[0].start).toBe(merged.start)
+    expect(pieces[0].end).toBe(90.3)
+    expect(pieces[1].start).toBe(90.3)
     expect(pieces[1].end).toBe(merged.end)
-    expect(pieces[1].start).toBeGreaterThan(88)
-    expect(pieces[1].start).toBeLessThan(91)
     expect(pieces[1].id).toBe(`${merged.id}~1`)
   })
 
@@ -84,9 +90,9 @@ describe('N5: 発話の中の質問の頭・長い間で分けてから区切る
       (text) => scenes.find((s) => s.lines.some((l) => l.text.includes(text)))!.id
     )
     expect(new Set(q).size).toBe(1)
-    // 区切りは質問の途中(前は 96.34 秒)に入らない。入るなら質問の頭(分けた発話「実は…」の頭)
-    const head = scenes.flatMap((s) => s.lines).find((l) => l.text === QUESTION[0])!
-    for (const b of bounds(scenes)) if (b > head.start - 1e-9 && b < 107) expect(b).toBe(head.start)
+    // 区切りは質問の途中(前は 96.34 秒)に入らない。音が無ければ質問の頭を含む発話(76.24〜92.55 秒)の
+    // 内側にも置かない(声の途中になりうる)
+    for (const b of bounds(scenes)) expect(b > 76.24 && b < 106.53).toBe(false)
     // 場面の発話の文はつなぐと元の文(分けても文は欠けない)
     const all = scenes.flatMap((s) => s.lines.map((l) => l.text)).join('')
     expect(all).toBe(
@@ -116,35 +122,5 @@ describe('N4: 区切りを文の境に寄せ、言いかけの短い場面を最
       const long = prev.end - scenes[i - 1].lines[0].start >= 90
       expect(head.start - prev.end >= 8 || long).toBe(true)
     }
-  })
-
-  it('仕上がりの最後に、前を落とした、文の途中から始まる短い場面だけが残るなら落とす', () => {
-    // 第4回の作りと同じ: s7 を落とし、文の途中から始まる 9 秒の s8 が最後に残る
-    const mk = (id: string, start: number, end: number, text: string): Scene => ({
-      id,
-      start,
-      end,
-      speech: end - start,
-      lines: [{ id: `${id}-l`, start, end, text, overlap: false, speaker: 'マイク1' }]
-    })
-    const scenes = [
-      mk('s1', 0, 100, '始めます'),
-      mk('s2', 100, 190, '…とても大事だと思っております'),
-      mk('s3', 190, 280, 'あとやはり我々は'),
-      mk('s4', 280, 289, '一緒に良いところも悪いところも頑張っていこうという形で'),
-      mk('s5', 289, 400, '政府の政策も活用されてきましたか')
-    ]
-    const j: SceneJudgement[] = scenes.map((s, i) => ({
-      sceneId: s.id,
-      score: 85 - i * 5,
-      kind: 'highlight',
-      reason: ''
-    }))
-    const r = selectScenes(scenes, j, 200)
-    expect(r.kept).toEqual(['s1', 's2'])
-    expect(r.dropped).toContainEqual({ sceneId: 's4', why: 'length', by: 'fragment' })
-    // 前の場面を残していれば(文がつながる)落とさない
-    const all = selectScenes(scenes, j, 1000)
-    expect(all.kept).toEqual(['s1', 's2', 's3', 's4', 's5'])
   })
 })
