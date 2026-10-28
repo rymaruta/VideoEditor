@@ -705,6 +705,8 @@ export function ExportDialog(): React.JSX.Element | null {
     outputPath: string
   ): Promise<{ success: boolean; rangeStartSec?: number; exported: Project }> {
     setProgress({ percent: 0, stage: '準備中' })
+    // 前の書き出しの確認がまだ動いていれば止める(結果を捨てる確認が、この書き出しと CPU を取り合う)
+    await useQcStore.getState().stopForExport()
     // 縦(9:16)で書き出すときは、既定で横長の絵を人物に寄せて縦いっぱいに切り出す(書き出し用の写しだけ。
     // 企画のクリップは変えない)。設定で「上下に黒帯」を選べば、今までどおり縮めて収める
     // ゲーム実況(企画の種類)はゲーム画面なので顔は探さず、真ん中で埋める(今までどおり)。顔探しは素材ごとの

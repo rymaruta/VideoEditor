@@ -120,6 +120,7 @@ import {
 } from '../lib/rangedAutoEdit'
 import { heuristicJudgements, indistinctJudgements } from '@shared/structure/scenes'
 import { framesOnFaces, prepareVerticalFill } from '../lib/verticalFraming'
+import { useQcStore } from './qcStore'
 import {
   AI_EFFECT_KINDS,
   AUTO_PLACE_CONFIDENCE,
@@ -1883,6 +1884,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               coverageOfClips(project.clips, info)
             )
           : project.cutOverrides
+        // 前の書き出しの確認がまだ動いていれば止める(書き出しと CPU を取り合う。書き出しの画面と同じ)
+        await useQcStore.getState().stopForExport()
         for (let i = 0; i < windows.length; i++) {
           set({
             shorts: {
