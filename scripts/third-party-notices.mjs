@@ -222,15 +222,37 @@ function isPlaceholder(value) {
 }
 
 /**
- * GPL のソースの提供の申し出(書面による申し出。GPL-3.0 の 6 条 b・GPL-2.0 の 3 条 b)。
- * 入手先・連絡先は product.json(sourceOfferUrl・vendor・vendorEmail)。未定なら「(未定)」と書く
- * (未定のままでは配布用のビルドは scripts/release-check.cjs が止める)。
+ * GPL の FFmpeg のソースの入手方法。入手先・連絡先は product.json(sourceOfferUrl・vendor・vendorEmail)。
+ * - 連絡先が無い(空・未定)とき: バイナリと同じ場所(sourceOfferUrl)から写せる形での提供
+ *   (GPL-3.0 の 6 条 d・GPL-2.0 の 3 条の最後の段落)。入手先の URL だけを案内する
+ * - 連絡先があるとき: 上に加えて、書面による申し出(GPL-3.0 の 6 条 b・GPL-2.0 の 3 条 b。3 年間・媒体での請求)
+ * 入手先が未定なら「(未定)」と書く(未定のままでは配布用のビルドは scripts/release-check.cjs が止める)。
  */
 export function sourceOfferLines(offer) {
-  const shown = (v) => (isPlaceholder(v) ? '(未定)' : String(v).trim())
   const vendor = isPlaceholder(offer?.vendor) ? '販売者(未定)' : String(offer?.vendor).trim()
-  const email = shown(offer?.vendorEmail)
-  const url = shown(offer?.sourceOfferUrl)
+  const hasUrl = !isPlaceholder(offer?.sourceOfferUrl)
+  const url = hasUrl ? String(offer?.sourceOfferUrl).trim() : '(未定)'
+  if (isPlaceholder(offer?.vendorEmail)) {
+    return [
+      'ソースの入手方法(バイナリと同じ場所からの提供)',
+      '',
+      hasUrl
+        ? `同梱の FFmpeg の対応するソース一式は、${url} の各版のリリースから入手できます(版ごとに置いています)。`
+        : '同梱の FFmpeg の対応するソース一式の入手先: (未定)',
+      '対応するソース一式とは、本製品に同梱した FFmpeg / FFprobe の実行ファイルに対応する完全なソース',
+      '(FFmpeg 本体と、ビルドに使われた x264・x265 などのライブラリのソース、ビルドの設定と手順)です。',
+      `${vendor} は、本製品の各版を配布しているのと同じ場所に、その版のソース一式を追加の費用なしで置き、`,
+      'その版を配布している間は置き続けます。',
+      '',
+      'Corresponding source code',
+      '',
+      'The complete corresponding source code of the FFmpeg / FFprobe executables included with this product',
+      '(FFmpeg itself, the GPL libraries such as x264 and x265 used to build them, and the build configuration)',
+      `is available at no charge from the same place as this product: the release of each version at ${url}.`,
+      `${vendor} keeps the source of each version there for as long as that version is offered.`
+    ]
+  }
+  const email = String(offer?.vendorEmail).trim()
   return [
     'ソースの提供の申し出(書面による申し出)',
     '',
@@ -267,7 +289,7 @@ function rule(title) {
  * @param {{ ffmpeg?: { version: string, readme: string, license: string }, ffprobe?: { version: string } }} input.ffmpeg
  * @param {{ version: string, license: string }} input.electron
  * @param {{ name: string, bundled: boolean, license: string, source: string, text?: string }[]} input.models
- * @param {{ vendor?: string, vendorEmail?: string, sourceOfferUrl?: string }} [input.offer] ソースの提供の申し出の宛先
+ * @param {{ vendor?: string, vendorEmail?: string, sourceOfferUrl?: string }} [input.offer] ソースの入手先と(あれば)連絡先
  */
 export function renderNotices(input) {
   const out = []
@@ -309,7 +331,7 @@ export function renderNotices(input) {
     '      Windows 版のビルド: https://www.gyan.dev/ffmpeg/builds/',
     '      macOS 版のビルド: https://evermeet.cx/pub/ffmpeg/ (Intel)、https://osxexperts.net/ (Apple Silicon)',
     '',
-    '同梱した実行ファイルと同じ版のソース一式は、下の「ソースの提供の申し出」の入手先で配っています',
+    '同梱した実行ファイルと同じ版のソース一式は、この欄の下に書いた入手先で配っています',
     '(作り方: npm run gpl-sources。取得元と SHA-256 を MANIFEST.txt に記録)。',
     ''
   )

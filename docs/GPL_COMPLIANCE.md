@@ -12,21 +12,39 @@
 - その上で GPL の義務を満たす:
   1. **表記**: `resources/THIRD_PARTY_NOTICES.txt`(ビルドのたびに `npm run licenses` が作る)に、GPL の全文・
      同梱した ffmpeg / ffprobe の版とビルドの設定(`-version` の出力と ffmpeg-static の README)を載せる
-  2. **書面による申し出**: 同じ文書に、**最後の配布から 3 年間**、同梱した ffmpeg と同じ版の完全なソースを
-     提供する申し出を載せる。宛先は `src/shared/product.json` の `vendorEmail`、入手先は同じファイルの
-     `sourceOfferUrl`
+  2. **バイナリと同じ場所からのソースの提供**(2026-10-28 に持ち主が決定): インストーラを配る公開の GitHub の
+     Releases(`src/shared/product.json` の `sourceOfferUrl` = https://github.com/rymaruta/VideoEditor/releases)の
+     **各版のリリースに、その版の対応するソース一式を一緒に置く**。GPLv3 の 6 条 d(「指定した場所からの
+     アクセスで目的コードを渡すとき、同じ場所から同じ方法で、追加の費用なしに対応するソースへのアクセスを
+     提供する」)・GPLv2 の 3 条の最後の段落(「指定した場所から写す手段で実行形式を配るとき、同じ場所から
+     ソースを写す手段を用意すれば、ソースの配布とみなす」)の形。表記の文書とバージョン情報には、
+     入手先の URL だけを案内する文を載せる:
+     「同梱の FFmpeg の対応するソース一式は、<URL> の各版のリリースから入手できます(版ごとに置いています)」
+     - この形では、**書面による申し出(3 年間・媒体での請求)は要らない**ので、連絡先のメール(`vendorEmail`)は
+       使わない(空文字)。代わりに、**その版のインストーラを Releases に置いている間は、同じリリースのソース一式を
+       消さない**(GPLv3 6 条 d の「目的コードを提供している間は」)
+     - ソースはインストーラと同じリリースに置く(別の場所に置くときは、インストーラの横に入手先をはっきり書く)
+     - **GitHub の Releases 以外(ストア・販売サイト・メディアなど)で配るときは、この形にはならない。**
+       その場所にもソース一式を同じように置くか、連絡先を決めて `vendorEmail` に入れ、書面による申し出を出す
+     - `vendorEmail` を入れた場合は、表記の文書とバージョン情報に、**最後の配布から 3 年間**のソースの提供と
+       媒体での請求の宛先を書いた**書面による申し出**(GPLv3 6 条 b・GPLv2 3 条 b)も自動で載る
   3. **対応するソース一式**: `npm run gpl-sources` が、同梱した実行ファイルと同じ版の FFmpeg 本体と、
      ビルドに使われた GPL のライブラリ(x264・x265・xvid・rubberband・frei0r・vid.stab)のソースを集め、
-     取得元と SHA-256 を記録した 1 つのアーカイブにする。これを `sourceOfferUrl` に置く
+     取得元と SHA-256 を記録した 1 つのアーカイブにする。これを、同じ版のインストーラと同じ Releases の
+     リリースに置く
 - アプリの中では、**ヘルプ > バージョン情報** から
   - 「オープンソースの表記…」(THIRD_PARTY_NOTICES.txt を開く。ヘルプ > オープンソースの表記 も同じ)
-  - 「ソースの入手方法」(申し出の文・入手先・連絡先。入手先が決まっていれば「入手先を開く」)
+  - 「ソースの入手方法」(入手先の URL の案内。連絡先があれば書面による申し出も。入手先が決まっていれば「入手先を開く」)
   が見られる。
 
 ## 2. 配布用のビルドの検査
 
-`vendor`・`vendorEmail`・`sourceOfferUrl` が未定(`TBD`・空・`example.*` の宛先)のままでは、配布用のビルドが止まる
-(`scripts/release-check.cjs`)。
+`vendor`・`sourceOfferUrl` が未定(`TBD`・空・`example.*` の宛先)のままでは、配布用のビルドが止まる
+(`scripts/release-check.cjs`)。`sourceOfferUrl` は https の URL でないと止まる。
+
+連絡先の `vendorEmail` は任意で、空・未定でも止めない(上の 2 の形でソースを配るため)。ただし、何か書いてあるのに
+メールの宛先の形でなければ止める(書面による申し出の宛先になるため)。linux のパッケージの maintainer は、連絡先が
+無ければ `product.json` の `homepage` を使う(`VideoEditor <https://github.com/rymaruta/VideoEditor>`)。
 
 | コマンド | 検査 | 用途 |
 | --- | --- | --- |
@@ -95,11 +113,13 @@ GPL の「対応するソース」は実行ファイル全体のソースを指�
 
 ## 4. 持ち主の作業
 
-1. 販売者の名義・連絡先を決め、`src/shared/product.json` の `vendor`・`vendorEmail` と `package.json` の `author` を直す
-2. ソースを置く URL を決め(https。最後の配布から 3 年以上置き続けられる場所)、`product.json` の `sourceOfferUrl` に入れる
-3. 上の「取れなかったもの」を片付ける(vid.stab の版、ffprobe を揃えるか)
-4. 配布する OS ごとに `npm run gpl-sources` を走らせ、できたアーカイブと `.sha256` を `sourceOfferUrl` に置く
-   (製品の版・ffmpeg の版ごとに残す。古い版も最後の配布から 3 年は消さない)
-5. `npm run build:win` で配布用のインストーラを作り、ヘルプ > バージョン情報 の「ソースの入手方法」に入手先と連絡先が出ること、
-   「入手先を開く」で置いた場所が開くことを確かめる
-6. 媒体での請求(メール)が来たら応じられる体制にしておく(実費のみ)
+1. 販売者の名義(`src/shared/product.json` の `vendor` と `package.json` の `author`)は `VideoEditor`、
+   ソースの入手先(`sourceOfferUrl`)は https://github.com/rymaruta/VideoEditor/releases、連絡先(`vendorEmail`)は
+   使わない(空文字。`package.json` の `author` にも email を置かない)。2026-10-28 に決定済み
+2. 上の「取れなかったもの」を片付ける(vid.stab の版、ffprobe を揃えるか)
+3. 配布する OS ごとに `npm run gpl-sources` を走らせ、できたアーカイブと `.sha256` を、**同じ版のインストーラと同じ
+   GitHub の Releases のリリース**に置く(製品の版・ffmpeg の版ごとに。インストーラを置いている間はソースも消さない)
+4. `npm run build:win` で配布用のインストーラを作り、ヘルプ > バージョン情報 の「ソースの入手方法」に入手先の URL が出ること、
+   「入手先を開く」で Releases が開くことを確かめる
+5. GitHub の Releases 以外で配ることにしたら、「1. 方針」の 2 に戻って方式を決め直す(その場所にもソースを置くか、
+   連絡先を決めて書面による申し出を出す)

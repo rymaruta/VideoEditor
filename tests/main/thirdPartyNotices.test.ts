@@ -257,8 +257,36 @@ describe('ライセンス表記の生成: 欠けたまま作らない', () => {
   )
 })
 
-describe('GPL のソースの提供の申し出(書面)', () => {
-  it('入手先・連絡先・3 年間を日本語と英語で書く', () => {
+describe('GPL のソースの入手方法(連絡先があれば書面による申し出も)', () => {
+  it('連絡先が無ければ、入手先の URL での提供だけを日本語と英語で書く(書面による申し出は出さない)', () => {
+    for (const vendorEmail of ['', undefined, 'TBD', 'noreply@example.invalid']) {
+      const text = sourceOfferLines({
+        vendor: 'VideoEditor',
+        vendorEmail,
+        sourceOfferUrl: 'https://github.com/rymaruta/VideoEditor/releases'
+      }).join('\n')
+      expect(text).toContain('ソースの入手方法(バイナリと同じ場所からの提供)')
+      expect(text).toContain(
+        '同梱の FFmpeg の対応するソース一式は、https://github.com/rymaruta/VideoEditor/releases の各版のリリースから入手できます(版ごとに置いています)。'
+      )
+      expect(text).toContain('available at no charge from the same place as this product')
+      expect(text).toMatch(/x264/)
+      expect(text).not.toContain('書面による申し出')
+      expect(text).not.toContain('3 年間')
+      expect(text).not.toContain('three years')
+      expect(text).not.toContain('@')
+    }
+  })
+
+  it('連絡先が無く入手先も未定なら「(未定)」と書く', () => {
+    const text = sourceOfferLines({ vendor: 'TBD', vendorEmail: '', sourceOfferUrl: 'TBD' }).join(
+      '\n'
+    )
+    expect(text).toContain('入手先: (未定)')
+    expect(text).not.toContain('TBD')
+  })
+
+  it('連絡先があれば、入手先・連絡先・3 年間(書面による申し出)を日本語と英語で書く', () => {
     const text = sourceOfferLines({
       vendor: '山田映像合同会社',
       vendorEmail: 'support@vendor.co.jp',
@@ -304,5 +332,27 @@ describe('GPL のソースの提供の申し出(書面)', () => {
     expect(offerAt).toBeGreaterThan(0)
     expect(offerAt).toBeLessThan(text.indexOf('GNU General Public License version 3 の全文'))
     expect(text).toContain('npm run gpl-sources')
+  })
+
+  it('連絡先が無ければ、表記の文書の FFmpeg の欄に URL での提供の文が入る(GPL の全文より前)', () => {
+    const text = renderNotices({
+      productName: 'P',
+      productVersion: '1',
+      packages: [],
+      ffmpeg: {
+        ffmpeg: { version: 'ffmpeg version 7', readme: '', license: 'GNU GENERAL PUBLIC LICENSE' }
+      },
+      electron: { version: '1', license: 'MIT' },
+      models: [],
+      offer: {
+        vendor: 'VideoEditor',
+        vendorEmail: '',
+        sourceOfferUrl: 'https://github.com/rymaruta/VideoEditor/releases'
+      }
+    })
+    const at = text.indexOf('ソースの入手方法(バイナリと同じ場所からの提供)')
+    expect(at).toBeGreaterThan(0)
+    expect(at).toBeLessThan(text.indexOf('GNU General Public License version 3 の全文'))
+    expect(text).not.toContain('書面による申し出')
   })
 })

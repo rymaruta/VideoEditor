@@ -1,5 +1,8 @@
 // 配布用のビルド(build:win・build:mac・build:linux、electron-builder のインストーラ)の前の検査。
-// 販売者(vendor)・連絡先(vendorEmail)・GPL のソースの入手先(sourceOfferUrl)が未定(TBD)のままなら止める。
+// 販売者(vendor)・GPL のソースの入手先(sourceOfferUrl)が未定(TBD)のままなら止める。
+// 連絡先(vendorEmail)は持ち主が「使わない」と決めた(2026-10-28)ので、未定・空でも止めない。
+// GPL のソースはバイナリと同じ場所(sourceOfferUrl)から写せる形で配る(GPLv3 6 条 d・GPLv2 3 条の最後の段落)。
+// 連絡先を書いたときだけ、メールの宛先の形かを確かめる(書面による申し出の宛先になる)。
 // 開発用のビルド(npm run build・build:unpack = electron-builder --dir)は止めない。
 //
 // 使い方: node scripts/release-check.cjs   (止めるときは理由を出して終了コード 1)
@@ -28,11 +31,11 @@ function releaseProblems(product) {
   const p = product ?? {}
   if (isPlaceholder(p.vendor))
     problems.push('販売者(product.json の vendor)が未定です。法的な名義を入れてください')
-  if (isPlaceholder(p.vendorEmail))
-    problems.push(
-      '販売者の連絡先(product.json の vendorEmail)が未定です。GPL のソースの提供の申し出の宛先になります'
-    )
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(p.vendorEmail).trim()))
+  // 連絡先は任意(未定・空なら書面による申し出を出さず、入手先の URL だけを案内する)
+  if (
+    !isPlaceholder(p.vendorEmail) &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(p.vendorEmail).trim())
+  )
     problems.push(`販売者の連絡先(vendorEmail)がメールの宛先の形ではありません: ${p.vendorEmail}`)
   if (isPlaceholder(p.sourceOfferUrl))
     problems.push(
@@ -67,12 +70,30 @@ function assertReleasable(projectDir) {
     )
 }
 
-module.exports = { isPlaceholder, releaseProblems, isDistributionBuild, assertReleasable }
+/**
+ * linux のパッケージ(deb など)の maintainer。連絡先があれば `名義 <メール>`、
+ * 無ければ `名義 <製品の URL>`(homepage。無ければソースの入手先)
+ */
+function linuxMaintainer(product) {
+  const p = product ?? {}
+  const contact = isPlaceholder(p.vendorEmail)
+    ? String((isPlaceholder(p.homepage) ? p.sourceOfferUrl : p.homepage) ?? '').trim()
+    : String(p.vendorEmail).trim()
+  return `${String(p.vendor ?? '').trim()} <${contact}>`
+}
+
+module.exports = {
+  isPlaceholder,
+  releaseProblems,
+  isDistributionBuild,
+  assertReleasable,
+  linuxMaintainer
+}
 
 if (require.main === module) {
   try {
     assertReleasable(join(__dirname, '..'))
-    console.log('配布用のビルドの検査: 販売者・連絡先・ソースの入手先は決まっています')
+    console.log('配布用のビルドの検査: 販売者・ソースの入手先は決まっています')
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e))
     process.exit(1)

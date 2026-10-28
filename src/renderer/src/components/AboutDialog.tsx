@@ -7,7 +7,7 @@ import { DialogHeader } from './DialogHeader'
 /**
  * ヘルプ > バージョン情報。アプリの中のダイアログで出す(統一のダイアログの枠・幅 440)。
  * 「オープンソースの表記」「Chromium のライセンス」の文書は main が別の窓で開く。
- * 「ソースの入手方法」(GPL の FFmpeg のソースの提供の申し出)はこのダイアログの中で開く。
+ * 「ソースの入手方法」(GPL の FFmpeg のソースの入手先)はこのダイアログの中で開く。
  */
 export function AboutDialog(): React.JSX.Element | null {
   const [info, setInfo] = useState<AboutInfo | null>(null)

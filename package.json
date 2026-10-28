@@ -5,7 +5,7 @@
   "main": "./out/main/index.js",
   "author": {
     "name": "VideoEditor",
-    "email": "noreply@example.invalid"
+    "url": "https://github.com/rymaruta/VideoEditor"
   },
   "license": "UNLICENSED",
   "private": true,
