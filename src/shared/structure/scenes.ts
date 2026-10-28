@@ -76,6 +76,80 @@ export function continuesSentence(text: string): boolean {
 /** 長さで分けるとき、文の途中でも分けてよい間(秒)。これだけ黙っていれば話の切れ目とみなす */
 const LONG_PAUSE_SEC = 3
 
+/** 疑問の形の文末(「…でしょうか」「…のか」「…について」) */
+const QUESTION_TAIL =
+  /(?:でしょうか|ですか|ますか|ませんか|でしょう[ね]?か|のか|のかな|かね|[?？]|について|に関して|に対して)$/u
+/** 依頼の形の文末(「ぜひお聞かせいただきたいなと思います」「教えてください」)。依頼の言葉の後ろ 16 字まで */
+const REQUEST_TAIL =
+  /(?:お聞かせ|聞かせて|お聞き|教えて|お話し|伺い|伺え|伺わ|お伺)[^。．！？!?]{0,16}$/u
+/** 質問の頭の前置き(「では次に」「○○さん、」)。ここより前へは質問を広げない */
+const QUESTION_HEAD =
+  /^(?:では|それでは|じゃあ|続いて|次に|さて|ところで|[^\s、,]{1,10}さん[、,\s])/u
+/** 前の話を指す言葉で始まる質問(「そのあたり…について」)。指している前の文まで質問に含める */
+const BACK_REFERENCE =
+  /^(?:そのあたり|その辺|その点|そこ|それ|そういった|そういう|この点|このあたり|こうした)/u
+/** 質問(前置き〜疑問・依頼の文末)の長さの上限(秒)。これより前へは広げない */
+const MAX_QUESTION_SEC = 45
+/** 質問の後、答えの頭からこの秒数は同じ場面に入れる(質問と答えを分けない) */
+const ANSWER_HOLD_SEC = 10
+
+/** 発話が質問・依頼の形で終わるか(「…でしょうか」「…について」「ぜひお聞かせください」) */
+export function endsQuestion(text: string): boolean {
+  const t = text.replace(/[\s\u3000。．.、,]+$/u, '')
+  return QUESTION_TAIL.test(t) || REQUEST_TAIL.test(t)
+}
+
+/**
+ * 質問とその答えの頭を、場面の区切りを入れない区間として返す(頭 = 質問の前置きの発話の頭、終わり = 答えの頭
+ * + `ANSWER_HOLD_SEC`)。質問の頭は、疑問・依頼の文末から、続きのある形・疑問の形の発話をさかのぼった所。
+ * 「そのあたり…」のように前の話を指して始まる質問は、指している前の文まで含める。前置き(「では次に」
+ * 「○○さん、」)より前へはさかのぼらない
+ */
+export function questionHolds(
+  sorted: readonly TimedLine[],
+  quietSec: number
+): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = []
+  const near = (a: TimedLine, b: TimedLine): boolean => b.start - a.end < LONG_PAUSE_SEC
+  for (let q = 0; q < sorted.length; q++) {
+    if (!endsQuestion(sorted[q].text)) continue
+    // 疑問の発話が続くなら、続きの最後で決める(「…決断について / どういった背景から…のか / ぜひお聞かせ…」)
+    const nx = sorted[q + 1]
+    if (nx && near(sorted[q], nx) && endsQuestion(nx.text)) continue
+    const qEnd = sorted[q].end
+    const within = (i: number): boolean => qEnd - sorted[i].start <= MAX_QUESTION_SEC
+    let h = q
+    while (
+      h > 0 &&
+      !QUESTION_HEAD.test(sorted[h].text) &&
+      near(sorted[h - 1], sorted[h]) &&
+      within(h - 1) &&
+      (endsQuestion(sorted[h - 1].text) || continuesSentence(sorted[h - 1].text))
+    )
+      h--
+    if (
+      BACK_REFERENCE.test(sorted[h].text) &&
+      h > 0 &&
+      near(sorted[h - 1], sorted[h]) &&
+      within(h - 1)
+    ) {
+      h--
+      while (
+        h > 0 &&
+        !QUESTION_HEAD.test(sorted[h].text) &&
+        near(sorted[h - 1], sorted[h]) &&
+        within(h - 1) &&
+        continuesSentence(sorted[h - 1].text)
+      )
+        h--
+    }
+    const answer = sorted[q + 1]
+    const end = answer && answer.start - qEnd < quietSec ? answer.start + ANSWER_HOLD_SEC : qEnd
+    out.push({ start: sorted[h].start, end })
+  }
+  return out
+}
+
 export function buildScenes(
   lines: readonly TimedLine[],
   range: { start: number; end: number },
@@ -86,11 +160,18 @@ export function buildScenes(
   const quiet = options.quietSec ?? 8
   const minTail = options.minTailSec ?? 20
   const sorted = [...lines].sort((a, b) => a.start - b.start)
+  // 質問とその答えの頭の間には区切りを入れない。長さで分けるなら、質問の頭(前置き)で分ける
+  // (試し編集 第3回: 補佐官の質問「やはり思い切って10%の価格を上げたというのは / ものすごい挑戦だった… /
+  // そのあたり会長の思い切った決断について / …ぜひお聞かせ…」の途中の 227.05 秒で分かれ、前の場面を落とした
+  // 仕上がりが「そのあたり会長の…」から始まった)
+  const holds = questionHolds(sorted, quiet)
 
   // 話のまとまり
   const groups: TimedLine[][] = []
   /** 長さだけで分けた(話は続いている)まとまりの頭 */
   const splitByLength = new Set<TimedLine[]>()
+  /** 質問の頭で分けたまとまり(短くても前へ戻さない。戻すと質問が前の話の途中に入る) */
+  const atQuestion = new Set<TimedLine[]>()
   // まとまりの終わりは足しながら持つ(1行ごとに全部をなめると、1万行で1秒かかっていた)
   const ends = new Map<TimedLine[], number>()
   for (const l of sorted) {
@@ -105,6 +186,27 @@ export function buildScenes(
       const long =
         len >= maxScene &&
         (len >= maxScene * 2 || gap >= LONG_PAUSE_SEC || !continuesSentence(last.text))
+      // 質問〜答えの頭の中: 長い無言でなければつなぐ(長さの目安の倍を超えたら分ける)
+      const inside = holds.some((h) => h.start < l.start - 1e-9 && l.start <= h.end)
+      if (inside && gap < quiet && len < maxScene * 2) {
+        g.push(l)
+        ends.set(g, Math.max(gEnd, l.end))
+        continue
+      }
+      // 質問の頭: 質問〜答えの頭まで入れると長さの目安を超えるなら、ここで分ける(間が短くても)
+      const head = holds.find((h) => Math.abs(h.start - l.start) <= 1e-9)
+      const atHead =
+        head !== undefined &&
+        gap < joinGap &&
+        len >= minTail &&
+        len + (head.end - l.start) >= maxScene
+      if (atHead) {
+        const fresh = [l]
+        groups.push(fresh)
+        ends.set(fresh, l.end)
+        atQuestion.add(fresh)
+        continue
+      }
       if (gap < joinGap && !(long && gap >= 1)) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
