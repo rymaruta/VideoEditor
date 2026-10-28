@@ -41,6 +41,7 @@ import {
   type Range
 } from '@shared/roughCut/overrides'
 import {
+  MIN_CARVED_SEC,
   autoTelopKey,
   isManualEdit,
   mergeManualTelops,
@@ -6408,17 +6409,30 @@ function followMainEdit(
       if (o.edited) droppedEdited.push(o)
       return []
     }
-    const startTime = pieces[0].at
-    let endTime = startTime + (pieces[0].to - pieces[0].from)
-    for (const p of pieces.slice(1)) {
-      if (Math.abs(p.at - endTime) > 1e-6) break
-      endTime = p.at + (p.to - p.from)
+    // 写した先で続いている所ごとにまとめる(並べ替え・詰めで、元の1枚がいくつかに分かれることがある)
+    const runs: { startTime: number; endTime: number; from: number }[] = []
+    for (const p of pieces) {
+      const last = runs[runs.length - 1]
+      if (last && Math.abs(p.at - last.endTime) <= 1e-6) last.endTime = p.at + (p.to - p.from)
+      else runs.push({ startTime: p.at, endTime: p.at + (p.to - p.from), from: p.from })
     }
-    if (point) endTime = startTime + (o.endTime - o.startTime)
+    // 使うのは最初の続いた所。ただし、切られて読めない長さ(仮編集の枚の最短 0.3 秒未満)になった所は使わず、
+    // 次の読める長さの所を使う。どこも読めない長さなら、本編から消えたのと同じく消す
+    // (詰めで発言の頭や終わりの数フレームだけが残ると、全文が一瞬だけ出た。もとから短い枚はそのまま)
+    const readable = (r: (typeof runs)[number]): boolean =>
+      r.endTime - r.startTime >= MIN_CARVED_SEC - 1e-6
+    const run =
+      point || o.endTime - o.startTime < MIN_CARVED_SEC - 1e-6 ? runs[0] : runs.find(readable)
+    if (!run) {
+      if (o.edited) droppedEdited.push(o)
+      return []
+    }
+    const startTime = run.startTime
+    const endTime = point ? startTime + (o.endTime - o.startTime) : run.endTime
     if (sameNumber(startTime, o.startTime) && sameNumber(endTime, o.endTime)) return [o]
-    return [
-      { ...o, startTime, endTime, words: shiftOverlayWords(o.words, startTime - o.startTime) }
-    ]
+    // 言葉の時刻は、最初の所なら今までどおり頭の動きでずらし、後ろの所なら、その所の素材の時刻からずらす
+    const shift = run === runs[0] ? startTime - o.startTime : startTime - run.from
+    return [{ ...o, startTime, endTime, words: shiftOverlayWords(o.words, shift) }]
   })
   return {
     ...next,
@@ -6821,13 +6835,15 @@ export function rangedEditProject(base: Project, input: RangedEditInput): Ranged
     !o.linkedClipId && autoTelopKey(o) !== null && (input.replaceTelop?.(o) ?? true)
   // 範囲の境をまたぐ古いものは境で切って外側だけ残す(真ん中の時刻だけで入れ替えると、境をまたぐ古い
   // 枚が丸ごと残り、同じ発言の新しい枚と2枚同時に出ていた)
-  let textOverlays = joinTelopsAtEdges(
-    [
-      ...followed.textOverlays.filter((o) => !isAuto(o)),
-      ...followed.textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, after)),
-      ...incoming.flatMap((o) => telopWithin(o, after))
-    ],
-    [after.start, after.end]
+  let textOverlays = dropTelopSlivers(
+    joinTelopsAtEdges(
+      [
+        ...followed.textOverlays.filter((o) => !isAuto(o)),
+        ...followed.textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, after)),
+        ...incoming.flatMap((o) => telopWithin(o, after))
+      ],
+      [after.start, after.end]
+    )
   )
 
   // リップル: 範囲より後ろの手置き(自動の印も紐づきも無いもの)も、長さの変わりだけ動かす
@@ -7352,10 +7368,17 @@ function joinAt(clips: Clip[], i: number): Clip[] {
 }
 
 /**
- * 境で切ったテロップの切れ端の最短。短い切れ端も残す(捨てると、範囲の外で出ていた字幕の時間が欠けた)。
- * 境で続く新しい枚とは `joinTelopsAtEdges` が1枚に戻す
+ * 境で切ったテロップの切れ端の最短。短い切れ端も一旦残す(先に捨てると、境で続く同じ枚とつなげず、
+ * 範囲の外で出ていた字幕の時間が欠けた)。境で続く新しい枚とは `joinTelopsAtEdges` が1枚に戻し、
+ * つながらずに残った短い切れ端は `dropTelopSlivers` が捨てる
  */
 const MIN_TELOP_PIECE_SEC = 0.05
+
+/**
+ * 境で切って短くなった切れ端(`telopPiece` が作ったもの)。つながらずに残ったとき、読めない長さなら捨てるのに使う。
+ * つないだ枚は新しい物になるので入らない
+ */
+const cutTelopPieces = new WeakSet<TextOverlay>()
 
 /** テロップの [a, b) の所(カラオケの言葉も切る)。短すぎれば無し */
 function telopPiece(
@@ -7372,12 +7395,33 @@ function telopPiece(
     const m = (x.start + x.end) / 2
     return m >= start && m < end
   })
-  return {
+  const piece: TextOverlay = {
     ...o,
     startTime: start,
     endTime: end,
     ...(o.words ? { words: words && words.length > 0 ? words : undefined } : {})
   }
+  cutTelopPieces.add(piece)
+  return piece
+}
+
+/** 切れ端の印を、写した(ずらした)物へ引き継ぐ */
+function carryCutMark<T extends TextOverlay>(from: TextOverlay, to: T): T {
+  if (cutTelopPieces.has(from)) cutTelopPieces.add(to)
+  return to
+}
+
+/**
+ * 境で切って短くなり、境で続く同じ枚ともつながらずに残った切れ端のうち、読めない長さ(仮編集の枚の最短
+ * `MIN_CARVED_SEC` = 0.3 秒未満)の物を捨てる。
+ * 残すと、ロックした塊を別の所へ並べた・範囲の中を別の発言に入れ替えたときに、境の外から続いていた文の
+ * 頭や終わりの数フレームだけが一瞬出た(実測: ロックの頭に 2〜8 フレーム = 0.06〜0.28 秒の全文)。
+ * 切っていない枚(もとから短い枚)・人が置いた枚・つないだ枚には触らない
+ */
+function dropTelopSlivers(list: TextOverlay[]): TextOverlay[] {
+  return list.filter(
+    (o) => !cutTelopPieces.has(o) || o.endTime - o.startTime >= MIN_CARVED_SEC - 1e-6
+  )
 }
 
 /**
@@ -7455,7 +7499,7 @@ function telopOutside(o: TextOverlay, r: TimelineRange): TextOverlay[] {
   const left = o.startTime < r.start ? telopPiece(o, -Infinity, r.start) : null
   const right = o.endTime > r.end ? telopPiece(o, r.end, Infinity) : null
   // 両側に残るなら後ろの切れ端は別の枚(別の id)
-  return [left, right && left ? { ...right, id: uuid() } : right].filter(
+  return [left, right && left ? carryCutMark(right, { ...right, id: uuid() }) : right].filter(
     (x): x is TextOverlay => x !== null
   )
 }
@@ -7549,33 +7593,30 @@ function restoreLockedContent(project: Project, prev: Project, locks: readonly R
     // 境をまたぐものは境で切る(新しいものは外側だけ、前のものは中だけ。2枚同時に出さない)。
     // 前のものの、ロックの中に掛かるごく短い切れ端(速さを変えたクリップの境など)も一旦残し、境で外の同じ枚と
     // つながればそのまま1枚にする(捨てると、ロックの中のテロップがその分だけ短くなった)。つながらずに残った
-    // ごく短い切れ端は、一瞬だけ出るので後で捨てる
+    // 短い切れ端(0.3 秒未満)は、一瞬だけ出るので後で捨てる(`dropTelopSlivers`)
     const back = prev.textOverlays
       .filter(isAuto)
       .flatMap((o) => telopWithin(o, w.prev, 1e-6))
-      .map((o) => ({
-        ...o,
-        id: uuid(),
-        startTime: o.startTime + shift,
-        endTime: o.endTime + shift,
-        words: shiftOverlayWords(o.words, shift)
-      }))
-    textOverlays = joinTelopsAtEdges(
-      [
-        ...textOverlays.filter((o) => !isAuto(o)),
-        ...textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, now)),
-        ...back
-      ],
-      [now.start, now.end],
-      lockedNow
-    )
-    const slivers = new Set(
-      back.filter((o) => o.endTime - o.startTime < MIN_TELOP_PIECE_SEC).map((o) => o.id)
-    )
-    if (slivers.size > 0)
-      textOverlays = textOverlays.filter(
-        (o) => !slivers.has(o.id) || o.endTime - o.startTime >= MIN_TELOP_PIECE_SEC
+      .map((o) =>
+        carryCutMark(o, {
+          ...o,
+          id: uuid(),
+          startTime: o.startTime + shift,
+          endTime: o.endTime + shift,
+          words: shiftOverlayWords(o.words, shift)
+        })
       )
+    textOverlays = dropTelopSlivers(
+      joinTelopsAtEdges(
+        [
+          ...textOverlays.filter((o) => !isAuto(o)),
+          ...textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, now)),
+          ...back
+        ],
+        [now.start, now.end],
+        lockedNow
+      )
+    )
   }
   return { ...project, audioTracks, videoOverlayTracks, textOverlays }
 }

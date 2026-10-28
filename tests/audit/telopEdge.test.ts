@@ -15,6 +15,8 @@ import { usePipelineStore } from '@renderer/store/pipelineStore'
 import { useProjectStore } from '@renderer/store/projectStore'
 import { DEFAULT_RANGED_OPTIONS, mainLength } from '@renderer/lib/rangedAutoEdit'
 import { commonWindowOf } from '@shared/roughCut/range'
+import { MIN_CARVED_SEC } from '@shared/telop/manual'
+import { markIn, markOut, rippleDelete } from '@renderer/lib/editCommands'
 import { episode2, project } from './h'
 const overlaps = () => {
   const sp = project()
@@ -122,4 +124,96 @@ for (const mode of ['range', 'lock'] as const)
     }
     expect(flashes()).toEqual([])
     expect(overlaps()).toEqual([])
+  })
+
+/** 前には無かった、0.3 秒(仮編集の枚の最短)未満の発言テロップ(境で切って残った切れ端) */
+const newSlivers = (before: Set<string>) =>
+  project()
+    .textOverlays.filter((x) => x.utteranceId && !x.linkedClipId)
+    .filter((x) => x.endTime - x.startTime < MIN_CARVED_SEC - 1e-6)
+    .filter((x) => !before.has(`${x.text}@${x.startTime.toFixed(3)}-${x.endTime.toFixed(3)}`))
+    .map((x) => `${x.text.replace(/\n/g, '')} [${x.startTime.toFixed(3)}-${x.endTime.toFixed(3)}]`)
+
+// 境を発言の終わりの数フレーム手前(または頭の数フレーム後ろ)に置くと、境の外から続く文の終わり(頭)の
+// 数フレームだけが切れ端として残り、ロックした塊を別の所へ並べた本編で全文が一瞬(0.06〜0.28 秒)出ていた
+for (const mode of ['range', 'lock'] as const)
+  for (const [side, frames] of [
+    ['start', 3],
+    ['end', 6]
+  ] as const)
+    it(`境で切ったテロップの数フレームの切れ端を残さない: ${mode}・境が発言の${side === 'start' ? '終わりの手前' : '頭の後ろ'} ${frames} フレーム`, async () => {
+      await episode2(false)
+      usePipelineStore.getState().setTargetMinutes(6)
+      await usePipelineStore.getState().rebuildRoughCut()
+      const total = mainLength(project())
+      const t = project().textOverlays.filter(
+        (o) =>
+          o.utteranceId &&
+          o.endTime - o.startTime > 1 &&
+          o.startTime > total * 0.1 &&
+          o.endTime < total * 0.8
+      )[frames]
+      const before = new Set(
+        project().textOverlays.map(
+          (x) => `${x.text}@${x.startTime.toFixed(3)}-${x.endTime.toFixed(3)}`
+        )
+      )
+      const edge =
+        side === 'start'
+          ? Math.round((t.endTime - frames / 30) * 30) / 30
+          : Math.round((t.startTime + frames / 30) * 30) / 30
+      const a = side === 'start' ? edge : Math.round((edge - 15) * 30) / 30
+      const b = side === 'start' ? Math.round((edge + 15) * 30) / 30 : edge
+      if (mode === 'range') {
+        const r = await usePipelineStore
+          .getState()
+          .prepareRangedEdit({ start: a, end: b }, DEFAULT_RANGED_OPTIONS, { exact: true })
+        if (!r.ok) throw new Error(r.reason)
+        usePipelineStore.getState().applyRangedEdit(r.preview)
+      } else {
+        const cw = commonWindowOf(project().clips, project().multicam!, { start: a, end: b })
+        if (!cw.ok) throw new Error()
+        useProjectStore.getState().addAutoEditLock(cw.window)
+        usePipelineStore.getState().setTargetMinutes(2)
+        await usePipelineStore.getState().rebuildRoughCut()
+      }
+      expect(newSlivers(before)).toEqual([])
+      expect(overlaps()).toEqual([])
+      expect(flashes()).toEqual([])
+    })
+
+// I/O で囲んで詰める(リップル削除)と、発言の頭(または終わり)の数フレームだけがテロップとして残り、
+// 全文が一瞬(0.13〜0.25 秒)出ていた
+for (const [keep, frames] of [
+  ['頭', 4],
+  ['終わり', 7]
+] as const)
+  it(`詰めで発言の${keep}の ${frames} フレームだけが残っても、テロップを一瞬だけ出さない`, async () => {
+    await episode2(false)
+    usePipelineStore.getState().setTargetMinutes(6)
+    await usePipelineStore.getState().rebuildRoughCut()
+    const total = mainLength(project())
+    const t = project().textOverlays.filter(
+      (o) => o.utteranceId && o.endTime - o.startTime > 1 && o.startTime > total * 0.1
+    )[frames]
+    const before = new Set(
+      project().textOverlays.map(
+        (x) => `${x.text}@${x.startTime.toFixed(3)}-${x.endTime.toFixed(3)}`
+      )
+    )
+    const a =
+      keep === '頭'
+        ? Math.round((t.startTime + frames / 30) * 30) / 30
+        : Math.round((t.startTime - 0.5) * 30) / 30
+    const b =
+      keep === '頭'
+        ? Math.round((t.endTime + 0.5) * 30) / 30
+        : Math.round((t.endTime - frames / 30) * 30) / 30
+    useProjectStore.getState().selectClip(null)
+    useProjectStore.getState().seekTo(a)
+    markIn()
+    useProjectStore.getState().seekTo(b)
+    markOut()
+    expect(rippleDelete()).toBe(true)
+    expect(newSlivers(before)).toEqual([])
   })
