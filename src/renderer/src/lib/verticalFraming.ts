@@ -50,6 +50,8 @@ const MIN_WINDOW_W = 0.2
  * (Shorts の下の帯より上)が入る余地を残す
  */
 const FACE_Y_IN_WINDOW = 0.36
+/** 同じ人の発話の続きとみなす間(秒) */
+const RUN_JOIN_SEC = 1
 /** 話者の切り替えの、1ショットの長さの下限(秒)。これより短くなる切り替えはしない */
 export const MIN_SHOT_SEC = 2
 /** 上下に積んだ所の境目の上下に、テロップを置かない幅(画面の高さに対する比) */
@@ -331,6 +333,12 @@ export interface SpeakerLine {
   speaker: string
   start: number
   end: number
+  /**
+   * 別の人の声と重なっている所がある(話者の区間に 0.25 秒以上の重なりがあると区間全体に付く)。
+   * 切り替えには使う(相づちが重なった長い答えを丸ごと捨てると、答える人へ切り替わらなかった)。
+   * 口の動きを測るのには、重なりの無い発話を先に使う
+   */
+  overlap?: boolean
 }
 
 /** 話者と顔の対応(素材ごと。話者 → 顔の横の真ん中(素材の比))と、タイムラインの発話 */
@@ -363,10 +371,29 @@ export function speakerShots(
     const l = inside[i]
     const cur = shots[shots.length - 1]
     if (l.key === cur.key || l.start <= start) continue
-    // この人が話し続ける間(次に別の人が話し始めるまで)
-    const next = inside.slice(i + 1).find((x) => x.key !== l.key)
-    const runEnd = Math.min(end, next ? next.start : end)
-    if (l.start - cur.start < minShot || end - l.start < minShot || runEnd - l.start < minShot)
+    // この人が話し続ける間: この発話の終わりから、同じ人の続きの発話(間が `RUN_JOIN_SEC` まで)をつなぎ、
+    // 終わった後に別の人が話し始めたら止める(終わりの前に重なって始まる別の人の相づちでは止めない)。
+    // 前は「次に別の人が話し始めるまで」としていて、話し続ける人の途中の 0.5 秒の相づちで、相づちの
+    // 人を元の人の次の発話まで(7 秒)映していた
+    let runEnd = l.end
+    for (const x of inside.slice(i + 1)) {
+      if (x.key === l.key) {
+        if (x.start <= runEnd + RUN_JOIN_SEC) runEnd = Math.max(runEnd, x.end)
+        else break
+      } else if (x.start >= runEnd) break
+    }
+    runEnd = Math.min(end, runEnd)
+    // 今映している人が、この発話の間ずっと話している(重なった相づち)なら切り替えない
+    const curUntil = Math.max(
+      -Infinity,
+      ...inside.filter((x) => x.key === cur.key && x.start <= l.start).map((x) => x.end)
+    )
+    if (
+      l.start - cur.start < minShot ||
+      end - l.start < minShot ||
+      runEnd - l.start < minShot ||
+      curUntil >= runEnd
+    )
       continue
     cur.end = l.start
     shots.push({ start: l.start, end, key: l.key })
@@ -573,9 +600,14 @@ export function speakerLines(
   range?: { start: number; end: number }
 ): SpeakerLine[] {
   return placedUtterances(project)
-    .filter((p) => p.utterance.speaker?.trim() && !p.utterance.overlap)
+    .filter((p) => p.utterance.speaker?.trim())
     .filter((p) => !range || (p.end > range.start && p.start < range.end))
-    .map((p) => ({ speaker: p.utterance.speaker!.trim(), start: p.start, end: p.end }))
+    .map((p) => ({
+      speaker: p.utterance.speaker!.trim(),
+      start: p.start,
+      end: p.end,
+      ...(p.utterance.overlap ? { overlap: true } : {})
+    }))
 }
 
 /**
@@ -686,7 +718,11 @@ export async function findSpeakerFaces(
         .filter((l) => l.speaker === speaker && l.end - l.start >= MOUTH_MIN_LINE_SEC)
         .map((l) => ({ l, at: list.find((x) => l.start >= x.start && l.end <= x.end) }))
         .filter((x): x is { l: SpeakerLine; at: (typeof list)[number] } => x.at !== undefined)
-        .sort((a, b) => b.l.end - b.l.start - (a.l.end - a.l.start))
+        .sort(
+          (a, b) =>
+            Number(Boolean(a.l.overlap)) - Number(Boolean(b.l.overlap)) ||
+            b.l.end - b.l.start - (a.l.end - a.l.start)
+        )
         .slice(0, MOUTH_SAMPLES_PER_SPEAKER)
       for (const { l, at } of mine)
         picks.push({
