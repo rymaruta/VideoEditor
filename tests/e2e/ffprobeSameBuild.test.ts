@@ -54,7 +54,9 @@ describe.skipIf(!existsSync(ffmpegPath) || !existsSync(ffprobePath))(
       const file = join(work, 'ipcm.mp4')
       ff([...VIDEO, ...TONE, '-c:v', 'libx264', '-c:a', 'pcm_s24le', file])
       const info = await probeMedia(file)
-      expect(info.audioCodec).toBe('pcm_s24le')
+      // Linux(7.0.2)は pcm_s24le、Windows(gyan.dev 6.1.1)は入れ物の ipcm を pcm_s32le と読む。
+      // どちらも PCM として読めていればよい(4.0.2 は unknown と読み、試聴用の素材の判定を誤った)
+      expect(info.audioCodec).toMatch(/^pcm_s(24|32)le$/)
       expect(info.hasAudio).toBe(true)
       expect(info.duration).toBeCloseTo(2, 1)
     })
