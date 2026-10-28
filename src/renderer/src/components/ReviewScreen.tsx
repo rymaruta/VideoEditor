@@ -4,7 +4,7 @@ import { usePipelineStore } from '../store/pipelineStore'
 import { getTotalDuration, useProjectStore } from '../store/projectStore'
 import { useReviewItems } from '../lib/useReviewItems'
 import type { ReviewItem } from '../lib/reviewItems'
-import { formatTimecode } from '../lib/timelineRuler'
+import { formatTimecode, lengthClock } from '../lib/timelineRuler'
 import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
 import {
   foreignBetweenOf,
@@ -171,6 +171,8 @@ function ReviewCards({
   const [current, setCurrent] = useState<string | null>(null)
   const list = showDone ? done : open
   const total = getTotalDuration(project)
+  // 長さは編集画面・書き出しと同じ数え方(コマに丸めて秒を切り捨て)
+  const lengthFps = 1 / frameSeconds(project.clips, project.assets)
   return (
     <aside className="ve-review-left" aria-label="要確認">
       <div className="ve-review-head">
@@ -270,11 +272,11 @@ function ReviewCards({
         <span className="ve-review-section">この回の仮編集</span>
         <div className="ve-review-stat-grid">
           <div>
-            <span className="mono">{clock(recordedLength(project))}</span>
+            <span className="mono">{lengthClock(recordedLength(project), lengthFps)}</span>
             <span>収録の長さ</span>
           </div>
           <div>
-            <span className="mono">{clock(total)}</span>
+            <span className="mono">{lengthClock(total, lengthFps)}</span>
             <span>仕上がり</span>
           </div>
           <div>

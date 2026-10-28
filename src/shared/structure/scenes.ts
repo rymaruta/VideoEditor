@@ -76,6 +76,92 @@ export function continuesSentence(text: string): boolean {
 /** 長さで分けるとき、文の途中でも分けてよい間(秒)。これだけ黙っていれば話の切れ目とみなす */
 const LONG_PAUSE_SEC = 3
 
+/** 疑問の形の文末(「…でしょうか」「…のか」「…について」) */
+const QUESTION_TAIL =
+  /(?:でしょうか|ですか|ますか|ませんか|でしょう[ね]?か|のか|のかな|かね|[?？]|について|に関して|に対して)$/u
+/** 依頼の形の文末(「ぜひお聞かせいただきたいなと思います」「教えてください」)。依頼の言葉の後ろ 16 字まで */
+const REQUEST_TAIL =
+  /(?:お聞かせ|聞かせて|お聞き|教えて|お話し|伺い|伺え|伺わ|お伺)[^。．！？!?]{0,16}$/u
+/** 質問の頭の前置き(「では次に」「○○さん、」)。ここより前へは質問を広げない */
+const QUESTION_HEAD =
+  /^(?:では|それでは|じゃあ|続いて|次に|さて|ところで|[^\s、,]{1,10}さん[、,\s])/u
+/** 前の話を指す言葉で始まる質問(「そのあたり…について」)。指している前の文まで質問に含める */
+const BACK_REFERENCE =
+  /^(?:そのあたり|その辺|その点|そこ|それ|そういった|そういう|この点|このあたり|こうした)/u
+/** 質問(前置き〜疑問・依頼の文末)の長さの上限(秒)。これより前へは広げない */
+const MAX_QUESTION_SEC = 45
+/** 質問とみなす文(前置き〜疑問の文末)の字数の下限(依頼の形は短くても質問) */
+const MIN_QUESTION_CHARS = 20
+/** 質問の後、答えの頭からこの秒数は同じ場面に入れる(質問と答えを分けない) */
+const ANSWER_HOLD_SEC = 10
+
+/** 発話が質問・依頼の形で終わるか(「…でしょうか」「…について」「ぜひお聞かせください」) */
+export function endsQuestion(text: string): boolean {
+  const t = text.replace(/[\s\u3000。．.、,]+$/u, '')
+  return QUESTION_TAIL.test(t) || REQUEST_TAIL.test(t)
+}
+
+/**
+ * 質問とその答えの頭を、場面の区切りを入れない区間として返す(頭 = 質問の前置きの発話の頭、終わり = 答えの頭
+ * + `ANSWER_HOLD_SEC`)。質問の頭は、疑問・依頼の文末から、続きのある形・疑問の形の発話をさかのぼった所。
+ * 「そのあたり…」のように前の話を指して始まる質問は、指している前の文まで含める。前置き(「では次に」
+ * 「○○さん、」)より前へはさかのぼらない
+ */
+export function questionHolds(
+  sorted: readonly TimedLine[],
+  quietSec: number
+): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = []
+  const near = (a: TimedLine, b: TimedLine): boolean => b.start - a.end < LONG_PAUSE_SEC
+  for (let q = 0; q < sorted.length; q++) {
+    if (!endsQuestion(sorted[q].text)) continue
+    // 疑問の発話が続くなら、続きの最後で決める(「…決断について / どういった背景から…のか / ぜひお聞かせ…」)
+    const nx = sorted[q + 1]
+    if (nx && near(sorted[q], nx) && endsQuestion(nx.text)) continue
+    const qEnd = sorted[q].end
+    const within = (i: number): boolean => qEnd - sorted[i].start <= MAX_QUESTION_SEC
+    let h = q
+    while (
+      h > 0 &&
+      !QUESTION_HEAD.test(sorted[h].text) &&
+      near(sorted[h - 1], sorted[h]) &&
+      within(h - 1) &&
+      (endsQuestion(sorted[h - 1].text) || continuesSentence(sorted[h - 1].text))
+    )
+      h--
+    if (
+      BACK_REFERENCE.test(sorted[h].text) &&
+      h > 0 &&
+      near(sorted[h - 1], sorted[h]) &&
+      within(h - 1)
+    ) {
+      h--
+      while (
+        h > 0 &&
+        !QUESTION_HEAD.test(sorted[h].text) &&
+        near(sorted[h - 1], sorted[h]) &&
+        within(h - 1) &&
+        continuesSentence(sorted[h - 1].text)
+      )
+        h--
+    }
+    // 短い問い返し・驚き(「えっ、何それ?」)は質問とみなさない。前置きからの文が `MIN_QUESTION_CHARS` 字
+    // 以上か、依頼の形(「お聞かせください」「教えてください」)の質問だけ
+    const chars = sorted
+      .slice(h, q + 1)
+      .reduce((t, l) => t + [...l.text.replace(/[\s、。,.!?！？]/gu, '')].length, 0)
+    if (
+      chars < MIN_QUESTION_CHARS &&
+      !REQUEST_TAIL.test(sorted[q].text.replace(/[\s。．.]+$/u, ''))
+    )
+      continue
+    const answer = sorted[q + 1]
+    const end = answer && answer.start - qEnd < quietSec ? answer.start + ANSWER_HOLD_SEC : qEnd
+    out.push({ start: sorted[h].start, end })
+  }
+  return out
+}
+
 export function buildScenes(
   lines: readonly TimedLine[],
   range: { start: number; end: number },
@@ -86,11 +172,18 @@ export function buildScenes(
   const quiet = options.quietSec ?? 8
   const minTail = options.minTailSec ?? 20
   const sorted = [...lines].sort((a, b) => a.start - b.start)
+  // 質問とその答えの頭の間には区切りを入れない。長さで分けるなら、質問の頭(前置き)で分ける
+  // (試し編集 第3回: 補佐官の質問「やはり思い切って10%の価格を上げたというのは / ものすごい挑戦だった… /
+  // そのあたり会長の思い切った決断について / …ぜひお聞かせ…」の途中の 227.05 秒で分かれ、前の場面を落とした
+  // 仕上がりが「そのあたり会長の…」から始まった)
+  const holds = questionHolds(sorted, quiet)
 
   // 話のまとまり
   const groups: TimedLine[][] = []
   /** 長さだけで分けた(話は続いている)まとまりの頭 */
   const splitByLength = new Set<TimedLine[]>()
+  /** 質問の頭で分けたまとまり(短くても前へ戻さない。戻すと質問が前の話の途中に入る) */
+  const atQuestion = new Set<TimedLine[]>()
   // まとまりの終わりは足しながら持つ(1行ごとに全部をなめると、1万行で1秒かかっていた)
   const ends = new Map<TimedLine[], number>()
   for (const l of sorted) {
@@ -105,6 +198,27 @@ export function buildScenes(
       const long =
         len >= maxScene &&
         (len >= maxScene * 2 || gap >= LONG_PAUSE_SEC || !continuesSentence(last.text))
+      // 質問〜答えの頭の中: 長い無言でなければつなぐ(長さの目安の倍を超えたら分ける)
+      const inside = holds.some((h) => h.start < l.start - 1e-9 && l.start <= h.end)
+      if (inside && gap < quiet && len < maxScene * 2) {
+        g.push(l)
+        ends.set(g, Math.max(gEnd, l.end))
+        continue
+      }
+      // 質問の頭: 質問〜答えの頭まで入れると長さの目安を超えるなら、ここで分ける(間が短くても)
+      const head = holds.find((h) => Math.abs(h.start - l.start) <= 1e-9)
+      const atHead =
+        head !== undefined &&
+        gap < joinGap &&
+        len >= minTail &&
+        len + (head.end - l.start) >= maxScene
+      if (atHead) {
+        const fresh = [l]
+        groups.push(fresh)
+        ends.set(fresh, l.end)
+        atQuestion.add(fresh)
+        continue
+      }
       if (gap < joinGap && !(long && gap >= 1)) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
@@ -348,20 +462,33 @@ export function describeCues(c: SceneCues): string {
 
 /** 判定が区別できていないとみなす場面の数の下限 */
 const MIN_SCENES_TO_DISTINGUISH = 3
+/** 同じ点数・印の場面がこの割合以上なら、ほぼ同点(区別できていない)とみなす */
+const NEAR_TIE_RATIO = 0.75
 
 /**
- * 判定が場面を区別できていないか(「不要」以外の全部の場面に同じ点数・同じ印を付けた)。区別できていなければ
- * その点数と印。小さいモデルは全部の場面に「見どころ・85 点」を付けることがある(試し編集 第2回: 9 場面すべて)。
+ * 判定が場面を区別できていないか(「不要」以外の全部、またはほとんど(`NEAR_TIE_RATIO` 以上)の場面に同じ
+ * 点数・同じ印を付けた)。区別できていなければその点数と印と場面の数(ほとんどのときは `of` に全体の数)。小さいモデルは全部の場面に「見どころ・85 点」を付けることがある(試し編集 第2回: 9 場面すべて)。
  * そのまま長さに合わせると、落とす場面が並び順で決まっていた
  */
 export function indistinctJudgements(
   judgements: readonly SceneJudgement[]
-): { total: number; score: number; kind: SceneKind } | null {
+): { total: number; score: number; kind: SceneKind; of?: number } | null {
   const usable = judgements.filter((j) => j.kind !== 'unneeded')
   if (usable.length < MIN_SCENES_TO_DISTINGUISH) return null
-  const first = usable[0]
-  return usable.every((j) => j.score === first.score && j.kind === first.kind)
-    ? { total: usable.length, score: first.score, kind: first.kind }
+  // いちばん多い点数・印の組(同じ数なら先に出た方)
+  const counts = new Map<string, { n: number; score: number; kind: SceneKind }>()
+  for (const j of usable) {
+    const k = `${j.score}|${j.kind}`
+    const c = counts.get(k)
+    if (c) c.n++
+    else counts.set(k, { n: 1, score: j.score, kind: j.kind })
+  }
+  const top = [...counts.values()].reduce((a, b) => (b.n > a.n ? b : a))
+  if (top.n === usable.length) return { total: top.n, score: top.score, kind: top.kind }
+  // ほぼ同点(1〜2 場面だけ違う): 同じ点の場面どうしは区別できていない(試し編集 第3回: 9 場面中 8 場面が
+  // 85 点で、落とした 85 点の場面に「点数の低い場面から」と出て、要確認も出なかった)
+  return top.n >= MIN_SCENES_TO_DISTINGUISH && top.n >= usable.length * NEAR_TIE_RATIO
+    ? { total: top.n, score: top.score, kind: top.kind, of: usable.length }
     : null
 }
 
@@ -384,6 +511,9 @@ export interface Selection {
    */
   rescued?: { kept: number; total: number }
 }
+
+/** 長さに合わせて落とす最後の場面を選ぶとき、目標を下回る長さの差として許す幅(秒) */
+const COVER_SLACK_SEC = 15
 
 /** 点数の下限を越える場面が無いとき、残す上位の割合 */
 const RELAXED_KEEP_RATIO = 0.25
@@ -501,16 +631,46 @@ export function selectScenes(
     const beside = (a: Scene, b: Scene): number =>
       Number(besideDropped(b)) - Number(besideDropped(a))
     const byCues = (a: Scene, b: Scene): number => substance(a) - substance(b)
-    const s = left
+    const tied = left
       .filter((x) => score(x) === low)
       .sort((a, b) =>
         indistinct
           ? edge(a) - edge(b) || byCues(a, b) || beside(a, b)
           : edge(a) - edge(b) || beside(a, b) || byCues(a, b)
-      )[0]
+      )
+    // (4) 1つ落とせば目標に収まる所まで来たら、落とした後の長さが目標を下回りすぎない場面から選ぶ
+    // (下回りの少ない場面との差が `COVER_SLACK_SEC` か目標の 5% 以内なら、その中で (1)〜(3) の順)。
+    // 同じ点の中で中身の手掛かりだけで選ぶと、目標を大きく下回る長い場面を落としていた(試し編集 第3回:
+    // 全部同点で作り直すと 8 分の目標に 7:12)
+    const excess = total - targetSec
+    const covering = tied.filter((x) => edge(x) === 0 && estimate(x) >= excess)
+    let s = tied[0]
+    if (covering.length > 0) {
+      const least = Math.min(...covering.map((x) => estimate(x) - excess))
+      const slack = Math.max(COVER_SLACK_SEC, targetSec * 0.05)
+      s = covering.find((x) => estimate(x) - excess <= least + slack) ?? s
+    }
     keep.delete(s.id)
     total -= estimate(s)
     dropped.push({ sceneId: s.id, why: 'length' })
+  }
+  // 落としすぎた分を戻す: 長さで落とした場面のうち、戻しても目標に収まるものは戻す(点数の高い順、
+  // 同じなら中身の手掛かりの多い順)。短い場面を先に落とした後で長い場面を落とすと、短い場面まで
+  // 落とした分だけ目標を下回っていた(試し編集 第3回: 8 秒・9 秒の場面まで落ちた)
+  if (targetSec > 0) {
+    const byLength = scenes.filter((x) =>
+      dropped.some((d) => d.sceneId === x.id && d.why === 'length')
+    )
+    byLength.sort((a, b) => score(b) - score(a) || substance(b) - substance(a))
+    for (const x of byLength) {
+      if (total + estimate(x) > targetSec) continue
+      keep.add(x.id)
+      total += estimate(x)
+      dropped.splice(
+        dropped.findIndex((d) => d.sceneId === x.id),
+        1
+      )
+    }
   }
   return {
     kept: scenes.filter((s) => keep.has(s.id)).map((s) => s.id),

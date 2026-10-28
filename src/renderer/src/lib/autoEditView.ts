@@ -8,6 +8,7 @@ import type { DropBasis } from '@shared/autoEdit'
 import {
   describeCues,
   indistinctJudgements,
+  sceneSubstance,
   sceneCues,
   type Scene,
   type SceneJudgement
@@ -324,7 +325,12 @@ export function droppedSceneReason(
   judgements: readonly SceneJudgement[],
   /** 人が「残す」を外した */
   manual: boolean,
-  policy: DropPolicy
+  policy: DropPolicy,
+  /**
+   * 残している場面(同じ点の場面を残したかを見る)。無ければ、判定が全部(ほとんど)同じ点のときに
+   * 同じ点の中で選んだとみなす
+   */
+  keptScenes?: readonly Scene[]
 ): string {
   const why = droppedWhy(judgement, manual, policy)
   const cues = describeCues(sceneCues(scene))
@@ -336,9 +342,32 @@ export function droppedSceneReason(
     case 'minScore':
       return `点数(${judgement!.score} 点)が残す下限(${policy.minScore} 点)に届かないので落としました(${cues})`
     case 'length': {
+      // 同じ点の場面を残しているか(残していれば、点数ではなく同じ点の中で選んだ)。前は判定が全部同じ点の
+      // ときだけ見ていて、ほぼ同点(9 場面中 8 場面が 85 点)で落とした 85 点の場面に「点数の低い場面から」と
+      // 出ていた(試し編集 第3回)
+      const byScore = new Map(judgements.map((j) => [j.sceneId, j.score]))
+      const sameKept = judgement
+        ? keptScenes
+          ? keptScenes.filter((k) => k.id !== scene.id && byScore.get(k.id) === judgement.score)
+          : null
+        : []
       const same = indistinctJudgements(judgements)
-      if (same && judgement && judgement.score === same.score)
-        return `仕上がりの長さに合わせて落としました。判定がどの場面も同じ点(${same.score} 点)なので、中身の手掛かりの少ない場面から選びました(${cues})`
+      const tied = sameKept ? sameKept.length > 0 : Boolean(same && judgement?.score === same.score)
+      if (tied && judgement) {
+        // 手掛かりの数と、選んだ決め手(1分あたりで比べた手掛かりの点)を合わせて書く。数だけを出すと、
+        // 長い場面の固有名詞 21 が多く見えるのに「手掛かりが少ない」と出ていた
+        const mine = Math.round(sceneSubstance(scene))
+        const others = (sameKept ?? []).map((k) => Math.round(sceneSubstance(k)))
+        const range =
+          others.length > 0
+            ? `。残した同じ点の場面は ${Math.min(...others)}〜${Math.max(...others)}`
+            : ''
+        return (
+          `仕上がりの長さに合わせて落としました。同じ点(${judgement.score} 点)の場面の中で、中身の手掛かり` +
+          `(発話の割合・話者の数・1分あたりの数字と固有名詞)の少ない場面から選びました` +
+          `(手掛かり ${mine}${range} · ${cues})`
+        )
+      }
       return `仕上がりの長さに合わせて、点数の低い場面から落としました(${judgement ? `${judgement.score} 点 · ` : ''}${cues})`
     }
     default:

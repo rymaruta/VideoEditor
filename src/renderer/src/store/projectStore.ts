@@ -375,6 +375,17 @@ const PIP_POSITIONS: readonly PipPosition[] = [
  * ここに書き忘れた任意項目(`fillCrop` / `cropCenter` / `transitionIn` / `colorLabel` など)が
  * **読み込むたびに消える**——直したつもりで別の失い方をする。
  */
+/**
+ * 2人を上下に積む分割(縦の自動のショートの写しに付く)を外す。人が見え方(切り抜き・ぼかし背景)を決めたら、
+ * 書き出しも人の決めた見え方にする(残すと、書き出しだけ上下に積んだ形のままになる)
+ */
+function withoutSplitStack(c: Clip): Clip {
+  if (!c.splitStack) return c
+  const out = { ...c }
+  delete out.splitStack
+  return out
+}
+
 function normalizeAsset(raw: Record<string, unknown>): MediaAsset | null {
   if (typeof raw.filePath !== 'string' || raw.filePath === '') return null
   return {
@@ -3403,7 +3414,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         ...state.project,
         // `...c` でスプレッドしないと、クロップ位置や色ラベルなどここに書いていない
         // 設定が落ちる
-        clips: state.project.clips.map((c) => (c.id === clipId ? { ...c, blurBackground } : c))
+        clips: state.project.clips.map((c) =>
+          c.id === clipId ? { ...withoutSplitStack(c), blurBackground } : c
+        )
       }
     })),
 
@@ -3415,7 +3428,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       project: {
         ...state.project,
         clips: state.project.clips.map((c) =>
-          c.id === clipId ? { ...c, fillCrop, cropCenter: cropCenter ?? c.cropCenter } : c
+          c.id === clipId
+            ? { ...withoutSplitStack(c), fillCrop, cropCenter: cropCenter ?? c.cropCenter }
+            : c
         )
       }
     })),
@@ -3438,7 +3453,9 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           const nextCenter = cropCenter ?? trimmed.cropCenter
           const cropChanged =
             fillCrop !== (trimmed.fillCrop ?? false) || nextCenter !== trimmed.cropCenter
-          return cropChanged ? { ...trimmed, fillCrop, cropCenter: nextCenter } : trimmed
+          return cropChanged
+            ? { ...withoutSplitStack(trimmed), fillCrop, cropCenter: nextCenter }
+            : trimmed
         })
       })
     })),

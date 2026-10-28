@@ -1225,7 +1225,11 @@ export async function exportProject(options: ExportOptions): Promise<void> {
           clip.fillCrop,
           clip.cropCenter,
           clip.blurBackground,
-          { labelSuffix: String(i), fps: fpsArg }
+          {
+            labelSuffix: String(i),
+            fps: fpsArg,
+            ...(clip.splitStack ? { stack: clip.splitStack } : {})
+          }
         )
         // `fps` は scaleToFrameFilter が中で付ける。ここで overlay の後ろに付けると
         // ぼかし背景のときだけ最後の1フレームが落ちる(関数側のコメント参照)。

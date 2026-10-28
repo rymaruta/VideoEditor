@@ -60,6 +60,28 @@ describe('テロップの改行: 語の途中で切る数が前より増えな�
       expect(newTotal).toBeLessThanOrEqual(oldTotal)
     })
 
+  it('試し編集 第3回で語の途中に入った改行が直る(1行 14 字)', () => {
+    const cases: [string, string][] = [
+      ['単にそういう科学的なものだけではなくてですね', '科学/的'],
+      ['いかに増やしていくかということをこの', '増や/して'],
+      ['最終的につながりにもつながっていったと思うんですが', 'つな/がって'],
+      ['そういう価格転換の指針みたいなものを発表はされている', 'みたい/な']
+    ]
+    for (const [text, bad] of cases) {
+      const lines = wrapTelopLines(text, 14)
+      expect(lines.join('')).toBe(text)
+      expect(lines.join('/')).not.toContain(bad)
+      // 1行は 14 字(はみ出しても1字)まで・2行まで
+      expect(lines.length).toBeLessThanOrEqual(2)
+      for (const l of lines) expect([...l].length).toBeLessThanOrEqual(15)
+      // 文節の切れ目で切る
+      const { allowed } = parseCorpus(
+        LINE_BREAK_CORPUS.find((c) => c.replaceAll('|', '') === text)!
+      )
+      expect(midWord(breaksOf(lines), allowed)).toEqual([])
+    }
+  })
+
   it('改善した例は保つ(文の終わりで切る)', () => {
     expect(wrapTelopLines('ありがとうございましたそれでは次に', 14)).toEqual([
       'ありがとうございました',

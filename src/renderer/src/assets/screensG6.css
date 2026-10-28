@@ -1467,6 +1467,20 @@ select.ve-select-input {
 .ve-export-sample-box.vertical {
   flex-wrap: wrap;
 }
+/* 2人を上下に積む見本: 上下の段を同じ枠に並べる(書き出しと同じ窓で切り出す) */
+.ve-export-sample-box.vertical .ve-export-stack {
+  display: flex;
+  flex-direction: column;
+}
+.ve-export-stack-half {
+  position: relative;
+  display: block;
+  flex: 1;
+  overflow: hidden;
+}
+.ve-export-stack-half + .ve-export-stack-half {
+  border-top: 1px solid var(--ve-black);
+}
 /* 縦の書き出しの見本(書き出しと同じ切り出しの3コマ) */
 .ve-export-vertical-samples {
   display: flex;

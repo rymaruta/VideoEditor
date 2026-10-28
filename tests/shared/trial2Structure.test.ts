@@ -52,7 +52,8 @@ describe('AI が全部の場面に同じ点を付けたとき(不具合 2)', () 
   it('区別できていないことを見分ける(全部が同じ点・同じ印)', () => {
     expect(sceneSubstance(rich)).toBeGreaterThan(sceneSubstance(thin(2)))
     expect(indistinctJudgements(same)).toEqual({ total: 9, score: 85, kind: 'highlight' })
-    const varied = same.map((j, i) => (i === 3 ? { ...j, score: 60 } : j))
+    // 1 場面だけ違うほぼ同点は区別できていない(第3回の #N2。`trial3Structure.test.ts`)。3 場面違えば区別できている
+    const varied = same.map((j, i) => (i % 3 === 0 ? { ...j, score: 60 + i } : j))
     expect(indistinctJudgements(varied)).toBeNull()
   })
 

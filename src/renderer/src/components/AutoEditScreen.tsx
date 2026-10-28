@@ -8,7 +8,8 @@ import { buildRunReport, formatElapsed } from '../lib/runReport'
 import { loadEditXml } from '../lib/editXml'
 import { compareEdits, type EditComparison } from '@shared/eval/compare'
 import type { ReviewItem } from '../lib/reviewItems'
-import { formatTimecode } from '../lib/timelineRuler'
+import { formatTimecode, lengthClock } from '../lib/timelineRuler'
+import { frameSeconds } from '@shared/frameRate'
 import { placedUtterances, telopsFromTranscript } from '../lib/transcriptTimeline'
 import { usePresetStore } from '../store/presetStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -44,7 +45,6 @@ import {
   commonSpan,
   droppedSceneReason,
   dropPolicyFor,
-  formatDuration,
   overallProgress,
   sceneChips,
   sceneTitle
@@ -618,7 +618,10 @@ export function AutoEditScreen(): React.JSX.Element | null {
                   {roughCut && (
                     <MetricCard
                       label="仕上がり"
-                      value={formatDuration(roughCut.duration)}
+                      value={lengthClock(
+                        roughCut.duration,
+                        1 / frameSeconds(project.clips, project.assets)
+                      )}
                       tone="green"
                     />
                   )}
@@ -1227,7 +1230,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
                                   j,
                                   judgements,
                                   keep[sc.id] === false,
-                                  dropPolicyFor(roughCut.basis, editPolicy, targetMinutes)
+                                  dropPolicyFor(roughCut.basis, editPolicy, targetMinutes),
+                                  scenes.filter((x) => keptOf(x.id))
                                 )}
                               </span>
                             )}

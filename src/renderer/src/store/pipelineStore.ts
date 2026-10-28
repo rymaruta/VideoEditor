@@ -120,6 +120,7 @@ import {
 } from '../lib/rangedAutoEdit'
 import { heuristicJudgements, indistinctJudgements } from '@shared/structure/scenes'
 import { framesOnFaces, prepareVerticalFill } from '../lib/verticalFraming'
+import { useQcStore } from './qcStore'
 import {
   AI_EFFECT_KINDS,
   AUTO_PLACE_CONFIDENCE,
@@ -1381,7 +1382,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const byLength = plan.selection.dropped.filter((d) => d.why === 'length').length
       if (same)
         log(
-          `構成: 判定が ${same.total} 場面すべてに同じ点(${same.score} 点)を付け、場面を区別できていません(要確認)${byLength > 0 ? `。長さに合わせて落とした ${byLength} 場面は、発話の密度・話者の数・数字や固有名詞の多さで選びました` : ''}`
+          `構成: 判定が ${same.of ? `${same.of} 場面中 ${same.total} 場面` : `${same.total} 場面すべて`}に同じ点(${same.score} 点)を付け、場面を区別できていません(要確認)${byLength > 0 ? `。長さに合わせて落とした ${byLength} 場面は、同じ点の中で発話の密度・話者の数・数字や固有名詞の多さで選びました` : ''}`
         )
     }
     const raw = plan.selection.kept.reduce((t, id) => {
@@ -1883,6 +1884,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               coverageOfClips(project.clips, info)
             )
           : project.cutOverrides
+        // 前の書き出しの確認がまだ動いていれば止める(書き出しと CPU を取り合う。書き出しの画面と同じ)
+        await useQcStore.getState().stopForExport()
         for (let i = 0; i < windows.length; i++) {
           set({
             shorts: {
@@ -1895,7 +1898,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           })
           // 企画の種類(企画に覚えたもの → 自動編集の画面 → 設定。書き出しと同じ決め方)で決める
           const onFaces =
-            settings.verticalFraming === 'fill' &&
+            settings.verticalFraming !== 'letterbox' &&
             framesOnFaces(project, get().sceneKind ?? settings.episodeKind)
           let short = buildShortProject(
             {
@@ -1916,8 +1919,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           // ロケ・対談の回は、真ん中ではなく人物(顔)に寄せて縦に切り出す(ゲーム実況はゲーム画面の真ん中)。
           // 組み立てが真ん中で埋めたクリップだけを寄せ直す(静止画・縦の素材は今までどおり埋める)
           if (onFaces)
-            short = (await prepareVerticalFill(short, { refineAutoFill: true, alwaysLift: true }))
-              .project
+            short = (
+              await prepareVerticalFill(short, {
+                refineAutoFill: true,
+                alwaysLift: true,
+                // 2人が縦の枠に収まらないとき: 上下に積む・話している人へ切り替える(書き出しの画面と同じ)
+                twoPeople: settings.verticalFraming === 'fill'
+              })
+            ).project
           const base = await freeShortBase(`${folder}/${safeFileBaseName(short.name)}`)
           await window.api.saveProject(`${base}.veproj`, short)
           const telopLayer = await prepareTelopLayerForExport(short, '9:16', 1080)

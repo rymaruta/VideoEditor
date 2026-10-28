@@ -113,6 +113,42 @@ describe('書き出し後の自動確認', () => {
     expect(report?.stopped).toBe('/out/YouTube.mp4')
   })
 
+  it('次の書き出しを始めたら、前の確認をその場で止め、次の確認で「止めました」と出す(試し編集 第3回 N4)', async () => {
+    // 前は次の書き出しが終わるまで前の確認が裏で測り続け、書き出しが 24.1 → 40.6 秒に遅くなった
+    let canceled = 0
+    const api = stubApi({ '/out/YouTube.mp4': measurement(), '/out/short.mp4': measurement() })
+    const w = (globalThis as unknown as { window: { api: { qcCancel: () => Promise<void> } } })
+      .window
+    const cancel = w.api.qcCancel
+    w.api.qcCancel = async () => {
+      canceled++
+      await cancel()
+    }
+    useQcStore.setState({ report: null })
+    useProjectStore.setState({ project })
+    const first = useQcStore.getState().run('/out/YouTube.mp4', 'off', project)
+    await tick()
+    expect(useQcStore.getState().report?.state).toBe('run')
+    // 次の書き出しの頭: 前の確認を止め、終わるのを待つ(書き出しの間は測らない)
+    await useQcStore.getState().stopForExport()
+    expect(canceled).toBe(1)
+    await first
+    expect(useQcStore.getState().report).toBeNull()
+    // 書き出しが終わって次の確認を始めると、前の確認を止めたことが出る
+    const second = useQcStore.getState().run('/out/short.mp4', 'off', project)
+    await tick()
+    await tick()
+    api.resolve('/out/short.mp4')
+    await second
+    const report = useQcStore.getState().report
+    expect(report?.path).toBe('/out/short.mp4')
+    expect(report?.state).toBe('done')
+    expect(report?.stopped).toBe('/out/YouTube.mp4')
+    // 止める確認が無ければ何もしない
+    await useQcStore.getState().stopForExport()
+    expect(canceled).toBe(1)
+  })
+
   it('黒味などの時刻は、繋ぎのぶん短いファイルの秒ではなく、タイムラインの秒で出す', async () => {
     const api = stubApi({ '/a.mp4': measurement([{ start: 3.9, end: 7 }]) })
     useQcStore.setState({ report: null })

@@ -47,6 +47,12 @@ interface QcState {
     range?: QcRange
   ) => Promise<void>
   cancel: () => void
+  /**
+   * 次の書き出しを始める前に、前の書き出しの確認を止める(終わるまで待つ)。確認は結果を捨てるのに、
+   * 次の書き出しと CPU を取り合い、書き出しが遅くなっていた(試し編集 第3回: ショート 24.1 → 40.6 秒)。
+   * 止めたことは、次の書き出しの確認の欄に「止めました」と出す(続けて書き出したときと同じ)
+   */
+  stopForExport: () => Promise<void>
 }
 
 /** 範囲だけを書き出したときの範囲 */
@@ -75,6 +81,8 @@ let runCall = 0
 let measuring: Promise<unknown> | null = null
 /** 測っている最中の確認のファイル */
 let measuringPath: string | null = null
+/** 次の書き出しを始めるために止めた確認のファイル(次の確認の欄に「止めました」と出す) */
+let stoppedForExport: string | null = null
 
 /**
  * ファイルの秒で返る映像・音声の指摘を、タイムラインの秒へ直す(テロップの指摘・移る先と同じ秒)。
@@ -131,9 +139,10 @@ export const useQcStore = create<QcState>((set, get) => ({
     const project = exported ?? useProjectStore.getState().project
     // 前の書き出しの確認がまだ測っているなら止めて、終わるのを待つ(main は1つずつしか測らないので、
     // 新しい確認は「実行中です」で失敗し、あとから前のファイルの結果で上書きされていた)
-    let stopped: string | undefined
+    let stopped: string | undefined = stoppedForExport ?? undefined
+    stoppedForExport = null
     if (measuring) {
-      stopped = measuringPath ?? undefined
+      stopped = measuringPath ?? stopped
       void window.api.qcCancel()
       await measuring.catch(() => {})
     }
@@ -205,6 +214,16 @@ export const useQcStore = create<QcState>((set, get) => ({
   },
   cancel: () => {
     void window.api.qcCancel()
+  },
+  stopForExport: async () => {
+    const pending = measuring
+    if (!pending) return
+    stoppedForExport = measuringPath
+    // 止めた確認の欄は残さない(結果は出ない。次の確認の欄に止めたことを出す)
+    runCall++
+    set({ report: null })
+    void window.api.qcCancel()
+    await pending.catch(() => {})
   }
 }))
 
@@ -212,6 +231,7 @@ export const useQcStore = create<QcState>((set, get) => ({
 // (残すと、書き出しの画面に前のプロジェクトの指摘が出て、押すと今のプロジェクトの別の時刻へ飛んでいた)
 onProjectSwitch(() => {
   runToken++
+  stoppedForExport = null
   if (useQcStore.getState().report?.state === 'run') void window.api.qcCancel()
   useQcStore.setState({ report: null })
 })

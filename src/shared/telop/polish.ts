@@ -95,6 +95,11 @@ const JOINS_PREVIOUS =
 
 /** 単語の途中で区切る良さ。ほかに区切れる所が無いときだけ選ばれるよう、どの区切りよりも低くする */
 export const INSIDE_WORD_SCORE = -3
+/**
+ * 付属語(助詞・助動詞)の前で区切る良さ(「科学的なもの / だけ」「経済 / にとって」)。語の切れ目ではないが、
+ * 語の途中(「科学 / 的」「つな / がって」)よりは読める。どちらでしか切れないときに、こちらを選ぶ
+ */
+export const ATTACHED_WORD_SCORE = -2
 
 const wordSegmenter: Intl.Segmenter | null =
   typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
@@ -207,20 +212,59 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
     wordBoundaries(chars)?.has(k - 1) === true
   )
     base = 2
+  // 「て・で」の後ろの補助の動詞(「増やして / いく」「頑張って / まいります」「させて / いただく」)は
+  // 別の文節。単語の区切りが「てい|く」と分けるので、語の途中とみなしていた(試し編集 第3回)
+  if (
+    base === INSIDE_WORD_SCORE &&
+    /[てで]/u.test(prev) &&
+    HIRAGANA.test(before) &&
+    /^(?:いく|いき|いけ|いっ|いる|いた|いま|おり|おる|くる|くれ|くだ|きた|きま|しま|みる|みた|みま|もら|いただ|あげ|まいり|ほし)/u.test(
+      chars.slice(k, k + 3).join('')
+    )
+  )
+    base = 1
   // 句点が無くても文の終わりらしい所(「…ました / それでは」「…ですね / 以前」)は、次が前にくっつく仮名で
   // なければ切ってよい(仮名の並びの中を全部語の途中とみなすと「ありがとうございまし / た…」になった)
   if (base > -Infinity && !ATTACHES.test(next) && endsSentence(chars, k)) return Math.max(base, 2)
+  // 漢字の名詞に付く接尾の字(「科学 / 的」「可能 / 性」「自動 / 化」)の前は語の途中(試し編集 第3回)
+  if (KANJI.test(prev) && /[的性化]/u.test(next)) return Math.min(base, INSIDE_WORD_SCORE)
+  // 「…的な / もの」の「な」は文節の終わり(「科学的な / ものだけでは」)
+  if (
+    prev === 'な' &&
+    before === '的' &&
+    HIRAGANA.test(next) &&
+    (!ATTACHES.test(next) || /^(?:もの|こと|とこ|とき)/u.test(chars.slice(k, k + 2).join('')))
+  )
+    return Math.max(base, 1)
   if (HIRAGANA.test(next)) {
-    // 漢字・カタカナ・数字の後ろの助詞・送り仮名・「する」の活用(「経済 / にとって」「競合 / しない」)
+    // 漢字+送り仮名+「す」の活用(「増や / していく」「減ら / して」「伸ば / した」)。送り仮名の「や」「か」を
+    // 助詞とみなして区切っていた(試し編集 第3回)
+    if (KANJI.test(before) && /[やらばわまか]/u.test(prev) && /[しすさせ]/u.test(next))
+      return Math.min(base, INSIDE_WORD_SCORE)
+    // 漢字・カタカナ・数字の後ろの助詞・送り仮名・「する」の活用(「経済 / にとって」「競合 / しない」)。
+    // 単語の区切りが言葉の切れ目と見る所(名詞の後ろの助詞)は、付属語の前(語の途中よりは軽い)
     if (
       (KANJI.test(prev) || KATAKANA.test(prev) || DIGIT.test(prev)) &&
       (ATTACHES.test(next) || /[しすさせ]/u.test(next))
     )
-      return Math.min(base, INSIDE_WORD_SCORE)
+      return Math.min(
+        base,
+        wordBoundaries(chars)?.has(k) === true ? ATTACHED_WORD_SCORE : INSIDE_WORD_SCORE
+      )
     // 「…て / ですね」の「ですね」は前にくっつかない(言い直しの間の決まり文句)
     const filler = FREE_HEAD.test(chars.slice(k, k + 4).join(''))
-    if (HIRAGANA.test(prev) && (!PHRASE_END.test(prev) || (ATTACHES.test(next) && !filler)))
+    // 仮名の言葉の途中(「つな / がって」「みたい / な」)。単語の区切りがあり、次がそれだけで立つ副詞
+    // (「お前もう / ちょっと」)なら途中ではない
+    const freeWord =
+      wordBoundaries(chars)?.has(k) === true &&
+      /^(?:ちょっと|すごく|とても|ずっと|いつも|もっと|やっぱり|やはり|なかなか|たくさん|ぜひ)/u.test(
+        chars.slice(k, k + 4).join('')
+      )
+    if (HIRAGANA.test(prev) && !PHRASE_END.test(prev) && !freeWord)
       return Math.min(base, INSIDE_WORD_SCORE)
+    // 文節の終わりの後ろの付属語の前(「もの / だけ」)。語の途中よりは軽い
+    if (HIRAGANA.test(prev) && ATTACHES.test(next) && !filler)
+      return Math.min(base, ATTACHED_WORD_SCORE)
   }
   // 「お」「ご」+漢字(「お聞かせ」「ご案内」)の間
   if (KANJI.test(next) && /[おご]/u.test(prev)) return Math.min(base, INSIDE_WORD_SCORE)
@@ -268,6 +312,9 @@ export function findBreak(
  * 残りを何行で書くかを先に決め、その平均の長さの近くで良い区切りを探す。
  * 各行は `maxLine` 以内(区切れる所が無いときの禁則のぶら下げで、1文字だけ超えうる)。
  */
+/** 語の切れ目で切るために1字はみ出してよい、1行の字数の下限(既定の 14 字の枠と、それより広いもの) */
+const MIN_OVERFLOW_LINE = 12
+
 export function balancedLineEnds(
   chars: readonly string[],
   maxLine: number,
@@ -328,6 +375,31 @@ export function balancedLineEnds(
         }
       }
       if (alt > from) best = alt
+      // それでも語の切れ目が無ければ、1行だけ1文字はみ出してよいとして探す(禁則のぶら下げと同じ幅)。
+      // 「最終的につながりにも / つながっていったと思うんですが」(14字で 10 + 15)を「…つな / がって」と
+      // 切っていた(試し編集 第3回)。はみ出すのは最後の行か、この行のどちらか1行だけ。1行の字数が
+      // `MIN_OVERFLOW_LINE` より少ない(狭い枠に合わせた)ときははみ出さない(1字の重みが大きい)
+      else if (lines === 2 && max >= MIN_OVERFLOW_LINE) {
+        let over = -1
+        let overValue = -Infinity
+        for (let len = max + 1; len >= Math.max(1, remaining - max - 1); len--) {
+          // どちらの行も半分より短くしない(「いかに / 増やしていくかということをこの」のような偏りは避ける)
+          const half = Math.ceil(max / 2)
+          if (len >= remaining || len < half || remaining - len < half || noCut?.(from + len))
+            continue
+          const sc = lineBreakScore(chars, from + len)
+          if (sc < 0) continue
+          const value = sc - Math.abs(len - target) * 0.5
+          if (value > overValue) {
+            over = from + len
+            overValue = value
+          }
+        }
+        if (over > from) {
+          ends.push(over, chars.length)
+          break
+        }
+      }
     }
     const cut = best > from ? best : findBreak(chars, from, max, score)
     ends.push(cut)

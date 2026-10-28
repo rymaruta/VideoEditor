@@ -212,8 +212,12 @@ function readExportEngine(): ExportEngine {
   }
 }
 
-/** 縦で書き出すときの横長の絵の収め方(`verticalFraming`) */
-export type VerticalFraming = 'fill' | 'letterbox'
+/**
+ * 縦で書き出すときの横長の絵の収め方(`verticalFraming`)。fill = 人物に寄せて切り出す(2人が離れていれば
+ * 上下に積む・話者が分かれていれば話す人へ切り替える)、single = 人物に寄せて切り出す(よく映る1人だけ)、
+ * letterbox = 上下に黒帯
+ */
+export type VerticalFraming = 'fill' | 'single' | 'letterbox'
 
 export interface EnvKeySources {
   youtubeApiKey: boolean
@@ -246,8 +250,9 @@ interface SettingsState {
   exportEngine: ExportEngine
   setExportEngine: (engine: ExportEngine) => void
   /**
-   * 縦(9:16)で書き出すときの横長の絵の収め方。fill = 人物(顔)に寄せて縦いっぱいに切り出す(既定)、
-   * letterbox = 横長の絵をそのまま縮めて上下を黒にする。人がクリップに決めた切り抜きはどちらでもそのまま
+   * 縦(9:16)で書き出すときの横長の絵の収め方。fill = 人物(顔)に寄せて縦いっぱいに切り出す(既定。2人が
+   * 離れていれば上下に積む・話者が分かれていれば話す人へ切り替える)、single = 人物に寄せる(よく映る1人だけ)、
+   * letterbox = 横長の絵をそのまま縮めて上下を黒にする。人がクリップに決めた切り抜きはどれでもそのまま
    */
   verticalFraming: VerticalFraming
   setVerticalFraming: (framing: VerticalFraming) => void
@@ -409,7 +414,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     }
     set({ exportEngine: engine })
   },
-  verticalFraming: readChoice<VerticalFraming>(VERTICAL_FRAMING_KEY, ['fill', 'letterbox'], 'fill'),
+  verticalFraming: readChoice<VerticalFraming>(
+    VERTICAL_FRAMING_KEY,
+    ['fill', 'single', 'letterbox'],
+    'fill'
+  ),
   setVerticalFraming: (framing) => {
     writeSetting(VERTICAL_FRAMING_KEY, framing)
     set({ verticalFraming: framing })
