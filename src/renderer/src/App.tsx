@@ -19,6 +19,7 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
+import { LockRefusalBar } from './components/LockRefusalBar'
 import { autoBottomHeight, defaultSideWidths } from './lib/layoutDefaults'
 import { WorkflowBar } from './components/WorkflowBar'
 import { SideRail, type RailItem } from './components/SideRail'
@@ -614,6 +615,7 @@ function App(): React.JSX.Element {
         </section>
       </div>
       <PanelBoundary name="ステータスバー">
+        <LockRefusalBar />
         <StatusBar />
       </PanelBoundary>
       <PanelBoundary name="書き出し">

@@ -102,14 +102,15 @@ export function useAppMenu(windows: readonly { id: string; label: string }[]): v
         const action = KEY_ACTIONS[id]
         if (action) return pressShortcut(action)
         if (id === 'telop.add') {
-          store.selectOverlay(
-            store.addTextOverlay({
-              text: '新しいテキスト',
-              ...newOverlayRange(store.playheadTime, getTotalDuration(store.project)),
-              style: defaultTextStyle(),
-              source: 'manual'
-            })
-          )
+          const added = store.addTextOverlay({
+            text: '新しいテキスト',
+            ...newOverlayRange(store.playheadTime, getTotalDuration(store.project)),
+            style: defaultTextStyle(),
+            source: 'manual'
+          })
+          // 断られた(テロップの固定など)ら選びも一覧も変えない。知らせはストアが帯で出す
+          if (added === null) return
+          store.selectOverlay(added)
           emitMenuCommand('window.text')
           return
         }

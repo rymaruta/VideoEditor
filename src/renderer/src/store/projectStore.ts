@@ -1102,6 +1102,13 @@ interface ProjectState {
   trial: ProjectTrial | null
   /** 試しに当てている間に断った編集の数(ダイアログが「決めるか閉じてから」と知らせる) */
   trialRefused: number
+  /**
+   * トラックの固定を理由に断った・一部を変えなかった書き込みの知らせ(`LockRefusalBar` が帯に出す)。
+   * `count` は断った数(増えたら出し直す)。`partial` は、ほかのトラックは変わり固定したトラックだけが
+   * 変わらなかったとき(自動の仕上げなど複数のトラックに書く処理)
+   */
+  lockRefusal: { count: number; names: string[]; partial: boolean } | null
+  dismissLockRefusal: () => void
   /** 試しに当て始める(試す前の企画と履歴を覚える)。もう試していれば何もしない */
   beginTrial: () => void
   /**
@@ -1328,7 +1335,10 @@ interface ProjectState {
   redo: () => void
 
   /** 足したテロップの ID を返す(足した直後に選ぶため) */
-  addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => string
+  /**
+   * 足したテロップの ID を返す(足した直後に選ぶため)。断られた(トラックの固定・試している間)ら null
+   */
+  addTextOverlay: (overlay: Omit<TextOverlay, 'id'>) => string | null
   addTextOverlays: (overlays: Omit<TextOverlay, 'id'>[]) => void
   /**
    * テロップの文字を一括で置き換える(検索と置換)。`ids` を渡すとそのテロップだけ。
@@ -2149,33 +2159,77 @@ const sameJson = (a: unknown, b: unknown): boolean =>
  * 選ぶ操作は止めない(Premiere と同じく、選べるが変えられない)
  */
 export function freezeLockedTracks(before: Project, after: Project): Project | null {
-  if (before.mainTrackLocked && !sameJson(before.clips, after.clips)) return null
+  return checkLockedTracks(before, after).project
+}
+
+/**
+ * `freezeLockedTracks` の中身。守った(変えさせなかった)トラックの名前も返す(知らせに使う)。
+ * `project` が null なら書き込みを丸ごと断る
+ */
+export function checkLockedTracks(
+  before: Project,
+  after: Project
+): { project: Project | null; names: string[] } {
+  if (before.mainTrackLocked && !sameJson(before.clips, after.clips))
+    return { project: null, names: ['本編'] }
+  const names: string[] = []
+  // 本編のクリップに紐づくもの(分離した音声・追従するテロップ)は、固定していても本編と一緒に
+  // 動き・消え・切れる(同期を優先する)。守るのは紐づかない中身だけ
+  const own = <T extends { linkedClipId?: string }>(xs: readonly T[]): T[] =>
+    xs.filter((x) => !x.linkedClipId)
+  const linked = <T extends { linkedClipId?: string }>(xs: readonly T[]): T[] =>
+    xs.filter((x) => x.linkedClipId)
   let out = after
-  if (before.telopTrackLocked && !sameJson(before.textOverlays, after.textOverlays))
-    out = { ...out, textOverlays: before.textOverlays }
-  for (const t of before.audioTracks) {
-    if (!t.locked) continue
-    const now = out.audioTracks.find((x) => x.id === t.id)
-    if (!now) return null
-    if (!sameJson(t.clips, now.clips))
-      out = {
-        ...out,
-        audioTracks: out.audioTracks.map((x) => (x.id === t.id ? { ...x, clips: t.clips } : x))
-      }
+  if (before.telopTrackLocked && !sameJson(own(before.textOverlays), own(after.textOverlays))) {
+    out = {
+      ...out,
+      textOverlays: [...own(before.textOverlays), ...linked(after.textOverlays)].sort(
+        (a, b) => a.startTime - b.startTime
+      )
+    }
+    names.push('テロップ')
   }
   for (const t of before.videoOverlayTracks) {
     if (!t.locked) continue
     const now = out.videoOverlayTracks.find((x) => x.id === t.id)
-    if (!now) return null
-    if (!sameJson(t.clips, now.clips))
+    if (!now) return { project: null, names: [t.name] }
+    if (!sameJson(t.clips, now.clips)) {
       out = {
         ...out,
         videoOverlayTracks: out.videoOverlayTracks.map((x) =>
           x.id === t.id ? { ...x, clips: t.clips } : x
         )
       }
+      names.push(t.name)
+    }
   }
-  return out
+  for (const t of before.audioTracks) {
+    if (!t.locked) continue
+    const now = out.audioTracks.find((x) => x.id === t.id)
+    if (!now) return { project: null, names: [t.name] }
+    if (!sameJson(own(t.clips), own(now.clips))) {
+      const clips = [...own(t.clips), ...linked(now.clips)].sort(
+        (a, b) => a.startTime - b.startTime
+      )
+      out = {
+        ...out,
+        audioTracks: out.audioTracks.map((x) => (x.id === t.id ? { ...x, clips } : x))
+      }
+      names.push(t.name)
+    }
+  }
+  // 固定したトラックが、消えた素材を指すことになる書き込み(素材の削除など)は丸ごと断る
+  const assetIds = new Set(out.assets.map((a) => a.id))
+  const orphan = [
+    ...before.videoOverlayTracks
+      .filter((t) => t.locked && t.clips.some((c) => !assetIds.has(c.assetId)))
+      .map((t) => t.name),
+    ...before.audioTracks
+      .filter((t) => t.locked && own(t.clips).some((c) => !assetIds.has(c.assetId)))
+      .map((t) => t.name)
+  ]
+  if (orphan.length > 0) return { project: null, names: orphan }
+  return { project: out, names }
 }
 
 /** 固定しているトラックの名前(作り直しの前の確かめ・押せない理由に使う) */
@@ -2244,12 +2298,22 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
         // トラックの固定(全体の作り直しは通す)
         if (patch.__lockBypass) patch = omitKeys(patch, ['__lockBypass'])
         else if (patch.project) {
-          const frozen = freezeLockedTracks(state.project, patch.project)
-          if (frozen === null) {
+          const checked = checkLockedTracks(state.project, patch.project)
+          const notice = (partial: boolean): ProjectState['lockRefusal'] => ({
+            count: (state.lockRefusal?.count ?? 0) + 1,
+            names: checked.names,
+            partial
+          })
+          if (checked.project === null) {
+            // 丸ごと断った。黙って何も起きないことにしない(帯で知らせる)
             restoreHistoryCoalescing(coalescingMark)
-            return state
+            return { lockRefusal: notice(false) }
           }
-          if (frozen !== patch.project) patch = { ...patch, project: frozen }
+          if (checked.names.length > 0) {
+            // 固定したトラックだけを戻した。ほかに変わる所が無ければ断ったのと同じ、あれば一部だけ
+            const partial = !sameProjectContent(checked.project, state.project)
+            patch = { ...patch, project: checked.project, lockRefusal: notice(partial) }
+          }
         }
         // まとめている1件の続きで、積んだ時(ドラッグの始まり)と同じ中身に戻ったなら、その1件を下ろす。
         // 1つ前の書き込みとだけ比べると、行って戻したドラッグが「中身の変わらない1件」と未保存の印を残し、
@@ -2326,6 +2390,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
   future: [],
   trial: null,
   trialRefused: 0,
+  lockRefusal: null,
+  dismissLockRefusal: () => set({ lockRefusal: null }),
   beginTrial: () => {
     resetHistoryCoalescing()
     set((s) =>
@@ -3728,7 +3794,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         textOverlays: [...state.project.textOverlays, { ...overlay, id }]
       }
     }))
-    return id
+    return get().project.textOverlays.some((o) => o.id === id) ? id : null
   },
 
   addTextOverlays: (overlays) =>
@@ -4173,6 +4239,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
         t.effectId && placedAt.has(t.effectId) ? { ...t, ...placedAt.get(t.effectId)! } : t
       )
       return {
+        // 自動編集の作り直しの続き(演出テロップの置き直し)。固定は見ない(確認は始める前に済ませる)
+        __lockBypass: true as const,
         ...pushHistory(state),
         project: {
           ...state.project,
@@ -4268,10 +4336,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           at < 0
             ? k.length
             : p.videoOverlayTracks.slice(0, at).filter((t) => !isUntouchedAuto(t)).length
+        const cgLocked = p.videoOverlayTracks.some(
+          (t) => t.autoRole === 'cg' && isUntouchedAuto(t) && t.locked
+        )
+        const placed = adopted.tracks.map((t) => (cgLocked ? { ...t, locked: true as const } : t))
         return {
           ...p,
           assets: adopted.assets,
-          videoOverlayTracks: [...k.slice(0, below), ...adopted.tracks, ...k.slice(below)]
+          videoOverlayTracks: [...k.slice(0, below), ...placed, ...k.slice(below)]
         }
       }
       // 履歴には積まないが、未保存にする(保存の途中に届いた CG が、保存済みと扱われて残らなかった)
@@ -4325,7 +4397,14 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           assets,
           tracks.filter((t) => !editedRoles.has(t.autoRole))
         )
-        return { ...p, assets: adopted.assets, audioTracks: [...kept, ...adopted.tracks] }
+        // 入れ替える自動のトラックを固定していたら、新しいトラックにも固定の印を残す(中身は変わる)
+        const lockedRoles = new Set(
+          p.audioTracks.filter((t) => isUntouchedAuto(t) && t.locked).map((t) => t.autoRole)
+        )
+        const placed = adopted.tracks.map((t) =>
+          lockedRoles.has(t.autoRole) ? { ...t, locked: true as const } : t
+        )
+        return { ...p, assets: adopted.assets, audioTracks: [...kept, ...placed] }
       }
       // 履歴には積まないが、未保存にする(保存の途中に届いた SE・BGM が、保存済みと扱われて残らなかった)
       return {

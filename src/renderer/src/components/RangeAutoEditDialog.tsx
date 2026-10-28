@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePipelineStore } from '../store/pipelineStore'
-import { useProjectStore } from '../store/projectStore'
+import { lockedTrackNames, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import {
   DEFAULT_RANGED_OPTIONS,
@@ -296,6 +296,18 @@ export function RangeAutoEditDialog({
     setAskRipple(false)
   }
   const prepare = async (opts: RangedEditOptions): Promise<void> => {
+    // 範囲の長さが変わると、固定したトラック(声・テロップ…)は動かないので後ろでずれる。
+    // 長さを保つときは後ろが動かないので確かめない
+    if (!opts.keepLength) {
+      const names = lockedTrackNames(useProjectStore.getState().project).filter((n) => n !== '本編')
+      if (
+        names.length > 0 &&
+        !confirm(
+          `固定中のトラック(${names.join('・')})は動かないため、範囲より後ろで音やテロップがずれる場合があります。続けますか`
+        )
+      )
+        return
+    }
     if (abortRef.current) abortRef.current.aborted = true
     const signal = { aborted: false }
     abortRef.current = signal

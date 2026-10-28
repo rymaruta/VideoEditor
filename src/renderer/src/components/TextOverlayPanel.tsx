@@ -110,6 +110,8 @@ export function TextOverlayPanel(): React.JSX.Element {
       style: defaultTextStyle(),
       source: 'manual'
     })
+    // 断られた(トラックの固定など)ら選ばない。知らせはストアが帯で出す
+    if (id === null) return
     setMultiIds(new Set([id]))
     selectOverlay(id)
   }
@@ -125,6 +127,8 @@ export function TextOverlayPanel(): React.JSX.Element {
       style: kind.style(),
       source: 'manual'
     })
+    // 断られた(トラックの固定など)ら選ばない。知らせはストアが帯で出す
+    if (id === null) return
     setMultiIds(new Set([id]))
     selectOverlay(id)
   }

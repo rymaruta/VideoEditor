@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { freezeLockedTracks, lockedTrackNames, useProjectStore } from '@renderer/store/projectStore'
+import {
+  checkLockedTracks,
+  freezeLockedTracks,
+  lockedTrackNames,
+  useProjectStore
+} from '@renderer/store/projectStore'
 import { rippleDeleteRange } from '@renderer/lib/editCommands'
 import type { AudioTrack, MediaAsset, Project, VideoOverlayTrack } from '@shared/types'
 
@@ -240,11 +245,7 @@ describe('トラックの固定はストアの 1 か所で守る', () => {
     const changed = { ...p, clips: p.clips.slice(1) }
     expect(freezeLockedTracks(p, changed)).toBeNull()
     expect(lockedTrackNames(p)).toEqual(['本編', 'テロップ', 'v2', 'a1'])
-    useProjectStore.setState((st) => ({
-      ...({ __historyPush: true, __lockBypass: true } as object),
-      past: [...st.past, st.project],
-      project: changed
-    }))
-    expect(s().project.clips.map((c) => c.id)).toEqual(['c2'])
+    // 作り直し(仮編集を入れる・同期の結果を並べる)は `__lockBypass` の印で、この判定を通らない
+    expect(checkLockedTracks(p, changed)).toEqual({ project: null, names: ['本編'] })
   })
 })

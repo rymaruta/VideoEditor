@@ -38,3 +38,25 @@ export function firstLockReason(project: Project, targets: readonly LockTarget[]
   }
   return null
 }
+
+/** トラックの固定を理由に断った・変えなかったときの知らせの文 */
+export function lockRefusalMessage(r: { names: readonly string[]; partial: boolean }): string {
+  const names = r.names.join('・')
+  return r.partial
+    ? `${names}は固定されているため変わりませんでした。外してから操作してください`
+    : `${names}は固定されています。外してから操作してください`
+}
+
+/** その素材を固定したトラックで使っていれば、消せない理由(使っていなければ null) */
+export function assetLockReason(project: Project, assetId: string): string | null {
+  if (project.mainTrackLocked && project.clips.some((c) => c.assetId === assetId))
+    return '固定した本編で使っています'
+  const t =
+    project.videoOverlayTracks.find(
+      (x) => x.locked && x.clips.some((c) => c.assetId === assetId)
+    ) ??
+    project.audioTracks.find(
+      (x) => x.locked && x.clips.some((c) => c.assetId === assetId && !c.linkedClipId)
+    )
+  return t ? `固定した${t.name}で使っています` : null
+}

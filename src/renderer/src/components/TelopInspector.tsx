@@ -412,19 +412,19 @@ export function TelopInspector({ overlay: o }: { overlay: TextOverlay }): React.
       <div className="prop-actions">
         <button
           className="small-button"
-          onClick={() =>
-            selectOverlay(
-              addTextOverlay({
-                text: o.text,
-                startTime: o.startTime,
-                endTime: o.endTime,
-                style: { ...o.style },
-                source: o.source,
-                speaker: o.speaker,
-                words: o.words ? o.words.map((w) => ({ ...w })) : undefined
-              })
-            )
-          }
+          onClick={() => {
+            const added = addTextOverlay({
+              text: o.text,
+              startTime: o.startTime,
+              endTime: o.endTime,
+              style: { ...o.style },
+              source: o.source,
+              speaker: o.speaker,
+              words: o.words ? o.words.map((w) => ({ ...w })) : undefined
+            })
+            // 断られた(テロップの固定など)ら選びを変えない
+            if (added !== null) selectOverlay(added)
+          }}
         >
           <CopyIcon width={12} height={12} />
           複製

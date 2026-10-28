@@ -20,6 +20,7 @@ import {
   type MediaKindFilter
 } from '../lib/mediaFilter'
 import { useProgramView } from '../lib/programView'
+import { assetLockReason } from '../lib/trackLock'
 import { stillAssetFrom } from '../lib/stillAsset'
 import { relinkRefusal } from '../lib/relinkCheck'
 import { ASSET_DRAG_TYPE } from '../lib/assetDrag'
@@ -567,9 +568,12 @@ export function MediaBin(): React.JSX.Element {
         })
       }
     }
+    // 固定したトラックで使っている素材は消せない(消えた素材を指すクリップが残るため。トラックの固定)
+    const usedOnLocked = assetLockReason(useProjectStore.getState().project, asset.id)
     items.push({
-      label: 'プロジェクトから削除',
+      label: usedOnLocked ? `プロジェクトから削除(${usedOnLocked})` : 'プロジェクトから削除',
       danger: true,
+      disabled: usedOnLocked !== null,
       onSelect: () => handleRemoveAsset(asset)
     })
     return items

@@ -493,3 +493,23 @@
 .timeline-panel .track-labels-col .track-label {
   padding: 0 6px;
 }
+
+/* トラックの固定で断ったときの知らせ(画面の下の帯) */
+.ve-lock-refusal {
+  position: fixed;
+  left: 50%;
+  bottom: 36px;
+  z-index: 50;
+  transform: translateX(-50%);
+  max-width: min(640px, calc(100vw - 32px));
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  padding: var(--ve-space-2) var(--ve-space-2) var(--ve-space-2) var(--ve-space-3);
+  border: 1px solid var(--ve-warning-line);
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-warning-soft);
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-12);
+  box-shadow: var(--ve-drop-lg);
+}
