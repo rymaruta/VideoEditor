@@ -3,6 +3,7 @@
  * 状態から組み立てる純関数。**実際にあるデータだけ**を返す(無いものは空)。
  */
 import type { Project } from '@shared/types'
+import { POLICY_PROFILES, type EditPolicy } from '@shared/structure/kind'
 import {
   describeCues,
   indistinctJudgements,
@@ -275,24 +276,82 @@ export function rulerTicks(span: number): number[] {
   return out
 }
 
+/** 場面を選んだときの方針(仮編集を作るときと同じ値) */
+export interface DropPolicy {
+  /** 「不要」を落とすか(`POLICY_PROFILES`) */
+  dropUnneeded: boolean
+  /** 長さの目標を使う方針で、目標が決まっている(秒。0 は目標なし) */
+  targetSec: number
+  /** 目標が無いとき、これ未満の点数の場面を落とす(-Infinity は落とさない) */
+  minScore: number
+}
+
+export type DropWhy = 'manual' | 'unneeded' | 'length' | 'minScore' | 'other'
+
 /**
- * 落とした場面の、落とした理由(構成の一覧に出す)。人が落とした・「不要」の判定・長さに合わせた、のどれか。
- * 長さに合わせて落とした場面は、点数と中身の手掛かりも添える。判定が場面を区別できていない(全部に同じ点数)
- * ときは、中身の手掛かりで選んだことを書く(試し編集 第2回: 落とした理由が画面に出ず、「見どころ」の印のまま
- * 「残す」のチェックが外れているだけだった)
+ * 落とした場面が、なぜ落ちたか。`judgement` は場面を選ぶのに使った判定(見どころを置き換えた後の
+ * `planJudgements`。置き換えていなければ AI・簡易の判定)。仮編集の選び方(`autoSelection`)と同じ順で決める
+ */
+export function droppedWhy(
+  judgement: SceneJudgement | undefined,
+  manual: boolean,
+  policy: DropPolicy
+): DropWhy {
+  if (manual) return 'manual'
+  if (policy.dropUnneeded && judgement?.kind === 'unneeded') return 'unneeded'
+  if (policy.targetSec > 0) return 'length'
+  if (
+    Number.isFinite(policy.minScore) &&
+    judgement &&
+    judgement.kind !== 'highlight' &&
+    judgement.score < policy.minScore
+  )
+    return 'minScore'
+  return 'other'
+}
+
+/**
+ * 落とした場面の、落とした理由(構成の一覧に出す)。人が落とした・「不要」の判定・長さに合わせた・点数の
+ * 下限に届かない、のどれか。長さに合わせて落とした場面は、点数と中身の手掛かりも添える。判定が場面を
+ * 区別できていない(全部に同じ点数)ときは、中身の手掛かりで選んだことを書く(試し編集 第2回: 落とした理由が
+ * 画面に出ず、「見どころ」の印のまま「残す」のチェックが外れているだけだった)。
+ * `judgements` は場面を選ぶのに使った判定(`planJudgements ?? judgements`)
  */
 export function droppedSceneReason(
   scene: Scene,
   judgement: SceneJudgement | undefined,
   judgements: readonly SceneJudgement[],
   /** 人が「残す」を外した */
-  manual: boolean
+  manual: boolean,
+  policy: DropPolicy
 ): string {
-  if (manual) return '手で落としました'
-  if (judgement?.kind === 'unneeded') return '「不要」の判定で落としました'
+  const why = droppedWhy(judgement, manual, policy)
   const cues = describeCues(sceneCues(scene))
-  const same = indistinctJudgements(judgements)
-  if (same && judgement && judgement.score === same.score)
-    return `仕上がりの長さに合わせて落としました。判定がどの場面も同じ点(${same.score} 点)なので、中身の手掛かりの少ない場面から選びました(${cues})`
-  return `仕上がりの長さに合わせて、点数の低い場面から落としました(${judgement ? `${judgement.score} 点 · ` : ''}${cues})`
+  switch (why) {
+    case 'manual':
+      return '手で落としました'
+    case 'unneeded':
+      return '「不要」の判定で落としました'
+    case 'minScore':
+      return `点数(${judgement!.score} 点)が残す下限(${policy.minScore} 点)に届かないので落としました(${cues})`
+    case 'length': {
+      const same = indistinctJudgements(judgements)
+      if (same && judgement && judgement.score === same.score)
+        return `仕上がりの長さに合わせて落としました。判定がどの場面も同じ点(${same.score} 点)なので、中身の手掛かりの少ない場面から選びました(${cues})`
+      return `仕上がりの長さに合わせて、点数の低い場面から落としました(${judgement ? `${judgement.score} 点 · ` : ''}${cues})`
+    }
+    default:
+      return `自動の選び方で落としました(${cues})`
+  }
+}
+
+/** 設定の方針と目標の長さ(分)から、場面を選んだときの方針(`autoSelection` と同じ決め方) */
+export function dropPolicyOf(policyName: EditPolicy, targetMinutes: number): DropPolicy {
+  const p = POLICY_PROFILES[policyName] ?? POLICY_PROFILES.tempo
+  const targetSec = p.useTarget ? Math.max(0, targetMinutes) * 60 : 0
+  return {
+    dropUnneeded: p.dropUnneeded,
+    targetSec,
+    minScore: targetSec > 0 ? -Infinity : p.minScoreWithoutTarget
+  }
 }

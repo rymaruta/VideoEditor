@@ -153,6 +153,8 @@ import {
   hallucinatedIndices,
   isLikelyHallucination,
   joinSplitNumbers,
+  SPLIT_NUMBER_GAP_SEC,
+  SPLIT_NUMBER_GAP_SINGLE_MIC_SEC,
   type AsrDevice,
   type AsrJobResult,
   type TranscriptUtterance
@@ -805,7 +807,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       })
     }
     // 数字と単位(「約4」「%弱…」)の間で分かれた発話はつなぐ
-    const joined = joinSplitNumbers(utterances)
+    // マイク1本(話者を分けられない)の回は、別の人の発言をつながないよう、短い間だけ
+    const joined = joinSplitNumbers(
+      utterances,
+      mics.length <= 1 ? SPLIT_NUMBER_GAP_SINGLE_MIC_SEC : SPLIT_NUMBER_GAP_SEC
+    )
     useProjectStore.getState().setTranscript(joined)
     setStep('transcribe', {
       state: 'done',
@@ -1880,6 +1886,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               note: `${i + 1}/${windows.length} 本目を書き出し中`
             }
           })
+          // 企画の種類(企画に覚えたもの)で決める。設定の番組の種類は、別の回を作るときに替わる
+          const onFaces =
+            settings.verticalFraming === 'fill' &&
+            (project.autoEdit?.kind ?? get().sceneKind ?? settings.episodeKind) !== 'game'
           let short = buildShortProject(
             {
               project,
@@ -1892,16 +1902,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
               dictionary: parseDictionary(settings.telopDictionary)
             },
             windows[i],
-            i
+            i,
+            // 顔に寄せるときは、発言テロップの高さは顔を避けるときに決める(先に上げると顔を避けられない)
+            { liftTelops: !onFaces }
           )
-          // ロケ・対談の回は、真ん中ではなく人物(顔)に寄せて縦に切り出す(ゲーム実況はゲーム画面の真ん中)
-          if (settings.episodeKind !== 'game' && settings.verticalFraming === 'fill')
-            short = (
-              await prepareVerticalFill({
-                ...short,
-                clips: short.clips.map((c) => ({ ...c, fillCrop: undefined }))
-              })
-            ).project
+          // ロケ・対談の回は、真ん中ではなく人物(顔)に寄せて縦に切り出す(ゲーム実況はゲーム画面の真ん中)。
+          // 組み立てが真ん中で埋めたクリップだけを寄せ直す(静止画・縦の素材は今までどおり埋める)
+          if (onFaces)
+            short = (await prepareVerticalFill(short, { refineAutoFill: true, alwaysLift: true }))
+              .project
           const base = await freeShortBase(`${folder}/${safeFileBaseName(short.name)}`)
           await window.api.saveProject(`${base}.veproj`, short)
           const telopLayer = await prepareTelopLayerForExport(short, '9:16', 1080)

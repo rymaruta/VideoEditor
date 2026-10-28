@@ -53,7 +53,12 @@ import type { PlacedCg } from '@shared/finish/cg'
 import type { PlacedSound } from '@shared/finish/sound'
 import type { ColorMatch } from '@shared/color/match'
 import type { RoughCut } from '@shared/roughCut/build'
-import { toCommon, type MulticamInfo, type MulticamSource } from '@shared/sync/multicam'
+import {
+  toCommon,
+  type MulticamFile,
+  type MulticamInfo,
+  type MulticamSource
+} from '@shared/sync/multicam'
 import type { TranscriptUtterance } from '@shared/transcript'
 import type { MulticamLayout } from '@shared/sync/multicamLayout'
 import {
@@ -6409,13 +6414,27 @@ function followMainEdit(
     return times && times.length > 0 && f ? times.map((t) => toCommon(f, t)) : null
   }
   /** 変更前のタイムラインの [a, b) で、`common` の時刻の声が流れていたか */
+  // 変更前の本編のクリップから、タイムラインの秒 → 素材の秒(イン点 + 経過 × 速さ)→ 共通の時刻 と写す。
+  // 速さを変えたクリップは対応の上では仮の時刻(共通の時刻ではない)なので、クリップの速さとイン点から直接求める
+  // (タイムラインの秒と共通の時刻を 1:1 とみなすと、速さを変えたクリップで照合がずれ、言葉の残る枚まで消えていた)
+  const prevPlaced: { start: number; end: number; clip: Clip; file: MulticamFile }[] = []
+  {
+    let cursor = 0
+    for (const c of prev.clips) {
+      const len = Math.max(0, c.outPoint - c.inPoint) / (c.speed || 1)
+      const f = fileOfAsset.get(c.assetId)
+      if (f && len > 1e-9) prevPlaced.push({ start: cursor, end: cursor + len, clip: c, file: f })
+      cursor += len
+    }
+  }
   const playedIn = (common: readonly number[], a: number, b: number): boolean =>
-    before.some((sp) => {
-      const lo = Math.max(a, sp.timeline)
-      const hi = Math.min(b, sp.timeline + (sp.end - sp.start))
+    prevPlaced.some(({ start, end, clip, file }) => {
+      const lo = Math.max(a, start)
+      const hi = Math.min(b, end)
       if (hi - lo <= 1e-6) return false
-      const c0 = sp.start + (lo - sp.timeline)
-      const c1 = sp.start + (hi - sp.timeline)
+      const speed = clip.speed || 1
+      const c0 = toCommon(file, clip.inPoint + (lo - start) * speed)
+      const c1 = toCommon(file, clip.inPoint + (hi - start) * speed)
       return common.some((c) => c >= c0 - 1e-6 && c < c1 + 1e-6)
     })
   const textOverlays = next.textOverlays.flatMap((o) => {

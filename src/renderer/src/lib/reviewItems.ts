@@ -8,6 +8,7 @@ import { autoTelopKey, placedTelopKeys } from '@shared/telop/manual'
 import { stripTelopMarkup } from '@shared/telop/render'
 import { joinTelopLines } from '@shared/qc/telop'
 import { indistinctJudgements, type SceneJudgement, type SceneKind } from '@shared/structure/scenes'
+import { droppedWhy, type DropPolicy } from './autoEditView'
 
 /**
  * 要確認の一覧(計画書 §5.13)。自動編集の各工程が「自信の低い箇所」をここへ出し、人はここから直す。
@@ -60,28 +61,39 @@ export interface StructureIndistinct {
   total: number
   score: number
   kind: SceneKind
-  /** 長さに合わせて落とした場面の数 */
+  /** 長さに合わせて自動で落とした場面の数(人が落とした場面・「不要」・点数の下限で落とした場面は数えない) */
   droppedByLength: number
   source: 'ai' | 'heuristic' | null
+  /** 見どころが多すぎたので、場面を選ぶ判定を点数の判定に置き換えた(`planJudgements`) */
+  replaced: boolean
 }
 
 /**
  * 構成の判定が「不要」以外の全部の場面に同じ点数・同じ印を付けたか(`indistinctJudgements`)。付けていれば、
  * 長さに合わせて落とした場面は中身の手掛かり(発話の密度・話者の数・数字や固有名詞)で選んでいるので、
- * 人に確かめてもらう
+ * 人に確かめてもらう。`planJudgements` は場面を選ぶのに使った判定(置き換えていれば)。落とした数は、
+ * 仮編集の選び方と同じ決め方(`droppedWhy`)で「長さに合わせた」ものだけ
  */
 export function structureIndistinctOf(
   judgements: readonly SceneJudgement[],
+  planJudgements: readonly SceneJudgement[] | null,
   keptIds: readonly string[] | undefined,
+  keep: Readonly<Record<string, boolean>>,
+  policy: DropPolicy,
   source: 'ai' | 'heuristic' | null
 ): StructureIndistinct | null {
   const same = indistinctJudgements(judgements)
   if (!same) return null
   const kept = new Set(keptIds ?? [])
+  const used = new Map((planJudgements ?? judgements).map((j) => [j.sceneId, j]))
   const droppedByLength = keptIds
-    ? judgements.filter((j) => j.kind !== 'unneeded' && !kept.has(j.sceneId)).length
+    ? judgements.filter(
+        (j) =>
+          !kept.has(j.sceneId) &&
+          droppedWhy(used.get(j.sceneId), keep[j.sceneId] === false, policy) === 'length'
+      ).length
     : 0
-  return { ...same, droppedByLength, source }
+  return { ...same, droppedByLength, source, replaced: planJudgements !== null }
 }
 
 /**
@@ -231,7 +243,9 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       text:
         `構成の${x.source === 'ai' ? ' AI ' : ''}判定が ${x.total} 場面すべてに同じ点(${x.score} 点・${kindLabel})を付けていて、場面の良し悪しを区別できていません。` +
         (x.droppedByLength > 0
-          ? `長さに合わせて落とした ${x.droppedByLength} 場面は、発話の密度・話者の数・数字や固有名詞の多さで選びました。`
+          ? x.replaced
+            ? `長さに合わせて落とした ${x.droppedByLength} 場面は、声の盛り上がり・笑い・発話の密度の点数で選びました。`
+            : `長さに合わせて落とした ${x.droppedByLength} 場面は、発話の密度・話者の数・数字や固有名詞の多さで選びました。`
           : '') +
         '「構成」タブで残す場面と落とした理由を確かめてください',
       tab: 'structure'

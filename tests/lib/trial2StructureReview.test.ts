@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildReviewItems, structureIndistinctOf } from '@renderer/lib/reviewItems'
-import { droppedSceneReason } from '@renderer/lib/autoEditView'
+import { droppedSceneReason, dropPolicyOf, type DropPolicy } from '@renderer/lib/autoEditView'
 import type { Scene, SceneJudgement } from '@shared/structure/scenes'
 import type { Project } from '@shared/types'
 
@@ -26,6 +26,8 @@ const judgements: SceneJudgement[] = Array.from({ length: 9 }, (_, i) => ({
   reason: '文字起こしの言い換え'
 }))
 const kept = ['s1', 's4', 's5', 's6', 's7', 's8', 's9']
+/** 仕上がり 8 分・テンポよく(試し編集 第2回の設定) */
+const POLICY: DropPolicy = dropPolicyOf('tempo', 8)
 
 const sources = (
   indistinct: ReturnType<typeof structureIndistinctOf>
@@ -45,8 +47,15 @@ const sources = (
 
 describe('構成の判定が場面を区別できていないことを知らせる', () => {
   it('要確認に「全部に同じ点を付けた」「長さで落とした場面は中身の手掛かりで選んだ」を出す', () => {
-    const x = structureIndistinctOf(judgements, kept, 'ai')
-    expect(x).toEqual({ total: 9, score: 85, kind: 'highlight', droppedByLength: 2, source: 'ai' })
+    const x = structureIndistinctOf(judgements, null, kept, {}, POLICY, 'ai')
+    expect(x).toEqual({
+      total: 9,
+      score: 85,
+      kind: 'highlight',
+      droppedByLength: 2,
+      source: 'ai',
+      replaced: false
+    })
     const items = buildReviewItems(sources(x))
     const item = items.find((i) => i.key === 'structure-indistinct')
     expect(item?.area).toBe('structure')
@@ -57,7 +66,7 @@ describe('構成の判定が場面を区別できていないことを知らせ�
 
   it('点数に差があれば出さない', () => {
     const varied = judgements.map((j, i) => ({ ...j, score: 50 + i * 5 }))
-    expect(structureIndistinctOf(varied, kept, 'ai')).toBeNull()
+    expect(structureIndistinctOf(varied, null, kept, {}, POLICY, 'ai')).toBeNull()
   })
 
   it('落とした場面に、落とした理由(長さ・中身の手掛かり)を出す', () => {
@@ -77,13 +86,42 @@ describe('構成の判定が場面を区別できていないことを知らせ�
         }
       ]
     }
-    const why = droppedSceneReason(scene, judgements[1], judgements, false)
+    const why = droppedSceneReason(scene, judgements[1], judgements, false, POLICY)
     expect(why).toContain('長さに合わせて')
     expect(why).toContain('同じ点(85 点)')
     expect(why).toMatch(/数字 \d/)
-    expect(droppedSceneReason(scene, judgements[1], judgements, true)).toBe('手で落としました')
+    expect(droppedSceneReason(scene, judgements[1], judgements, true, POLICY)).toBe(
+      '手で落としました'
+    )
     expect(
-      droppedSceneReason(scene, { ...judgements[1], kind: 'unneeded' }, judgements, false)
+      droppedSceneReason(scene, { ...judgements[1], kind: 'unneeded' }, judgements, false, POLICY)
     ).toContain('不要')
+  })
+})
+
+describe('落とした場面の数と理由を、実際の選び方に合わせる(監査 D2)', () => {
+  it('手で落とした場面は「長さに合わせて落とした」に数えない', () => {
+    const x = structureIndistinctOf(judgements, null, kept, { s3: false }, POLICY, 'ai')
+    expect(x?.droppedByLength).toBe(1)
+  })
+
+  it('目標の長さが無い「面白い所だけ」で落ちた場面は、点数の下限で落ちたと書く', () => {
+    const policy = dropPolicyOf('highlights', 0)
+    const plan = judgements.map((j, i) =>
+      i === 1 ? { ...j, kind: 'normal' as const, score: 30 } : j
+    )
+    const scene: Scene = { id: 's2', start: 0, end: 60, speech: 30, lines: [] }
+    const why = droppedSceneReason(scene, plan[1], plan, false, policy)
+    expect(why).toContain('下限(50 点)')
+    expect(why).not.toContain('長さ')
+    expect(structureIndistinctOf(judgements, plan, kept, {}, policy, 'ai')?.droppedByLength).toBe(0)
+  })
+
+  it('見どころを点数の判定に置き換えた回は、置き換えた判定で選んだと書く', () => {
+    const plan = judgements.map((j, i) => ({ ...j, score: 40 + i * 5, kind: 'normal' as const }))
+    const x = structureIndistinctOf(judgements, plan, kept, {}, POLICY, 'ai')!
+    expect(x.replaced).toBe(true)
+    const text = buildReviewItems(sources(x)).find((i) => i.key === 'structure-indistinct')!.text
+    expect(text).toContain('声の盛り上がり・笑い・発話の密度の点数で選びました')
   })
 })

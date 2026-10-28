@@ -86,7 +86,12 @@ export function shortWindowsFor(
 export function buildShortProject(
   input: ShortPlanInput,
   window: ShortCandidate,
-  index: number
+  index: number,
+  /**
+   * liftTelops: 下の発言テロップを Shorts の下の帯に隠れない高さへ上げる(既定)。顔に寄せて切り出すときは、
+   * 顔を避ける所(`applyVerticalFill`)で上げるので false
+   */
+  options: { liftTelops?: boolean } = {}
 ): Project {
   const { info } = input
   // 間を詰めると、選んだ区間より短くなる(黙っている所を落とすので)。下限に届かなければ、
@@ -139,7 +144,7 @@ export function buildShortProject(
     win = next
     plan = nextPlan
   }
-  return shortProjectFromPlan(input, plan, index)
+  return shortProjectFromPlan(input, plan, index, options.liftTelops ?? true)
 }
 
 /**
@@ -210,7 +215,8 @@ function planShort(
 function shortProjectFromPlan(
   input: ShortPlanInput,
   plan: ReturnType<typeof planRoughCut>,
-  index: number
+  index: number,
+  liftTelops: boolean
 ): Project {
   const { project, info } = input
   const cut = plan.cut
@@ -282,14 +288,14 @@ function shortProjectFromPlan(
     }),
     // 本編で人が直した文字・消したテロップは、ショートでも同じに
     // 下の発言テロップは、Shorts の下部の帯(チャンネル名・説明文)に隠れない高さへ上げる
-    textOverlays: liftAboveShortsUi(
+    textOverlays: ((telops) =>
+      liftTelops ? liftAboveShortsUi(telops, textCanvasSize('9:16').h) : telops)(
       mergeManualTelops(
         project.textOverlays,
         plan.telops,
         new Set(project.dismissedTelops ?? []),
         project.editedTelops
-      ),
-      textCanvasSize('9:16').h
+      )
     ).map((t) => ({ ...t, id: uuid() })),
     transcript: project.transcript,
     multicam: info,

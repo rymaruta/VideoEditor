@@ -3,7 +3,13 @@ import { v4 as uuid } from 'uuid'
 import { onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
 import { useSettingsStore, type ExportLoudness, type VerticalFraming } from '../store/settingsStore'
-import { prepareVerticalFill } from '../lib/verticalFraming'
+import {
+  framesOnFaces,
+  prepareVerticalFill,
+  verticalSamples,
+  type VerticalSample
+} from '../lib/verticalFraming'
+import { cropObjectPosition } from '@shared/videoFrame'
 import { useMenuCommand } from '../lib/menuCommands'
 import { formatIpcError } from '../lib/ipcError'
 import { formatTimecode } from '../lib/timelineRuler'
@@ -235,6 +241,80 @@ function PreviewThumb({ project, at }: { project: Project; at: number }): React.
   )
 }
 
+/**
+ * 縦の書き出しの見本(範囲の頭・真ん中・終わり近くの3コマ)。書き出しと同じ決め方で切り出して見せる
+ * (顔に寄せる・人が決めた切り抜き・黒帯)。前は見本を真ん中で切っていて、書き出しの絵と違っていた
+ */
+const verticalSampleCache = new Map<string, Promise<VerticalSample[]>>()
+function VerticalSampleThumbs({
+  project,
+  start,
+  end,
+  onFaces
+}: {
+  project: Project
+  start: number
+  end: number
+  onFaces: boolean
+}): React.JSX.Element {
+  const times = useMemo(() => {
+    const len = Math.max(0, end - start)
+    return [start, start + len * 0.5, start + len * 0.9].map((t) => Math.min(t, end - 1e-3))
+  }, [start, end])
+  const key = `${onFaces}|${times.map((t) => t.toFixed(1)).join(',')}|${project.clips.length}`
+  const [shown, setShown] = useState<{ key: string; list: (VerticalSample & { url: string })[] }>()
+  useEffect(() => {
+    let alive = true
+    let p = verticalSampleCache.get(key)
+    if (!p) {
+      p = verticalSamples(project, times, onFaces)
+      p.catch(() => verticalSampleCache.delete(key))
+      verticalSampleCache.set(key, p)
+    }
+    p.then(async (samples) => {
+      const list = await Promise.all(
+        samples.map(async (x) => {
+          const k = `${x.filePath}|${x.time.toFixed(1)}`
+          let t = thumbCache.get(k)
+          if (!t) {
+            t = window.api.generateThumbnail(x.filePath, x.time)
+            t.catch(() => thumbCache.delete(k))
+            thumbCache.set(k, t)
+          }
+          return { ...x, url: await t }
+        })
+      )
+      if (alive) setShown({ key, list })
+    }).catch(() => {})
+    return () => {
+      alive = false
+    }
+    // project・times は key から決まる
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return (
+    <span className="ve-export-vertical-samples" title="書き出しと同じ切り出しの見本">
+      {shown?.list.map((x) => {
+        const pos = cropObjectPosition(x.sourceAspect, 9 / 16, x.center)
+        return (
+          <span key={x.at} className="ve-export-thumb">
+            <img
+              src={x.url}
+              alt="縦の画の見本"
+              draggable={false}
+              style={
+                x.fill
+                  ? { objectFit: 'cover', objectPosition: `${pos.x * 100}% ${pos.y * 100}%` }
+                  : { objectFit: 'contain' }
+              }
+            />
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
 /** 見本(サムネイル + 波形。音声のみは波形だけ)と、開始・終了の時刻 */
 function ExportPreview({
   project,
@@ -242,6 +322,7 @@ function ExportPreview({
   end,
   audioOnly,
   vertical,
+  onFaces,
   fps
 }: {
   project: Project
@@ -250,6 +331,8 @@ function ExportPreview({
   audioOnly: boolean
   /** 縦(9:16)で書き出す: 見本も縦に切り出して見せる */
   vertical: boolean
+  /** 縦の書き出しで顔に寄せて切り出す(見本も書き出しと同じ切り出しで見せる) */
+  onFaces: boolean
   fps: number
 }): React.JSX.Element {
   const pieces = useMemo(() => timelineAudioPieces(project, start, end), [project, start, end])
@@ -259,7 +342,12 @@ function ExportPreview({
       <span
         className={`ve-export-sample-box ${audioOnly ? 'audio-only' : ''} ${vertical && !audioOnly ? 'vertical' : ''}`}
       >
-        {!audioOnly && <PreviewThumb project={project} at={start} />}
+        {!audioOnly &&
+          (vertical ? (
+            <VerticalSampleThumbs project={project} start={start} end={end} onFaces={onFaces} />
+          ) : (
+            <PreviewThumb project={project} at={start} />
+          ))}
         {levels && (
           <WaveBars
             levels={levels}
@@ -600,12 +688,25 @@ export function ExportDialog(): React.JSX.Element | null {
     setProgress({ percent: 0, stage: '準備中' })
     // 縦(9:16)で書き出すときは、既定で横長の絵を人物に寄せて縦いっぱいに切り出す(書き出し用の写しだけ。
     // 企画のクリップは変えない)。設定で「上下に黒帯」を選べば、今までどおり縮めて収める
+    // ゲーム実況(企画の種類)はゲーム画面なので顔に寄せない(今までどおり)。顔探しは素材ごとの代表の画だけで、
+    // 進み具合を出し、中止も効く
     let source = project
-    if (job.aspectRatio === '9:16' && job.format !== 'wav' && verticalFraming === 'fill') {
+    if (
+      job.aspectRatio === '9:16' &&
+      job.format !== 'wav' &&
+      verticalFraming === 'fill' &&
+      framesOnFaces(project)
+    ) {
       setProgress({ percent: 0, stage: '人物の位置を探しています' })
-      const fill = await prepareVerticalFill(project, job.range, (done, total) =>
-        setProgress({ percent: 0, stage: `人物の位置を探しています(${done}/${total})` })
-      )
+      const fill = await prepareVerticalFill(project, {
+        ...(job.range ? { range: job.range } : {}),
+        signal: abortRef.current?.signal,
+        onProgress: (done, total) =>
+          setProgress({
+            percent: total > 0 ? Math.round((done / total) * 100) : 0,
+            stage: `人物の位置を探しています(${done}/${total})`
+          })
+      })
       source = fill.project
     }
     // 音声だけのときは絵が無いので、テロップは描かない。範囲だけのときは、その範囲(繋ぎのぶん広がる)に
@@ -1510,6 +1611,7 @@ export function ExportDialog(): React.JSX.Element | null {
                   end={span.end}
                   audioOnly={format === 'wav'}
                   vertical={project.aspectRatio === '9:16'}
+                  onFaces={verticalFraming === 'fill' && framesOnFaces(project)}
                   fps={fps}
                 />
               )}

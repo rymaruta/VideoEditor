@@ -1467,6 +1467,13 @@ select.ve-select-input {
 .ve-export-sample-box.vertical {
   flex-wrap: wrap;
 }
+/* 縦の書き出しの見本(書き出しと同じ切り出しの3コマ) */
+.ve-export-vertical-samples {
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  width: 100%;
+}
 
 /* ---------- この範囲を再編集(範囲の自動編集のダイアログ): 書き出しのダイアログと同じ面・部品 ---------- */
 .range-auto-edit-dialog {
