@@ -97,9 +97,15 @@ function rateOf(el: XmlElement | undefined, fallback: number): number {
   return ntsc ? (timebase * 1000) / 1001 : timebase
 }
 
+/**
+ * `pathurl` → パス。区切りはどの OS の XML でも `/` で返す(Windows: `file://localhost/C%3a/a/b.mov` →
+ * `C:/a/b.mov`。Windows のファイルの API はこの形でも開ける。突き合わせは区切りをそろえて比べる)。
+ */
 function decodePath(url: string | undefined): string | undefined {
   if (!url) return undefined
-  const raw = url.replace(/^file:\/\/(localhost)?/, '')
+  // 共有フォルダ(UNC)は file://server/share/b.mov(書き出しの fileUrl と同じ形)→ //server/share/b.mov
+  const unc = /^file:\/\/(?!localhost\/)([^/]+)(\/.*)$/i.exec(url)
+  const raw = unc ? `//${unc[1]}${unc[2]}` : url.replace(/^file:\/\/(localhost)?/, '')
   // 正しい「%XX」だけを戻す(「100%完成」のような生の % が混ざると decodeURIComponent が失敗し、
   // file:// の付いたままのパスになっていた)
   let p: string

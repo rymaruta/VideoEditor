@@ -12,6 +12,7 @@ import {
   type PremiereExportPayload
 } from '@main/premiereExportService'
 import { appendTelopLayerImages, beginTelopLayer, withTelopLayer } from '@main/telopLayerStage'
+import { fileUrl } from '@shared/export/premiereXml'
 import { readFcp7, type XmlElement } from '@shared/import/fcp7'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
 import { sequenceDurationFrames } from '@shared/sequence/segmentPlan'
@@ -98,6 +99,13 @@ function read(xmlPath: string): ReturnType<typeof readFcp7> {
   return readFcp7(doc.documentElement as unknown as XmlElement)
 }
 
+/** XML の中の pathurl(書いたままの文字) */
+function pathUrls(xmlPath: string): string[] {
+  const doc = new DOMParser().parseFromString(readFileSync(xmlPath, 'utf-8'), 'text/xml')
+  const els = doc.getElementsByTagName('pathurl')
+  return Array.from({ length: els.length }, (_, i) => els[i].textContent?.trim() ?? '')
+}
+
 const base = (
   p: Project,
   dir: string,
@@ -166,7 +174,11 @@ describe('exportPremiereXml(main)', () => {
       [15, 30],
       [30, 45]
     ])
-    expect(top[0].path).toBe(join(work, 'png_telop', 'telop_000001.png'))
+    const first = join(work, 'png_telop', 'telop_000001.png')
+    // XML には Premiere が読む形の pathurl で書く(Windows: file://localhost/C%3a/Users/…/telop_000001.png)
+    expect(pathUrls(payload.outputPath)).toContain(fileUrl(first))
+    // 読み戻した pathurl のパスは、どの OS でも区切りが /(Windows では C:/Users/…)
+    expect(top[0].path).toBe(first.replace(/\\/g, '/'))
     expect(top[2].path).toBe(top[0].path)
   })
 

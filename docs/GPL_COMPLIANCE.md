@@ -100,9 +100,17 @@ npm run gpl-sources                   # dist/gpl-sources/ にアーカイブを�
 
 ### Windows 版について
 
-Windows の ffmpeg-static(b6.1.1)の実行ファイルは gyan.dev のビルド(この開発環境では Windows 版を動かせないので未確認)。
-gyan.dev のビルドのページ・同梱の説明にライブラリの版があるはずなので確かめ、Windows で `npm run gpl-sources -- --dry-run` を走らせ、「入手先を決められません」と出た
-部品は gyan.dev の一覧の版で `--source` を与える。
+Windows の ffmpeg-static(b6.1.1)の実行ファイルは gyan.dev のビルド(`6.1.1-essentials_build-www.gyan.dev`、
+ソースは FFmpeg の e38092ef93 = 6.1.1)。
+
+- ffmpeg-static の install.js は README・LICENSE を「実行ファイルのパス + `.README` / `.LICENSE`」に落とすので、
+  Windows では **`ffmpeg.exe.README`・`ffmpeg.exe.LICENSE`**(ほかの OS は `ffmpeg.README`・`ffmpeg.LICENSE`)。
+  表記(`npm run licenses`)と `npm run gpl-sources` はどちらの名前も探す。LICENSE が落とせなかったときは、
+  リポジトリの `scripts/license-texts/GPL-3.0.txt`(FSF の GPL v3 の全文)を使う(`--enable-version3` のビルドに限る)
+- gyan.dev の README のライブラリの版は「`x265 3.5-153-gce8642f22`」の並び(`external libraries' versions:` の下)。
+  これも読み、x265・vid.stab の git describe の形の版はそのコミットのソースを取る
+  (b6.1.1 の Windows 版: x265 `ce8642f22`・vid.stab `05829db`・xvid 1.3.7・rubberband 1.8.1。x264 は版の印から)
+- 配布の前に、Windows で `npm run gpl-sources -- --dry-run` を走らせて「入手先を決められません」が無いことを確かめる
 
 ### 静的にリンクされた GPL 以外のライブラリ
 

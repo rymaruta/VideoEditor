@@ -55,3 +55,11 @@ export function debianSourceFiles(
   json: unknown,
   wanted: { package: string; version: string }
 ): { name: string; sha1: string; url: string }[]
+export function ffmpegStaticDocCandidates(
+  exePath: string,
+  pathApi?: typeof import('node:path')
+): { readme: string[]; license: string[] }
+export function findFfmpegStaticDocs(
+  exePath: string,
+  fallbackLicense?: string
+): { readme: string | null; license: string | null; licenseFromPackage: boolean }

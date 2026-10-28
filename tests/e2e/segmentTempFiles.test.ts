@@ -10,12 +10,13 @@ import {
   writeFileSync
 } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, win32 } from 'path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ffmpegPath, probeMedia } from '@main/ffmpegService'
 import {
   cleanupOutsideWorkDirs,
   exportSequenceSegmented,
+  reallyMissing,
   setOutsideWorkRegistryPath
 } from '@main/segmentRenderer'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
@@ -265,7 +266,8 @@ describe.skipIf(!existsSync(ffmpegPath))('区間ごとの書き出しの一時�
       await cleanupOutsideWorkDirs(Date.now())
       expect(existsSync(recent)).toBe(true)
       expect(JSON.parse(readFileSync(registry, 'utf-8'))).toEqual([recent])
-      // 消せなかったもの(ここでは消す前の stat が失敗する、ENOENT 以外)は記録に残す
+      // 消せなかったもの(ここではファイルの下のパス。stat は Linux・macOS で ENOTDIR、Windows で ENOENT)は
+      // 記録に残す。ENOENT でも、在る祖先がフォルダでなければ「無い」とは決めない(reallyMissing)
       const blocked = join(dir, 'out', 'file-not-dir', '.ve-seg-y')
       writeFileSync(join(dir, 'out', 'file-not-dir'), 'x')
       writeFileSync(registry, JSON.stringify([blocked]))
@@ -274,5 +276,54 @@ describe.skipIf(!existsSync(ffmpegPath))('区間ごとの書き出しの一時�
     } finally {
       setOutsideWorkRegistryPath(null)
     }
+  })
+})
+
+describe('書き出し先の作業場の記録: 本当に無いものだけ外す(Windows の stat の振る舞い)', () => {
+  /**
+   * Windows の stat を真似る(path.win32 の大文字小文字を区別しない名前で引く)。在るものだけ表に書き、
+   * 無いもの・ファイルの下のパス(C:\\out\\file\\x)は、Windows と同じく ENOENT にする
+   */
+  function windowsStat(
+    entries: Record<string, 'dir' | 'file' | 'EPERM'>
+  ): (p: string) => Promise<{ isDirectory(): boolean }> {
+    const table = new Map(Object.entries(entries).map(([k, v]) => [k.toLowerCase(), v]))
+    return async (p: string): Promise<{ isDirectory(): boolean }> => {
+      const hit = table.get(win32.normalize(p).toLowerCase())
+      if (hit === 'EPERM' || !hit)
+        throw Object.assign(new Error(hit ?? 'ENOENT'), { code: hit ?? 'ENOENT' })
+      return { isDirectory: () => hit === 'dir' }
+    }
+  }
+  const fs = windowsStat({
+    'C:\\': 'dir',
+    'C:\\Out': 'dir',
+    'C:\\Out\\file-not-dir': 'file',
+    'C:\\Locked': 'EPERM'
+  })
+
+  it('親のフォルダが在って、その中に無いものは「無い」(記録から外す)', async () => {
+    expect(await reallyMissing('C:\\out\\.ve-seg-x', win32, fs)).toBe(true)
+    // 間のフォルダごと無くても、在る祖先がフォルダなら「無い」
+    expect(await reallyMissing('C:\\out\\gone\\deeper\\.ve-seg-x', win32, fs)).toBe(true)
+  })
+
+  it('ファイルの下のパス(Windows では ENOTDIR でなく ENOENT)は「決められない」(記録に残す)', async () => {
+    expect(await reallyMissing('C:\\out\\file-not-dir\\.ve-seg-y', win32, fs)).toBe(false)
+    expect(await reallyMissing('C:\\out\\file-not-dir\\a\\.ve-seg-y', win32, fs)).toBe(false)
+  })
+
+  it('切れたドライブ・つながらない共有・調べられない祖先は「決められない」(記録に残す)', async () => {
+    expect(await reallyMissing('E:\\videos\\.ve-seg-z', win32, fs)).toBe(false)
+    expect(await reallyMissing('\\\\nas\\share\\out\\.ve-seg-z', win32, fs)).toBe(false)
+    expect(await reallyMissing('C:\\locked\\.ve-seg-z', win32, fs)).toBe(false)
+  })
+
+  it('この PC の本物の stat でも同じ(無いフォルダは外し、ファイルの下は残す)', async () => {
+    const dir = join(work, 'missing-check')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'file'), 'x')
+    expect(await reallyMissing(join(dir, 'gone', '.ve-seg-a'))).toBe(true)
+    expect(await reallyMissing(join(dir, 'file', '.ve-seg-b'))).toBe(false)
   })
 })
