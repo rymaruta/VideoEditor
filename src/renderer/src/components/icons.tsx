@@ -619,3 +619,67 @@ export function ArrowUpIcon(props: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+/** 素材(画面の中に再生の三角) */
+export function MediaIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <rect x="3.5" y="6" width="17" height="12" rx="1" />
+      <polygon points="10 9.5 10 14.5 14.5 12 10 9.5" />
+    </svg>
+  )
+}
+
+/** テンプレート(4 つの枠) */
+export function LayoutGridIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <rect x="3.5" y="3.5" width="7" height="7" />
+      <rect x="13.5" y="3.5" width="7" height="7" />
+      <rect x="3.5" y="13.5" width="7" height="7" />
+      <rect x="13.5" y="13.5" width="7" height="7" />
+    </svg>
+  )
+}
+
+/** ロック(錠) */
+export function LockIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <rect x="5" y="10.5" width="14" height="10" rx="1" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </svg>
+  )
+}
+
+/** つまみ(トラックの音量) */
+export function KnobIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 4v7" />
+    </svg>
+  )
+}
+
+/** ほか(横の 3 点) */
+export function MoreIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="5.5" cy="12" r="1" fill="currentColor" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
+      <circle cx="18.5" cy="12" r="1" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** 縦の 3 点(トラックの設定) */
+export function MoreVerticalIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="5.5" r="1" fill="currentColor" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
+      <circle cx="12" cy="18.5" r="1" fill="currentColor" />
+    </svg>
+  )
+}

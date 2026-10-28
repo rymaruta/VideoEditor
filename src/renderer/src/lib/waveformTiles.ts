@@ -81,17 +81,28 @@ export function waveformDensity(screenWidth: number): number {
   return screenWidth * WAVEFORM_DENSITY <= WAVEFORM_DENSE_MAX_WIDTH ? WAVEFORM_DENSITY : 1
 }
 
-/** 高さの分解能のために、縦も何倍で頼むか(描く時は枠の高さに縮める) */
-export const WAVEFORM_HEIGHT_SCALE = 2
+/**
+ * 縦は何倍で頼むか。1(枠の高さのまま)。2 倍で頼んで縮めると、細い線が詰まって白い塊に見えていた
+ */
+export const WAVEFORM_HEIGHT_SCALE = 1
+
+/** 振幅の持ち上げの指数(0.75)。平方根(0.5)では小さい音まで高く持ち上がり、波形が塊になっていた */
+export const WAVEFORM_LIFT_EXPONENT = 0.75
+
+/** 振幅 1 のときの高さ: レーン(1 段)の半分の高さのうち、この割合まで(上下で 80%) */
+export const WAVEFORM_AMP_SHARE = 0.8
+
+/** この高さ(px)より低い波形は、L と R を 2 段に分けず 1 本に重ねる */
+export const WAVEFORM_SPLIT_MIN_HEIGHT = 48
 
 /**
- * 振幅を平方根で持ち上げる(dB のように丸い塊に潰さず、小さい音も見え、尖りは残る)。
+ * 振幅を少し持ち上げる(指数 0.75。小さい音も見え、尖りは残る)。
  * `levels` は中心からの高さ(px)、`half` は半分の高さ(px)。新しい配列を返す
  */
 export function liftLevels(
   levels: Float32Array,
   half: number,
-  exponent: number = 0.5
+  exponent: number = WAVEFORM_LIFT_EXPONENT
 ): Float32Array {
   const out = new Float32Array(levels.length)
   if (half <= 0) return out
@@ -215,8 +226,8 @@ export function releaseCanvas(canvas: { width: number; height: number }): void {
   canvas.height = 0
 }
 
-/** 振幅(-1〜1)を平方根で持ち上げる。符号は残す(上下の非対称をそのまま描く) */
-export function liftAmplitude(v: number, exponent: number = 0.5): number {
+/** 振幅(-1〜1)を少し持ち上げる(指数 0.75)。符号は残す(上下の非対称をそのまま描く) */
+export function liftAmplitude(v: number, exponent: number = WAVEFORM_LIFT_EXPONENT): number {
   if (!(v === v) || v === 0) return 0
   const a = Math.min(1, Math.abs(v))
   return Math.sign(v) * Math.pow(a, exponent)
@@ -242,4 +253,24 @@ export function peakColumnSpan(
   const rmsTop = Math.max(top, cy - r)
   const rmsBottom = Math.max(rmsTop, Math.min(bottom, cy + r))
   return { top, bottom, rmsTop, rmsBottom }
+}
+
+/**
+ * 低いレーンの 1 本の波形: L と R を重ねた 1 列の値(山は両方の外側、RMS は 2 本の二乗平均)。
+ * 1 本しか無ければそのまま
+ */
+export function mergedColumn(
+  channels: readonly { max: ArrayLike<number>; min: ArrayLike<number>; rms: ArrayLike<number> }[],
+  k: number
+): { max: number; min: number; rms: number } {
+  if (channels.length === 0) return { max: 0, min: 0, rms: 0 }
+  let max = -Infinity
+  let min = Infinity
+  let sq = 0
+  for (const ch of channels) {
+    max = Math.max(max, ch.max[k] ?? 0)
+    min = Math.min(min, ch.min[k] ?? 0)
+    sq += (ch.rms[k] ?? 0) ** 2
+  }
+  return { max, min, rms: Math.sqrt(sq / channels.length) }
 }

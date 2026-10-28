@@ -7,6 +7,7 @@ import './assets/timelineG3.css'
 import './assets/autoEditG3.css'
 import './assets/dialogsG3.css'
 import './assets/windowsG3.css'
+import './assets/shellG4.css'
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

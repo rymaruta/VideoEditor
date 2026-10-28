@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { projectToSave, useProjectStore } from '../store/projectStore'
+import { useProjectStore } from '../store/projectStore'
 
 /**
- * 上部バーのプロジェクト名。クリックすると編集できる。
+ * 上の帯のプロジェクト名。クリックすると編集できる。
  *
  * 書き出しの既定ファイル名やバッチ書き出しのファイル名はこの名前から作られるので、
  * 変えられないと**別プロジェクトを同じフォルダへ出したときに全部同名になって上書き**
@@ -11,7 +11,6 @@ import { projectToSave, useProjectStore } from '../store/projectStore'
 export function ProjectNameField(): React.JSX.Element {
   const projectName = useProjectStore((s) => s.project.name)
   // 試しに当てている間は、試す前の未保存の印
-  const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const setProjectName = useProjectStore((s) => s.setProjectName)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(projectName)
@@ -63,7 +62,6 @@ export function ProjectNameField(): React.JSX.Element {
       }}
     >
       {projectName}
-      {isDirty && <span className="dirty-dot" title="未保存の変更があります" />}
     </button>
   )
 }

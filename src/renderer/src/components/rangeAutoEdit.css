@@ -337,7 +337,7 @@
   border-bottom: 1px solid var(--ve-border-subtle);
 }
 .timeline-panel .g3-lock-label {
-  height: 17px;
+  height: 16px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -364,9 +364,6 @@
   );
   box-shadow: inset 0 0 0 1px rgba(150, 170, 205, 0.55);
   cursor: context-menu;
-}
-.timeline-panel .track-lanes-col.g3-has-scenes.g3-has-locks .timeline-playhead {
-  top: -71px;
 }
 .timeline-panel .g3-ruler-range-drag {
   background: color-mix(in srgb, var(--ve-auto) 14%, transparent);

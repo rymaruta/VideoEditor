@@ -10,9 +10,10 @@ export const SAFE_FRAME_KEY = 've-preview-safe-frame'
 /** 既定は一覧(今までと同じ)。格子は選んだ人だけ */
 export function readMediaLayout(): 'grid' | 'list' {
   try {
-    return localStorage.getItem(MEDIA_LAYOUT_KEY) === 'grid' ? 'grid' : 'list'
+    // 既定は格子(デザイン案の素材のパネル)。一覧を選んだら覚える
+    return localStorage.getItem(MEDIA_LAYOUT_KEY) === 'list' ? 'list' : 'grid'
   } catch {
-    return 'list'
+    return 'grid'
   }
 }
 

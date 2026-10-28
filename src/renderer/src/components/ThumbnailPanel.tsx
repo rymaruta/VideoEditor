@@ -3,7 +3,7 @@ import { useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
 import { buildTimedClips, totalTimelineDuration, findTimedClipAt } from '../lib/timelineMath'
 import { formatIpcError } from '../lib/ipcError'
-import { ImageIcon, DownloadIcon, SparklesIcon, WandIcon } from './icons'
+import { AlertTriangleIcon, ImageIcon, DownloadIcon, SparklesIcon, WandIcon } from './icons'
 import { targetResolution } from '@shared/resolution'
 import { safeFileBaseName } from '@shared/fileName'
 import { textCanvasSize } from '@shared/resolution'
@@ -354,6 +354,13 @@ export function ThumbnailPanel(): React.JSX.Element {
       <div className="panel-header">
         <h2>サムネイル生成</h2>
       </div>
+      {/* 候補は素材から作るので、V1 を隠していても本編の絵が入る。そのことだけ知らせる */}
+      {project.mainVideoHidden && (
+        <p className="hint-text thumbnail-hidden-note">
+          <AlertTriangleIcon width={12} height={12} className="inline-icon" />
+          本編(V1)を隠しています。サムネイルの候補は素材から作るので、隠した本編の絵も入ります。
+        </p>
+      )}
       <div className="thumbnail-generate-buttons">
         <button className="primary-button" onClick={generateCandidates} disabled={loading}>
           <SparklesIcon width={14} height={14} />

@@ -10,16 +10,15 @@
  * electron を読み込まない(試験で使う)。
  */
 
-/** 上の帯の高さ(px)。graphite3.css の `.workflow-bar` と同じ */
-export const TITLE_BAR_HEIGHT = 46
+/** 上の帯の高さ(px)。tokens.css の `--ve-bar-workflow`(`.workflow-bar`)と同じ */
+export const TITLE_BAR_HEIGHT = 44
 
 /**
- * 重ねるボタンの地の色。上の帯の右端(地の暗い紺に、帯の青緑の淡い光が乗った色)に合わせる。
- * 帯の右端は CSS でこの色へ寄せてある(継ぎ目が見えない)
+ * 重ねるボタンの地の色。上の帯の地(見出しの帯 --ve-surface-band)と同じ灰(継ぎ目が見えない)
  */
-export const TITLE_BAR_OVERLAY_COLOR = '#0b121a'
-/** 重ねるボタンの記号の色(文字の色 --ve-text) */
-export const TITLE_BAR_SYMBOL_COLOR = '#edeef0'
+export const TITLE_BAR_OVERLAY_COLOR = '#202020'
+/** 重ねるボタンの記号の色(ふつうの操作の字 --ve-text-2) */
+export const TITLE_BAR_SYMBOL_COLOR = '#bdbdbd'
 
 /**
  * 窓の最小の大きさ。これより狭いと、パネル(最小 300)・モニター・タイムラインの道具の帯
@@ -47,7 +46,7 @@ export function windowChromeOptions(platform: string): WindowChromeOptions {
       minHeight: MIN_WINDOW_HEIGHT,
       titleBarStyle: 'hiddenInset',
       autoHideMenuBar: false,
-      // 信号のボタン(高さ 14px)を 46px の帯の真ん中に
+      // 信号のボタン(高さ 14px)を 44px の帯の真ん中に
       trafficLightPosition: { x: 14, y: Math.round((TITLE_BAR_HEIGHT - 14) / 2) }
     }
   return {

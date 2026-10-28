@@ -14,6 +14,7 @@ import { pathKey } from './exportOutputGuard'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, join } from 'path'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
+import { projectForOutput } from '@shared/trackVisibility'
 import { sequenceDurationFrames } from '@shared/sequence/segmentPlan'
 import { telopConcatList } from '@shared/telop/layer'
 import { buildPremiereXml, type PremiereOverlayClip } from '@shared/export/premiereXml'
@@ -157,17 +158,26 @@ export async function exportPremiereXml(
 ): Promise<PremiereExportResult> {
   const progress = deps.onProgress ?? ((): void => {})
   progress(0, 'シーケンスを組み立て中')
+  // T1 の「目」を閉じていれば、テロップ(絵・SRT・テロップのマーカー)は出さない。
+  // 章・コーナーのマーカーはテロップの中身とは別なので、隠していても元の企画から残す
+  const telopsHidden = payload.project.telopTrackHidden === true
   const v2 = projectV1ToV2(
-    { ...payload.project, aspectRatio: payload.aspectRatio },
+    { ...projectForOutput(payload.project), aspectRatio: payload.aspectRatio },
     { resolution: payload.resolutionHeight }
   )
+  const markerSource = telopsHidden
+    ? projectV1ToV2(
+        { ...payload.project, aspectRatio: payload.aspectRatio },
+        { resolution: payload.resolutionHeight }
+      )
+    : v2
   const fps = v2.sequence.fps
   const total = sequenceDurationFrames(v2.sequence)
   const base = premiereSidecarBase(payload.outputPath)
   const sidecars = premiereSidecarPaths(payload.outputPath)
   const srtPath = sidecars.srt
-  const markers = premiereMarkers(payload.project, v2, {
-    telops: payload.telopMarkers !== false,
+  const markers = premiereMarkers(payload.project, markerSource, {
+    telops: payload.telopMarkers !== false && !telopsHidden,
     reviews: payload.reviews
   })
 

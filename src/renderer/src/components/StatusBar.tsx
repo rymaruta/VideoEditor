@@ -1,22 +1,15 @@
-import { projectToSave, useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution } from '@shared/resolution'
+import { useProjectStore } from '../store/projectStore'
 import { ProjectMenu } from './ProjectMenu'
 import { useAutoEditRunStore } from '../store/autoEditRunStore'
-import { ProjectNameField } from './ProjectNameField'
-import { usePipelineStore } from '../store/pipelineStore'
-import { useReviewItems } from '../lib/useReviewItems'
 
 /**
- * 画面の一番下のステータスバー(Windows の編集ソフトと同じ位置)。
- * プロジェクト名(クリックで変更)・保存の状態・失敗の知らせ・企画の規模・画角と書き出しの設定を出す。
- * 操作のボタンは置かない(操作はメニューバーとパネルにある)。
+ * 画面の一番下のステータスバー。出すのは「縦横比・解像度」「書き出しの方式」と、保存・失敗・処理中の
+ * 知らせだけ(企画名と未保存の印は上の帯、クリップとテロップの数はタイムラインの帯、要確認の数は
+ * 上の帯の「確認」にある。同じものを 2 か所に出さない)。操作のボタンは置かない。
  */
 export function StatusBar(): React.JSX.Element {
-  // 試しに当てている間は、試す前の未保存の印
-  const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
-  const clipCount = useProjectStore((s) => s.project.clips.length)
-  const telopCount = useProjectStore((s) => s.project.textOverlays.length)
   const aspectRatio = useProjectStore((s) => s.project.aspectRatio)
   const resolution = useSettingsStore((s) => s.exportResolutionHeight)
   const engine = useSettingsStore((s) => s.exportEngine)
@@ -25,29 +18,12 @@ export function StatusBar(): React.JSX.Element {
     (s) => s.status === 'running' || s.finishingId !== null
   )
   const { w, h } = targetResolution(aspectRatio, resolution)
-  // 自動編集の要確認(自信の低い箇所)。押すと自動編集の画面の一覧を開く
-  const reviewCount = useReviewItems().open.length
   return (
     <footer className="status-bar">
-      <ProjectNameField />
-      <span className={`status-save ${isDirty ? 'dirty' : ''}`}>
-        {isDirty ? '未保存の変更あり' : '保存済み'}
-      </span>
+      {/* 保存・読み込みの失敗の知らせ(閉じるまで出す) */}
       <ProjectMenu />
       {autoEditRunning && <span className="status-busy">AIおまかせ全自動編集: 生成中…</span>}
       <span className="status-spacer" />
-      {reviewCount > 0 && (
-        <button
-          className="status-review"
-          title="自動編集で自信の低かった箇所の一覧を開く"
-          onClick={() => usePipelineStore.getState().setScreenOpen(true)}
-        >
-          要確認 {reviewCount.toLocaleString()}
-        </button>
-      )}
-      <span>
-        クリップ {clipCount.toLocaleString()} · テロップ {telopCount.toLocaleString()}
-      </span>
       <span>
         {aspectRatio} · {w}×{h}
       </span>

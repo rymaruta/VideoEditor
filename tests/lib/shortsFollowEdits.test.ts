@@ -121,6 +121,29 @@ describe('ショートは本編の人の修正に従う', () => {
     expect(short.audioTracks.find((t) => t.multicamSourceId === 'b')?.muted).toBe(true)
     expect(short.audioTracks.find((t) => t.multicamSourceId === 'a')?.muted).toBe(false)
   })
+
+  it('本編で隠したトラック(V1・T1 の「目」)は、ショートでも隠す。隠していなければ足さない', () => {
+    const make = (extra: Partial<Project>): Project =>
+      buildShortProject(
+        {
+          project: { ...project, ...extra },
+          info,
+          hype: [],
+          activity,
+          styles: [],
+          speechLook: { style: defaultTextStyle() },
+          overrides: { removed: [], added: [], angles: [] }
+        },
+        { start: 0, end: 30, strength: 10, peaks: 1 },
+        0
+      )
+    const hidden = make({ mainVideoHidden: true, telopTrackHidden: true })
+    expect(hidden.mainVideoHidden).toBe(true)
+    expect(hidden.telopTrackHidden).toBe(true)
+    const shown = make({})
+    expect('mainVideoHidden' in shown).toBe(false)
+    expect('telopTrackHidden' in shown).toBe(false)
+  })
 })
 
 describe('縦長の企画に横長の録画を置いたとき、HUD・顔は画面の位置で比べる', () => {

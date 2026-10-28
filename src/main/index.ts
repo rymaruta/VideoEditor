@@ -118,6 +118,7 @@ import {
   toggleLibraryFavorite
 } from './libraryService'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
+import { projectForOutput } from '@shared/trackVisibility'
 import type { TelopLayerPayload } from '@shared/telop/layer'
 import type {
   AspectRatio,
@@ -563,8 +564,10 @@ function registerWindowScopedIpcHandlers(): void {
     const onProgress = (percent: number, stage: string): void => {
       notifySender(event, IPC.exportProgress, { percent, stage })
     }
-    // 層の画像の置き場は、書き出しが終わったら(成功・失敗・中止のどれでも)片付ける
-    return withTelopLayer(payload.telopLayer, () => runExport(payload, onProgress))
+    // 層の画像の置き場は、書き出しが終わったら(成功・失敗・中止のどれでも)片付ける。
+    // 隠したテロップ(T1 の「目」)は書き出さない
+    const output = { ...payload, project: projectForOutput(payload.project) }
+    return withTelopLayer(payload.telopLayer, () => runExport(output, onProgress))
   })
   // Premiere 用 XML(FCP7 xmeml)。XML・SRT・(選べば)見た目どおりのテロップを並べて書く
   ipcMain.handle(IPC.selectPremiereXmlPath, async (event, defaultName: string) => {
@@ -611,6 +614,7 @@ function registerWindowScopedIpcHandlers(): void {
     return withTelopLayer(payload.telopLayer, () =>
       runExclusiveExport((signal) =>
         writeExportGuarded(payload.outputPath, protectedPaths, (xmlWritePath) =>
+          // 隠したテロップ(T1 の「目」)の扱いは exportPremiereXml の中で(章・コーナーのマーカーは残す)
           exportPremiereXml(payload, xmlWritePath, {
             ffmpegPath,
             onProgress,

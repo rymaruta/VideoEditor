@@ -109,3 +109,23 @@
 .timeline-panel .g3-ruler-marker:hover {
   filter: brightness(1.2);
 }
+
+/* キーの配置とキーの一覧の帯の切り替え(見出しの下の段) */
+.shortcut-help-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ve-space-2) var(--ve-space-6);
+  padding: var(--ve-space-3) var(--ve-pad-dialog);
+  border-bottom: 1px solid var(--ve-border-subtle);
+}
+.shortcut-help-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+.shortcut-help-setting select {
+  height: var(--ve-control-md);
+}

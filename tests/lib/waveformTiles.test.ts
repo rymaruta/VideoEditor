@@ -6,6 +6,10 @@ import {
   columnLevels,
   liftLevels,
   liftAmplitude,
+  mergedColumn,
+  WAVEFORM_AMP_SHARE,
+  WAVEFORM_HEIGHT_SCALE,
+  WAVEFORM_SPLIT_MIN_HEIGHT,
   peakColumnSpan,
   peakEnvelope,
   waveformDensity,
@@ -104,9 +108,13 @@ describe('列ごとの大きさと山', () => {
 })
 
 describe('細かい波形(Graphite 3)', () => {
-  it('平方根で持ち上げる: 小さい音は大きく、満ちた音と無音はそのまま', () => {
+  it('指数 0.75 で少し持ち上げる: 小さい音は少し大きく、満ちた音と無音はそのまま', () => {
     const out = liftLevels(new Float32Array([0, 2.5, 10, 20]), 10)
-    expect(Array.from(out)).toEqual([0, 5, 10, 10])
+    expect(out[0]).toBe(0)
+    expect(out[1]).toBeCloseTo(10 * 0.25 ** 0.75) // 3.54(平方根の 5 ほど持ち上げない)
+    expect(out[1]).toBeGreaterThan(2.5)
+    expect(out[2]).toBe(10)
+    expect(out[3]).toBe(10)
   })
   it('1px に 2 列で頼む。canvas の上限を超える長さは 1 列に戻す', () => {
     expect(waveformDensity(1000)).toBe(2)
@@ -115,17 +123,38 @@ describe('細かい波形(Graphite 3)', () => {
 })
 
 describe('値で描く細かい波形の 1 列(peakColumnSpan)', () => {
-  it('上下非対称の山をそのまま、振幅は平方根で持ち上げる', () => {
+  it('上下非対称の山をそのまま、振幅は指数 0.75 で少し持ち上げる', () => {
     const s = peakColumnSpan(0.25, -0.04, 0.1, 50, 40)
-    expect(s.top).toBeCloseTo(50 - 0.5 * 40)
-    expect(s.bottom).toBeCloseTo(50 + 0.2 * 40)
-    expect(liftAmplitude(-0.25)).toBeCloseTo(-0.5)
+    expect(s.top).toBeCloseTo(50 - 0.25 ** 0.75 * 40)
+    expect(s.bottom).toBeCloseTo(50 + 0.04 ** 0.75 * 40)
+    expect(liftAmplitude(-0.25)).toBeCloseTo(-(0.25 ** 0.75))
   })
   it('RMS は山の範囲からはみ出さない(片側だけの音で、無い側に描かない)', () => {
     const s = peakColumnSpan(0.64, 0, 0.36, 50, 40)
     expect(s.bottom).toBe(50)
-    expect(s.rmsTop).toBeCloseTo(50 - 0.6 * 40)
+    expect(s.rmsTop).toBeCloseTo(50 - 0.36 ** 0.75 * 40)
     expect(s.rmsBottom).toBe(50)
+  })
+  it('低いレーンの 1 本: L と R の外側の山、RMS は二乗平均', () => {
+    const ch = (
+      max: number,
+      min: number,
+      rms: number
+    ): { max: number[]; min: number[]; rms: number[] } => ({
+      max: [max],
+      min: [min],
+      rms: [rms]
+    })
+    const v = mergedColumn([ch(0.5, -0.1, 0.3), ch(0.2, -0.6, 0.4)], 0)
+    expect(v.max).toBe(0.5)
+    expect(v.min).toBe(-0.6)
+    expect(v.rms).toBeCloseTo(Math.sqrt((0.09 + 0.16) / 2))
+    expect(mergedColumn([ch(0.3, -0.2, 0.1)], 0)).toEqual({ max: 0.3, min: -0.2, rms: 0.1 })
+  })
+  it('振幅 1 でもレーンの高さの 80% まで・48px 未満は 1 本・縦は倍にしない', () => {
+    expect(WAVEFORM_AMP_SHARE).toBe(0.8)
+    expect(WAVEFORM_SPLIT_MIN_HEIGHT).toBe(48)
+    expect(WAVEFORM_HEIGHT_SCALE).toBe(1)
   })
   it('無音は高さ 0', () => {
     const s = peakColumnSpan(0, 0, 0, 50, 40)

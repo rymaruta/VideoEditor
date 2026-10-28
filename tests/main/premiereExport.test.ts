@@ -116,6 +116,27 @@ beforeAll(() => {
 afterAll(() => removeTempDir(work))
 
 describe('exportPremiereXml(main)', () => {
+  it('T1 を隠したら、テロップ(SRT・テロップのマーカー)は出さず、章のマーカーは残す', async () => {
+    const p = project()
+    p.textOverlays.push({
+      id: 't3',
+      text: '第1章',
+      startTime: 1,
+      endTime: 1.4,
+      effectId: 'chapter-title',
+      style: defaultTextStyle()
+    })
+    const dir = join(work, 'hidden')
+    mkdirSync(dir, { recursive: true })
+    const payload = base({ ...p, telopTrackHidden: true }, dir, 'text')
+    const r = await exportPremiereXml(payload, payload.outputPath, { ffmpegPath })
+    const srt = readFileSync(r.srtPath, 'utf-8')
+    expect(srt).not.toContain('こんにちは')
+    expect(srt).not.toContain('第1章')
+    const names = read(payload.outputPath)!.markers!.map((m) => m.name)
+    expect(names).toContain('章: 第1章')
+    expect(names).not.toContain('テロップ')
+  })
   it('文字だけ: XML と同じ名前の SRT(BOM 付き)を書き、テロップの文字はマーカーに', async () => {
     const payload = base(project(), work, 'text')
     const r = await exportPremiereXml(payload, payload.outputPath, { ffmpegPath })

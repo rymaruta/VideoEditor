@@ -1,285 +1,327 @@
 /* =====================================================================
-   デザインの決まり(案) — tokens.css
-   - 基準: Graphite 3(design3/project/Main.dc.html と main.css の --ve-*)。
-     値はできるだけ今の Graphite 3 のまま。「役割の名前」に付け直し、足りない役割を足し、
-     重なっていた値(灰色の文字 4 種 → 3 種、琥珀 3 種 → 1 種 など)を寄せた。
-   - 名前は今の --ve-* の続き(4 つ目の名前の系統を作らない)。旧名は末尾の「移行用の別名」で
-     新しい名前へつなぐ。直し終わったら別名の塊を消す。
-   - コントラストは WCAG 2.1 AA。数字は計算値(tools/contrast.py)。
-     文字 4.5:1 以上 / 大きな文字(18.66px 太字・24px)と、線・印・枠などの「物」 3:1 以上。
+   デザインの決まり — tokens.css
+   - 基準: 合意したデザイン案(design1/project/Main.dc.html)。灰色の段・青い差し色・平らな面。
+     光(グロー)・グラデーション・浮いたカードは使わない。区画は 1px の溝(--ve-gutter)で分ける。
+   - 名前は「役割」で付ける(--ve-surface-* / --ve-text-* / --ve-primary* / --ve-clip-* など)。
+     前の名前(Graphite 3)は消さずに、新しい値か新しい名前へつないである(使う所を直し終えたら消す)。
+   - 差し色は青(#4d8fe6)。主ボタン「書き出す」だけ #2a6fd0 の塗り。注意は琥珀(#e5b84f)のまま残す。
+   - コントラストは WCAG 2.1 AA(文字 4.5:1 以上 / 物 3:1 以上)。
    - 色の直書き(#… / rgb(…))は、この表とトラック・話者・テロップの絵の中身(データ)以外では使わない。
    ===================================================================== */
 
 :root {
   /* ---------------------------------------------------------------
-     1. 色 — 地と面(奥 → 手前)
+     1. 色 — 灰色の段(奥 → 手前)
      --------------------------------------------------------------- */
-  --ve-bg: #07080c; /* 地。窓の一番奥 */
-  --ve-well: #04050a; /* モニターの周り(絵の外) */
-  --ve-surface-sunken: #0d0f18; /* くぼみ: 入力欄・リスト・波形の地。面1 の上で 1 段沈む */
-  --ve-surface-1: #121426; /* 面1: パネル(カード) */
-  --ve-surface-1-fill: linear-gradient(180deg, #1a1d33 0%, #121426 55%, #0f1120 100%);
-  --ve-surface-2: #1a1d33; /* 面2: 浮く物(メニュー・ポップオーバー・ダイアログ・パネル見出し) */
-  --ve-surface-3: #22263d; /* 面3: 操作の地(ふつうのボタン・選んだタブ・選んだ行) */
-  --ve-surface-3-hover: #2a2f45;
-  --ve-surface-3-press: #1c2034;
-  --ve-surface-3-fill: linear-gradient(180deg, #2a2f45, #20243a); /* 面3 の立体(ボタンの地) */
-  --ve-surface-3-fill-hover: linear-gradient(180deg, #32385a, #262b45);
-  --ve-scrim: rgba(4, 5, 10, 0.66); /* ダイアログの後ろ(ぼかし 3px と組) */
-  --ve-white: #ffffff; /* 縁の光・ハイライトの元(透明度は color-mix で付ける) */
-  --ve-black: #000000; /* 影の元 */
-  --ve-edge: #96a5ff; /* 面の縁の青い光の元(rgba(150,165,255,…) をまとめた) */
+  --ve-surface-deep: #121212; /* 最も奥: 窓の地・工程の切り替えの地・道具の組の地 */
+  --ve-surface-ground: #1b1b1b; /* 地: プログラムの区画・タイムラインの地 */
+  --ve-surface-band: #202020; /* 見出しの帯: 上の帯・タイムラインの道具の帯・トラックの見出し・レール */
+  --ve-surface-panel: #252525; /* パネル: 素材・インスペクタ・パネルの見出し */
+  --ve-surface-card: #2c2c2c; /* カード: 中のまとまり・メニュー・ゴーストのボタンの hover */
+  --ve-surface-raised: #3a3a3a; /* 選んだ状態・副ボタンの地 */
+  --ve-surface-raised-hover: #4a4a4a; /* 副ボタンの hover */
+  --ve-surface-field: #171717; /* 入力欄・切り替えの組の地 */
+
+  /* 前の名前(値は上の段へ寄せた) */
+  --ve-bg: var(--ve-surface-deep);
+  --ve-well: var(--ve-surface-ground); /* モニターの周り(絵の外) */
+  --ve-surface-sunken: var(--ve-surface-field);
+  --ve-surface-1: var(--ve-surface-panel);
+  --ve-surface-1-fill: var(--ve-surface-panel);
+  --ve-surface-2: var(--ve-surface-card);
+  --ve-surface-3: var(--ve-surface-raised);
+  --ve-surface-3-hover: var(--ve-surface-raised-hover);
+  --ve-surface-3-press: var(--ve-surface-card);
+  --ve-surface-3-fill: linear-gradient(var(--ve-surface-raised), var(--ve-surface-raised));
+  --ve-surface-3-fill-hover: linear-gradient(
+    var(--ve-surface-raised-hover),
+    var(--ve-surface-raised-hover)
+  );
+  --ve-scrim: rgba(0, 0, 0, 0.6); /* ダイアログの後ろ */
+  --ve-white: #ffffff;
+  --ve-black: #000000;
+  --ve-edge: #8c8c8c; /* 面の縁の元(前は青い光。今は灰) */
+  --ve-violet: #a493d9; /* 前の「奥の紫の光」の元。今は AI の色と同じ */
 
   /* 線 */
-  --ve-border-subtle: #1c2033; /* 区切り線・行の境(飾り。コントラストの決まりの外) */
-  --ve-border: #2e3350; /* 操作の枠(ボタン・入力欄)。欄の見分けは「くぼみの地 + ラベル」で付ける */
-  --ve-border-hover: #3c4266;
-  --ve-border-strong: #6a7090; /* チェック・ラジオ・スライダーの溝・トグルの枠。面1 で 3.76:1(今の #4A5070 は 2.32:1 で不足) */
+  --ve-gutter: #0e0e0e; /* 区画の溝(1px) */
+  --ve-stroke-track: #333333; /* トラックの境目・行の境 */
+  --ve-stroke-control: #4a4a4a; /* ボタンの枠 */
+  --ve-stroke-field: #6b6b6b; /* 入力欄の枠(3:1 以上) */
+  --ve-stroke-field-hover: #8c8c8c;
+  --ve-border-subtle: var(--ve-stroke-track);
+  --ve-border: var(--ve-stroke-control);
+  --ve-border-hover: var(--ve-stroke-field);
+  --ve-border-strong: var(--ve-stroke-field);
 
-  /* 文字(面1 #121426 / 面2 #1A1D33 / 面3 #22263D の上の比) */
-  --ve-text-1: #edeef0; /* 本文・見出し 15.7 / 14.3 / 12.8 */
-  --ve-text-2: #a6abb3; /* 補足・ラベル 7.9 / 7.2 / 6.4 */
-  --ve-text-3: #8e949d; /* 注記・単位・無効でない薄い字 6.0 / 5.4 / 4.9(面3 の hover #2A2F45 では 4.3 → そこでは text-2 を使う) */
-  --ve-text-disabled: #737989; /* 無効(WCAG の対象外。それでも面3 で 3.4:1 を確保) */
-  --ve-text-on-primary: #1c1004; /* 琥珀の上 10.4(最も暗い #FF7A1F でも 7.2) */
-  --ve-text-on-danger: #2a0c08; /* 危険の塗りの上 6.5 */
-  --ve-text-link: #ffcb6b; /* = primary-ink */
+  /* 文字(#252525 の上の比: f2f2f2 14.0 / bdbdbd 8.9 / a6a6a6 6.9 / 8c8c8c 4.9) */
+  --ve-text-1: #f2f2f2; /* 本文・見出し */
+  --ve-text-2: #bdbdbd; /* ラベル・ふつうの操作の字 */
+  --ve-text-3: #a6a6a6; /* 補足・単位 */
+  --ve-text-icon: #8c8c8c; /* アイコン・無効 */
+  --ve-text-disabled: var(--ve-text-icon);
+  --ve-text-faint: #5c5c5c; /* 押せない記号(やり直せないとき)。WCAG の対象外 */
+  --ve-text-on-primary: #ffffff; /* 主ボタン #2a6fd0 の上 5.0 */
+  --ve-text-on-danger: #2a0c08;
+  --ve-text-link: var(--ve-primary-ink);
 
   /* ---------------------------------------------------------------
      2. 色 — 意味の色(塗り / hover / press / 淡い地 soft / 字 ink / 線 line)
-        ink は soft と面1 の上で 4.5:1 以上。塗りの上の字は on-*。
      --------------------------------------------------------------- */
-  /* 主(琥珀)— 塗りは「1 画面に 1 つの主ボタン」と「選択」だけ */
-  --ve-primary: #ffb224;
-  --ve-primary-hover: #ffc04a;
-  --ve-primary-press: #f08a1c;
-  --ve-primary-fill: linear-gradient(135deg, #ffd25c 0%, #ffa62b 55%, #ff7a1f 100%);
-  --ve-primary-soft: #2b2312; /* ink 10.4 */
-  --ve-primary-ink: #ffcb6b; /* 面1 12.1 */
-  --ve-primary-line: rgba(255, 178, 36, 0.38);
-  --ve-primary-warm: #ff8a1f; /* 琥珀の淡いグラデの終わり(rgba(255,138,31,…) をまとめた) */
-  --ve-selection-fill: rgba(
-    255,
-    178,
-    36,
-    0.16
-  ); /* 選んだ範囲・行(今の rgba(245,165,36,…) を寄せる) */
-  --ve-selection-ring: inset 0 0 0 1.5px var(--ve-primary);
-  --ve-selection-range: rgba(255, 178, 36, 0.12); /* 目盛りの上の選んだ区間 */
-  --ve-selection-glow:
-    0 0 0 3px rgba(255, 178, 36, 0.18), 0 0 14px rgba(255, 178, 36, 0.22); /* 選んだクリップの光 */
+  /* 差し色(選択・フォーカス・選んだタブの線・トグルのオン) */
+  --ve-primary: #4d8fe6;
+  --ve-primary-hover: #6aa1ea;
+  --ve-primary-press: #3a7de0;
+  --ve-primary-soft: #1d2836; /* 差し色の淡い地(ink 7.4) */
+  --ve-primary-ink: #8fb8f0; /* 差し色の字(#252525 の上 7.6) */
+  --ve-primary-line: rgba(77, 143, 230, 0.45);
+  /* 主ボタン「書き出す」だけの塗り。光らせない */
+  --ve-primary-solid: #2a6fd0;
+  --ve-primary-solid-hover: #3a7de0;
+  --ve-primary-fill: linear-gradient(var(--ve-primary-solid), var(--ve-primary-solid));
+  --ve-primary-warm: var(--ve-primary-solid); /* 前の琥珀のグラデの終わり → 青 */
+  --ve-selection-fill: rgba(77, 143, 230, 0.16); /* 選んだ行・範囲の淡い地 */
+  --ve-selection-ring: inset 0 0 0 2px var(--ve-primary);
+  --ve-selection-range: rgba(77, 143, 230, 0.6); /* 目盛りの帯の 6px の範囲の帯 */
+  --ve-selection-tint: rgba(255, 255, 255, 0.04); /* 範囲の中のレーンの淡い明るさ */
+  --ve-selection-glow: none; /* 光らせない */
 
   /* 危険(取り返せない操作・失敗) */
-  --ve-danger: #ff6b5e; /* 面1 6.5 */
+  --ve-danger: #ff6b5e;
   --ve-danger-hover: #ff8378;
   --ve-danger-press: #e5544a;
-  --ve-danger-soft: #301714; /* ink 8.8 */
-  --ve-danger-soft-hover: #3d1c18;
+  --ve-danger-soft: #36201e;
+  --ve-danger-soft-hover: #432622;
   --ve-danger-ink: #ffa49b;
-  --ve-danger-line: #5a2620;
-  --ve-danger-line-hover: #7a3028;
+  --ve-danger-line: #6a2c26;
+  --ve-danger-line-hover: #84362e;
 
   /* 成功(終わった・合っている) */
-  --ve-success: #4cc38a;
-  --ve-success-soft: #12291f; /* ink 9.9 */
-  --ve-success-ink: #7de3b1;
-  --ve-success-line: #1f4a36;
+  --ve-success: #2f9d63;
+  --ve-success-soft: #1d2e25;
+  --ve-success-ink: #7dd3a4;
+  --ve-success-line: #2a5a40;
 
-  /* 注意(このままだと困るかも)— 主の琥珀と見分けるため、黄寄り + 必ず ⚠ のアイコンと一緒に。
-     塗りのボタンには使わない(塗りの琥珀は主だけ) */
-  --ve-warning: #f5c35a; /* 面1 11.1 */
-  --ve-warning-soft: #2d2512; /* ink 11.2 */
-  --ve-warning-ink: #ffd88a;
-  --ve-warning-line: #5a4a1f;
+  /* 注意(このままだと困るかも)— 琥珀。必ず ⚠ のアイコンか件数と一緒に。塗りのボタンには使わない */
+  --ve-warning: #e5b84f;
+  --ve-warning-soft: #3d3320; /* 確認の件数のバッジの地(ink 7.7) */
+  --ve-warning-ink: #e5b84f;
+  --ve-warning-line: #5e4c24;
 
   /* 情報(知らせ・ヒント・進行中) */
-  --ve-info: #6ea8ff; /* 面1 7.6 */
-  --ve-info-soft: #142038; /* ink 9.6 */
-  --ve-info-ink: #a9c8ff;
-  --ve-info-line: #29406b;
+  --ve-info: #4d8fe6;
+  --ve-info-soft: #1d2836;
+  --ve-info-ink: #8fb8f0;
+  --ve-info-line: #2d4a70;
 
-  /* 自動(AI が入れた物)— 色だけに頼らず「自動」バッジ/点線の枠と組む(劇伴の紫と近いため) */
-  --ve-auto: #b79cff;
-  --ve-auto-soft: #221c36; /* ink 9.3 */
-  --ve-auto-ink: #cdb9ff;
-  --ve-auto-line: #43386a;
-  --ve-violet: #7c5cff; /* 書き出し・自動編集の見出しの奥の淡い紫の光の元 */
+  /* AI(自動で入れた物・AI の判断)— 色だけに頼らず「自動」の印と組む */
+  --ve-auto: #a493d9;
+  --ve-auto-soft: #2a2638;
+  --ve-auto-ink: #c4b8ec;
+  --ve-auto-line: #4a4366;
 
-  --ve-playhead: #ff4d55; /* 再生位置だけ */
-  --ve-playhead-fill: linear-gradient(180deg, #ff6a4d, #ff3d5e 400px); /* タイムラインの縦の線 */
-  --ve-playhead-fill-h: linear-gradient(90deg, #ff6a4d, #ff3d5e); /* モニターの溝の再生済み */
-  --ve-playhead-glow: 0 0 14px rgba(255, 70, 80, 0.6);
+  /* 再生位置(タイムラインの縦の線・旗・モニターの溝の再生済みには使わない) */
+  --ve-playhead: #e8453c;
+  --ve-playhead-fill: var(--ve-playhead);
+  --ve-playhead-fill-h: var(--ve-text-2); /* モニターの溝の再生済み(案では灰) */
+  --ve-playhead-glow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+
+  /* 音量メーター */
+  --ve-meter-ok: #2f9d63;
+  --ve-meter-warn: #d9b44a;
+  --ve-meter-over: #e8453c;
 
   /* ---------------------------------------------------------------
-     3. 色 — トラック(タイムライン・名札・素材の印で同じ色)
-        key: 名札の塗り・レーンの印(面1 で 5.7 以上 / 名札の上の字 #0A0B12 で 6.2 以上)
-        clip: クリップの地 / clip-line: 縁 / clip-ink: クリップの字(clip の上 7.9 以上)
-        lane: レーンに敷く薄い色(key 8%)
-        今の timelineG3.css の --g3-k と main.css の --ve-trk-* の 2 系統をここへ 1 つに。
+     3. 色 — クリップとトラック(タイムライン・名札・素材の印で同じ色)
+        塗り 1 色。選んだクリップは 12% 明るく(-selected)・内側に 2px の白・両端に取っ手
      --------------------------------------------------------------- */
-  --ve-track-tag-ink: #0a0b12;
-  --ve-track-video: #5b8cff; /* 本編 V1 */
-  --ve-track-video-clip: #2a4673;
-  --ve-track-video-clip-line: #3d5f96;
-  --ve-track-video-clip-ink: #e3ebfc;
-  --ve-track-video-lane: rgba(91, 140, 255, 0.08);
-  --ve-track-overlay: #22d3e6; /* グラフィック・PiP */
-  --ve-track-overlay-clip: #134a55;
-  --ve-track-overlay-clip-line: #1f6a78;
-  --ve-track-overlay-clip-ink: #d4f7fb;
-  --ve-track-overlay-lane: rgba(34, 211, 230, 0.07);
-  --ve-track-telop: #ff5fa2; /* テロップ(クリップの縁は話者の色) */
-  --ve-track-telop-clip: #5a2a45;
-  --ve-track-telop-clip-line: #7a3a5e;
-  --ve-track-telop-clip-ink: #fbe3ef;
-  --ve-track-telop-lane: rgba(255, 95, 162, 0.07);
-  --ve-track-dialog: #2ee59a; /* 台詞(本編の音) */
-  --ve-track-dialog-clip: #1c4030;
-  --ve-track-dialog-clip-line: #2a5a43;
-  --ve-track-dialog-clip-ink: #c9f5df;
-  --ve-track-dialog-lane: rgba(46, 229, 154, 0.07);
-  --ve-track-music: #9a7bff; /* 劇伴・BGM */
-  --ve-track-music-clip: #2f2657;
-  --ve-track-music-clip-line: #4a3c85;
-  --ve-track-music-clip-ink: #e3dcff;
-  --ve-track-music-lane: rgba(154, 123, 255, 0.07);
-  --ve-track-se: #ff8f3d; /* 効果音 */
-  --ve-track-se-clip: #4f2e14;
-  --ve-track-se-clip-line: #7a4620;
-  --ve-track-se-clip-ink: #ffe3cc;
-  --ve-track-se-lane: rgba(255, 143, 61, 0.07);
-  /* 波形(外側の山 / 内側の平均) */
-  --ve-wave-dialog-peak: #2f6b50;
-  --ve-wave-dialog-rms: #7bddae;
-  --ve-wave-music-peak: #4b3f7d;
-  --ve-wave-music-rms: #9b86e0;
-  --ve-wave-video-peak: #5c7cb3;
-  --ve-wave-video-rms: #a9c3ff;
+  --ve-clip-main: #345a94; /* 本編 V1 */
+  --ve-clip-main-selected: #4c6ea1;
+  --ve-clip-pip: #4a74b3; /* ワイプ・グラフィック V2〜 */
+  --ve-clip-pip-selected: #6085bc;
+  --ve-clip-telop: #b0588a; /* テロップ T1 */
+  --ve-clip-telop-selected: #b96c98;
+  --ve-clip-voice: #276b49; /* 声 */
+  --ve-clip-voice-selected: #417d5f;
+  --ve-clip-bgm: #3a8f8f; /* BGM */
+  --ve-clip-bgm-selected: #529c9c;
+  --ve-clip-se: #9a6232; /* SE */
+  --ve-clip-se-selected: #a6754b;
+  --ve-clip-ink: #ffffff; /* クリップの上の字 */
+  --ve-clip-edge: rgba(0, 0, 0, 0.35); /* クリップの内側の細い縁 */
+  --ve-clip-selected-ring: #ffffff;
+  --ve-clip-grip: rgba(255, 255, 255, 0.4); /* 選んだクリップの両端の取っ手 */
+  --ve-clip-label-bg: rgba(0, 0, 0, 0.55); /* 波形の上の名前の地 */
+  --ve-lane-a: #1c1c1c; /* トラックの地(交互) */
+  --ve-lane-b: #242424;
+  /* 波形は 1 色(持ち主の必須要件)。外側の山は淡く、内側の平均は濃く(同じ色の濃さで分ける) */
+  --ve-wave: #e6f4ec;
+  --ve-wave-outer: rgba(230, 244, 236, 0.35);
+  --ve-wave-inner: rgba(230, 244, 236, 0.85);
 
-  /* タイムライン(Graphite 3)で実際に描く値。クリップの地(body)・字(body-ink)・縁の光(ring)・波形。
-     timelineG3.css はここだけを読む(色を直書きしない) */
-  --ve-track-video-tint: #3d6bff; /* レーンに敷く色(本編だけ印より深い青) */
-  --ve-track-video-body: #14213f;
-  --ve-track-video-head: linear-gradient(
-    90deg,
-    #335ce6,
-    #2b4fd6 60%,
-    #3a3ac9
-  ); /* 名前の帯(字が 4.5:1 以上) */
-  --ve-track-video-body-ink: #f2f5ff;
-  --ve-track-video-ring: rgba(120, 160, 255, 0.3);
-  --ve-track-video-index: rgba(10, 14, 40, 0.35);
-  --ve-track-video-wave-shade: linear-gradient(180deg, transparent, rgba(8, 12, 30, 0.7));
-  --ve-track-video-wave-peak: #2e4bb8;
-  --ve-track-video-wave-rms: #9db8ff;
-  --ve-track-video-warn-ink: #ffe3a8;
-  --ve-track-overlay-body: linear-gradient(90deg, #0d7484, #0a4b57);
-  --ve-track-overlay-body-ink: #d8fbff;
-  --ve-track-overlay-ring: rgba(51, 214, 232, 0.45);
-  --ve-track-telop-base: #0b0c14; /* 話者の色を混ぜる地 */
-  --ve-track-telop-body-ink: #f3f4f6;
-  --ve-track-telop-speaker-none: #555555; /* 話者の無いテロップ */
-  --ve-track-dialog-body: linear-gradient(180deg, #0f3b2c, #0a2a20);
-  --ve-track-dialog-body-ink: #a6f0cb;
-  --ve-track-dialog-ring: rgba(92, 242, 176, 0.22);
-  --ve-track-dialog-wave-peak: #1e7a55;
-  --ve-track-dialog-wave-rms: #5cf2b0;
-  --ve-track-music-body: linear-gradient(180deg, #2c1f66, #1c1546);
-  --ve-track-music-body-ink: #d6ccff;
-  --ve-track-music-ring: rgba(185, 166, 255, 0.26);
-  --ve-track-music-wave-peak: #4d3bb0;
-  --ve-track-music-wave-rms: #b9a6ff;
-  --ve-track-se-body: linear-gradient(180deg, #7a3410, #4e2009);
-  --ve-track-se-body-ink: #ffd0a6;
-  --ve-track-se-ring: rgba(255, 143, 61, 0.45);
-  --ve-track-se-wave-peak: #a64a14;
-  --ve-track-se-wave-rms: #ffa25c;
-  --ve-track-labels-fill: linear-gradient(90deg, #181b30, #13152a); /* 見出しの列 */
-  --ve-track-lanes-fill: linear-gradient(180deg, rgba(9, 11, 18, 0.85), rgba(7, 8, 13, 0.9));
-  --ve-track-label-ink: #e3e5e8;
-  --ve-ruler-bg: #0f1114;
-  --ve-ruler-tick-minor: #2a2f37;
-  --ve-ruler-tick: #3a3f48;
-  --ve-ruler-ink: #8a9099;
-  --ve-scene-ink: #c9cce0;
+  /* 前の名前(タイムライン・名札が読む)。値は上のクリップの色へ */
+  --ve-track-tag-ink: #ffffff;
+  --ve-track-video: var(--ve-clip-main);
+  --ve-track-video-clip: var(--ve-clip-main);
+  --ve-track-video-clip-line: var(--ve-clip-edge);
+  --ve-track-video-clip-ink: var(--ve-clip-ink);
+  --ve-track-video-lane: transparent;
+  --ve-track-overlay: var(--ve-clip-pip);
+  --ve-track-overlay-clip: var(--ve-clip-pip);
+  --ve-track-overlay-clip-line: var(--ve-clip-edge);
+  --ve-track-overlay-clip-ink: var(--ve-clip-ink);
+  --ve-track-overlay-lane: transparent;
+  --ve-track-telop: var(--ve-clip-telop);
+  --ve-track-telop-clip: var(--ve-clip-telop);
+  --ve-track-telop-clip-line: var(--ve-clip-edge);
+  --ve-track-telop-clip-ink: var(--ve-clip-ink);
+  --ve-track-telop-lane: transparent;
+  --ve-track-dialog: var(--ve-clip-voice);
+  --ve-track-dialog-clip: var(--ve-clip-voice);
+  --ve-track-dialog-clip-line: var(--ve-clip-edge);
+  --ve-track-dialog-clip-ink: var(--ve-clip-ink);
+  --ve-track-dialog-lane: transparent;
+  --ve-track-music: var(--ve-clip-bgm);
+  --ve-track-music-clip: var(--ve-clip-bgm);
+  --ve-track-music-clip-line: var(--ve-clip-edge);
+  --ve-track-music-clip-ink: var(--ve-clip-ink);
+  --ve-track-music-lane: transparent;
+  --ve-track-se: var(--ve-clip-se);
+  --ve-track-se-clip: var(--ve-clip-se);
+  --ve-track-se-clip-line: var(--ve-clip-edge);
+  --ve-track-se-clip-ink: var(--ve-clip-ink);
+  --ve-track-se-lane: transparent;
+  /* 波形(山と平均を同じ 1 色に) */
+  --ve-wave-dialog-peak: var(--ve-wave-outer);
+  --ve-wave-dialog-rms: var(--ve-wave-inner);
+  --ve-wave-music-peak: var(--ve-wave-outer);
+  --ve-wave-music-rms: var(--ve-wave-inner);
+  --ve-wave-video-peak: var(--ve-wave-outer);
+  --ve-wave-video-rms: var(--ve-wave-inner);
 
-  /* タイムラインの旧い見た目(Graphite 2)の名札・ワイプ・自動の地。main.css の :root から移した */
-  --ve-trk-video-selected: #34558a;
-  --ve-trk-pip: #1e2d47;
-  --ve-trk-pip-line: #2f4672;
-  --ve-trk-pip-ink: #c9d8fa;
-  --ve-trk-auto: #2a2240;
-  --ve-trk-auto-line: #43386a;
-  --ve-trk-auto-ink: #cdb9ff;
-  --ve-tag-video: #1e2d47;
-  --ve-tag-video-ink: #a9c3ff;
-  --ve-tag-audio: #173628;
-  --ve-tag-audio-ink: #8fe0b8;
-  --ve-tag-telop: #3d1f31;
-  --ve-tag-telop-ink: #f6a6cc;
-  --ve-tag-auto: #2a2240;
-  --ve-tag-auto-ink: #cdb9ff;
-  --ve-wave-auto-peak: #4b3f7d;
-  --ve-wave-auto-rms: #9b86e0; /* 紫の地(#2A2240)の上で 4.9:1 */
+  --ve-track-video-tint: transparent;
+  --ve-track-video-body: var(--ve-clip-main);
+  --ve-track-video-head: var(--ve-clip-main);
+  --ve-track-video-body-ink: var(--ve-clip-ink);
+  --ve-track-video-ring: var(--ve-clip-edge);
+  --ve-track-video-index: var(--ve-clip-label-bg);
+  --ve-track-video-wave-shade: transparent;
+  --ve-track-video-wave-peak: var(--ve-wave-outer);
+  --ve-track-video-wave-rms: var(--ve-wave-inner);
+  --ve-track-video-warn-ink: var(--ve-warning);
+  --ve-track-overlay-body: var(--ve-clip-pip);
+  --ve-track-overlay-body-ink: var(--ve-clip-ink);
+  --ve-track-overlay-ring: var(--ve-clip-edge);
+  --ve-track-telop-base: var(--ve-clip-telop);
+  --ve-track-telop-body-ink: var(--ve-clip-ink);
+  --ve-track-telop-speaker-none: #8c8c8c;
+  --ve-track-dialog-body: var(--ve-clip-voice);
+  --ve-track-dialog-body-ink: var(--ve-clip-ink);
+  --ve-track-dialog-ring: var(--ve-clip-edge);
+  --ve-track-dialog-wave-peak: var(--ve-wave-outer);
+  --ve-track-dialog-wave-rms: var(--ve-wave-inner);
+  --ve-track-music-body: var(--ve-clip-bgm);
+  --ve-track-music-body-ink: var(--ve-clip-ink);
+  --ve-track-music-ring: var(--ve-clip-edge);
+  --ve-track-music-wave-peak: var(--ve-wave-outer);
+  --ve-track-music-wave-rms: var(--ve-wave-inner);
+  --ve-track-se-body: var(--ve-clip-se);
+  --ve-track-se-body-ink: var(--ve-clip-ink);
+  --ve-track-se-ring: var(--ve-clip-edge);
+  --ve-track-se-wave-peak: var(--ve-wave-outer);
+  --ve-track-se-wave-rms: var(--ve-wave-inner);
+  --ve-track-labels-fill: var(--ve-surface-band);
+  --ve-track-lanes-fill: var(--ve-surface-ground);
+  --ve-track-label-ink: var(--ve-text-2);
+  --ve-ruler-bg: var(--ve-surface-band);
+  --ve-ruler-tick-minor: #4a4a4a;
+  --ve-ruler-tick: #6b6b6b;
+  --ve-ruler-ink: var(--ve-text-3);
+  --ve-scene-ink: var(--ve-text-1);
+  --ve-scene-a: #333333; /* 場面の帯(交互) */
+  --ve-scene-b: #2c2c2c;
+  --ve-scene-edge: #8c8c8c;
+
+  /* 名札(V1 / A1 / T1)とワイプ・自動の地。クリップの色の塗りに白い字 */
+  --ve-trk-video-selected: var(--ve-clip-main-selected);
+  --ve-trk-pip: var(--ve-clip-pip);
+  --ve-trk-pip-line: var(--ve-clip-edge);
+  --ve-trk-pip-ink: var(--ve-clip-ink);
+  --ve-trk-auto: var(--ve-auto-soft);
+  --ve-trk-auto-line: var(--ve-auto-line);
+  --ve-trk-auto-ink: var(--ve-auto-ink);
+  --ve-tag-video: var(--ve-clip-main);
+  --ve-tag-video-ink: var(--ve-clip-ink);
+  --ve-tag-audio: var(--ve-clip-voice);
+  --ve-tag-audio-ink: var(--ve-clip-ink);
+  --ve-tag-telop: var(--ve-clip-telop);
+  --ve-tag-telop-ink: var(--ve-clip-ink);
+  --ve-tag-auto: var(--ve-auto-soft);
+  --ve-tag-auto-ink: var(--ve-auto-ink);
+  --ve-wave-auto-peak: var(--ve-wave-outer);
+  --ve-wave-auto-rms: var(--ve-wave-inner);
   /* 波形の既定(レーンの色が無い所。Waveform.tsx が読む) */
-  --ve-wave-peak: var(--ve-wave-dialog-peak);
-  --ve-wave-rms: var(--ve-wave-dialog-rms);
+  --ve-wave-peak: var(--ve-wave-outer);
+  --ve-wave-rms: var(--ve-wave-inner);
 
-  /* 話者(テロップの縁・印・文字起こしの名前。最大 8 人)— 今のまま */
-  --ve-speaker-0: #f6a6cc;
-  --ve-speaker-1: #7fa8ff;
-  --ve-speaker-2: #f5c35a;
-  --ve-speaker-3: #6fd3a3;
-  --ve-speaker-4: #ff9a6b;
-  --ve-speaker-5: #b79cff;
-  --ve-speaker-6: #5fd0e0;
-  --ve-speaker-7: #d7db6a;
+  /* 話者(テロップの縁・印・文字起こしの名前。最大 8 人)— @shared/speaker の色と同じ */
+  --ve-speaker-0: #5cc1b3;
+  --ve-speaker-1: #e08a9a;
+  --ve-speaker-2: #6cc3d5;
+  --ve-speaker-3: #8fd16a;
+  --ve-speaker-4: #d9785f;
+  --ve-speaker-5: #b9c25a;
+  --ve-speaker-6: #d6d6d6;
+  --ve-speaker-7: #7aa88e;
 
   /* ---------------------------------------------------------------
-     4. 文字
+     4. 文字 — 11 / 12 / 13 / 15 / 22 の 5 段。等幅は数字(時刻・数値)だけ
      --------------------------------------------------------------- */
   --ve-font-sans:
     'Geist Sans', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo UI', 'Segoe UI',
     'Hiragino Kaku Gothic ProN', system-ui, sans-serif;
   --ve-font-mono: 'Geist Mono', 'Consolas', 'Cascadia Mono', 'Menlo', monospace;
 
-  /* 大きさの段(7 段 + 英数字専用の 10)。9 / 9.5 / 10.5 / 11.5 / 15 / 18 は使わない */
-  --ve-fs-10: 10px; /* micro: 英数字だけ(ルーラの時刻・クリップ番号・kbd)。和文は不可 */
-  --ve-fs-11: 11px; /* caption: 注記・単位・タグ・バッジ・表の見出し */
-  --ve-fs-12: 12px; /* label: 欄の名前・小さい操作(24px)・タブ・メニュー */
-  --ve-fs-13: 13px; /* body: 本文・既定の操作(28px)・入力欄 */
-  --ve-fs-14: 14px; /* subhead: パネルの見出し・ダイアログの節の見出し・ダイアログの本文 */
-  --ve-fs-16: 16px; /* title: ダイアログの見出し */
-  --ve-fs-20: 20px; /* headline: 画面の見出し・空の状態の見出し */
-  --ve-fs-24: 24px; /* display: モニターのタイムコード(Mono) */
+  --ve-fs-11: 11px; /* 注記・単位・バッジ・目盛り・節の小見出し */
+  --ve-fs-12: 12px; /* ラベル・小さい操作(24px)・タブの中の字 */
+  --ve-fs-13: 13px; /* 本文・既定の操作(28px)・パネルの見出し */
+  --ve-fs-15: 15px; /* タイムコードの入力欄・ダイアログの見出し */
+  --ve-fs-22: 22px; /* プログラムの上のテロップ・画面の見出し */
+  /* 前の段(移行用の別名。いちばん近い段へ) */
+  --ve-fs-10: var(--ve-fs-11);
+  --ve-fs-14: var(--ve-fs-13);
+  --ve-fs-16: var(--ve-fs-15);
+  --ve-fs-20: var(--ve-fs-22);
+  --ve-fs-24: var(--ve-fs-22);
 
   /* 行の高さ(4 の倍数) */
-  --ve-lh-10: 14px;
   --ve-lh-11: 16px;
   --ve-lh-12: 16px;
   --ve-lh-13: 20px;
-  --ve-lh-14: 20px;
-  --ve-lh-16: 24px;
-  --ve-lh-20: 28px;
-  --ve-lh-24: 32px;
+  --ve-lh-15: 20px;
+  --ve-lh-22: 28px;
+  --ve-lh-10: var(--ve-lh-11);
+  --ve-lh-14: var(--ve-lh-13);
+  --ve-lh-16: var(--ve-lh-15);
+  --ve-lh-20: var(--ve-lh-22);
+  --ve-lh-24: var(--ve-lh-22);
   --ve-lh-prose: 1.6; /* 3 行以上の説明文だけ */
 
-  /* 太さは 3 つだけ(700 はテロップの絵の中だけ) */
   --ve-fw-regular: 400;
-  --ve-fw-medium: 500; /* 操作・タブ・ラベル */
-  --ve-fw-semibold: 600; /* 見出し・主ボタン・選んだタブ */
+  --ve-fw-medium: 500;
+  --ve-fw-semibold: 600;
+  --ve-fw-bold: 700; /* 見出し・選んだ工程とタブ・主ボタン(和文は同梱の 700) */
 
-  /* 組み合わせ(font の一括指定に使う) */
-  --ve-type-micro: 500 var(--ve-fs-10) / var(--ve-lh-10) var(--ve-font-mono);
+  --ve-type-micro: 500 var(--ve-fs-11) / var(--ve-lh-11) var(--ve-font-mono);
   --ve-type-caption: 400 var(--ve-fs-11) / var(--ve-lh-11) var(--ve-font-sans);
-  --ve-type-label: 500 var(--ve-fs-12) / var(--ve-lh-12) var(--ve-font-sans);
+  --ve-type-label: 400 var(--ve-fs-12) / var(--ve-lh-12) var(--ve-font-sans);
   --ve-type-body: 400 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-sans);
-  --ve-type-control: 500 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-sans);
-  --ve-type-subhead: 600 var(--ve-fs-14) / var(--ve-lh-14) var(--ve-font-sans);
-  --ve-type-title: 600 var(--ve-fs-16) / var(--ve-lh-16) var(--ve-font-sans);
-  --ve-type-headline: 600 var(--ve-fs-20) / var(--ve-lh-20) var(--ve-font-sans);
-  --ve-type-display: 500 var(--ve-fs-24) / var(--ve-lh-24) var(--ve-font-mono);
-  --ve-type-timecode: 500 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-mono);
+  --ve-type-control: 400 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-sans);
+  --ve-type-subhead: 700 var(--ve-fs-13) / var(--ve-lh-13) var(--ve-font-sans);
+  --ve-type-title: 700 var(--ve-fs-15) / var(--ve-lh-15) var(--ve-font-sans);
+  --ve-type-headline: 700 var(--ve-fs-22) / var(--ve-lh-22) var(--ve-font-sans);
+  --ve-type-display: 500 var(--ve-fs-15) / var(--ve-lh-15) var(--ve-font-mono);
+  --ve-type-timecode: 400 var(--ve-fs-12) / var(--ve-lh-12) var(--ve-font-mono);
 
   /* ---------------------------------------------------------------
      5. 余白(4 の倍数。例外は 2px の「髪の毛」とアイコンと字の間 6px だけ)
@@ -295,100 +337,98 @@
   --ve-space-8: 32px;
   --ve-space-10: 40px;
   --ve-space-12: 48px;
-  --ve-gap-icon: 6px; /* アイコンと字の間 */
-  /* 役割ごとの余白 */
-  --ve-pad-panel: var(--ve-space-3); /* パネルの中 12 */
-  --ve-pad-dialog: var(--ve-space-5); /* ダイアログの中 20 */
-  --ve-gap-field: var(--ve-space-3); /* 欄と欄 12 */
-  --ve-gap-section: var(--ve-space-6); /* 節と節 24 */
-  --ve-gap-actions: var(--ve-space-2); /* ボタンとボタン 8 */
-  --ve-gap-label: var(--ve-space-1); /* ラベルと欄 4(縦) / 8(横) */
+  --ve-gap-icon: 6px;
+  --ve-pad-panel: var(--ve-space-3);
+  --ve-pad-dialog: var(--ve-space-5);
+  --ve-gap-field: var(--ve-space-3);
+  --ve-gap-section: var(--ve-space-6);
+  --ve-gap-actions: var(--ve-space-2);
+  --ve-gap-label: var(--ve-space-1);
 
   /* ---------------------------------------------------------------
-     6. 操作の大きさ(高さ。アイコンだけの操作は同じ辺の正方形)
+     6. 部品の高さ 24 / 28 / 32(トラックの見出しのトグルだけ 20)・帯の高さ
      --------------------------------------------------------------- */
-  --ve-control-xs: 20px; /* トラック見出しの中だけ */
-  --ve-control-sm: 24px; /* 詰めた所: インスペクタの行・タイムラインの道具 */
-  --ve-control-md: 28px; /* 既定 */
-  --ve-control-lg: 32px; /* ダイアログの足・上の帯の主ボタン */
-  --ve-control-xl: 40px; /* 空の状態の 1 つだけの大きな操作 */
+  --ve-control-xs: 20px; /* トラックの見出しのトグル */
+  --ve-control-sm: 24px;
+  --ve-control-md: 28px;
+  --ve-control-lg: 32px;
+  --ve-control-xl: 40px; /* 再生ボタン(丸)・空の状態の 1 つだけの大きな操作 */
   --ve-control-pad-sm: 0 8px;
   --ve-control-pad-md: 0 12px;
   --ve-control-pad-lg: 0 16px;
-  --ve-bar-workflow: 46px; /* 上の帯 */
-  --ve-bar-panel-head: 36px; /* パネルの見出し(タブ)の帯 */
+  --ve-bar-workflow: 44px; /* 上の帯 */
+  --ve-bar-panel-head: 40px; /* パネルの見出し */
   --ve-bar-dialog-head: 48px;
   --ve-bar-dialog-foot: 64px;
-  --ve-bar-status: 28px;
+  --ve-bar-status: 24px;
   --ve-hit-min: 24px; /* 押せる所の最小(WCAG 2.5.8) */
+  --ve-rail-width: 80px; /* 左のレール */
+  --ve-track-head-width: 184px; /* トラックの見出し */
+  --ve-titlebar-overlay: 138px; /* Windows の重ねたボタン(最小化・最大化・閉じる)の幅 */
 
-  /* アイコン(線のセット 1 つ: 24 の格子・線の端は丸。大きさで線が細らないよう非拡大の線) */
-  --ve-icon-xs: 12px; /* xs/sm の操作の中 */
-  --ve-icon-sm: 14px; /* sm の操作 */
-  --ve-icon-md: 16px; /* md/lg の操作・メニュー */
-  --ve-icon-lg: 20px; /* 見出し・空の状態の脇 */
-  --ve-icon-xl: 32px; /* 空の状態の絵 */
-  --ve-icon-stroke: 1.5px; /* vector-effect: non-scaling-stroke と組む(手本は 1.6) */
+  --ve-icon-xs: 12px;
+  --ve-icon-sm: 14px;
+  --ve-icon-md: 16px;
+  --ve-icon-lg: 18px; /* レールのアイコン */
+  --ve-icon-xl: 32px;
+  --ve-icon-stroke: 1.5px;
 
   /* ---------------------------------------------------------------
-     7. 角
+     7. 角 — 部品 3 / カード 4 / ダイアログ 6
      --------------------------------------------------------------- */
-  --ve-radius-xs: 2px; /* kbd・トラックの名札・小さな印 */
-  --ve-radius-sm: 4px; /* クリップ・チェック・ツールチップ・表の中のチップ */
-  --ve-radius-md: 7px; /* 操作(ボタン・入力欄・選択・タブ) */
-  --ve-radius-lg: 10px; /* メニュー・ポップオーバー・面の中のカード */
-  --ve-radius-xl: 12px; /* パネル・ダイアログ */
-  --ve-radius-pill: 999px; /* 絞り込みのチップ・トグル */
-  --ve-radius-round: 50%; /* 再生ボタン・色の丸 */
+  --ve-radius-xs: 2px; /* 小さな印・時間の札 */
+  --ve-radius-sm: 3px; /* クリップ・名札 */
+  --ve-radius-md: 3px; /* 部品(ボタン・入力欄・選択・タブ) */
+  --ve-radius-lg: 4px; /* カード・メニュー・切り替えの組 */
+  --ve-radius-xl: 6px; /* ダイアログ */
+  --ve-radius-pill: 999px;
+  --ve-radius-round: 50%;
 
   /* ---------------------------------------------------------------
-     8. 影(高さ)— 5 段 + 輪
+     8. 影 — 面は平ら。浮く物(メニュー・ダイアログ)だけ落ちる影
      --------------------------------------------------------------- */
   --ve-shadow-0: none;
-  --ve-shadow-control: inset 0 1px 0 rgba(255, 255, 255, 0.05); /* ボタンの上の縁の光 */
-  --ve-shadow-panel:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px rgba(150, 165, 255, 0.07),
-    0 0 0 1px rgba(0, 0, 0, 0.6), 0 12px 32px rgba(0, 0, 0, 0.45);
-  --ve-shadow-popover: 0 0 0 1px var(--ve-border), 0 8px 24px rgba(0, 0, 0, 0.45);
-  --ve-shadow-dialog: 0 0 0 1px var(--ve-border), 0 24px 64px rgba(0, 0, 0, 0.55);
-  /* 落ちる影だけ(枠の輪を持たない物に組む)。小: 押せる物の浮き / 中: メニュー・カード / 大: 浮く窓 */
-  --ve-drop-sm: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --ve-drop-md: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --ve-drop-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
-  --ve-shadow-primary: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 2px rgba(0, 0, 0, 0.5);
-  --ve-glow-primary: 0 6px 22px rgba(255, 140, 30, 0.35); /* 上の帯の「書き出す」1 つだけ */
-  --ve-focus-ring: 0 0 0 2px var(--ve-bg), 0 0 0 4px var(--ve-primary); /* 面1 で 11:1 */
+  --ve-shadow-control: none;
+  --ve-shadow-panel: none;
+  --ve-shadow-popover: 0 0 0 1px var(--ve-border), 0 8px 24px rgba(0, 0, 0, 0.5);
+  --ve-shadow-dialog: 0 0 0 1px var(--ve-border), 0 24px 64px rgba(0, 0, 0, 0.6);
+  --ve-drop-sm: 0 2px 6px rgba(0, 0, 0, 0.4);
+  --ve-drop-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --ve-drop-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --ve-shadow-primary: none;
+  --ve-glow-primary: none; /* 主ボタンは光らせない */
+  --ve-focus-ring: 0 0 0 2px var(--ve-primary);
   --ve-focus-outline: 2px solid var(--ve-primary);
-  --ve-focus-offset: 2px;
+  --ve-focus-offset: 1px;
 
   /* ---------------------------------------------------------------
      9. 動き
      --------------------------------------------------------------- */
   --ve-dur-instant: 0ms;
-  --ve-dur-fast: 90ms; /* hover・押す・色が変わる */
-  --ve-dur-base: 160ms; /* タブの印・メニュー/ポップオーバーが出る・開閉の矢印 */
-  --ve-dur-slow: 240ms; /* ダイアログが出る・パネルの開閉 */
-  --ve-dur-exit: 120ms; /* 消えるときは出るときより速く */
-  --ve-ease-out: cubic-bezier(0.2, 0.7, 0.2, 1); /* 出る・変わる(既定) */
-  --ve-ease-in: cubic-bezier(0.4, 0, 1, 1); /* 消える */
-  --ve-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* 画面の中を動く(つまみ・並べ替え) */
+  --ve-dur-fast: 90ms;
+  --ve-dur-base: 160ms;
+  --ve-dur-slow: 240ms;
+  --ve-dur-exit: 120ms;
+  --ve-ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ve-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ve-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --ve-motion-dialog-from: translateY(4px) scale(0.98);
 
   /* ---------------------------------------------------------------
-     10. 重なり(17 種 → 9 段)
+     10. 重なり
      --------------------------------------------------------------- */
   --ve-z-base: 0;
-  --ve-z-raised: 1; /* 隣より上(選んだクリップ・つまみ) */
-  --ve-z-sticky: 10; /* ルーラ・トラック見出し */
+  --ve-z-raised: 1;
+  --ve-z-sticky: 10;
   --ve-z-playhead: 20;
-  --ve-z-dropdown: 100; /* 右クリック・選択の一覧 */
+  --ve-z-dropdown: 100;
   --ve-z-popover: 110;
-  --ve-z-modal: 200; /* 背景 + ダイアログ */
+  --ve-z-modal: 200;
   --ve-z-toast: 300;
   --ve-z-tooltip: 400;
 
   /* 無効 */
-  --ve-disabled-surface: var(--ve-surface-3);
+  --ve-disabled-surface: var(--ve-surface-card);
   --ve-disabled-border: var(--ve-border-subtle);
   --ve-disabled-text: var(--ve-text-disabled);
 }

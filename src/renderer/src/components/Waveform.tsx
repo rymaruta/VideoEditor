@@ -5,8 +5,11 @@ import {
   peakColumnSpan,
   peakEnvelope,
   WAVEFORM_DENSITY,
+  WAVEFORM_AMP_SHARE,
   WAVEFORM_HEIGHT_SCALE,
+  WAVEFORM_SPLIT_MIN_HEIGHT,
   WAVEFORM_TILE_WIDTH,
+  mergedColumn,
   tileReadRange,
   waveformTiles,
   waveformImageRequestSize,
@@ -78,7 +81,10 @@ function tileLevels(
   ctx.clearRect(0, 0, sw, h)
   ctx.drawImage(img, sx, 0, sw, h, 0, 0, sw, h)
   // 平方根で持ち上げてから山を取る(小さい音も読め、尖りは残る)
-  const levels = liftLevels(columnLevels(ctx.getImageData(0, 0, sw, h).data, sw, h), (h - 1) / 2)
+  // 上限はレーンの高さの 80%(絵の中の高さを縮めてから持ち上げる)
+  const half = (h - 1) / 2
+  const raw = columnLevels(ctx.getImageData(0, 0, sw, h).data, sw, h)
+  const levels = liftLevels(raw, half).map((v) => v * WAVEFORM_AMP_SHARE)
   const peak = peakEnvelope(levels)
   const result = {
     rms: levels.slice(offset, offset + tile.w),
@@ -108,9 +114,9 @@ function drawTile(canvas: HTMLCanvasElement, img: HTMLImageElement, tile: WaveTi
     style.getPropertyValue(`--g3-wave-${name}`).trim() ||
     style.getPropertyValue(`--ve-wave-${name}`).trim() ||
     fallback
-  ctx.fillStyle = color('peak', '#2f6b50')
+  ctx.fillStyle = color('peak', 'rgba(230, 244, 236, 0.35)')
   for (let x = 0; x < tile.w; x++) if (peak[x] > 0) ctx.fillRect(x, mid - peak[x], 1, peak[x] * 2)
-  ctx.fillStyle = color('rms', '#7bddae')
+  ctx.fillStyle = color('rms', 'rgba(230, 244, 236, 0.85)')
   for (let x = 0; x < tile.w; x++) if (rms[x] > 0) ctx.fillRect(x, mid - rms[x], 1, rms[x] * 2)
 }
 
@@ -135,16 +141,24 @@ function drawPeakTile(
     style.getPropertyValue(`--ve-wave-${name}`).trim() ||
     fallback
   ctx.clearRect(0, 0, tile.w, h)
-  const band = h / peaks.channels.length
-  const peakColor = color('peak', '#2f6b50')
-  const rmsColor = color('rms', '#7bddae')
-  peaks.channels.forEach((ch, i) => {
+  // 低いレーン(48px 未満)は L と R を 1 本に重ねる。高いレーンは上下 2 段
+  const merge = height < WAVEFORM_SPLIT_MIN_HEIGHT && peaks.channels.length > 1
+  const rows = merge ? 1 : peaks.channels.length
+  const band = h / rows
+  const peakColor = color('peak', 'rgba(230, 244, 236, 0.35)')
+  const rmsColor = color('rms', 'rgba(230, 244, 236, 0.85)')
+  for (let i = 0; i < rows; i++) {
+    const ch = peaks.channels[i]
     const cy = band * i + band / 2
-    const amp = band / 2 - 0.5
+    // 振幅 1 でも段の高さの 80% まで
+    const amp = (band / 2) * WAVEFORM_AMP_SHARE
     const spans: ReturnType<typeof peakColumnSpan>[] = []
     for (let x = 0; x < tile.w; x++) {
       const k = tile.x + x
-      spans.push(peakColumnSpan(ch.max[k], ch.min[k], ch.rms[k], cy, amp))
+      const v = merge
+        ? mergedColumn(peaks.channels, k)
+        : { max: ch.max[k], min: ch.min[k], rms: ch.rms[k] }
+      spans.push(peakColumnSpan(v.max, v.min, v.rms, cy, amp))
     }
     ctx.fillStyle = peakColor
     spans.forEach((s, x) => {
@@ -154,7 +168,7 @@ function drawPeakTile(
     spans.forEach((s, x) => {
       if (s.rmsBottom - s.rmsTop > 0.01) ctx.fillRect(x, s.rmsTop, 1, s.rmsBottom - s.rmsTop)
     })
-  })
+  }
 }
 
 /**

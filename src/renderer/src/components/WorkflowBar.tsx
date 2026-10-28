@@ -5,7 +5,9 @@ import { useReviewItems } from '../lib/useReviewItems'
 import { isModalOpen } from '../lib/useKeyboardShortcuts'
 import { modifierLabel, workflowBarUndo } from '../lib/undoAction'
 import { useModalOpen } from '../lib/useModalOpen'
-import { RedoIcon, UndoIcon, UploadIcon } from './icons'
+import { CheckIcon, RedoIcon, SparklesIcon, TypeIcon, UndoIcon, UploadIcon } from './icons'
+import { PRODUCT_NAME } from '@shared/product'
+import { ProjectNameField } from './ProjectNameField'
 import { needsMenuButton } from '@shared/windowChrome'
 import { createAltTapDetector, menuMnemonicFor } from '../lib/altMenuKey'
 import { topMenuMnemonics } from '@shared/appMenu'
@@ -24,7 +26,7 @@ const platform = (typeof window !== 'undefined' && window.api?.platform) || ''
  * - 確認 → 自動編集の画面の要確認の一覧へ(最初の項目にフォーカス)。件数はステータスバーの「要確認」と同じ数
  * - 編集 → この画面(上段左のパネルをインスペクタへ戻す)
  * - テロップ → 上段左のパネルをテロップへ(メニューの「ウィンドウ > テキスト」と同じ)
- * - 書き出し → 書き出しの窓(メニューの「書き出し…」と同じ)
+ * 書き出しは工程に並べず、右上の「書き出す」1 か所にまとめる(メニューの「書き出し…」と同じ窓)。
  * ショートの画面はまだ無いので並べない。
  */
 export function WorkflowBar({
@@ -37,7 +39,6 @@ export function WorkflowBar({
   onEdit: () => void
   onTelop: () => void
 }): React.JSX.Element {
-  const projectName = useProjectStore((s) => s.project.name)
   // 試しに当てている間は、試す前の未保存の印
   const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const reviewCount = useReviewItems().open.length
@@ -76,7 +77,7 @@ export function WorkflowBar({
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const openMenu = (): void => {
     const b = menuButtonRef.current?.getBoundingClientRect()
-    window.api.popupAppMenu(b ? { x: b.left, y: b.bottom + 2 } : { x: 8, y: 46 })
+    window.api.popupAppMenu(b ? { x: b.left, y: b.bottom + 2 } : { x: 8, y: 44 })
   }
   // Alt を単独で押して離したら、メニューボタンへ(Windows のメニューバーと同じ入り方)。
   // ダイアログの間は帯ごと inert なので移さない
@@ -96,7 +97,7 @@ export function WorkflowBar({
       e.preventDefault()
       e.stopPropagation()
       const b = menuButtonRef.current?.getBoundingClientRect()
-      window.api.popupTopMenu(letter, b ? { x: b.left, y: b.bottom + 2 } : { x: 8, y: 46 })
+      window.api.popupTopMenu(letter, b ? { x: b.left, y: b.bottom + 2 } : { x: 8, y: 44 })
     }
     const onUp = (e: KeyboardEvent): void => {
       if (!alt.keyup(e) || isModalOpen()) return
@@ -167,22 +168,29 @@ export function WorkflowBar({
             <path d="M7 4.5v15l12.5-7.5z" fill="currentColor" />
           </svg>
         </span>
-        <span className="workflow-bar-name" title={projectName}>
-          {projectName}
+        <span className="workflow-bar-product">{PRODUCT_NAME}</span>
+        <span className="workflow-bar-slash" aria-hidden="true">
+          /
         </span>
-        <span className={`workflow-bar-saved ${isDirty ? 'dirty' : ''}`}>
+        <span className="workflow-bar-name">
+          <ProjectNameField />
+        </span>
+        <span
+          className={`workflow-bar-saved ${isDirty ? 'dirty' : ''}`}
+          title={isDirty ? '未保存の変更があります' : '保存済みです'}
+        >
           <span className="workflow-bar-saved-dot" aria-hidden="true" />
-          {isDirty ? '未保存の変更あり' : '保存済み'}
+          {isDirty ? '未保存' : '保存済み'}
         </span>
       </div>
-      <nav className="workflow-steps" aria-label="作業の流れ">
+      <nav className="workflow-steps" aria-label="工程">
         <button
           type="button"
           className={`workflow-step ${autoOpen ? 'current' : ''}`}
           aria-current={autoOpen ? 'page' : undefined}
           onClick={openAutoEdit}
         >
-          {autoOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          <SparklesIcon width={14} height={14} />
           自動編集
         </button>
         <button
@@ -191,10 +199,12 @@ export function WorkflowBar({
           aria-current={reviewOpen ? 'page' : undefined}
           onClick={() => emitMenuCommand('auto.review')}
         >
-          {reviewOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          <CheckIcon width={14} height={14} />
           確認
           {reviewCount > 0 && (
-            <span className="workflow-step-count">{reviewCount.toLocaleString()}</span>
+            <span className="workflow-step-count" aria-label={`要確認 ${reviewCount} 件`}>
+              {reviewCount.toLocaleString()}
+            </span>
           )}
         </button>
         <button
@@ -206,7 +216,14 @@ export function WorkflowBar({
             onEdit()
           }}
         >
-          {!telopOpen && !screenOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M2 3h12v10H2zM2 7h12M6 7v6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
           編集
         </button>
         <button
@@ -218,11 +235,8 @@ export function WorkflowBar({
             onTelop()
           }}
         >
-          {telopOpen && !screenOpen && <span className="workflow-step-dot" aria-hidden="true" />}
+          <TypeIcon width={14} height={14} />
           テロップ
-        </button>
-        <button type="button" className="workflow-step" onClick={openExport}>
-          書き出し
         </button>
       </nav>
       <div className="workflow-bar-actions">
@@ -246,11 +260,14 @@ export function WorkflowBar({
         >
           <RedoIcon width={16} height={16} />
         </button>
-        <span className="workflow-bar-sep" aria-hidden="true" />
-        <button type="button" className="primary-button workflow-export" onClick={openExport}>
-          <UploadIcon width={16} height={16} />
+        <button
+          type="button"
+          className="primary-button workflow-export"
+          title={`書き出し… (${mod}+M)`}
+          onClick={openExport}
+        >
+          <UploadIcon width={14} height={14} />
           書き出す
-          <span className="workflow-export-key tc">{mod}+M</span>
         </button>
       </div>
     </header>
