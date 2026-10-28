@@ -510,9 +510,10 @@ export function indistinctJudgements(
  * 長さに合わせて落とした場面を、何で選んだか(落とした理由の文に使う)。score = 残った中で点数がいちばん
  * 低かった、cues = 同じ点の中で中身の手掛かりが少なかった、beside = 同じ点の中で前後がすでに落ちていた、
  * edge = 同じ点の場面が番組の頭・終わりしか残っていなかった、fit = 同じ点の中で、落とすと目標の長さに
- * いちばん近くなった
+ * いちばん近くなった、refit = 点数の低い順に落とした後、この場面より点の低い短い場面を、戻しても目標に
+ * 収まるので戻した(この場面は長くて戻せなかった)
  */
-export type LengthDropBy = 'score' | 'cues' | 'beside' | 'edge' | 'fit'
+export type LengthDropBy = 'score' | 'cues' | 'beside' | 'edge' | 'fit' | 'refit'
 
 export interface Selection {
   kept: string[]
@@ -704,14 +705,25 @@ export function selectScenes(
       dropped.some((d) => d.sceneId === x.id && d.why === 'length')
     )
     byLength.sort((a, b) => score(b) - score(a) || substance(b) - substance(a))
+    const restored: Scene[] = []
     for (const x of byLength) {
       if (total + estimate(x) > targetSec) continue
       keep.add(x.id)
       total += estimate(x)
+      restored.push(x)
       dropped.splice(
         dropped.findIndex((d) => d.sceneId === x.id),
         1
       )
+    }
+    // 点数の低い場面から落とした場面より点の低い場面を戻したら、決め手は「点数」だけではない(戻した場面は
+    // 短く、この場面は長くて戻せなかった)。前は「点数の低い場面から」と出て、より低い場面が残る食い違いに
+    // 見えた(試し編集 第4回: 55 点の s7 を落とし、50 点・9 秒の s8 が残った)
+    const sceneOf = new Map(scenes.map((x) => [x.id, x]))
+    for (const d of dropped) {
+      if (d.why !== 'length' || d.by !== 'score') continue
+      const me = score(sceneOf.get(d.sceneId)!)
+      if (restored.some((x) => score(x) < me)) d.by = 'refit'
     }
   }
   return {
