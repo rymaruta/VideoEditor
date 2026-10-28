@@ -34,7 +34,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import nodePath, { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** ffmpeg / ffprobe の -version の出力を読む */
@@ -55,18 +55,78 @@ export function parseVersionOutput(text) {
   return { version, release, gitHash, configuration, enabled: [...enabled].sort() }
 }
 
-/** ffmpeg-static が配る README(「libx264: 0.164.3191」の並び)から、ライブラリの版を読む */
+/**
+ * ffmpeg-static が配る README から、ライブラリの版を読む。
+ * - Linux 版(John Van Sickle のビルド): 「libx264: 0.164.3191」の並び
+ * - Windows 版(gyan.dev のビルド): 「… external libraries' versions:」の下の「x265 3.5-153-gce8642f22」の並び。
+ *   名前は Linux 版にそろえて lib をつけた小文字(x265 → libx265)にし、版の頭の v は外す(v1.3.7 → 1.3.7)
+ */
 export function parseReadmeVersions(readme) {
   const out = {}
+  // gyan.dev の一覧: 'none'(外)→ 'before'(見出しの後の空行)→ 'in'(一覧の中)。空行・別の形の行で終わる
+  let gyan = 'none'
   for (const line of String(readme ?? '').split(/\r?\n/)) {
+    if (/external libraries' versions:\s*$/i.test(line)) {
+      gyan = 'before'
+      continue
+    }
+    if (gyan !== 'none') {
+      const g = /^([A-Za-z][\w.+-]*) +(\S+)\s*$/.exec(line)
+      if (g) {
+        const lower = g[1].toLowerCase()
+        out[lower.startsWith('lib') ? lower : `lib${lower}`] = g[2].replace(/^v(?=\d)/, '')
+        gyan = 'in'
+        continue
+      }
+      if (gyan === 'before' && line.trim() === '') continue
+      gyan = 'none'
+    }
     const m = /^\s*([A-Za-z][\w.+-]*)\s*:\s*(\S.*?)\s*$/.exec(line)
     if (!m) continue
     const name = m[1].toLowerCase()
-    if (['build', 'version', 'notes', 'email', 'irc', 'url', 'patreon', 'paypal'].includes(name))
-      continue
+    const skip = [
+      'build',
+      'version',
+      'license',
+      'notes',
+      'email',
+      'irc',
+      'url',
+      'patreon',
+      'paypal'
+    ]
+    if (skip.includes(name)) continue
     out[name] = m[2]
   }
   return out
+}
+
+/**
+ * ffmpeg-static が実行ファイルの横に置く README・LICENSE の場所の候補(先にあるものほど優先)。
+ * ffmpeg-static の install.js は、実行ファイルのパス(index.js が返すもの。Windows では ffmpeg.exe)に
+ * .README・.LICENSE を足した名前で落とす。つまり Windows では ffmpeg.exe.README・ffmpeg.exe.LICENSE、
+ * ほかの OS では ffmpeg.README・ffmpeg.LICENSE(落とせなかったときは警告だけで、無いこともある)。
+ * `pathApi` は試験で path.win32 / path.posix を渡すため。
+ */
+export function ffmpegStaticDocCandidates(exePath, pathApi = nodePath) {
+  const dir = pathApi.dirname(exePath)
+  const bases = [...new Set([pathApi.basename(exePath), 'ffmpeg.exe', 'ffmpeg'])]
+  return {
+    readme: bases.map((b) => pathApi.join(dir, `${b}.README`)),
+    license: bases.map((b) => pathApi.join(dir, `${b}.LICENSE`))
+  }
+}
+
+/**
+ * ffmpeg-static の README・LICENSE を探す(無いものは null)。ffmpeg-static が LICENSE を配らなかったときは、
+ * `fallbackLicense`(リポジトリに置いた GPL v3 の全文 scripts/license-texts/GPL-3.0.txt)を使う。
+ */
+export function findFfmpegStaticDocs(exePath, fallbackLicense) {
+  const c = ffmpegStaticDocCandidates(exePath)
+  const first = (list) => list.find((p) => existsSync(p)) ?? null
+  const own = first(c.license)
+  const fallback = fallbackLicense && existsSync(fallbackLicense) ? fallbackLicense : null
+  return { readme: first(c.readme), license: own ?? fallback, licenseFromPackage: own !== null }
 }
 
 /** x264 が書く印(「x264 - core 164 r3191 4613ac3」)を読む */
@@ -76,6 +136,8 @@ export function parseX264Banner(text) {
 }
 
 const isHash = (s) => /^[0-9a-f]{7,40}$/.test(s ?? '')
+/** git describe の版(3.5-153-gce8642f22・1.1.1-4-g05829db)。[1] がコミット */
+const DESCRIBED = /^\d+(?:\.\d+)+-\d+-g([0-9a-f]{7,40})$/
 
 /**
  * GPL のライブラリ。`flag` は configure の --enable-…、`readme` は README の名前。
@@ -106,6 +168,13 @@ export const GPL_LIBRARIES = [
         return {
           version: v,
           url: `https://bitbucket.org/multicoreware/x265_git/get/${hash}.tar.gz`
+        }
+      // git describe の形(Windows 版 gyan.dev の 3.5-153-gce8642f22): そのコミットのソース
+      const described = DESCRIBED.exec(v)
+      if (described)
+        return {
+          version: v,
+          url: `https://bitbucket.org/multicoreware/x265_git/get/${described[1]}.tar.gz`
         }
       if (/^\d+(\.\d+)+$/.test(v))
         return {
@@ -162,8 +231,18 @@ export const GPL_LIBRARIES = [
     id: 'vidstab',
     flag: 'libvidstab',
     license: 'GPL-2.0-or-later',
-    // README の版(1.20 など)は vid.stab のタグと対応しない。--source vidstab=<url> で与える
-    resolve: () => null
+    // Linux 版の README の版(1.20 など)は vid.stab のタグと対応しない。--source vidstab=<url> で与える。
+    // Windows 版(gyan.dev)は git describe の形(1.1.1-4-g05829db)なので、そのコミットのソースを取る
+    resolve: ({ readme }) => {
+      const v = readme.libvidstab ?? ''
+      const described = DESCRIBED.exec(v)
+      return described
+        ? {
+            version: v,
+            url: `https://github.com/georgmartius/vid.stab/archive/${described[1]}.tar.gz`
+          }
+        : null
+    }
   }
 ]
 
@@ -399,8 +478,14 @@ export function main(argv, projectDir) {
     const path = bins[kind]
     if (!existsSync(path)) throw new Error(`${kind} が見つかりません: ${path}(npm ci をやり直す)`)
     const versionText = run(path, ['-version'])
-    const readmePath = kind === 'ffmpeg' ? join(dirname(path), 'ffmpeg.README') : ''
-    const licensePath = kind === 'ffmpeg' ? join(dirname(path), 'ffmpeg.LICENSE') : ''
+    // README・LICENSE は Windows では ffmpeg.exe.README・ffmpeg.exe.LICENSE(ffmpegStaticDocCandidates)。
+    // LICENSE が無ければ、リポジトリに置いた GPL v3 の全文を入れる
+    const docs =
+      kind === 'ffmpeg'
+        ? findFfmpegStaticDocs(path, join(projectDir, 'scripts', 'license-texts', 'GPL-3.0.txt'))
+        : { readme: null, license: null }
+    const readmePath = docs.readme ?? ''
+    const licensePath = docs.license ?? ''
     const readme = readmePath && existsSync(readmePath) ? readFileSync(readmePath, 'utf-8') : ''
     const banner = kind === 'ffmpeg' ? x264Banner(path) : ''
     plans.push(

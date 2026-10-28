@@ -1,5 +1,13 @@
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -234,12 +242,60 @@ describe('ライセンス表記の生成: 欠けたまま作らない', () => {
     const { problems } = buildNotices(root)
     expect(problems).toEqual(
       expect.arrayContaining([
-        'ffmpeg-static の ffmpeg.LICENSE がありません',
+        'ffmpeg-static の ffmpeg.LICENSE(Windows では ffmpeg.exe.LICENSE)も、scripts/license-texts/GPL-3.0.txt もありません',
         'ffmpeg を実行して版と構成を読めませんでした',
         'Electron の LICENSES.chromium.html がありません'
       ])
     )
     expect(problems.some((p) => p.includes('Electron の LICENSE がありません'))).toBe(false)
+  })
+
+  /** ffmpeg-static だけを入れた小さなプロジェクト(実行ファイルは動かない偽物) */
+  function ffmpegOnlyProject(name: string, ffmpegFiles: Record<string, string>): string {
+    const root = join(tmp, name)
+    pkg(root, { name: 'app', version: '1.0.0', dependencies: { 'ffmpeg-static': '1' } })
+    mkdirSync(join(root, 'src', 'shared'), { recursive: true })
+    writeFileSync(join(root, 'src', 'shared', 'product.json'), JSON.stringify({ name: 'P' }))
+    pkg(
+      join(root, 'node_modules', 'ffmpeg-static'),
+      { name: 'ffmpeg-static', version: '5.3.0', license: 'GPL-3.0-or-later' },
+      ffmpegFiles
+    )
+    return root
+  }
+  const licenseProblem = (problems: string[]): boolean =>
+    problems.some((p) => p.includes('LICENSE') && p.includes('ffmpeg'))
+
+  it('Windows の ffmpeg-static(ffmpeg.exe の横の ffmpeg.exe.LICENSE・ffmpeg.exe.README)も GPL の全文と構成を載せる', () => {
+    // ffmpeg-static の install.js は「実行ファイルのパス + .LICENSE」に落とす。Windows では ffmpeg.exe.LICENSE
+    const root = ffmpegOnlyProject('win-layout', {
+      'ffmpeg.exe': 'not really an exe',
+      'ffmpeg.exe.LICENSE': 'WIN GPL3 TEXT',
+      'ffmpeg.exe.README': 'FFmpeg 64-bit static Windows build from www.gyan.dev'
+    })
+    const { problems, text } = buildNotices(root)
+    expect(licenseProblem(problems)).toBe(false)
+    expect(text).toContain('WIN GPL3 TEXT')
+    expect(text).toContain('Windows build from www.gyan.dev')
+  })
+
+  it('ffmpeg-static が LICENSE を配らなかったときは、リポジトリに置いた GPL v3 の全文を載せる', () => {
+    const root = ffmpegOnlyProject('no-license', { 'ffmpeg.exe': 'not really an exe' })
+    mkdirSync(join(root, 'scripts', 'license-texts'), { recursive: true })
+    writeFileSync(join(root, 'scripts', 'license-texts', 'GPL-3.0.txt'), 'REPO GPL3 TEXT')
+    const { problems, text } = buildNotices(root)
+    expect(licenseProblem(problems)).toBe(false)
+    expect(text).toContain('REPO GPL3 TEXT')
+  })
+
+  it('リポジトリの GPL v3 の全文は FSF の GPL v3 そのもの', () => {
+    const gpl = readFileSync(
+      join(__dirname, '..', '..', 'scripts', 'license-texts', 'GPL-3.0.txt'),
+      'utf-8'
+    )
+    expect(gpl).toContain('GNU GENERAL PUBLIC LICENSE')
+    expect(gpl).toContain('Version 3, 29 June 2007')
+    expect(gpl).toContain('END OF TERMS AND CONDITIONS')
   })
 
   // Windows はシンボリックリンクを作るのに管理者の権限が要る

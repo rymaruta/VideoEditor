@@ -23,6 +23,7 @@ import {
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { findFfmpegStaticDocs } from './gpl-sources.mjs'
 
 /** devDependencies だが、画面のコードに取り込まれて製品に入るもの */
 export const BUNDLED_FROM_DEV = ['react', 'react-dom']
@@ -504,12 +505,24 @@ export function buildNotices(projectDir) {
   const chromiumLicenses = electronDir ? join(electronDir, 'dist', CHROMIUM_LICENSES) : ''
   const ffmpegVersion = ffmpegExe ? binaryVersion(ffmpegExe) : ''
   const ffprobeVersion = ffprobeExe ? binaryVersion(ffprobeExe) : ''
-  const ffmpegLicense = ffmpegDir ? optionalText(join(ffmpegDir, 'ffmpeg.LICENSE')) : ''
+  // ffmpeg-static の README・LICENSE は「実行ファイルのパス + .README / .LICENSE」(Windows では ffmpeg.exe.LICENSE)。
+  // LICENSE が無ければ、リポジトリに置いた GPL v3 の全文(scripts/license-texts/GPL-3.0.txt)を載せる
+  const ffmpegDocs = ffmpegDir
+    ? findFfmpegStaticDocs(ffmpegExe ?? join(ffmpegDir, 'ffmpeg'), join(textsDir, 'GPL-3.0.txt'))
+    : { readme: null, license: null, licenseFromPackage: false }
+  const ffmpegLicense = optionalText(ffmpegDocs.license)
 
   // 表記が欠けたまま出荷しないよう、欠けたものを挙げる(CLI は失敗で終わる)
   const problems = []
   if (!ffmpegDir) problems.push('ffmpeg-static が入っていません')
-  if (!ffmpegLicense) problems.push('ffmpeg-static の ffmpeg.LICENSE がありません')
+  if (ffmpegDir && !ffmpegLicense)
+    problems.push(
+      'ffmpeg-static の ffmpeg.LICENSE(Windows では ffmpeg.exe.LICENSE)も、scripts/license-texts/GPL-3.0.txt もありません'
+    )
+  // 代わりの全文は GPL v3。v3 でビルドされていない(--enable-version3 が無い)ffmpeg には使えない
+  const usesFallback = Boolean(ffmpegLicense) && !ffmpegDocs.licenseFromPackage
+  if (usesFallback && ffmpegVersion && !/--enable-version3\b/.test(ffmpegVersion))
+    problems.push('ffmpeg が GPL v3 でビルドされておらず、GPL-3.0.txt の全文では表記になりません')
   if (!ffmpegVersion) problems.push('ffmpeg を実行して版と構成を読めませんでした')
   if (!ffprobeVersion) problems.push('ffprobe を実行して版と構成を読めませんでした')
   if (!electron.license) problems.push('Electron の LICENSE がありません')
@@ -529,7 +542,7 @@ export function buildNotices(projectDir) {
       ffmpeg: ffmpegDir
         ? {
             version: ffmpegVersion,
-            readme: optionalText(join(ffmpegDir, 'ffmpeg.README')),
+            readme: optionalText(ffmpegDocs.readme),
             license: ffmpegLicense
           }
         : undefined,

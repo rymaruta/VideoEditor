@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import path, { join } from 'path'
+import { afterAll, describe, expect, it } from 'vitest'
 import {
   debianSourceFiles,
   ffmpegSourceUrl,
+  ffmpegStaticDocCandidates,
+  findFfmpegStaticDocs,
   looksLikeArchive,
   missingItems,
   parseReadmeVersions,
@@ -170,5 +175,120 @@ describe('GPL のソース一式: 取ってきた物の確かめ', () => {
       'frei0r_1.6.1.orig.tar.gz'
     ])
     expect(files[1].url).toBe('https://snapshot.debian.org/file/ccc')
+  })
+})
+
+// ffmpeg-static 5.3.0(b6.1.1)の Windows 版(gyan.dev のビルド)の README(win32-x64.README)の抜き書き。
+// -version の出力は Windows で動かせないので、版の行と configure の GPL の部品だけを写したもの
+const VERSION_WIN = [
+  'ffmpeg version 6.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2023 the FFmpeg developers',
+  'built with gcc 12.2.0 (Rev10, Built by MSYS2 project)',
+  'configuration: --enable-gpl --enable-version3 --enable-static --enable-libx264 --enable-libx265 --enable-libxvid --enable-librubberband --enable-libvidstab --enable-libaom --enable-libopus'
+].join('\r\n')
+const README_WIN = [
+  'FFmpeg 64-bit static Windows build from www.gyan.dev',
+  '',
+  'Version: 6.1.1-essentials_build-www.gyan.dev',
+  '',
+  'License: GPL v3',
+  '',
+  'Source Code: https://github.com/FFmpeg/FFmpeg/commit/e38092ef93',
+  '',
+  'release-essentials build configuration: ',
+  '',
+  'ARCH                      x86 (generic)',
+  '',
+  'Enabled outdevs:',
+  'sdl2',
+  '',
+  "release-essentials external libraries' versions: ",
+  '',
+  'AMF v1.4.32',
+  'aom v3.8.0-180-g0eeb62d344',
+  'libass 0.17.0-63-gc047dd2',
+  'opus v1.4-9-gc8549975',
+  'rubberband v1.8.1',
+  'vidstab v1.1.1-4-g05829db',
+  'x264 v0.164.3172',
+  'x265 3.5-153-gce8642f22',
+  'xvid v1.3.7',
+  'zimg release-3.0.5-150-g7143181',
+  ''
+].join('\r\n')
+
+describe('GPL のソース一式: Windows 版(gyan.dev)の ffmpeg-static', () => {
+  it('README・LICENSE は「実行ファイル + .README / .LICENSE」(Windows では ffmpeg.exe.LICENSE)を先に探す', () => {
+    const win = ffmpegStaticDocCandidates(
+      'C:\\app\\node_modules\\ffmpeg-static\\ffmpeg.exe',
+      path.win32
+    )
+    expect(win.license[0]).toBe('C:\\app\\node_modules\\ffmpeg-static\\ffmpeg.exe.LICENSE')
+    expect(win.readme[0]).toBe('C:\\app\\node_modules\\ffmpeg-static\\ffmpeg.exe.README')
+    expect(win.license).toContain('C:\\app\\node_modules\\ffmpeg-static\\ffmpeg.LICENSE')
+    const posix = ffmpegStaticDocCandidates('/app/node_modules/ffmpeg-static/ffmpeg', path.posix)
+    expect(posix.license[0]).toBe('/app/node_modules/ffmpeg-static/ffmpeg.LICENSE')
+    expect(posix.readme[0]).toBe('/app/node_modules/ffmpeg-static/ffmpeg.README')
+  })
+
+  const tmp = mkdtempSync(join(tmpdir(), 've-gplsrc-'))
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }))
+
+  it('Windows の並び(ffmpeg.exe.LICENSE)を見つけ、LICENSE が無ければリポジトリの GPL v3 の全文を使う', () => {
+    const win = join(tmp, 'win')
+    mkdirSync(win)
+    writeFileSync(join(win, 'ffmpeg.exe'), '')
+    writeFileSync(join(win, 'ffmpeg.exe.LICENSE'), 'gpl')
+    writeFileSync(join(win, 'ffmpeg.exe.README'), 'readme')
+    const fallback = join(tmp, 'GPL-3.0.txt')
+    writeFileSync(fallback, 'repo gpl')
+    expect(findFfmpegStaticDocs(join(win, 'ffmpeg.exe'), fallback)).toEqual({
+      readme: join(win, 'ffmpeg.exe.README'),
+      license: join(win, 'ffmpeg.exe.LICENSE'),
+      licenseFromPackage: true
+    })
+    const bare = join(tmp, 'bare')
+    mkdirSync(bare)
+    writeFileSync(join(bare, 'ffmpeg.exe'), '')
+    expect(findFfmpegStaticDocs(join(bare, 'ffmpeg.exe'), fallback)).toEqual({
+      readme: null,
+      license: fallback,
+      licenseFromPackage: false
+    })
+    expect(findFfmpegStaticDocs(join(bare, 'ffmpeg.exe')).license).toBeNull()
+  })
+
+  it('gyan.dev の README のライブラリの版(「x265 3.5-153-gce8642f22」の並び)を読む', () => {
+    const r = parseReadmeVersions(README_WIN)
+    expect(r.libx265).toBe('3.5-153-gce8642f22')
+    expect(r.libxvid).toBe('1.3.7')
+    expect(r.librubberband).toBe('1.8.1')
+    expect(r.libvidstab).toBe('1.1.1-4-g05829db')
+    expect(r.libx264).toBe('0.164.3172')
+    expect(r.libaom).toBe('3.8.0-180-g0eeb62d344')
+    // 見出し・構成の行は版として拾わない
+    expect(r.license).toBeUndefined()
+    expect(r.version).toBeUndefined()
+    expect(r.libarch).toBeUndefined()
+    expect(r.libsdl2).toBeUndefined()
+  })
+
+  it('6.1.1 のリリースのソースと、GPL のライブラリをすべて決める(入手先の決まらない部品が残らない)', () => {
+    const plan = planSources({
+      kind: 'ffmpeg',
+      versionText: VERSION_WIN,
+      readme: README_WIN,
+      x264Banner: 'x264 - core 164 r3172 c1c9931 - H.264/MPEG-4 AVC codec'
+    })
+    const byId = Object.fromEntries(plan.items.map((i) => [i.id, i]))
+    expect(plan.parsed.release).toBe('6.1.1')
+    expect(byId.ffmpeg.url).toBe('https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz')
+    expect(byId.ffmpeg.license).toBe('GPL-3.0-or-later')
+    expect(byId.x264.url).toContain('/x264-c1c9931.tar.bz2')
+    expect(byId.x265.url).toBe('https://bitbucket.org/multicoreware/x265_git/get/ce8642f22.tar.gz')
+    expect(byId.xvid.url).toBe('https://downloads.xvid.com/downloads/xvidcore-1.3.7.tar.gz')
+    expect(byId.rubberband.url).toContain('rubberband-1.8.1.tar.bz2')
+    expect(byId.vidstab.url).toBe('https://github.com/georgmartius/vid.stab/archive/05829db.tar.gz')
+    expect(missingItems([plan])).toEqual([])
+    expect(plan.others.find((o) => o.name === 'libaom')?.version).toBe('3.8.0-180-g0eeb62d344')
   })
 })
