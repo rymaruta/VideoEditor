@@ -467,3 +467,92 @@ export function dictionaryNoCut(
   }
   return (index) => inside.has(index)
 }
+
+/** 数字の後ろに付く単位(数字との間で切らない) */
+const UNIT_CHAR = /[%％‰円人年月日時分秒歳個件回倍万億兆割]/u
+
+/**
+ * 確実に悪い切れ目か(`chars[k]` の手前で改行する)。改行を前の版(d110078)から替えてよいかを決めるのに使う。
+ * 文節の見当(`lineBreakScore`)やラベルに頼らず、字の種類と決まった並びだけで機械的に決める:
+ * - 漢字|漢字(「戸 / 惑った」「改定名 / 団」「科学 / 的」)
+ * - 漢字|送り仮名(「焼 / いた」「お聞 / きする」。助詞・助動詞・「まで」「など」・言いよどみの頭は除く)
+ * - カタカナ|カタカナ(「オーネアレン / ティク」)、カタカナ|漢字1字の接尾(「コロナ / 禍で」)
+ * - 数字|数字・数字|単位(「200 / 0円」「約4 / %」)
+ * - 小さい「っ」で終わる行(「つながっ / て」)
+ * - 仮名の言葉の途中の決まった形: 「ん」「ま(す)」で始まる行(「たくさ / ん」「あり / ました」)・「ま / す」、
+ *   「た・な・し・み / い」「よ・そ・こ・ど / う」、
+ *   「こ / と」「も / の」「と / ころ」「と / き」、仮名+「っ」の活用の途中(「つな / がって」)、
+ *   「みたい / な」「よう / な」「そう / な」、漢字+送り仮名+す の活用の途中(「増や / して」)、「いただ / き」
+ */
+export function certainlyBadBreak(chars: readonly string[], k: number): boolean {
+  if (k <= 0 || k >= chars.length) return false
+  const prev = chars[k - 1]
+  const next = chars[k]
+  const before = chars[k - 2] ?? ''
+  const after = chars[k + 1] ?? ''
+  const ahead = chars.slice(k, k + 3).join('')
+  const behind = chars.slice(Math.max(0, k - 4), k).join('')
+  if (KANJI.test(prev) && KANJI.test(next)) return true
+  if (
+    KANJI.test(prev) &&
+    HIRAGANA.test(next) &&
+    !/[はがをにでともへやのだ]/u.test(next) &&
+    !/^(?:まで|より|など|くらい|ぐらい|しか|ほど|みたい|らしい|です|でし|なら|なの|ばかり|ばっか|すら|さえ|って|ね|よ|さん|さま|くん|ちゃん)/u.test(
+      ahead
+    ) &&
+    !/^(?:え[ーぇっ]|あの[ーぉ]|ま[あー]|う[ーん]|ん[ーっ]|あ[ーぁ]|そのー)/u.test(ahead)
+  )
+    return true
+  if (KATAKANA.test(prev) && KATAKANA.test(next)) return true
+  if (KATAKANA.test(prev) && KANJI.test(next) && !KANJI.test(after)) return true
+  if (DIGIT.test(prev) && (DIGIT.test(next) || UNIT_CHAR.test(next))) return true
+  // 漢字+送り仮名1字+漢字(複合語の途中。「思い / 切った」「受け / 入れ」)
+  // 送り仮名はい段・え段(連用形)だけ(「違う / 人」「来た / 時」は言葉の切れ目)
+  if (
+    KANJI.test(next) &&
+    /[いきぎしじちびみりけげせぜてえべめれ]/u.test(prev) &&
+    KANJI.test(before)
+  )
+    return true
+  // 「お・ご」+漢字(「お / 客様」「ご / 案内」)
+  if (/[おご]/u.test(prev) && KANJI.test(next) && !KANJI.test(before)) return true
+  // 小さい「っ」で終わる行(「つながっ / て」「行っ / た」)
+  if (prev === 'っ' || prev === 'ッ') return true
+  if (HIRAGANA.test(prev)) {
+    if (next === 'ん') return true
+    // 「ます」の前・中(「あり / ました」「ございま / した」)
+    if (/^ま[すしせ]/u.test(ahead)) return true
+    if (prev === 'ま' && /[すしせ]/u.test(next)) return true
+    // 「〜たい・ない・しい・みたい」「よう・そう・こう・どう」の中(「みた / いな」「よ / うな」)
+    if (next === 'い' && /[たなしみ]/u.test(prev)) return true
+    if (next === 'う' && /[よそこど]/u.test(prev)) return true
+    // 活用の後ろの「て・で」(「させ / て」「読ん / で」)。「では・でも・です」は除く
+    if (next === 'て' || (next === 'で' && !/^で[はもす]/u.test(ahead))) return true
+    // 「〜ています」の中(「できて / います」)
+    if (prev === 'て' && /^いま/u.test(ahead)) return true
+    // 「〜たり・〜たら」の中(「図っ / たり」「図った / り」)
+    if (prev === 'た' && /[りら]/u.test(next)) return true
+    // 「ます・です」の後ろの終助詞の前(「できています / か」)
+    if (/[かねよ]/u.test(next) && /(?:ます|です)$/u.test(behind)) return true
+    if (/^(?:こと|もの|とこ|とき)$/u.test(prev + next)) return true
+    if (HIRAGANA.test(next) && after === 'っ') return true
+    if (/(?:みたい|よう|そう)$/u.test(behind) && /[なに]/u.test(next)) return true
+    if (KANJI.test(before) && /[やらばわまか]/u.test(prev) && /[しすさせ]/u.test(next)) return true
+    if (/いただ$/u.test(behind) && next === 'き') return true
+  }
+  return false
+}
+
+/**
+ * 改行の並び(終わりの位置)の、確実に悪い切れ目の数。1字だけの行も1つと数える(最後の行も)
+ */
+export function certainlyBadCount(chars: readonly string[], ends: readonly number[]): number {
+  let n = 0
+  let from = 0
+  for (const [i, e] of ends.entries()) {
+    if (i < ends.length - 1 && certainlyBadBreak(chars, e)) n++
+    if (ends.length > 1 && chars.slice(from, e).join('').trim().length === 1) n++
+    from = e
+  }
+  return n
+}

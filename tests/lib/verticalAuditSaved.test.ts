@@ -86,6 +86,24 @@ describe('保存した企画の積む形・分けたクリップ', () => {
     expect(savedStack.clips).toHaveLength(3)
   })
 
+  it('2本目に人が変えた設定(音を分けた・ぼかし背景・色ラベル・頭の繋ぎ)があればつながず、積む形だけ外す(再監査の指摘 3)', () => {
+    for (const extra of [
+      { audioDetached: true },
+      { blurBackground: true },
+      { colorLabel: 'red' as const },
+      { transitionIn: { type: 'crossfade' as const, duration: 0.5 } }
+    ]) {
+      const edited = {
+        ...savedStack,
+        clips: savedStack.clips.map((c) => (c.id === 'c1~v1' ? { ...c, ...extra } : c))
+      }
+      const plain = withoutVerticalSplits(edited)
+      expect(plain.clips.map((c) => c.id)).toEqual(['c1', 'c1~v1', 'c2'])
+      expect(plain.clips[1]).toMatchObject(extra)
+      expect(plain.clips.every((c) => !c.splitStack)).toBe(true)
+    }
+  })
+
   it('縦でない出力(16:9 にした企画)では積まない', () => {
     const stack = savedStack.clips[2].splitStack!
     expect(

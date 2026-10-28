@@ -7,6 +7,7 @@ import {
 } from '@shared/telop/avoidFaces'
 import { liftAboveShortsUi, SHORTS_TELOP_BOTTOM } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
+import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import { frameCountForDuration, projectFrameRate } from '@shared/frameRate'
 import { stackTopHeight, type CropWindow, type StackSplit } from '@shared/videoFrame'
 import type { Clip, MediaAsset, Project, TextOverlay } from '@shared/types'
@@ -50,8 +51,8 @@ const MIN_WINDOW_W = 0.2
  * (Shorts の下の帯より上)が入る余地を残す
  */
 const FACE_Y_IN_WINDOW = 0.36
-/** 同じ人の発話の続きとみなす間(秒) */
-const RUN_JOIN_SEC = 1
+/** 同じ人の発話を1つの番としてまとめる間(秒) */
+const RUN_JOIN_SEC = 2.5
 /** 話者の切り替えの、1ショットの長さの下限(秒)。これより短くなる切り替えはしない */
 export const MIN_SHOT_SEC = 2
 /** 上下に積んだ所の境目の上下に、テロップを置かない幅(画面の高さに対する比) */
@@ -302,6 +303,23 @@ export function fillsVertical(
  * 寄せる」「黒帯」を選んだとき・縦でない(16:9 にした)ときに、積んだまま・分けたまま書き出していた
  * (監査の指摘 3)。分けたクリップは、続いている(同じ素材・同じ速さで、素材の位置が続く)ものだけ戻す
  */
+/**
+ * 分けたクリップどうしの設定が同じか(位置・id・切り抜きの位置・頭の繋ぎ・積む形のほか全部)。音を分けた・
+ * ぼかし背景・色ラベルなど、人が片方だけ変えた所があればつながない(つなぐと2本目の設定が消え、音を分けた
+ * 片方だけで声が二重・無音になった)。切り抜きの位置は話す人ごとに違うのが分けた理由なので比べない
+ * (つないだクリップは1本目の位置)
+ */
+function sameClipSettings(a: Clip, b: Clip): boolean {
+  const skip = new Set(['id', 'inPoint', 'outPoint', 'cropCenter', 'transitionIn', 'splitStack'])
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => !skip.has(k)))
+  for (const k of keys) {
+    const x = (a as unknown as Record<string, unknown>)[k]
+    const y = (b as unknown as Record<string, unknown>)[k]
+    if (JSON.stringify(x ?? null) !== JSON.stringify(y ?? null)) return false
+  }
+  return true
+}
+
 export function withoutVerticalSplits(project: Project): Project {
   if (!project.clips.some((c) => c.splitStack || c.id.includes('~v'))) return project
   const out: Clip[] = []
@@ -312,8 +330,8 @@ export function withoutVerticalSplits(project: Project): Project {
       prev &&
       base !== c.id &&
       prev.id === base &&
-      prev.assetId === c.assetId &&
-      (prev.speed || 1) === (c.speed || 1) &&
+      !c.transitionIn &&
+      sameClipSettings(prev, c) &&
       Math.abs(prev.outPoint - c.inPoint) < 1e-6
     ) {
       out[out.length - 1] = { ...prev, outPoint: c.outPoint }
@@ -403,10 +421,9 @@ export function speakerShots(
     const l = inside[i]
     const cur = shots[shots.length - 1]
     if (l.key === cur.key || l.start <= start) continue
-    // この人が話し続ける間: この発話の終わりから、同じ人の続きの発話(間が `RUN_JOIN_SEC` まで)をつなぎ、
-    // 終わった後に別の人が話し始めたら止める(終わりの前に重なって始まる別の人の相づちでは止めない)。
-    // 前は「次に別の人が話し始めるまで」としていて、話し続ける人の途中の 0.5 秒の相づちで、相づちの
-    // 人を元の人の次の発話まで(7 秒)映していた
+    // この人の番: この発話から、同じ人の続きの発話(間が `RUN_JOIN_SEC` まで。間に別の人が話し始めない
+    // もの)を1つの番としてまとめ、長さを測る。答える人が短い発話を間を空けて続けても1つの番になる
+    // (前は間 1 秒までしかつながず、2 秒未満の発話を 1 秒以上空けて話すと一度も切り替わらなかった)
     let runEnd = l.end
     for (const x of inside.slice(i + 1)) {
       if (x.key === l.key) {
@@ -415,22 +432,78 @@ export function speakerShots(
       } else if (x.start >= runEnd) break
     }
     runEnd = Math.min(end, runEnd)
-    // 今映している人が、この発話の間ずっと話している(重なった相づち)なら切り替えない
-    const curUntil = Math.max(
-      -Infinity,
-      ...inside.filter((x) => x.key === cur.key && x.start <= l.start).map((x) => x.end)
-    )
+    // 相づち: この番の間、今映している人も話している(半分以上重なる)なら切り替えない
+    let covered = 0
+    for (const x of inside)
+      if (x.key === cur.key)
+        covered += Math.max(0, Math.min(x.end, runEnd) - Math.max(x.start, l.start))
     if (
       l.start - cur.start < minShot ||
       end - l.start < minShot ||
       runEnd - l.start < minShot ||
-      curUntil >= runEnd
+      covered >= (runEnd - l.start) * 0.5
     )
       continue
     cur.end = l.start
     shots.push({ start: l.start, end, key: l.key })
   }
   return shots
+}
+
+/**
+ * 話す人の切り替えで分けたクリップの素材の位置を、書き出しのコマにそろえる(その場で直す)。
+ * 書き出しはクリップの頭を `computeMainTrackLayout` でコマに丸めた所から素材を読む。分けた2本目以降の頭の
+ * 素材の位置を「1本目の頭のコマ + コマの差」から求めないと、分けた所で音が飛ぶ・途切れる。コマの番号は
+ * 書き出しと同じ関数・同じ入力(素材のある本編のクリップ・出力のフレームレート)で求め、整数のコマで差を取る
+ * (式を写して丸めると、ちょうど半コマの時刻で小数の誤差により1コマずれた: 25fps・前のクリップ 2.7 秒で
+ * 40ms、50fps・2.71 秒で 20ms)。分けた所のタイムラインの時刻は、コマの真ん中の側へごくわずか(1コマの
+ * 1万分の1)寄せて、半コマちょうどで丸めが揺れないようにする
+ */
+function alignSplitPieces(
+  clips: Clip[],
+  assets: ReadonlyMap<string, MediaAsset>,
+  originOf: ReadonlyMap<string, string>
+): void {
+  if (originOf.size === 0) return
+  const fps = projectFrameRate(
+    clips,
+    clips.map((c) => assets.get(c.assetId)).filter((a): a is MediaAsset => a !== undefined)
+  )
+  if (!(fps > 0)) return
+  for (let round = 0; round < 4; round++) {
+    // 素材のあるクリップ(書き出しの本編)の、並びの位置 → 書き出しの番号
+    const slot: number[] = []
+    const main: Clip[] = []
+    for (const c of clips) {
+      slot.push(assets.has(c.assetId) ? main.length : -1)
+      if (assets.has(c.assetId)) main.push(c)
+    }
+    const layout = computeMainTrackLayout(main, fps)
+    const frameAt = (i: number): number => Math.round(layout.exportStarts[slot[i]] * fps)
+    let changed = false
+    for (let i = 0; i < clips.length; i++) {
+      const origin = originOf.get(clips[i].id)
+      if (!origin || slot[i] < 0) continue
+      // 同じ元のクリップの1本目(分けたクリップは並んでいる)
+      let j = i
+      while (j > 0 && originOf.get(clips[j - 1].id) === origin) j--
+      j--
+      if (j < 0 || clips[j].id !== origin || slot[j] < 0) continue
+      const first = clips[j]
+      const f0 = frameAt(j)
+      const delta = layout.timelineStarts[slot[j]] * fps - f0
+      const frames = frameAt(i) - f0
+      const speed = first.speed || 1
+      // 半コマちょうどで丸めが揺れないよう、コマの真ん中の側へ 1万分の1コマ寄せる(素材の位置で 2µs 未満)
+      const want = first.inPoint + ((frames - delta * 1e-4) / fps) * speed
+      if (Math.abs(want - clips[i].inPoint) > 1e-12) {
+        changed = true
+        clips[i] = { ...clips[i], inPoint: want }
+        clips[i - 1] = { ...clips[i - 1], outPoint: want }
+      }
+    }
+    if (!changed) return
+  }
 }
 
 /**
@@ -472,7 +545,9 @@ export function applyVerticalFill(
     if (framing.kind === 'single') return [{ ...c, fillCrop: true, cropCenter: framing.center }]
     // 2人が収まらない: 話者と顔の対応があれば話している人へ切り替える。無ければ上下に積む
     const byFace = options.speakers?.faces.get(c.assetId)
-    if (byFace && options.speakers) {
+    // 速さを変えたクリップは分けない(分けると書き出しが速さの掛け直しで音をずらし・途切れさせる。
+    // 59.94fps・速さ 0.8 で 14.5ms のずれ、30fps・速さ 0.5 で途切れ)。上下に積む
+    if (byFace && options.speakers && (c.speed || 1) === 1) {
       const people = framing.people
       const keyOf = (speaker: string): number | null => {
         const x = byFace.get(speaker)
@@ -529,6 +604,7 @@ export function applyVerticalFill(
       }
     ]
   })
+  alignSplitPieces(clips, assets, originOf)
   const result = { filled, onFaces, stacked, switched }
   if (filled === 0 && !options.alwaysLift) return { project, ...result, movedTelops: 0 }
 

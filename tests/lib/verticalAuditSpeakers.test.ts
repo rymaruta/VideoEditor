@@ -57,6 +57,29 @@ describe('話す人の切り替え: 相づちでは切り替えない', () => {
   })
 })
 
+describe('答える人が短い発話を間を空けて続けても切り替える(再監査の指摘 2)', () => {
+  it('A 0-9.5、B 10-11.8/13-14.8/16-17.8/19-20.8、A 21-30 → B の番 10〜21、A に戻る', () => {
+    const shots = speakerShots(
+      [
+        { speaker: 'A', start: 0, end: 9.5 },
+        { speaker: 'B', start: 10, end: 11.8 },
+        { speaker: 'B', start: 13, end: 14.8 },
+        { speaker: 'B', start: 16, end: 17.8 },
+        { speaker: 'B', start: 19, end: 20.8 },
+        { speaker: 'A', start: 21, end: 30 }
+      ],
+      0,
+      30,
+      keyOf
+    )
+    expect(shots.map((s) => [s.start, s.key])).toEqual([
+      [0, 0],
+      [10, 1],
+      [21, 0]
+    ])
+  })
+})
+
 describe('話者の区間に重なりの印がある長い答えも、切り替えに使う', () => {
   it('overlap の付いた発話も残す(印は持ったまま)', () => {
     const project = {
