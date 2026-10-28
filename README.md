@@ -132,7 +132,9 @@ YouTubeショート動画向けの動画編集デスクトップアプリ(Electr
 
 ### アプリとして使う場合
 
-ビルド済みのインストーラーが欲しい場合は、下記「[セットアップ(開発者向け)](#セットアップ開発者向け)」の手順で `npm install` の後に `npm run build:win` / `build:mac` / `build:linux` のいずれかを実行してください(販売者などが未定の間は止まります。下記「配布用インストーラーのビルド」)。`dist/` フォルダにOS別のインストーラー(Windowsは `.exe`、macOSは `.dmg`、Linuxは `.AppImage` 等)が生成されるので、それを実行してインストールします。
+正式版の Windows のインストーラーは [GitHub の Releases](https://github.com/rymaruta/VideoEditor/releases) に置いています(入れたアプリは自動で更新されます)。正式版を出す手順は [docs/RELEASE.md](docs/RELEASE.md)。
+
+自分でビルドしたインストーラーが欲しい場合は、下記「[セットアップ(開発者向け)](#セットアップ開発者向け)」の手順で `npm install` の後に `npm run build:win` / `build:mac` / `build:linux` のいずれかを実行してください(販売者などが未定の間は止まります。下記「配布用インストーラーのビルド」)。`dist/` フォルダにOS別のインストーラー(Windowsは `.exe`、macOSは `.dmg`、Linuxは `.AppImage` 等)が生成されるので、それを実行してインストールします。
 
 ### 開発モードですぐ試す場合
 
@@ -172,6 +174,10 @@ npm run lint
 ```
 
 #### 配布用インストーラーのビルド
+
+正式版(GitHub の Releases に置く Windows のインストーラーと GPL のソース一式)は、`v*` のタグを push すると
+GitHub Actions(`.github/workflows/release.yml`)が作ります。手順・署名の Secrets・持ち主が試す版(personal)との違いは
+[docs/RELEASE.md](docs/RELEASE.md)。手元で作るときは次のとおり。
 
 OSごとのインストーラー(Windows: `.exe`、macOS: `.dmg`、Linux: `.AppImage`等)を `dist/` フォルダに生成します。
 

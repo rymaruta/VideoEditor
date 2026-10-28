@@ -13,7 +13,8 @@
    - **Microsoft の Trusted Signing(Azure の署名サービス)**: 月額の安い署名サービス。
      利用できる国・個人か法人かの条件があるので、申し込み前に Microsoft の案内で確認する
    - 名義は販売者(法人か個人事業)の正式な名前にする。product.json の vendor も同じ名前にそろえる
-2. 署名の方法が決まったら、CI(.github/workflows/windows-release-gates.yml の package)に組み込む
+2. 署名の方法が決まったら、CI(.github/workflows/windows-release-gates.yml の package と、正式版の
+   .github/workflows/release.yml。docs/RELEASE.md)に組み込む
    - .pfx を使える場合: リポジトリの Settings > Secrets and variables > Actions に
      `WIN_CSC_LINK`(.pfx を base64 にした文字列)と `WIN_CSC_KEY_PASSWORD` を入れるだけで、次のビルドから署名される
    - クラウドの HSM や Azure の署名サービスの場合: electron-builder の `win.signtoolOptions` / `azureSignOptions`

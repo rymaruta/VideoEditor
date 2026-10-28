@@ -13,6 +13,23 @@ const {
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /**
+ * 持ち主の PC で試す版(VE_PERSONAL_BUILD=1)。配布しない。
+ * - インストーラの名前に -personal を付ける(配布用と取り違えない)
+ * - 販売者などの検査(beforePack)を掛けない
+ * - 自動更新をしない: 更新の行き先(resources/app-update.yml)を入れず、package.json の印(videoEditorBuild)を
+ *   'personal' にする。アプリ(src/main/autoUpdate.ts)は 'release' の印がある版でだけ更新を確かめる
+ */
+const PERSONAL = process.env.VE_PERSONAL_BUILD === '1'
+
+/**
+ * 自動更新の行き先: このリポジトリの GitHub の Releases(.github/workflows/release.yml が、`v*` のタグを push
+ * したときに、インストーラ・latest.yml・blockmap・GPL のソース一式を同じリリースに置く)。
+ * electron-builder は --publish never で使い、ここはアプリに入れる app-update.yml の中身にだけ使う
+ * (アップロードはワークフローがする)。docs/RELEASE.md
+ */
+const RELEASE_REPO = { provider: 'github', owner: 'rymaruta', repo: 'VideoEditor' }
+
+/**
  * 製品に入れない物(どの OS でも)。files は win・mac・linux の中にだけ書き、どれもこれに OS ごとの物を足す。
  * 一番上にも files を書くと、electron-builder(26.x)は上の files を別の組として扱い、その組には既定の除外
  * (.git・dist・build・package-lock.json など)を付けないので、リポジトリの中身と dist がまるごと app.asar に入る(実測)。
@@ -99,10 +116,9 @@ module.exports = {
   },
   nsis: {
     // 持ち主の PC で試す版は名前で分かるようにする(配布用と取り違えない)
-    artifactName:
-      process.env.VE_PERSONAL_BUILD === '1'
-        ? '${productName}-${version}-personal-setup.${ext}'
-        : '${productName}-${version}-setup.${ext}',
+    artifactName: PERSONAL
+      ? '${productName}-${version}-personal-setup.${ext}'
+      : '${productName}-${version}-setup.${ext}',
     shortcutName: '${productName}',
     uninstallDisplayName: '${productName}',
     createDesktopShortcut: 'always'
@@ -164,14 +180,13 @@ module.exports = {
   // (scripts/release-check.cjs。npm の build:win などは先にも検査して、長いビルドの前に止める)
   beforePack: (context) => {
     // VE_PERSONAL_BUILD=1 は持ち主の PC で試すための版(配布しない)。販売者などの検査は掛けない
-    if (isDistributionBuild(context && context.targets) && process.env.VE_PERSONAL_BUILD !== '1')
-      assertReleasable(__dirname)
+    if (isDistributionBuild(context && context.targets) && !PERSONAL) assertReleasable(__dirname)
     execFileSync(process.execPath, [join(__dirname, 'scripts', 'third-party-notices.mjs')], {
       stdio: 'inherit'
     })
   },
-  publish: {
-    provider: 'generic',
-    url: 'https://example.com/auto-updates'
-  }
+  // 製品に入れる package.json に、正式版か持ち主が試す版かの印を書く(src/main/autoUpdate.ts が読む)
+  extraMetadata: { videoEditorBuild: PERSONAL ? 'personal' : 'release' },
+  // 自動更新の行き先(RELEASE_REPO)。持ち主が試す版には入れない
+  publish: PERSONAL ? null : RELEASE_REPO
 }

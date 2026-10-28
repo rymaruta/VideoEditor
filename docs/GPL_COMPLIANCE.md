@@ -126,7 +126,9 @@ GPL の「対応するソース」は実行ファイル全体のソースを指�
    使わない(空文字。`package.json` の `author` にも email を置かない)。2026-10-28 に決定済み
 2. 上の「取れなかったもの」を片付ける(vid.stab の版、ffprobe を揃えるか)
 3. 配布する OS ごとに `npm run gpl-sources` を走らせ、できたアーカイブと `.sha256` を、**同じ版のインストーラと同じ
-   GitHub の Releases のリリース**に置く(製品の版・ffmpeg の版ごとに。インストーラを置いている間はソースも消さない)
+   GitHub の Releases のリリース**に置く(製品の版・ffmpeg の版ごとに。インストーラを置いている間はソースも消さない)。
+   **Windows 版は `v*` のタグを push すると `.github/workflows/release.yml` が自動でする**(Windows で `npm run gpl-sources` を
+   走らせ、インストーラ・latest.yml と同じ Release に置く。ソースを取れなければ Release を作らずに止まる。docs/RELEASE.md)
 4. `npm run build:win` で配布用のインストーラを作り、ヘルプ > バージョン情報 の「ソースの入手方法」に入手先の URL が出ること、
    「入手先を開く」で Releases が開くことを確かめる
 5. GitHub の Releases 以外で配ることにしたら、「1. 方針」の 2 に戻って方式を決め直す(その場所にもソースを置くか、

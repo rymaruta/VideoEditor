@@ -101,6 +101,13 @@ import { RendererCrashGuard } from './rendererRecovery'
 import { collectSystemInfo, installCrashLogging, logRendererError } from './diagnostics'
 import { installEnvCheckIpc } from './envCheckService'
 import {
+  readBuildKind,
+  startAutoUpdate,
+  updateCheckPlan,
+  type AutoUpdateHandle,
+  type UpdaterLike
+} from './autoUpdate'
+import {
   appendTelopLayerImages,
   beginTelopLayer,
   releaseAllTelopLayers,
@@ -1308,13 +1315,64 @@ app.whenReady().then(() => {
   registerWindowScopedIpcHandlers()
 
   createWindow()
+  autoUpdate = startAppAutoUpdate()
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
+/** 製品に入った package.json(electron-builder.cjs が正式版・持ち主が試す版の印を書く) */
+function packagedPackageJson(): unknown {
+  try {
+    return JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+/** 自動更新(正式版の Windows だけ。autoUpdate) */
+let autoUpdate: AutoUpdateHandle | null = null
+function startAppAutoUpdate(): AutoUpdateHandle | null {
+  const plan = updateCheckPlan({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    buildKind: readBuildKind(packagedPackageJson()),
+    env: process.env
+  })
+  return startAutoUpdate(plan, {
+    loadUpdater: async () => {
+      const m = (await import('electron-updater')) as unknown as {
+        autoUpdater?: UpdaterLike
+        default?: { autoUpdater?: UpdaterLike }
+      }
+      const u = m.autoUpdater ?? m.default?.autoUpdater
+      if (!u) throw new Error('electron-updater の autoUpdater がありません')
+      return u
+    },
+    ask: async (version) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      const options: Electron.MessageBoxOptions = {
+        type: 'info',
+        buttons: ['再起動して更新', 'あとで'],
+        defaultId: 1,
+        cancelId: 1,
+        message: `新しい版(${version})の準備ができました`,
+        detail:
+          '「あとで」を選ぶと、次にアプリを終了したときに更新します。書き出しなどの途中なら「あとで」を選んでください。'
+      }
+      const r = win
+        ? await dialog.showMessageBox(win, options)
+        : await dialog.showMessageBox(options)
+      return r.response === 0 ? 'restart' : 'later'
+    },
+    log: (message, error) =>
+      error === undefined ? console.log(message) : console.warn(message, error)
+  })
+}
+
 app.on('will-quit', () => {
+  autoUpdate?.stop()
   stopLibraryWatchers()
   // 動いている ffmpeg(ノイズ除去・試聴用素材・自動確認)を止める。macOS・Linux では親が終わっても残る
   killLiveProcesses()

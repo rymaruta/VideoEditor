@@ -66,7 +66,9 @@ const ALWAYS = [
   'node_modules/fluent-ffmpeg/lib/fluent-ffmpeg.js',
   'node_modules/ffmpeg-static/index.js',
   'node_modules/node-llama-cpp/dist/index.js',
-  'node_modules/sharp/lib/index.js'
+  'node_modules/sharp/lib/index.js',
+  // 自動更新(正式版の Windows。src/main/autoUpdate.ts)
+  'node_modules/electron-updater/out/main.js'
 ]
 /** どの OS でも入れない物 */
 const NEVER = [
