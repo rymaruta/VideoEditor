@@ -303,6 +303,23 @@ export function fillsVertical(
  * 寄せる」「黒帯」を選んだとき・縦でない(16:9 にした)ときに、積んだまま・分けたまま書き出していた
  * (監査の指摘 3)。分けたクリップは、続いている(同じ素材・同じ速さで、素材の位置が続く)ものだけ戻す
  */
+/**
+ * 分けたクリップどうしの設定が同じか(位置・id・切り抜きの位置・頭の繋ぎ・積む形のほか全部)。音を分けた・
+ * ぼかし背景・色ラベルなど、人が片方だけ変えた所があればつながない(つなぐと2本目の設定が消え、音を分けた
+ * 片方だけで声が二重・無音になった)。切り抜きの位置は話す人ごとに違うのが分けた理由なので比べない
+ * (つないだクリップは1本目の位置)
+ */
+function sameClipSettings(a: Clip, b: Clip): boolean {
+  const skip = new Set(['id', 'inPoint', 'outPoint', 'cropCenter', 'transitionIn', 'splitStack'])
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => !skip.has(k)))
+  for (const k of keys) {
+    const x = (a as unknown as Record<string, unknown>)[k]
+    const y = (b as unknown as Record<string, unknown>)[k]
+    if (JSON.stringify(x ?? null) !== JSON.stringify(y ?? null)) return false
+  }
+  return true
+}
+
 export function withoutVerticalSplits(project: Project): Project {
   if (!project.clips.some((c) => c.splitStack || c.id.includes('~v'))) return project
   const out: Clip[] = []
@@ -313,8 +330,8 @@ export function withoutVerticalSplits(project: Project): Project {
       prev &&
       base !== c.id &&
       prev.id === base &&
-      prev.assetId === c.assetId &&
-      (prev.speed || 1) === (c.speed || 1) &&
+      !c.transitionIn &&
+      sameClipSettings(prev, c) &&
       Math.abs(prev.outPoint - c.inPoint) < 1e-6
     ) {
       out[out.length - 1] = { ...prev, outPoint: c.outPoint }
