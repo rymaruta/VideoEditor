@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useProjectStore } from '../store/projectStore'
 import { useQcStore } from '../store/qcStore'
-import { buildReviewItems, type ReviewItem } from './reviewItems'
+import { buildReviewItems, structureRescueOf, type ReviewItem } from './reviewItems'
 import { timelineRangeOf } from '@shared/finish/sound'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import type { Project } from '@shared/types'
@@ -62,6 +62,9 @@ export function useReviewItems(): ReviewLists {
   const effects = usePipelineStore((s) => s.effects)
   const effectChosen = usePipelineStore((s) => s.effectChosen)
   const qc = useQcStore((s) => s.report)
+  const judgements = usePipelineStore((s) => s.judgements)
+  const keptIds = usePipelineStore((s) => s.roughCut?.keptIds)
+  const keep = usePipelineStore((s) => s.keep)
 
   return useMemo(() => {
     const deps = [
@@ -74,7 +77,10 @@ export function useReviewItems(): ReviewLists {
       denoiseFailures,
       effects,
       effectChosen,
-      qc
+      qc,
+      judgements,
+      keptIds,
+      keep
     ]
     return sharedLists(deps, () => {
       const sourceOf = new Map(syncedFiles.map((f) => [f.id, f.sourceId]))
@@ -92,7 +98,8 @@ export function useReviewItems(): ReviewLists {
         denoiseFailures,
         effects,
         effectChosen,
-        qc
+        qc,
+        structureRescue: structureRescueOf(judgements, keptIds, keep)
       })
       const done = new Set(project.reviewed ?? [])
       return {
@@ -110,6 +117,9 @@ export function useReviewItems(): ReviewLists {
     denoiseFailures,
     effects,
     effectChosen,
-    qc
+    qc,
+    judgements,
+    keptIds,
+    keep
   ])
 }

@@ -20,7 +20,9 @@ import {
   sourceAspect,
   sourceHeight,
   type DestinationId,
-  type DestinationSettings
+  type DestinationSettings,
+  exportBaseName,
+  type ExportNameKind
 } from '../lib/exportDestinations'
 import { safeFileBaseName } from '@shared/fileName'
 import { frameSeconds } from '@shared/frameRate'
@@ -51,7 +53,11 @@ import { reportBusy } from '../lib/busyReporter'
 import { useQcStore } from '../store/qcStore'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
-import type { PremiereExportResult, PremiereTelopMode } from '@shared/export/premiereTypes'
+import {
+  premiereMediaNote,
+  type PremiereExportResult,
+  type PremiereTelopMode
+} from '@shared/export/premiereTypes'
 
 /**
  * 書き出し(ファイル > 書き出し… / Ctrl+M / 上の帯の「書き出す」)。デザイン案の「書き出し」ダイアログ。
@@ -413,15 +419,18 @@ export function ExportDialog(): React.JSX.Element | null {
   const [premiereReviews, setPremiereReviews] = useState(true)
   const [premiereTelopMarkers, setPremiereTelopMarkers] = useState(true)
   const [premiereDone, setPremiereDone] = useState<PremiereExportResult | null>(null)
-  /** ファイル名(拡張子なし)。開くたびに企画の名前から作る(null は企画の名前のまま) */
-  const [fileName, setFileName] = useState<string | null>(null)
+  /**
+   * 手で書いたファイル名(拡張子なし)。動画・音声と Premiere 用 XML で別々に覚える(`exportBaseName`)。
+   * 開くたびに企画の名前から作る(無いものは企画の名前のまま)
+   */
+  const [typedNames, setTypedNames] = useState<Partial<Record<ExportNameKind, string>>>({})
   const [rangeMode, setRangeMode] = useState<'all' | 'range'>('all')
   const [diskFree, setDiskFree] = useState<{ folder: string; bytes: number | null } | null>(null)
   const reviewLists = useReviewItems()
 
   useMenuCommand((id) => {
     if (id === 'file.export') {
-      setFileName(null)
+      setTypedNames({})
       setOpen(true)
     }
   })
@@ -437,7 +446,7 @@ export function ExportDialog(): React.JSX.Element | null {
       setProgress(null)
       setQueue([])
       setQueueStatus({})
-      setFileName(null)
+      setTypedNames({})
       setRangeMode('all')
     })
   }, [running])
@@ -514,7 +523,7 @@ export function ExportDialog(): React.JSX.Element | null {
   const span = useRange && selection ? selection : { start: 0, end: totalDuration }
   const duration = Math.max(0, span.end - span.start)
   const ext = xml ? 'xml' : EXPORT_FORMAT_EXT[format]
-  const baseName = fileName ?? safeFileBaseName(project.name)
+  const baseName = exportBaseName(typedNames, xml, project.name)
   const srcH = sourceHeight(project.assets)
   const srcAspect = sourceAspect(project.assets, project.aspectRatio)
   const current: DestinationSettings = {
@@ -1080,7 +1089,10 @@ export function ExportDialog(): React.JSX.Element | null {
                   id="ve-export-name"
                   value={baseName}
                   disabled={running}
-                  onChange={(e) => setFileName(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setTypedNames((prev) => ({ ...prev, [xml ? 'xml' : 'media']: value }))
+                  }}
                 />
                 <span className="mono ve-export-ext">.{ext}</span>
               </div>
@@ -1379,6 +1391,11 @@ export function ExportDialog(): React.JSX.Element | null {
                     Premiere 用 XML を書き出しました(映像 {premiereDone.stats.videoClips}・音声{' '}
                     {premiereDone.stats.audioClips} クリップ・マーカー {premiereDone.stats.markers})
                   </p>
+                  {premiereMediaNote(premiereDone.media) && (
+                    <p className="hint-text" title={premiereDone.media?.dir}>
+                      {premiereMediaNote(premiereDone.media)}
+                    </p>
+                  )}
                   <div className="export-done-actions">
                     <button
                       className="small-button"

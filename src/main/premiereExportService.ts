@@ -14,7 +14,7 @@ import {
 import { copyFile } from 'fs/promises'
 import { isSamePath } from './exportOutputGuard'
 import { tmpdir } from 'os'
-import { basename, dirname, extname, join } from 'path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
 import { projectForOutput } from '@shared/trackVisibility'
 import { sequenceDurationFrames } from '@shared/sequence/segmentPlan'
@@ -33,6 +33,10 @@ import { describeFfmpegExit } from './ffmpegError'
  *
  * - `名前.xml` … シーケンス(本編・重ね・音声・マーカー)
  * - `名前.srt` … テロップの文字(シーケンスの時刻)。Premiere の「キャプション」に読み込める
+ * - `名前_media/` … アプリの設定フォルダの中のファイル(ノイズ除去後のマイクの音・ナレーション など)を本編で
+ *   使っていれば、その写し。XML はこちらを指す(設定フォルダはこの PC だけのキャッシュで、別の PC で開く・
+ *   キャッシュを消すとオフラインになるため。Premiere の「プロジェクトマネージャー」で素材を集めるのと同じく、
+ *   XML の隣に置いてフォルダごと渡せるようにする)
  * - 見た目どおりのテロップ(選んだときだけ):
  *   - `png`: `名前_telop/telop_000001.png` …(絵が変わる区間ごとの透過 PNG。XML の一番上のトラックに並ぶ)
  *   - `prores`: `名前_telop.mov`(ProRes 4444・透過付きの 1 本。頭から全体に置く)
@@ -52,6 +56,13 @@ export interface PremiereExportDeps {
   freeBytes?: (dir: string) => number
   /** PNG の入れ替え(試験で途中の失敗を起こすために差し替える) */
   swapPngs?: typeof swapInTelopPngs
+  /**
+   * アプリのキャッシュのフォルダ(設定フォルダ `userData`)。この中のファイルを本編で使っていれば、XML の隣の
+   * `名前_media/` へ写して、XML はそちらを指す(無ければ写さない)
+   */
+  appCacheDirs?: readonly string[]
+  /** `名前_media/` の入れ替え(試験で途中の失敗を起こすために差し替える) */
+  swapMedia?: typeof swapInTelopPngs
 }
 
 /** 透過の PNG を写すとき、何枚ごとに中止を見て進み具合を出すか */
@@ -69,15 +80,67 @@ export function premiereSidecarPaths(xmlPath: string): {
   srt: string
   telopDir: string
   telopMov: string
+  mediaDir: string
 } {
   const base = premiereSidecarBase(xmlPath)
-  return { srt: `${base}.srt`, telopDir: `${base}_telop`, telopMov: `${base}_telop.mov` }
+  return {
+    srt: `${base}.srt`,
+    telopDir: `${base}_telop`,
+    telopMov: `${base}_telop.mov`,
+    mediaDir: `${base}_media`
+  }
 }
 
 /** 並べて書くもののうち、もうあるもの(上書きしてよいか確かめるのに使う) */
 export function existingPremiereSidecars(xmlPath: string): string[] {
   const p = premiereSidecarPaths(xmlPath)
-  return [p.srt, p.telopDir, p.telopMov].filter((x) => existsSync(x))
+  return [p.srt, p.telopDir, p.telopMov, p.mediaDir].filter((x) => existsSync(x))
+}
+
+/** `path` が `dir` の中(`dir` そのものは除く)にあるか */
+export function isInsideDir(path: string, dir: string): boolean {
+  if (!path || !dir) return false
+  const rel = relative(resolve(dir), resolve(path))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/** XML の隣へ写す、アプリのキャッシュの中の素材(写す元と、写した先の名前) */
+export interface PremiereMediaCopy {
+  assetId: string
+  from: string
+  name: string
+}
+
+/**
+ * 本編で使う素材のうち、アプリのキャッシュのフォルダの中にあるもの(ノイズ除去後のマイクの音 など)と、
+ * `名前_media/` の中での名前。名前は元のファイルの名前(同じ名前が重なれば `-2` などを付ける)
+ */
+export function premiereMediaCopies(
+  assets: readonly { id: string; filePath: string }[],
+  usedIds: ReadonlySet<string>,
+  cacheDirs: readonly string[]
+): PremiereMediaCopy[] {
+  const out: PremiereMediaCopy[] = []
+  const names = new Set<string>()
+  const byPath = new Map<string, string>()
+  for (const a of assets) {
+    if (!usedIds.has(a.id) || !cacheDirs.some((d) => isInsideDir(a.filePath, d))) continue
+    // 同じファイルを指す素材は 1 回だけ写す
+    const same = byPath.get(a.filePath)
+    if (same) {
+      out.push({ assetId: a.id, from: a.filePath, name: same })
+      continue
+    }
+    const file = basename(a.filePath)
+    const ext = extname(file)
+    const stem = file.slice(0, file.length - ext.length)
+    let name = file
+    for (let k = 2; names.has(name.toLowerCase()); k++) name = `${stem}-${k}${ext}`
+    names.add(name.toLowerCase())
+    byPath.set(a.filePath, name)
+    out.push({ assetId: a.id, from: a.filePath, name })
+  }
+  return out
 }
 
 const TELOP_PNG = /^telop_\d{6}\.png$/i
@@ -93,7 +156,9 @@ const TELOP_PNG = /^telop_\d{6}\.png$/i
 export function swapInTelopPngs(
   stage: string,
   dir: string,
-  move: (from: string, to: string) => void = renameSync
+  move: (from: string, to: string) => void = renameSync,
+  /** 前回の分として退避するファイル(既定は `telop_*.png`) */
+  owns: (name: string) => boolean = (name) => TELOP_PNG.test(name)
 ): { commit: () => void; rollback: () => void } {
   mkdirSync(dir, { recursive: true })
   const backup = mkdtempSync(`${dir}.previous-`)
@@ -120,7 +185,7 @@ export function swapInTelopPngs(
   }
   try {
     for (const name of readdirSync(dir)) {
-      if (!TELOP_PNG.test(name) || lstatSync(join(dir, name)).isDirectory()) continue
+      if (!owns(name) || lstatSync(join(dir, name)).isDirectory()) continue
       move(join(dir, name), join(backup, name))
       movedOld.push(name)
     }
@@ -139,7 +204,7 @@ export function swapInTelopPngs(
  * テロップの PNG のフォルダ `dir` を作れるか。同じ名前のファイル(フォルダでない物)があると、XML・SRT を書いた
  * 後で作れずに失敗していた(SRT だけ新しくなる)。書き始める前に止める
  */
-function assertTelopDirUsable(dir: string): void {
+function assertDirUsable(dir: string, what: string): void {
   let isDir = true
   try {
     isDir = statSync(dir).isDirectory()
@@ -148,7 +213,7 @@ function assertTelopDirUsable(dir: string): void {
   }
   if (!isDir)
     throw new Error(
-      `テロップの PNG を入れるフォルダ「${basename(dir)}」と同じ名前のファイルがあります。` +
+      `${what}を入れるフォルダ「${basename(dir)}」と同じ名前のファイルがあります。` +
         'XML を別の名前で書き出すか、そのファイルの名前を変えてください'
     )
 }
@@ -261,6 +326,8 @@ export async function exportPremiereXml(
   let pngStage: string | null = null
   /** SRT を書いている一時ファイル(最後に置き換える) */
   let srtPartial: string | null = null
+  /** アプリのキャッシュの中の素材を写している一時フォルダ(最後に `名前_media/` へ入れ替える) */
+  let mediaStage: string | null = null
   try {
     const layer = payload.telopLayer
     if (payload.telopMode !== 'text' && layer && layer.runs.length > 0) {
@@ -272,7 +339,7 @@ export async function exportPremiereXml(
         if (payload.telopMode === 'png') {
           // フォルダの名前は ASCII の決まった後ろ(素材のフォルダに日本語があっても、PNG の名前は短く)
           const dir = sidecars.telopDir
-          assertTelopDirUsable(dir)
+          assertDirUsable(dir, 'テロップの PNG ')
           // そのフォルダの telop_*.png を企画の素材として使っていれば、片付けで消さないよう止める
           const used = telopPngsUsedAsAssets(dir, payload.project.assets)
           if (used.length > 0)
@@ -423,7 +490,56 @@ export async function exportPremiereXml(
       }
       if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
     }
-    const result = buildPremiereXml(v2, {
+    // アプリのキャッシュ(設定フォルダ)の中の素材は XML の隣の `名前_media/` へ写し、XML はそちらを指す。
+    // PNG と同じく一時フォルダに写し、XML と SRT を書き終えてから入れ替える(失敗・中止で半端に残さない)
+    const usedIds = new Set(
+      [...v2.sequence.videoTracks, ...v2.sequence.audioTracks].flatMap((t) =>
+        t.items.flatMap((i) => ('assetId' in i && typeof i.assetId === 'string' ? [i.assetId] : []))
+      )
+    )
+    const mediaCopies = premiereMediaCopies(v2.assets, usedIds, deps.appCacheDirs ?? [])
+    const mediaDir = sidecars.mediaDir
+    let sequence = v2
+    if (mediaCopies.length > 0) {
+      assertDirUsable(mediaDir, '写した素材')
+      const names = [...new Set(mediaCopies.map((c) => c.name))]
+      // 写す先を、この企画の素材として使っていれば止める(入れ替えで消えるため)
+      const used = names.filter((n) =>
+        payload.project.assets.some((a) =>
+          [a.filePath, a.proxyPath, a.denoisedFrom, a.proxyBeforeDenoise].some(
+            (x) => x && basename(x) === n && isSamePath(dirname(x), mediaDir)
+          )
+        )
+      )
+      if (used.length > 0)
+        throw new Error(
+          `「${basename(mediaDir)}」の ${used.slice(0, 3).join('・')}${used.length > 3 ? ' ほか' : ''} は` +
+            'この企画の素材として使われているため、上書きできません。XML を別の名前で書き出してください'
+        )
+      const sources = [...new Map(mediaCopies.map((c) => [c.name, c.from])).entries()]
+      const need = sources.reduce((t, [, from]) => t + statSync(from).size, 0) + 64 * 1024 * 1024
+      mkdirSync(dirname(mediaDir), { recursive: true })
+      const free = (deps.freeBytes ?? defaultFreeBytes)(dirname(mediaDir))
+      if (free < need)
+        throw new Error(
+          `本編で使っているアプリの中のファイル(ノイズ除去後のマイクの音など)を XML の隣へ写すのに約 ` +
+            `${(need / 1024 ** 3).toFixed(1)}GB 必要ですが、書き出し先の空きは ${(free / 1024 ** 3).toFixed(1)}GB です`
+        )
+      mediaStage = mkdtempSync(`${mediaDir}.partial-`)
+      for (let i = 0; i < sources.length; i++) {
+        if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
+        const [name, from] = sources[i]
+        progress(95, `マイクの音などを XML の隣へ写し中(${i + 1}/${sources.length} 本)`)
+        await copyFile(from, join(mediaStage, name))
+      }
+      if (deps.signal?.aborted) throw new Error('EXPORT_CANCELED')
+      const target = new Map(mediaCopies.map((c) => [c.assetId, join(mediaDir, c.name)]))
+      sequence = {
+        ...v2,
+        assets: v2.assets.map((a) => (target.has(a.id) ? { ...a, filePath: target.get(a.id)! } : a))
+      }
+    }
+    const result = buildPremiereXml(sequence, {
       audioChannels,
       name: payload.project.name || safeFileBaseName(basename(base)),
       dropFrame: payload.dropFrame !== false,
@@ -436,26 +552,53 @@ export async function exportPremiereXml(
     // ならないように)
     srtPartial = join(dirname(srtPath), `.${basename(srtPath)}.partial`)
     writeFileSync(srtPartial, '﻿' + premiereSrt(v2), 'utf-8')
-    // ここまで来たら入れ替える: 前回の telop_*.png を退避し、今回の PNG を移す(失敗すれば元に戻す)
-    const swap = pngStage ? (deps.swapPngs ?? swapInTelopPngs)(pngStage, sidecars.telopDir) : null
+    // ここまで来たら入れ替える: 写した素材を `名前_media/` へ(同じ名前の前回の分は退避)、前回の telop_*.png を
+    // 退避して今回の PNG を移す(どれかが失敗すれば、入れ替えた分を元に戻す)
+    const mediaStaged = mediaStage
+    const mediaNames = new Set(mediaCopies.map((c) => c.name.toLowerCase()))
+    const mediaSwap = mediaStaged
+      ? (deps.swapMedia ?? swapInTelopPngs)(mediaStaged, mediaDir, renameSync, (name) =>
+          mediaNames.has(name.toLowerCase())
+        )
+      : null
+    let swap: ReturnType<typeof swapInTelopPngs> | null = null
+    try {
+      swap = pngStage ? (deps.swapPngs ?? swapInTelopPngs)(pngStage, sidecars.telopDir) : null
+    } catch (e) {
+      mediaSwap?.rollback()
+      throw e
+    }
     try {
       renameSync(srtPartial, srtPath)
     } catch (e) {
       swap?.rollback()
+      mediaSwap?.rollback()
       throw e
     }
     srtPartial = null
     swap?.commit()
+    mediaSwap?.commit()
     progress(100, '完了')
     return {
       xmlPath: payload.outputPath,
       srtPath,
       ...(telopPath ? { telopPath } : {}),
+      ...(mediaCopies.length > 0
+        ? {
+            media: {
+              dir: mediaDir,
+              files: [...new Map(mediaCopies.map((c) => [c.name, c.from])).entries()].map(
+                ([name, from]) => ({ name, from })
+              )
+            }
+          }
+        : {}),
       warnings: result.warnings,
       stats: result.stats
     }
   } finally {
     if (pngStage) rmSync(pngStage, { recursive: true, force: true })
+    if (mediaStage) rmSync(mediaStage, { recursive: true, force: true })
     if (srtPartial) rmSync(srtPartial, { force: true })
   }
 }

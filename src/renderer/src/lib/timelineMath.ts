@@ -254,6 +254,20 @@ export function speedSelectChoices(
   return { value: s, options: [...options, s].sort((a, b) => a - b) }
 }
 
+/** クリップ名に添える速さの、小数点以下の桁(0.001 倍まで) */
+const SPEED_LABEL_DIGITS = 3
+
+/**
+ * クリップ名に添える速さ(「 (1.5x)」)。表示だけ小数点以下 3 桁に丸め(速さそのものは変えない)、丸めて 1 倍に
+ * なるもの(同期で求めた時計のずれの補正 0.9999999983 倍・1.00006 倍 など)は添えない。
+ * 丸めずに出していたため「C0001.MP4 (0.9999999983316958x)」のように全桁が出ていた
+ */
+export function speedLabel(speed: number): string {
+  if (!Number.isFinite(speed) || speed <= 0) return ''
+  const shown = Number(speed.toFixed(SPEED_LABEL_DIGITS))
+  return shown === 1 ? '' : ` (${shown}x)`
+}
+
 /**
  * 「タイムライン全体を表示」のためだけに許す、倍率の下限。
  * 0.01(40px/秒で 0.4px/秒)では、1時間ほどより長い回がレーンに入らなかった

@@ -1116,6 +1116,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       ...(s.steps.effects.state === 'done' ? { effectsAsked: true } : {}),
       ...(s.carriedTelops.length > 0 ? { carriedTelops: s.carriedTelops } : {}),
       ...(sync ? { sync } : {}),
+      // 色合わせが済んだこと(合わせる必要が無かった回は素材に印が残らないため。開き直して「済み」と出す)
+      ...(s.steps.color.state === 'done' ? { colorDone: s.steps.color.note ?? '' } : {}),
       ...(s.rangeRuns.length > 0 ? { rangeRuns: s.rangeRuns } : {})
     }
     useProjectStore.getState().setAutoEdit(decisions)
@@ -1302,9 +1304,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     if (editedMeanwhile()) return
     // 残す区間が無い仮編集は当てない(当てると、並べた本編が丸ごと消える)
     if (plan.cut.main.length === 0) {
+      // 判定が全部を「不要」にしたときは上位を仮に残す(`selectScenes` の `rescued`)ので、ここへ来るのは
+      // 人が残す場面を全部外したとき・残した場面に使える区間が無いとき
+      const allDroppedByHand =
+        get().scenes.length > 0 && get().scenes.every((sc) => get().keep[sc.id] === false)
       setStep('cut', {
         state: 'error',
-        note: '残す場面がありません(構成で残す場面を選ぶか、「大事にすること」を替えてください)'
+        note: allDroppedByHand
+          ? '残す場面がありません(構成ですべての場面を外しています。残す場面にチェックを付けてください)'
+          : '残す場面がありません(構成で残す場面を選ぶか、「大事にすること」を替えてください)'
       })
       log('残す場面が無いため、仮編集を作りませんでした(タイムラインはそのままです)')
       // 作り直しでは、前に済んだ工程(AI に頼んだ演出テロップの提案など)をそのまま残す。
@@ -1323,6 +1331,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       log(
         `構成: ${plan.demoted.total} 場面中 ${plan.demoted.highlights} 場面が「見どころ」で見分けになっていないため、見どころは声の盛り上がり・笑い・発話の密度の点数で選び直しました(題・理由・不要の印はそのまま)`
       )
+    if (plan.selection.rescued)
+      log(
+        `構成: 判定が全 ${plan.selection.rescued.total} 場面を「不要」にしたため、点数・発話の多い ${plan.selection.rescued.kept} 場面を仮に残しました(要確認。「構成」タブで残す場面を確かめてください)`
+      )
     if (plan.selection.relaxed)
       log('声の山・笑いのはっきりした場面が無かったため、点数の上位の場面を残しました(静かな回)')
     const raw = plan.selection.kept.reduce((t, id) => {
@@ -1332,7 +1344,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     setStep('cut', {
       state: 'done',
       percent: 100,
-      note: `${plan.pieces.length} 区間 · 間を詰めて ${formatMinutes(raw)} → ${formatMinutes(plan.cut.duration)}`
+      note:
+        `${plan.pieces.length} 区間 · 間を詰めて ${formatMinutes(raw)} → ${formatMinutes(plan.cut.duration)}` +
+        (plan.selection.rescued
+          ? ` · 全場面が「不要」の判定のため ${plan.selection.rescued.kept} 場面を仮に残しました(要確認)`
+          : '')
     })
     const switches = plan.shots.length
     setStep('angles', { state: 'done', percent: 100, note: `ショット ${switches}` })

@@ -618,7 +618,8 @@ function registerWindowScopedIpcHandlers(): void {
       message: '同じ名前で並べて書くファイルがすでにあります',
       detail:
         existing.map((p) => `・${basename(p)}`).join('\n') +
-        '\n\n上書きしますか?(テロップの PNG のフォルダは、前回の telop_*.png を消してから書きます)'
+        '\n\n上書きしますか?(テロップの PNG のフォルダは、前回の telop_*.png を消してから書きます。' +
+        '「_media」のフォルダは、同じ名前のファイルだけを書き直します)'
     }
     const { response } = win
       ? await dialog.showMessageBox(win, options)
@@ -632,7 +633,7 @@ function registerWindowScopedIpcHandlers(): void {
     const protectedPaths = exportProtectedPaths(payload.project)
     // 並べて書く字幕・テロップの動画も、素材・企画ファイルを上書きしないか確かめる
     const sidecars = premiereSidecarPaths(payload.outputPath)
-    for (const sidecar of [sidecars.srt, sidecars.telopMov, sidecars.telopDir]) {
+    for (const sidecar of [sidecars.srt, sidecars.telopMov, sidecars.telopDir, sidecars.mediaDir]) {
       const conflict = exportOutputConflict(sidecar, protectedPaths)
       if (conflict) throw new Error(conflict)
     }
@@ -644,7 +645,9 @@ function registerWindowScopedIpcHandlers(): void {
             ffmpegPath,
             onProgress,
             signal,
-            probeChannels: probeAudioChannels
+            probeChannels: probeAudioChannels,
+            // 設定フォルダの中のファイル(ノイズ除去後のマイクの音 など)は XML の隣の `名前_media/` へ写す
+            appCacheDirs: [app.getPath('userData')]
           })
         )
       )

@@ -41,8 +41,24 @@ function sceneText(s: Scene): string {
   const head = events ? `(${events})` : ''
   if (s.lines.length === 0) return `${head}(会話なし)`
   const body = head + s.lines.map((l) => `${l.speaker ?? '?'}「${l.text}」`).join(' ')
-  return body.length > MAX_CHARS_PER_SCENE ? body.slice(0, MAX_CHARS_PER_SCENE) + '…' : body
+  // 話している長さの割合も渡す。聞き取れない言葉の文字起こし(「2」「ん」だけ など)では、言葉の中身より
+  // こちらが場面を比べる手掛かりになる(文字だけ見せると、小さいモデルは全部の場面を同じ判定にした)
+  const dur = s.end - s.start
+  const ratio = dur > 0 ? Math.round(Math.min(1, s.speech / dur) * 100) : 0
+  const tail = `(発話${ratio}%)`
+  return (
+    (body.length > MAX_CHARS_PER_SCENE ? body.slice(0, MAX_CHARS_PER_SCENE) + '…' : body) + tail
+  )
 }
+
+/**
+ * 場面どうしを比べて判定させる決まり(ロケ・ゲーム実況で共通)。このPCの小さいモデルは、文字起こしが
+ * 聞き取れていない(数字や「ん」だけ)と、全部の場面に同じ見出し・同じ点数を付けた(試し編集の回:
+ * 7 場面すべてを「無題・0 点・不要」)。点数に差があれば、全部が「不要」のときに仮に残す場面
+ * (`rescueScenes`)を点数で選べる。「不要」を減らすようには頼まない(長いロケで待ちの多い回は、本当に大半が不要)
+ */
+const COMPARE_RULES = `場面どうしを比べて、点数に差を付けてください。
+文字起こしが聞き取れていない(数字や「ん」だけ・意味の通らない文字)場面は、言葉の中身だけで決めず、「発話○%」(話している長さの割合)と笑いの回数でも比べてください。`
 
 export function chunkScenes(scenes: readonly Scene[]): Scene[][] {
   const chunks: Scene[][] = []
@@ -84,6 +100,7 @@ ${options.note ? `編集方針: ${options.note}\n` : ''}
 - title: 場面の短い見出し(日本語15字以内)
 - reason: そう判定した理由(日本語1文。発言を引用してよい)
 - mood: 場面の雰囲気(BGM を選ぶのに使う)。"楽しい" / "穏やか" / "緊張" / "感動" / "移動"
+${COMPARE_RULES}
 発言の内容を作り変えたり、無い発言を書いたりしないでください。
 
 場面:
@@ -119,6 +136,7 @@ ${options.note ? `編集方針: ${options.note}\n` : ''}
 - title: 場面の短い見出し(日本語15字以内)
 - reason: そう判定した理由(日本語1文。発言を引用してよい)
 - mood: 場面の雰囲気(BGM を選ぶのに使う)。"楽しい" / "穏やか" / "緊張" / "感動" / "移動"
+${COMPARE_RULES}
 発言の内容を作り変えたり、無い発言を書いたりしないでください。
 
 場面:

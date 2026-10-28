@@ -71,6 +71,11 @@ export interface AutoEditDecisions {
   carriedTelops?: Omit<TextOverlay, 'id'>[]
   sync?: SyncSummary
   /**
+   * カメラの色合わせの工程が済んだときの結果の文。合わせる必要のあるカメラが無かった回は素材に色合わせの
+   * 印(`colorMatch`)が残らないので、開き直すと「待機 · 分かりません」と出ていた。済んだことを覚えておく
+   */
+  colorDone?: string
+  /**
    * 範囲だけ自動編集した所(共通の時刻。新しいものが後ろ)。全体を作り直すと、ここも作り直されることを
    * 作り直す前に知らせる(残したい所はロックする)。全体を作り直したら空にする
    */
@@ -235,6 +240,7 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     ...(raw.effectsAsked === true ? { effectsAsked: true } : {}),
     ...(carriedTelops.length > 0 ? { carriedTelops } : {}),
     ...(sync ? { sync } : {}),
+    ...(str(raw.colorDone) ? { colorDone: raw.colorDone } : {}),
     ...(rangeRuns.length > 0 ? { rangeRuns } : {})
   }
 }

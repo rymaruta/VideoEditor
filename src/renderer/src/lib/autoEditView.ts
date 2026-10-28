@@ -38,6 +38,42 @@ export function overallFraction(steps: readonly { state: StepState; percent: num
   return sum / steps.length
 }
 
+/**
+ * 全体の進み具合の表示(割合・済んだ工程の数・文)。
+ * - 動いている間: 済んだ・省いた工程と、進行中の割合(`overallFraction`)
+ * - 止まった後(どれかの工程が失敗): 済んだ工程だけで数え、「止まりました」と添える。失敗の後の工程は
+ *   「省略(仮編集がありません)」になるので、省略を数えると止まっているのに 93% と出ていた
+ * - それ以外: 済んだ工程と省いた工程(番組素材フォルダが無い など)を合わせて数える。全部が済む・省くで
+ *   終われば 100% · 14 / 14(作り直しの後も「12 / 14」と、終わっていない数が出ていた)
+ */
+export function overallProgress(
+  steps: readonly { state: StepState; percent: number }[],
+  running: boolean
+): { percent: number; finished: number; total: number; stopped: boolean; text: string } {
+  const total = steps.length
+  const done = steps.filter((s) => s.state === 'done').length
+  const skipped = steps.filter((s) => s.state === 'skipped').length
+  if (!running && steps.some((s) => s.state === 'error')) {
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0
+    return {
+      percent,
+      finished: done,
+      total,
+      stopped: true,
+      text: `止まりました · ${done} / ${total} 工程`
+    }
+  }
+  const percent = Math.round(overallFraction(steps) * 100)
+  const finished = done + skipped
+  return {
+    percent,
+    finished,
+    total,
+    stopped: false,
+    text: `${percent}% · ${finished} / ${total} 工程${skipped > 0 ? `(省略 ${skipped})` : ''}`
+  }
+}
+
 /** 重なり・接した区間をまとめ、時刻順に並べる */
 export function mergeRanges(ranges: readonly Range[], joinGap = 0): Range[] {
   const sorted = ranges.filter((r) => r.end > r.start).sort((a, b) => a.start - b.start)

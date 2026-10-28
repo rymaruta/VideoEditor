@@ -503,7 +503,8 @@ export function planRoughCut(
             : 'length'
       })),
     estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0),
-    ...(auto.relaxed ? { relaxed: true } : {})
+    ...(auto.relaxed ? { relaxed: true } : {}),
+    ...(auto.rescued ? { rescued: auto.rescued } : {})
   }
 
   const tightened = tightenRanges(kept.flatMap(rangesOf), activity, speech, tighten)

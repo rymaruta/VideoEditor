@@ -9,6 +9,7 @@ import {
   keptOrder,
   mergeRanges,
   overallFraction,
+  overallProgress,
   rulerTicks,
   sceneChips,
   sceneTitle,
@@ -95,6 +96,43 @@ describe('overallFraction', () => {
     ).toBeCloseTo(2.5 / 4)
     expect(overallFraction([])).toBe(0)
     expect(overallFraction([{ state: 'run', percent: 250 }])).toBe(1)
+  })
+})
+
+describe('overallProgress(全体の進み具合の表示)', () => {
+  type S = { state: 'wait' | 'run' | 'done' | 'error' | 'skipped'; percent: number }
+  const of = (states: S['state'][]): S[] =>
+    states.map((state) => ({ state, percent: state === 'done' ? 100 : 0 }))
+
+  it('カットで止まった後は、失敗の後の「省略」を数えず、止まったと出す(93% と出ていた)', () => {
+    // 試し編集の回: 9 工程が済み、カットが失敗、その後の 4 工程が「省略(仮編集がありません)」
+    const steps = of([
+      ...Array<S['state']>(9).fill('done'),
+      'error',
+      ...Array<S['state']>(4).fill('skipped')
+    ])
+    const p = overallProgress(steps, false)
+    expect(p.stopped).toBe(true)
+    expect(p.percent).toBe(64)
+    expect(p.text).toBe('止まりました · 9 / 14 工程')
+  })
+
+  it('全部が済む・省くで終われば 100% · 14 / 14(作り直しの後も 12 / 14 と出ていた)', () => {
+    const steps = of([...Array<S['state']>(13).fill('done'), 'skipped'])
+    const p = overallProgress(steps, false)
+    expect(p.percent).toBe(100)
+    expect(p.finished).toBe(14)
+    expect(p.text).toBe('100% · 14 / 14 工程(省略 1)')
+  })
+
+  it('動いている間は、進行中の割合も足す', () => {
+    const steps: S[] = [
+      { state: 'done', percent: 100 },
+      { state: 'run', percent: 50 },
+      { state: 'wait', percent: 0 },
+      { state: 'wait', percent: 0 }
+    ]
+    expect(overallProgress(steps, true).text).toBe('38% · 1 / 4 工程')
   })
 })
 
