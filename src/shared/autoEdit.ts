@@ -307,15 +307,7 @@ export function normalizeDropBasis(raw: unknown): DropBasis | undefined {
   }
 }
 
-const LENGTH_BY: readonly LengthDropBy[] = [
-  'score',
-  'cues',
-  'beside',
-  'edge',
-  'fit',
-  'refit',
-  'fragment'
-]
+const LENGTH_BY: readonly LengthDropBy[] = ['score', 'cues', 'beside', 'edge', 'fit', 'refit']
 
 function lengthByOf(raw: unknown): Record<string, LengthDropBy> | undefined {
   if (!raw || typeof raw !== 'object') return undefined

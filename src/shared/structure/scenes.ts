@@ -17,11 +17,6 @@ export interface TimedLine {
   overlap: boolean
   /** 声を拾った音源(マイク・カメラ)の ID。声の盛り上がりを、その音源の音で測る */
   source?: string
-  /**
-   * 語ごとの時刻(共通の時間軸)。あれば、発話の中の長い間・質問の頭で発話を分ける時刻に使う
-   * (場面には残さない)
-   */
-  words?: readonly { text: string; start: number; end: number }[]
 }
 
 export type SceneKind = 'highlight' | 'normal' | 'unneeded'
@@ -62,8 +57,6 @@ export interface SceneOptions {
   quietSec?: number
   /** 長さで分けた残りがこれより短ければ、前の場面に含める(秒) */
   minTailSec?: number
-  /** 発話の中で字数から見積もった切れ目を寄せる、静かな所を探す(`splitInnerTurns`) */
-  quietCut?: (lo: number, hi: number) => number | null
 }
 
 /**
@@ -75,152 +68,17 @@ export interface SceneOptions {
 export function continuesSentence(text: string): boolean {
   const t = text.replace(/[\s\u3000]+$/u, '')
   if (/[。．.!?！？]$/u.test(t)) return false
-  // 「…我々は」「…○○さんは」の「は」も続きのある形。前は「のは」「には」などだけを見ていて、「あとやはり
-  // 我々は / 一緒に…」の間で場面を分けていた(試し編集 第4回)。挨拶(「こんにちは」「今日は」「本日は」)と、
-  // 言いさしの質問(「お名前は」「ご出身は」)は除く
-  if (/は$/u.test(t) && (GREETING_HA.test(t) || ASKING_HA.test(t))) return false
-  return /(?:は|[をがてでにとし]|けど|けれど(?:も)?|から|ので|のに|ながら|たり|[、,，])$/u.test(t)
+  return /(?:[のにでとも]は|[をがてでにとし]|けど|けれど(?:も)?|から|ので|のに|ながら|たり|[、,，])$/u.test(
+    t
+  )
 }
-
-/** 「は」で終わる挨拶(発話の終わり)。「こんにちは」「こんちは」「こんばんは」「今日は」「本日は」 */
-const GREETING_HA = /(?:こんにち|こんち|こんばん|今日|今晩|本日)は$/u
-/**
- * 「は」で終わる言いさしの質問(「お名前は」「ご出身は」「ご感想は」「年齢は」)。発話が丁寧の「お」「ご」で
- * 始まる短い名詞+「は」だけ、または問いによく使う名詞+「は」だけのもの(前置きの「では」「で」「それで」の後でも)。
- * 「我々は」「私は」だけの発話は続きのある形のまま
- */
-const ASKING_HA =
-  /^(?:(?:では|じゃあ|で|それで)[、,\s\u3000]?)?(?:[おご][^\s、,。．はをがにでの]{1,6}|年齢|名前|出身|趣味|感想|理由|きっかけ|目標|結果|今後|狙い|ポイント)は$/u
 
 /** 長さで分けるとき、文の途中でも分けてよい間(秒)。これだけ黙っていれば話の切れ目とみなす */
 const LONG_PAUSE_SEC = 3
 
-/** 発話の中で、ここで分ける語と語の間(秒)。音声認識が2人の発話を1件にまとめても、間で分かれる */
-const INNER_PAUSE_SEC = 0.7
-/**
- * 発話の中で、言い切りの後に質問・話題の頭が始まる所(「…と考えております / 実は○○さんは…」
- * 「…と思います / では次に…」「…でした / ○○さん、…」)。音声認識が答えの終わりと次の質問の頭を1件に
- * まとめると、質問の頭が前の発話の中に埋もれ、場面の区切りが質問の途中に入った(試し編集 第4回 N5:
- * 「…私は基本的に考えております実は千崎社長の日立健貴さんは / 具体的にどういった…」の途中の 96.34 秒)
- */
-const INNER_HEAD =
-  /(?<=(?:ます|です|ました|でした|ません|おります|ございます|でしょう|ください)[。．.!?！？、,\s\u3000]*)(?=(?:では|それでは|じゃあ|続いて|次に|さて|ところで|実は|具体的に)|[\p{Script=Han}\p{Script=Katakana}ー]{1,6}さん[、,])/gu
-/** 字数で見積もった切れ目を、静かな所へ寄せる範囲(前後の秒) */
-const SNAP_RADIUS_SEC = 1.0
-/** 寄せ先にする語と語の間の下限(秒) */
-const MIN_WORD_GAP_SEC = 0.15
-/** 分けた発話の、短すぎる切れ端(字)。これより短くなる所では分けない */
-const MIN_PIECE_CHARS = 3
-
-/**
- * 発話を、中の長い間(語の時刻があるとき)と、言い切りの後の質問・話題の頭で分ける(場面の区切りを決める前に)。
- * 語の時刻が無ければ、分ける時刻は字数の割合で見積もる。分けた発話の id は `<元の id>~<番号>`
- */
-export function splitInnerTurns(
-  lines: readonly TimedLine[],
-  /**
-   * 字数で見積もった切れ目(語の時刻が無い・字と合わない)を寄せる、静かな所を探す(`lo`〜`hi` の秒の中の
-   * いちばん静かな時刻。静かな所が無ければ null)。無ければ語と語の間を探す
-   */
-  quietCut?: (lo: number, hi: number) => number | null
-): TimedLine[] {
-  const out: TimedLine[] = []
-  for (const l of lines) {
-    const chars = [...l.text]
-    const heads = new Set<number>()
-    for (const m of l.text.matchAll(INNER_HEAD)) {
-      const at = [...l.text.slice(0, m.index)].length
-      if (at >= MIN_PIECE_CHARS && chars.length - at >= MIN_PIECE_CHARS) heads.add(at)
-    }
-    // 語の時刻: 字の位置 → 語。語の字を足して発話の字と合わなければ、字の位置からは使わない
-    const words = l.words ?? []
-    const joined = words.map((w) => w.text).join('')
-    const wordsFit = words.length > 0 && [...joined].length === chars.length
-    const wordAt: number[] = []
-    let k = 0
-    for (const w of words) {
-      wordAt.push(k)
-      k += [...w.text].length
-    }
-    /** 切れ目: 字の位置と、前の切れ端の終わり・次の切れ端の頭の時刻 */
-    const cuts = new Map<number, { end: number; start: number }>()
-    const fits = (at: number): boolean =>
-      at >= MIN_PIECE_CHARS && chars.length - at >= MIN_PIECE_CHARS
-    if (wordsFit) {
-      // 語の頭で分ける(語の途中ならその語の頭)
-      const wordIndex = (c: number): number => {
-        let j = 0
-        while (j + 1 < wordAt.length && wordAt[j + 1] <= c) j++
-        return j
-      }
-      const add = (i: number): void => {
-        if (i <= 0 || !fits(wordAt[i])) return
-        cuts.set(wordAt[i], { end: words[i - 1].end, start: words[i].start })
-      }
-      for (const at of heads) add(wordIndex(at))
-      for (let i = 1; i < words.length; i++)
-        if (words[i].start - words[i - 1].end >= INNER_PAUSE_SEC) add(i)
-    } else {
-      // 字数の割合で見積もった時刻は声の途中に入りうる。前後 `SNAP_RADIUS_SEC` のいちばん静かな所(音の
-      // 強さ。無ければ語と語の間)へ寄せ、静かな所が無ければ分けない(監査の指摘: 89.86 秒が元の発話
-      // 76.24〜92.55 秒の声の途中だった)
-      for (const at of heads) {
-        const est = l.start + ((l.end - l.start) * at) / Math.max(1, chars.length)
-        const lo = Math.max(l.start + 0.05, est - SNAP_RADIUS_SEC)
-        const hi = Math.min(l.end - 0.05, est + SNAP_RADIUS_SEC)
-        if (!(hi > lo)) continue
-        if (quietCut) {
-          const t = quietCut(lo, hi)
-          if (t !== null && t >= lo - 1e-9 && t <= hi + 1e-9) cuts.set(at, { end: t, start: t })
-          continue
-        }
-        // 語と語の間(`MIN_WORD_GAP_SEC` 以上)のいちばん長い所
-        let best: { end: number; start: number } | null = null
-        for (let i = 1; i < words.length; i++) {
-          const g0 = words[i - 1].end
-          const g1 = words[i].start
-          const mid = (g0 + g1) / 2
-          if (g1 - g0 < MIN_WORD_GAP_SEC || mid < lo || mid > hi) continue
-          if (!best || g1 - g0 > best.start - best.end) best = { end: g0, start: g1 }
-        }
-        if (best) cuts.set(at, best)
-      }
-    }
-    if (cuts.size === 0) {
-      out.push(l)
-      continue
-    }
-    const at = [...cuts.keys()].sort((x, y) => x - y)
-    const bounds = [0, ...at, chars.length]
-    for (let p = 0; p + 1 < bounds.length; p++) {
-      const a = bounds[p]
-      const b = bounds[p + 1]
-      const start = p === 0 ? l.start : cuts.get(a)!.start
-      const end = p === bounds.length - 2 ? l.end : Math.max(start, cuts.get(b)!.end)
-      const piece: TimedLine = {
-        ...l,
-        id: p === 0 ? l.id : `${l.id}~${p}`,
-        start,
-        end,
-        text: chars.slice(a, b).join('')
-      }
-      if (words.length > 0)
-        piece.words = words.filter((w) => w.start >= start - 1e-9 && w.end <= end + 1e-9)
-      else delete piece.words
-      out.push(piece)
-    }
-  }
-  return out
-}
-
 /** 疑問の形の文末(「…でしょうか」「…のか」「…について」) */
 const QUESTION_TAIL =
-  /(?:でしょうか|ですか|ますか|ませんか|でしょう[ね]?か|のか|のかな|かね|[?？]|について|に関して|に対して|のかという(?:お?話|こと|点|ところ)を?)$/u
-/** 質問の疑問の言葉(「どういった」「どのような」)。これを含み、言い切らずに次の発話へ続く発話は質問の一部 */
-const INTERROGATIVE = /(?:どういった|どのような|どのように|どんな|どうやって|どうして|なぜ|いかが)/u
-/** 言い切りの形の文末(ここで文が終わっている) */
-const SENTENCE_END =
-  /(?:[。．.!?！？]|ます|です|ました|でした|ません|ございます|おります|でしょう|ください|[ねよ])$/u
+  /(?:でしょうか|ですか|ますか|ませんか|でしょう[ね]?か|のか|のかな|かね|[?？]|について|に関して|に対して)$/u
 /** 依頼の形の文末(「ぜひお聞かせいただきたいなと思います」「教えてください」)。依頼の言葉の後ろ 16 字まで */
 const REQUEST_TAIL =
   /(?:お聞かせ|聞かせて|お聞き|教えて|お話し|伺い|伺え|伺わ|お伺)[^。．！？!?]{0,16}$/u
@@ -259,15 +117,7 @@ export function questionHolds(
   quietSec: number
 ): { start: number; end: number }[] {
   const out: { start: number; end: number }[] = []
-  // 間が長くても、前の発話が続きのある形(「…日立健貴さんは」)で終わっていれば、長い無言(`quietSec`)の手前
-  // までは同じ文(試し編集 第4回: 質問の頭と続きの間が 7.6 秒あいていた)
-  const near = (a: TimedLine, b: TimedLine): boolean =>
-    b.start - a.end < LONG_PAUSE_SEC || (b.start - a.end < quietSec && continuesSentence(a.text))
-  /** 疑問の言葉を含み、言い切らずに次の発話へ続く(「具体的にどういった…高い評価 / 得られているのか…」) */
-  const asksOn = (t: string): boolean => {
-    const x = t.replace(/[\s\u3000]+$/u, '')
-    return INTERROGATIVE.test(x) && !SENTENCE_END.test(x)
-  }
+  const near = (a: TimedLine, b: TimedLine): boolean => b.start - a.end < LONG_PAUSE_SEC
   for (let q = 0; q < sorted.length; q++) {
     if (!endsQuestion(sorted[q].text)) continue
     // 疑問の発話が続くなら、続きの最後で決める(「…決断について / どういった背景から…のか / ぜひお聞かせ…」)
@@ -281,9 +131,7 @@ export function questionHolds(
       !QUESTION_HEAD.test(sorted[h].text) &&
       near(sorted[h - 1], sorted[h]) &&
       within(h - 1) &&
-      (endsQuestion(sorted[h - 1].text) ||
-        continuesSentence(sorted[h - 1].text) ||
-        asksOn(sorted[h - 1].text))
+      (endsQuestion(sorted[h - 1].text) || continuesSentence(sorted[h - 1].text))
     )
       h--
     if (
@@ -328,9 +176,7 @@ export function buildScenes(
   const maxScene = options.maxSceneSec ?? 90
   const quiet = options.quietSec ?? 8
   const minTail = options.minTailSec ?? 20
-  // 発話の中の長い間・質問の頭で、先に発話を分ける(答えの終わりと質問の頭が1件にまとまっていても、
-  // 質問の頭で区切れるように)
-  const sorted = splitInnerTurns(lines, options.quietCut).sort((a, b) => a.start - b.start)
+  const sorted = [...lines].sort((a, b) => a.start - b.start)
   // 質問とその答えの頭の間には区切りを入れない。長さで分けるなら、質問の頭(前置き)で分ける
   // (試し編集 第3回: 補佐官の質問「やはり思い切って10%の価格を上げたというのは / ものすごい挑戦だった… /
   // そのあたり会長の思い切った決断について / …ぜひお聞かせ…」の途中の 227.05 秒で分かれ、前の場面を落とした
@@ -420,33 +266,6 @@ export function buildScenes(
     }
   }
 
-  // 文の途中で始まる短いまとまり(`minTail` 未満)は、前のまとまりへ戻す(長い無言を挟まず、
-  // 戻した後の長さが上限(長さの目安の 1.5 倍)に収まるときだけ)。試し編集 第4回 N4: 「あとやはり我々は /
-  // 一緒に良いところも…という形で」の間(5.8 秒)で分かれ、文の途中から始まる 9 秒の場面ができ、仕上がりの
-  // 最後に残って言いかけで終わった。前の直しは続きのある形の後の間を全部つないだので、場面が減りすぎ
-  // (合成で 4 分の 1)、つないだ後の長さも見ていなかった(監査の指摘)。文の途中で始まる短いまとまりだけを戻す
-  const spanOf = (g: TimedLine[]): { start: number; end: number } => ({
-    start: g[0].start,
-    end: Math.max(...g.map((x) => x.end))
-  })
-  for (let i = groups.length - 1; i >= 0; i--) {
-    const g = groups[i]
-    const own = spanOf(g)
-    if (own.end - own.start >= minTail) continue
-    const prev = groups[i - 1]
-    const fits = (a: TimedLine[], b: TimedLine[]): boolean =>
-      spanOf(b).end - spanOf(a).start <= maxScene * HOLD_MAX_RATIO
-    if (
-      prev &&
-      own.start - spanOf(prev).end < quiet &&
-      continuesSentence(prev[prev.length - 1].text) &&
-      fits(prev, g)
-    ) {
-      prev.push(...g)
-      groups.splice(i, 1)
-    }
-  }
-
   const scenes: Scene[] = []
   let cursor = range.start
   const push = (start: number, end: number, ls: TimedLine[]): void => {
@@ -455,13 +274,7 @@ export function buildScenes(
       id: `s${scenes.length + 1}`,
       start,
       end,
-      // 語の時刻は区切りを決めるのにだけ使う(企画に覚える場面には残さない)
-      lines: ls.map((x) => {
-        if (!x.words) return x
-        const { words: _w, ...rest } = x
-        void _w
-        return rest
-      }),
+      lines: ls,
       speech: speechSeconds(ls)
     })
   }
@@ -698,64 +511,9 @@ export function indistinctJudgements(
  * 低かった、cues = 同じ点の中で中身の手掛かりが少なかった、beside = 同じ点の中で前後がすでに落ちていた、
  * edge = 同じ点の場面が番組の頭・終わりしか残っていなかった、fit = 同じ点の中で、落とすと目標の長さに
  * いちばん近くなった、refit = 点数の低い順に落とした後、この場面より点の低い短い場面を、戻しても目標に
- * 収まるので戻した(この場面は長くて戻せなかった)、fragment = 仕上がりの最後に残った、文の途中で始まる・
- * 終わる短い場面(言いかけで終わらないように落とした)
+ * 収まるので戻した(この場面は長くて戻せなかった)。決め手の記録だけで、選ぶ結果は変えない
  */
-export type LengthDropBy = 'score' | 'cues' | 'beside' | 'edge' | 'fit' | 'refit' | 'fragment'
-
-/** 仕上がりの最後に残すと言いかけで終わる、文の途中で始まる・終わる場面の長さの上限(秒) */
-const FRAGMENT_SEC = 20
-
-/**
- * 場面が文の途中で始まる(前の場面の最後の発話が続きのある形で終わる)か、文の途中で終わる(この場面の最後の
- * 発話が続きのある形で終わり、次の場面がある)か
- */
-/**
- * 仕上がりの最後の場面が言いかけの切れ端なら、その場面の id(落とす)。手で決めた残す/落とすを当てた後の
- * 残す場面(`kept`)で見る(手で後ろの場面を残していれば、それが最後)。落とすのは次の全部を満たすとき:
- * - 長さの目標がある(目標なし・点数の下限で選ぶときは落とさない)
- * - 前後を落とした、文の途中で始まる・終わる `FRAGMENT_SEC` 未満の場面
- * - 見どころでも、番組の頭・終わりの場面でもなく、手で残した場面でもない
- * - 点数が、残した場面の中で低い方(下半分)
- * 前は長さの目標と関係なく、見どころ・番組の終わりの場面(「ありがとうございました」)まで落としていた
- */
-export function trailingFragment(
-  scenes: readonly Scene[],
-  judgements: readonly SceneJudgement[],
-  kept: ReadonlySet<string>,
-  targetSec: number,
-  manualKeep: ReadonlySet<string> = new Set()
-): string | null {
-  if (!(targetSec > 0 && Number.isFinite(targetSec)) || kept.size < 2) return null
-  const i = scenes.map((x) => kept.has(x.id)).lastIndexOf(true)
-  if (i <= 0 || i >= scenes.length - 1) return null
-  const last = scenes[i]
-  if (manualKeep.has(last.id) || last.end - last.start >= FRAGMENT_SEC) return null
-  const judge = new Map(judgements.map((j) => [j.sceneId, j]))
-  const j = judge.get(last.id)
-  if (j?.kind === 'highlight') return null
-  const score = (id: string): number => judge.get(id)?.score ?? 50
-  const scores = scenes.filter((x) => kept.has(x.id)).map((x) => score(x.id))
-  const below = scores.filter((v) => v < score(last.id)).length
-  if (below >= Math.ceil(scores.length / 2)) return null
-  const cut = sceneCutsSentence(scenes, i)
-  const prevDropped = !kept.has(scenes[i - 1].id)
-  const nextDropped = !kept.has(scenes[i + 1].id)
-  return (cut.starts && prevDropped) || (cut.ends && nextDropped) ? last.id : null
-}
-
-export function sceneCutsSentence(
-  scenes: readonly Scene[],
-  i: number
-): { starts: boolean; ends: boolean } {
-  const lastText = (x: Scene | undefined): string | undefined => x?.lines[x.lines.length - 1]?.text
-  const prev = lastText(scenes[i - 1])
-  const mine = lastText(scenes[i])
-  return {
-    starts: prev !== undefined && continuesSentence(prev),
-    ends: mine !== undefined && i + 1 < scenes.length && continuesSentence(mine)
-  }
-}
+export type LengthDropBy = 'score' | 'cues' | 'beside' | 'edge' | 'fit' | 'refit'
 
 export interface Selection {
   kept: string[]
@@ -960,7 +718,8 @@ export function selectScenes(
     }
     // 点数の低い場面から落とした場面より点の低い場面を戻したら、決め手は「点数」だけではない(戻した場面は
     // 短く、この場面は長くて戻せなかった)。前は「点数の低い場面から」と出て、より低い場面が残る食い違いに
-    // 見えた(試し編集 第4回: 55 点の s7 を落とし、50 点・9 秒の s8 が残った)
+    // 見えた(試し編集 第4回: 55 点の s7 を落とし、50 点・9 秒の s8 が残った)。決め手の記録だけで、残す・
+    // 落とす場面は変えない
     const sceneOf = new Map(scenes.map((x) => [x.id, x]))
     for (const d of dropped) {
       if (d.why !== 'length' || d.by !== 'score') continue
