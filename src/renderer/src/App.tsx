@@ -19,6 +19,7 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
+import { LockRefusalBar } from './components/LockRefusalBar'
 import { autoBottomHeight, defaultSideWidths } from './lib/layoutDefaults'
 import { WorkflowBar } from './components/WorkflowBar'
 import { SideRail, type RailItem } from './components/SideRail'
@@ -32,6 +33,9 @@ import { formatIpcError } from './lib/ipcError'
 import { useAutosaveStore } from './store/autosaveStore'
 import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
+import { installLoopWatcher } from './lib/loopPlayback'
+import { InspectorTabBar } from './components/InspectorTabs'
+import { ProgramHeadMenus } from './components/ProgramHeadMenus'
 import { installModalFocusTrap } from './lib/modalFocus'
 import {
   LayoutGridIcon,
@@ -451,6 +455,8 @@ function App(): React.JSX.Element {
   }, [])
 
   useKeyboardShortcuts()
+  // ループ再生: ふつうの再生でもイン〜アウトの終わりで頭へ戻す
+  useEffect(() => installLoopWatcher(), [])
 
   // 左のパネルの中身。どれも閉じずに隠すだけ(AI・API の頼みを走らせたまま、戻れば結果が残る)
   const leftPane = (id: LeftPanel, name: string, node: React.ReactNode): React.JSX.Element => (
@@ -536,6 +542,7 @@ function App(): React.JSX.Element {
                   プログラム
                 </button>
               </div>
+              {!showSource && <ProgramHeadMenus />}
             </div>
             <div className="tab-content">
               {/* Keyed by asset so switching clips remounts the viewer: transport position,
@@ -568,12 +575,16 @@ function App(): React.JSX.Element {
           >
             <div className="ve-panel-head">
               {/* 中身は工程で決まる(編集 → プロパティ・テロップ → テロップの一覧)。タブは重ねて置かない */}
-              <h2
-                className="ve-panel-title"
-                title={RIGHT_TABS.find((t) => t.id === right)?.description}
-              >
-                {RIGHT_TABS.find((t) => t.id === right)?.label}
-              </h2>
+              {right === 'inspector' ? (
+                <InspectorTabBar />
+              ) : (
+                <h2
+                  className="ve-panel-title"
+                  title={RIGHT_TABS.find((t) => t.id === right)?.description}
+                >
+                  {RIGHT_TABS.find((t) => t.id === right)?.label}
+                </h2>
+              )}
             </div>
             <div className="tab-content">
               <div className={`tab-pane ${right === 'inspector' ? 'active' : ''}`}>
@@ -604,6 +615,7 @@ function App(): React.JSX.Element {
         </section>
       </div>
       <PanelBoundary name="ステータスバー">
+        <LockRefusalBar />
         <StatusBar />
       </PanelBoundary>
       <PanelBoundary name="書き出し">

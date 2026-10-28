@@ -52,6 +52,7 @@ export function PresetPanel(): React.JSX.Element {
   // 描き直され、テロップが多い企画ほど重くなる(実測: テロップ1,000本・60分の企画で、
   // 再生中のフレーム間隔が 167ms=約6fps まで落ちていた。原因の大半がこの描き直し)。
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
+  const telopLocked = useProjectStore((s) => s.project.telopTrackLocked === true)
   const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
 
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -204,7 +205,12 @@ export function PresetPanel(): React.JSX.Element {
             <div className="preset-item-actions">
               <button
                 className="icon-button"
-                title="現在の再生位置に新規テロップとして追加"
+                title={
+                  telopLocked
+                    ? '追加できません(テロップは固定されています)'
+                    : '現在の再生位置に新規テロップとして追加'
+                }
+                disabled={telopLocked}
                 onClick={() => handleAddCaption(preset)}
               >
                 <PlusIcon width={14} height={14} />

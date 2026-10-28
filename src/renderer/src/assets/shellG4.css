@@ -874,12 +874,6 @@ input[type='radio'] {
   justify-content: flex-end;
   gap: var(--ve-space-1);
 }
-/* オンのトグルは #3a3a3a の面に青いアイコン */
-.ve-track-toggle[aria-pressed='true'],
-.ve-track-toggle[aria-pressed='true']:hover:not(:disabled) {
-  background-color: var(--ve-surface-raised);
-  color: var(--ve-primary);
-}
 .ve-track-settings .hint-text {
   max-width: 240px;
   font-size: var(--ve-fs-11);

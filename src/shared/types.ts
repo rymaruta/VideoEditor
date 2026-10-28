@@ -286,6 +286,8 @@ export interface AudioTrackClip {
 export interface AudioTrack {
   id: string
   name: string
+  /** トラックの固定(ピン)。固定したトラックのクリップは選ぶ・動かす・切る・削除・貼り付けの対象にしない */
+  locked?: boolean
   /** 収録素材の同期で作ったトラックなら、その機材の ID(仮編集を作り直すときに入れ替える) */
   multicamSourceId?: string
   muted: boolean
@@ -341,6 +343,8 @@ export interface VideoOverlayClip {
 export interface VideoOverlayTrack {
   id: string
   name: string
+  /** トラックの固定(ピン)。`AudioTrack.locked` と同じ */
+  locked?: boolean
   /** 収録素材の同期で作ったトラックなら、その機材の ID */
   multicamSourceId?: string
   hidden: boolean
@@ -376,6 +380,10 @@ export interface Project {
   mainVideoHidden?: boolean
   /** テロップ(T1)を隠す(画面にも書き出しにも出さない)。`@shared/trackVisibility` */
   telopTrackHidden?: boolean
+  /** 本編(V1)のトラックの固定(ピン)。`AudioTrack.locked` と同じ */
+  mainTrackLocked?: boolean
+  /** テロップ(T1)のトラックの固定(ピン) */
+  telopTrackLocked?: boolean
   beatGrid?: BeatGrid | null
   /** 文字起こしと話者(自動編集の工程で作る)。時刻は素材の時刻 */
   transcript?: TranscriptUtterance[]

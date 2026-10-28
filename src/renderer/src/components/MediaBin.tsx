@@ -1,5 +1,5 @@
 import { describeColorMatch } from '@shared/color/match'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { LibraryPanel } from './LibraryPanel'
 import { Waveform } from './Waveform'
 import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
@@ -13,6 +13,14 @@ import { formatIpcError } from '../lib/ipcError'
 import { canPreviewFile, planLoadedAssetPreview } from '../lib/canPreview'
 import { hasLetterboxInMain } from '../lib/aspect'
 import { isImagePath, isSupportedMediaPath, MEDIA_EXTENSIONS } from '@shared/mediaExtensions'
+import {
+  countByKind,
+  filterAssets,
+  MEDIA_KIND_FILTERS,
+  type MediaKindFilter
+} from '../lib/mediaFilter'
+import { useProgramView } from '../lib/programView'
+import { assetLockReason } from '../lib/trackLock'
 import { stillAssetFrom } from '../lib/stillAsset'
 import { relinkRefusal } from '../lib/relinkCheck'
 import { ASSET_DRAG_TYPE } from '../lib/assetDrag'
@@ -28,7 +36,8 @@ import {
   AlertTriangleIcon,
   ImageIcon,
   LayersIcon,
-  PlusIcon
+  PlusIcon,
+  SearchIcon
 } from './icons'
 import { readMediaLayout, storeMediaLayout } from '../lib/uiPrefs'
 
@@ -84,6 +93,14 @@ export function MediaBin(): React.JSX.Element {
   )
   // 「プロジェクト」(この企画の素材)と「ライブラリ」(全プロジェクト共通)の切り替え
   const [view, setView] = useState<'project' | 'library'>('project')
+  // 素材の検索と種類(すべて / 動画 / 音声 / 画像)の絞り込み
+  const [query, setQuery] = useState('')
+  const [kindFilter, setKindFilter] = useState<MediaKindFilter>('all')
+  const shownAssets = useMemo(
+    () => filterAssets(assets, query, kindFilter),
+    [assets, query, kindFilter]
+  )
+  const kindCounts = useMemo(() => countByKind(assets), [assets])
   // 素材の右クリックメニュー(操作のボタンを行に並べないため)
   const [assetMenu, setAssetMenu] = useState<{ asset: MediaAsset; x: number; y: number } | null>(
     null
@@ -105,6 +122,10 @@ export function MediaBin(): React.JSX.Element {
       setProxyProgress((prev) => ({ ...prev, [assetId]: percent }))
     })
   }, [])
+
+  // 再生の解像度「軽い」で作った軽い版も同じ帯で進み具合を出す。作り終えたものは帯を出さない
+  // (素材の読み込みの変換は自分で消すが、軽い版はプログラムの見出しが作るので、ここで見る)
+  const lightProxies = useProgramView((s) => s.lightProxies)
 
   // Transcoding is the expensive fallback, so it only runs once the preview element
   // itself has said it cannot play the file. Chromium can decode HEVC on machines with
@@ -497,12 +518,20 @@ export function MediaBin(): React.JSX.Element {
       items.push({ label: 'ソースで開く', onSelect: () => openInSourceViewer(asset.id) })
       // 静止画は本編には置かない(長さを持たない)が、ワイプ・CG のトラックには置ける(ドラッグと同じ)
       if (asset.hasVideo && !asset.still) {
-        items.push({ label: '本編(V1)の末尾に追加', onSelect: () => addClipToTimeline(asset.id) })
+        const locked = useProjectStore.getState().project.mainTrackLocked
+        items.push({
+          label: locked ? '本編(V1)の末尾に追加(本編は固定されています)' : '本編(V1)の末尾に追加',
+          disabled: locked === true,
+          onSelect: () => addClipToTimeline(asset.id)
+        })
       }
       if (asset.hasVideo) {
         for (const t of videoOverlayTracks) {
           items.push({
-            label: `${t.name}(ワイプ)に追加`,
+            label: t.locked
+              ? `${t.name}(ワイプ)に追加(${t.name}は固定されています)`
+              : `${t.name}(ワイプ)に追加`,
+            disabled: t.locked === true,
             onSelect: () => addClipToVideoOverlayTrack(t.id, asset.id)
           })
         }
@@ -510,7 +539,8 @@ export function MediaBin(): React.JSX.Element {
       if (asset.hasAudio) {
         for (const t of audioTracks) {
           items.push({
-            label: `${t.name} に追加`,
+            label: t.locked ? `${t.name} に追加(${t.name}は固定されています)` : `${t.name} に追加`,
+            disabled: t.locked === true,
             onSelect: () => addClipToAudioTrack(t.id, asset.id)
           })
         }
@@ -538,9 +568,12 @@ export function MediaBin(): React.JSX.Element {
         })
       }
     }
+    // 固定したトラックで使っている素材は消せない(消えた素材を指すクリップが残るため。トラックの固定)
+    const usedOnLocked = assetLockReason(useProjectStore.getState().project, asset.id)
     items.push({
-      label: 'プロジェクトから削除',
+      label: usedOnLocked ? `プロジェクトから削除(${usedOnLocked})` : 'プロジェクトから削除',
       danger: true,
+      disabled: usedOnLocked !== null,
       onSelect: () => handleRemoveAsset(asset)
     })
     return items
@@ -733,7 +766,45 @@ export function MediaBin(): React.JSX.Element {
           {/* 自動編集(AIおまかせ・ラフカット・長尺からショート)はメニューバーの「自動編集」から開く */}
           {importing && <p className="hint-text">読み込み中…</p>}
           {error && <p className="error-text">{error}</p>}
+          {assets.length > 0 && (
+            <div className="ve-media-filter">
+              <label className="ve-media-search">
+                <SearchIcon width={12} height={12} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={query}
+                  placeholder="素材を検索"
+                  aria-label="素材を検索"
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && query) {
+                      e.stopPropagation()
+                      setQuery('')
+                    }
+                  }}
+                />
+              </label>
+              <div className="ve-media-kinds" role="group" aria-label="素材の種類">
+                {MEDIA_KIND_FILTERS.map((k) => (
+                  <button
+                    key={k.id}
+                    type="button"
+                    className="ve-media-kind"
+                    aria-pressed={kindFilter === k.id}
+                    disabled={k.id !== 'all' && kindFilter !== k.id && kindCounts[k.id] === 0}
+                    title={`${k.label}(${kindCounts[k.id]})`}
+                    onClick={() => setKindFilter(k.id)}
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className={`media-list ${layout === 'grid' ? 'media-grid' : ''}`}>
+            {assets.length > 0 && shownAssets.length === 0 && (
+              <p className="hint-text ve-media-none">条件に合う素材はありません</p>
+            )}
             {assets.length === 0 && (
               <div className="empty-state">
                 <ClapperboardIcon width={32} height={32} />
@@ -741,14 +812,14 @@ export function MediaBin(): React.JSX.Element {
                 <p className="hint-text">ファイルをこのウィンドウにドロップしても追加できます</p>
               </div>
             )}
-            {assets.length > 0 && layout === 'list' && (
+            {shownAssets.length > 0 && layout === 'list' && (
               <div className="media-list-head" aria-hidden>
                 <span className="media-col-name">名前</span>
                 <span className="media-col-dur">デュレーション</span>
                 <span className="media-col-res">解像度</span>
               </div>
             )}
-            {assets.map((asset) => {
+            {shownAssets.map((asset) => {
               const isMissing = missingAssetIds.includes(asset.id)
               // 黒帯が入るのは本編(V1)に置いた所だけ(ワイプは枠に収めるので入らない)
               const mismatch =
@@ -851,7 +922,7 @@ export function MediaBin(): React.JSX.Element {
                         ? `${asset.width}×${asset.height}`
                         : '音声'}
                   </span>
-                  {proxyProgress[asset.id] !== undefined && (
+                  {proxyProgress[asset.id] !== undefined && !lightProxies[asset.filePath] && (
                     <span
                       className="media-row-progress"
                       title={`プレビュー用に変換中 ${proxyProgress[asset.id]}%(書き出しは元のファイルを使います)`}

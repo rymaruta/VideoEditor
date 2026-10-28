@@ -88,6 +88,8 @@ export function stepFrames(frames: number): void {
  */
 export function rippleTrimToPlayhead(side: 'start' | 'end'): boolean {
   const store = useProjectStore.getState()
+  // 本編(V1)を固定していたら切らない(トラックの固定)
+  if (store.project.mainTrackLocked) return false
   const p = store.playheadTime
   const span = mainSpans(store.project).find((s) => p >= s.start - EPS && p < s.end - EPS)
   if (!span) return false
@@ -118,6 +120,7 @@ export function rippleTrimToPlayhead(side: 'start' | 'end'): boolean {
  */
 export function rippleDeleteRange(start: number, end: number): boolean {
   if (!Number.isFinite(start) || !Number.isFinite(end) || end - start <= EPS) return false
+  if (useProjectStore.getState().project.mainTrackLocked) return false
   const before = useProjectStore.getState()
   const splitAt = (t: number): void => {
     const s = useProjectStore.getState()
@@ -165,6 +168,7 @@ export function rippleDelete(): boolean {
   // ここでは何もしない(イン〜アウトまで抜くと、1回の押下で2つの操作になっていた)
   if (hasNonMainSelection()) return false
   const store = useProjectStore.getState()
+  if (store.project.mainTrackLocked) return false
   const ids =
     store.multiSelectedClipIds.length > 0
       ? store.multiSelectedClipIds

@@ -59,6 +59,7 @@ import {
   VolumeXIcon,
   SkipBackIcon,
   SkipForwardIcon,
+  RepeatIcon,
   StepBackIcon,
   StepForwardIcon
 } from './icons'
@@ -93,6 +94,15 @@ import {
 } from '../lib/pendingPreviewLoad'
 import { canSwapToStandby, standbyTargetFor, type StandbyTarget } from '../lib/previewStandby'
 import { isModalOpen } from '../lib/useKeyboardShortcuts'
+import { restartLoopAtEnd } from '../lib/loopPlayback'
+import { useProgramView, zoomFrameWidth } from '../lib/programView'
+import { getSharedAudioContext, noteElementGainNode } from '../lib/previewAudio'
+import { ProgramMeter } from './ProgramMeter'
+import {
+  activeSoloIds,
+  nonTrackAudioSilencedBySolo,
+  trackSilencedInPreview
+} from '../lib/monitorSolo'
 
 /** テロップの当たり判定を測るための Canvas(描かない。文字の幅を測るだけ) */
 let measureContext: CanvasRenderingContext2D | null = null
@@ -382,22 +392,8 @@ function PreviewCrossfadeLayer({
   )
 }
 
-/**
- * プレビューの音量を鳴らすための共通 `AudioContext`。
- *
- * 再生要素ごとに作ると出力デバイスを食い潰すので1つだけ持つ。**1倍を超える音量を
- * 実際に要求されたときにだけ**作る(下の `attachGainNode` 参照)。
- */
-let sharedAudioContext: AudioContext | null = null
-function getSharedAudioContext(): AudioContext | null {
-  if (sharedAudioContext) return sharedAudioContext
-  try {
-    sharedAudioContext = new AudioContext()
-  } catch {
-    sharedAudioContext = null
-  }
-  return sharedAudioContext
-}
+// プレビューの音量を鳴らすための共通 `AudioContext` は lib/previewAudio(音量計と共有)。
+// **1倍を超える音量を実際に要求されたときにだけ**作る(下の `attachGainNode` 参照)。
 
 /**
  * 再生要素を `GainNode` 経由に付け替えて、1倍を超える音量を出せるようにする。
@@ -439,6 +435,8 @@ function attachAudioNodes(el: HTMLMediaElement): ElementAudioNodes | null {
     gain.connect(ctx.destination)
     const nodes = { source, gain }
     audioNodesByElement.set(el, nodes)
+    // 音量計が「聞こえている大きさ」を出すために読む
+    noteElementGainNode(el, gain)
     return nodes
   } catch {
     return null
@@ -796,6 +794,27 @@ function AudioTrackClipLayer({
 export function PreviewPlayer(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const isPlaying = useProjectStore((s) => s.isPlaying)
+  // 音声トラックのソロ(モニター用。書き出しには効かない)。1 本でもあれば本編・ワイプの音も止める
+  const programZoom = useProgramView((s) => s.zoom)
+  // 画質(軽い版)が替わったら、いまの位置で読み直す(本編は `seekTo` で入れ直す)
+  const lightKey = useProgramView((s) =>
+    s.quality === 'light' ? Object.keys(s.lightProxies).length : -1
+  )
+  const lightKeyRef = useRef(lightKey)
+  useEffect(() => {
+    if (lightKeyRef.current === lightKey) return
+    lightKeyRef.current = lightKey
+    const st = useProjectStore.getState()
+    st.seekTo(st.playheadTime)
+  }, [lightKey])
+  const loopPlayback = useProjectStore((s) => s.loopPlayback)
+  const setLoopPlayback = useProjectStore((s) => s.setLoopPlayback)
+  const soloTrackIds = useProjectStore((s) => s.soloTrackIds)
+  const activeSolo = useMemo(
+    () => activeSoloIds(soloTrackIds, project.audioTracks),
+    [soloTrackIds, project.audioTracks]
+  )
+  const soloSilencesOthers = nonTrackAudioSilencedBySolo(activeSolo)
   const setIsPlaying = useProjectStore((s) => s.setIsPlaying)
   const togglePlayback = useProjectStore((s) => s.togglePlayback)
   const setPlayheadTime = useProjectStore((s) => s.setPlayheadTime)
@@ -1156,7 +1175,8 @@ export function PreviewPlayer(): React.JSX.Element {
       const tc = activeTimedClipRef.current
       const next = tc ? nextTimedClip(timedClips, tc) : null
       if (next) loadClipForTime(next.start, true)
-      else setIsPlaying(false)
+      // ループ再生がオンなら止めずに範囲の頭へ戻る
+      else if (!restartLoopAtEnd()) setIsPlaying(false)
     } else handleVideoError()
   }
 
@@ -1338,7 +1358,7 @@ export function PreviewPlayer(): React.JSX.Element {
           const next = nextTimedClip(timedClips, tc)
           if (next) {
             loadClipForTime(next.start, isPlaying)
-          } else {
+          } else if (!restartLoopAtEnd()) {
             video.pause()
             setIsPlaying(false)
           }
@@ -1356,19 +1376,21 @@ export function PreviewPlayer(): React.JSX.Element {
   const activeClipAudioDetached =
     findTimedClipAt(timedClips, playheadTime)?.clip.audioDetached ?? false
 
+  // 本編の音を止めるか(全体の消音、またはソロ中)
+  const mainMuted = muted || soloSilencesOthers
   useEffect(() => {
     volumeRef.current = volume
-    mutedRef.current = muted
+    mutedRef.current = mainMuted
     if (videoRef.current) {
       videoRef.current.volume = volume
-      videoRef.current.muted = muted || activeClipAudioDetached
+      videoRef.current.muted = mainMuted || activeClipAudioDetached
     }
-  }, [volume, muted, activeSrc, activeSlot, activeClipAudioDetached])
+  }, [volume, mainMuted, activeSrc, activeSlot, activeClipAudioDetached])
 
   // ダッキングを使っているトラックが1つでもあるときだけ、本編のレベル測定を始める。
   // 使っていないプロジェクトでは本編の音声経路に一切触らない。
   const duckingInUse = project.audioTracks.some((t) => t.duckingEnabled && !t.muted)
-  useMainAudioDucking(videoRef, duckingInUse, volume, muted)
+  useMainAudioDucking(videoRef, duckingInUse, volume, mainMuted)
 
   function stepFrame(direction: 1 | -1): void {
     // 1フレームぶんは素材のフレームレートで決まる。60fps の素材で 1/30 秒動かすと
@@ -1415,6 +1437,8 @@ export function PreviewPlayer(): React.JSX.Element {
   const mainHidden = project.mainVideoHidden === true
 
   const aspectClass = project.aspectRatio === '9:16' ? 'aspect-9-16' : 'aspect-16-9'
+  // プログラムの見出しの「全体を表示 ▾」(実寸に対する倍率。全体を表示なら枠に収める)
+  const zoomWidth = isExpanded ? null : zoomFrameWidth(programZoom, project.aspectRatio)
   // カメラ間の色合わせ(本編・ぼかし背景・クロスフェードに同じ補正を掛ける)
   const activeAsset = findTimedClipAt(timedClips, playheadTime)?.asset
 
@@ -1424,202 +1448,213 @@ export function PreviewPlayer(): React.JSX.Element {
         <div className="preview-expanded-backdrop" onClick={() => setIsExpanded(false)} />
       )}
       <div className={`panel preview-player ${isExpanded ? 'expanded' : ''}`}>
-        <div className="preview-frame-wrapper">
-          <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
-            <ColorMatchFilters assets={project.assets} />
-            {activeSrc && blurBackdrop && !mainHidden && (
-              <PreviewBlurBackdrop
-                src={activeSrc}
-                colorFilter={colorMatchCss(activeAsset)}
-                localTime={blurBackdrop.localTime}
-                isPlaying={isPlaying}
-                blurPx={blurBackdrop.blurPx}
-                speed={blurBackdrop.speed}
-                seekToken={seekToken}
-              />
-            )}
-            {activeSrc ? (
-              [0, 1].map((slot) => (
-                <video
-                  key={slot}
-                  ref={slot === 0 ? attachSlot0 : attachSlot1}
-                  className="preview-main-video"
-                  // いま映している方の印(テロップのスタイル管理が「現在のフレーム」を取る)
-                  data-active={slot === activeSlot ? 'true' : undefined}
-                  src={slotSrc[slot] ?? undefined}
-                  // 控えの要素は見せない(音は用意するときに止める。入れ替えはその場で切り替える)
-                  style={{
-                    ...cropFit,
-                    filter: colorMatchCss(activeAsset),
-                    visibility: slot === activeSlot && !mainHidden ? 'visible' : 'hidden'
-                  }}
-                  onEnded={(e) => handleSlotEvent('ended', e.currentTarget)}
-                  onError={(e) => handleSlotEvent('error', e.currentTarget)}
-                  onLoadedMetadata={(e) => handleSlotEvent('loaded', e.currentTarget)}
+        {/* 映像と、その右の縦の音量計(L/R) */}
+        <div className="ve-program-stage">
+          <div className={`preview-frame-wrapper ${zoomWidth !== null ? 'is-zoomed' : ''}`}>
+            <div
+              className={`preview-frame ${aspectClass}`}
+              ref={frameRef}
+              style={zoomWidth !== null ? { width: zoomWidth } : undefined}
+            >
+              <ColorMatchFilters assets={project.assets} />
+              {activeSrc && blurBackdrop && !mainHidden && (
+                <PreviewBlurBackdrop
+                  src={activeSrc}
+                  colorFilter={colorMatchCss(activeAsset)}
+                  localTime={blurBackdrop.localTime}
+                  isPlaying={isPlaying}
+                  blurPx={blurBackdrop.blurPx}
+                  speed={blurBackdrop.speed}
+                  seekToken={seekToken}
                 />
-              ))
-            ) : (
-              <div className="preview-empty">
-                <ClapperboardIcon width={32} height={32} />
-                <p>タイムラインにクリップを追加してください</p>
-              </div>
-            )}
-            {/* 消えていく前のクリップは本編の**上**に重ねる。下に敷くと、本編が
+              )}
+              {activeSrc ? (
+                [0, 1].map((slot) => (
+                  <video
+                    key={slot}
+                    ref={slot === 0 ? attachSlot0 : attachSlot1}
+                    className="preview-main-video"
+                    // いま映している方の印(テロップのスタイル管理が「現在のフレーム」を取る)
+                    data-active={slot === activeSlot ? 'true' : undefined}
+                    src={slotSrc[slot] ?? undefined}
+                    // 控えの要素は見せない(音は用意するときに止める。入れ替えはその場で切り替える)
+                    style={{
+                      ...cropFit,
+                      filter: colorMatchCss(activeAsset),
+                      visibility: slot === activeSlot && !mainHidden ? 'visible' : 'hidden'
+                    }}
+                    onEnded={(e) => handleSlotEvent('ended', e.currentTarget)}
+                    onError={(e) => handleSlotEvent('error', e.currentTarget)}
+                    onLoadedMetadata={(e) => handleSlotEvent('loaded', e.currentTarget)}
+                  />
+                ))
+              ) : (
+                <div className="preview-empty">
+                  <ClapperboardIcon width={32} height={32} />
+                  <p>タイムラインにクリップを追加してください</p>
+                </div>
+              )}
+              {/* 消えていく前のクリップは本編の**上**に重ねる。下に敷くと、本編が
                 不透明なので何も見えない(不透明度を動かしているのはこちら側)。
                 PiP・テロップより手前に出ないよう、重ね順は本編のすぐ上に留める。 */}
-            {activeSrc && crossfade && !mainHidden && (
-              <PreviewCrossfadeLayer
-                src={crossfade.src}
-                localTime={crossfade.localTime}
-                isPlaying={isPlaying}
-                opacity={crossfade.opacity}
-                speed={crossfade.speed}
-                fit={{ ...crossfade.fit, filter: crossfade.colorFilter }}
-                seekToken={seekToken}
-                blur={
-                  crossfade.blurPx !== undefined
-                    ? { blurPx: crossfade.blurPx, colorFilter: crossfade.colorFilter }
-                    : undefined
-                }
-              />
-            )}
-            {playbackError && <div className="preview-playback-error">{playbackError}</div>}
-            {/* 重なっている PiP は**全部**、書き出しと同じ並び順で重ねる
+              {activeSrc && crossfade && !mainHidden && (
+                <PreviewCrossfadeLayer
+                  src={crossfade.src}
+                  localTime={crossfade.localTime}
+                  isPlaying={isPlaying}
+                  opacity={crossfade.opacity}
+                  speed={crossfade.speed}
+                  fit={{ ...crossfade.fit, filter: crossfade.colorFilter }}
+                  seekToken={seekToken}
+                  blur={
+                    crossfade.blurPx !== undefined
+                      ? { blurPx: crossfade.blurPx, colorFilter: crossfade.colorFilter }
+                      : undefined
+                  }
+                />
+              )}
+              {playbackError && <div className="preview-playback-error">{playbackError}</div>}
+              {/* 重なっている PiP は**全部**、書き出しと同じ並び順で重ねる
                 (後ろのものが上。1本だけ出していた頃は画面と書き出しで別の絵が映っていた) */}
-            {project.videoOverlayTracks
-              .filter((t) => !t.hidden)
-              .flatMap((track) =>
-                activeVideoOverlayClips(track.clips, playheadTime).map((clip) => {
-                  const asset = project.assets.find((a) => a.id === clip.assetId)
-                  if (!asset) return null
-                  return (
-                    <VideoOverlayLayer
-                      key={clip.id}
-                      clip={clip}
-                      asset={asset}
-                      position={track.position}
-                      scale={track.scale}
-                      frameWidth={frameWidth}
-                      playheadTime={playheadTime}
-                      isPlaying={isPlaying}
-                      volume={volume}
-                      muted={muted || track.audioMuted === true}
-                      seekToken={seekToken}
-                    />
-                  )
-                })
-              )}
-            {/* テロップは書き出しと同じ共通レンダラで描く(どの書き出し方式でも、見えたとおりに出る) */}
-            <TelopCanvasLayer
-              overlays={activeOverlays.map((o) =>
-                overlayDrag?.id === o.id && overlayDrag.moved
-                  ? {
-                      ...o,
-                      style: {
-                        ...o.style,
-                        customPosition: { x: overlayDrag.x, y: overlayDrag.y }
+              {project.videoOverlayTracks
+                .filter((t) => !t.hidden)
+                .flatMap((track) =>
+                  activeVideoOverlayClips(track.clips, playheadTime).map((clip) => {
+                    const asset = project.assets.find((a) => a.id === clip.assetId)
+                    if (!asset) return null
+                    return (
+                      <VideoOverlayLayer
+                        key={clip.id}
+                        clip={clip}
+                        asset={asset}
+                        position={track.position}
+                        scale={track.scale}
+                        frameWidth={frameWidth}
+                        playheadTime={playheadTime}
+                        isPlaying={isPlaying}
+                        volume={volume}
+                        muted={muted || track.audioMuted === true || soloSilencesOthers}
+                        seekToken={seekToken}
+                      />
+                    )
+                  })
+                )}
+              {/* テロップは書き出しと同じ共通レンダラで描く(どの書き出し方式でも、見えたとおりに出る) */}
+              <TelopCanvasLayer
+                overlays={activeOverlays.map((o) =>
+                  overlayDrag?.id === o.id && overlayDrag.moved
+                    ? {
+                        ...o,
+                        style: {
+                          ...o.style,
+                          customPosition: { x: overlayDrag.x, y: overlayDrag.y }
+                        }
                       }
-                    }
-                  : o
-              )}
-              time={playheadTime}
-              frameWidth={frameWidth}
-              frameHeight={frameHeight}
-              aspectRatio={project.aspectRatio}
-            />
-            {activeOverlays.map((o) => {
-              // DOM の箱は、つかんで動かすための当たり判定だけ(絵は上の Canvas が描く)
-              const livePos =
-                overlayDrag?.id === o.id && overlayDrag.moved ? overlayDrag : o.style.customPosition
-              const hitStyle = telopHitBoxStyle(
-                livePos ? { ...o, style: { ...o.style, customPosition: livePos } } : o,
-                textCanvas,
-                frameWidth
-              )
-              if (!hitStyle) return null
-              const selected = selectedOverlayId === o.id
-              return (
-                <div
-                  key={o.id}
-                  className={`overlay-text overlay-hitbox-only ${selected ? 'selected' : ''}`}
-                  style={hitStyle}
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    selectOverlay(o.id)
-                    // 中心は自由配置ならその位置、そうでなければ当たり判定の箱の中心
-                    const r = e.currentTarget.getBoundingClientRect()
-                    const center =
-                      o.style.customPosition ??
-                      clientToNormalized(r.left + r.width / 2, r.top + r.height / 2)
-                    const p = clientToNormalized(e.clientX, e.clientY)
-                    setOverlayDrag({
-                      id: o.id,
-                      x: center.x,
-                      y: center.y,
-                      dx: center.x - p.x,
-                      dy: center.y - p.y,
-                      startX: e.clientX,
-                      startY: e.clientY,
-                      moved: false
-                    })
-                  }}
-                >
-                  {/* 選んだテロップには琥珀の枠と札(どのトラック・誰の発言か) */}
-                  {selected && (
-                    <span className="overlay-selected-tag">
-                      T1{o.speaker ? ` · ${o.speaker}` : ''}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-            {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
-            {showSafeArea && project.aspectRatio === '9:16' && (
-              <div className="shorts-safe-area" style={shortsSafeAreaInset()}>
-                <span className="shorts-safe-area-label">セーフエリア</span>
-              </div>
-            )}
-            {/* 横長の安全枠(放送の目安: 動きの安全 5%・文字の安全 10%)。画面だけの線で、書き出しには写らない */}
-            {showSafeFrame && project.aspectRatio !== '9:16' && activeSrc && (
-              <>
-                <div className="preview-safe-frame action" aria-hidden="true" />
-                <div className="preview-safe-frame title" aria-hidden="true" />
-              </>
-            )}
-            {project.audioTracks.flatMap((track) =>
-              track.clips
-                .filter(
-                  (c) =>
-                    playheadTime >= c.startTime && playheadTime < c.startTime + audioClipDuration(c)
+                    : o
+                )}
+                time={playheadTime}
+                frameWidth={frameWidth}
+                frameHeight={frameHeight}
+                aspectRatio={project.aspectRatio}
+              />
+              {activeOverlays.map((o) => {
+                // DOM の箱は、つかんで動かすための当たり判定だけ(絵は上の Canvas が描く)
+                const livePos =
+                  overlayDrag?.id === o.id && overlayDrag.moved
+                    ? overlayDrag
+                    : o.style.customPosition
+                const hitStyle = telopHitBoxStyle(
+                  livePos ? { ...o, style: { ...o.style, customPosition: livePos } } : o,
+                  textCanvas,
+                  frameWidth
                 )
-                .map((clip) => {
-                  const asset = project.assets.find((a) => a.id === clip.assetId)
-                  if (!asset) return null
-                  return (
-                    <AudioTrackClipLayer
-                      key={clip.id}
-                      clip={clip}
-                      asset={asset}
-                      trackVolume={track.volume}
-                      trackMuted={track.muted}
-                      trackDucking={track.duckingEnabled}
-                      isMainVoice={
-                        (isMainVoiceClip(clip) || Boolean(track.voice)) &&
-                        !track.duckingEnabled &&
-                        duckingInUse
-                      }
-                      playheadTime={playheadTime}
-                      isPlaying={isPlaying}
-                      masterVolume={volume}
-                      masterMuted={muted}
-                      seekToken={seekToken}
-                      timelineEnd={total}
-                    />
+                if (!hitStyle) return null
+                const selected = selectedOverlayId === o.id
+                return (
+                  <div
+                    key={o.id}
+                    className={`overlay-text overlay-hitbox-only ${selected ? 'selected' : ''}`}
+                    style={hitStyle}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      selectOverlay(o.id)
+                      // 中心は自由配置ならその位置、そうでなければ当たり判定の箱の中心
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const center =
+                        o.style.customPosition ??
+                        clientToNormalized(r.left + r.width / 2, r.top + r.height / 2)
+                      const p = clientToNormalized(e.clientX, e.clientY)
+                      setOverlayDrag({
+                        id: o.id,
+                        x: center.x,
+                        y: center.y,
+                        dx: center.x - p.x,
+                        dy: center.y - p.y,
+                        startX: e.clientX,
+                        startY: e.clientY,
+                        moved: false
+                      })
+                    }}
+                  >
+                    {/* 選んだテロップには琥珀の枠と札(どのトラック・誰の発言か) */}
+                    {selected && (
+                      <span className="overlay-selected-tag">
+                        T1{o.speaker ? ` · ${o.speaker}` : ''}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+              {showShortsUi && project.aspectRatio === '9:16' && <ShortsUiMockup />}
+              {showSafeArea && project.aspectRatio === '9:16' && (
+                <div className="shorts-safe-area" style={shortsSafeAreaInset()}>
+                  <span className="shorts-safe-area-label">セーフエリア</span>
+                </div>
+              )}
+              {/* 横長の安全枠(放送の目安: 動きの安全 5%・文字の安全 10%)。画面だけの線で、書き出しには写らない */}
+              {showSafeFrame && project.aspectRatio !== '9:16' && activeSrc && (
+                <>
+                  <div className="preview-safe-frame action" aria-hidden="true" />
+                  <div className="preview-safe-frame title" aria-hidden="true" />
+                </>
+              )}
+              {project.audioTracks.flatMap((track) =>
+                track.clips
+                  .filter(
+                    (c) =>
+                      playheadTime >= c.startTime &&
+                      playheadTime < c.startTime + audioClipDuration(c)
                   )
-                })
-            )}
+                  .map((clip) => {
+                    const asset = project.assets.find((a) => a.id === clip.assetId)
+                    if (!asset) return null
+                    return (
+                      <AudioTrackClipLayer
+                        key={clip.id}
+                        clip={clip}
+                        asset={asset}
+                        trackVolume={track.volume}
+                        trackMuted={trackSilencedInPreview(track, activeSolo)}
+                        trackDucking={track.duckingEnabled}
+                        isMainVoice={
+                          (isMainVoiceClip(clip) || Boolean(track.voice)) &&
+                          !track.duckingEnabled &&
+                          duckingInUse
+                        }
+                        playheadTime={playheadTime}
+                        isPlaying={isPlaying}
+                        masterVolume={volume}
+                        masterMuted={muted}
+                        seekToken={seekToken}
+                        timelineEnd={total}
+                      />
+                    )
+                  })
+              )}
+            </div>
           </div>
+          <ProgramMeter rootRef={frameRef} />
         </div>
         <div className="preview-controls">
           {/* 再生位置の溝(24px)。イン〜アウトは青い枠で重ねる */}
@@ -1792,6 +1827,19 @@ export function PreviewPlayer(): React.JSX.Element {
                 <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M6 3h4v10H6" fill="none" stroke="currentColor" strokeWidth="1.6" />
                 </svg>
+              </button>
+              <button
+                className={`icon-button transport-loop ${loopPlayback ? 'active' : ''}`}
+                aria-pressed={loopPlayback}
+                aria-label="ループ再生"
+                title={
+                  loopPlayback
+                    ? 'ループ再生をやめる'
+                    : 'ループ再生(イン〜アウト、無ければ全体を繰り返す。Ctrl+Shift+Space も繰り返す)'
+                }
+                onClick={() => setLoopPlayback(!loopPlayback)}
+              >
+                <RepeatIcon width={14} height={14} />
               </button>
             </div>
             <div className="transport-side transport-side-right">

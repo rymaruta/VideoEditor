@@ -38,6 +38,8 @@ export function SourceViewer(): React.JSX.Element | null {
   const assets = useProjectStore((s) => s.project.assets)
   const project = useProjectStore((s) => s.project)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
+  // 本編を固定していれば、末尾に追加・挿入・上書きは押せない(トラックの固定)
+  const mainLocked = useProjectStore((s) => s.project.mainTrackLocked === true)
   const sourceIn = useProjectStore((s) => s.sourceIn)
   const sourceOut = useProjectStore((s) => s.sourceOut)
   const setSourceIn = useProjectStore((s) => s.setSourceIn)
@@ -219,11 +221,13 @@ export function SourceViewer(): React.JSX.Element | null {
   // ソースビューアは音声だけの素材(BGM・ナレーション)や静止画も開けるが、本編(V1)には置けない。
   // 押せたままだと映像の無いクリップが本編に入り、標準の書き出しが失敗していた
   // (タイムラインへのドロップ・「本編(V1)の末尾に追加」と同じ `playableOnMain` で決める)
-  const mainRefusal = playableOnMain(asset)
-    ? null
-    : asset.still
-      ? '静止画は本編(V1)には置けません。ワイプ・CG のトラックへドラッグしてください'
-      : '音声だけの素材は本編(V1)には置けません。音声トラックへドラッグしてください'
+  const mainRefusal = mainLocked
+    ? '本編は固定されています'
+    : playableOnMain(asset)
+      ? null
+      : asset.still
+        ? '静止画は本編(V1)には置けません。ワイプ・CG のトラックへドラッグしてください'
+        : '音声だけの素材は本編(V1)には置けません。音声トラックへドラッグしてください'
   const cannotPlace = rangeDuration <= 0 || mainRefusal !== null
 
   function appendToTimeline(): void {

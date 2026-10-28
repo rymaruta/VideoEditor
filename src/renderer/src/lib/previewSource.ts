@@ -1,4 +1,5 @@
 import type { MediaAsset } from '@shared/types'
+import { lightProxyFor } from './programView'
 
 /**
  * ファイルのパスを `file://` の URL にする。
@@ -36,5 +37,6 @@ export function previewSourceUrl(asset: MediaAsset): string {
 export function previewSourcePath(asset: MediaAsset): string {
   // 静止画は元の画像をそのまま見せる(プレビュー用の変換は動画のためのもの)
   if (asset.still) return asset.filePath
-  return asset.proxyPath ?? asset.filePath
+  // プログラムの画質「軽い」のときは、作った軽い版(540p)で再生する(lib/programView)
+  return lightProxyFor(asset.filePath) ?? asset.proxyPath ?? asset.filePath
 }

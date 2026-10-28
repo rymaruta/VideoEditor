@@ -23,6 +23,8 @@ import {
 import { TimecodeField } from './TimecodeField'
 import { formatTimecode } from '../lib/timelineRuler'
 import { emitMenuCommand } from '../lib/menuCommands'
+import { useInspectorTab } from '../lib/inspectorTab'
+import { InspectorColor, InspectorDecision } from './InspectorTabs'
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
 
@@ -111,6 +113,31 @@ function DraftRange({
  * toolbar (speed, transition, audio), with no single place showing a clip's actual state.
  */
 export function Inspector(): React.JSX.Element {
+  // 見出しのタブ(プロパティ / 色 / AI の判断)。テロップを選んでいるときはテロップの設定だけ
+  const tab = useInspectorTab((s) => s.tab)
+  const telopSelected = useProjectStore(
+    (s) => s.selectedClipId === null && s.selectedOverlayId !== null
+  )
+  const mainLocked = useProjectStore((s) => s.project.mainTrackLocked === true)
+  const telopLocked = useProjectStore((s) => s.project.telopTrackLocked === true)
+  if (tab === 'color' && !telopSelected) return <InspectorColor />
+  if (tab === 'decision' && !telopSelected) return <InspectorDecision />
+  // 固定したトラックのものは見るだけ(変える欄は押せない。トラックの固定)
+  const locked = telopSelected ? telopLocked : mainLocked
+  if (!locked) return <InspectorProperties />
+  return (
+    <>
+      <p className="hint-text ve-lock-note" role="note">
+        {telopSelected ? 'テロップ' : '本編'}は固定されています(タイムラインのピンで外せます)
+      </p>
+      <fieldset className="ve-lock-fieldset" disabled>
+        <InspectorProperties />
+      </fieldset>
+    </>
+  )
+}
+
+function InspectorProperties(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const selectedClipId = useProjectStore((s) => s.selectedClipId)
   const multiSelectedClipIds = useProjectStore((s) => s.multiSelectedClipIds)

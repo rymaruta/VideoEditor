@@ -17,6 +17,11 @@ function formatTime(seconds: number): string {
 export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const addKeywordSeClips = useProjectStore((s) => s.addKeywordSeClips)
+  // 置く先の SE の段(SE・SE 2・SE 3)を固定していれば置けない(トラックの固定)
+  const seLock = useProjectStore((s) => {
+    const t = s.project.audioTracks.find((x) => x.locked && /^SE( \d+)?$/.test(x.name))
+    return t ? `${t.name}は固定されています` : null
+  })
   const dictionary = useSfxDictionaryStore((s) => s.entries)
 
   const matches = useMemo(
@@ -179,7 +184,8 @@ export function KeywordSeModal({ onClose }: { onClose: () => void }): React.JSX.
           <button
             className="primary-button"
             onClick={handleApply}
-            disabled={applying || selected.size === 0}
+            disabled={applying || selected.size === 0 || seLock !== null}
+            title={seLock ? `配置できません(${seLock})` : undefined}
           >
             <PlusIcon width={14} height={14} />
             {applying ? '配置中…' : 'タイムラインに配置'}

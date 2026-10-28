@@ -34,6 +34,8 @@ const LIST_PAGE = 200
 export function TextOverlayPanel(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const addTextOverlay = useProjectStore((s) => s.addTextOverlay)
+  // テロップ(T1)を固定していれば、この一覧からは変えられない(トラックの固定)
+  const telopLocked = useProjectStore((s) => s.project.telopTrackLocked === true)
   const shiftAllTextOverlays = useProjectStore((s) => s.shiftAllTextOverlays)
   const updateTextOverlaysStyle = useProjectStore((s) => s.updateTextOverlaysStyle)
   const selectedOverlayId = useProjectStore((s) => s.selectedOverlayId)
@@ -108,6 +110,8 @@ export function TextOverlayPanel(): React.JSX.Element {
       style: defaultTextStyle(),
       source: 'manual'
     })
+    // 断られた(トラックの固定など)ら選ばない。知らせはストアが帯で出す
+    if (id === null) return
     setMultiIds(new Set([id]))
     selectOverlay(id)
   }
@@ -123,6 +127,8 @@ export function TextOverlayPanel(): React.JSX.Element {
       style: kind.style(),
       source: 'manual'
     })
+    // 断られた(トラックの固定など)ら選ばない。知らせはストアが帯で出す
+    if (id === null) return
     setMultiIds(new Set([id]))
     selectOverlay(id)
   }
@@ -133,158 +139,165 @@ export function TextOverlayPanel(): React.JSX.Element {
 
   return (
     <div className="telop-panel">
-      <div className="telop-panel-body">
-        <div className="telop-list-pane">
-          <div className="telop-list-head">
-            <span>テロップ {sorted.length.toLocaleString()}件</span>
-            <button
-              className="small-button"
-              onClick={handleAdd}
-              title="再生位置にテロップを足します"
-            >
-              <PlusIcon width={12} height={12} />
-              追加
-            </button>
-            <select
-              className="telop-kind-add"
-              aria-label="種類から追加"
-              title={`${TELOP_KINDS.length} 種類の見た目と見本の文から、再生位置に足します`}
-              value=""
-              onChange={(e) => {
-                handleAddKind(e.target.value)
-                e.target.value = ''
+      {telopLocked && (
+        <p className="hint-text ve-lock-note" role="note">
+          テロップは固定されています(タイムラインの T1 のピンで外せます)
+        </p>
+      )}
+      <fieldset className="ve-lock-fieldset" disabled={telopLocked}>
+        <div className="telop-panel-body">
+          <div className="telop-list-pane">
+            <div className="telop-list-head">
+              <span>テロップ {sorted.length.toLocaleString()}件</span>
+              <button
+                className="small-button"
+                onClick={handleAdd}
+                title="再生位置にテロップを足します"
+              >
+                <PlusIcon width={12} height={12} />
+                追加
+              </button>
+              <select
+                className="telop-kind-add"
+                aria-label="種類から追加"
+                title={`${TELOP_KINDS.length} 種類の見た目と見本の文から、再生位置に足します`}
+                value=""
+                onChange={(e) => {
+                  handleAddKind(e.target.value)
+                  e.target.value = ''
+                }}
+              >
+                <option value="">種類から追加…</option>
+                {CATEGORY_ORDER.map((c) => (
+                  <optgroup key={c} label={CATEGORY_LABEL[c]}>
+                    {TELOP_KINDS.filter((k) => k.category === c).map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {k.label}
+                        {k.how === 'manual' ? '' : `(${HOW_LABEL[k.how]})`}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <TelopToolsBar
+              onSelect={(id) => {
+                setMultiIds(new Set([id]))
+                selectOverlay(id)
               }}
-            >
-              <option value="">種類から追加…</option>
-              {CATEGORY_ORDER.map((c) => (
-                <optgroup key={c} label={CATEGORY_LABEL[c]}>
-                  {TELOP_KINDS.filter((k) => k.category === c).map((k) => (
-                    <option key={k.id} value={k.id}>
-                      {k.label}
-                      {k.how === 'manual' ? '' : `(${HOW_LABEL[k.how]})`}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-          <TelopToolsBar
-            onSelect={(id) => {
-              setMultiIds(new Set([id]))
-              selectOverlay(id)
-            }}
-          />
-          {sorted.length === 0 ? (
-            <div className="empty-state">
-              <TypeIcon width={20} height={20} />
-              <p className="hint-text">
-                テロップはありません。「追加」か、テロップメニューの「音声から自動でテロップを作る」で作れます。
-              </p>
-            </div>
-          ) : (
-            <ul className="telop-list" ref={listRef} role="listbox" aria-multiselectable="true">
-              {sorted.slice(range.start, range.end).map((o) => {
-                const isSel = o.id === selectedOverlayId || Boolean(effectiveMulti?.has(o.id))
-                return (
-                  <li
-                    key={o.id}
-                    role="option"
-                    aria-selected={isSel}
-                    className={`telop-row ${isSel ? 'selected' : ''}`}
-                    style={{ borderLeftColor: speakerColor(o.speaker) }}
-                    title={
-                      o.speaker
-                        ? `${o.speaker}: ${stripTelopMarkup(o.text)}`
-                        : stripTelopMarkup(o.text)
-                    }
-                    onClick={(e) => handleRowClick(e, o)}
-                  >
-                    <span className="telop-row-tc">{formatTimecode(o.startTime, fps)}</span>
-                    <span className="telop-row-text">
-                      {stripTelopMarkup(o.text).replace(/\n/g, ' ') || '(空)'}
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          {pages > 1 && (
-            <div className="telop-list-paging">
-              <button
-                className="small-button"
-                disabled={currentPage === 0}
-                onClick={() => setPage(currentPage - 1)}
-              >
-                前へ
-              </button>
-              <span>
-                {range.start + 1}〜{range.end}
-              </span>
-              <button
-                className="small-button"
-                disabled={currentPage >= pages - 1}
-                onClick={() => setPage(currentPage + 1)}
-              >
-                次へ
-              </button>
-              <button
-                className="small-button"
-                title="再生位置のテロップが載っているページへ移ります"
-                onClick={() =>
-                  setPage(pageForTime(sorted, useProjectStore.getState().playheadTime, LIST_PAGE))
-                }
-              >
-                再生位置へ
-              </button>
-            </div>
-          )}
-          {sorted.length > 0 && (
-            <div
-              className="telop-list-foot"
-              title="すべてのテロップの開始・終了をまとめてずらします"
-            >
-              <span>全体をずらす</span>
-              <input
-                type="number"
-                aria-label="ずらす秒数"
-                step={0.1}
-                value={shiftAmount}
-                onChange={(e) => setShiftAmount(Number(e.target.value))}
-              />
-              <span>秒</span>
-              <button className="small-button" onClick={() => shiftAllTextOverlays(-shiftAmount)}>
-                早める
-              </button>
-              <button className="small-button" onClick={() => shiftAllTextOverlays(shiftAmount)}>
-                遅らせる
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="telop-detail-pane">
-          {effectiveMulti ? (
-            <BulkStyleEditor
-              overlays={multiOverlays}
-              onApply={(patch) =>
-                updateTextOverlaysStyle(
-                  multiOverlays.map((o) => o.id),
-                  patch
-                )
-              }
             />
-          ) : selected ? (
-            <TelopInspector key={selected.id} overlay={selected} />
-          ) : (
-            <div className="empty-state">
-              <p className="hint-text">
-                一覧かタイムラインでテロップを選ぶと、ここで本文・話者・見た目を変えられます。
-                Ctrl+クリックで複数を選ぶと、まとめて変更できます。
-              </p>
-            </div>
-          )}
+            {sorted.length === 0 ? (
+              <div className="empty-state">
+                <TypeIcon width={20} height={20} />
+                <p className="hint-text">
+                  テロップはありません。「追加」か、テロップメニューの「音声から自動でテロップを作る」で作れます。
+                </p>
+              </div>
+            ) : (
+              <ul className="telop-list" ref={listRef} role="listbox" aria-multiselectable="true">
+                {sorted.slice(range.start, range.end).map((o) => {
+                  const isSel = o.id === selectedOverlayId || Boolean(effectiveMulti?.has(o.id))
+                  return (
+                    <li
+                      key={o.id}
+                      role="option"
+                      aria-selected={isSel}
+                      className={`telop-row ${isSel ? 'selected' : ''}`}
+                      style={{ borderLeftColor: speakerColor(o.speaker) }}
+                      title={
+                        o.speaker
+                          ? `${o.speaker}: ${stripTelopMarkup(o.text)}`
+                          : stripTelopMarkup(o.text)
+                      }
+                      onClick={(e) => handleRowClick(e, o)}
+                    >
+                      <span className="telop-row-tc">{formatTimecode(o.startTime, fps)}</span>
+                      <span className="telop-row-text">
+                        {stripTelopMarkup(o.text).replace(/\n/g, ' ') || '(空)'}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            {pages > 1 && (
+              <div className="telop-list-paging">
+                <button
+                  className="small-button"
+                  disabled={currentPage === 0}
+                  onClick={() => setPage(currentPage - 1)}
+                >
+                  前へ
+                </button>
+                <span>
+                  {range.start + 1}〜{range.end}
+                </span>
+                <button
+                  className="small-button"
+                  disabled={currentPage >= pages - 1}
+                  onClick={() => setPage(currentPage + 1)}
+                >
+                  次へ
+                </button>
+                <button
+                  className="small-button"
+                  title="再生位置のテロップが載っているページへ移ります"
+                  onClick={() =>
+                    setPage(pageForTime(sorted, useProjectStore.getState().playheadTime, LIST_PAGE))
+                  }
+                >
+                  再生位置へ
+                </button>
+              </div>
+            )}
+            {sorted.length > 0 && (
+              <div
+                className="telop-list-foot"
+                title="すべてのテロップの開始・終了をまとめてずらします"
+              >
+                <span>全体をずらす</span>
+                <input
+                  type="number"
+                  aria-label="ずらす秒数"
+                  step={0.1}
+                  value={shiftAmount}
+                  onChange={(e) => setShiftAmount(Number(e.target.value))}
+                />
+                <span>秒</span>
+                <button className="small-button" onClick={() => shiftAllTextOverlays(-shiftAmount)}>
+                  早める
+                </button>
+                <button className="small-button" onClick={() => shiftAllTextOverlays(shiftAmount)}>
+                  遅らせる
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="telop-detail-pane">
+            {effectiveMulti ? (
+              <BulkStyleEditor
+                overlays={multiOverlays}
+                onApply={(patch) =>
+                  updateTextOverlaysStyle(
+                    multiOverlays.map((o) => o.id),
+                    patch
+                  )
+                }
+              />
+            ) : selected ? (
+              <TelopInspector key={selected.id} overlay={selected} />
+            ) : (
+              <div className="empty-state">
+                <p className="hint-text">
+                  一覧かタイムラインでテロップを選ぶと、ここで本文・話者・見た目を変えられます。
+                  Ctrl+クリックで複数を選ぶと、まとめて変更できます。
+                </p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </fieldset>
     </div>
   )
 }

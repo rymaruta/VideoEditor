@@ -16,6 +16,7 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
   const projectName = useProjectStore((s) => s.project.name)
   const replaceTelopText = useProjectStore((s) => s.replaceTelopText)
   const addTextOverlays = useProjectStore((s) => s.addTextOverlays)
+  const telopLocked = useProjectStore((s) => s.project.telopTrackLocked === true)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [replacement, setReplacement] = useState('')
@@ -113,7 +114,12 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
           type="button"
           className="small-button"
           onClick={() => void importSrt()}
-          title="字幕ファイル(SRT)をテロップとして読み込みます(Premiere・YouTube などの字幕)"
+          disabled={telopLocked}
+          title={
+            telopLocked
+              ? '読み込めません(テロップは固定されています)'
+              : '字幕ファイル(SRT)をテロップとして読み込みます(Premiere・YouTube などの字幕)'
+          }
         >
           SRT 読み込み
         </button>
@@ -163,7 +169,7 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
             <button
               type="button"
               className="small-button"
-              disabled={matches.length === 0}
+              disabled={matches.length === 0 || telopLocked}
               onClick={findNext}
             >
               次を探す
@@ -171,7 +177,7 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
             <button
               type="button"
               className="small-button"
-              disabled={matches.length === 0}
+              disabled={matches.length === 0 || telopLocked}
               onClick={replaceAll}
             >
               すべて置換

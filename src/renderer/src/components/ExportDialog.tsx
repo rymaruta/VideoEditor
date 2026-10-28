@@ -108,6 +108,10 @@ function displayFps(fps: number): string {
 export function ExportDialog(): React.JSX.Element | null {
   const project = useProjectStore((s) => s.project)
   const missingAssetIds = useProjectStore((s) => s.missingAssetIds)
+  // ソロ(モニター用)は書き出しに効かない。ソロ中だけ一言知らせる
+  const soloOn = useProjectStore((s) =>
+    s.soloTrackIds.some((id) => s.project.audioTracks.some((t) => t.id === id))
+  )
   const setAspectRatio = useProjectStore((s) => s.setAspectRatio)
 
   const resolutionHeight = useSettingsStore((s) => s.exportResolutionHeight)
@@ -589,6 +593,15 @@ export function ExportDialog(): React.JSX.Element | null {
               </div>
             )}
             {error && <p className="error-text">{error}</p>}
+            {soloOn && (
+              <p
+                className="hint-text ve-export-solo-note"
+                role="note"
+                title="ソロはプレビューの音だけに効きます。書き出しには、ミュートしていない全部のトラックの音が入ります"
+              >
+                ソロ中: 書き出しには効きません
+              </p>
+            )}
           </div>
 
           <div className="export-dialog-settings">
