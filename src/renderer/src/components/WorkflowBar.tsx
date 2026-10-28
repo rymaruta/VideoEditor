@@ -7,6 +7,7 @@ import { modifierLabel, workflowBarUndo } from '../lib/undoAction'
 import { useModalOpen } from '../lib/useModalOpen'
 import { CheckIcon, RedoIcon, SparklesIcon, TypeIcon, UndoIcon, UploadIcon } from './icons'
 import { PRODUCT_NAME } from '@shared/product'
+import { ProjectNameField } from './ProjectNameField'
 import { needsMenuButton } from '@shared/windowChrome'
 import { createAltTapDetector, menuMnemonicFor } from '../lib/altMenuKey'
 import { topMenuMnemonics } from '@shared/appMenu'
@@ -38,7 +39,6 @@ export function WorkflowBar({
   onEdit: () => void
   onTelop: () => void
 }): React.JSX.Element {
-  const projectName = useProjectStore((s) => s.project.name)
   // 試しに当てている間は、試す前の未保存の印
   const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
   const reviewCount = useReviewItems().open.length
@@ -172,8 +172,8 @@ export function WorkflowBar({
         <span className="workflow-bar-slash" aria-hidden="true">
           /
         </span>
-        <span className="workflow-bar-name" title={projectName}>
-          {projectName}
+        <span className="workflow-bar-name">
+          <ProjectNameField />
         </span>
         <span
           className={`workflow-bar-saved ${isDirty ? 'dirty' : ''}`}

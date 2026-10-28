@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { LibraryPanel } from './LibraryPanel'
 import { Waveform } from './Waveform'
 import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
-import { formatTimecode } from '../lib/timelineRuler'
+import { formatShortDuration, formatTimecode } from '../lib/timelineRuler'
 import { useMenuCommand } from '../lib/menuCommands'
 import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
@@ -807,10 +807,15 @@ export function MediaBin(): React.JSX.Element {
                           />
                         </span>
                       )}
-                      <span className="media-tile-dur tc">
-                        {formatTimecode(asset.duration, asset.fps || 30)}
+                      <span
+                        className="media-tile-dur tc"
+                        title={formatTimecode(asset.duration, asset.fps || 30)}
+                      >
+                        {formatShortDuration(asset.duration)}
                       </span>
-                      {usedAssetIds.has(asset.id) && <span className="media-tile-used" />}
+                      {usedAssetIds.has(asset.id) && (
+                        <span className="media-tile-used" title="タイムラインで使用中" />
+                      )}
                     </span>
                   )}
                   <span
@@ -841,9 +846,7 @@ export function MediaBin(): React.JSX.Element {
                   </span>
                   <span className="media-col-res">
                     {layout === 'grid'
-                      ? usedAssetIds.has(asset.id)
-                        ? '使用中'
-                        : ''
+                      ? ''
                       : asset.hasVideo
                         ? `${asset.width}×${asset.height}`
                         : '音声'}

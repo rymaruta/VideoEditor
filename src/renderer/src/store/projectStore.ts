@@ -846,6 +846,13 @@ function normalizeLoadedProjectFields(project: Project): Project {
       normalizeTextOverlay
     ),
     beatGrid: normalizeBeatGrid(raw.beatGrid),
+    // V1・T1 の「目」。true のときだけ持つ(壊れた値・false は消す)
+    ...('mainVideoHidden' in raw
+      ? { mainVideoHidden: raw.mainVideoHidden === true ? true : undefined }
+      : {}),
+    ...('telopTrackHidden' in raw
+      ? { telopTrackHidden: raw.telopTrackHidden === true ? true : undefined }
+      : {}),
     transcript: normalizeTranscript(raw.transcript),
     multicam: normalizeMulticam(raw.multicam),
     reviewed: asStringArray(raw.reviewed),
@@ -1449,6 +1456,10 @@ interface ProjectState {
   addVideoOverlayTrack: (name: string) => void
   removeVideoOverlayTrack: (trackId: string) => void
   toggleVideoOverlayTrackHidden: (trackId: string) => void
+  /** V1(本編の絵)の「目」。画面にも書き出しにも出さない */
+  toggleMainVideoHidden: () => void
+  /** T1(テロップ)の「目」。画面にも書き出しにも出さない */
+  toggleTelopTrackHidden: () => void
   /** ワイプの音だけを鳴らす/鳴らさない(絵はそのまま) */
   toggleVideoOverlayTrackAudio: (trackId: string) => void
   setVideoOverlayTrackPosition: (trackId: string, position: PipPosition) => void
@@ -4835,6 +4846,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       project: {
         ...state.project,
         videoOverlayTracks: state.project.videoOverlayTracks.filter((t) => t.id !== trackId)
+      }
+    })),
+
+  toggleMainVideoHidden: () =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        mainVideoHidden: state.project.mainVideoHidden ? undefined : true
+      }
+    })),
+
+  toggleTelopTrackHidden: () =>
+    set((state) => ({
+      ...pushHistory(state),
+      project: {
+        ...state.project,
+        telopTrackHidden: state.project.telopTrackHidden ? undefined : true
       }
     })),
 

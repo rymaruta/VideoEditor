@@ -372,6 +372,10 @@ export interface Project {
   audioTracks: AudioTrack[]
   videoOverlayTracks: VideoOverlayTrack[]
   textOverlays: TextOverlay[]
+  /** 本編(V1)の絵を隠す(画面にも書き出しにも出さない。音は鳴らす)。`@shared/trackVisibility` */
+  mainVideoHidden?: boolean
+  /** テロップ(T1)を隠す(画面にも書き出しにも出さない)。`@shared/trackVisibility` */
+  telopTrackHidden?: boolean
   beatGrid?: BeatGrid | null
   /** 文字起こしと話者(自動編集の工程で作る)。時刻は素材の時刻 */
   transcript?: TranscriptUtterance[]

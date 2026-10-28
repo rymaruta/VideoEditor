@@ -19,7 +19,7 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
-import { defaultBottomHeight } from './lib/layoutDefaults'
+import { defaultBottomHeight, defaultSideWidths } from './lib/layoutDefaults'
 import { WorkflowBar } from './components/WorkflowBar'
 import { SideRail, type RailItem } from './components/SideRail'
 import { storedPanelTab } from './lib/panelTabs'
@@ -204,14 +204,14 @@ function storeValue(key: string, value: string): void {
  *   │ ステータスバー                                          │
  *   └──────────────────────────────────────────────────────┘
  *
- * 左のパネルと右のインスペクタの幅・タイムラインの高さは溝をドラッグして変えられ、次回も残る。
+ * 既定: 幅 1440 以上は 素材 288・インスペクタ 312、それ未満は 240・280。タイムラインの高さは中身
+ * (トラックの合計 + 目盛り + スクロールバー)に合わせ、残りはプログラムに回す。
+ * 溝をドラッグして変えた寸法だけを覚え、次回も使う(変えていない寸法は既定のまま窓・中身に付いていく)。
  */
-const LEFT_WIDTH_KEY = 've-layout3-left-width'
-const RIGHT_WIDTH_KEY = 've-layout3-right-width'
-const BOTTOM_HEIGHT_KEY = 've-layout3-bottom-height'
+const LEFT_WIDTH_KEY = 've-layout4-left-width'
+const RIGHT_WIDTH_KEY = 've-layout4-right-width'
+const BOTTOM_HEIGHT_KEY = 've-layout4-bottom-height'
 
-const DEFAULT_LEFT_WIDTH = 288
-const DEFAULT_RIGHT_WIDTH = 312
 const MIN_LEFT_WIDTH = 220
 const MIN_RIGHT_WIDTH = 260
 const RAIL_WIDTH = 80
@@ -221,10 +221,10 @@ const MIN_TOP_HEIGHT = 220
 /** 上の帯 44・ステータスバー 24・溝 */
 const CHROME_HEIGHT = 70
 
-function readStoredSize(key: string, fallback: number): number {
+function readStoredSize(key: string): number | undefined {
   const raw = readStored(key)
   const n = raw ? Number(raw) : NaN
-  return Number.isFinite(n) && n > 0 ? n : fallback
+  return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -356,16 +356,28 @@ function App(): React.JSX.Element {
     else if (LEFT_PANELS.some((p) => p.id === target)) setLeft(target as LeftPanel)
   })
 
-  const [size, setSize] = useState<LayoutSize>(() =>
-    fitLayout({
-      left: readStoredSize(LEFT_WIDTH_KEY, DEFAULT_LEFT_WIDTH),
-      right: readStoredSize(RIGHT_WIDTH_KEY, DEFAULT_RIGHT_WIDTH),
-      bottom: readStoredSize(
-        BOTTOM_HEIGHT_KEY,
-        defaultBottomHeight(window.innerHeight, CHROME_HEIGHT, MIN_BOTTOM_HEIGHT)
-      )
-    })
-  )
+  // 溝をドラッグして決めた寸法(決めていなければ既定)
+  const [userSize, setUserSize] = useState<Partial<LayoutSize>>(() => ({
+    left: readStoredSize(LEFT_WIDTH_KEY),
+    right: readStoredSize(RIGHT_WIDTH_KEY),
+    bottom: readStoredSize(BOTTOM_HEIGHT_KEY)
+  }))
+  // タイムラインの中身の高さ(Timeline が測って知らせる)
+  const [timelineNatural, setTimelineNatural] = useState<number | null>(null)
+  // 窓の大きさ(変われば詰め直す)
+  const [windowSize, setWindowSize] = useState(() => ({
+    w: window.innerWidth,
+    h: window.innerHeight
+  }))
+  const sideDefaults = defaultSideWidths(windowSize.w)
+  const size = fitLayout({
+    left: userSize.left ?? sideDefaults.left,
+    right: userSize.right ?? sideDefaults.right,
+    bottom:
+      userSize.bottom ??
+      timelineNatural ??
+      defaultBottomHeight(windowSize.h, CHROME_HEIGHT, MIN_BOTTOM_HEIGHT)
+  })
   const [resizeDrag, setResizeDrag] = useState<ResizeDragState | null>(null)
 
   function beginResize(kind: ResizeDragState['kind'], e: React.MouseEvent): void {
@@ -380,15 +392,15 @@ function App(): React.JSX.Element {
       const dx = e.clientX - resizeDrag.startX
       const dy = e.clientY - resizeDrag.startY
       const s = resizeDrag.start
-      setSize(
-        fitLayout(
-          resizeDrag.kind === 'left'
-            ? { ...s, left: s.left + dx }
-            : resizeDrag.kind === 'right'
-              ? { ...s, right: s.right - dx }
-              : { ...s, bottom: s.bottom - dy }
-        )
+      const next = fitLayout(
+        resizeDrag.kind === 'left'
+          ? { ...s, left: s.left + dx }
+          : resizeDrag.kind === 'right'
+            ? { ...s, right: s.right - dx }
+            : { ...s, bottom: s.bottom - dy }
       )
+      const key = resizeDrag.kind === 'rows' ? 'bottom' : resizeDrag.kind
+      setUserSize((u) => ({ ...u, [key]: next[key] }))
     }
     function handleMouseUp(): void {
       setResizeDrag(null)
@@ -407,15 +419,19 @@ function App(): React.JSX.Element {
     }
   }, [resizeDrag])
 
+  // ドラッグして決めた寸法だけを覚える
   useEffect(() => {
-    storeValue(LEFT_WIDTH_KEY, String(Math.round(size.left)))
-    storeValue(RIGHT_WIDTH_KEY, String(Math.round(size.right)))
-    storeValue(BOTTOM_HEIGHT_KEY, String(Math.round(size.bottom)))
-  }, [size])
+    if (userSize.left !== undefined) storeValue(LEFT_WIDTH_KEY, String(Math.round(userSize.left)))
+    if (userSize.right !== undefined)
+      storeValue(RIGHT_WIDTH_KEY, String(Math.round(userSize.right)))
+    if (userSize.bottom !== undefined)
+      storeValue(BOTTOM_HEIGHT_KEY, String(Math.round(userSize.bottom)))
+  }, [userSize])
 
   // 窓そのものの大きさが変わったら詰め直す(前回の大きさのまま狭い窓で開いたときも)
   useEffect(() => {
-    const handleWindowResize = (): void => setSize((s) => fitLayout(s))
+    const handleWindowResize = (): void =>
+      setWindowSize({ w: window.innerWidth, h: window.innerHeight })
     window.addEventListener('resize', handleWindowResize)
     return () => window.removeEventListener('resize', handleWindowResize)
   }, [])
@@ -535,21 +551,13 @@ function App(): React.JSX.Element {
             aria-label="インスペクタ"
           >
             <div className="ve-panel-head">
-              <div className="panel-tabs-list" role="tablist" aria-label="インスペクタ">
-                {RIGHT_TABS.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={right === t.id}
-                    className={`panel-tab ${right === t.id ? 'active' : ''}`}
-                    title={t.description}
-                    onClick={() => setRight(t.id)}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
+              {/* 中身は工程で決まる(編集 → プロパティ・テロップ → テロップの一覧)。タブは重ねて置かない */}
+              <h2
+                className="ve-panel-title"
+                title={RIGHT_TABS.find((t) => t.id === right)?.description}
+              >
+                {RIGHT_TABS.find((t) => t.id === right)?.label}
+              </h2>
             </div>
             <div className="tab-content">
               <div className={`tab-pane ${right === 'inspector' ? 'active' : ''}`}>
@@ -574,7 +582,7 @@ function App(): React.JSX.Element {
 
         <section className="frame frame-timeline ve-timeline" style={{ height: size.bottom }}>
           <PanelBoundary name="タイムライン">
-            <Timeline />
+            <Timeline onNaturalHeight={setTimelineNatural} />
           </PanelBoundary>
         </section>
       </div>

@@ -1,4 +1,5 @@
 import { trackUntilDone } from './liveProcesses'
+import { HIDE_MAIN_VIDEO_FILTER } from '@shared/trackVisibility'
 import { meterEncodedAudio } from './encodedLoudness'
 import { colorMatchFilter } from '@shared/color/match'
 import {
@@ -1365,6 +1366,12 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       )
       // The encoded video's real length; the raw timeline sum would stall progress short of 100%.
       totalDuration = mainLayout.totalExportDuration
+
+      // V1 の「目」を閉じていれば、本編の絵を黒で塗る(大きさ・時刻・音はそのまま。ワイプとテロップは上に重ねる)
+      if (includeVideo && project.mainVideoHidden === true) {
+        filterParts.push(`[${curV}]${HIDE_MAIN_VIDEO_FILTER}[v1hidden]`)
+        curV = 'v1hidden'
+      }
 
       // --- Video overlay tracks (PiP): scale + timestamp-shift + overlay onto the base video ---
       const pipAudioEntries: { label: string; duck: boolean }[] = []

@@ -14,7 +14,8 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { frameSeconds } from '@shared/frameRate'
-import { formatTimecode, parseTimecode } from '../lib/timelineRuler'
+import { formatTimecode } from '../lib/timelineRuler'
+import { TimecodeField } from './TimecodeField'
 import { goToEditPoint, markIn, markOut } from '../lib/editCommands'
 import { audibleClipDuration, fadeGainAt } from '@shared/audioFade'
 import {
@@ -792,65 +793,6 @@ function AudioTrackClipLayer({
   return <audio ref={ref} src={audioSrc} style={{ display: 'none' }} />
 }
 
-/**
- * 再生位置のタイムコードの入力欄(HH:MM:SS:FF)。打って Enter で移る。Esc・外へ出ると今の位置へ戻す。
- * 打っている間は再生位置が動いても書き換えない
- */
-function TimecodeField({
-  time,
-  fps,
-  max,
-  onSeek
-}: {
-  time: number
-  fps: number
-  max: number
-  onSeek: (t: number) => void
-}): React.JSX.Element {
-  const [draft, setDraft] = useState<string | null>(null)
-  const [invalid, setInvalid] = useState(false)
-  const shown = draft ?? formatTimecode(time, fps)
-  return (
-    <input
-      className={`tc preview-timecode-input ${invalid ? 'invalid' : ''}`}
-      aria-label="再生位置(タイムコードを入力)"
-      aria-invalid={invalid || undefined}
-      spellCheck={false}
-      value={shown}
-      onFocus={(e) => {
-        setDraft(formatTimecode(time, fps))
-        e.currentTarget.select()
-      }}
-      onChange={(e) => {
-        setDraft(e.target.value)
-        setInvalid(false)
-      }}
-      onBlur={() => {
-        setDraft(null)
-        setInvalid(false)
-      }}
-      onKeyDown={(e) => {
-        e.stopPropagation()
-        if (e.key === 'Escape') {
-          setDraft(null)
-          setInvalid(false)
-          e.currentTarget.blur()
-          return
-        }
-        if (e.key !== 'Enter') return
-        const t = parseTimecode(draft ?? '', fps)
-        if (t === null) {
-          setInvalid(true)
-          return
-        }
-        onSeek(Math.max(0, Math.min(max, t)))
-        setDraft(null)
-        e.currentTarget.blur()
-      }}
-    />
-  )
-}
-
 export function PreviewPlayer(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const isPlaying = useProjectStore((s) => s.isPlaying)
@@ -1465,9 +1407,12 @@ export function PreviewPlayer(): React.JSX.Element {
     return () => window.clearTimeout(id)
   }, [textOverlays])
 
-  const activeOverlays = project.textOverlays.filter(
-    (o) => playheadTime >= o.startTime && playheadTime < o.endTime
-  )
+  // T1 の「目」を閉じていればテロップは出さない(書き出しにも出さない。@shared/trackVisibility)
+  const activeOverlays = project.telopTrackHidden
+    ? []
+    : project.textOverlays.filter((o) => playheadTime >= o.startTime && playheadTime < o.endTime)
+  // V1 の「目」を閉じていれば本編の絵は出さない(音は鳴らす)
+  const mainHidden = project.mainVideoHidden === true
 
   const aspectClass = project.aspectRatio === '9:16' ? 'aspect-9-16' : 'aspect-16-9'
   // カメラ間の色合わせ(本編・ぼかし背景・クロスフェードに同じ補正を掛ける)
@@ -1482,7 +1427,7 @@ export function PreviewPlayer(): React.JSX.Element {
         <div className="preview-frame-wrapper">
           <div className={`preview-frame ${aspectClass}`} ref={frameRef}>
             <ColorMatchFilters assets={project.assets} />
-            {activeSrc && blurBackdrop && (
+            {activeSrc && blurBackdrop && !mainHidden && (
               <PreviewBlurBackdrop
                 src={activeSrc}
                 colorFilter={colorMatchCss(activeAsset)}
@@ -1506,7 +1451,7 @@ export function PreviewPlayer(): React.JSX.Element {
                   style={{
                     ...cropFit,
                     filter: colorMatchCss(activeAsset),
-                    visibility: slot === activeSlot ? 'visible' : 'hidden'
+                    visibility: slot === activeSlot && !mainHidden ? 'visible' : 'hidden'
                   }}
                   onEnded={(e) => handleSlotEvent('ended', e.currentTarget)}
                   onError={(e) => handleSlotEvent('error', e.currentTarget)}
@@ -1522,7 +1467,7 @@ export function PreviewPlayer(): React.JSX.Element {
             {/* 消えていく前のクリップは本編の**上**に重ねる。下に敷くと、本編が
                 不透明なので何も見えない(不透明度を動かしているのはこちら側)。
                 PiP・テロップより手前に出ないよう、重ね順は本編のすぐ上に留める。 */}
-            {activeSrc && crossfade && (
+            {activeSrc && crossfade && !mainHidden && (
               <PreviewCrossfadeLayer
                 src={crossfade.src}
                 localTime={crossfade.localTime}
@@ -1736,7 +1681,14 @@ export function PreviewPlayer(): React.JSX.Element {
           </div>
           <div className="preview-transport-row">
             <div className="transport-side transport-side-left">
-              <TimecodeField time={playheadTime} fps={timecodeFps} max={total} onSeek={seekTo} />
+              <TimecodeField
+                time={playheadTime}
+                fps={timecodeFps}
+                max={total}
+                onCommit={seekTo}
+                label="再生位置(タイムコードを入力)"
+                className="preview-timecode-input"
+              />
               <span className="time-label total">/ {formatTimecode(total, timecodeFps)}</span>
               {exportTotal < total - 0.005 && (
                 <span

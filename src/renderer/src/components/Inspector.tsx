@@ -11,8 +11,18 @@ import { CLIP_COLORS } from '../lib/clipColors'
 import { transitionSecondsForClip } from '@shared/transition'
 import { frameSeconds } from '@shared/frameRate'
 import type { ClipColorLabel, TransitionType } from '@shared/types'
-import { GaugeIcon, LayersIcon, MusicIcon, ScissorsIcon, TagIcon, TargetIcon } from './icons'
-import { DraftNumber } from './DraftNumber'
+import {
+  AlertTriangleIcon,
+  GaugeIcon,
+  LayersIcon,
+  MusicIcon,
+  ScissorsIcon,
+  TagIcon,
+  TargetIcon
+} from './icons'
+import { TimecodeField } from './TimecodeField'
+import { formatTimecode } from '../lib/timelineRuler'
+import { emitMenuCommand } from '../lib/menuCommands'
 
 const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
 
@@ -90,13 +100,6 @@ function DraftRange({
       onBlur={commit}
     />
   )
-}
-
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds)) return '0:00.00'
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${s.toFixed(2).padStart(5, '0')}`
 }
 
 /**
@@ -223,6 +226,8 @@ export function Inspector(): React.JSX.Element {
   }
 
   const speed = clip.speed || 1
+  // 素材のフレームレートで数える(イン点・アウト点は素材の中の時刻)
+  const assetFps = asset.fps > 0 ? asset.fps : 30
   const speedChoices = speedSelectChoices(speed, SPEED_OPTIONS)
   const sourceDuration = clip.outPoint - clip.inPoint
   const timelineDuration = sourceDuration / speed
@@ -294,12 +299,12 @@ export function Inspector(): React.JSX.Element {
         </h3>
         <div className="inspector-field">
           <label>イン点(素材内)</label>
-          <DraftNumber
-            min={0}
+          <TimecodeField
+            time={clip.inPoint}
+            fps={assetFps}
             max={asset.duration}
-            step={0.1}
-            value={clip.inPoint}
             onCommit={setIn}
+            label="イン点(素材内)"
           />
         </div>
         <DraftRange
@@ -311,12 +316,12 @@ export function Inspector(): React.JSX.Element {
         />
         <div className="inspector-field">
           <label>アウト点(素材内)</label>
-          <DraftNumber
-            min={0}
+          <TimecodeField
+            time={clip.outPoint}
+            fps={assetFps}
             max={asset.duration}
-            step={0.1}
-            value={clip.outPoint}
             onCommit={setOut}
+            label="アウト点(素材内)"
           />
         </div>
         <DraftRange
@@ -326,15 +331,36 @@ export function Inspector(): React.JSX.Element {
           value={clip.outPoint}
           onCommit={setOut}
         />
-        <div className="inspector-readout">
-          <span>素材内の長さ {formatTime(sourceDuration)}</span>
-          <span>タイムライン上 {formatTime(timelineDuration)}</span>
+        <div className="inspector-field">
+          <label>長さ(素材内)</label>
+          <TimecodeField
+            time={sourceDuration}
+            fps={assetFps}
+            min={MIN_CLIP_SOURCE_DURATION}
+            max={asset.duration - clip.inPoint}
+            onCommit={(len) => setOut(clip.inPoint + len)}
+            label="長さ(素材内)"
+          />
         </div>
-        {timed && (
-          <button className="small-button" onClick={() => seekTo(timed.start)}>
-            このクリップの先頭へ移動
+        <div className="inspector-readout">
+          <span>
+            タイムライン上 <span className="tc">{formatTimecode(timelineDuration, assetFps)}</span>
+          </span>
+        </div>
+        <div className="inspector-button-row">
+          {timed && (
+            <button className="small-button" onClick={() => seekTo(timed.start)}>
+              このクリップの先頭へ移動
+            </button>
+          )}
+          <button
+            className="small-button"
+            title="トリムの窓で、見ながらイン点・アウト点を決めます"
+            onClick={() => emitMenuCommand('clip.trimDialog')}
+          >
+            トリム…
           </button>
-        )}
+        </div>
       </div>
 
       <div className="inspector-section">
@@ -374,7 +400,12 @@ export function Inspector(): React.JSX.Element {
       {mismatch && (
         <div className="inspector-section">
           <h3>
-            <TargetIcon width={14} height={14} />
+            <AlertTriangleIcon
+              width={14}
+              height={14}
+              className="inspector-warn"
+              aria-label="縦横比が違います"
+            />
             フレーミング
           </h3>
           <label className="checkbox-label">
@@ -470,7 +501,7 @@ export function Inspector(): React.JSX.Element {
               )
             }
           >
-            <option value="none">カット(繋ぎなし)</option>
+            <option value="none">つなぎ: なし</option>
             <option value="crossfade">クロスフェード</option>
             <option value="fade">フェード</option>
             <option value="wipe">ワイプ</option>

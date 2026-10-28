@@ -24,3 +24,25 @@ export function defaultBottomHeight(
   const available = Math.max(0, windowHeight - chromeHeight)
   return Math.max(minBottom, Math.min(TIMELINE_LANES_HEIGHT, Math.round(available * BOTTOM_SHARE)))
 }
+
+/** これより狭い窓では、素材とインスペクタを細くする */
+export const NARROW_WINDOW_WIDTH = 1440
+
+/** 左のパネル(素材)と右のインスペクタの既定の幅。1440 未満の窓では 240・280(プログラムを広く残す) */
+export function defaultSideWidths(windowWidth: number): { left: number; right: number } {
+  return windowWidth < NARROW_WINDOW_WIDTH ? { left: 240, right: 280 } : { left: 288, right: 312 }
+}
+
+/**
+ * タイムラインの中身の高さ: パネルの中のトラック以外(道具の帯など)+ 見出しの列・レーンの列の高い方
+ * (レーンの列は横のスクロールバーを含む)
+ */
+export function timelineNaturalHeight(m: {
+  panelHeight: number
+  tracksClientHeight: number
+  labelsHeight: number
+  lanesHeight: number
+}): number {
+  const chrome = Math.max(0, m.panelHeight - m.tracksClientHeight)
+  return Math.ceil(chrome + Math.max(m.labelsHeight, m.lanesHeight))
+}

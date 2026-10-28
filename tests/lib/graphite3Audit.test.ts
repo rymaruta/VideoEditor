@@ -153,7 +153,7 @@ describe('波形の上限とメモリ', () => {
         }
       }
     }
-    // 短いクリップは細かいまま(横 2 倍・縦 2 倍)
+    // 短いクリップは細かいまま(横 2 倍。縦は倍にしない: 縮めると細い線が詰まって白い塊に見えた)
     expect(waveformImageRequestSize(1000, 30)).toEqual({
       width: 2000,
       height: 30 * WAVEFORM_HEIGHT_SCALE

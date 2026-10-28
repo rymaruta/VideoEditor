@@ -154,8 +154,10 @@
   --ve-clip-label-bg: rgba(0, 0, 0, 0.55); /* 波形の上の名前の地 */
   --ve-lane-a: #1c1c1c; /* トラックの地(交互) */
   --ve-lane-b: #242424;
-  /* 波形は 1 色(持ち主の必須要件) */
+  /* 波形は 1 色(持ち主の必須要件)。外側の山は淡く、内側の平均は濃く(同じ色の濃さで分ける) */
   --ve-wave: #e6f4ec;
+  --ve-wave-outer: rgba(230, 244, 236, 0.35);
+  --ve-wave-inner: rgba(230, 244, 236, 0.85);
 
   /* 前の名前(タイムライン・名札が読む)。値は上のクリップの色へ */
   --ve-track-tag-ink: #ffffff;
@@ -190,12 +192,12 @@
   --ve-track-se-clip-ink: var(--ve-clip-ink);
   --ve-track-se-lane: transparent;
   /* 波形(山と平均を同じ 1 色に) */
-  --ve-wave-dialog-peak: var(--ve-wave);
-  --ve-wave-dialog-rms: var(--ve-wave);
-  --ve-wave-music-peak: var(--ve-wave);
-  --ve-wave-music-rms: var(--ve-wave);
-  --ve-wave-video-peak: var(--ve-wave);
-  --ve-wave-video-rms: var(--ve-wave);
+  --ve-wave-dialog-peak: var(--ve-wave-outer);
+  --ve-wave-dialog-rms: var(--ve-wave-inner);
+  --ve-wave-music-peak: var(--ve-wave-outer);
+  --ve-wave-music-rms: var(--ve-wave-inner);
+  --ve-wave-video-peak: var(--ve-wave-outer);
+  --ve-wave-video-rms: var(--ve-wave-inner);
 
   --ve-track-video-tint: transparent;
   --ve-track-video-body: var(--ve-clip-main);
@@ -204,8 +206,8 @@
   --ve-track-video-ring: var(--ve-clip-edge);
   --ve-track-video-index: var(--ve-clip-label-bg);
   --ve-track-video-wave-shade: transparent;
-  --ve-track-video-wave-peak: var(--ve-wave);
-  --ve-track-video-wave-rms: var(--ve-wave);
+  --ve-track-video-wave-peak: var(--ve-wave-outer);
+  --ve-track-video-wave-rms: var(--ve-wave-inner);
   --ve-track-video-warn-ink: var(--ve-warning);
   --ve-track-overlay-body: var(--ve-clip-pip);
   --ve-track-overlay-body-ink: var(--ve-clip-ink);
@@ -216,18 +218,18 @@
   --ve-track-dialog-body: var(--ve-clip-voice);
   --ve-track-dialog-body-ink: var(--ve-clip-ink);
   --ve-track-dialog-ring: var(--ve-clip-edge);
-  --ve-track-dialog-wave-peak: var(--ve-wave);
-  --ve-track-dialog-wave-rms: var(--ve-wave);
+  --ve-track-dialog-wave-peak: var(--ve-wave-outer);
+  --ve-track-dialog-wave-rms: var(--ve-wave-inner);
   --ve-track-music-body: var(--ve-clip-bgm);
   --ve-track-music-body-ink: var(--ve-clip-ink);
   --ve-track-music-ring: var(--ve-clip-edge);
-  --ve-track-music-wave-peak: var(--ve-wave);
-  --ve-track-music-wave-rms: var(--ve-wave);
+  --ve-track-music-wave-peak: var(--ve-wave-outer);
+  --ve-track-music-wave-rms: var(--ve-wave-inner);
   --ve-track-se-body: var(--ve-clip-se);
   --ve-track-se-body-ink: var(--ve-clip-ink);
   --ve-track-se-ring: var(--ve-clip-edge);
-  --ve-track-se-wave-peak: var(--ve-wave);
-  --ve-track-se-wave-rms: var(--ve-wave);
+  --ve-track-se-wave-peak: var(--ve-wave-outer);
+  --ve-track-se-wave-rms: var(--ve-wave-inner);
   --ve-track-labels-fill: var(--ve-surface-band);
   --ve-track-lanes-fill: var(--ve-surface-ground);
   --ve-track-label-ink: var(--ve-text-2);
@@ -256,21 +258,21 @@
   --ve-tag-telop-ink: var(--ve-clip-ink);
   --ve-tag-auto: var(--ve-auto-soft);
   --ve-tag-auto-ink: var(--ve-auto-ink);
-  --ve-wave-auto-peak: var(--ve-wave);
-  --ve-wave-auto-rms: var(--ve-wave);
+  --ve-wave-auto-peak: var(--ve-wave-outer);
+  --ve-wave-auto-rms: var(--ve-wave-inner);
   /* 波形の既定(レーンの色が無い所。Waveform.tsx が読む) */
-  --ve-wave-peak: var(--ve-wave);
-  --ve-wave-rms: var(--ve-wave);
+  --ve-wave-peak: var(--ve-wave-outer);
+  --ve-wave-rms: var(--ve-wave-inner);
 
-  /* 話者(テロップの縁・印・文字起こしの名前。最大 8 人)— 今のまま */
-  --ve-speaker-0: #f6a6cc;
-  --ve-speaker-1: #7fa8ff;
-  --ve-speaker-2: #f5c35a;
-  --ve-speaker-3: #6fd3a3;
-  --ve-speaker-4: #ff9a6b;
-  --ve-speaker-5: #b79cff;
-  --ve-speaker-6: #5fd0e0;
-  --ve-speaker-7: #d7db6a;
+  /* 話者(テロップの縁・印・文字起こしの名前。最大 8 人)— @shared/speaker の色と同じ */
+  --ve-speaker-0: #5cc1b3;
+  --ve-speaker-1: #e08a9a;
+  --ve-speaker-2: #6cc3d5;
+  --ve-speaker-3: #8fd16a;
+  --ve-speaker-4: #d9785f;
+  --ve-speaker-5: #b9c25a;
+  --ve-speaker-6: #d6d6d6;
+  --ve-speaker-7: #7aa88e;
 
   /* ---------------------------------------------------------------
      4. 文字 — 11 / 12 / 13 / 15 / 22 の 5 段。等幅は数字(時刻・数値)だけ

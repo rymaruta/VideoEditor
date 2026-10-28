@@ -143,3 +143,12 @@ export function parseTimecode(text: string, fps: number): number | null {
   }
   return frame / (ntsc ? real : nominal)
 }
+
+/** 素材の格子の長さの札: M:SS(1 時間を超えたら H:MM:SS)。秒より細かい時刻は札の title と一覧で */
+export function formatShortDuration(seconds: number): string {
+  const s = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const ss = String(s % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}

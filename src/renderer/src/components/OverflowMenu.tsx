@@ -10,6 +10,8 @@ export interface OverflowAction {
   title?: string
   /** 危険な操作(削除など)。赤い字で出す */
   danger?: boolean
+  /** 今は使えない(押せない。理由は title に) */
+  disabled?: boolean
   onSelect: () => void
 }
 
@@ -22,12 +24,15 @@ export interface OverflowAction {
 export function OverflowMenu({
   actions,
   label = 'その他',
+  icon,
   menuLabel,
   className = '',
   children
 }: {
   actions: readonly OverflowAction[]
   label?: string
+  /** ボタンの頭のアイコン */
+  icon?: React.ReactNode
   /** メニューの名前(読み上げ) */
   menuLabel: string
   className?: string
@@ -78,6 +83,7 @@ export function OverflowMenu({
           }
         }}
       >
+        {icon}
         {label}
         <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -108,6 +114,7 @@ export function OverflowMenu({
                 tabIndex={-1}
                 className={`overflow-menu-item ${a.danger ? 'danger' : ''}`}
                 title={a.title}
+                disabled={a.disabled}
                 onClick={() => {
                   setOpen(false)
                   ref.current?.focus()

@@ -263,7 +263,7 @@ input[type='radio'] {
   background: var(--ve-surface-ground);
 }
 .ve-timeline {
-  flex-shrink: 0;
+  flex: none;
   background: var(--ve-surface-ground);
 }
 /* 区画の溝 1px。押せる所は左右(上下)に 3px ずつ広げる。hover・ドラッグ中は差し色 */
@@ -491,7 +491,7 @@ input[type='radio'] {
 }
 /* 素材の格子: 2 列・16:9 の枠・下に波形の帯・右下に時間 */
 .ve-left .media-list.media-grid {
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: var(--ve-space-3) var(--ve-space-2);
   padding: 0;
 }
@@ -567,8 +567,8 @@ input[type='radio'] {
   height: 100%;
 }
 .media-tile-wave {
-  --g3-wave-peak: var(--ve-wave);
-  --g3-wave-rms: var(--ve-wave);
+  --g3-wave-peak: var(--ve-wave-outer);
+  --g3-wave-rms: var(--ve-wave-inner);
 }
 
 /* ---------- プログラム ---------- */
@@ -810,7 +810,7 @@ input[type='radio'] {
   place-items: center;
 }
 .preview-timecode-input {
-  width: 120px;
+  width: 132px;
   height: var(--ve-control-md);
   padding: 0 var(--ve-space-2);
   font-family: var(--ve-font-mono);
@@ -862,4 +862,133 @@ input[type='radio'] {
     width: 36px;
     height: 36px;
   }
+}
+
+/* ---------- 第1段のレビューの直し ---------- */
+/* トラックの見出しのトグルは右の列にそろえる(映像: 目・⋮ / 音声: 音量・M・⋮) */
+.ve-track-toggles {
+  flex-shrink: 0;
+  width: calc(var(--ve-control-xs) * 3 + var(--ve-space-1) * 2);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ve-space-1);
+}
+/* オンのトグルは #3a3a3a の面に青いアイコン */
+.ve-track-toggle[aria-pressed='true'],
+.ve-track-toggle[aria-pressed='true']:hover:not(:disabled) {
+  background-color: var(--ve-surface-raised);
+  color: var(--ve-primary);
+}
+.ve-track-settings .hint-text {
+  max-width: 240px;
+  font-size: var(--ve-fs-11);
+  line-height: var(--ve-lh-11);
+}
+/* 見出しの列の最後の「+ トラック ▾」(24px) */
+.ve-add-track-row {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--ve-space-2);
+}
+.ve-add-track-row .ve-add-track,
+.ve-add-track-row .ve-add-track:hover:not(:disabled) {
+  height: var(--ve-control-sm);
+  padding: var(--ve-control-pad-sm);
+  gap: var(--ve-space-1);
+  font-size: var(--ve-fs-12);
+}
+/* 隠したトラックのクリップは薄く */
+.timeline-panel .video-lane.hidden .timeline-clip,
+.timeline-panel .caption-lane.hidden .timeline-caption-clip {
+  opacity: 0.4;
+}
+/* 道具の帯: 範囲の表示・AI の操作 */
+.ve-range-chip {
+  flex-shrink: 0;
+  height: var(--ve-control-md);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  padding: 0 var(--ve-space-2);
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-field);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+  white-space: nowrap;
+}
+.ve-range-chip .tc {
+  color: var(--ve-text-1);
+}
+.timeline-panel .ve-ai-button,
+.timeline-panel .ve-ai-button:hover:not(:disabled) {
+  flex-shrink: 0;
+  height: var(--ve-control-md);
+  gap: var(--ve-space-1);
+  white-space: nowrap;
+}
+.timeline-panel .ve-ai-button > .ve-icon {
+  color: var(--ve-auto);
+}
+/* ⚠ はクリップではホバー・選んだときだけ(素材とインスペクタに 1 回ずつ出す) */
+.timeline-panel .timeline-clip .ve-clip-warn {
+  display: none;
+}
+.timeline-panel .timeline-clip:hover .ve-clip-warn,
+.timeline-panel .timeline-clip.selected .ve-clip-warn {
+  display: inline-flex;
+}
+.inspector-warn {
+  color: var(--ve-warning);
+}
+/* タイムコードの入力欄(インスペクタ・プログラム) */
+.timecode-field {
+  font-family: var(--ve-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.timecode-field.invalid {
+  border-color: var(--ve-danger);
+}
+.inspector-field .timecode-field {
+  width: 112px;
+  height: var(--ve-control-sm);
+  padding: 0 var(--ve-space-2);
+  font-size: var(--ve-fs-12);
+  text-align: right;
+}
+/* 上の帯の企画名(押すと名前を変えられる) */
+.workflow-bar .project-name,
+.workflow-bar .project-name:hover:not(:disabled) {
+  height: var(--ve-control-sm);
+  max-width: 280px;
+  padding: 0 var(--ve-space-1);
+  border: 1px solid transparent;
+  border-radius: var(--ve-radius-md);
+  background: transparent;
+  color: var(--ve-text-2);
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-regular);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workflow-bar .project-name:hover:not(:disabled) {
+  border-color: var(--ve-border);
+  color: var(--ve-text-1);
+}
+.workflow-bar .project-name-input {
+  height: var(--ve-control-sm);
+  width: 240px;
+  font-size: var(--ve-fs-13);
+}
+.workflow-bar-name {
+  min-width: 0;
+  display: inline-flex;
+}
+/* 映像の黒と上下の黒い帯をそろえる(どちらも純黒) */
+.preview-frame,
+.preview-main-video {
+  background: var(--ve-black);
 }

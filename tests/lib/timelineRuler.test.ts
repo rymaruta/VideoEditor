@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatShortDuration,
   formatTimecode,
   parseTimecode,
   rulerStep,
@@ -129,5 +130,15 @@ describe('parseTimecode — タイムコードの入力欄', () => {
         expect(Math.round(back! * fps)).toBe(frame)
       }
     }
+  })
+})
+
+describe('formatShortDuration — 素材の格子の長さの札', () => {
+  it('M:SS、1 時間を超えたら H:MM:SS。おかしな値は 0:00', () => {
+    expect(formatShortDuration(192.4)).toBe('3:12')
+    expect(formatShortDuration(734)).toBe('12:14')
+    expect(formatShortDuration(3725)).toBe('1:02:05')
+    expect(formatShortDuration(NaN)).toBe('0:00')
+    expect(formatShortDuration(-3)).toBe('0:00')
   })
 })

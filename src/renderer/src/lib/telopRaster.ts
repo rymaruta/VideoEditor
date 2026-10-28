@@ -2,6 +2,7 @@ import { loadTelopFonts } from './telopFonts'
 import type { Sequence } from '@shared/sequence/types'
 import type { AspectRatio, Project } from '@shared/types'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
+import { projectForOutput } from '@shared/trackVisibility'
 import {
   planTelopRuns,
   telopItemSource,
@@ -118,6 +119,9 @@ export async function prepareTelopLayerForExport(
   onProgress?: (done: number, total: number) => void,
   signal?: AbortSignal
 ): Promise<TelopLayerPayload | null> {
-  const v2 = projectV1ToV2({ ...project, aspectRatio }, { resolution: resolutionHeight })
+  // T1 の「目」を閉じていれば、テロップは焼き込まない
+  const output = projectForOutput(project)
+  if (output.textOverlays.length === 0) return null
+  const v2 = projectV1ToV2({ ...output, aspectRatio }, { resolution: resolutionHeight })
   return rasterizeTelopLayer(v2.sequence, onProgress, signal)
 }

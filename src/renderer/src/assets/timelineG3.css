@@ -518,10 +518,10 @@
   background: var(--g3-k);
   box-shadow: inset 0 0 0 1px var(--ve-clip-edge);
   color: var(--ve-clip-ink);
-  --g3-wave-peak: var(--ve-wave);
-  --g3-wave-rms: var(--ve-wave);
-  --ve-wave-peak: var(--ve-wave);
-  --ve-wave-rms: var(--ve-wave);
+  --g3-wave-peak: var(--ve-wave-outer);
+  --g3-wave-rms: var(--ve-wave-inner);
+  --ve-wave-peak: var(--ve-wave-outer);
+  --ve-wave-rms: var(--ve-wave-inner);
 }
 .timeline-panel .timeline-clip::after,
 .timeline-panel .timeline-audio-clip::after,

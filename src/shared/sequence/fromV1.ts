@@ -131,7 +131,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
   })
 
   const videoTracks: VideoTrack[] = [
-    { id: 'v1-main', name: 'V1 本編', hidden: false, items: mainItems }
+    // V1 の「目」を閉じていれば、本編の絵は出さない(音は a1-main で鳴らす)
+    { id: 'v1-main', name: 'V1 本編', hidden: project.mainVideoHidden === true, items: mainItems }
   ]
 
   // --- PiP: 1本の v1 トラックの中で重なっていれば、v2 では段を分ける ---
