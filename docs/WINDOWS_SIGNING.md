@@ -10,7 +10,7 @@
      2023 年 6 月以降、秘密鍵はハードウェア(USB トークンかクラウドの HSM)に置くことが必須になった。
      .pfx ファイルを CI に置く方式は、クラウドの HSM の署名サービスを使う形に置き換える必要がある
    - **EV コード署名証明書**: OV と同じくハードウェアに鍵を置く。SmartScreen の評価が最初から付きやすい
-   - **Microsoft の Azure Artifact Signing(旧 Trusted Signing)**: 月額の安い署名サービス。
+   - **Microsoft の Trusted Signing(Azure の署名サービス)**: 月額の安い署名サービス。
      利用できる国・個人か法人かの条件があるので、申し込み前に Microsoft の案内で確認する
    - 名義は販売者(法人か個人事業)の正式な名前にする。product.json の vendor も同じ名前にそろえる
 2. 署名の方法が決まったら、CI(.github/workflows/windows-release-gates.yml の package)に組み込む
