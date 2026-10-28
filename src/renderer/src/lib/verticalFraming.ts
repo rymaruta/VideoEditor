@@ -529,7 +529,7 @@ export function applyVerticalFill(
   let switched = 0
   /** 話者の切り替えで分けたクリップの、元のクリップ(顔を探した画は元のクリップの id で覚えている) */
   const originOf = new Map<string, string>()
-  const clips = project.clips.flatMap((c): Clip[] => {
+  const clips = project.clips.flatMap((c, ci): Clip[] => {
     const asset = assets.get(c.assetId)
     if (!inRange.has(c.id) || !fillsVertical(c, asset, ASPECT, options.refineAutoFill)) return [c]
     filled++
@@ -547,7 +547,15 @@ export function applyVerticalFill(
     const byFace = options.speakers?.faces.get(c.assetId)
     // 速さを変えたクリップは分けない(分けると書き出しが速さの掛け直しで音をずらし・途切れさせる。
     // 59.94fps・速さ 0.8 で 14.5ms のずれ、30fps・速さ 0.5 で途切れ)。上下に積む
-    if (byFace && options.speakers && (c.speed || 1) === 1) {
+    // 繋ぎ(クロスフェードなど)に関わるクリップ(自分・前・次に繋ぎがある)も分けない。繋ぎで書き出しの
+    // 頭が数コマ手前へ動き、分けた所で 1〜2 コマ(最大 80ms)音が飛んだ(25fps・前 2.7 秒・繋ぎ 0.3 秒)
+    const nearTransition = [project.clips[ci - 1], c, project.clips[ci + 1]].some(
+      (x) =>
+        x?.transitionIn !== undefined &&
+        x.transitionIn.type !== 'none' &&
+        x.transitionIn.duration > 0
+    )
+    if (byFace && options.speakers && (c.speed || 1) === 1 && !nearTransition) {
       const people = framing.people
       const keyOf = (speaker: string): number | null => {
         const x = byFace.get(speaker)
