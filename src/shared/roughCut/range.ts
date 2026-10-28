@@ -169,19 +169,71 @@ export function intersectSegs(segs: readonly CameraSeg[], windows: readonly Rang
 
 /**
  * 窓の中を今の中身(`current`。今の本編の共通の時刻とカメラ)に固定する本編の修正。
- * 窓の中で今の本編に無い所は削り、ある所は足し(詰めずに残す)、カメラは今のカメラにする
+ * 窓の中で今の本編に無い所は削り、ある所は足し(詰めずに残す)、カメラは今のカメラにする。
+ *
+ * 作り直した本編は同じ共通の時刻を1回しか映せないので、今の本編が同じ時刻を2回以上(複製・並べ替え)
+ * 違うカメラで映していると、カメラは1つに潰れる。そのとき前に組んだ本編(`auto`)を渡せば、組んだ本編と
+ * 違うカメラ(人が替えた方)を残し、組んだ本編のままのカメラはその時間から外す(`updateOverrides` と同じ
+ * 読み方。渡さなければ、後ろに並んだ方が勝つ)。人が替えた方が並びの前にあると、手で決めたカメラが
+ * ロックの作り直しで消えていた
  */
 export function pinOverrides(
   windows: readonly Range[],
-  current: readonly CameraSeg[]
+  current: readonly CameraSeg[],
+  auto?: readonly CameraSeg[]
 ): CutOverrides {
   const ws = unionRanges(windows)
   const inside = intersectSegs(current, ws)
   return {
     removed: subtractRanges(ws, inside),
     added: unionRanges(inside),
-    angles: inside
+    angles: auto ? preferDecidedCameras(inside, auto) : inside
   }
+}
+
+/** 人が決めたカメラと読む最短の切れ端(秒)。これより短い違いは丸め・約1コマのはみ出し */
+const DECIDED_MIN_SEC = 0.1
+
+/** 区間どうしの重なり */
+const overlapOf = (a: readonly Range[], b: readonly Range[]): Range[] =>
+  subtractRanges(a, subtractRanges(unionRanges(a), unionRanges(b)))
+
+/**
+ * 同じ共通の時刻を違うカメラで映す区間が重なるとき、前に組んだ本編(`auto`)のままのカメラの区間から、
+ * 人が決めたカメラ(組んだ本編と違うカメラ・組んだ本編に無い所。`DECIDED_MIN_SEC` 以上)の区間と
+ * 重なる所を外す。組んだ本編と違うがごく短い切れ端(区間の端の丸めのはみ出し)は人の判断と読まず、
+ * ほかのカメラの区間と重なる所は外す(残すと、並べ替えたときに切れ端が後ろに当たってちらつく)。
+ * 重ならない区間は同じ形のまま(複製の無い本編では何も変えない)
+ */
+export function preferDecidedCameras(
+  segs: readonly CameraSeg[],
+  auto: readonly CameraSeg[]
+): CameraSeg[] {
+  const parts = segs.map((s) => {
+    const same = auto.filter((a) => a.cameraId === s.cameraId)
+    const differs = subtractRanges([s], same)
+    return {
+      s,
+      plain: intersectSegs([s], same),
+      decided: differs.filter((r) => r.end - r.start >= DECIDED_MIN_SEC),
+      slivers: differs.filter((r) => r.end - r.start < DECIDED_MIN_SEC)
+    }
+  })
+  if (parts.every((p) => p.decided.length === 0)) return [...segs]
+  return parts.flatMap(({ s, plain, slivers }) => {
+    const others = parts.filter((q) => q.s !== s && q.s.cameraId !== s.cameraId)
+    const drop = unionRanges([
+      ...overlapOf(
+        plain,
+        others.flatMap((q) => q.decided)
+      ),
+      ...overlapOf(
+        slivers,
+        others.map((q) => q.s)
+      )
+    ])
+    return drop.length === 0 ? [s] : subtractSegs([s], drop)
+  })
 }
 
 /** `base` の窓の中を `pinned` で置き換える(窓の外の判断はそのまま、窓の中は `pinned` が勝つ) */
@@ -422,4 +474,139 @@ export function timelineWindowOf(
     if (a < window.start - ORDER_SLACK || b > window.end + ORDER_SLACK) return null
   }
   return { start, end }
+}
+
+/** 本編の塊(窓の中を映すクリップが続いて並ぶ所)の、タイムラインの区間と中身 */
+export interface TimelineBlock extends TimelineRange {
+  /** 窓の中の所の共通の時刻とカメラ(並びの順) */
+  segs: CameraSeg[]
+  /** 塊の最初と最後のクリップの番号 */
+  first: number
+  last: number
+}
+
+/**
+ * 共通の時刻の窓 → 本編のタイムラインの塊(窓の中を映すクリップが続いて並ぶ所)の並び。
+ * 窓の外を映す収録素材のクリップが挟まる所で分ける(差し込みの画は分けない)。
+ * 塊が1つなら `timelineWindowOf` と同じ区間。窓の中を映すクリップが無ければ空
+ */
+export function timelineBlocksOf(
+  clips: readonly RangeClip[],
+  info: MulticamInfo,
+  window: Range
+): TimelineBlock[] {
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+  const times = clipTimes(clips)
+  const out: TimelineBlock[] = []
+  let cur: TimelineBlock | null = null
+  const close = (): void => {
+    if (cur) out.push(cur)
+    cur = null
+  }
+  clips.forEach((c, i) => {
+    const f = fileOf.get(c.assetId)
+    if (!f) return
+    const speed = c.speed || 1
+    const a = toCommon(f, c.inPoint)
+    const b = toCommon(f, c.outPoint)
+    const lo = Math.max(a, window.start)
+    const hi = Math.min(b, window.end)
+    if (hi - lo <= EPS) return close()
+    const scale = f.rate / speed
+    const ts = times[i].start + (lo - a) * scale
+    const te = times[i].start + (hi - a) * scale
+    // 窓の頭より前から映すクリップは新しい塊の頭、窓の終わりより後ろまで映すクリップは塊の終わり
+    if (a < window.start - ORDER_SLACK) close()
+    const seg = { start: lo, end: hi, cameraId: f.sourceId }
+    if (cur) {
+      cur.end = te
+      cur.last = i
+      cur.segs.push(seg)
+    } else cur = { start: ts, end: te, segs: [seg], first: i, last: i }
+    if (b > window.end + ORDER_SLACK) close()
+  })
+  close()
+  return out
+}
+
+const SEG_TOL = 1e-3
+
+/** 続いた同じカメラの区間をまとめる(窓の境で分けて差し戻したクリップがつながっても同じに見る) */
+function mergedSegs(segs: readonly CameraSeg[]): CameraSeg[] {
+  const out: CameraSeg[] = []
+  for (const s of segs) {
+    const last = out[out.length - 1]
+    if (last && last.cameraId === s.cameraId && Math.abs(last.end - s.start) <= SEG_TOL)
+      last.end = s.end
+    else out.push({ ...s })
+  }
+  return out
+}
+
+/**
+ * 前の本編(`previous`)の塊と、今の本編(`current`)の塊の対応(ロックの中身をそのまま差し戻したもの)。
+ * 今の本編の塊を、前の本編の塊の中身(共通の時刻とカメラの並び)で頭から敷き詰める(差し戻した塊どうしが
+ * 隣り合ってつながっても分けられる)。中身の合わない塊は対応させない
+ */
+export function matchLockBlocks(
+  previous: readonly RangeClip[],
+  current: readonly RangeClip[],
+  info: MulticamInfo,
+  window: Range
+): { prev: TimelineBlock; now: TimelineRange }[] {
+  const prevBlocks = timelineBlocksOf(previous, info, window).map((b) => ({
+    b,
+    segs: mergedSegs(b.segs)
+  }))
+  const used = new Set<number>()
+  let lastMatched = -1
+  const out: { prev: TimelineBlock; now: TimelineRange }[] = []
+  for (const nb of timelineBlocksOf(current, info, window)) {
+    const segs = mergedSegs(nb.segs)
+    let i = 0
+    let at = segs[0]?.start ?? 0
+    let t = nb.start
+    /** 塊の中身が、今の位置から続くか。続けば次の位置 */
+    const fits = (want: readonly CameraSeg[]): { i: number; at: number } | null => {
+      let ci = i
+      let ca = at
+      for (const s of want) {
+        const c = segs[ci]
+        if (!c || c.cameraId !== s.cameraId || Math.abs(ca - s.start) > SEG_TOL) return null
+        if (c.end < s.end - SEG_TOL) return null
+        if (Math.abs(c.end - s.end) <= SEG_TOL) {
+          ci++
+          ca = segs[ci]?.start ?? 0
+        } else ca = s.end
+      }
+      return { i: ci, at: ca }
+    }
+    while (i < segs.length) {
+      let found = -1
+      let next: { i: number; at: number } | null = null
+      // 前の本編での並びの順(直前に対応させた塊の次から)を先に試す。中身がまったく同じ塊・頭が同じ塊を、
+      // 中身だけで先に合ったものに対応させると、塊どうしの前後を取り違えた
+      const order = prevBlocks
+        .map((_, k) => k)
+        .filter((k) => !used.has(k))
+        .sort((a, b) => Number(a <= lastMatched) - Number(b <= lastMatched) || a - b)
+      for (const k of order) {
+        next = fits(prevBlocks[k].segs)
+        if (next) {
+          found = k
+          break
+        }
+      }
+      if (found < 0 || !next) break
+      used.add(found)
+      lastMatched = found
+      const pb = prevBlocks[found].b
+      const len = pb.end - pb.start
+      out.push({ prev: pb, now: { start: t, end: t + len } })
+      t += len
+      i = next.i
+      at = next.at
+    }
+  }
+  return out
 }

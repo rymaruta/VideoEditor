@@ -6,9 +6,11 @@ import {
   commonWindowOf,
   fitLength,
   intersectSegs,
+  matchLockBlocks,
   overridesWithPinned,
   overridesWithin,
   pinOverrides,
+  preferDecidedCameras,
   spliceClips,
   spliceTimed,
   type RangeClip
@@ -207,6 +209,119 @@ describe('pinOverrides', () => {
     ])
     expect(overridesWithin(o, [{ start: 10, end: 20 }], false)?.added).toEqual([
       { start: 50, end: 55 }
+    ])
+  })
+
+  it('同じ時刻を2回映す本編(複製)は、組んだ本編と違うカメラ(人が決めた方)を残す。並びの順によらない', () => {
+    const auto: CameraSeg[] = [{ start: 10, end: 20, cameraId: 'A' }]
+    const hand = { start: 10, end: 20, cameraId: 'B' }
+    const plain = { start: 10, end: 20, cameraId: 'A' }
+    for (const current of [
+      [hand, plain],
+      [plain, hand]
+    ]) {
+      const pin = pinOverrides([{ start: 10, end: 20 }], current, auto)
+      expect(pin.angles).toEqual([hand])
+      expect(pin.added).toEqual([{ start: 10, end: 20 }])
+      expect(pin.removed).toEqual([])
+    }
+    // 組んだ本編を渡さなければ、今までどおり(後ろに並んだ方が勝つ並び)
+    expect(pinOverrides([{ start: 10, end: 20 }], [hand, plain]).angles).toEqual([hand, plain])
+  })
+
+  it('人が決めたカメラと重なる所だけ外し、重ならない区間・複製の無い本編はそのまま', () => {
+    const auto: CameraSeg[] = [
+      { start: 0, end: 30, cameraId: 'A' },
+      { start: 30, end: 40, cameraId: 'B' }
+    ]
+    const current: CameraSeg[] = [
+      { start: 12, end: 15, cameraId: 'B' },
+      { start: 10, end: 20, cameraId: 'A' },
+      { start: 30, end: 40, cameraId: 'B' }
+    ]
+    expect(preferDecidedCameras(current, auto)).toEqual([
+      { start: 12, end: 15, cameraId: 'B' },
+      { start: 10, end: 12, cameraId: 'A' },
+      { start: 15, end: 20, cameraId: 'A' },
+      { start: 30, end: 40, cameraId: 'B' }
+    ])
+    const noDup: CameraSeg[] = [
+      { start: 0, end: 10, cameraId: 'B' },
+      { start: 10, end: 20, cameraId: 'A' }
+    ]
+    expect(preferDecidedCameras(noDup, auto)).toEqual(noDup)
+  })
+})
+
+describe('preferDecidedCameras(a5dbe9c の監査 zPrefer から)', () => {
+  const seg = (start: number, end: number, cameraId: string): CameraSeg => ({
+    start,
+    end,
+    cameraId
+  })
+  it('U1 人が決めたカメラが2つあれば、組んだ本編のままの方だけ外す', () => {
+    expect(
+      preferDecidedCameras(
+        [seg(10, 20, 'B'), seg(10, 20, 'A'), seg(10, 20, 'C')],
+        [seg(10, 20, 'A')]
+      )
+    ).toEqual([seg(10, 20, 'B'), seg(10, 20, 'C')])
+  })
+  it('U2 一部だけ重なる複製は、重なる所だけ外す', () => {
+    expect(preferDecidedCameras([seg(10, 20, 'A'), seg(15, 25, 'B')], [seg(10, 30, 'A')])).toEqual([
+      seg(10, 15, 'A'),
+      seg(15, 25, 'B')
+    ])
+  })
+  it('U3 組んだ本編の切れ目の丸め(0.01 秒)は、人の判断と読まない', () => {
+    expect(
+      preferDecidedCameras(
+        [seg(10, 20, 'A'), seg(10, 20, 'B')],
+        [seg(10, 19.99, 'A'), seg(19.99, 30, 'B')]
+      )
+    ).toEqual([seg(10, 20, 'B')])
+  })
+  it('U4 約1コマ(0.03 秒)のはみ出しは人の判断と読まず、ちらつく切れ端を残さない', () => {
+    expect(
+      preferDecidedCameras(
+        [seg(10, 20.03, 'A'), seg(15, 25, 'B')],
+        [seg(10, 20, 'A'), seg(20, 30, 'B')]
+      )
+    ).toEqual([seg(10, 15, 'A'), seg(15, 25, 'B')])
+  })
+  it('U5 複製の無い隣どうし(0.04 秒の重なり)は、人が決めた方を残す', () => {
+    expect(preferDecidedCameras([seg(0, 10.04, 'A'), seg(10, 20, 'B')], [seg(0, 20, 'A')])).toEqual(
+      [seg(0, 10, 'A'), seg(10, 20, 'B')]
+    )
+  })
+  it('U6 組んだ本編が空なら、並びはそのまま(後ろが勝つ)', () => {
+    expect(
+      pinOverrides([{ start: 10, end: 20 }], [seg(10, 20, 'B'), seg(10, 20, 'A')], []).angles
+    ).toEqual([seg(10, 20, 'B'), seg(10, 20, 'A')])
+  })
+})
+
+describe('matchLockBlocks(塊の対応は前の本編での並びの順を使う。df19fea の監査)', () => {
+  const W = { start: 10, end: 20 }
+  it('中身がまったく同じ塊は、前の本編での並びの順に対応する', () => {
+    // 前: [10-20][50-60][10-20] / 今: 前に別のクリップが入って、どれもずれた
+    const prev = [clip('a', 10, 20), clip('a', 50, 60), clip('a', 10, 20)]
+    const now = [clip('a', 30, 33), clip('a', 10, 20), clip('a', 50, 60), clip('a', 10, 20)]
+    const pairs = matchLockBlocks(prev, now, INFO, W)
+    expect(pairs.map((x) => [x.prev.start, x.now.start])).toEqual([
+      [0, 3],
+      [20, 23]
+    ])
+  })
+
+  it('頭の部分が同じ塊(短い塊が長い塊の頭と同じ)も、並びの順に対応する', () => {
+    // 前: [10-15] … [10-20](10-15 は A、15-20 は B) / 今: 同じ並び
+    const prev = [clip('a', 10, 15), clip('a', 50, 60), clip('a', 10, 15), clip('b', 13, 18)]
+    const now = [...prev]
+    const pairs = matchLockBlocks(prev, now, INFO, W)
+    expect(pairs.map((x) => [x.prev.start, x.now.start, x.now.end - x.now.start])).toEqual([
+      [0, 0, 5],
+      [15, 15, 10]
     ])
   })
 })

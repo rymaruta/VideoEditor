@@ -20,7 +20,8 @@ import {
   hasOverrides,
   releaseOverridesForScenes,
   spansOfClips,
-  updateOverrides
+  updateOverrides,
+  type CameraSeg
 } from '@shared/roughCut/overrides'
 import { planCg, type PlacedCg } from '@shared/finish/cg'
 import {
@@ -96,7 +97,7 @@ import {
   overridesWithPinned,
   overridesWithin,
   pinOverrides,
-  timelineWindowOf,
+  matchLockBlocks,
   type TimelineRange
 } from '@shared/roughCut/range'
 import { subtractRanges, type CutOverrides, type Range } from '@shared/roughCut/overrides'
@@ -1263,12 +1264,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       locks.length > 0
         ? overridesWithPinned(
             keptOverrides,
-            pinOverrides(locks, coverageOfClips(project.clips, info)),
+            // 同じ時刻を2回映す本編(複製・並べ替え)は、組んだ本編と違うカメラ(人が決めた方)を残す
+            pinOverrides(locks, coverageOfClips(project.clips, info), project.roughCutAuto),
             locks
           )
         : keptOverrides
     const plan = planRoughCut(project, info, get().scenes, get().judgements, activity, {
       overrides,
+      ...(locks.length > 0 ? { locks } : {}),
       targetSec: get().targetMinutes * 60,
       keep: get().keep,
       styles: usePresetStore.getState().captionPresets,
@@ -2419,7 +2422,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         : undefined
       let overrides = kept
       if (!steps.cut || !steps.angles) {
-        const pin = pinOverrides([win], current)
+        // 固定するのは範囲の中の今の中身だけ(範囲の外にある、窓の中の時刻を映すクリップ(複製・並べ替え)
+        // まで入れると、外の複製のカメラ・区間で範囲の中が替わっていた)
+        const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
+        const insideNow: CameraSeg[] = cw.pieces.flatMap((pc) => {
+          const f = fileOf.get(project.clips[pc.clipIndex].assetId)
+          return f ? [{ start: pc.start, end: pc.end, cameraId: f.sourceId }] : []
+        })
+        const pin = pinOverrides([win], insideNow)
         overrides = {
           removed: steps.cut ? (kept?.removed ?? []) : pin.removed,
           added: steps.cut ? (kept?.added ?? []) : pin.added,
@@ -3019,11 +3029,13 @@ function lockedSoundWindows(
   const info = applied.multicam
   const prevInfo = prev.multicam
   if (!info || !prevInfo) return undefined
-  const windows = locks.flatMap((l) => {
-    const p = timelineWindowOf(prev.clips, prevInfo, l)
-    const n = timelineWindowOf(applied.clips, info, l)
-    return p && n ? [{ prev: p, now: n }] : []
-  })
+  // 塊ごと(離れた所に差し戻した複製も、その塊の置かれた所へずらす)
+  const windows = locks.flatMap((l) =>
+    matchLockBlocks(prev.clips, applied.clips, info, l).map((w) => ({
+      prev: { start: w.prev.start, end: w.prev.end },
+      now: w.now
+    }))
+  )
   return windows.length > 0 ? { windows, prev } : undefined
 }
 

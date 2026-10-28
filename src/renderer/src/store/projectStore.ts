@@ -10,6 +10,9 @@ import {
   intersectSegs,
   overridesWithin,
   spliceClips,
+  matchLockBlocks,
+  timelineBlocksOf,
+  type TimelineBlock,
   subtractSegs,
   timelineWindowOf,
   type TimelineRange
@@ -32,6 +35,7 @@ import {
   coverageOfClips,
   hasOverrides,
   reinsertExtraClips,
+  subtractRanges,
   type CameraSeg,
   type CutOverrides,
   type Range
@@ -3973,8 +3977,8 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           ? followMainEdit({ ...fresh, clips: rebuilt }, fresh, true)
           : fresh
       const rebuiltProject =
-        pin && pin.windows.length > 0
-          ? restoreLockedContent(followedProject, state.project, pin.windows)
+        pin && pin.locks.length > 0
+          ? restoreLockedContent(followedProject, state.project, pin.locks)
           : followedProject
       return {
         __noFollow: true,
@@ -6771,9 +6775,29 @@ export function sameExceptAutoEdit(a: Project, b: Project): boolean {
   return true
 }
 
+/** 前後のクリップが共通の時刻の順に並んでいるかを見るときの余裕(丸め・分割ファイルのつなぎ目) */
+const ORDER_SLACK_SEC = 0.05
+
 /**
  * 作り直した本編(`rebuilt`)の、自動編集で触らない範囲(`locks`。共通の時刻)の所を、前の本編の同じ所の
- * クリップに差し替える。前の本編で窓の中が続いて並んでいない(窓の外のクリップが挟まる)所は差し替えない。
+ * クリップに差し替える。前の本編で窓の中が続いて並んでいない(複製・並べ替えで、窓の外のクリップが挟まる)
+ * ときも、続いて並ぶ塊ごとにそのまま差し戻す。
+ *
+ * - 前の本編で隣り合う塊(ほかのロックの塊とも。間にどのロックの塊でもない収録素材のクリップが無いもの)は、
+ *   1つの並び(グループ)として、並びのまま動かす
+ * - 前後・目印は、どのロックの塊にも入っていない収録素材のクリップの所(自由な所)だけで見る
+ * - 中が共通の時刻の順に並び、前後の自由な所の少なくとも片側と順に並ぶグループ(並べ替えていない元の所。
+ *   隣へロックしていないクリップを並べ替えて置いても、順に並ぶ側を根拠に元の所とみなす。前後に自由な所が
+ *   無い側は根拠にしない)の塊は、作り直した本編のそれぞれのロックの窓の所へ(食い違う側の少ないグループ、
+ *   同じならそのロックの塊がいちばん長いものを、そのロックの元の所とする)。ただし前の本編の順と窓の所の順が
+ *   食い違わない組(長さの合計がいちばん長いもの)だけ
+ * - 作り直した本編の窓の所は、どのロックもみな外す。元の所のグループが無いロックは、窓の所へは何も入れない
+ *   (ロックは触らない約束なので、並べ替えた所へ戻さない)
+ * - ほかのグループ(離れた所に置いた複製など)は、前の本編で直前にあった自由な所の終わり(共通の時刻)を目印に、
+ *   作り直した本編でその時刻より前に始まる最後のクリップの後ろへ(差し込みの画と同じ置き方。目印が無ければ
+ *   頭)。前の本編の順を保つよう、前のグループより前へ・次に窓の所へ戻すグループより後ろへは置かない。
+ *   窓の所を外した本編へ入れるので、差し戻したグループの途中には入らない
+ *
  * `previousForExtras` は、差し込みの画を入れ直すのに使う前の本編(窓の中に入れた差し込みの画を除く)
  */
 function pinLockedClips(
@@ -6784,34 +6808,195 @@ function pinLockedClips(
 ): {
   clips: Clip[]
   previousForExtras: Clip[]
-  windows: { lock: Range; prev: TimelineRange }[]
+  /** 差し戻したロック */
+  locks: Range[]
 } {
-  const recorded = new Set(info.files.map((f) => f.assetId))
+  const fileOf = new Map(info.files.map((f) => [f.assetId, f]))
   const prevTimes = clipTimes(previous)
+  const sorted = [...locks].sort((a, b) => a.start - b.start)
+  const prevBlocks = sorted.map((lock) => timelineBlocksOf(previous, info, lock))
+  // 前の本編の、どのロックの塊にも入っていない収録素材のクリップの所(タイムラインの区間と共通の時刻)
+  const free: { ts: number; te: number; cs: number; ce: number }[] = []
+  previous.forEach((c, i) => {
+    const f = fileOf.get(c.assetId)
+    if (!f) return
+    const speed = c.speed || 1
+    const at = (t: number): number => toCommon(f, c.inPoint + (t - prevTimes[i].start) * speed)
+    for (const r of subtractRanges([prevTimes[i]], prevBlocks.flat()))
+      free.push({ ts: r.start, te: r.end, cs: at(r.start), ce: at(r.end) })
+  })
+  free.sort((a, b) => a.ts - b.ts)
+  /** タイムラインの `t` より前にあった最後の自由な所の終わり(共通の時刻) */
+  const anchorBefore = (t: number): number => {
+    let anchor = -Infinity
+    for (const x of free) if (x.ts < t - 1e-6 && x.te <= t + 1e-6) anchor = x.ce
+    return anchor
+  }
+  /** タイムラインの `t` より後ろにあった最初の自由な所の頭(共通の時刻) */
+  const startAfter = (t: number): number => free.find((x) => x.ts >= t - 1e-6)?.cs ?? Infinity
+
+  // 隣り合う塊をグループに(前の本編の並びの順)
+  type Item = { li: number; b: TimelineBlock }
+  const items: Item[] = prevBlocks
+    .flatMap((bs, li) => bs.map((b) => ({ li, b })))
+    .sort((x, y) => x.b.start - y.b.start)
+  const groups: Item[][] = []
+  for (const x of items) {
+    const g = groups[groups.length - 1]
+    const last = g?.[g.length - 1]
+    const apart = !last || free.some((f) => f.ts >= last.b.end - 1e-6 && f.ts < x.b.start - 1e-6)
+    if (apart) groups.push([x])
+    else g.push(x)
+  }
+  const rangeOf = (g: Item[]): TimelineRange => ({
+    start: g[0].b.start,
+    end: g[g.length - 1].b.end
+  })
+  /**
+   * 並べ替えていない元の所か(`ok`)と、前後の自由な所と食い違う側の数(`bad`)。中が共通の時刻の順に並び、
+   * 前後の自由な所の少なくとも片側と順に並べば元の所とみなす(片側だけ食い違うのは、隣へロックしていない
+   * クリップを並べ替えて置いたとき。順に並ぶ側を根拠にする)。前後に自由な所が無い側(頭・終わり)は根拠に
+   * しない: 両側とも無ければ元の所、片側が無くもう片側が食い違えば元の所ではない(頭に置いた予告の複製)
+   */
+  const placeOf = (g: Item[]): { ok: boolean; bad: number } => {
+    for (let k = 1; k < g.length; k++) {
+      const a = g[k - 1].b.segs
+      if (a[a.length - 1].end > g[k].b.segs[0].start + ORDER_SLACK_SEC) return { ok: false, bad: 2 }
+    }
+    const r = rangeOf(g)
+    const last = g[g.length - 1].b.segs
+    const before = anchorBefore(r.start)
+    const after = startAfter(r.end)
+    const hasBefore = before > -Infinity
+    const hasAfter = after < Infinity
+    const okBefore = hasBefore && before <= g[0].b.segs[0].start + ORDER_SLACK_SEC
+    const okAfter = hasAfter && after >= last[last.length - 1].end - ORDER_SLACK_SEC
+    return {
+      ok: okBefore || okAfter || (!hasBefore && !hasAfter),
+      bad: Number(hasBefore && !okBefore) + Number(hasAfter && !okAfter)
+    }
+  }
+  // ロックごとの元の所のグループ(食い違う側の少ないもの、同じならそのロックの塊がいちばん長いもの)。
+  // 順に並ぶ側の数で選ぶと、本編の頭・終わりにある元の所(片側に自由な所が無い)より、動かしたクリップの中の
+  // 短い塊を選んでしまった
+  const mainOf = new Map<number, Item[]>()
+  const placeOfGroup = new Map(groups.map((g) => [g, placeOf(g)]))
+  for (const g of groups) {
+    const pg = placeOfGroup.get(g)!
+    if (!pg.ok) continue
+    for (const x of g) {
+      const had = mainOf.get(x.li)
+      const lenIn = (h: Item[]): number =>
+        h.filter((y) => y.li === x.li).reduce((t, y) => Math.max(t, y.b.end - y.b.start), 0)
+      const ph = had && placeOfGroup.get(had)!
+      const better =
+        !had || !ph || pg.bad < ph.bad || (pg.bad === ph.bad && lenIn(g) > lenIn(had) + 1e-9)
+      if (better) mainOf.set(x.li, g)
+    }
+  }
+
+  // 作り直した本編の窓の所を外し、外した所(クリップの番号)を覚える
   let clips = rebuilt
-  const windows: { lock: Range; prev: TimelineRange }[] = []
-  const usedExtras = new Set<string>()
-  for (const lock of [...locks].sort((a, b) => a.start - b.start)) {
-    const prevWin = timelineWindowOf(previous, info, lock)
+  const pinned: Range[] = []
+  const slotOf = new Map<number, number>()
+  sorted.forEach((lock, li) => {
+    if (prevBlocks[li].length === 0) return
+    pinned.push(lock)
     const nowWin = timelineWindowOf(clips, info, lock)
-    if (!prevWin || !nowWin) continue
-    const inside = spliceClips(previous, [], prevWin, splitId).inside
-    // 窓に掛かる差し込みの画は窓の中の切れ端として入るので、入れ直さない
-    previous.forEach((c, i) => {
-      if (recorded.has(c.assetId)) return
-      if (prevTimes[i].end > prevWin.start + 1e-6 && prevTimes[i].start < prevWin.end - 1e-6)
+    if (!nowWin) return
+    const parts = spliceClips(clips, [], nowWin, splitId)
+    clips = parts.clips
+    slotOf.set(li, parts.before.length)
+  })
+  // 元の所のグループの塊は、それぞれのロックの窓の所へ(そのロックの元の所がこのグループのもの)。グループを
+  // まとめて最初の窓の所へ入れると、作り直した本編が窓どうしの間に入れた中身がグループの後ろへ回り、後ろの
+  // 塊の前後が食い違った
+  const ownSlot = (g: Item[], x: Item): number | undefined =>
+    mainOf.get(x.li) === g ? slotOf.get(x.li) : undefined
+  const slotsOf = (g: Item[]): number[] =>
+    g.flatMap((x) => {
+      const slot = ownSlot(g, x)
+      return slot === undefined ? [] : [slot]
+    })
+  // 窓の所へ戻すグループは、前の本編の順と窓の所の順が食い違わないもの(長さの合計がいちばん長い組)だけ。
+  // 食い違うもの(人が並べ替えたクリップの中のロック)を窓の所へ戻すと、ロックした塊どうしの前後が入れ替わった
+  const cand = groups.filter((g) => {
+    const ss = slotsOf(g)
+    return ss.length > 0 && ss.every((x, n) => n === 0 || ss[n - 1] <= x)
+  })
+  const first = (g: Item[]): number => slotsOf(g)[0]
+  const last = (g: Item[]): number => slotsOf(g)[slotsOf(g).length - 1]
+  const weight = (g: Item[]): number => rangeOf(g).end - rangeOf(g).start
+  const best = cand.map((g) => ({ w: weight(g), from: -1 }))
+  cand.forEach((g, k) => {
+    for (let m = 0; m < k; m++)
+      if (last(cand[m]) <= first(g) && best[m].w + weight(g) > best[k].w + 1e-9)
+        best[k] = { w: best[m].w + weight(g), from: m }
+  })
+  const atWindow = new Set<Item[]>()
+  let k = best.reduce((m, x, idx) => (m < 0 || x.w > best[m].w + 1e-9 ? idx : m), -1)
+  while (k >= 0) {
+    atWindow.add(cand[k])
+    k = best[k].from
+  }
+  // ほかのグループは、前の本編で直前にあった自由な所の終わりを目印に、作り直した本編でその時刻より前に始まる
+  // 最後のクリップの後ろへ(差し込みの画と同じ置き方。目印が無ければ頭)。前の本編の順を保つよう、前の
+  // 塊より前へ・次に窓の所へ戻すグループより後ろへは置かない
+  const startsNow = clips.map((c) => {
+    const f = fileOf.get(c.assetId)
+    return f ? toCommon(f, c.inPoint) : -Infinity
+  })
+  const anchorPos = (anchor: number): number => {
+    let idx = -1
+    for (let n = 0; n < clips.length; n++) if (startsNow[n] < anchor - 0.02) idx = n
+    return idx + 1
+  }
+  /** 入れる所ごとの、続いて並ぶ塊(前の本編の順) */
+  const units: { items: Item[]; pos: number }[] = []
+  let lo = 0
+  groups.forEach((g, gi) => {
+    if (atWindow.has(g)) {
+      // 窓の所の無い塊(そのロックの元の所はほかのグループ)は、直前の塊に付けて入れる
+      let cur: { items: Item[]; pos: number } | null = null
+      for (const x of g) {
+        const slot = ownSlot(g, x)
+        if (slot !== undefined || !cur) {
+          cur = { items: [x], pos: slot ?? first(g) }
+          units.push(cur)
+        } else cur.items.push(x)
+      }
+      lo = cur!.pos
+      return
+    }
+    const nextWin = groups.slice(gi + 1).find((h) => atWindow.has(h))
+    const hi = nextWin ? first(nextWin) : clips.length
+    const pos = Math.min(hi, Math.max(lo, anchorPos(anchorBefore(rangeOf(g).start))))
+    units.push({ items: g, pos })
+    lo = pos
+  })
+  const usedExtras = new Set<string>()
+  const clipsOf = (items: Item[]): Clip[] => {
+    const r = rangeOf(items)
+    // 塊に掛かる差し込みの画は塊の中の切れ端として入るので、入れ直さない
+    previous.forEach((c, n) => {
+      if (fileOf.has(c.assetId)) return
+      if (prevTimes[n].end > r.start + 1e-6 && prevTimes[n].start < r.end - 1e-6)
         usedExtras.add(c.id)
     })
-    const parts = spliceClips(clips, inside, nowWin, splitId)
-    // 窓の境でだけ分かれた続きのクリップ(同じ素材の続いた所)は1本に戻す(境に余計な切れ目を作らない)
-    clips = joinAt(
-      joinAt(parts.clips, parts.before.length - 1),
-      parts.before.length + inside.length - 1
-    )
-    windows.push({ lock, prev: prevWin })
+    return spliceClips(previous, [], r, splitId).inside
   }
-  const previousForExtras = previous.filter((c) => recorded.has(c.assetId) || !usedExtras.has(c.id))
-  return { clips, previousForExtras, windows }
+  // 後ろの所から入れる(前の所の番号が変わらないように)。同じ所に入る塊は前の本編の順に
+  const positions = [...new Set([...units.map((u) => u.pos), ...slotOf.values()])].sort(
+    (a, b) => b - a
+  )
+  for (const pos of positions) {
+    const inside = units.filter((u) => u.pos === pos).flatMap((u) => clipsOf(u.items))
+    clips = [...clips.slice(0, pos), ...inside, ...clips.slice(pos)]
+    // 入れた所の境(何も入れなければ、外した窓の所の前後)で、同じ素材の続いた所は1本に戻す
+    clips = joinAt(joinAt(clips, pos + inside.length - 1), pos - 1)
+  }
+  const previousForExtras = previous.filter((c) => fileOf.has(c.assetId) || !usedExtras.has(c.id))
+  return { clips, previousForExtras, locks: pinned }
 }
 
 /**
@@ -6841,11 +7026,16 @@ function joinAt(clips: Clip[], i: number): Clip[] {
 const MIN_TELOP_PIECE_SEC = 0.05
 
 /** テロップの [a, b) の所(カラオケの言葉も切る)。短すぎれば無し */
-function telopPiece(o: TextOverlay, a: number, b: number): TextOverlay | null {
+function telopPiece(
+  o: TextOverlay,
+  a: number,
+  b: number,
+  min = MIN_TELOP_PIECE_SEC
+): TextOverlay | null {
   const start = Math.max(o.startTime, a)
   const end = Math.min(o.endTime, b)
   if (start <= o.startTime + 1e-9 && end >= o.endTime - 1e-9) return o
-  if (end - start < MIN_TELOP_PIECE_SEC) return null
+  if (end - start < min) return null
   const words = o.words?.filter((x) => {
     const m = (x.start + x.end) / 2
     return m >= start && m < end
@@ -6865,10 +7055,17 @@ function telopPiece(o: TextOverlay, a: number, b: number): TextOverlay | null {
  * 文字は長い方(切る前の全文)、人が直した方があればそちらの文字と見た目を使う。
  * 境の内側の新しい枚は、発言の切れ目の当て直しで境から少し離れて始まる(終わる)ことがある。片方が境に
  * 接し、間が `TELOP_EDGE_JOIN_GAP_SEC` 以内なら同じく1枚に戻す(境の手前に全文が 0.1 秒ほど一瞬出て、
- * 同じ文が出直していた)
+ * 同じ文が出直していた)。
+ * `locked`(ロックの中に戻した所。どのロックの塊も)を渡すと、つなぐ間がそのどれかに掛かるときはつながない
+ * (ロックの中の枚が境に接していないのにつなぐと、ロックの中の枚の終わりから境までが埋まり、ロックの中の
+ * 時刻が変わった。隣り合う別の塊の中を埋めることもあった)
  */
 const TELOP_EDGE_JOIN_GAP_SEC = 0.3
-function joinTelopsAtEdges(list: TextOverlay[], edges: readonly number[]): TextOverlay[] {
+function joinTelopsAtEdges(
+  list: TextOverlay[],
+  edges: readonly number[],
+  locked: readonly TimelineRange[] = []
+): TextOverlay[] {
   const keyOf = (o: TextOverlay): string | null =>
     o.utteranceId && !o.linkedClipId ? `${o.utteranceId}#${o.utteranceChunk ?? 0}` : null
   const EPS = 0.02
@@ -6897,7 +7094,8 @@ function joinTelopsAtEdges(list: TextOverlay[], edges: readonly number[]): TextO
         o.startTime > e + TELOP_EDGE_JOIN_GAP_SEC + EPS ||
         gap < -EPS ||
         gap > TELOP_EDGE_JOIN_GAP_SEC + EPS ||
-        (Math.abs(left.endTime - e) >= EPS && Math.abs(o.startTime - e) >= EPS)
+        (Math.abs(left.endTime - e) >= EPS && Math.abs(o.startTime - e) >= EPS) ||
+        locked.some((w) => Math.min(o.startTime, w.end) - Math.max(left.endTime, w.start) > 1e-6)
       )
         continue
       const base = left.edited ? left : o.edited ? o : left.text.length >= o.text.length ? left : o
@@ -6931,11 +7129,15 @@ function telopOutside(o: TextOverlay, r: TimelineRange): TextOverlay[] {
 }
 
 /** テロップの、区間 `r` の中の所(またぐものは境で切る。長さの無いものは頭の時刻で決める) */
-function telopWithin<T extends TextOverlay>(o: T, r: TimelineRange): T[] {
+function telopWithin<T extends TextOverlay>(
+  o: T,
+  r: TimelineRange,
+  min = MIN_TELOP_PIECE_SEC
+): T[] {
   if (o.endTime - o.startTime <= 1e-6)
     return o.startTime >= r.start - 1e-6 && o.startTime < r.end - 1e-6 ? [o] : []
   if (o.endTime <= r.start + 1e-6 || o.startTime >= r.end - 1e-6) return []
-  const piece = telopPiece(o, r.start, r.end)
+  const piece = telopPiece(o, r.start, r.end, min)
   return piece ? [piece as T] : []
 }
 
@@ -6964,18 +7166,16 @@ function insideWindow<
  * 自動編集で触らない範囲の、声(収録の音)・顔カメラのワイプ・自動テロップを、作り直す前のもの
  * (前の本編の同じ所)に戻す。作り直した本編で、その範囲が置かれた所へずらして入れる
  */
-function restoreLockedContent(
-  project: Project,
-  prev: Project,
-  windows: readonly { lock: Range; prev: TimelineRange }[]
-): Project {
+function restoreLockedContent(project: Project, prev: Project, locks: readonly Range[]): Project {
   const info = project.multicam
   if (!info) return project
   const recorded = new Set(info.files.map((f) => f.assetId))
   let { audioTracks, videoOverlayTracks, textOverlays } = project
+  // 塊ごとに(離れた所に差し戻した複製も、その塊の置かれた所へずらす)
+  const windows = locks.flatMap((lock) => matchLockBlocks(prev.clips, project.clips, info, lock))
+  const lockedNow = windows.map((w) => w.now)
   for (const w of windows) {
-    const now = timelineWindowOf(project.clips, info, w.lock)
-    if (!now) continue
+    const now = w.now
     const shift = now.start - w.prev.start
     const moved = <C extends { startTime: number }>(c: C): C => ({
       ...c,
@@ -7014,10 +7214,13 @@ function restoreLockedContent(
     })
     // 自動テロップ: 真ん中の時刻が範囲の中の新しいものは捨て、前のものを残す
     const isAuto = (o: TextOverlay): boolean => !o.linkedClipId && autoTelopKey(o) !== null
-    // 境をまたぐものは境で切る(新しいものは外側だけ、前のものは中だけ。2枚同時に出さない)
+    // 境をまたぐものは境で切る(新しいものは外側だけ、前のものは中だけ。2枚同時に出さない)。
+    // 前のものの、ロックの中に掛かるごく短い切れ端(速さを変えたクリップの境など)も一旦残し、境で外の同じ枚と
+    // つながればそのまま1枚にする(捨てると、ロックの中のテロップがその分だけ短くなった)。つながらずに残った
+    // ごく短い切れ端は、一瞬だけ出るので後で捨てる
     const back = prev.textOverlays
       .filter(isAuto)
-      .flatMap((o) => telopWithin(o, w.prev))
+      .flatMap((o) => telopWithin(o, w.prev, 1e-6))
       .map((o) => ({
         ...o,
         id: uuid(),
@@ -7031,8 +7234,16 @@ function restoreLockedContent(
         ...textOverlays.filter(isAuto).flatMap((o) => telopOutside(o, now)),
         ...back
       ],
-      [now.start, now.end]
+      [now.start, now.end],
+      lockedNow
     )
+    const slivers = new Set(
+      back.filter((o) => o.endTime - o.startTime < MIN_TELOP_PIECE_SEC).map((o) => o.id)
+    )
+    if (slivers.size > 0)
+      textOverlays = textOverlays.filter(
+        (o) => !slivers.has(o.id) || o.endTime - o.startTime >= MIN_TELOP_PIECE_SEC
+      )
   }
   return { ...project, audioTracks, videoOverlayTracks, textOverlays }
 }
