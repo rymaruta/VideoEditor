@@ -52,7 +52,7 @@ import { askAiJson, type AiProgress } from './ai'
 import { tightenRanges, totalLength, type CutRange, type TightenOptions } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
 import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
-import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
+import { mixLevelDb, quietestIn, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { clampPieces, fitLength } from '@shared/roughCut/range'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { mixResidual } from '@shared/ingest/tracks'
@@ -745,13 +745,29 @@ export function planRoughCut(
 export function scenesFor(
   project: Project,
   info: MulticamInfo,
-  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[] } = {}
+  options: {
+    kind?: EpisodeKind
+    hype?: readonly HypeMoment[]
+    /** 音の大きさ(`levelOf`)。発話の中で字数から見積もった切れ目を、静かな所へ寄せる */
+    level?: Float32Array
+    /**
+     * 保存した場面の区切り(共通の秒)。開き直したときは音を読まないので、字数から見積もった切れ目は、
+     * 前に音で寄せて区切った所(前後 1 秒の中の保存した区切り)にだけ置く(作った時と同じ場面になる)
+     */
+    savedBounds?: readonly number[]
+  } = {}
 ): Scene[] {
-  const scenes = buildScenes(
-    timedLines(project, info),
-    cameraRange(info),
-    KIND_PROFILES[options.kind ?? 'location'].scene
-  )
+  const level = options.level
+  const saved = options.savedBounds
+  const quietCut = level
+    ? (lo: number, hi: number) => quietestIn(level, lo, hi)
+    : saved
+      ? (lo: number, hi: number) => saved.find((b) => b >= lo && b <= hi) ?? null
+      : undefined
+  const scenes = buildScenes(timedLines(project, info), cameraRange(info), {
+    ...KIND_PROFILES[options.kind ?? 'location'].scene,
+    ...(quietCut ? { quietCut } : {})
+  })
   const hype = options.hype
   // 笑い・歓声・声の盛り上がりを測っていれば、場面ごとの回数を付ける(判定と AI への文に使う)
   const events = project.audioEvents

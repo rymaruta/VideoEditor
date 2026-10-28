@@ -62,6 +62,8 @@ export interface SceneOptions {
   quietSec?: number
   /** 長さで分けた残りがこれより短ければ、前の場面に含める(秒) */
   minTailSec?: number
+  /** 発話の中で字数から見積もった切れ目を寄せる、静かな所を探す(`splitInnerTurns`) */
+  quietCut?: (lo: number, hi: number) => number | null
 }
 
 /**
@@ -103,6 +105,10 @@ const INNER_PAUSE_SEC = 0.7
  */
 const INNER_HEAD =
   /(?<=(?:ます|です|ました|でした|ません|おります|ございます|でしょう|ください)[。．.!?！？、,\s\u3000]*)(?=(?:では|それでは|じゃあ|続いて|次に|さて|ところで|実は|具体的に)|[\p{Script=Han}\p{Script=Katakana}ー]{1,6}さん[、,])/gu
+/** 字数で見積もった切れ目を、静かな所へ寄せる範囲(前後の秒) */
+const SNAP_RADIUS_SEC = 1.0
+/** 寄せ先にする語と語の間の下限(秒) */
+const MIN_WORD_GAP_SEC = 0.15
 /** 分けた発話の、短すぎる切れ端(字)。これより短くなる所では分けない */
 const MIN_PIECE_CHARS = 3
 
@@ -110,71 +116,96 @@ const MIN_PIECE_CHARS = 3
  * 発話を、中の長い間(語の時刻があるとき)と、言い切りの後の質問・話題の頭で分ける(場面の区切りを決める前に)。
  * 語の時刻が無ければ、分ける時刻は字数の割合で見積もる。分けた発話の id は `<元の id>~<番号>`
  */
-export function splitInnerTurns(lines: readonly TimedLine[]): TimedLine[] {
+export function splitInnerTurns(
+  lines: readonly TimedLine[],
+  /**
+   * 字数で見積もった切れ目(語の時刻が無い・字と合わない)を寄せる、静かな所を探す(`lo`〜`hi` の秒の中の
+   * いちばん静かな時刻。静かな所が無ければ null)。無ければ語と語の間を探す
+   */
+  quietCut?: (lo: number, hi: number) => number | null
+): TimedLine[] {
   const out: TimedLine[] = []
   for (const l of lines) {
     const chars = [...l.text]
-    const cuts = new Set<number>()
+    const heads = new Set<number>()
     for (const m of l.text.matchAll(INNER_HEAD)) {
       const at = [...l.text.slice(0, m.index)].length
-      if (at >= MIN_PIECE_CHARS && chars.length - at >= MIN_PIECE_CHARS) cuts.add(at)
+      if (at >= MIN_PIECE_CHARS && chars.length - at >= MIN_PIECE_CHARS) heads.add(at)
     }
-    // 語の時刻: 字の位置 → 語。語の字を足して発話の字と合わなければ使わない
+    // 語の時刻: 字の位置 → 語。語の字を足して発話の字と合わなければ、字の位置からは使わない
     const words = l.words ?? []
     const joined = words.map((w) => w.text).join('')
     const wordsFit = words.length > 0 && [...joined].length === chars.length
     const wordAt: number[] = []
+    let k = 0
+    for (const w of words) {
+      wordAt.push(k)
+      k += [...w.text].length
+    }
+    /** 切れ目: 字の位置と、前の切れ端の終わり・次の切れ端の頭の時刻 */
+    const cuts = new Map<number, { end: number; start: number }>()
+    const fits = (at: number): boolean =>
+      at >= MIN_PIECE_CHARS && chars.length - at >= MIN_PIECE_CHARS
     if (wordsFit) {
-      let k = 0
-      for (const w of words) {
-        wordAt.push(k)
-        k += [...w.text].length
+      // 語の頭で分ける(語の途中ならその語の頭)
+      const wordIndex = (c: number): number => {
+        let j = 0
+        while (j + 1 < wordAt.length && wordAt[j + 1] <= c) j++
+        return j
       }
+      const add = (i: number): void => {
+        if (i <= 0 || !fits(wordAt[i])) return
+        cuts.set(wordAt[i], { end: words[i - 1].end, start: words[i].start })
+      }
+      for (const at of heads) add(wordIndex(at))
       for (let i = 1; i < words.length; i++)
-        if (words[i].start - words[i - 1].end >= INNER_PAUSE_SEC) {
-          const at = wordAt[i]
-          if (at >= MIN_PIECE_CHARS && chars.length - at >= MIN_PIECE_CHARS) cuts.add(at)
+        if (words[i].start - words[i - 1].end >= INNER_PAUSE_SEC) add(i)
+    } else {
+      // 字数の割合で見積もった時刻は声の途中に入りうる。前後 `SNAP_RADIUS_SEC` のいちばん静かな所(音の
+      // 強さ。無ければ語と語の間)へ寄せ、静かな所が無ければ分けない(監査の指摘: 89.86 秒が元の発話
+      // 76.24〜92.55 秒の声の途中だった)
+      for (const at of heads) {
+        const est = l.start + ((l.end - l.start) * at) / Math.max(1, chars.length)
+        const lo = Math.max(l.start + 0.05, est - SNAP_RADIUS_SEC)
+        const hi = Math.min(l.end - 0.05, est + SNAP_RADIUS_SEC)
+        if (!(hi > lo)) continue
+        if (quietCut) {
+          const t = quietCut(lo, hi)
+          if (t !== null && t >= lo - 1e-9 && t <= hi + 1e-9) cuts.set(at, { end: t, start: t })
+          continue
         }
+        // 語と語の間(`MIN_WORD_GAP_SEC` 以上)のいちばん長い所
+        let best: { end: number; start: number } | null = null
+        for (let i = 1; i < words.length; i++) {
+          const g0 = words[i - 1].end
+          const g1 = words[i].start
+          const mid = (g0 + g1) / 2
+          if (g1 - g0 < MIN_WORD_GAP_SEC || mid < lo || mid > hi) continue
+          if (!best || g1 - g0 > best.start - best.end) best = { end: g0, start: g1 }
+        }
+        if (best) cuts.set(at, best)
+      }
     }
     if (cuts.size === 0) {
       out.push(l)
       continue
     }
-    const at = [...cuts].sort((a, b) => a - b)
-    /** 字の位置の時刻(語の頭。語の時刻が無ければ字数の割合) */
-    const timeAt = (c: number): number => {
-      if (wordsFit) {
-        const i = wordAt.indexOf(c)
-        if (i > 0) return words[i].start
-        // 語の途中: その語の頭
-        let j = 0
-        while (j + 1 < wordAt.length && wordAt[j + 1] <= c) j++
-        return words[j].start
-      }
-      return l.start + ((l.end - l.start) * c) / Math.max(1, chars.length)
-    }
-    const endAt = (c: number): number => {
-      if (wordsFit) {
-        let j = 0
-        while (j + 1 < wordAt.length && wordAt[j + 1] < c) j++
-        return words[j].end
-      }
-      return timeAt(c)
-    }
+    const at = [...cuts.keys()].sort((x, y) => x - y)
     const bounds = [0, ...at, chars.length]
-    for (let k = 0; k + 1 < bounds.length; k++) {
-      const a = bounds[k]
-      const b = bounds[k + 1]
-      const start = k === 0 ? l.start : timeAt(a)
-      const end = k === bounds.length - 2 ? l.end : Math.max(start, endAt(b))
+    for (let p = 0; p + 1 < bounds.length; p++) {
+      const a = bounds[p]
+      const b = bounds[p + 1]
+      const start = p === 0 ? l.start : cuts.get(a)!.start
+      const end = p === bounds.length - 2 ? l.end : Math.max(start, cuts.get(b)!.end)
       const piece: TimedLine = {
         ...l,
-        id: k === 0 ? l.id : `${l.id}~${k}`,
+        id: p === 0 ? l.id : `${l.id}~${p}`,
         start,
         end,
         text: chars.slice(a, b).join('')
       }
-      if (wordsFit) piece.words = words.filter((_, i) => wordAt[i] >= a && wordAt[i] < b)
+      if (words.length > 0)
+        piece.words = words.filter((w) => w.start >= start - 1e-9 && w.end <= end + 1e-9)
       else delete piece.words
       out.push(piece)
     }
@@ -299,7 +330,7 @@ export function buildScenes(
   const minTail = options.minTailSec ?? 20
   // 発話の中の長い間・質問の頭で、先に発話を分ける(答えの終わりと質問の頭が1件にまとまっていても、
   // 質問の頭で区切れるように)
-  const sorted = splitInnerTurns(lines).sort((a, b) => a.start - b.start)
+  const sorted = splitInnerTurns(lines, options.quietCut).sort((a, b) => a.start - b.start)
   // 質問とその答えの頭の間には区切りを入れない。長さで分けるなら、質問の頭(前置き)で分ける
   // (試し編集 第3回: 補佐官の質問「やはり思い切って10%の価格を上げたというのは / ものすごい挑戦だった… /
   // そのあたり会長の思い切った決断について / …ぜひお聞かせ…」の途中の 227.05 秒で分かれ、前の場面を落とした

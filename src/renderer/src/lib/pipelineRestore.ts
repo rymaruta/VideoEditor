@@ -240,7 +240,12 @@ export function restorePipelineFromProject(
   const hype = saved?.hype ?? []
 
   // 構成の場面は、文字起こしと同期の情報から同じように切り直せる(声の盛り上がりは保存したもの)
-  const scenes = scenesFor(project, info, { kind, ...(saved?.hype ? { hype } : {}) })
+  // 字数から見積もった発話の中の切れ目は、保存した区切りの所にだけ置く(開き直しでは音を読まない)
+  const scenes = scenesFor(project, info, {
+    kind,
+    ...(saved?.hype ? { hype } : {}),
+    ...(saved ? { savedBounds: saved.scenes.slice(1).map((x) => x.start) } : {})
+  })
   const sameScenes =
     saved !== undefined &&
     saved.scenes.length === scenes.length &&
