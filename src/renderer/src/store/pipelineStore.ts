@@ -78,8 +78,9 @@ import { placeTelopsAvoidingFaces, placeTelopsAvoidingHud } from '../lib/telopPl
 import {
   LEGACY_NOTE,
   isLegacyNote,
-  matchScenesByTime,
   remapSceneFlags,
+  remapSceneIds,
+  sceneOriginsByTime,
   restorePipelineFromProject
 } from '../lib/pipelineRestore'
 import {
@@ -1991,17 +1992,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
           )
           const scenes = scenesFor(project, project.multicam, { kind, hype })
           // 切り直した場面に、残す/落とすを当て直す(時刻がほぼ同じ場面だけ。ID は番号なので別の場面を指す)
-          const match = matchScenesByTime(get().scenes, scenes)
+          const origins = sceneOriginsByTime(get().scenes, scenes)
+          const match = new Map([...origins].map(([id, from]) => [id, from[0]]))
           set({
             hype,
             scenes,
             judgements: heuristicJudgements(scenes, kind),
-            keep: remapSceneFlags(get().keep, match),
+            keep: remapSceneFlags(get().keep, match, origins),
             builtKept: get().builtKept.map((b) => ({
               cut: b.cut,
-              keptIds: remapKept(b.keptIds, match)
+              keptIds: remapSceneIds(b.keptIds, origins)
             })),
-            keepTouched: remapKept(get().keepTouched, match),
+            keepTouched: remapSceneIds(get().keepTouched, origins),
             sceneKind: kind
           })
           recut = true
@@ -3340,11 +3342,6 @@ function forgetUsedTouches(): void {
 }
 
 /** 残した場面の ID を、切り直した場面の ID へ移す(時刻がほぼ同じ場面だけ。`match` は今 → 前) */
-function remapKept(ids: readonly string[], match: ReadonlyMap<string, string>): string[] {
-  const set = new Set(ids)
-  return [...match].filter(([, prev]) => set.has(prev)).map(([id]) => id)
-}
-
 /** 同期の報告から、企画に覚える要約を作る(素材ごとの位置の決め方は、企画の素材の ID で) */
 function syncSummaryOf(report: SyncReport, project: Project): SyncSummary {
   const drift = report.pairs
