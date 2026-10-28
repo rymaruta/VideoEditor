@@ -1367,11 +1367,13 @@ function startAppAutoUpdate(): AutoUpdateHandle | null {
       return r.response === 0 ? 'restart' : 'later'
     },
     log: (message, error) =>
-      error === undefined ? console.log(message) : console.warn(message, error)
+      error === undefined ? console.log(message) : console.warn(message, error),
+    requestQuit: () => app.quit()
   })
 }
 
 app.on('will-quit', () => {
+  autoUpdate?.onWillQuit()
   autoUpdate?.stop()
   stopLibraryWatchers()
   // 動いている ffmpeg(ノイズ除去・試聴用素材・自動確認)を止める。macOS・Linux では親が終わっても残る

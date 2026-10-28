@@ -90,14 +90,16 @@ describe('自動更新: 確かめ方', () => {
     loadUpdater: () => Promise<FakeUpdater>
     ask: ReturnType<typeof vi.fn<(version: string) => Promise<'restart' | 'later'>>>
     log: ReturnType<typeof vi.fn>
+    requestQuit: ReturnType<typeof vi.fn>
     handle: ReturnType<typeof startAutoUpdate>
   } {
     const updater = new FakeUpdater()
     const loadUpdater = vi.fn(async () => updater)
     const ask = vi.fn<(version: string) => Promise<'restart' | 'later'>>(async () => 'later')
     const log = vi.fn()
-    const handle = startAutoUpdate(plan, { loadUpdater, ask, log })
-    return { updater, loadUpdater, ask, log, handle }
+    const requestQuit = vi.fn()
+    const handle = startAutoUpdate(plan, { loadUpdater, ask, log, requestQuit })
+    return { updater, loadUpdater, ask, log, requestQuit, handle }
   }
 
   it('確かめない版では electron-updater を読みもしない', async () => {
@@ -142,7 +144,8 @@ describe('自動更新: 確かめ方', () => {
         throw new Error('Cannot find module')
       },
       ask: async () => 'later',
-      log
+      log,
+      requestQuit: () => undefined
     })
     await vi.advanceTimersByTimeAsync(FIRST_CHECK_DELAY_MS)
     expect(log.mock.calls[0][0]).toMatch(/読めませんでした/)
@@ -158,15 +161,25 @@ describe('自動更新: 確かめ方', () => {
     expect(s.ask).toHaveBeenCalledTimes(1)
     expect(s.ask).toHaveBeenCalledWith('1.2.0')
     expect(s.updater.installs).toEqual([])
+    expect(s.requestQuit).not.toHaveBeenCalled()
+    s.handle?.onWillQuit()
+    expect(s.updater.installs).toEqual([])
     s.handle?.stop()
   })
 
-  it('「再起動して更新」なら入れて起動し直す', async () => {
+  it('「再起動して更新」はまずいつもどおり終了を始め、終了まで進んだときだけ入れて起動し直す', async () => {
     const s = setup()
     s.ask.mockResolvedValue('restart')
     await vi.advanceTimersByTimeAsync(FIRST_CHECK_DELAY_MS)
     s.updater.emit('update-downloaded', { version: '1.2.0' })
     await vi.advanceTimersByTimeAsync(0)
+    // 保存していない変更の確かめより先にインストーラを動かさない
+    expect(s.updater.installs).toEqual([])
+    expect(s.requestQuit).toHaveBeenCalledTimes(1)
+    s.handle?.onWillQuit()
+    expect(s.updater.installs).toEqual([[false, true]])
+    // 2 度は入れない
+    s.handle?.onWillQuit()
     expect(s.updater.installs).toEqual([[false, true]])
     s.handle?.stop()
   })

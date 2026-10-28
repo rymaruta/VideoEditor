@@ -59,6 +59,11 @@ export interface AutoUpdateDeps {
   /** ダウンロードし終えた版を、今すぐ入れるか(再起動)・あとで(終了したとき)か尋ねる */
   ask: (version: string) => Promise<'restart' | 'later'>
   log: (message: string, error?: unknown) => void
+  /**
+   * いつもどおりの終了を始める(窓を閉じる)。保存していない変更・処理中の確かめはここで出て、
+   * キャンセルされれば終了しない。終了まで進んだときだけ will-quit で onWillQuit が入れ替える
+   */
+  requestQuit: () => void
 }
 
 /** 起動してから最初に確かめるまで(起動の重い処理と取り合わない) */
@@ -68,6 +73,11 @@ export const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 export interface AutoUpdateHandle {
   stop: () => void
+  /**
+   * will-quit で呼ぶ。「再起動して更新」を選んだあと終了まで進んだなら、入れ替えて起動し直す
+   * (選ばなければ autoInstallOnAppQuit が、終了したときに起動し直さずに入れる)
+   */
+  onWillQuit: () => void
 }
 
 /**
@@ -86,6 +96,8 @@ export function startAutoUpdate(
   let updater: UpdaterLike | null = null
   let stopped = false
   let checking = false
+  /** 「再起動して更新」を選んだ(終了まで進んだら入れ替えて起動し直す) */
+  let restartRequested = false
   /** 尋ねた版(同じ版で何度も尋ねない) */
   const asked = new Set<string>()
 
@@ -103,8 +115,13 @@ export function startAutoUpdate(
         deps
           .ask(version)
           .then((choice) => {
-            // 終了の確かめ(保存していない変更・処理中)は、窓を閉じるときにいつもどおり出る
-            if (choice === 'restart' && !stopped) u.quitAndInstall(false, true)
+            // ここで quitAndInstall すると、終了の確かめ(保存していない変更・処理中)より先に
+            // インストーラが動き、アプリを閉じてしまう。まずいつもどおり終了を始め、確かめを通って
+            // 終了まで進んだときだけ(will-quit → onWillQuit)入れ替える
+            if (choice === 'restart' && !stopped) {
+              restartRequested = true
+              deps.requestQuit()
+            }
           })
           .catch((e) => deps.log('自動更新: 尋ねられませんでした', e))
       })
@@ -136,6 +153,15 @@ export function startAutoUpdate(
       stopped = true
       clearTimeout(first)
       clearInterval(every)
+    },
+    onWillQuit: () => {
+      if (!restartRequested || !updater) return
+      restartRequested = false
+      try {
+        updater.quitAndInstall(false, true)
+      } catch (e) {
+        deps.log('自動更新: 入れ替えられませんでした', e)
+      }
     }
   }
 }
