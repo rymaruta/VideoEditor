@@ -197,3 +197,13 @@ export function lengthClock(seconds: number, fps: number): string {
   const ss = String(v % 60).padStart(2, '0')
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
 }
+
+/**
+ * 上限を超えた長さの表示(「60.4 秒」)。0.1 秒へ切り上げるので、上限を少しでも超えていれば上限より大きく
+ * 出る。長さの表示(`lengthClock`)は秒を切り捨てるので、ショートの 60 秒の上限を 60.4 秒で超えたときに
+ * 「今は 1:00」と出ていた(監査の指摘 4)
+ */
+export function overLimitText(seconds: number): string {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0
+  return `${(Math.ceil(safe * 10 - 1e-9) / 10).toFixed(1)} 秒`
+}

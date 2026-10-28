@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatTimecode, lengthClock } from '@renderer/lib/timelineRuler'
+import { formatTimecode, lengthClock, overLimitText } from '@renderer/lib/timelineRuler'
 
 /**
  * 試し編集 第3回の N5: 仕上がりの長さが確認の画面 7:21・編集画面と書き出し 7:22 と 1 秒違った。
@@ -34,5 +34,17 @@ describe('長さの表示を編集画面の時刻・書き出しと同じ数え�
     expect(lengthClock(Number.NaN, 30)).toBe('0:00')
     expect(lengthClock(-3, 30)).toBe('0:00')
     expect(lengthClock(12, 0)).toBe('0:12')
+  })
+})
+
+describe('上限を超えた長さの表示(監査の指摘 4)', () => {
+  it('ショートの 60 秒を超えたら、上限より大きく出す(切り捨てて 1:00 と出さない)', () => {
+    expect(overLimitText(60.4)).toBe('60.4 秒')
+    expect(overLimitText(60.01)).toBe('60.1 秒')
+    expect(overLimitText(61)).toBe('61.0 秒')
+    for (let i = 1; i < 100; i++) {
+      const sec = 60 + i * 0.0137
+      expect(parseFloat(overLimitText(sec))).toBeGreaterThan(60)
+    }
   })
 })

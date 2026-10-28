@@ -14,7 +14,7 @@ import {
 import { cropObjectPosition } from '@shared/videoFrame'
 import { useMenuCommand } from '../lib/menuCommands'
 import { formatIpcError } from '../lib/ipcError'
-import { formatTimecode, lengthClock } from '../lib/timelineRuler'
+import { formatTimecode, lengthClock, overLimitText } from '../lib/timelineRuler'
 import { buildTimedClips, findTimedClipAt, totalExportDuration } from '../lib/timelineMath'
 import { prepareTelopLayerForExport } from '../lib/telopRaster'
 import type { EpisodeKind } from '@shared/structure/kind'
@@ -1623,7 +1623,7 @@ export function ExportDialog(): React.JSX.Element | null {
                 <div className="ve-export-warn" role="alert">
                   <AlertTriangleIcon width={14} height={14} />
                   <span>
-                    ショートは {SHORT_MAX_SEC} 秒までです(今は {lengthClock(duration, fps)})。
+                    ショートは {SHORT_MAX_SEC} 秒までです(今は {overLimitText(duration)})。
                     {SHORT_MAX_SEC} 秒以下の範囲を選ぶと書き出せます。
                   </span>
                   <button
