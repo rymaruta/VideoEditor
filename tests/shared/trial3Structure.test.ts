@@ -3,6 +3,7 @@ import {
   buildScenes,
   endsQuestion,
   indistinctJudgements,
+  questionHolds,
   sceneSubstance,
   selectScenes,
   type Scene,
@@ -32,6 +33,15 @@ describe('場面の区切りを質問の途中に入れない(#3)', () => {
     expect(endsQuestion('ぜひ教えてください')).toBe(true)
     expect(endsQuestion('ものすごい挑戦だったというふうに思うんです')).toBe(false)
     expect(endsQuestion('頑張ってまいりました')).toBe(false)
+  })
+
+  it('短い問い返し・驚き(「えっ、何それ?」)は質問とみなさない', () => {
+    const lines: TimedLine[] = [
+      { id: 'a', start: 0, end: 2, text: 'すごい!これは本当に面白いですね!', overlap: false },
+      { id: 'b', start: 2.3, end: 4, text: 'えっ、ちょっと待って、何それ?', overlap: false },
+      { id: 'c', start: 4.3, end: 6, text: 'じゃあ次の場所へ移動しましょうか', overlap: false }
+    ]
+    expect(questionHolds(lines, 8)).toEqual([])
   })
 
   it('第3回の実文: 補佐官の質問(219.9 秒〜)とその答えを同じ場面に入れる', () => {

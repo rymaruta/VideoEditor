@@ -90,6 +90,8 @@ const BACK_REFERENCE =
   /^(?:そのあたり|その辺|その点|そこ|それ|そういった|そういう|この点|このあたり|こうした)/u
 /** 質問(前置き〜疑問・依頼の文末)の長さの上限(秒)。これより前へは広げない */
 const MAX_QUESTION_SEC = 45
+/** 質問とみなす文(前置き〜疑問の文末)の字数の下限(依頼の形は短くても質問) */
+const MIN_QUESTION_CHARS = 20
 /** 質問の後、答えの頭からこの秒数は同じ場面に入れる(質問と答えを分けない) */
 const ANSWER_HOLD_SEC = 10
 
@@ -143,6 +145,16 @@ export function questionHolds(
       )
         h--
     }
+    // 短い問い返し・驚き(「えっ、何それ?」)は質問とみなさない。前置きからの文が `MIN_QUESTION_CHARS` 字
+    // 以上か、依頼の形(「お聞かせください」「教えてください」)の質問だけ
+    const chars = sorted
+      .slice(h, q + 1)
+      .reduce((t, l) => t + [...l.text.replace(/[\s、。,.!?！？]/gu, '')].length, 0)
+    if (
+      chars < MIN_QUESTION_CHARS &&
+      !REQUEST_TAIL.test(sorted[q].text.replace(/[\s。．.]+$/u, ''))
+    )
+      continue
     const answer = sorted[q + 1]
     const end = answer && answer.start - qEnd < quietSec ? answer.start + ANSWER_HOLD_SEC : qEnd
     out.push({ start: sorted[h].start, end })
