@@ -1,3 +1,4 @@
+import type { LengthDropBy } from './structure/scenes'
 import type { EffectKind, EffectProposal } from './telop/effects'
 import type { HypeMoment } from './structure/hype'
 import type { EpisodeKind } from './structure/kind'
@@ -287,6 +288,8 @@ export interface DropBasis {
   relaxed: boolean
   /** 見どころが多すぎて、場面を選ぶ判定を点数の判定に置き換えた */
   replaced: boolean
+  /** 長さに合わせて落とした場面を、何で選んだか(場面の id → `LengthDropBy`) */
+  lengthBy?: Record<string, LengthDropBy>
 }
 
 export function normalizeDropBasis(raw: unknown): DropBasis | undefined {
@@ -299,6 +302,17 @@ export function normalizeDropBasis(raw: unknown): DropBasis | undefined {
     targetSec: Math.max(0, r.targetSec),
     minScore: typeof r.minScore === 'number' && Number.isFinite(r.minScore) ? r.minScore : null,
     relaxed: r.relaxed === true,
-    replaced: r.replaced === true
+    replaced: r.replaced === true,
+    ...(lengthByOf(r.lengthBy) ? { lengthBy: lengthByOf(r.lengthBy)! } : {})
   }
+}
+
+const LENGTH_BY: readonly LengthDropBy[] = ['score', 'cues', 'beside', 'edge', 'fit']
+
+function lengthByOf(raw: unknown): Record<string, LengthDropBy> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: Record<string, LengthDropBy> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>))
+    if (LENGTH_BY.includes(v as LengthDropBy)) out[k] = v as LengthDropBy
+  return Object.keys(out).length > 0 ? out : undefined
 }

@@ -91,6 +91,11 @@ export interface ChunkOptions {
   removeFillers?: boolean
   /** 用語の辞書 */
   dictionary?: readonly DictionaryEntry[]
+  /**
+   * 語の切れ目で切るために、1行だけ1字はみ出してよい(はみ出した行が描画の枠に収まるとき。
+   * `lineOverflowFits` で確かめて渡す)。無ければはみ出さない
+   */
+  overflowFits?: boolean
 }
 
 /**
@@ -263,10 +268,15 @@ function spreadZeroWords(out: TimedChar[], words: readonly AsrWord[]): void {
 }
 
 /** 1行に収まるよう改行を入れる(禁則を守り、句読点・助詞の後を優先) */
-export function wrapTelopLines(text: string, maxLineChars: number): string[] {
+export function wrapTelopLines(
+  text: string,
+  maxLineChars: number,
+  /** 語の切れ目で切るために1行だけ1字はみ出してよい(描画の枠に収まると確かめたとき。`lineOverflowFits`) */
+  overflow = false
+): string[] {
   const chars = [...text]
   let from = 0
-  return phraseLineEnds(chars, maxLineChars)
+  return phraseLineEnds(chars, maxLineChars, overflow)
     .map((end) => {
       const line = chars.slice(from, end).join('').trim()
       from = end
@@ -281,7 +291,7 @@ export function wrapTelopLines(text: string, maxLineChars: number): string[] {
  * 文節の見当で全部を選び直すと、今まで語の切れ目で切れていた文まで動き、別の所で語の途中に切れていた
  * (「一生懸 / 命」「た / くさん」)
  */
-function phraseLineEnds(chars: readonly string[], max: number): number[] {
+function phraseLineEnds(chars: readonly string[], max: number, overflow = false): number[] {
   const before = balancedLineEnds(chars, max)
   const inside = (ends: readonly number[]): number =>
     ends.slice(0, -1).filter((e) => lineBreakScore(chars, e) < 0).length
@@ -291,7 +301,7 @@ function phraseLineEnds(chars: readonly string[], max: number): number[] {
     ends.slice(0, -1).reduce((t, e) => t - Math.min(0, lineBreakScore(chars, e)), 0)
   const bad = inside(before)
   if (bad === 0) return before
-  const after = balancedLineEnds(chars, max, undefined, true)
+  const after = balancedLineEnds(chars, max, undefined, true, overflow)
   return after.length === before.length && inside(after) <= bad && badness(after) < badness(before)
     ? after
     : before
@@ -615,7 +625,7 @@ export function clipTelopChunk(
       if (clamped[0] <= Math.min(...times) && clamped[1] >= Math.max(...times)) range = clamped
     }
     return {
-      text: wrapTelopLines(text, options.maxLineChars ?? 14).join('\n'),
+      text: wrapTelopLines(text, options.maxLineChars ?? 14, options.overflowFits).join('\n'),
       times,
       spoken: spokenOf(vis),
       range,
@@ -785,7 +795,7 @@ export function utteranceToTelopChunks(
     const polished = polish(chars.slice(p.from, p.to).join(''))
     const vis = visOf[pi]
     const times = vis ? vis.map((v) => (v.lo + v.hi) / 2) : null
-    const lines = wrapTelopLines(polished, maxLine)
+    const lines = wrapTelopLines(polished, maxLine, options.overflowFits)
     const text = lines.join('\n')
     if (!text) return
     // 頭の、整えると消える文字(言いよどみ・句読点・空白)は時刻に入れない

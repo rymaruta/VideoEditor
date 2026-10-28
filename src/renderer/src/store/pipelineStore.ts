@@ -118,7 +118,11 @@ import {
   type RangedVariantSpec,
   type RangedVariantsResult
 } from '../lib/rangedAutoEdit'
-import { heuristicJudgements, indistinctJudgements } from '@shared/structure/scenes'
+import {
+  heuristicJudgements,
+  indistinctJudgements,
+  type LengthDropBy
+} from '@shared/structure/scenes'
 import { framesOnFaces, prepareVerticalFill } from '../lib/verticalFraming'
 import { useQcStore } from './qcStore'
 import {
@@ -1885,7 +1889,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             )
           : project.cutOverrides
         // 前の書き出しの確認がまだ動いていれば止める(書き出しと CPU を取り合う。書き出しの画面と同じ)
-        await useQcStore.getState().stopForExport()
+        // 自動のショートは確認をしないので、止めたことは次の確認の欄に残さない
+        await useQcStore.getState().stopForExport({ note: false })
         for (let i = 0; i < windows.length; i++) {
           set({
             shorts: {
@@ -3690,16 +3695,27 @@ function trackParentSource(s: EditableSource, all: readonly EditableSource[]): s
 
 /** 仮編集で場面を選んだときの方針(`autoSelection` と同じ決め方。落とした理由・数の文言に使う) */
 function dropBasisOf(
-  plan: { selection: { relaxed?: boolean; minScore?: number }; demoted?: unknown },
+  plan: {
+    selection: {
+      relaxed?: boolean
+      minScore?: number
+      dropped?: { sceneId: string; why: string; by?: LengthDropBy }[]
+    }
+    demoted?: unknown
+  },
   targetSec: number,
   policyName: EditPolicy
 ): DropBasis {
   const p = POLICY_PROFILES[policyName] ?? POLICY_PROFILES.tempo
+  const lengthBy = (plan.selection.dropped ?? [])
+    .filter((d) => d.why === 'length' && d.by)
+    .map((d) => [d.sceneId, d.by!] as const)
   return {
     dropUnneeded: p.dropUnneeded,
     targetSec: p.useTarget ? Math.max(0, targetSec) : 0,
     minScore: plan.selection.minScore ?? null,
     relaxed: Boolean(plan.selection.relaxed),
-    replaced: Boolean(plan.demoted)
+    replaced: Boolean(plan.demoted),
+    ...(lengthBy.length > 0 ? { lengthBy: Object.fromEntries(lengthBy) } : {})
   }
 }

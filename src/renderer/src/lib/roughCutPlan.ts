@@ -82,7 +82,7 @@ import {
   type EffectLine,
   type EffectProposal
 } from '@shared/telop/effects'
-import { stackSimultaneousTelops } from '@shared/telop/stack'
+import { lineOverflowFits, stackSimultaneousTelops } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
 import type { DictionaryEntry } from '@shared/telop/polish'
 
@@ -569,7 +569,13 @@ export function planRoughCut(
     const chunkOptions = {
       dictionary: options.dictionary,
       maxLineChars: options.style?.telopLineChars,
-      minDurationSec: options.style?.telopMinSec
+      minDurationSec: options.style?.telopMinSec,
+      // 語の切れ目で切るための1字のはみ出しは、その話者のテロップの見た目で描画の枠に収まるときだけ
+      overflowFits: lineOverflowFits(
+        speechTelopStyle(def ? def.style : look.style),
+        options.aspectRatio ?? project.aspectRatio,
+        options.style?.telopLineChars ?? 14
+      )
     }
     const chunks = utteranceToTelopChunks(u, chunkOptions)
     for (let ci = 0; ci < chunks.length; ci++) {

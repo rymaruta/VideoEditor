@@ -90,6 +90,11 @@ const BACK_REFERENCE =
   /^(?:そのあたり|その辺|その点|そこ|それ|そういった|そういう|この点|このあたり|こうした)/u
 /** 質問(前置き〜疑問・依頼の文末)の長さの上限(秒)。これより前へは広げない */
 const MAX_QUESTION_SEC = 45
+/**
+ * 場面の長さの上限(長さの目安に対する倍率)。質問〜答えの頭をつなぐときも、文の途中で分けるときも、
+ * これを超えたら分ける
+ */
+const HOLD_MAX_RATIO = 1.5
 /** 質問とみなす文(前置き〜疑問の文末)の字数の下限(依頼の形は短くても質問) */
 const MIN_QUESTION_CHARS = 20
 /** 質問の後、答えの頭からこの秒数は同じ場面に入れる(質問と答えを分けない) */
@@ -182,8 +187,6 @@ export function buildScenes(
   const groups: TimedLine[][] = []
   /** 長さだけで分けた(話は続いている)まとまりの頭 */
   const splitByLength = new Set<TimedLine[]>()
-  /** 質問の頭で分けたまとまり(短くても前へ戻さない。戻すと質問が前の話の途中に入る) */
-  const atQuestion = new Set<TimedLine[]>()
   // まとまりの終わりは足しながら持つ(1行ごとに全部をなめると、1万行で1秒かかっていた)
   const ends = new Map<TimedLine[], number>()
   for (const l of sorted) {
@@ -193,16 +196,25 @@ export function buildScenes(
       const gap = l.start - gEnd
       const len = gEnd - g[0].start
       // 長さで分けるのは、文の切れ目(続きのある形で終わっていない)か、長めの間のある所だけ。
-      // 長さの目安の倍を超えたら、文の途中でも分ける(場面が際限なく長くならないように)
+      // 長さの目安の 1.5 倍を超えたら、文の途中でも分ける(場面が際限なく長くならないように)
       const last = g[g.length - 1]
       const long =
         len >= maxScene &&
-        (len >= maxScene * 2 || gap >= LONG_PAUSE_SEC || !continuesSentence(last.text))
-      // 質問〜答えの頭の中: 長い無言でなければつなぐ(長さの目安の倍を超えたら分ける)
+        (len >= maxScene * HOLD_MAX_RATIO || gap >= LONG_PAUSE_SEC || !continuesSentence(last.text))
+      // 質問〜答えの頭の中: 長い無言でなければつなぐ(長さの目安の 1.5 倍を超えたら分ける)
       const inside = holds.some((h) => h.start < l.start - 1e-9 && l.start <= h.end)
-      if (inside && gap < quiet && len < maxScene * 2) {
+      if (inside && gap < quiet && len < maxScene * HOLD_MAX_RATIO) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
+        continue
+      }
+      // 質問〜答えの中で長さの目安の 1.5 倍を超えたら、間が短くても分ける(前は倍まで・間 8 秒までつなぎ、
+      // 合成 300 回で最長 191 秒の場面ができた)
+      if (inside && len >= maxScene * HOLD_MAX_RATIO) {
+        const fresh = [l]
+        groups.push(fresh)
+        ends.set(fresh, l.end)
+        splitByLength.add(fresh)
         continue
       }
       // 質問の頭: 質問〜答えの頭まで入れると長さの目安を超えるなら、ここで分ける(間が短くても)
@@ -216,10 +228,11 @@ export function buildScenes(
         const fresh = [l]
         groups.push(fresh)
         ends.set(fresh, l.end)
-        atQuestion.add(fresh)
         continue
       }
-      if (gap < joinGap && !(long && gap >= 1)) {
+      // 長さの目安の 1.5 倍を超えたら、文の途中・間が短くても分ける(場面が際限なく長くならないように)
+      const tooLong = len >= maxScene * HOLD_MAX_RATIO
+      if (gap < joinGap && !(long && gap >= 1) && !tooLong) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
         continue
@@ -246,7 +259,8 @@ export function buildScenes(
     const next = groups[i + 1]
     // 後ろも話が続いている(さらに長さで分けた)なら、残りではない
     if (next && splitByLength.has(next)) continue
-    if (gEnd - g[0].start < minTail) {
+    // 戻すと上限(長さの目安の 1.5 倍)を超えるなら戻さない
+    if (gEnd - g[0].start < minTail && gEnd - groups[i - 1][0].start <= maxScene * HOLD_MAX_RATIO) {
       groups[i - 1].push(...g)
       groups.splice(i, 1)
     }
@@ -492,9 +506,17 @@ export function indistinctJudgements(
     : null
 }
 
+/**
+ * 長さに合わせて落とした場面を、何で選んだか(落とした理由の文に使う)。score = 残った中で点数がいちばん
+ * 低かった、cues = 同じ点の中で中身の手掛かりが少なかった、beside = 同じ点の中で前後がすでに落ちていた、
+ * edge = 同じ点の場面が番組の頭・終わりしか残っていなかった、fit = 同じ点の中で、落とすと目標の長さに
+ * いちばん近くなった
+ */
+export type LengthDropBy = 'score' | 'cues' | 'beside' | 'edge' | 'fit'
+
 export interface Selection {
   kept: string[]
-  dropped: { sceneId: string; why: 'unneeded' | 'length' }[]
+  dropped: { sceneId: string; why: 'unneeded' | 'length'; by?: LengthDropBy }[]
   /** 残した場面の、詰めた後の見込みの長さ(秒) */
   estimated: number
   /**
@@ -650,9 +672,29 @@ export function selectScenes(
       const slack = Math.max(COVER_SLACK_SEC, targetSec * 0.05)
       s = covering.find((x) => estimate(x) - excess <= least + slack) ?? s
     }
+    // 何で選んだか(落とした理由の文を、実際の選び方に合わせる)
+    let by: LengthDropBy = 'score'
+    if (s !== tied[0]) by = 'fit'
+    else if (tied.length > 1) {
+      const [a, b] = tied
+      const order: [LengthDropBy, number][] = indistinct
+        ? [
+            ['edge', edge(a) - edge(b)],
+            ['cues', byCues(a, b)],
+            ['beside', beside(a, b)]
+          ]
+        : [
+            ['edge', edge(a) - edge(b)],
+            ['beside', beside(a, b)],
+            ['cues', byCues(a, b)]
+          ]
+      by = order.find(([, d]) => d !== 0)?.[0] ?? 'cues'
+      // 頭・終わりの場面しか残っていなかった(残りの同じ点の場面はどれも頭・終わり)
+      if (by !== 'edge' && edge(a) === 1) by = 'edge'
+    }
     keep.delete(s.id)
     total -= estimate(s)
-    dropped.push({ sceneId: s.id, why: 'length' })
+    dropped.push({ sceneId: s.id, why: 'length', by })
   }
   // 落としすぎた分を戻す: 長さで落とした場面のうち、戻しても目標に収まるものは戻す(点数の高い順、
   // 同じなら中身の手掛かりの多い順)。短い場面を先に落とした後で長い場面を落とすと、短い場面まで

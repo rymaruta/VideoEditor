@@ -9,6 +9,7 @@ import {
   describeCues,
   indistinctJudgements,
   sceneSubstance,
+  type LengthDropBy,
   sceneCues,
   type Scene,
   type SceneJudgement
@@ -330,7 +331,13 @@ export function droppedSceneReason(
    * 残している場面(同じ点の場面を残したかを見る)。無ければ、判定が全部(ほとんど)同じ点のときに
    * 同じ点の中で選んだとみなす
    */
-  keptScenes?: readonly Scene[]
+  keptScenes?: readonly Scene[],
+  /**
+   * 仮編集が長さに合わせてこの場面を何で選んだか(`DropBasis.lengthBy`)。あれば、その決め手を書く
+   * (同じ点の中でも、前後が落ちている・目標の長さに近い、で選ぶことがある)。無ければ(古い企画)点数と
+   * 残した場面から見当を付ける
+   */
+  by?: LengthDropBy
 ): string {
   const why = droppedWhy(judgement, manual, policy)
   const cues = describeCues(sceneCues(scene))
@@ -353,6 +360,16 @@ export function droppedSceneReason(
         : []
       const same = indistinctJudgements(judgements)
       const tied = sameKept ? sameKept.length > 0 : Boolean(same && judgement?.score === same.score)
+      if (judgement && by && by !== 'score' && by !== 'cues') {
+        const lead = `仕上がりの長さに合わせて落としました。同じ点(${judgement.score} 点)の場面の中で、`
+        if (by === 'fit')
+          return `${lead}落とすと仕上がりが目標の長さにいちばん近くなる場面を選びました(${cues})`
+        if (by === 'beside')
+          return `${lead}前後の場面がすでに落ちている場面から選びました(話の途中へ飛ぶ所を増やさないため · ${cues})`
+        return `${lead}番組の頭・終わりの場面しか残っていなかったので、この場面を選びました(${cues})`
+      }
+      if (by === 'score')
+        return `仕上がりの長さに合わせて、点数の低い場面から落としました(${judgement ? `${judgement.score} 点 · ` : ''}${cues})`
       if (tied && judgement) {
         // 手掛かりの数と、選んだ決め手(1分あたりで比べた手掛かりの点)を合わせて書く。数だけを出すと、
         // 長い場面の固有名詞 21 が多く見えるのに「手掛かりが少ない」と出ていた

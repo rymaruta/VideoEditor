@@ -116,7 +116,7 @@ describe('selectScenes', () => {
   it('長すぎれば点数の低い場面から落とす', () => {
     const r = selectScenes(scenes, judgements, 130)
     expect(r.kept).toEqual(['s1', 's4'])
-    expect(r.dropped).toContainEqual({ sceneId: 's3', why: 'length' })
+    expect(r.dropped).toContainEqual({ sceneId: 's3', why: 'length', by: 'score' })
     expect(r.estimated).toBe(120)
   })
 })

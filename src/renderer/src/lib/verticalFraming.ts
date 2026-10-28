@@ -7,7 +7,7 @@ import {
 } from '@shared/telop/avoidFaces'
 import { liftAboveShortsUi, SHORTS_TELOP_BOTTOM } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
-import { projectFrameRate } from '@shared/frameRate'
+import { frameCountForDuration, projectFrameRate } from '@shared/frameRate'
 import { stackTopHeight, type CropWindow, type StackSplit } from '@shared/videoFrame'
 import type { Clip, MediaAsset, Project, TextOverlay } from '@shared/types'
 import type { EpisodeKind } from '@shared/structure/kind'
@@ -50,6 +50,8 @@ const MIN_WINDOW_W = 0.2
  * (Shorts の下の帯より上)が入る余地を残す
  */
 const FACE_Y_IN_WINDOW = 0.36
+/** 同じ人の発話の続きとみなす間(秒) */
+const RUN_JOIN_SEC = 1
 /** 話者の切り替えの、1ショットの長さの下限(秒)。これより短くなる切り替えはしない */
 export const MIN_SHOT_SEC = 2
 /** 上下に積んだ所の境目の上下に、テロップを置かない幅(画面の高さに対する比) */
@@ -294,6 +296,38 @@ export function fillsVertical(
   return windowFraction(asset, aspect) < 1
 }
 
+/**
+ * 上下に積む形・話す人の切り替えで分けたクリップを、元の形に戻した写し(企画は変えない)。自動のショートで
+ * 保存した企画には、積む形(`splitStack`)と分けたクリップ(`<id>~v<n>`)が残る。書き出しの画面で「1人に
+ * 寄せる」「黒帯」を選んだとき・縦でない(16:9 にした)ときに、積んだまま・分けたまま書き出していた
+ * (監査の指摘 3)。分けたクリップは、続いている(同じ素材・同じ速さで、素材の位置が続く)ものだけ戻す
+ */
+export function withoutVerticalSplits(project: Project): Project {
+  if (!project.clips.some((c) => c.splitStack || c.id.includes('~v'))) return project
+  const out: Clip[] = []
+  for (const c of project.clips) {
+    const prev = out[out.length - 1]
+    const base = c.id.replace(/~v\d+$/, '')
+    if (
+      prev &&
+      base !== c.id &&
+      prev.id === base &&
+      prev.assetId === c.assetId &&
+      (prev.speed || 1) === (c.speed || 1) &&
+      Math.abs(prev.outPoint - c.inPoint) < 1e-6
+    ) {
+      out[out.length - 1] = { ...prev, outPoint: c.outPoint }
+      continue
+    }
+    if (c.splitStack) {
+      const plain = { ...c }
+      delete plain.splitStack
+      out.push(plain)
+    } else out.push(c)
+  }
+  return { ...project, clips: out }
+}
+
 /** タイムラインの区間 [a, b) に掛かる本編のクリップと、その頭の時刻 */
 export function clipsInRange(
   clips: readonly Clip[],
@@ -331,6 +365,12 @@ export interface SpeakerLine {
   speaker: string
   start: number
   end: number
+  /**
+   * 別の人の声と重なっている所がある(話者の区間に 0.25 秒以上の重なりがあると区間全体に付く)。
+   * 切り替えには使う(相づちが重なった長い答えを丸ごと捨てると、答える人へ切り替わらなかった)。
+   * 口の動きを測るのには、重なりの無い発話を先に使う
+   */
+  overlap?: boolean
 }
 
 /** 話者と顔の対応(素材ごと。話者 → 顔の横の真ん中(素材の比))と、タイムラインの発話 */
@@ -363,10 +403,29 @@ export function speakerShots(
     const l = inside[i]
     const cur = shots[shots.length - 1]
     if (l.key === cur.key || l.start <= start) continue
-    // この人が話し続ける間(次に別の人が話し始めるまで)
-    const next = inside.slice(i + 1).find((x) => x.key !== l.key)
-    const runEnd = Math.min(end, next ? next.start : end)
-    if (l.start - cur.start < minShot || end - l.start < minShot || runEnd - l.start < minShot)
+    // この人が話し続ける間: この発話の終わりから、同じ人の続きの発話(間が `RUN_JOIN_SEC` まで)をつなぎ、
+    // 終わった後に別の人が話し始めたら止める(終わりの前に重なって始まる別の人の相づちでは止めない)。
+    // 前は「次に別の人が話し始めるまで」としていて、話し続ける人の途中の 0.5 秒の相づちで、相づちの
+    // 人を元の人の次の発話まで(7 秒)映していた
+    let runEnd = l.end
+    for (const x of inside.slice(i + 1)) {
+      if (x.key === l.key) {
+        if (x.start <= runEnd + RUN_JOIN_SEC) runEnd = Math.max(runEnd, x.end)
+        else break
+      } else if (x.start >= runEnd) break
+    }
+    runEnd = Math.min(end, runEnd)
+    // 今映している人が、この発話の間ずっと話している(重なった相づち)なら切り替えない
+    const curUntil = Math.max(
+      -Infinity,
+      ...inside.filter((x) => x.key === cur.key && x.start <= l.start).map((x) => x.end)
+    )
+    if (
+      l.start - cur.start < minShot ||
+      end - l.start < minShot ||
+      runEnd - l.start < minShot ||
+      curUntil >= runEnd
+    )
       continue
     cur.end = l.start
     shots.push({ start: l.start, end, key: l.key })
@@ -429,21 +488,26 @@ export function applyVerticalFill(
       const shots = speakerShots(options.speakers.lines, clipStart, clipEnd, keyOf)
       if (shots.length > 0) {
         switched++
-        // 切り替えの時刻はコマにそろえる(書き出しはクリップの両端をコマに丸める)
-        const snap = (t: number): number => Math.round(t * fps) / fps
-        const cuts = shots.map((s, i) => (i === 0 ? clipStart : snap(s.start)))
+        // 切り替えの時刻はコマにそろえ、素材の位置は書き出しが丸めたクリップの頭から数える。書き出しは
+        // クリップの頭を(タイムラインの累積で)コマに丸めた所から素材を読む(`computeMainTrackLayout`)ので、
+        // 丸める前の頭から数えると、分けた所で素材の位置が最大半コマずれ、音が途切れる・飛ぶ(1本目が
+        // 1.01 秒のとき切り替えの直前に約 10ms の無音、1.0167 秒のとき約 16ms の音飛び)。
+        // 丸めた頭から数えると、分けた後のクリップの頭のタイムラインの時刻も同じコマに丸まり、素材は続く
+        const frameAt = (t: number): number => frameCountForDuration(t, fps) / fps
+        const exportStart = frameAt(clipStart)
+        const sourceAt = shots.map((s, i) =>
+          i === 0 ? c.inPoint : c.inPoint + (frameAt(s.start) - exportStart) * speed
+        )
         return shots
           .map((s, i) => {
-            const a = cuts[i]
-            const b = i + 1 < cuts.length ? cuts[i + 1] : clipEnd
             const person = people[s.key]
             const id = i === 0 ? c.id : `${c.id}~v${i}`
             if (i > 0) originOf.set(id, c.id)
             const piece: Clip = {
               ...c,
               id,
-              inPoint: c.inPoint + (a - clipStart) * speed,
-              outPoint: i + 1 < cuts.length ? c.inPoint + (b - clipStart) * speed : c.outPoint,
+              inPoint: sourceAt[i],
+              outPoint: i + 1 < sourceAt.length ? sourceAt[i + 1] : c.outPoint,
               fillCrop: true,
               cropCenter: { x: person.cx, y: 0.5 }
             }
@@ -568,9 +632,14 @@ export function speakerLines(
   range?: { start: number; end: number }
 ): SpeakerLine[] {
   return placedUtterances(project)
-    .filter((p) => p.utterance.speaker?.trim() && !p.utterance.overlap)
+    .filter((p) => p.utterance.speaker?.trim())
     .filter((p) => !range || (p.end > range.start && p.start < range.end))
-    .map((p) => ({ speaker: p.utterance.speaker!.trim(), start: p.start, end: p.end }))
+    .map((p) => ({
+      speaker: p.utterance.speaker!.trim(),
+      start: p.start,
+      end: p.end,
+      ...(p.utterance.overlap ? { overlap: true } : {})
+    }))
 }
 
 /**
@@ -681,7 +750,11 @@ export async function findSpeakerFaces(
         .filter((l) => l.speaker === speaker && l.end - l.start >= MOUTH_MIN_LINE_SEC)
         .map((l) => ({ l, at: list.find((x) => l.start >= x.start && l.end <= x.end) }))
         .filter((x): x is { l: SpeakerLine; at: (typeof list)[number] } => x.at !== undefined)
-        .sort((a, b) => b.l.end - b.l.start - (a.l.end - a.l.start))
+        .sort(
+          (a, b) =>
+            Number(Boolean(a.l.overlap)) - Number(Boolean(b.l.overlap)) ||
+            b.l.end - b.l.start - (a.l.end - a.l.start)
+        )
         .slice(0, MOUTH_SAMPLES_PER_SPEAKER)
       for (const { l, at } of mine)
         picks.push({
@@ -889,12 +962,13 @@ export async function verticalSamples(
   twoPeople = true
 ): Promise<VerticalSample[]> {
   const assets = new Map(project.assets.map((a) => [a.id, a]))
-  let framed = project
+  // 積む・切り替えは「人物に寄せる(2人は上下・話す人)」の設定のときだけ(保存した企画の分も)
+  let framed = fill && twoPeople ? project : withoutVerticalSplits(project)
   if (fill && times.length > 0) {
     const lo = Math.min(...times)
     const hi = Math.max(...times)
     framed = (
-      await prepareVerticalFill(project, {
+      await prepareVerticalFill(framed, {
         range: { start: lo, end: hi + 1e-3 },
         findFaces,
         twoPeople,
@@ -925,7 +999,7 @@ export async function verticalSamples(
 
 /**
  * 書き出し画面の見本の覚え方の鍵。企画・設定と、見本の時刻に掛かるクリップの中身(素材・区間・速さ・
- * 見え方)の指紋(企画の中身が変われば別の鍵)
+ * 見え方)と、話者・文字起こしの指紋(企画の中身が変われば別の鍵)
  */
 export function verticalSampleKey(
   project: Project,
@@ -952,6 +1026,12 @@ export function verticalSampleKey(
       c.blurBackground ?? ''
     ].join(':')
   })
+  // 話者と文字起こし(話す人への切り替えは発話の話者・時刻で決まる。話者を直したら見本も作り直す)
+  if (twoPeople)
+    for (const u of project.transcript ?? [])
+      parts.push(
+        `${u.assetId}:${u.speaker ?? ''}:${u.sourceStart}:${u.sourceEnd}:${u.overlap ? 1 : 0}`
+      )
   let h = 0x811c9dc5
   const text = parts.join('|')
   for (let i = 0; i < text.length; i++) {

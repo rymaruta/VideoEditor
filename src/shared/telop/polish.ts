@@ -80,6 +80,9 @@ const KANJI = /[一-鿿々]/u
 const HIRAGANA = /[ぁ-ゟ]/u
 const KATAKANA = /[ァ-ヿ]/u
 const DIGIT = /[0-9０-９]/u
+/** それだけで立つ副詞(この前後は文節の切れ目) */
+const ADVERB =
+  /(?:ちょっと|すごく|とても|ずっと|いつも|もっと|やっぱり|やはり|なかなか|たくさん|いっぱい|ぜひ|必ず|すぐ|少し|ほとんど)/u
 /** 文節の終わりになる仮名(助詞・接続の「て」「ば」など)。この後ろは区切ってよい */
 const PHRASE_END = /[はがをにでともへやのねよてばどら]/u
 /** 前の言葉にくっつく仮名(助詞・助動詞・活用の頭・小さい仮名)。この前では区切らない */
@@ -226,6 +229,16 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
   // 句点が無くても文の終わりらしい所(「…ました / それでは」「…ですね / 以前」)は、次が前にくっつく仮名で
   // なければ切ってよい(仮名の並びの中を全部語の途中とみなすと「ありがとうございまし / た…」になった)
   if (base > -Infinity && !ATTACHES.test(next) && endsSentence(chars, k)) return Math.max(base, 2)
+  // 複合の付属語(「について」「にとって」「としては」「に対して」)の中(「テーマに / ついて」)は語の途中
+  // (監査: 前の版は「テーマ / について」と付属語の前で切っていた)
+  if (/^(?:に(?:つい|とっ|対し|よっ|関し|おい)|として)/u.test(chars.slice(k - 1, k + 2).join('')))
+    return Math.min(base, INSIDE_WORD_SCORE)
+  // それだけで立つ副詞の後ろで、次が漢字・カタカナ(「必ず / 我々」)は文節の切れ目
+  if (
+    (KANJI.test(next) || KATAKANA.test(next)) &&
+    new RegExp(`${ADVERB.source}$`, 'u').test(chars.slice(Math.max(0, k - 4), k).join(''))
+  )
+    return Math.max(base, 1)
   // 漢字の名詞に付く接尾の字(「科学 / 的」「可能 / 性」「自動 / 化」)の前は語の途中(試し編集 第3回)
   if (KANJI.test(prev) && /[的性化]/u.test(next)) return Math.min(base, INSIDE_WORD_SCORE)
   // 「…的な / もの」の「な」は文節の終わり(「科学的な / ものだけでは」)
@@ -241,6 +254,20 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
     // 助詞とみなして区切っていた(試し編集 第3回)
     if (KANJI.test(before) && /[やらばわまか]/u.test(prev) && /[しすさせ]/u.test(next))
       return Math.min(base, INSIDE_WORD_SCORE)
+    // 漢字の後ろの送り仮名(「焼 / いた」「お聞 / きする」)。助詞・助動詞・「まで」「など」で始まる所は除く
+    // (監査: 単語の区切りが「焼|い」と分けるので、語の切れ目とみなしていた)
+    // 言いよどみ(「えーと」「あのー」「まあ」)の頭は除く(言いよどみは言葉の外。前の言葉に付かない)
+    if (
+      KANJI.test(prev) &&
+      !/[はがをにでともへやのだ]/u.test(next) &&
+      !/^(?:え[ーぇっ]|あの[ーぉ]|ま[あー]|う[ーん]|ん[ーっ]|あ[ーぁ]|そのー)/u.test(
+        chars.slice(k, k + 3).join('')
+      ) &&
+      !/^(?:まで|より|など|くらい|ぐらい|しか|ほど|みたい|らしい|です|でし|なら|なの|ばかり|ばっか|すら|さえ|って|ね|よ|さん|さま|くん|ちゃん)/u.test(
+        chars.slice(k, k + 3).join('')
+      )
+    )
+      return Math.min(base, INSIDE_WORD_SCORE)
     // 漢字・カタカナ・数字の後ろの助詞・送り仮名・「する」の活用(「経済 / にとって」「競合 / しない」)。
     // 単語の区切りが言葉の切れ目と見る所(名詞の後ろの助詞)は、付属語の前(語の途中よりは軽い)
     if (
@@ -253,13 +280,20 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
       )
     // 「…て / ですね」の「ですね」は前にくっつかない(言い直しの間の決まり文句)
     const filler = FREE_HEAD.test(chars.slice(k, k + 4).join(''))
+    // 言い切りの後ろの終助詞・接続助詞(「下げる / よ」「です / けども」「行った / から」)は付属語の前
+    // (語の途中より軽い。どちらでしか切れないときにこちらを選ぶ)
+    if (
+      /[るたいうだすく]/u.test(prev) &&
+      /^(?:よ|ね|けど|けれど|から|ので|のに|って|と(?!こ))/u.test(chars.slice(k, k + 3).join(''))
+    )
+      return Math.min(base, ATTACHED_WORD_SCORE)
     // 仮名の言葉の途中(「つな / がって」「みたい / な」)。単語の区切りがあり、次がそれだけで立つ副詞
     // (「お前もう / ちょっと」)なら途中ではない
     const freeWord =
       wordBoundaries(chars)?.has(k) === true &&
-      /^(?:ちょっと|すごく|とても|ずっと|いつも|もっと|やっぱり|やはり|なかなか|たくさん|ぜひ)/u.test(
-        chars.slice(k, k + 4).join('')
-      )
+      (new RegExp(`^${ADVERB.source}`, 'u').test(chars.slice(k, k + 4).join('')) ||
+        // それだけで立つ副詞の後ろ(「たくさん / やってる」)
+        new RegExp(`${ADVERB.source}$`, 'u').test(chars.slice(Math.max(0, k - 4), k).join('')))
     if (HIRAGANA.test(prev) && !PHRASE_END.test(prev) && !freeWord)
       return Math.min(base, INSIDE_WORD_SCORE)
     // 文節の終わりの後ろの付属語の前(「もの / だけ」)。語の途中よりは軽い
@@ -324,7 +358,12 @@ export function balancedLineEnds(
    * 文節の切れ目の見当(`lineBreakScore`)で選ぶ。語の途中でしか切れないときは、1行増やしてでも語の切れ目で
    * 切る(テロップの1枚の中の改行。行が増えた分は次の枚になる)
    */
-  phrases = false
+  phrases = false,
+  /**
+   * 語の切れ目で切るために、1行だけ1字はみ出してよい(はみ出した行が描画の枠に収まると、呼ぶ側が
+   * 確かめたときだけ。`lineOverflowFits`)
+   */
+  overflow = false
 ): number[] {
   const score = phrases ? lineBreakScore : breakScore
   const ends: number[] = []
@@ -379,7 +418,7 @@ export function balancedLineEnds(
       // 「最終的につながりにも / つながっていったと思うんですが」(14字で 10 + 15)を「…つな / がって」と
       // 切っていた(試し編集 第3回)。はみ出すのは最後の行か、この行のどちらか1行だけ。1行の字数が
       // `MIN_OVERFLOW_LINE` より少ない(狭い枠に合わせた)ときははみ出さない(1字の重みが大きい)
-      else if (lines === 2 && max >= MIN_OVERFLOW_LINE) {
+      else if (overflow && lines === 2 && max >= MIN_OVERFLOW_LINE) {
         let over = -1
         let overValue = -Infinity
         for (let len = max + 1; len >= Math.max(1, remaining - max - 1); len--) {
