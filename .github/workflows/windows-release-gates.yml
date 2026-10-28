@@ -66,10 +66,14 @@ jobs:
           npx electron-vite build
           npm run licenses
 
+      # コード署名: リポジトリの Secrets に WIN_CSC_LINK(.pfx を base64 にしたもの)と WIN_CSC_KEY_PASSWORD を
+      # 入れると署名する。無ければ署名せずに作る(docs/WINDOWS_SIGNING.md)
       - name: Package (unpacked, x64)
         run: npx electron-builder --win --x64 --dir
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Upload (folder)
         uses: actions/upload-artifact@v4
@@ -78,12 +82,14 @@ jobs:
           path: dist/win-unpacked
           retention-days: 14
 
-      # 持ち主の PC で試すインストーラ(署名なし・配布しない)。スタートメニュー・デスクトップのショートカットと
+      # 持ち主の PC で試すインストーラ(証明書が Secrets にあれば署名する・配布しない)。スタートメニュー・デスクトップのショートカットと
       # 「設定 > アプリ」からのアンインストールが付く
       - name: Installer (personal, unsigned)
         run: npx electron-builder --win nsis --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           VE_PERSONAL_BUILD: '1'
 
       - name: Upload (installer)

@@ -2,7 +2,7 @@
   "name": "VideoEditor",
   "appId": "com.videoeditor.app",
   "description": "撮影素材から自動でカット・テロップ・BGM を付けて書き出す、デスクトップの動画編集アプリ",
-  "vendor": "TBD",
+  "vendor": "VideoEditor",
   "vendorEmail": "noreply@example.invalid",
   "sourceOfferUrl": "TBD"
 }

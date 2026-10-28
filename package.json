@@ -4,7 +4,7 @@
   "description": "撮影素材から自動でカット・テロップ・BGM を付けて書き出す、デスクトップの動画編集アプリ",
   "main": "./out/main/index.js",
   "author": {
-    "name": "TBD",
+    "name": "VideoEditor",
     "email": "noreply@example.invalid"
   },
   "license": "UNLICENSED",
