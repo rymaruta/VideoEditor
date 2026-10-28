@@ -39,7 +39,7 @@ import {
   lockOrder,
   memory,
   project,
-  reversedLocks
+  reversedPairs
 } from './h'
 
 /**
@@ -346,9 +346,9 @@ describe('audit fuzz', () => {
           const mem = memory(before)
           const locks = before.autoEditLocks ?? []
           const order0 = lockOrder(before)
-          // どちらも元の所の塊が逆の順に並ぶとき(順を保つと前後はどちらか食い違う)は、そのロックを数えない
-          const reversed = reversedLocks(before)
-          const nb0 = lockNeighborMismatches(before, reversed)
+          // どちらも元の所の塊が逆の順に並ぶ組(順を保つと、組ごとにどちらかの前後が1つ食い違う)の数
+          const reversedCount = reversedPairs(before)
+          const nb0 = lockNeighborMismatches(before)
           const lockCov = locks.map((l) => ({
             l,
             segs: inter(cov(before), [l])
@@ -454,15 +454,16 @@ describe('audit fuzz', () => {
           // ロックした塊の、タイムラインの順の中身の並びは変わらない(matchLockBlocks を使わない確かめ)
           if (lockOrder(now) !== order0)
             fail(`lock order changed\nbefore=${order0}\nafter =${lockOrder(now)}`)
-          // ロックした塊が、並べ替えたクリップに付いて動かない(前後の自由な所と食い違う側が増えない)
+          // ロックした塊が、並べ替えたクリップに付いて動かない: 元の所の塊を持つロックは元の所を失わず、
+          // 前後の自由な所と食い違う側は、逆の順に並ぶ組の数より増えない
           {
-            const nb1 = lockNeighborMismatches(now, reversed)
+            const nb1 = lockNeighborMismatches(now)
             const lost = [...nb0.inPlace].filter((id) => !nb1.inPlace.has(id))
             if (lost.length > 0)
               fail(`lock left its place ${lost.length}\nbefore=${nb0.detail}\nafter =${nb1.detail}`)
-            if (nb1.count > nb0.count)
+            if (nb1.count - nb0.count > reversedCount)
               fail(
-                `lock neighbors mismatched ${nb0.count}->${nb1.count}\nbefore=${nb0.detail}\nafter =${nb1.detail}`
+                `lock neighbors mismatched ${nb0.count}->${nb1.count} (reversed pairs ${reversedCount})\nbefore=${nb0.detail}\nafter =${nb1.detail}`
               )
           }
           for (const { l, segs } of lockCov) {

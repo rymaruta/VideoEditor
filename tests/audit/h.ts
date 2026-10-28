@@ -189,14 +189,14 @@ function lockBlockSides(p: Project): LockBlockSide[] {
  * ロックした塊の、前後の自由な所との食い違いの数。塊の直前の自由な所の終わりが塊の頭より後ろ、直後の
  * 自由な所の頭が塊の終わりより前なら、その側は食い違う(前後に自由な所が無い側は数えない)。作り直しで
  * 食い違う側が増えたら、ロックした塊が並べ替えたクリップに付いて動いた(`lockOrder` では見えない)。
- * `inPlace` は元の所の塊を持つロック(作り直しで元の所を失えば、塊が動いた。食い違いの数が変わらなくても)。
- * `skip` のロック(`reversedLocks`)の塊は数えない
+ * `inPlace` は元の所の塊を持つロック(作り直しで元の所を失えば、塊が動いた。食い違いの数が変わらなくても)
  */
-export function lockNeighborMismatches(
-  p: Project = project(),
-  skip: ReadonlySet<string> = new Set()
-): { count: number; inPlace: Set<string>; detail: string } {
-  const sides = lockBlockSides(p).filter((x) => !skip.has(x.lockId))
+export function lockNeighborMismatches(p: Project = project()): {
+  count: number
+  inPlace: Set<string>
+  detail: string
+} {
+  const sides = lockBlockSides(p)
   const count = sides.reduce((n, x) => n + Number(x.badBefore) + Number(x.badAfter), 0)
   // 元の所の塊(前後の少なくとも片側と順に並ぶ)を持つロック
   const inPlace = new Set(sides.filter((x) => x.inPlace).map((x) => x.lockId))
@@ -211,21 +211,18 @@ export function lockNeighborMismatches(
 
 /**
  * どちらも元の所(前後の少なくとも片側と順に並ぶ)なのに、タイムラインで共通の時刻と逆の順に並んでいる
- * 塊の組(人がロックを含むクリップごと並べ替えた)のロック。作り直した本編はロックの外を共通の時刻の順に
- * 並べるので、ロックした塊どうしの順を保つと、そのどちらかの前後は必ず食い違う。前後の食い違いの確かめから
- * 外す(頭に置いた予告の複製のように、元の所でない塊は外さない)
+ * 塊の組の数(人がロックを含むクリップごと並べ替えた)。作り直した本編はロックの外を共通の時刻の順に
+ * 並べるので、ロックした塊どうしの順を保つと、組ごとにどちらかの前後が1つ食い違う。作り直しで増えてよい
+ * 食い違いの数の上限に使う(ロックを丸ごと確かめから外さない)
  */
-export function reversedLocks(p: Project = project()): Set<string> {
+export function reversedPairs(p: Project = project()): number {
   const sides = lockBlockSides(p)
-  const out = new Set<string>()
+  let n = 0
   for (let i = 0; i < sides.length; i++)
     for (let j = i + 1; j < sides.length; j++) {
       const a = sides[i]
       const b = sides[j]
-      if (a.inPlace && b.inPlace && a.last > b.first + 0.05) {
-        out.add(a.lockId)
-        out.add(b.lockId)
-      }
+      if (a.inPlace && b.inPlace && a.last > b.first + 0.05) n++
     }
-  return out
+  return n
 }
