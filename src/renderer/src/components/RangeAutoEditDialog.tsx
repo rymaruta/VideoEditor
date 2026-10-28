@@ -419,16 +419,16 @@ export function RangeAutoEditDialog({
         className="range-auto-edit-dialog range-auto-edit"
         role="dialog"
         aria-modal="true"
-        aria-label="この範囲を自動編集"
+        aria-label="この範囲を再編集"
         onClick={(e) => e.stopPropagation()}
       >
         <DialogHeader
           title={
             <>
               <WandIcon width={16} height={16} />
-              この範囲を自動編集
+              この範囲を再編集
               <span className="range-auto-edit-span mono">
-                {formatTimecode(range.start, fps)} 〜 {formatTimecode(range.end, fps)}
+                {formatTimecode(range.start, fps)} – {formatTimecode(range.end, fps)}
               </span>
             </>
           }
@@ -597,12 +597,13 @@ export function RangeAutoEditDialog({
             </span>
           )}
           <div className="dialog-footer-spacer" />
-          <button className="small-button" onClick={close}>
+          <button type="button" className="ve-export-button" onClick={close}>
             閉じる
           </button>
           {!blocked && previews.length === 0 && (
             <button
-              className="primary-button"
+              type="button"
+              className="ve-export-button primary"
               disabled={busy}
               onClick={() => void prepare(options)}
             >
@@ -610,7 +611,12 @@ export function RangeAutoEditDialog({
             </button>
           )}
           {!blocked && previews.length > 0 && (
-            <button className="primary-button" disabled={!chosen} onClick={choose}>
+            <button
+              type="button"
+              className="ve-export-button primary"
+              disabled={!chosen}
+              onClick={choose}
+            >
               この案にする
             </button>
           )}

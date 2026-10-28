@@ -13,6 +13,9 @@ export interface DockRect {
   top: number
   width: number
   height: number
+  /** 上下で切り取る量(枠が送れる列の外へはみ出した分。0 なら切らない) */
+  clipTop: number
+  clipBottom: number
 }
 
 export const useProgramDock = create<{
@@ -28,20 +31,40 @@ export const useProgramDock = create<{
       prev.left === rect.left &&
       prev.top === rect.top &&
       prev.width === rect.width &&
-      prev.height === rect.height
+      prev.height === rect.height &&
+      prev.clipTop === rect.clipTop &&
+      prev.clipBottom === rect.clipBottom
     )
       return
     set({ rect })
   }
 }))
 
-/** 要素の画面の上の位置(整数に丸める。少しの揺れで描き直さない) */
-export function dockRectOf(el: Element): DockRect {
+/**
+ * 要素の画面の上の位置(整数に丸める。少しの揺れで描き直さない)。`within` を渡すと、その中に見えている所の
+ * 外(縦に送って上下にはみ出した所)を切り取る量も返す
+ */
+export function dockRectOf(el: Element, within?: Element): DockRect {
   const r = el.getBoundingClientRect()
+  const box = within?.getBoundingClientRect()
+  return dockRectFrom(r, box)
+}
+
+/** 位置と、見えている枠から(試験のため DOM を使わない形で分けてある) */
+export function dockRectFrom(
+  r: { left: number; top: number; width: number; height: number },
+  box?: { top: number; bottom: number }
+): DockRect {
+  const top = Math.round(r.top)
+  const height = Math.round(r.height)
+  const clipTop = box ? Math.max(0, Math.min(height, Math.round(box.top) - top)) : 0
+  const clipBottom = box ? Math.max(0, Math.min(height, top + height - Math.round(box.bottom))) : 0
   return {
     left: Math.round(r.left),
-    top: Math.round(r.top),
+    top,
     width: Math.round(r.width),
-    height: Math.round(r.height)
+    height,
+    clipTop,
+    clipBottom
   }
 }

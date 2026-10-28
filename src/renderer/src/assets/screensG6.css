@@ -47,7 +47,13 @@
 .ve-wave-bars {
   display: block;
   width: 100%;
-  fill: var(--ve-wave);
+}
+/* 山(外側)は淡く、平均(内側)は濃く。同じ 1 色の濃さで分ける(タイムラインの波形と同じ) */
+.ve-wave-bars .ve-wave-peak {
+  fill: var(--ve-wave-outer);
+}
+.ve-wave-bars .ve-wave-rms {
+  fill: var(--ve-wave-inner);
 }
 
 /* =====================================================================
@@ -59,7 +65,9 @@
   inset: var(--ve-bar-workflow) 0 0 0;
   z-index: 90;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 456px;
+  /* 右の列は広い窓で広げ、プログラムとカメラを大きく見せる(1366 幅では 456px のまま) */
+  grid-template-columns: 300px minmax(0, 1fr) clamp(456px, 32vw, 640px);
+  word-break: auto-phrase;
   grid-template-rows: minmax(0, 1fr) 96px;
   gap: 1px;
   font-size: var(--ve-fs-13);
@@ -211,7 +219,7 @@
   cursor: pointer;
 }
 .ve-review-card.on {
-  box-shadow: inset 0 0 0 2px var(--ve-clip-selected-ring);
+  box-shadow: inset 0 0 0 2px var(--ve-text-1);
 }
 .ve-review-card:focus-visible {
   outline: var(--ve-focus-outline);
@@ -228,9 +236,6 @@
   flex: none;
   border-radius: var(--ve-radius-round);
   background: var(--ve-warning);
-}
-.ve-review-card-dot.muted {
-  background: var(--ve-text-icon);
 }
 .ve-review-card-title {
   flex: 1;
@@ -300,8 +305,15 @@
 }
 .ve-review-line {
   display: grid;
-  grid-template-columns: 88px minmax(0, 640px);
+  grid-template-columns: 88px minmax(0, 1fr);
   gap: var(--ve-space-4);
+}
+/* 文字起こしは 720px までの幅で、列の中ほどに置く */
+.ve-review-line-group,
+.ve-review-lines > .ve-review-empty {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
 }
 .ve-review-line-who {
   display: flex;
@@ -401,6 +413,7 @@
   box-shadow: var(--ve-drop-md);
 }
 .ve-review-rangebar-tc {
+  white-space: nowrap;
   padding: 0 var(--ve-space-2);
   font-size: var(--ve-fs-11);
   color: var(--ve-text-2);
@@ -409,15 +422,25 @@
 .ve-review-lines {
   container-type: inline-size;
 }
+.ve-tc-short {
+  display: none;
+}
 @container (max-width: 660px) {
-  .ve-review-barrow > span:first-child {
+  .ve-review-rangebar {
+    flex-wrap: nowrap;
+  }
+  .ve-review-rangebar .ve-tc-full {
     display: none;
   }
-  .ve-review-barrow > :last-child {
-    grid-column: 1 / -1;
+  .ve-review-rangebar .ve-tc-short {
+    display: inline;
   }
-  .ve-review-barrow .ve-review-rangebar {
-    justify-self: end;
+  .ve-review-rangebar .ve-review-button.strong,
+  .ve-review-rangebar .ve-review-button.flat {
+    padding: var(--ve-control-pad-sm);
+  }
+  .ve-review-rangebar-tc {
+    padding: 0 var(--ve-space-1);
   }
 }
 
@@ -429,9 +452,13 @@
 
 /* ---------- 右: プログラム ---------- */
 .ve-review-right {
-  overflow-y: auto;
+  overflow: hidden;
 }
+/* 見出しの帯は残し、中だけを縦に送る(重ねたプログラムは送った所に付いていき、外は切り取る) */
 .ve-review-right-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--ve-space-3);
@@ -619,7 +646,7 @@
 }
 
 /* プログラム(PreviewPlayer)を右の枠へ重ねる(lib/programDock)。操作の帯・音量計は確認の画面のものを使う */
-.preview-player.ve-program-docked {
+.panel.preview-player.ve-program-docked {
   position: fixed;
   z-index: 95;
   padding: 0;
@@ -749,7 +776,7 @@
    ===================================================================== */
 .ve-export {
   width: min(960px, calc(100vw - 32px));
-  height: min(680px, calc(100vh - 32px));
+  height: min(760px, calc(100vh - 80px));
   display: flex;
   flex-direction: column;
   background: var(--ve-surface-panel);
@@ -1158,7 +1185,9 @@ select.ve-export-field:disabled {
   flex: 1;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* 出せない欄(推定時間)は隠すので、欄の数で等分する */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   border-radius: var(--ve-radius-lg);
   background: var(--ve-surface-band);
   border: 1px solid var(--ve-gutter);
@@ -1249,4 +1278,232 @@ select.ve-export-field:disabled {
     padding-top: var(--ve-space-3);
     padding-bottom: var(--ve-space-3);
   }
+}
+
+/* 選んだ文が本編で離れて並ぶとき: 下地を縞にして、つながっていないことを見せる */
+.ve-review-line.picked.apart .ve-review-line-text,
+.ve-review-line.picked.apart.continues .ve-review-line-text::after {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--ve-primary-soft) 0 8px,
+    var(--ve-surface-ground) 8px 12px
+  );
+}
+.ve-review-ov-range.apart {
+  border-style: dashed;
+}
+.ve-review-rangebar-warn {
+  flex-basis: 100%;
+  padding: var(--ve-space-1) var(--ve-space-2) 0;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-warning-ink);
+}
+
+/* プログラムを重ねたとき: 枠の中いっぱいに出す(周りの余白・枠を足さない) */
+.preview-player.ve-program-docked .ve-program-stage,
+.preview-player.ve-program-docked .preview-frame-wrapper {
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  border: 0;
+}
+.preview-player.ve-program-docked .preview-frame {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.ve-review-program-slot {
+  background: transparent;
+}
+
+/* ---------- AI の判断のまとめ(確認の画面とインスペクタで同じ) ---------- */
+.ve-decision-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-2);
+}
+.ve-decision-conclusion {
+  margin: 0;
+  font-size: var(--ve-fs-13);
+  line-height: var(--ve-lh-13);
+  color: var(--ve-text-1);
+}
+.ve-decision-scene-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ve-space-1);
+}
+.ve-decision-scene-name {
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+.ve-decision-table {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: var(--ve-space-hair) var(--ve-space-4);
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-12);
+}
+.ve-decision-table > div {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--ve-space-2);
+  min-width: 0;
+}
+.ve-decision-table dt {
+  color: var(--ve-text-3);
+  white-space: nowrap;
+}
+.ve-decision-table dd {
+  margin: 0;
+  color: var(--ve-text-1);
+  font-family: var(--ve-font-mono);
+  white-space: nowrap;
+}
+.ve-decision-text {
+  font-size: var(--ve-fs-12);
+  line-height: var(--ve-lh-prose);
+  color: var(--ve-text-2);
+}
+
+/* ---------- 書き出し: 決まった値(枠を付けない字)と選ぶ欄(枠と ▾) ---------- */
+.ve-export {
+  word-break: auto-phrase;
+}
+.ve-export-fixed {
+  height: var(--ve-control-md);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-1);
+}
+.ve-export-fixed-value {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ve-export-fixed-note {
+  flex: none;
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-3);
+}
+.ve-select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+select.ve-select-input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0 var(--ve-space-6) 0 var(--ve-space-2);
+}
+.ve-select-chevron {
+  position: absolute;
+  right: var(--ve-space-2);
+  top: 50%;
+  margin-top: -5px;
+  color: var(--ve-text-2);
+  pointer-events: none;
+}
+.ve-select.disabled .ve-select-chevron {
+  color: var(--ve-text-icon);
+}
+.ve-export-warn {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  padding: var(--ve-space-2) var(--ve-space-3);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-warning-soft);
+  border: 1px solid var(--ve-warning-line);
+  color: var(--ve-warning-ink);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-warn > span {
+  flex: 1;
+}
+.ve-export-warn .ve-icon {
+  flex: none;
+  color: var(--ve-warning);
+}
+.ve-export-nav .ve-export-queue {
+  margin-top: var(--ve-space-3);
+  font-size: var(--ve-fs-12);
+}
+.ve-export-nav .ve-export-queue-head {
+  flex-wrap: wrap;
+  gap: var(--ve-space-1);
+}
+.ve-export-nav .export-queue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-1) 0;
+  font-size: var(--ve-fs-11);
+  color: var(--ve-text-2);
+}
+.ve-export-nav .export-queue-item > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.ve-export-sample-box.vertical {
+  display: flex;
+  justify-content: center;
+}
+.ve-export-sample-box.vertical .ve-export-thumb,
+.ve-export-sample-box.vertical .ve-export-thumb img {
+  width: 41px;
+  height: 72px;
+}
+.ve-export-sample-box.vertical {
+  flex-wrap: wrap;
+}
+
+/* ---------- この範囲を再編集(範囲の自動編集のダイアログ): 書き出しのダイアログと同じ面・部品 ---------- */
+.range-auto-edit-dialog {
+  background: var(--ve-surface-panel);
+  border: 1px solid var(--ve-gutter);
+  box-shadow: var(--ve-drop-lg);
+  word-break: auto-phrase;
+}
+.range-auto-edit-dialog .dialog-titlebar {
+  height: 44px;
+  background: var(--ve-surface-band);
+  border-bottom: 1px solid var(--ve-gutter);
+}
+.range-auto-edit-dialog .range-auto-edit-body {
+  padding: var(--ve-space-4) var(--ve-space-6);
+}
+.range-auto-edit-dialog fieldset {
+  margin: var(--ve-space-3) 0 0;
+  padding: var(--ve-space-3);
+  border: 0;
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-card);
+}
+.range-auto-edit-dialog legend {
+  float: left;
+  width: 100%;
+  padding: 0 0 var(--ve-space-2);
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-bold);
+  letter-spacing: 0.04em;
+  color: var(--ve-text-3);
+}
+.range-auto-edit-dialog .dialog-footer {
+  height: var(--ve-bar-dialog-foot);
+  box-sizing: border-box;
+  padding: 0 var(--ve-space-4);
+  gap: var(--ve-space-2);
+  background: var(--ve-surface-band);
+  border-top: 1px solid var(--ve-gutter);
+}
+
+/* 離れて並ぶ知らせがあるときは、帯を折り返して知らせを下の行に出す */
+.ve-review-rangebar:has(.ve-review-rangebar-warn) {
+  flex-wrap: wrap;
 }

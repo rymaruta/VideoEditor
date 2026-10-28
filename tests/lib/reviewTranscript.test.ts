@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  foreignBetweenOf,
   lineAtTime,
   lineOf,
   rangeOfLines,
@@ -183,7 +184,15 @@ describe('reviewTranscriptLines / rangeOfLines / lineAtTime', () => {
 
   it('選んだ行の範囲は、残っている所をつないだもの(削った行は入れない)。全部削った行だけなら null', () => {
     const lines = reviewTranscriptLines(project)
-    expect(rangeOfLines(lines, [0, 1, 2])).toEqual({ start: 2, end: 13 })
+    expect(rangeOfLines(lines, [0, 1, 2])).toEqual({
+      start: 2,
+      end: 13,
+      pieces: [
+        { start: 2, end: 4 },
+        { start: 11, end: 13 }
+      ],
+      contiguous: true
+    })
     expect(rangeOfLines(lines, [1])).toBeNull()
     expect(rangeOfLines(lines, [])).toBeNull()
     expect(rangeOfLines(lines, [99])).toBeNull()
@@ -199,5 +208,90 @@ describe('reviewTranscriptLines / rangeOfLines / lineAtTime', () => {
 
   it('文字起こしが無ければ空', () => {
     expect(reviewTranscriptLines({ ...project, transcript: undefined })).toEqual([])
+  })
+})
+
+describe('【監査 2026-10】並べ替えた本編で、選んだ範囲が選んだ文より広がらない', () => {
+  const cam = {
+    id: 'cam',
+    filePath: '/m/cam.mp4',
+    fileName: 'cam.mp4',
+    duration: 100,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    hasAudio: true,
+    hasVideo: true
+  }
+  const make = (clips: [number, number][]): Project =>
+    ({
+      assets: [cam],
+      clips: clips.map(([a, b], i) => ({
+        id: `c${i}`,
+        assetId: 'cam',
+        inPoint: a,
+        outPoint: b,
+        speed: 1
+      })),
+      audioTracks: [],
+      videoOverlayTracks: [],
+      multicam: {
+        anchorSourceId: 'A',
+        sources: [{ id: 'A', name: 'A', kind: 'camera' }],
+        files: [{ assetId: 'cam', sourceId: 'A', start: 0, rate: 1, duration: 100 }]
+      },
+      transcript: [
+        { ...utt([['前の文', 2, 4]], { assetId: 'cam' }), id: 'u1' },
+        { ...utt([['後の文', 6, 8]], { assetId: 'cam' }), id: 'u2' },
+        { ...utt([['遠くの文', 22, 24]], { assetId: 'cam' }), id: 'u3' }
+      ]
+    }) as unknown as Project
+
+  it('対照: 並べ替えていなければ、続いて並ぶ(外枠に当ててよい)', () => {
+    const p = make([[0, 30]])
+    const lines = reviewTranscriptLines(p)
+    const r = rangeOfLines(lines, [0, 1], foreignBetweenOf(p))
+    expect(r).toMatchObject({ start: 2, end: 8, contiguous: true })
+  })
+
+  it('間に別の所(収録の 50〜60 秒)を挟むと、続いていない。切れごとの区間を返す', () => {
+    // 本編: 収録 0〜5 → 50〜60 → 5〜10(2 つの文の間に、関係ない 10 秒が挟まる)
+    const p = make([
+      [0, 5],
+      [50, 60],
+      [5, 10]
+    ])
+    const lines = reviewTranscriptLines(p)
+    const r = rangeOfLines(lines, [0, 1], foreignBetweenOf(p))
+    expect(r?.contiguous).toBe(false)
+    expect(r?.pieces).toEqual([
+      { start: 2, end: 4 },
+      { start: 16, end: 18 }
+    ])
+    // 外枠(2〜18)は、挟まった 10 秒まで入ってしまう。外枠に当てる操作はしない
+    expect(r).toMatchObject({ start: 2, end: 18 })
+  })
+
+  it('収録の後の文が、本編では前に来る(順番を入れ替えた)ときも続いていない', () => {
+    const p = make([
+      [20, 30],
+      [0, 10]
+    ])
+    const lines = reviewTranscriptLines(p)
+    const r = rangeOfLines(lines, [0, 2], foreignBetweenOf(p))
+    expect(r?.contiguous).toBe(false)
+    expect(r?.pieces).toEqual([
+      { start: 12, end: 14 },
+      { start: 2, end: 4 }
+    ])
+  })
+
+  it('同じ所を削っただけ(言い直しを詰めた)なら続いている', () => {
+    const p = make([
+      [0, 5],
+      [5.5, 10]
+    ])
+    const lines = reviewTranscriptLines(p)
+    expect(rangeOfLines(lines, [0, 1], foreignBetweenOf(p))?.contiguous).toBe(true)
   })
 })

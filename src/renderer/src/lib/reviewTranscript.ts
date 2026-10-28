@@ -2,6 +2,7 @@ import type { Project } from '@shared/types'
 import type { PlacedClipRef, TranscriptUtterance } from '@shared/transcript'
 import { toCommon } from '@shared/sync/multicam'
 import { placedClips } from './transcriptTimeline'
+import { buildTimedClips } from './timelineMath'
 
 /**
  * 確認の画面の文字起こし: 発言を時刻順に並べ、**今の本編に残っている所と削った所**を分ける。
@@ -27,6 +28,8 @@ export interface TranscriptLine {
   /** 残っている所のタイムラインの区間(全部削っていれば null) */
   start: number | null
   end: number | null
+  /** 残っている切れ(タイムラインの区間と収録の時刻。タイムラインで続く切れはまとめてある) */
+  spans: LineSpan[]
   /** 並べる順(共通の時刻。同期の無い企画は素材の時刻) */
   order: number
   /** 収録の時刻(共通の時刻。同期の無い企画は素材の時刻) */
@@ -35,8 +38,19 @@ export interface TranscriptLine {
   overlap: boolean
 }
 
+/** 残っている切れ: タイムラインの [start, end) と、その収録の時刻 [recStart, recEnd) */
+export interface LineSpan {
+  start: number
+  end: number
+  recStart: number
+  recEnd: number
+}
+
 /** 印を入れる無音の長さ(秒) */
 export const PAUSE_MARK_SEC = 1
+
+/** タイムラインで「続いている」とみなす隙間(秒) */
+const JOIN_SEC = 0.05
 
 /** 言葉の時刻が無い発言を、どの細かさで見るか(秒) */
 const SAMPLE_SEC = 0.1
@@ -81,9 +95,16 @@ export function lineOf(
   const parts: TranscriptPart[] = []
   let start: number | null = null
   let end: number | null = null
-  const keep = (a: number | null, b: number | null): void => {
-    if (a !== null) start = start === null ? a : Math.min(start, a)
-    if (b !== null) end = end === null ? b : Math.max(end, b)
+  const spans: LineSpan[] = []
+  const keep = (a: number, b: number, srcA: number, srcB: number): void => {
+    start = start === null ? a : Math.min(start, a)
+    end = end === null ? b : Math.max(end, b)
+    const last = spans[spans.length - 1]
+    // タイムラインで続いていて、収録の時刻も前へ進んでいれば 1 つにまとめる
+    if (last && Math.abs(a - last.end) <= JOIN_SEC && common(srcA) >= last.recEnd - JOIN_SEC) {
+      last.end = Math.max(last.end, b)
+      last.recEnd = Math.max(last.recEnd, common(srcB))
+    } else spans.push({ start: a, end: b, recStart: common(srcA), recEnd: common(srcB) })
   }
   const words = (u.words ?? []).filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end))
   if (words.length > 0) {
@@ -96,7 +117,7 @@ export function lineOf(
       }
       const mid = (w.start + Math.max(w.start, w.end)) / 2
       const span = placeSpan(clips, mid, w.start, Math.max(w.start, w.end))
-      if (span) keep(span.start, span.end)
+      if (span) keep(span.start, span.end, w.start, Math.max(w.start, w.end))
       pushPart(parts, { text: w.text, cut: span === null, kind: 'speech' })
     })
   } else {
@@ -107,7 +128,7 @@ export function lineOf(
     for (let t = a; t < b - 1e-9; t += SAMPLE_SEC) {
       const step = Math.min(SAMPLE_SEC, b - t)
       const span = placeSpan(clips, t + step / 2, t, t + step)
-      if (span) keep(span.start, span.end)
+      if (span) keep(span.start, span.end, t, t + step)
       const kept = span !== null
       const last = runs[runs.length - 1]
       if (last && last.kept === kept) last.len += step
@@ -133,6 +154,7 @@ export function lineOf(
     parts,
     start,
     end,
+    spans,
     order: recorded,
     recorded,
     allCut: parts.every((p) => p.cut),
@@ -165,20 +187,68 @@ export function reviewTranscriptLines(
     .sort((a, b) => a.order - b.order)
 }
 
-/** 選んだ行(並びの番号)の、残っている所をつないだタイムラインの区間。どれも削っていれば null */
+/** 選んだ行の範囲 */
+export interface LinesRange {
+  /** 外枠(いちばん前から後ろまで) */
+  start: number
+  end: number
+  /** 残っている所の切れ(収録の時刻の順。タイムラインで続く切れはまとめてある) */
+  pieces: { start: number; end: number }[]
+  /**
+   * 選んだ文が本編で続いて並んでいるか。並べ替えた本編では、外枠の間に選んでいない中身が挟まる。
+   * そのときは外枠に当てる操作(削除・再編集・ロック)をしない
+   */
+  contiguous: boolean
+}
+
+/**
+ * 選んだ行(並びの番号)の、残っている所の範囲。どれも削っていれば null。
+ * `foreignBetween(前の切れ, 次の切れ)` は、2 つの切れの間のタイムラインに、その 2 つの間の収録ではない
+ * 中身(並べ替えて持ってきた所など)があるかを答える(省略は「無い」)
+ */
 export function rangeOfLines(
   lines: readonly TranscriptLine[],
-  picked: readonly number[]
-): { start: number; end: number } | null {
-  let start = Infinity
-  let end = -Infinity
-  for (const i of picked) {
+  picked: readonly number[],
+  foreignBetween: (prev: LineSpan, next: LineSpan) => boolean = () => false
+): LinesRange | null {
+  const all: LineSpan[] = []
+  for (const i of [...new Set(picked)].sort((a, b) => a - b)) {
     const l = lines[i]
-    if (!l || l.start === null || l.end === null) continue
-    start = Math.min(start, l.start)
-    end = Math.max(end, l.end)
+    if (l) all.push(...l.spans)
   }
-  return end - start > 1e-3 ? { start, end } : null
+  if (all.length === 0) return null
+  const byRec = [...all].sort((a, b) => a.recStart - b.recStart || a.start - b.start)
+  const merged: LineSpan[] = []
+  let contiguous = true
+  for (const sp of byRec) {
+    const last = merged[merged.length - 1]
+    if (!last) {
+      merged.push({ ...sp })
+      continue
+    }
+    if (sp.start < last.end - JOIN_SEC) {
+      // 収録では後なのに、タイムラインでは前にある(並べ替え)
+      contiguous = false
+      merged.push({ ...sp })
+      continue
+    }
+    if (sp.start - last.end <= JOIN_SEC) {
+      last.end = Math.max(last.end, sp.end)
+      last.recEnd = Math.max(last.recEnd, sp.recEnd)
+      continue
+    }
+    if (foreignBetween(last, sp)) contiguous = false
+    merged.push({ ...sp })
+  }
+  const start = Math.min(...merged.map((m) => m.start))
+  const end = Math.max(...merged.map((m) => m.end))
+  if (!(end - start > 1e-3)) return null
+  return {
+    start,
+    end,
+    pieces: merged.map((m) => ({ start: m.start, end: m.end })),
+    contiguous
+  }
 }
 
 /** タイムラインの時刻を含む(無ければその前で一番近い)行の番号。行が無ければ -1 */
@@ -196,4 +266,30 @@ export function lineAtTime(lines: readonly TranscriptLine[], t: number): number 
     }
   })
   return best
+}
+
+/**
+ * 2 つの切れの間のタイムラインに、その 2 つの間の収録ではない中身(並べ替えて持ってきた所・同期の無い素材)が
+ * あるか(確認の画面の範囲が、選んだ文より広がらないようにする。rangeOfLines に渡す)
+ */
+export function foreignBetweenOf(
+  project: Pick<Project, 'clips' | 'assets' | 'multicam'>
+): (prev: LineSpan, next: LineSpan) => boolean {
+  const timed = buildTimedClips(project as Project)
+  const fileOf = new Map((project.multicam?.files ?? []).map((f) => [f.assetId, f]))
+  const EPS = 0.05
+  return (prev, next) => {
+    for (const tc of timed) {
+      const a = Math.max(prev.end, tc.start)
+      const b = Math.min(next.start, tc.end)
+      if (b - a <= EPS) continue
+      const f = fileOf.get(tc.clip.assetId)
+      if (!f) return true
+      const speed = tc.clip.speed || 1
+      const ca = toCommon(f, tc.clip.inPoint + (a - tc.start) * speed)
+      const cb = toCommon(f, tc.clip.inPoint + (b - tc.start) * speed)
+      if (ca < prev.recEnd - EPS || cb > next.recStart + EPS) return true
+    }
+    return false
+  }
 }

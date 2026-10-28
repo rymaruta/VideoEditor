@@ -7,25 +7,28 @@ import type { ReviewItem } from '../lib/reviewItems'
 import { formatTimecode } from '../lib/timelineRuler'
 import { buildTimedClips, findTimedClipAt } from '../lib/timelineMath'
 import {
+  foreignBetweenOf,
   lineAtTime,
   rangeOfLines,
   reviewTranscriptLines,
+  type LinesRange,
   type TranscriptLine
 } from '../lib/reviewTranscript'
 import { timelineAudioPieces, useWaveLevels, type WavePiece } from '../lib/timelineWave'
 import { dockRectOf, useProgramDock } from '../lib/programDock'
 import { requestRangeAutoEdit } from '../lib/timelineRange'
 import { rangedEditBlockedReason } from '../lib/rangedAutoEdit'
-import { lockTimelineRange, rippleDeleteRange, switchRangeAngle } from '../lib/editCommands'
-import { decisionForClip, SCENE_KIND_LABEL } from '../lib/clipDecision'
+import { lockTimelineRange, rippleDeleteRange, switchRangesAngle } from '../lib/editCommands'
+import { cameraLabel, decisionForClip } from '../lib/clipDecision'
 import { commonSpan } from '../lib/autoEditView'
 import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
-import { speakerIndex } from '@shared/speaker'
+import { speakerOrderIndex, speakersInOrder } from '@shared/speaker'
 import { fileAt, toCommon, toSource } from '@shared/sync/multicam'
 import { frameSeconds } from '@shared/frameRate'
 import type { TimelineRange } from '@shared/roughCut/range'
 import type { Project } from '@shared/types'
 import { WaveBars } from './WaveBars'
+import { DecisionSummary } from './DecisionSummary'
 import { LockIcon, PauseIcon, PlayIcon, SparklesIcon } from './icons'
 
 /**
@@ -50,9 +53,14 @@ function clock(sec: number): string {
     : `${m}:${String(s).padStart(2, '0')}`
 }
 
-/** 話者の色の点(--ve-speaker-*) */
-function SpeakerDot({ speaker }: { speaker?: string }): React.JSX.Element {
-  const i = speakerIndex(speaker)
+/** 選んだ文が本編で離れて並んでいるときの理由(削除・再編集・ロックは外枠に当たるので押せない) */
+const APART_REASON = '選んだ文が本編で離れて並んでいます。続いている所だけを選んでください'
+
+/** 範囲の自動編集の案を試している間の理由(試しの関所。RangeAutoEditDialog と同じ文) */
+const TRIAL_REASON = '試している間は編集できません。この案にするか、閉じてから編集してください'
+
+/** 話者の色の点(--ve-speaker-*。この回で出てきた順の番号) */
+function SpeakerDot({ index: i }: { index: number | null }): React.JSX.Element {
   return (
     <span
       className="ve-review-dot"
@@ -60,11 +68,6 @@ function SpeakerDot({ speaker }: { speaker?: string }): React.JSX.Element {
       aria-hidden="true"
     />
   )
-}
-
-/** 要確認の種類ごとの点の色(すぐ手を入れたいものは琥珀、確かめるだけのものは灰) */
-function itemTone(item: ReviewItem): 'warn' | 'muted' {
-  return item.area === 'speaker' || item.area === 'effects' ? 'muted' : 'warn'
 }
 
 /** 収録の長さ(同期した素材は共通の時間軸、手で並べた企画は本編の素材の長さの合計) */
@@ -217,7 +220,7 @@ function ReviewCards({
                 }}
               >
                 <div className="ve-review-card-head">
-                  <span className={`ve-review-card-dot ${itemTone(d)}`} aria-hidden="true" />
+                  <span className="ve-review-card-dot" aria-hidden="true" />
                   <span className="ve-review-card-title">{d.kind}</span>
                   {d.at !== undefined && d.at <= total + 1 && (
                     <span className="mono ve-review-card-at">{clock(d.at)}</span>
@@ -276,7 +279,7 @@ function ReviewCards({
           </div>
           <div>
             <span className="mono">{project.clips.length.toLocaleString()}</span>
-            <span>カット</span>
+            <span>クリップ</span>
           </div>
         </div>
       </div>
@@ -289,14 +292,19 @@ function ReviewCards({
 function TranscriptRow({
   line,
   index,
+  colorIndex,
   picked,
+  apart,
   continues,
   hideCut,
   onPick
 }: {
   line: TranscriptLine
   index: number
+  colorIndex: number | null
   picked: boolean
+  /** 選んだ文が本編で離れて並んでいる(下地を縞にして分かるようにする) */
+  apart: boolean
   /** 次の行も選んでいる(下地を次の行までつなぐ) */
   continues: boolean
   hideCut: boolean
@@ -304,12 +312,12 @@ function TranscriptRow({
 }): React.JSX.Element {
   return (
     <div
-      className={`ve-review-line ${picked ? 'picked' : ''} ${continues ? 'continues' : ''} ${line.allCut ? 'all-cut' : ''}`}
+      className={`ve-review-line ${picked ? 'picked' : ''} ${picked && apart ? 'apart' : ''} ${continues ? 'continues' : ''} ${line.allCut ? 'all-cut' : ''}`}
       data-line={index}
     >
       <div className="ve-review-line-who">
         <span className="ve-review-speaker">
-          <SpeakerDot speaker={line.speaker} />
+          <SpeakerDot index={colorIndex} />
           {line.speaker ?? '話者不明'}
         </span>
         <span className="mono ve-review-line-at">
@@ -345,6 +353,7 @@ function TranscriptRow({
 function RangeBar({
   range,
   fps,
+  apart,
   onReEdit,
   onKeep,
   onDelete,
@@ -352,6 +361,8 @@ function RangeBar({
 }: {
   range: TimelineRange | null
   fps: number
+  /** 選んだ文が本編で離れて並んでいる */
+  apart: boolean
   onReEdit: () => void
   onKeep: () => void
   onDelete: () => void
@@ -361,17 +372,41 @@ function RangeBar({
   const scenes = usePipelineStore((s) => s.scenes)
   const restored = usePipelineStore((s) => s.restored)
   const running = usePipelineStore((s) => s.running)
-  const blocked = rangedEditBlockedReason(project, { scenes, restored, running })
+  const inTrial = useProjectStore((s) => s.trial !== null)
+  const blocked = apart
+    ? APART_REASON
+    : inTrial
+      ? TRIAL_REASON
+      : rangedEditBlockedReason(project, { scenes, restored, running })
   const none = range === null
   const noneTitle = '削った所だけを選んでいます。前後の文も選んでください'
+  const editBlocked = apart ? APART_REASON : inTrial ? TRIAL_REASON : null
   return (
     <div className="ve-review-line ve-review-barrow">
       <span />
       <div className="ve-review-rangebar" role="toolbar" aria-label="選んだ範囲">
-        <span className="mono ve-review-rangebar-tc">
-          {range
-            ? `${formatTimecode(range.start, fps)} – ${formatTimecode(range.end, fps)}`
-            : '範囲なし'}
+        <span
+          className="mono ve-review-rangebar-tc"
+          title={
+            range
+              ? `選んだ範囲(イン ${formatTimecode(range.start, fps)} – アウト ${formatTimecode(range.end, fps)})`
+              : undefined
+          }
+        >
+          {range ? (
+            <>
+              {/* 狭い列(1366 幅)ではコマを省いて 1 行に収める */}
+              <span className="ve-tc-full">
+                {formatTimecode(range.start, fps)} – {formatTimecode(range.end, fps)}
+              </span>
+              <span className="ve-tc-short">
+                {formatTimecode(range.start, fps).slice(0, 8)} –{' '}
+                {formatTimecode(range.end, fps).slice(0, 8)}
+              </span>
+            </>
+          ) : (
+            '範囲なし'
+          )}
         </span>
         <button
           type="button"
@@ -404,13 +439,15 @@ function RangeBar({
         <button
           type="button"
           className="ve-review-button flat"
-          disabled={none || project.mainTrackLocked === true}
+          disabled={none || project.mainTrackLocked === true || editBlocked !== null}
           title={
             none
               ? noneTitle
-              : project.mainTrackLocked
-                ? '本編は固定されています'
-                : 'この範囲を本編から抜いて詰めます(Shift+Delete と同じ。取り消しは Ctrl+Z)'
+              : editBlocked
+                ? editBlocked
+                : project.mainTrackLocked
+                  ? '本編は固定されています'
+                  : 'この範囲を本編から抜いて詰めます(Shift+Delete と同じ。取り消しは Ctrl+Z)'
           }
           onClick={onDelete}
         >
@@ -419,19 +456,26 @@ function RangeBar({
         <button
           type="button"
           className="ve-review-button flat"
-          disabled={none || !project.multicam}
+          disabled={none || !project.multicam || editBlocked !== null}
           title={
             none
               ? noneTitle
-              : project.multicam
-                ? 'この範囲を、自動編集で作り直さない範囲(ロック)にします'
-                : '同期した収録素材の企画で使えます'
+              : editBlocked
+                ? editBlocked
+                : project.multicam
+                  ? 'この範囲を、自動編集で作り直さない範囲(ロック)にします'
+                  : '同期した収録素材の企画で使えます'
           }
           onClick={onLock}
         >
           <LockIcon width={12} height={12} />
           ロック
         </button>
+        {apart && (
+          <span className="ve-review-rangebar-warn" role="note">
+            {APART_REASON}
+          </span>
+        )}
       </div>
     </div>
   )
@@ -446,13 +490,14 @@ function ProgramSlot({ label }: { label: string | null }): React.JSX.Element {
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
-    const update = (): void => useProgramDock.getState().setRect(dockRectOf(el))
+    const scroller = el.closest('.ve-review-right-body')
+    // 右の列を縦に送ったら付いていき、列の外(見出しの帯・下の帯)へはみ出す所は切り取る
+    const update = (): void =>
+      useProgramDock.getState().setRect(dockRectOf(el, scroller ?? undefined))
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
     window.addEventListener('resize', update)
-    // 縦に送ったら付いていく(右の列は低い窓で縦に送れる)
-    const scroller = el.closest('.ve-review-right')
     scroller?.addEventListener('scroll', update, { passive: true })
     return () => {
       ro.disconnect()
@@ -466,6 +511,7 @@ function ProgramSlot({ label }: { label: string | null }): React.JSX.Element {
       {/* 札はプログラム(画面の一番上に重ねてある)より上に出すので、画面の外(body)に置く */}
       {label &&
         rect &&
+        rect.clipTop === 0 &&
         createPortal(
           <span
             className="ve-review-camera-label"
@@ -635,22 +681,6 @@ function DecisionCard({ project, at }: { project: Project; at: number }): React.
   const judgeSource = usePipelineStore((s) => s.judgeSource)
   const tc = findTimedClipAt(buildTimedClips(project), at)
   const d = tc ? decisionForClip(tc.clip, project, { scenes, judgements, keep, judgeSource }) : null
-  const lines: string[] = []
-  if (d) {
-    for (const sc of d.scenes.slice(0, 2)) {
-      const kind = sc.kind ? SCENE_KIND_LABEL[sc.kind] : '場面'
-      const title = sc.title ? `「${sc.title}」` : ''
-      const keepNote = sc.keep === undefined ? '' : sc.keep ? '(手で残す)' : '(手で落とす)'
-      lines.push(`${kind}${title}${keepNote}${sc.reason ? `: ${sc.reason}` : ''}`)
-    }
-    if (d.camera)
-      lines.push(
-        `${d.camera.name}${d.camera.subject ? `(${d.camera.subject})` : ''}を映しています。`
-      )
-    if (d.manualAngle) lines.push('手でカメラを替えた所です。')
-    if (d.manualAdded) lines.push('手で足した所です。')
-    if (d.locked) lines.push('ロックした範囲です(全体の作り直しでも今のまま残ります)。')
-  }
   return (
     <div className="ve-review-ai" aria-label="AI の判断">
       <span className="ve-review-ai-title">
@@ -658,12 +688,8 @@ function DecisionCard({ project, at }: { project: Project; at: number }): React.
         AI の判断
         {d?.judgeSource === 'heuristic' && <span className="ve-review-ai-src">簡易の点数</span>}
       </span>
-      {lines.length > 0 ? (
-        lines.map((l, i) => (
-          <span key={i} className="ve-review-ai-text">
-            {l}
-          </span>
-        ))
+      {d ? (
+        <DecisionSummary decision={d} />
       ) : (
         <span className="ve-review-ai-text">
           {project.multicam
@@ -694,7 +720,7 @@ function Overview({
   range
 }: {
   project: Project
-  range: TimelineRange | null
+  range: LinesRange | null
 }): React.JSX.Element {
   const { open } = useReviewItems()
   const total = getTotalDuration(project)
@@ -711,7 +737,7 @@ function Overview({
         <span className="ve-review-legend" aria-hidden="true">
           <span>
             <span className="ve-review-legend-cut" />
-            カット
+            クリップ
           </span>
           <span>
             <span className="ve-review-legend-mark" />
@@ -752,12 +778,15 @@ function Overview({
               title={`${d.kind}(${clock(d.at!)})`}
             />
           ))}
-        {range && (
-          <span
-            className="ve-review-ov-range"
-            style={{ left: pct(range.start), width: pct(range.end - range.start) }}
-          />
-        )}
+        {/* 選んだ範囲の白い枠。本編で離れて並ぶときは、切れごとに枠を出す */}
+        {range &&
+          (range.contiguous ? [{ start: range.start, end: range.end }] : range.pieces).map((r) => (
+            <span
+              key={`${r.start}-${r.end}`}
+              className={`ve-review-ov-range ${range.contiguous ? '' : 'apart'}`}
+              style={{ left: pct(r.start), width: pct(r.end - r.start) }}
+            />
+          ))}
         <OverviewPlayhead total={total} />
       </div>
     </section>
@@ -783,7 +812,10 @@ export function ReviewScreen({ onFixTab }: { onFixTab: (tab: FixTab) => void }):
     .filter((i) => i >= 0)
     .sort((a, b) => a - b)
   const anchor = anchorId ? lines.findIndex((l) => l.id === anchorId) : -1
-  const range = rangeOfLines(lines, picked)
+  const foreign = useMemo(() => foreignBetweenOf(project), [project])
+  const range = rangeOfLines(lines, picked, foreign)
+  const apart = range !== null && !range.contiguous
+  const speakerOrder = useMemo(() => speakersInOrder(lines), [lines])
   // 再生位置(絵・AI の判断)は 1 秒単位、再生中は 5 秒単位で見る(毎コマ絵を作り直さない)
   const stillAt = useProjectStore((s) =>
     s.isPlaying ? Math.floor(s.playheadTime / 5) * 5 : Math.floor(s.playheadTime)
@@ -810,9 +842,7 @@ export function ReviewScreen({ onFixTab }: { onFixTab: (tab: FixTab) => void }):
   const cameras = (info?.sources ?? []).filter((s) => s.kind === 'camera')
   const currentSource = atFile?.sourceId ?? null
   const currentCamera = cameras.find((c) => c.id === currentSource)
-  const cameraLabel = currentCamera
-    ? `${currentCamera.name}${currentCamera.subject ? `(${currentCamera.subject})` : ''}`
-    : null
+  const programLabel = currentCamera ? cameraLabel(currentCamera.name, currentCamera.subject) : null
 
   // スペースで再生・停止(タイムラインのキーはこの画面の間は止めてあるので、ここで受ける)
   useEffect(() => {
@@ -850,7 +880,7 @@ export function ReviewScreen({ onFixTab }: { onFixTab: (tab: FixTab) => void }):
   function applySelection(next: number[]): void {
     setPickedIds(next.map((i) => lines[i]?.id).filter((x): x is string => Boolean(x)))
     setNote(null)
-    const r = rangeOfLines(lines, next)
+    const r = rangeOfLines(lines, next, foreign)
     const st = useProjectStore.getState()
     if (!r) return
     st.setTimelineIn(null)
@@ -951,7 +981,9 @@ export function ReviewScreen({ onFixTab }: { onFixTab: (tab: FixTab) => void }):
                   <TranscriptRow
                     line={l}
                     index={i}
+                    colorIndex={speakerOrderIndex(speakerOrder, l.speaker)}
                     picked={on}
+                    apart={apart}
                     continues={on && picked.includes(i + 1)}
                     hideCut={hideCut}
                     onPick={pick}
@@ -961,19 +993,24 @@ export function ReviewScreen({ onFixTab }: { onFixTab: (tab: FixTab) => void }):
                       <RangeBar
                         range={range}
                         fps={fps}
+                        apart={apart}
                         onReEdit={() => range && requestRangeAutoEdit(range, { origin: 'marks' })}
                         onKeep={() =>
                           range && requestRangeAutoEdit(range, { origin: 'marks', prefer: 'C' })
                         }
-                        onDelete={() =>
-                          range &&
+                        onDelete={() => {
+                          if (!range || apart) return
                           afterEdit(
                             rippleDeleteRange(range.start, range.end),
-                            '削除できませんでした(本編が固定されているか、範囲に本編がありません)'
+                            // 試している間は試しの関所が断る(その理由を出す)
+                            useProjectStore.getState().trial
+                              ? TRIAL_REASON
+                              : '削除できませんでした(本編が固定されているか、範囲に本編がありません)'
                           )
-                        }
+                        }}
                         onLock={() => {
-                          if (!range) return
+                          if (!range || apart) return
+                          if (useProjectStore.getState().trial) return setNote(TRIAL_REASON)
                           const reason = lockTimelineRange(range, true)
                           setNote(
                             reason
@@ -1004,7 +1041,7 @@ export function ReviewScreen({ onFixTab }: { onFixTab: (tab: FixTab) => void }):
           <span className="ve-review-title">プログラム</span>
         </div>
         <div className="ve-review-right-body">
-          <ProgramSlot label={cameraLabel} />
+          <ProgramSlot label={programLabel} />
           <RangeWave view={view} project={project} />
           <PlayControls
             view={view}
@@ -1025,22 +1062,30 @@ export function ReviewScreen({ onFixTab }: { onFixTab: (tab: FixTab) => void }):
                     key={c.id}
                     project={project}
                     sourceId={c.id}
-                    name={c.subject ? `${c.name} ${c.subject}` : c.name}
+                    name={cameraLabel(c.name, c.subject)}
                     current={c.id === currentSource}
                     at={commonAt}
                     view={view}
                     disabled={project.mainTrackLocked === true}
                     onPick={() => {
                       if (c.id === currentSource) return
-                      const target = range ?? (tcAt ? { start: tcAt.start, end: tcAt.end } : null)
-                      if (!target) return
-                      const ok = switchRangeAngle(target, c.id)
+                      // 本編で離れて並ぶ範囲は、切れごとに替える(間に挟まる別の中身は替えない)
+                      const targets = range
+                        ? range.contiguous
+                          ? [{ start: range.start, end: range.end }]
+                          : range.pieces
+                        : tcAt
+                          ? [{ start: tcAt.start, end: tcAt.end }]
+                          : []
+                      if (targets.length === 0) return
+                      if (useProjectStore.getState().trial) return setNote(TRIAL_REASON)
+                      const ok = switchRangesAngle(targets, c.id)
                       setNote(
                         ok
                           ? null
                           : project.mainTrackLocked
                             ? '本編は固定されています'
-                            : `${c.name} はこの時間を録っていないため、替えられませんでした`
+                            : `${cameraLabel(c.name, c.subject)} はこの時間を録っていないため、替えられませんでした`
                       )
                     }}
                   />

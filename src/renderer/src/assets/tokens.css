@@ -270,9 +270,9 @@
   /* 話者(テロップの縁・印・文字起こしの名前。最大 8 人)— @shared/speaker の色と同じ */
   --ve-speaker-0: #5cc1b3;
   --ve-speaker-1: #e08a9a;
-  --ve-speaker-2: #6cc3d5;
-  --ve-speaker-3: #8fd16a;
-  --ve-speaker-4: #d9785f;
+  --ve-speaker-2: #d9785f;
+  --ve-speaker-3: #6cc3d5;
+  --ve-speaker-4: #8fd16a;
   --ve-speaker-5: #b9c25a;
   --ve-speaker-6: #d6d6d6;
   --ve-speaker-7: #7aa88e;

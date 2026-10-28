@@ -136,4 +136,40 @@ describe.skipIf(!existsSync(ffmpegPath))('書き出しの形式と範囲', () =>
     const m = await probeMedia(out)
     expect(Math.abs(m.duration - 4.5)).toBeLessThan(0.05)
   }, 180_000)
+
+  it('【監査 2026-10】範囲の始まりが繋ぎの途中なら、繋ぎの手前へ広げ、その始まりを返す(点検の時刻はこれで合わせる)', async () => {
+    // 0〜4 秒と、4 秒から 1 秒のクロスフェードで入る 2 本目(書き出しでは 3〜4 秒が繋ぎ)
+    const p = {
+      ...project,
+      clips: [
+        { id: 'c1', assetId: 'A', inPoint: 0, outPoint: 4, speed: 1 },
+        {
+          id: 'c2',
+          assetId: 'A',
+          inPoint: 4,
+          outPoint: 8,
+          speed: 1,
+          transitionIn: { type: 'crossfade', duration: 1 }
+        }
+      ]
+    } as unknown as Project
+    const r = timelineRangeToExportFrames(p, 4.2, 6.5)
+    // タイムライン 4.2 秒は、書き出しでは 3.2 秒(96 フレーム)= 繋ぎの途中
+    expect(r).toMatchObject({ startFrame: 96, endFrame: 165 })
+    const out = join(work, 'range-trans.mp4')
+    const res = await exportSequenceSegmented({
+      project: projectV1ToV2(p, { resolution: 360 as never }),
+      outputPath: out,
+      quality: 'standard',
+      encoder: 'libx264',
+      telopLayer: null,
+      segmentOptions: SEG,
+      range: { startFrame: r!.startFrame, endFrame: r!.endFrame }
+    })
+    // 繋ぎ(90〜120 フレーム)を割らないよう、始まりは 89 へ広がる。ファイルの 0 秒はここ
+    expect(res.startFrame).toBe(89)
+    expect(res.frames).toBe(165 - 89)
+    const m = await probeMedia(out)
+    expect(Math.abs(m.duration - (165 - 89) / 30)).toBeLessThan(0.05)
+  }, 180_000)
 })

@@ -130,8 +130,13 @@ export interface SegmentedExportResult {
   segments: number
   encoder: VideoEncoder
   parallel: number
-  /** 書き出した映像のフレーム数(シーケンスの尺と一致する) */
+  /** 書き出した映像のフレーム数(シーケンスの尺と一致する。範囲のときは範囲の長さ) */
   frames: number
+  /**
+   * 範囲のとき、実際に書き出した範囲の始まり(シーケンスのフレーム)。境が繋ぎに掛かると頼んだ所より前へ
+   * 広げるので、書き出したファイルの 0 秒はここに当たる(点検の時刻はこれで合わせる)。全体なら 0
+   */
+  startFrame: number
 }
 
 // ------------------------------------------------------------------ ffmpeg の起動
@@ -804,7 +809,13 @@ export async function exportSequenceSegmented(
     onProgress(96, '仕上げ中')
     await runFfmpeg(finalMuxArgs(format, videoList, audioInput, audioFilter, outputPath), runSignal)
     onProgress(100, '完了')
-    return { segments: segments.length, encoder, parallel, frames: totalFrames }
+    return {
+      segments: segments.length,
+      encoder,
+      parallel,
+      frames: totalFrames,
+      startFrame: snapped?.startFrame ?? 0
+    }
   } catch (e) {
     if (runSignal.aborted) rmSync(outputPath, { force: true })
     // ディスクの空きで止めたときは、取り消しではなくその理由で失敗させる

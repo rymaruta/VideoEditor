@@ -26,7 +26,6 @@ import { safeFileBaseName } from '@shared/fileName'
 import { frameSeconds } from '@shared/frameRate'
 import { targetResolution } from '@shared/resolution'
 import { estimateOutputBytes, formatBytes } from '@shared/exportDiskSpace'
-import { timelineRangeToExportFrames } from '@shared/sequence/fromV1'
 import type { TelopLayerPayload } from '@shared/telop/layer'
 import {
   EXPORT_FORMAT_EXT,
@@ -37,11 +36,20 @@ import {
   type QualityPreset,
   type ResolutionHeight
 } from '@shared/types'
-import { FolderIcon, PlayCircleIcon, TrashIcon, UploadIcon, XIcon } from './icons'
+import {
+  AlertTriangleIcon,
+  ChevronDownIcon,
+  FolderIcon,
+  PlayCircleIcon,
+  TrashIcon,
+  UploadIcon,
+  XIcon
+} from './icons'
 import { ExportQcPanel } from './ExportQcPanel'
 import { WaveBars } from './WaveBars'
 import { reportBusy } from '../lib/busyReporter'
-import { useQcStore, type QcRange } from '../store/qcStore'
+import { useQcStore } from '../store/qcStore'
+import { usePipelineStore } from '../store/pipelineStore'
 import { useReviewItems } from '../lib/useReviewItems'
 import type { PremiereExportResult, PremiereTelopMode } from '@shared/export/premiereTypes'
 
@@ -59,6 +67,8 @@ import type { PremiereExportResult, PremiereTelopMode } from '@shared/export/pre
 
 interface QueueJob extends ExportJob {
   id: string
+  /** 加えたときの本編(範囲のジョブは、本編が変わると違う所を指す) */
+  clipsAtAdd: Project['clips']
 }
 
 type JobStatus = 'pending' | 'running' | 'done' | 'error'
@@ -103,12 +113,6 @@ const RESOLUTION_NAME: Record<ResolutionHeight, string> = {
 
 const RESOLUTIONS: ResolutionHeight[] = [2160, 1440, 1080, 720, 480]
 
-const FORMAT_LABEL: Record<ExportFormat, string> = {
-  mp4: 'MP4',
-  prores: 'ProRes',
-  wav: 'WAV'
-}
-
 const LOUDNESS_LABEL: Record<ExportLoudness, string> = {
   web: '−14 LUFS(YouTube 推奨)',
   broadcast: '−24 LKFS(放送 ARIB TR-B32)',
@@ -119,12 +123,23 @@ const MISSING_ASSET_MESSAGE =
   '見つからない素材ファイルがタイムラインで使われています。プロジェクトの素材一覧で再リンクしてから書き出してください。'
 
 /** キューの1件の見出し */
-function jobLabel(job: QueueJob): string {
+function jobLabel(job: QueueJob, fps: number): string {
   const range = job.range
-    ? ` · 範囲 ${formatTimecode(job.range.start, 30).slice(0, 8)}–${formatTimecode(job.range.end, 30).slice(0, 8)}`
+    ? ` · 範囲 ${formatTimecode(job.range.start, fps)} – ${formatTimecode(job.range.end, fps)}`
     : ''
   if (job.format === 'wav') return `音声のみ(WAV)${range}`
   return `${job.aspectRatio} · ${job.resolutionHeight}p · ${job.format === 'prores' ? 'ProRes 422' : QUALITY_LABEL[job.quality]}${range}`
+}
+
+/** 範囲に掛かるテロップだけを残した企画(範囲の書き出しのテロップの層を描く元。繋ぎのぶん前後に余白) */
+function telopsNear(project: Project, range: { start: number; end: number }): Project {
+  const margin = 1 + Math.max(0, ...project.clips.map((c) => c.transitionIn?.duration ?? 0))
+  return {
+    ...project,
+    textOverlays: project.textOverlays.filter(
+      (o) => o.endTime > range.start - margin && o.startTime < range.end + margin
+    )
+  }
 }
 
 /** 今の時刻(秒)。書き出しにかかった時間を測る */
@@ -219,19 +234,24 @@ function ExportPreview({
   start,
   end,
   audioOnly,
+  vertical,
   fps
 }: {
   project: Project
   start: number
   end: number
   audioOnly: boolean
+  /** 縦(9:16)で書き出す: 見本も縦に切り出して見せる */
+  vertical: boolean
   fps: number
 }): React.JSX.Element {
   const pieces = useMemo(() => timelineAudioPieces(project, start, end), [project, start, end])
   const levels = useWaveLevels(pieces, start, end, 64)
   return (
     <div className="ve-export-sample">
-      <span className={`ve-export-sample-box ${audioOnly ? 'audio-only' : ''}`}>
+      <span
+        className={`ve-export-sample-box ${audioOnly ? 'audio-only' : ''} ${vertical && !audioOnly ? 'vertical' : ''}`}
+      >
         {!audioOnly && <PreviewThumb project={project} at={start} />}
         {levels && (
           <WaveBars
@@ -303,16 +323,29 @@ function FieldRow({
 /** 決まった値の欄(選べない。無効のときは無効の見た目) */
 function Fixed({
   value,
-  disabled,
+  note = '固定',
   title
 }: {
   value: string
-  disabled?: boolean
+  /** 右に添える字(「固定」「素材と同じ」) */
+  note?: string
   title?: string
 }): React.JSX.Element {
   return (
-    <span className={`ve-export-field fixed ${disabled ? 'disabled' : ''}`} title={title}>
-      {value}
+    <span className="ve-export-fixed" title={title}>
+      <span className="ve-export-fixed-value">{value}</span>
+      <span className="ve-export-fixed-note">{note}</span>
+    </span>
+  )
+}
+
+/** 選ぶ欄(枠と ▾ は選べる欄だけ。▾ はアプリの線のアイコン) */
+function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>): React.JSX.Element {
+  const { className, ...rest } = props
+  return (
+    <span className={`ve-select ${props.disabled ? 'disabled' : ''}`}>
+      <select {...rest} className={`ve-export-field ve-select-input ${className ?? ''}`} />
+      <ChevronDownIcon width={10} height={10} className="ve-select-chevron" />
     </span>
   )
 }
@@ -502,6 +535,8 @@ export function ExportDialog(): React.JSX.Element | null {
   const estSec = xml || !speed ? null : duration / speed
   const free = folder && diskFree?.folder === folder ? diskFree.bytes : null
   const segmentedOnly = useRange || format !== 'mp4'
+  // ショート(縦・1080)で 60 秒を超えるときは書き出さない(範囲を選べば書き出せる)
+  const shortOver = picked === 'short' && duration > SHORT_MAX_SEC
   const encoderName =
     encoder === null ? '確認中…' : encoder === 'h264_nvenc' ? 'GPU(NVENC)' : 'CPU(x264)'
   const telopCount = project.textOverlays.length
@@ -526,12 +561,13 @@ export function ExportDialog(): React.JSX.Element | null {
 
   async function telopLayerFor(
     aspect: AspectRatio,
-    height: ResolutionHeight
+    height: ResolutionHeight,
+    source: Project = project
   ): Promise<TelopLayerPayload | null> {
     // テロップは書き出し方式によらず、画面と同じ描画関数で先に画像にしておく
     // (見えているとおりに書き出すため。main は画像を時刻どおりに重ねるだけ)
     return prepareTelopLayerForExport(
-      project,
+      source,
       aspect,
       height,
       (done, total) => setProgress({ percent: 0, stage: `テロップを描画中(${done}/${total})` }),
@@ -545,15 +581,25 @@ export function ExportDialog(): React.JSX.Element | null {
     void window.api.cancelExport()
   }
 
-  async function runOne(job: ExportJob, outputPath: string): Promise<void> {
+  async function runOne(
+    job: ExportJob,
+    outputPath: string
+  ): Promise<{ success: boolean; rangeStartSec?: number }> {
     setProgress({ percent: 0, stage: '準備中' })
-    // 音声だけのときは絵が無いので、テロップは描かない
+    // 音声だけのときは絵が無いので、テロップは描かない。範囲だけのときは、その範囲(繋ぎのぶん広がる)に
+    // 掛かるテロップだけを描く(全部を描くと長尺で時間と一時ファイルが無駄になる)
     const telopLayer =
-      job.format === 'wav' ? null : await telopLayerFor(job.aspectRatio, job.resolutionHeight)
+      job.format === 'wav'
+        ? null
+        : await telopLayerFor(
+            job.aspectRatio,
+            job.resolutionHeight,
+            job.range ? telopsNear(project, job.range) : project
+          )
     try {
       // 描画のあいだに中止を押されていたら、書き出しを始めない(main 側の中止は、始まる前だと効かない)
       if (abortRef.current?.signal.aborted) throw new Error('EXPORT_CANCELED')
-      await window.api.exportProject({
+      return await window.api.exportProject({
         project,
         aspectRatio: job.aspectRatio,
         resolutionHeight: job.resolutionHeight,
@@ -572,13 +618,6 @@ export function ExportDialog(): React.JSX.Element | null {
       if (telopLayer?.stagedId)
         void window.api.telopLayer.release(telopLayer.stagedId).catch(() => {})
     }
-  }
-
-  /** 範囲の書き出しの点検に渡す範囲(ファイルの 0 秒が範囲の始まり) */
-  function qcRangeOf(range: { start: number; end: number } | undefined): QcRange | undefined {
-    if (!range) return undefined
-    const r = timelineRangeToExportFrames(project, range.start, range.end)
-    return r ? { start: range.start, end: range.end, exportStart: r.startSec } : undefined
   }
 
   async function handleExport(): Promise<void> {
@@ -608,7 +647,7 @@ export function ExportDialog(): React.JSX.Element | null {
     const session = useProjectStore.getState().projectSession
     const began = nowSeconds()
     try {
-      await runOne(job, outputPath)
+      const result = await runOne(job, outputPath)
       const elapsed = nowSeconds() - began
       if (elapsed > 0.5) useSettingsStore.getState().recordExportSpeed(format, duration / elapsed)
       // 書き出している間に別のプロジェクトを開いたなら、結果・確認はそのプロジェクトに出さない
@@ -619,7 +658,16 @@ export function ExportDialog(): React.JSX.Element | null {
       window.api.notifyDone('書き出しが終わりました', outputPath)
       // 書き出した動画をそのまま点検する(黒味・フリーズ・無音・ラウドネス・テロップ)
       if (sameProject && qcAfter)
-        void useQcStore.getState().run(outputPath, loudness, project, qcRangeOf(job.range))
+        void useQcStore
+          .getState()
+          .run(
+            outputPath,
+            loudness,
+            project,
+            job.range && result.rangeStartSec !== undefined
+              ? { ...job.range, exportStart: result.rangeStartSec }
+              : undefined
+          )
       if (openFolderAfter) await window.api.showItemInFolder(outputPath).catch(() => {})
     } catch (e) {
       const message = formatIpcError(e)
@@ -705,6 +753,15 @@ export function ExportDialog(): React.JSX.Element | null {
       setError(reason)
       return
     }
+    // 範囲のジョブは時刻で覚えている。加えた後で本編が変わったなら、違う所を書き出すかもしれない
+    const moved = queue.filter((j) => j.range && j.clipsAtAdd !== project.clips)
+    if (
+      moved.length > 0 &&
+      !confirm(
+        `範囲を書き出すジョブ ${moved.length} 件は、キューに加えた後で本編が変わりました。範囲の時刻は加えたときのままなので、違う所を書き出すことがあります。続けますか`
+      )
+    )
+      return
     const target = await window.api.selectExportFolder()
     if (!target) return
     setRunning(true)
@@ -756,6 +813,7 @@ export function ExportDialog(): React.JSX.Element | null {
   function addToQueue(): void {
     const job: QueueJob = {
       id: uuid(),
+      clipsAtAdd: project.clips,
       aspectRatio: project.aspectRatio,
       resolutionHeight,
       quality,
@@ -813,8 +871,7 @@ export function ExportDialog(): React.JSX.Element | null {
       : undefined
 
   const resolutionSelect = (
-    <select
-      className="ve-export-field"
+    <Select
       aria-label="解像度"
       value={`${project.aspectRatio}|${resolutionHeight}`}
       disabled={running || (videoOff && !xml)}
@@ -837,7 +894,7 @@ export function ExportDialog(): React.JSX.Element | null {
           })}
         </optgroup>
       ))}
-    </select>
+    </Select>
   )
 
   return (
@@ -970,6 +1027,47 @@ export function ExportDialog(): React.JSX.Element | null {
                 {presetError && <span className="error-text">{presetError}</span>}
               </div>
             )}
+            {queue.length > 0 && (
+              <div className="ve-export-queue" aria-label="キュー">
+                <div className="ve-export-queue-head">
+                  <span>キュー({queue.length})</span>
+                  <button
+                    className="small-button"
+                    disabled={running}
+                    onClick={handleRunQueue}
+                    title="キューの組み合わせを、選んだフォルダへ順に書き出します"
+                  >
+                    キューを書き出す…
+                  </button>
+                </div>
+                <ul>
+                  {queue.map((job) => (
+                    <li key={job.id} className={`export-queue-item ${queueStatus[job.id] ?? ''}`}>
+                      <span>{jobLabel(job, fps)}</span>
+                      <span className="export-queue-status">
+                        {
+                          {
+                            pending: '待機',
+                            running: '書き出し中',
+                            done: '完了',
+                            error: '失敗'
+                          }[queueStatus[job.id] ?? 'pending']
+                        }
+                      </span>
+                      <button
+                        className="icon-button danger"
+                        title="キューから外す"
+                        aria-label="キューから外す"
+                        disabled={running}
+                        onClick={() => setQueue((prev) => prev.filter((j) => j.id !== job.id))}
+                      >
+                        <TrashIcon width={12} height={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </nav>
 
           <div className="ve-export-main">
@@ -1047,16 +1145,15 @@ export function ExportDialog(): React.JSX.Element | null {
                 <div className="ve-export-col">
                   <span className="ve-export-section">シーケンス</span>
                   <FieldRow label="形式">
-                    <Fixed value="FCP7 XML(xmeml v4)" title="Premiere の「読み込み」で開けます" />
+                    <Fixed value="FCP7 XML" title="Premiere の「読み込み」で開けます(xmeml v4)" />
                   </FieldRow>
                   <FieldRow label="解像度">{resolutionSelect}</FieldRow>
                   <FieldRow label="フレームレート">
-                    <Fixed value={`${displayFps(fps)} fps(素材と同じ)`} />
+                    <Fixed value={`${displayFps(fps)} fps`} note="素材と同じ" />
                   </FieldRow>
                   <FieldRow label="タイムコード">
                     {isDropFrameRate(fps) ? (
-                      <select
-                        className="ve-export-field"
+                      <Select
                         aria-label="タイムコード"
                         value={premiereDropFrame ? 'df' : 'ndf'}
                         disabled={running}
@@ -1064,7 +1161,7 @@ export function ExportDialog(): React.JSX.Element | null {
                       >
                         <option value="df">ドロップフレーム(DF)</option>
                         <option value="ndf">ノンドロップ(NDF)</option>
-                      </select>
+                      </Select>
                     ) : (
                       <Fixed value="ノンドロップ(NDF)" />
                     )}
@@ -1076,8 +1173,7 @@ export function ExportDialog(): React.JSX.Element | null {
                 <div className="ve-export-col">
                   <span className="ve-export-section">テロップ</span>
                   <FieldRow label="渡し方">
-                    <select
-                      className="ve-export-field"
+                    <Select
                       aria-label="テロップの渡し方"
                       value={premiereTelop}
                       disabled={running}
@@ -1089,18 +1185,18 @@ export function ExportDialog(): React.JSX.Element | null {
                           {label}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </FieldRow>
                   <Switch
                     id="ve-export-telop-markers"
-                    label="テロップの文字をマーカーにも入れる(SRT は常に書きます)"
+                    label="テロップの文字をマーカーにも入れる"
                     on={premiereTelopMarkers}
                     disabled={running}
                     onChange={setPremiereTelopMarkers}
                   />
                   <Switch
                     id="ve-export-review-markers"
-                    label={`要確認の印をマーカーにする(${reviewLists.open.length} 件)・章はいつもマーカーに`}
+                    label={`要確認をマーカーにする(${reviewLists.open.length} 件)`}
                     on={premiereReviews}
                     disabled={running}
                     onChange={setPremiereReviews}
@@ -1116,92 +1212,86 @@ export function ExportDialog(): React.JSX.Element | null {
               </div>
             ) : (
               <div className="ve-export-columns">
-                <div className="ve-export-col">
-                  <span className="ve-export-section">映像</span>
-                  <FieldRow label="コンテナ">
-                    <Fixed
-                      value={format === 'prores' ? 'QuickTime(.mov)' : 'MP4'}
-                      disabled={videoOff}
-                    />
-                  </FieldRow>
-                  <FieldRow label="コーデック">
-                    <select
-                      className="ve-export-field"
-                      aria-label="コーデック"
-                      value={format === 'prores' ? 'prores' : 'mp4'}
-                      disabled={running || videoOff}
-                      onChange={(e) => setFormat(e.target.value as ExportFormat)}
-                    >
-                      <option value="mp4">H.264</option>
-                      <option value="prores">Apple ProRes 422</option>
-                    </select>
-                  </FieldRow>
-                  <FieldRow label="解像度">{resolutionSelect}</FieldRow>
-                  <FieldRow label="フレームレート">
-                    <Fixed value={`${displayFps(fps)} fps(素材と同じ)`} disabled={videoOff} />
-                  </FieldRow>
-                  <FieldRow label="ビットレート">
-                    {format === 'prores' ? (
+                {format !== 'wav' && (
+                  <div className="ve-export-col">
+                    <span className="ve-export-section">映像</span>
+                    <FieldRow label="コンテナ">
                       <Fixed
-                        value="ProRes 422(画質は固定)"
-                        title="ProRes は画質の段を選ばず、決まった画質で書き出します"
+                        value={format === 'prores' ? 'QuickTime(.mov)' : 'MP4'}
+                        title="コーデックで決まります"
                       />
-                    ) : (
-                      <select
-                        className="ve-export-field"
-                        aria-label="ビットレート"
-                        value={quality}
+                    </FieldRow>
+                    <FieldRow label="コーデック">
+                      <Select
+                        aria-label="コーデック"
+                        value={format === 'prores' ? 'prores' : 'mp4'}
                         disabled={running || videoOff}
-                        onChange={(e) => setQuality(e.target.value as QualityPreset)}
+                        onChange={(e) => setFormat(e.target.value as ExportFormat)}
                       >
-                        <option value="high">VBR · 高画質</option>
-                        <option value="standard">VBR · 標準</option>
-                        <option value="small">VBR · 軽量(ファイルが小さい)</option>
-                      </select>
-                    )}
-                  </FieldRow>
-                  <FieldRow label="エンコード">
-                    {format === 'prores' ? (
-                      <Fixed value="CPU(ProRes 422)" title="ProRes は CPU で書き出します" />
-                    ) : (
-                      <select
-                        className="ve-export-field"
-                        aria-label="エンコード"
-                        value={segmentedOnly ? 'segmented' : engine}
-                        disabled={running || videoOff || segmentedOnly}
-                        title={
-                          segmentedOnly && !videoOff
-                            ? '範囲だけの書き出しは、区間に分けて書き出す方式で作ります'
-                            : undefined
-                        }
-                        onChange={(e) => setEngine(e.target.value as ExportEngine)}
-                      >
-                        <option value="segmented">
-                          {encoderName} · 区間に分けて並列(長尺向け)
-                        </option>
-                        <option value="standard">CPU(x264)· 全体を1回で</option>
-                      </select>
-                    )}
-                  </FieldRow>
-                  <FieldRow label="色空間">
-                    <Fixed
-                      value="Rec.709(SDR)"
-                      disabled={videoOff}
-                      title="HDR の素材も Rec.709 へ寄せて書き出します"
-                    />
-                  </FieldRow>
-                </div>
+                        <option value="mp4">H.264</option>
+                        <option value="prores">Apple ProRes 422</option>
+                      </Select>
+                    </FieldRow>
+                    <FieldRow label="解像度">{resolutionSelect}</FieldRow>
+                    <FieldRow label="フレームレート">
+                      <Fixed value={`${displayFps(fps)} fps`} note="素材と同じ" />
+                    </FieldRow>
+                    <FieldRow label="ビットレート">
+                      {format === 'prores' ? (
+                        <Fixed
+                          value="ProRes 422"
+                          title="ProRes は画質の段を選ばず、決まった画質で書き出します"
+                        />
+                      ) : (
+                        <Select
+                          aria-label="ビットレート"
+                          value={quality}
+                          disabled={running || videoOff}
+                          onChange={(e) => setQuality(e.target.value as QualityPreset)}
+                        >
+                          <option value="high">VBR · 高画質</option>
+                          <option value="standard">VBR · 標準</option>
+                          <option value="small">VBR · 軽量(ファイルが小さい)</option>
+                        </Select>
+                      )}
+                    </FieldRow>
+                    <FieldRow label="エンコード">
+                      {format === 'prores' ? (
+                        <Fixed value="CPU(ProRes 422)" title="ProRes は CPU で書き出します" />
+                      ) : (
+                        <Select
+                          aria-label="エンコード"
+                          value={segmentedOnly ? 'segmented' : engine}
+                          disabled={running || videoOff || segmentedOnly}
+                          title={
+                            segmentedOnly && !videoOff
+                              ? '範囲だけの書き出しは、区間に分けて書き出す方式で作ります'
+                              : undefined
+                          }
+                          onChange={(e) => setEngine(e.target.value as ExportEngine)}
+                        >
+                          <option value="segmented">
+                            {encoderName} · 区間に分けて並列(長尺向け)
+                          </option>
+                          <option value="standard">CPU(x264)· 全体を1回で</option>
+                        </Select>
+                      )}
+                    </FieldRow>
+                    <FieldRow label="色空間">
+                      <Fixed
+                        value="Rec.709(SDR)"
+                        title="HDR の素材も Rec.709 へ寄せて書き出します"
+                      />
+                    </FieldRow>
+                  </div>
+                )}
                 <div className="ve-export-col">
                   <span className="ve-export-section">音声</span>
                   <FieldRow label="コーデック">
-                    <Fixed
-                      value={format === 'mp4' ? 'AAC · 192 kbps' : 'PCM · 24 bit'}
-                      disabled={audioOff}
-                    />
+                    <Fixed value={format === 'mp4' ? 'AAC · 192 kbps' : 'PCM · 24 bit'} />
                   </FieldRow>
                   <FieldRow label="ラウドネス">
-                    <select
-                      className="ve-export-field"
+                    <Select
                       aria-label="ラウドネス"
                       value={loudness}
                       disabled={running || audioOff}
@@ -1213,10 +1303,10 @@ export function ExportDialog(): React.JSX.Element | null {
                           {LOUDNESS_LABEL[v]}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </FieldRow>
                   <FieldRow label="チャンネル">
-                    <Fixed value="ステレオ · 48 kHz" disabled={audioOff} />
+                    <Fixed value="ステレオ · 48 kHz" />
                   </FieldRow>
                   <span className="ve-export-section ve-export-section-gap">書き出しの後</span>
                   <Switch
@@ -1317,58 +1407,40 @@ export function ExportDialog(): React.JSX.Element | null {
                   ソロ中: 書き出しには効きません
                 </p>
               )}
-              {picked === 'short' && duration > SHORT_MAX_SEC && (
-                <p className="hint-text" role="note">
-                  ショートは {SHORT_MAX_SEC} 秒までです(今は {clockText(duration)}
-                  )。範囲を選ぶと、その所だけを書き出せます
-                </p>
+              {shortOver && (
+                <div className="ve-export-warn" role="alert">
+                  <AlertTriangleIcon width={14} height={14} />
+                  <span>
+                    ショートは {SHORT_MAX_SEC} 秒までです(今は {clockText(duration)})。
+                    {SHORT_MAX_SEC} 秒以下の範囲を選ぶと書き出せます。
+                  </span>
+                  <button
+                    type="button"
+                    className="small-button"
+                    onClick={() => {
+                      if (selection && selection.end - selection.start <= SHORT_MAX_SEC) {
+                        setRangeMode('range')
+                        return
+                      }
+                      // 範囲はタイムラインで選ぶ(イン点 I・アウト点 O)。確認の画面も閉じて編集の画面へ
+                      setOpen(false)
+                      usePipelineStore.getState().setScreenOpen(false)
+                    }}
+                    title={
+                      selection && selection.end - selection.start <= SHORT_MAX_SEC
+                        ? '選んである範囲だけを書き出します'
+                        : 'タイムラインでイン点(I)・アウト点(O)を打ち、もう一度開いてください'
+                    }
+                  >
+                    範囲を選ぶ
+                  </button>
+                </div>
               )}
               {xml && (
                 <p className="hint-text">
-                  {'本編のカット(カメラの切り替え)・速さ・繋ぎ、ワイプ・CG、BGM・SE の音量とフェードを同じ並びで書きます。' +
-                    'ダッキング・ラウドネスの調整・色合わせは Premiere で仕上げてください。'}
+                  {'カット・速さ・繋ぎ・ワイプ・BGM と SE の音量を、同じ並びで書きます。' +
+                    'ダッキング・ラウドネス・色合わせは Premiere で仕上げます。章はいつもマーカーに入ります。'}
                 </p>
-              )}
-              {queue.length > 0 && (
-                <div className="ve-export-queue" aria-label="キュー">
-                  <div className="ve-export-queue-head">
-                    <span>キュー({queue.length})</span>
-                    <button
-                      className="small-button"
-                      disabled={running}
-                      onClick={handleRunQueue}
-                      title="キューの組み合わせを、選んだフォルダへ順に書き出します"
-                    >
-                      キューを書き出す…
-                    </button>
-                  </div>
-                  <ul>
-                    {queue.map((job) => (
-                      <li key={job.id} className={`export-queue-item ${queueStatus[job.id] ?? ''}`}>
-                        <span>{jobLabel(job)}</span>
-                        <span className="export-queue-status">
-                          {
-                            {
-                              pending: '待機',
-                              running: '書き出し中',
-                              done: '完了',
-                              error: '失敗'
-                            }[queueStatus[job.id] ?? 'pending']
-                          }
-                        </span>
-                        <button
-                          className="icon-button danger"
-                          title="キューから外す"
-                          aria-label="キューから外す"
-                          disabled={running}
-                          onClick={() => setQueue((prev) => prev.filter((j) => j.id !== job.id))}
-                        >
-                          <TrashIcon width={12} height={12} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
               )}
               <ExportQcPanel onJump={() => setOpen(false)} />
             </div>
@@ -1390,6 +1462,7 @@ export function ExportDialog(): React.JSX.Element | null {
                   start={span.start}
                   end={span.end}
                   audioOnly={format === 'wav'}
+                  vertical={project.aspectRatio === '9:16'}
                   fps={fps}
                 />
               )}
@@ -1413,25 +1486,15 @@ export function ExportDialog(): React.JSX.Element | null {
                     )}
                   </dd>
                 </div>
-                <div>
-                  <dt>推定時間</dt>
-                  <dd
-                    title={
-                      estSec === null
-                        ? `${xml ? 'XML はすぐに書けます' : `一度 ${FORMAT_LABEL[format]} を書き出すと、その速さから目安を出します`}`
-                        : '前に書き出したときの速さからの目安'
-                    }
-                  >
-                    {estSec === null ? (
-                      <span className="mono">—</span>
-                    ) : (
-                      <>
-                        <span className="mono">{splitDuration(estSec)[0]}</span>
-                        {splitDuration(estSec)[1]}
-                      </>
-                    )}
-                  </dd>
-                </div>
+                {estSec !== null && (
+                  <div>
+                    <dt>推定時間</dt>
+                    <dd title="前に書き出したときの速さからの目安">
+                      <span className="mono">{splitDuration(estSec)[0]}</span>
+                      {splitDuration(estSec)[1]}
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt>空き容量</dt>
                   <dd title={folder ? folder : '保存先を選ぶと出ます'}>
@@ -1471,7 +1534,7 @@ export function ExportDialog(): React.JSX.Element | null {
             <button
               type="button"
               className="ve-export-button"
-              disabled={running}
+              disabled={running || shortOver}
               onClick={addToQueue}
               title="今の組み合わせをキューに並べ、あとでまとめて書き出します"
             >
@@ -1481,7 +1544,8 @@ export function ExportDialog(): React.JSX.Element | null {
           <button
             type="button"
             className="ve-export-button primary"
-            disabled={running}
+            disabled={running || shortOver}
+            title={shortOver ? `ショートは ${SHORT_MAX_SEC} 秒までです` : undefined}
             onClick={xml ? handlePremiereExport : handleExport}
           >
             <UploadIcon width={14} height={14} />

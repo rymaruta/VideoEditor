@@ -1038,7 +1038,7 @@ export function Timeline({
     const p = useProjectStore.getState().project
     return [
       {
-        label: blocked ? `この範囲を自動編集…(${blocked})` : 'この範囲を自動編集…',
+        label: blocked ? `この範囲を再編集…(${blocked})` : 'この範囲を再編集…',
         disabled: Boolean(blocked),
         onSelect: () => setRangeDialog({ range, origin })
       },
@@ -1084,7 +1084,7 @@ export function Timeline({
       usePipelineStore.getState()
     )
     if (blocked) {
-      setSfxDropError(`この範囲を自動編集できません: ${blocked}`)
+      setSfxDropError(`この範囲を再編集できません: ${blocked}`)
       return
     }
     const picked = currentRange()
@@ -2358,7 +2358,7 @@ export function Timeline({
           disabled={Boolean(rangeBlocked) || (!shownRange && !hasAiTarget)}
           title={
             rangeBlocked
-              ? `この範囲を自動編集できません(${rangeBlocked})`
+              ? `この範囲を再編集できません(${rangeBlocked})`
               : '範囲(無ければ選んだクリップ・再生位置のクリップ)を自動編集で作り直します'
           }
           onClick={() => openRangeAutoEdit()}

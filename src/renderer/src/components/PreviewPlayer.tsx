@@ -1454,7 +1454,19 @@ export function PreviewPlayer(): React.JSX.Element {
         className={`panel preview-player ${dock ? 've-program-docked' : isExpanded ? 'expanded' : ''}`}
         style={
           dock
-            ? { left: dock.left, top: dock.top, width: dock.width, height: dock.height }
+            ? {
+                left: dock.left,
+                top: dock.top,
+                width: dock.width,
+                height: dock.height,
+                // 右の列を縦に送って列の外へはみ出した所は切り取る
+                ...(dock.clipTop > 0 || dock.clipBottom > 0
+                  ? { clipPath: `inset(${dock.clipTop}px 0 ${dock.clipBottom}px 0)` }
+                  : {}),
+                ...(dock.clipTop + dock.clipBottom >= dock.height
+                  ? { visibility: 'hidden' as const }
+                  : {})
+              }
             : undefined
         }
       >

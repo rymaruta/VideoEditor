@@ -683,7 +683,7 @@ interface ExportPayload {
 async function runExport(
   payload: ExportPayload,
   onProgress: (percent: number, stage: string) => void
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; rangeStartSec?: number }> {
   // 失敗・中止で、壊れた動画が完成品の名前で残らないように(`writeViaPartial`)。
   // 書き出し先が素材・企画ファイル・自動保存なら、始める前に止める(最後の置き換えで
   // 素材が書き出した動画に差し替わり、元の撮影データが消えていた。`exportOutputGuard`)
@@ -708,7 +708,7 @@ function exportProtectedPaths(project: Project): ProtectedPath[] {
 async function runExportTo(
   payload: ExportPayload,
   onProgress: (percent: number, stage: string) => void
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; rangeStartSec?: number }> {
   // 標準の書き出しが OS の決まり(コマンドラインの長さ・一度に開く入力の数)に収まらなければ、
   // 区間ごとの書き出しを使う(収まらないまま起こすと、Windows では main プロセスごと落ちる)
   const format: ExportFormat =
@@ -731,7 +731,7 @@ async function runExportTo(
       { ...payload.project, aspectRatio: payload.aspectRatio },
       { resolution: payload.resolutionHeight }
     )
-    await runExclusiveExport((signal) =>
+    const done = await runExclusiveExport((signal) =>
       exportSequenceSegmented({
         project: v2,
         outputPath: payload.outputPath,
@@ -745,7 +745,9 @@ async function runExportTo(
         ...(range ? { range: { startFrame: range.startFrame, endFrame: range.endFrame } } : {})
       })
     )
-    return { success: true }
+    // 範囲のときは、実際に書き出した範囲の始まり(書き出しの秒)を返す(点検の時刻を合わせる)
+    const fps = v2.sequence.fps.num / v2.sequence.fps.den
+    return range ? { success: true, rangeStartSec: done.startFrame / fps } : { success: true }
   }
   await exportProject({
     project: payload.project,

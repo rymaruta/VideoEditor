@@ -152,20 +152,22 @@ describe('小さな波形の切れ(timelineWave)', () => {
     })
   })
 
-  it('切れの列を区間の列へ並べ、重なりは大きい方。区間が空なら全部 0', () => {
+  it('切れの列を区間の列へ並べ、重なりは大きい方(山も平均も)。区間が空なら全部 0', () => {
     const piece = { filePath: 'x', tlStart: 0, tlEnd: 5, srcStart: 0, srcEnd: 5 }
     const piece2 = { filePath: 'y', tlStart: 0, tlEnd: 10, srcStart: 0, srcEnd: 10 }
     const out = mergePieceLevels(
       [
-        { piece, levels: [1, 1] },
-        { piece: piece2, levels: [0.5, 0.5, 0.5, 0.5] }
+        { piece, levels: { peak: [1, 1], rms: [0.25, 0.25] } },
+        { piece: piece2, levels: { peak: [0.5, 0.5, 0.5, 0.5], rms: [0.5, 0.5, 0.5, 0.5] } }
       ],
       0,
       10,
       4
     )
-    expect(Array.from(out)).toEqual([1, 1, 0.5, 0.5])
-    expect(Array.from(mergePieceLevels([{ piece, levels: [1] }], 3, 3, 4))).toEqual([0, 0, 0, 0])
+    expect(Array.from(out.peak)).toEqual([1, 1, 0.5, 0.5])
+    expect(Array.from(out.rms)).toEqual([0.5, 0.5, 0.5, 0.5])
+    const empty = mergePieceLevels([{ piece, levels: { peak: [1], rms: [1] } }], 3, 3, 4)
+    expect(Array.from(empty.peak)).toEqual([0, 0, 0, 0])
     expect(pieceColumns(piece, 0, 10, 100)).toBe(50)
     expect(pieceColumns(piece, 0, 0, 100)).toBe(1)
   })

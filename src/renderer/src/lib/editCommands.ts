@@ -266,7 +266,16 @@ export function lockTimelineRange(range: TimelineRange, exact: boolean): string 
  * そのカメラが録っていないクリップはそのまま。1本でも替えたら true
  */
 export function switchRangeAngle(range: TimelineRange, sourceId: string): boolean {
-  if (!(range.end - range.start > EPS)) return false
+  return switchRangesAngle([range], sourceId)
+}
+
+/**
+ * いくつかの範囲(本編で離れて並ぶ切れ)の本編を、まとめて別のカメラに替える(1件の履歴)。
+ * 間に挟まる別の中身は替えない
+ */
+export function switchRangesAngle(ranges: readonly TimelineRange[], sourceId: string): boolean {
+  const list = ranges.filter((r) => r.end - r.start > EPS)
+  if (list.length === 0) return false
   const first = useProjectStore.getState()
   if (first.project.mainTrackLocked || !first.project.multicam) return false
   const before = first
@@ -277,15 +286,18 @@ export function switchRangeAngle(range: TimelineRange, sourceId: string): boolea
   }
   let switched = 0
   runAsOneUndoStep(() => {
-    splitAt(range.end)
-    splitAt(range.start)
+    // カメラを替えても長さは変わらないので、先に全部の端で分けてよい
+    for (const r of list) {
+      splitAt(r.end)
+      splitAt(r.start)
+    }
     const s = useProjectStore.getState()
     const info = s.project.multicam
     if (!info) return
     const ids = mainSpans(s.project)
       .filter((x) => {
         const mid = (x.start + x.end) / 2
-        return mid > range.start && mid < range.end
+        return list.some((r) => mid > r.start && mid < r.end)
       })
       .map((x) => x.id)
     for (const id of ids) {
