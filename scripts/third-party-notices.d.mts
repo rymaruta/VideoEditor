@@ -40,7 +40,7 @@ export function renderNotices(input: {
   packages: NoticePackage[]
   ffmpeg: {
     ffmpeg?: { version: string; readme: string; license: string }
-    ffprobe?: { version: string }
+    ffprobe?: { version: string; sameBuild?: boolean }
   }
   electron: { version: string; license: string }
   models: NoticeModel[]

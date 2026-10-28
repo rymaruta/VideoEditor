@@ -5,7 +5,7 @@
 // 集めるもの
 // - npm の部品: package.json の dependencies(と、その依存をたどったもの)と、devDependencies のうち
 //   画面に取り込まれて同梱されるもの(BUNDLED_FROM_DEV)。各パッケージの LICENSE・NOTICE などの全文を載せる
-// - FFmpeg / FFprobe(ffmpeg-static・ffprobe-static の中の実行ファイル): GPL であることと、ソースの入手先
+// - FFmpeg / FFprobe(ffmpeg-static・@derhuerst/ffprobe-static の中の実行ファイル): GPL であることと、ソースの入手先
 // - Electron / Chromium: Electron の MIT と、インストール先に置かれる Chromium の表記の場所
 // - AI のモデル(同梱するものと、初回に取得するもの)
 // - フォント(@fontsource。npm の部品としても全文を載せる)
@@ -23,7 +23,13 @@ import {
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findFfmpegStaticDocs } from './gpl-sources.mjs'
+import {
+  FFPROBE_PACKAGE,
+  ffprobeExecutable,
+  findFfmpegStaticDocs,
+  isSameBuild,
+  parseVersionOutput
+} from './gpl-sources.mjs'
 
 /** devDependencies だが、画面のコードに取り込まれて製品に入るもの */
 export const BUNDLED_FROM_DEV = ['react', 'react-dom']
@@ -287,7 +293,7 @@ function rule(title) {
  * @param {string} input.productName 製品名
  * @param {string} input.productVersion 製品の版
  * @param {{ name: string, version: string, license: string, source: string, author: string, files: { file: string, text: string }[], standardText?: string }[]} input.packages
- * @param {{ ffmpeg?: { version: string, readme: string, license: string }, ffprobe?: { version: string } }} input.ffmpeg
+ * @param {{ ffmpeg?: { version: string, readme: string, license: string }, ffprobe?: { version: string, sameBuild?: boolean } }} input.ffmpeg
  * @param {{ version: string, license: string }} input.electron
  * @param {{ name: string, bundled: boolean, license: string, source: string, text?: string }[]} input.models
  * @param {{ vendor?: string, vendorEmail?: string, sourceOfferUrl?: string }} [input.offer] ソースの入手先と(あれば)連絡先
@@ -316,7 +322,8 @@ export function renderNotices(input) {
   out.push(rule('1. FFmpeg / FFprobe'))
   out.push(
     '動画・音声の読み込みと書き出しに FFmpeg と FFprobe の実行ファイルを同梱しています',
-    '(npm の ffmpeg-static・ffprobe-static が配る、各 OS 用にビルドされたもの)。',
+    '(npm の ffmpeg-static・@derhuerst/ffprobe-static が配る、各 OS 用にビルドされたもの。',
+    ' 2 つは同じ配布元(ffmpeg-static のリリース)の、同じビルドの ffmpeg と ffprobe です)。',
     '',
     'これらは --enable-gpl --enable-version3 でビルドされており(x264・x265 などの GPL の部品を含む)、',
     '実行ファイル全体が GNU General Public License version 3 以降(GPL-3.0-or-later)の条件で配られます。',
@@ -327,7 +334,7 @@ export function renderNotices(input) {
     '  - FFmpeg 本体: https://ffmpeg.org/download.html#get-sources (版ごと: https://ffmpeg.org/releases/ )',
     '  - 同梱の実行ファイルの出どころ・ビルドの方法:',
     '      ffmpeg-static  https://github.com/eugeneware/ffmpeg-static (配布: https://github.com/eugeneware/ffmpeg-static/releases )',
-    '      ffprobe-static https://github.com/joshwnj/ffprobe-static',
+    '      @derhuerst/ffprobe-static https://www.npmjs.com/package/@derhuerst/ffprobe-static (ffmpeg-static と同じリポジトリ・同じリリース)',
     '      Linux 版のビルド: https://johnvansickle.com/ffmpeg/ (ソース一式も同所で配布)',
     '      Windows 版のビルド: https://www.gyan.dev/ffmpeg/builds/',
     '      macOS 版のビルド: https://evermeet.cx/pub/ffmpeg/ (Intel)、https://osxexperts.net/ (Apple Silicon)',
@@ -344,6 +351,8 @@ export function renderNotices(input) {
   }
   if (input.ffmpeg.ffprobe?.version) {
     out.push('同梱した ffprobe の版と構成:', indent(input.ffmpeg.ffprobe.version), '')
+    if (input.ffmpeg.ffprobe.sameBuild)
+      out.push('(ffprobe は上の ffmpeg と同じビルドで、対応するソースも同じです)', '')
   }
   out.push(...sourceOfferLines(input.offer), '')
   if (input.ffmpeg.ffmpeg?.license) {
@@ -482,19 +491,11 @@ export function buildNotices(projectDir) {
   )
 
   const ffmpegDir = findPackageDir('ffmpeg-static', projectDir, projectDir)
-  const ffprobeDir = findPackageDir('ffprobe-static', projectDir, projectDir)
+  const ffprobeDir = findPackageDir(FFPROBE_PACKAGE, projectDir, projectDir)
   const ffmpegExe = ffmpegDir
     ? [join(ffmpegDir, 'ffmpeg'), join(ffmpegDir, 'ffmpeg.exe')].find((p) => existsSync(p))
     : undefined
-  const ffprobeExe = ffprobeDir
-    ? join(
-        ffprobeDir,
-        'bin',
-        process.platform,
-        process.arch,
-        process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
-      )
-    : undefined
+  const ffprobeExe = ffprobeDir ? ffprobeExecutable(ffprobeDir) : undefined
   const optionalText = (path) => (path && existsSync(path) ? readText(path) : '')
 
   const electronDir = findPackageDir('electron', projectDir, projectDir)
@@ -515,6 +516,7 @@ export function buildNotices(projectDir) {
   // 表記が欠けたまま出荷しないよう、欠けたものを挙げる(CLI は失敗で終わる)
   const problems = []
   if (!ffmpegDir) problems.push('ffmpeg-static が入っていません')
+  if (!ffprobeDir) problems.push(`${FFPROBE_PACKAGE} が入っていません`)
   if (ffmpegDir && !ffmpegLicense)
     problems.push(
       'ffmpeg-static の ffmpeg.LICENSE(Windows では ffmpeg.exe.LICENSE)も、scripts/license-texts/GPL-3.0.txt もありません'
@@ -546,7 +548,15 @@ export function buildNotices(projectDir) {
             license: ffmpegLicense
           }
         : undefined,
-      ffprobe: ffprobeExe ? { version: ffprobeVersion } : undefined
+      ffprobe: ffprobeExe
+        ? {
+            version: ffprobeVersion,
+            sameBuild: isSameBuild(
+              parseVersionOutput(ffmpegVersion),
+              parseVersionOutput(ffprobeVersion)
+            )
+          }
+        : undefined
     },
     electron,
     models,

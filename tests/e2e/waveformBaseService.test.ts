@@ -25,7 +25,7 @@ import {
 import { tmpdir } from 'os'
 import { join } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
-import ffprobeStatic from 'ffprobe-static'
+import { ffprobePath } from '@main/ffmpegService'
 import { createWaveformPeaksService, wavePathPrefix } from '@main/waveformPeaks'
 
 const ffmpeg = ffmpegStatic as unknown as string
@@ -71,7 +71,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     files.forEach((f, i) => tone(f, 200 + i * 50, 30))
     const svc = createWaveformPeaksService({
       ffmpegPath: wrapper,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir: join(dir, 'cache-many'),
       directMaxSec: 0
     })
@@ -91,7 +91,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     files.forEach((f, i) => tone(f, 300 + i * 40, 60))
     const svc = createWaveformPeaksService({
       ffmpegPath: wrapper,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir: join(dir, 'cache-abort'),
       directMaxSec: 0
     })
@@ -117,7 +117,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     writeFileSync(bad, 'this is not audio')
     const svc = createWaveformPeaksService({
       ffmpegPath: wrapper,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir: join(dir, 'cache-fail'),
       failureMs: 60_000
     })
@@ -151,7 +151,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     const cacheDir = join(dir, 'cache-swap')
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir,
       directMaxSec: 0
     })
@@ -178,7 +178,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     // 20 秒のモノラルの素の値は 20×100×6 + 24 = 12,024 バイト。2 つぶんまで
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir,
       diskBytes: 25_000,
       directMaxSec: 0
@@ -200,7 +200,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     const cacheDir = join(dir, 'cache-direct')
     const svc = createWaveformPeaksService({
       ffmpegPath: wrapper,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir
     })
     const t0 = Date.now()
@@ -224,7 +224,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     tone(f, 260, 120)
     const svc = createWaveformPeaksService({
       ffmpegPath: wrapper,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir: join(dir, 'cache-grace'),
       directMaxSec: 0
     })
@@ -268,7 +268,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
       ])
       const svc = createWaveformPeaksService({
         ffmpegPath: ffmpeg,
-        ffprobePath: ffprobeStatic.path,
+        ffprobePath,
         cacheDir: join(dir, `cache-pick-${name}`)
       })
       const lanes: number[] = []
@@ -286,7 +286,7 @@ describe.skipIf(!has)('素の値のサービス(本物の ffmpeg)', () => {
     const cacheDir = join(dir, 'cache-touch')
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir,
       directMaxSec: 0
     })

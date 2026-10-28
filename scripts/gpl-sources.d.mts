@@ -63,3 +63,13 @@ export function findFfmpegStaticDocs(
   exePath: string,
   fallbackLicense?: string
 ): { readme: string | null; license: string | null; licenseFromPackage: boolean }
+export const FFPROBE_PACKAGE: string
+export function ffprobeExecutable(
+  packageDir: string,
+  platform?: NodeJS.Platform,
+  pathApi?: typeof import('node:path')
+): string
+export function isSameBuild(
+  ffmpegParsed: ParsedVersion | null | undefined,
+  ffprobeParsed: ParsedVersion | null | undefined
+): boolean

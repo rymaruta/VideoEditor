@@ -1,5 +1,14 @@
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -8,9 +17,11 @@ import { ffmpegPath, ffprobePath } from '@main/ffmpegService'
 import {
   existingPremiereSidecars,
   exportPremiereXml,
+  swapInTelopPngs,
   telopPngsUsedAsAssets,
   type PremiereExportPayload
 } from '@main/premiereExportService'
+import { writeViaPartial } from '@main/partialOutput'
 import { appendTelopLayerImages, beginTelopLayer, withTelopLayer } from '@main/telopLayerStage'
 import { fileUrl } from '@shared/export/premiereXml'
 import { readFcp7, type XmlElement } from '@shared/import/fcp7'
@@ -403,5 +414,173 @@ describe('exportPremiereXml(main)', () => {
     })
     expect(calls).toBe(10)
     expect(peak).toBeLessThanOrEqual(4)
+  })
+
+  /** 書き出し先のフォルダに残った一時の物(PNG の一時フォルダ・退避フォルダ・SRT の一時ファイル) */
+  const leftovers = (dir: string): string[] =>
+    readdirSync(dir).filter((n) => /\.(partial|previous)-|\.partial$/.test(n))
+
+  it('透過 PNG: 同じ XML へ 2 回書き出すと、2 回目の PNG に入れ替わり、XML が指す PNG がそろう', async () => {
+    const out = mkdtempSync(join(work, 'twice-'))
+    const payload = { ...base(project(), out, 'png'), outputPath: join(out, 'ep.xml') }
+    for (let round = 0; round < 2; round++) {
+      const layer = await stagedLayer()
+      await withTelopLayer(layer, () =>
+        exportPremiereXml({ ...payload, telopLayer: layer }, payload.outputPath, { ffmpegPath })
+      )
+    }
+    const dir = join(out, 'ep_telop')
+    expect(readdirSync(dir).sort()).toEqual(['telop_000001.png', 'telop_000002.png'])
+    const pngs = pathUrls(payload.outputPath).filter((u) => u.endsWith('.png'))
+    expect(pngs.length).toBeGreaterThan(0)
+    for (const u of pngs) expect(readdirSync(dir)).toContain(u.split('/').pop())
+    expect(leftovers(out)).toEqual([])
+  })
+
+  it('透過 PNG: 入れ替えの途中で失敗したら前回の PNG と SRT に戻す(前は前回の分が消え、今回の分も消えた)', async () => {
+    const out = mkdtempSync(join(work, 'midfail-'))
+    const dir = join(out, 'ep_telop')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'telop_000001.png'), 'previous 1')
+    writeFileSync(join(dir, 'telop_000002.png'), 'previous 2')
+    writeFileSync(join(dir, 'telop_000003.png'), 'previous 3')
+    writeFileSync(join(out, 'ep.srt'), 'previous srt')
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), out, 'png'),
+      outputPath: join(out, 'ep.xml'),
+      telopLayer: layer
+    }
+    // 今回の 2 枚目を移すところで失敗する(ディスクが外れた・ほかのアプリが掴んでいる、など)
+    let newMoves = 0
+    await expect(
+      withTelopLayer(layer, () =>
+        // XML は本番と同じく一時ファイルに書き、終わってから置き換える(失敗すれば消える)
+        writeViaPartial(payload.outputPath, (xmlPath) =>
+          exportPremiereXml(payload, xmlPath, {
+            ffmpegPath,
+            swapPngs: (stage, target) =>
+              swapInTelopPngs(stage, target, (from, to) => {
+                if (from.startsWith(stage) && ++newMoves === 2) throw new Error('EIO: 移せません')
+                renameSync(from, to)
+              })
+          })
+        )
+      )
+    ).rejects.toThrow('EIO')
+    expect(readdirSync(dir).sort()).toEqual([
+      'telop_000001.png',
+      'telop_000002.png',
+      'telop_000003.png'
+    ])
+    expect(readFileSync(join(dir, 'telop_000001.png'), 'utf-8')).toBe('previous 1')
+    expect(readFileSync(join(dir, 'telop_000003.png'), 'utf-8')).toBe('previous 3')
+    expect(readFileSync(join(out, 'ep.srt'), 'utf-8')).toBe('previous srt')
+    expect(existsSync(join(out, 'ep.xml'))).toBe(false)
+    expect(leftovers(out)).toEqual([])
+  })
+
+  it('透過 PNG: SRT を置き換えられなければ、入れ替えた PNG も前回の分に戻す', async () => {
+    const out = mkdtempSync(join(work, 'srtfail-'))
+    const dir = join(out, 'ep_telop')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'telop_000001.png'), 'previous 1')
+    // SRT の名前にフォルダがあると、一時ファイルからの置き換えが失敗する
+    mkdirSync(join(out, 'ep.srt'))
+    writeFileSync(join(out, 'ep.srt', 'keep.txt'), 'keep')
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), out, 'png'),
+      outputPath: join(out, 'ep.xml'),
+      telopLayer: layer
+    }
+    await expect(
+      withTelopLayer(layer, () =>
+        writeViaPartial(payload.outputPath, (xmlPath) =>
+          exportPremiereXml(payload, xmlPath, { ffmpegPath })
+        )
+      )
+    ).rejects.toThrow()
+    expect(readdirSync(dir)).toEqual(['telop_000001.png'])
+    expect(readFileSync(join(dir, 'telop_000001.png'), 'utf-8')).toBe('previous 1')
+    expect(readFileSync(join(out, 'ep.srt', 'keep.txt'), 'utf-8')).toBe('keep')
+    expect(leftovers(out)).toEqual([])
+  })
+
+  it('透過 PNG: フォルダの名前に同じ名前のファイルがあれば、何も書かずに止める(前は SRT を書いた後で失敗)', async () => {
+    const out = mkdtempSync(join(work, 'clash-'))
+    writeFileSync(join(out, 'ep_telop'), 'a file, not a folder')
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), out, 'png'),
+      outputPath: join(out, 'ep.xml'),
+      telopLayer: layer
+    }
+    await expect(
+      withTelopLayer(layer, () => exportPremiereXml(payload, payload.outputPath, { ffmpegPath }))
+    ).rejects.toThrow(/同じ名前のファイル/)
+    expect(readFileSync(join(out, 'ep_telop'), 'utf-8')).toBe('a file, not a folder')
+    expect(readdirSync(out)).toEqual(['ep_telop'])
+  })
+
+  it('透過 PNG: telop_*.png という名前のフォルダには触らず、入れ替えられなければ前回に戻す', async () => {
+    const out = mkdtempSync(join(work, 'dirname-'))
+    const dir = join(out, 'ep_telop')
+    mkdirSync(join(dir, 'telop_000002.png'), { recursive: true })
+    writeFileSync(join(dir, 'telop_000002.png', 'mine.txt'), 'mine')
+    writeFileSync(join(dir, 'telop_000001.png'), 'previous 1')
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(project(), out, 'png'),
+      outputPath: join(out, 'ep.xml'),
+      telopLayer: layer
+    }
+    await expect(
+      withTelopLayer(layer, () =>
+        writeViaPartial(payload.outputPath, (xmlPath) =>
+          exportPremiereXml(payload, xmlPath, { ffmpegPath })
+        )
+      )
+    ).rejects.toThrow()
+    expect(readFileSync(join(dir, 'telop_000002.png', 'mine.txt'), 'utf-8')).toBe('mine')
+    expect(readFileSync(join(dir, 'telop_000001.png'), 'utf-8')).toBe('previous 1')
+    expect(leftovers(out)).toEqual([])
+  })
+
+  it('透過 PNG: 素材の PNG を別の綴り(シンボリックリンクを通したフォルダ)で持っていても見つけて止める', async () => {
+    const out = mkdtempSync(join(work, 'alias-'))
+    const dir = join(out, 'ep_telop')
+    mkdirSync(dir)
+    const used = join(dir, 'telop_000001.png')
+    writeFileSync(used, 'asset')
+    symlinkSync(dir, join(out, 'link'))
+    const p = project()
+    p.assets.push({
+      id: 'cg',
+      filePath: join(out, 'link', 'telop_000001.png'),
+      fileName: 'telop_000001.png',
+      duration: 0,
+      width: W,
+      height: H,
+      fps: 30,
+      hasAudio: false,
+      hasVideo: true,
+      still: true
+    })
+    expect(telopPngsUsedAsAssets(dir, p.assets)).toEqual(['telop_000001.png'])
+    // ノイズ除去前のプレビュー用ファイルとして持っていても
+    expect(
+      telopPngsUsedAsAssets(dir, [{ filePath: '/media/x.wav', proxyBeforeDenoise: used }])
+    ).toEqual(['telop_000001.png'])
+    const layer = await stagedLayer()
+    const payload = {
+      ...base(p, out, 'png'),
+      outputPath: join(out, 'ep.xml'),
+      telopLayer: layer
+    }
+    await expect(
+      withTelopLayer(layer, () => exportPremiereXml(payload, payload.outputPath, { ffmpegPath }))
+    ).rejects.toThrow(/素材として使われている/)
+    expect(readFileSync(used, 'utf-8')).toBe('asset')
   })
 })

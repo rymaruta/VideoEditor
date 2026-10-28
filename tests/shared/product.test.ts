@@ -110,7 +110,7 @@ describe('製品の身元は product.json の1か所から', () => {
       expect.arrayContaining([
         'resources/**',
         'node_modules/ffmpeg-static/**',
-        'node_modules/ffprobe-static/**',
+        'node_modules/@derhuerst/ffprobe-static/**',
         'node_modules/onnxruntime-node/**',
         'node_modules/node-llama-cpp/**',
         'node_modules/@node-llama-cpp/**',

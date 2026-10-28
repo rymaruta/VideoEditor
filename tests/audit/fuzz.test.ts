@@ -28,7 +28,7 @@ import {
   unionRanges,
   type CameraSeg
 } from '@shared/roughCut/overrides'
-import { autoTelopKey } from '@shared/telop/manual'
+import { MIN_CARVED_SEC, autoTelopKey } from '@shared/telop/manual'
 import { markIn, markOut, rippleDelete } from '@renderer/lib/editCommands'
 import {
   cov,
@@ -75,6 +75,16 @@ function voiceOverlap(pp: {
   }
   return out
 }
+
+/**
+ * 窓 [lo, hi) の境をまたぎ、窓の中に掛かる所が 0.3 秒(MIN_CARVED_SEC)未満のテロップ。境で切ると読めない
+ * 切れ端になるので、境で続く同じ枚とつながらなければ捨てる(projectStore の dropTelopSlivers)。時刻の
+ * 合併の確かめでは、前後どちらの企画でも数えない
+ */
+const shortAtEdge = (x: { startTime: number; endTime: number }, lo: number, hi: number) =>
+  (x.startTime < lo - 1e-6 || x.endTime > hi + 1e-6) &&
+  Math.min(hi, x.endTime) - Math.max(lo, x.startTime) < MIN_CARVED_SEC - 1e-6
+
 describe('audit fuzz', () => {
   for (const seed0 of SEEDS)
     it(`seed ${seed0}`, async () => {
@@ -301,6 +311,8 @@ describe('audit fuzz', () => {
               unionRanges(
                 pp.textOverlays
                   .filter((x) => x.utteranceId)
+                  // 境(範囲の頭)で切って短くなる所(0.3 秒未満)は、つながらなければ一瞬出るだけなので捨てる(数えない)
+                  .filter((x) => !shortAtEdge(x, lo, hi))
                   .map((x) => ({ start: Math.max(lo, x.startTime), end: Math.min(hi, x.endTime) }))
                   .filter((x) => x.end > x.start + 1e-6)
               )
@@ -440,6 +452,8 @@ describe('audit fuzz', () => {
                 unionRanges(
                   pp.textOverlays
                     .filter((x) => x.utteranceId)
+                    // ロックの境で切って短くなる所(0.3 秒未満)は、つながらなければ一瞬出るだけなので捨てる(数えない)
+                    .filter((x) => !shortAtEdge(x, w.start, w.end))
                     .map((x) => ({
                       start: Math.max(w.start, x.startTime) - w.start,
                       end: Math.min(w.end, x.endTime) - w.start

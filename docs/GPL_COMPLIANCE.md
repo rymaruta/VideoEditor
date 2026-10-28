@@ -4,7 +4,8 @@
 
 ## 1. 方針(決定)
 
-- 動画・音声の読み書きには、GPL の **ffmpeg / ffprobe の実行ファイル**(npm の `ffmpeg-static`・`ffprobe-static`)を
+- 動画・音声の読み書きには、GPL の **ffmpeg / ffprobe の実行ファイル**(npm の `ffmpeg-static`・`@derhuerst/ffprobe-static`。
+  2 つは ffmpeg-static の同じリリースが配る、同じビルド)を
   **アプリとは別の実行ファイルとして同梱し、別のプロセスとして呼び出す**(集合物。アプリ本体のコードは GPL にしない)。
   - アプリは ffmpeg を `child_process` で起動して引数を渡すだけで、ffmpeg のライブラリをリンクしない
   - 実行ファイルには手を加えない(配られたものをそのまま入れる)。利用者はインストール先の
@@ -87,16 +88,20 @@ npm run gpl-sources                   # dist/gpl-sources/ にアーカイブを�
 | xvid | 1.3.7 | downloads.xvid.com |
 | rubberband | 1.8.2 | breakfastquay.com |
 | frei0r | 1.6.1-2(Debian) | snapshot.debian.org(orig + debian.tar.xz) |
-| FFmpeg(ffprobe 用) | 4.0.2 | https://ffmpeg.org/releases/ffmpeg-4.0.2.tar.xz |
+| FFmpeg(ffprobe 用) | 7.0.2(ffmpeg と同じビルド。取得は 1 回) | https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz |
 
 **取れなかったもの(配布の前に片付ける):**
 
 - **vid.stab**: Linux 版のビルド(John Van Sickle)の README の版は `1.20` で、vid.stab のタグと対応しない。
   ビルドした人に版を問い合わせて `--source vidstab=<url>` で与える
-- **ffprobe の GPL のライブラリ一式**: `ffprobe-static` の ffprobe は **ffmpeg とは別のビルド**(Linux 版は 4.0.2、
-  2018 年)で、ライブラリの版を示す README が無い。x264 などの版を決められない
-  → **推奨**: ffprobe を ffmpeg と同じビルドのもの(ffmpeg-static の同じリリースが配る ffprobe)に揃える。
-  そうすれば 1 組のソースで両方を賄え、ffprobe 4.0.2 という古い版も無くなる(コードの変更が要るので、持ち主が決める)
+- ~~ffprobe の GPL のライブラリ一式~~(2026-10-28 に片付けた): 前の `ffprobe-static`(3.1.0)の ffprobe は
+  ffmpeg とは別のビルド(Linux 版は 4.0.2、2018 年)で、ライブラリの版を決められなかった。
+  ffprobe を **`@derhuerst/ffprobe-static`**(ffmpeg-static と同じリポジトリ・同じリリース b6.1.1 が配る ffprobe。
+  作者も ffmpeg-static と同じ)に替えた。どの OS でも ffmpeg と ffprobe は同じビルド(Linux 7.0.2・Windows 6.1.1
+  gyan.dev・macOS は evermeet / osxexperts。各 OS の ffmpeg と ffprobe の configure が同じことを確かめた)。
+  `npm run gpl-sources` は、版と configure が同じなら ffprobe にも ffmpeg の x264 の印と README を使い、同じソースは
+  1 回だけ取る(Debian の frei0r も)。npm の包みは今の PC 用の 1 つだけを落とすので、全 OS 分の 4.0.2
+  (node_modules で約 340MB)も無くなった
 
 ### Windows 版について
 
@@ -124,7 +129,7 @@ GPL の「対応するソース」は実行ファイル全体のソースを指�
 1. 販売者の名義(`src/shared/product.json` の `vendor` と `package.json` の `author`)は `VideoEditor`、
    ソースの入手先(`sourceOfferUrl`)は https://github.com/rymaruta/VideoEditor/releases、連絡先(`vendorEmail`)は
    使わない(空文字。`package.json` の `author` にも email を置かない)。2026-10-28 に決定済み
-2. 上の「取れなかったもの」を片付ける(vid.stab の版、ffprobe を揃えるか)
+2. 上の「取れなかったもの」を片付ける(vid.stab の版)
 3. 配布する OS ごとに `npm run gpl-sources` を走らせ、できたアーカイブと `.sha256` を、**同じ版のインストーラと同じ
    GitHub の Releases のリリース**に置く(製品の版・ffmpeg の版ごとに。インストーラを置いている間はソースも消さない)。
    **Windows 版は `v*` のタグを push すると `.github/workflows/release.yml` が自動でする**(Windows で `npm run gpl-sources` を

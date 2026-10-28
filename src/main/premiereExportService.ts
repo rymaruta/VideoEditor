@@ -1,16 +1,18 @@
 import { spawn } from 'child_process'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   renameSync,
   rmSync,
   statfsSync,
+  statSync,
   writeFileSync
 } from 'fs'
 import { copyFile } from 'fs/promises'
-import { pathKey } from './exportOutputGuard'
+import { isSamePath } from './exportOutputGuard'
 import { tmpdir } from 'os'
 import { basename, dirname, extname, join } from 'path'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
@@ -48,6 +50,8 @@ export interface PremiereExportDeps {
   probeChannels?: (filePath: string) => Promise<number | undefined>
   /** 書き出し先の空き容量(バイト)。試験で差し替える */
   freeBytes?: (dir: string) => number
+  /** PNG の入れ替え(試験で途中の失敗を起こすために差し替える) */
+  swapPngs?: typeof swapInTelopPngs
 }
 
 /** 透過の PNG を写すとき、何枚ごとに中止を見て進み具合を出すか */
@@ -78,26 +82,96 @@ export function existingPremiereSidecars(xmlPath: string): string[] {
 
 const TELOP_PNG = /^telop_\d{6}\.png$/i
 
-/** 前回の書き出しの PNG(この書き出しが付ける名前のものだけ)を消す */
-function clearOldTelopPngs(dir: string): void {
-  if (!existsSync(dir)) return
-  for (const name of readdirSync(dir))
-    if (TELOP_PNG.test(name)) rmSync(join(dir, name), { force: true })
+/**
+ * 今回の PNG(一時フォルダ `stage` の中)を、本来のフォルダ `dir` へ入れ替える。
+ * 前回の `telop_*.png` は消さずに隣の退避フォルダへ移してから入れ、途中で失敗したら元に戻す
+ * (前は前回の分を先に消してから 1 枚ずつ移していたので、途中で失敗すると前回の分は消え、今回の分は一時フォルダごと
+ *  消され、前回の XML が消えた・入れ替わった PNG を指したまま残った)。
+ * 返す `commit` で退避した前回の分を消し、`rollback` で元に戻す(SRT の置き換えが失敗したとき)。
+ * ほかの名前のファイル・`telop_*.png` という名前のフォルダには触らない。
+ */
+export function swapInTelopPngs(
+  stage: string,
+  dir: string,
+  move: (from: string, to: string) => void = renameSync
+): { commit: () => void; rollback: () => void } {
+  mkdirSync(dir, { recursive: true })
+  const backup = mkdtempSync(`${dir}.previous-`)
+  const movedOld: string[] = []
+  const movedNew: string[] = []
+  const rollback = (): void => {
+    // 戻すのも失敗しうる(ディスクが外れたなど)。できる所まで戻し、戻せなければ退避フォルダは残す(前回の PNG を失わない)
+    let restored = true
+    for (const name of movedNew.splice(0).reverse()) {
+      try {
+        renameSync(join(dir, name), join(stage, name))
+      } catch {
+        restored = false
+      }
+    }
+    for (const name of movedOld.splice(0).reverse()) {
+      try {
+        renameSync(join(backup, name), join(dir, name))
+      } catch {
+        restored = false
+      }
+    }
+    if (restored) rmSync(backup, { recursive: true, force: true })
+  }
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!TELOP_PNG.test(name) || lstatSync(join(dir, name)).isDirectory()) continue
+      move(join(dir, name), join(backup, name))
+      movedOld.push(name)
+    }
+    for (const name of readdirSync(stage)) {
+      move(join(stage, name), join(dir, name))
+      movedNew.push(name)
+    }
+  } catch (e) {
+    rollback()
+    throw e
+  }
+  return { commit: () => rmSync(backup, { recursive: true, force: true }), rollback }
+}
+
+/**
+ * テロップの PNG のフォルダ `dir` を作れるか。同じ名前のファイル(フォルダでない物)があると、XML・SRT を書いた
+ * 後で作れずに失敗していた(SRT だけ新しくなる)。書き始める前に止める
+ */
+function assertTelopDirUsable(dir: string): void {
+  let isDir = true
+  try {
+    isDir = statSync(dir).isDirectory()
+  } catch {
+    return // 無ければ作る
+  }
+  if (!isDir)
+    throw new Error(
+      `テロップの PNG を入れるフォルダ「${basename(dir)}」と同じ名前のファイルがあります。` +
+        'XML を別の名前で書き出すか、そのファイルの名前を変えてください'
+    )
 }
 
 /**
  * テロップの PNG のフォルダの `telop_NNNNNN.png` を、この企画の素材として使っていれば、その名前の一覧
- * (片付けで消すと素材が消えるので、書き出しを止める)
+ * (片付けで消すと素材が消えるので、書き出しを止める)。
+ * フォルダは文字列だけでなく実体でも比べる(isSamePath): 大文字小文字を区別しない macOS の既定のディスクで綴りの
+ * 大小が違う・シンボリックリンクを通した、といった「同じフォルダの別の綴り」の素材を見落として消していた
  */
 export function telopPngsUsedAsAssets(
   dir: string,
-  assets: readonly { filePath: string; proxyPath?: string; denoisedFrom?: string }[]
+  assets: readonly {
+    filePath: string
+    proxyPath?: string
+    denoisedFrom?: string
+    proxyBeforeDenoise?: string
+  }[]
 ): string[] {
-  const key = pathKey(dir)
   const out = new Set<string>()
   for (const a of assets)
-    for (const p of [a.filePath, a.proxyPath, a.denoisedFrom])
-      if (p && TELOP_PNG.test(basename(p)) && pathKey(dirname(p)) === key) out.add(basename(p))
+    for (const p of [a.filePath, a.proxyPath, a.denoisedFrom, a.proxyBeforeDenoise])
+      if (p && TELOP_PNG.test(basename(p)) && isSamePath(dirname(p), dir)) out.add(basename(p))
   return [...out]
 }
 
@@ -185,6 +259,8 @@ export async function exportPremiereXml(
   let telopPath: string | undefined
   /** PNG を書いている一時フォルダ(最後に本来のフォルダへ入れ替える) */
   let pngStage: string | null = null
+  /** SRT を書いている一時ファイル(最後に置き換える) */
+  let srtPartial: string | null = null
   try {
     const layer = payload.telopLayer
     if (payload.telopMode !== 'text' && layer && layer.runs.length > 0) {
@@ -196,6 +272,7 @@ export async function exportPremiereXml(
         if (payload.telopMode === 'png') {
           // フォルダの名前は ASCII の決まった後ろ(素材のフォルダに日本語があっても、PNG の名前は短く)
           const dir = sidecars.telopDir
+          assertTelopDirUsable(dir)
           // そのフォルダの telop_*.png を企画の素材として使っていれば、片付けで消さないよう止める
           const used = telopPngsUsedAsAssets(dir, payload.project.assets)
           if (used.length > 0)
@@ -354,15 +431,21 @@ export async function exportPremiereXml(
       ...(telopMedia ? { telopMedia } : {})
     })
     writeFileSync(xmlWritePath, result.xml, 'utf-8')
-    // 既存の字幕の書き出しと同じく BOM 付き(Windows の Premiere・メモ帳で文字化けしない)
-    writeFileSync(srtPath, '﻿' + premiereSrt(v2), 'utf-8')
-    if (pngStage) {
-      // ここまで来たら入れ替える: 前回の telop_*.png を消し、今回の PNG を移す
-      const dir = sidecars.telopDir
-      mkdirSync(dir, { recursive: true })
-      clearOldTelopPngs(dir)
-      for (const name of readdirSync(pngStage)) renameSync(join(pngStage, name), join(dir, name))
+    // 既存の字幕の書き出しと同じく BOM 付き(Windows の Premiere・メモ帳で文字化けしない)。
+    // SRT も一時ファイルに書き、PNG を入れ替えられてから置き換える(PNG の入れ替えが失敗したのに SRT だけ新しく
+    // ならないように)
+    srtPartial = join(dirname(srtPath), `.${basename(srtPath)}.partial`)
+    writeFileSync(srtPartial, '﻿' + premiereSrt(v2), 'utf-8')
+    // ここまで来たら入れ替える: 前回の telop_*.png を退避し、今回の PNG を移す(失敗すれば元に戻す)
+    const swap = pngStage ? (deps.swapPngs ?? swapInTelopPngs)(pngStage, sidecars.telopDir) : null
+    try {
+      renameSync(srtPartial, srtPath)
+    } catch (e) {
+      swap?.rollback()
+      throw e
     }
+    srtPartial = null
+    swap?.commit()
     progress(100, '完了')
     return {
       xmlPath: payload.outputPath,
@@ -373,5 +456,6 @@ export async function exportPremiereXml(
     }
   } finally {
     if (pngStage) rmSync(pngStage, { recursive: true, force: true })
+    if (srtPartial) rmSync(srtPartial, { force: true })
   }
 }

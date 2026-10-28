@@ -23,8 +23,8 @@
 
 - **ffmpeg の実行ファイルは、`npm install` をした Mac の CPU 用の 1 つだけ**(ffmpeg-static は install のときに
   その PC 用を取ってくる)。Intel の Mac で作った dmg を Apple Silicon で動かすと Rosetta 2 が要り、逆は動かない。
-  **Apple Silicon 用と Intel 用は、それぞれの Mac で作る**(universal にはしない)。ffprobe-static は両方を持っている
-- ffprobe(ffprobe-static)は ffmpeg と別のビルド(docs/GPL_COMPLIANCE.md)。Mac の GPL のソース一式も Mac で
+  **Apple Silicon 用と Intel 用は、それぞれの Mac で作る**(universal にはしない)。ffprobe(@derhuerst/ffprobe-static)も同じで、その Mac の CPU 用の 1 つだけ
+- ffprobe(@derhuerst/ffprobe-static)は ffmpeg と同じリリースの同じビルド(docs/GPL_COMPLIANCE.md)。Mac の GPL のソース一式も Mac で
   `npm run gpl-sources` を走らせて作る
 
 ## 2. 確認の手順(Mac が 1 台あればできる)

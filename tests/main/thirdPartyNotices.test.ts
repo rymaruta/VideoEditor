@@ -156,6 +156,25 @@ describe('ライセンス表記の生成: 文書', () => {
     expect(text).toContain('ffmpeg version 7')
     expect(text).toContain('ffprobe version 4')
     expect(text).toContain('GPL3 TEXT')
+    // 同じビルドと分からない ffprobe には「同じビルド」と書かない
+    expect(text).not.toContain('ffmpeg と同じビルド')
+    expect(text).toContain('@derhuerst/ffprobe-static')
+    expect(text).not.toContain('joshwnj/ffprobe-static')
+  })
+
+  it('ffprobe が ffmpeg と同じビルドなら、そう書く(ソースも同じ)', () => {
+    const same = renderNotices({
+      productName: 'App',
+      productVersion: '1.0.0',
+      packages: [],
+      ffmpeg: {
+        ffmpeg: { version: 'ffmpeg version 7.0.2', readme: '', license: 'GPL3 TEXT' },
+        ffprobe: { version: 'ffprobe version 7.0.2', sameBuild: true }
+      },
+      electron: { version: '39.0.0', license: '' },
+      models: []
+    })
+    expect(same).toContain('ffprobe は上の ffmpeg と同じビルドで、対応するソースも同じです')
   })
 
   it('Electron・Chromium・モデル・フォントの欄がある', () => {

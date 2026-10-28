@@ -60,26 +60,24 @@ const FILES = [
 /**
  * ネイティブの部品のうち、作る OS・CPU で使わない物を外す(npm の包みに全 OS・全 CPU 用が入っている物がある)。
  * `${arch}` は electron-builder が作る CPU(x64・arm64 など)に置き換える。`!(...)` は「... 以外」。
- * - ffprobe-static: bin/<OS>/<CPU>/ffprobe(.exe) を全部の OS・CPU 分持っている
  * - onnxruntime-node: bin/napi-v6/<OS>/<CPU>/ を全部の OS・CPU 分持っている。Windows の DirectML(GPU)の
  *   DirectML.dll・dxcompiler.dll・dxil.dll は win32/x64 の中にあり、そのまま入る
  * - @node-llama-cpp/<OS>-<CPU>[-cuda|-cuda-ext|-vulkan]: その OS・CPU の物は GPU 用(CUDA・Vulkan・Metal)も全部残す。
  *   win-arm64・linux-arm64 などは x64 の PC にも入る(package.json の cpu に x64 がある)が、x64 では動かない
- * @param {'win32' | 'linux' | 'darwin'} os ffprobe-static・onnxruntime-node の OS の名前
+ * ffmpeg・ffprobe(ffmpeg-static・@derhuerst/ffprobe-static)は npm install がこの PC 用の 1 つだけを落とすので、絞る物は無い
+ * (前の ffprobe-static 3.x は全 OS・全 CPU 分の 4.0.2 を持っていて、ここで外していた)
+ * @param {'win32' | 'linux' | 'darwin'} os onnxruntime-node の OS の名前
  * @param {'win' | 'linux' | 'mac'} llamaOs @node-llama-cpp の OS の名前
  * @param {boolean} byArch CPU でも絞るか(macOS は universal で両方の CPU を1つにまとめることがあるので絞らない)
  */
 // eslint-disable-next-line @typescript-eslint/explicit-function-return-type -- 型は上の JSDoc(.cjs のため)
 function nativeExcludes(os, llamaOs, byArch) {
-  const ffprobe = 'node_modules/ffprobe-static/bin'
   const ort = 'node_modules/onnxruntime-node/bin/napi-v6'
   const llama = 'node_modules/@node-llama-cpp'
   return [
-    `!${ffprobe}/!(${os}){,/**}`,
     `!${ort}/!(${os}){,/**}`,
     ...(byArch
       ? [
-          `!${ffprobe}/${os}/!(\${arch}){,/**}`,
           `!${ort}/${os}/!(\${arch}){,/**}`,
           `!${llama}/!(${llamaOs}-\${arch}|${llamaOs}-\${arch}-*){,/**}`
         ]
@@ -103,7 +101,7 @@ module.exports = {
   asarUnpack: [
     'resources/**',
     'node_modules/ffmpeg-static/**',
-    'node_modules/ffprobe-static/**',
+    'node_modules/@derhuerst/ffprobe-static/**',
     'node_modules/onnxruntime-node/**',
     'node_modules/node-llama-cpp/**',
     'node_modules/@node-llama-cpp/**',
