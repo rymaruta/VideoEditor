@@ -8,8 +8,8 @@
 1. リポジトリのブランチ `claude/video-editing-app-ivwvqp` を取得し、`npm install` → `npm run build:win`
    - 販売者・連絡先・GPL のソースの入手先(`src/shared/product.json` の `vendor`・`vendorEmail`・`sourceOfferUrl`)が
      未定(`TBD`)の間は `build:win` が止まる(配布用のため)。確認だけなら `npm run build:win:test` で
-     `dist/win-unpacked/Tsunagi.exe` を作り、それを起動する(インストーラは作らない)
-2. `dist/Tsunagi-1.0.0-setup.exe`(名前は product.json の製品名) を実行してインストールする
+     `dist/win-unpacked/VideoEditor.exe` を作り、それを起動する(インストーラは作らない)
+2. `dist/VideoEditor-1.0.0-setup.exe`(名前は product.json の製品名) を実行してインストールする
 3. 起動できること(初回は「ファイル > 新しい回を作る…」から始める)
 
 ## 2. 1本目: 本物のロケ素材で自動編集を通す

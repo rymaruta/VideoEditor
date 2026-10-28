@@ -8,8 +8,8 @@
 - `electron-builder.cjs` の `mac` の設定: 利用目的の文(書類・ダウンロード・デスクトップ・外付け・ネットワークの
   フォルダ。日本語と英語)、`build/entitlements.mac.plist`(JIT など Electron に要る権限)、`notarize: false`
 - 窓は `titleBarStyle: hiddenInset`(信号のボタンの分を帯で空ける)
-- メニュー: 先頭に製品名の欄(「Tsunagi について」「Tsunagi を隠す ⌘H」「ほかを隠す ⌥⌘H」「すべてを表示」
-  「Tsunagi を終了 ⌘Q」)。キーの表示は ⌘ ⌥ ⇧
+- メニュー: 先頭に製品名の欄(「VideoEditor について」「VideoEditor を隠す ⌘H」「ほかを隠す ⌥⌘H」「すべてを表示」
+  「VideoEditor を終了 ⌘Q」)。キーの表示は ⌘ ⌥ ⇧
 - 書き出しの GPU は NVIDIA の NVENC だけなので、Mac は CPU(x264)で書き出す。環境チェックは VideoToolbox を試す
 - ローカル AI は node-llama-cpp が Metal を選ぶ(Apple Silicon は GPU と PC のメモリが共有。判定はそれを考える)
 - 文字起こしは CPU
@@ -31,8 +31,8 @@
 
 ```
 npm ci
-npm run build:unpack          # 署名なしで dist/mac*/Tsunagi.app を作る(配布の検査はしない)
-open dist/mac-arm64/Tsunagi.app   # Intel の Mac は dist/mac/
+npm run build:unpack          # 署名なしで dist/mac*/VideoEditor.app を作る(配布の検査はしない)
+open dist/mac-arm64/VideoEditor.app   # Intel の Mac は dist/mac/
 ```
 
 起動する・素材を読み込める・書き出せる・ヘルプ > 環境チェック… が終わる、を確かめる。署名していないので、
@@ -55,9 +55,9 @@ Mac で配る(ダウンロードしたものを Gatekeeper に止められずに
 5. `npm run build:mac`(販売者・連絡先・ソースの入手先が決まっていないと止まる)
 6. 確かめる:
    ```
-   spctl -a -vvv -t install dist/Tsunagi-1.0.0.dmg          # accepted / source=Notarized Developer ID
-   codesign --verify --deep --strict --verbose=2 dist/mac-arm64/Tsunagi.app
-   xcrun stapler validate dist/Tsunagi-1.0.0.dmg
+   spctl -a -vvv -t install dist/VideoEditor-1.0.0.dmg          # accepted / source=Notarized Developer ID
+   codesign --verify --deep --strict --verbose=2 dist/mac-arm64/VideoEditor.app
+   xcrun stapler validate dist/VideoEditor-1.0.0.dmg
    ```
    別の Mac にダウンロードして(ブラウザ経由で隔離の印を付けて)開けること、書き出し(ffmpeg の起動)・
    ローカル AI(Metal)・文字起こし・顔の検出が動くことを確かめる。hardened runtime で ffmpeg などが起動できない・

@@ -123,7 +123,7 @@ describe('GPL のソース一式: 集める物の一覧', () => {
 
   it('MANIFEST に取得元と SHA-256、未取得の物を書く', () => {
     const text = renderManifest({
-      productName: 'Tsunagi',
+      productName: 'VideoEditor',
       productVersion: '1.0.0',
       platform: 'win32-x64',
       plans: [plan],
@@ -138,7 +138,7 @@ describe('GPL のソース一式: 集める物の一覧', () => {
       ],
       createdAt: '2026-10-23T00:00:00Z'
     })
-    expect(text).toContain('Tsunagi 1.0.0')
+    expect(text).toContain('VideoEditor 1.0.0')
     expect(text).toContain(`SHA-256: ${'ab'.repeat(32)}`)
     expect(text).toContain('取得元: https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz')
     expect(text).toContain('(未取得')

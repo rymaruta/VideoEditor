@@ -240,7 +240,7 @@ describe('環境チェック: 結果の組み立てと伏せ字', () => {
     let t = Date.parse('2026-10-23T00:00:00Z')
     const result = await runEnvCheck({
       run: fakeFfmpeg([]),
-      app: { product: 'Tsunagi', version: '1.0.0', electron: '39.2.6', chrome: '142' },
+      app: { product: 'VideoEditor', version: '1.0.0', electron: '39.2.6', chrome: '142' },
       gpuInfo: async () => ({
         gpuDevice: [{ vendorId: 0x10de, active: true, deviceString: 'NVIDIA GeForce RTX 4070' }],
         auxAttributes: { videoMemory: 12282 }
@@ -324,8 +324,8 @@ describe('環境チェック: 結果の組み立てと伏せ字', () => {
     expect(text).toContain('DirectML(GPU) → CPU')
     expect(text).toContain('自動では送られません')
     expect(envCheckSections(result).map((s) => s.title)[0]).toBe('PC')
-    expect(envCheckFileName('Tsunagi', new Date(2026, 9, 23, 9, 5))).toBe(
-      'Tsunagi-環境チェック-20261023-0905.txt'
+    expect(envCheckFileName('VideoEditor', new Date(2026, 9, 23, 9, 5))).toBe(
+      'VideoEditor-環境チェック-20261023-0905.txt'
     )
   })
 
@@ -353,7 +353,7 @@ describe('環境チェック: 止める・断る・GPU の情報の上限(監査
   type Deps = Parameters<typeof runEnvCheck>[0]
   const baseDeps = (over: Partial<Deps> = {}): Deps => ({
     run: fakeFfmpeg([]),
-    app: { product: 'Tsunagi', version: '1.0.0', electron: '39', chrome: '142' },
+    app: { product: 'VideoEditor', version: '1.0.0', electron: '39', chrome: '142' },
     gpuInfo: async () => ({ gpuDevice: [{ vendorId: 0x10de, active: true, deviceString: 'RTX' }] }),
     gpuFeatures: () => ({}),
     localAi: vi.fn(async () => ({ ok: true, device: 'cpu' })),

@@ -1,4 +1,4 @@
-# Tsunagi(つなぎ)
+# VideoEditor
 
 製品名は `src/shared/product.json` の1か所で決める(このファイルの見出しは手で合わせる)。
 

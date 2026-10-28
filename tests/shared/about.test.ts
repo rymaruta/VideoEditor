@@ -5,14 +5,14 @@ describe('バージョン情報(アプリの中のダイアログ)', () => {
   it('見出しは製品名と版、部品の版は 1 行に', () => {
     expect(
       aboutLines({
-        product: 'Tsunagi',
+        product: 'VideoEditor',
         version: '1.2.3',
         electron: '39.8.10',
         chrome: '142.0',
         node: '22.1.0'
       })
     ).toEqual({
-      title: 'Tsunagi 1.2.3',
+      title: 'VideoEditor 1.2.3',
       runtime: 'Electron 39.8.10 / Chromium 142.0 / Node.js 22.1.0'
     })
   })

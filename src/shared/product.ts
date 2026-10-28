@@ -5,7 +5,7 @@ import product from './product.json'
  * メニュー・バージョン情報・ファイルの種類の名前・ライセンス表記・インストーラ(`electron-builder.cjs`)・
  * 窓の題名(`electron.vite.config.ts` が index.html に入れる)がここから読む。
  *
- * - 製品名は「Tsunagi」(つなぎ。収録をつないで番組にする)。商標の調査は持ち主の作業(docs/PRODUCT_NAME.md)
+ * - 製品名は product.json の `name`(2026-10-28 に持ち主が決定)。商標の調査は持ち主の作業(docs/PRODUCT_NAME.md)
  * - 販売者(`vendor`・`vendorEmail`)と、GPL のソースの入手先(`sourceOfferUrl`)はまだ未定(`TBD`)。
  *   決まったら `product.json` を直し、`package.json` の `author` も同じ値にする
  *   (試験 `tests/shared/product.test.ts` が食い違いを止める)。未定のままでは配布用のビルド

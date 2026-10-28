@@ -26,12 +26,12 @@ const builder = createRequire(__filename)(join(root, 'electron-builder.cjs')) as
 }
 
 describe('製品の身元は product.json の1か所から', () => {
-  it('製品名は Tsunagi(product.json から読む)', () => {
+  it('製品名は VideoEditor(product.json から読む)', () => {
     const json = JSON.parse(readFileSync(join(root, 'src/shared/product.json'), 'utf-8')) as Record<
       string,
       string
     >
-    expect(PRODUCT_NAME).toBe('Tsunagi')
+    expect(PRODUCT_NAME).toBe('VideoEditor')
     expect(PRODUCT_NAME).toBe(json.name)
     expect(PRODUCT_VENDOR_EMAIL).toBe(json.vendorEmail)
     expect(SOURCE_OFFER_URL).toBe(json.sourceOfferUrl)
