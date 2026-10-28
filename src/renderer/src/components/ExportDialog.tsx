@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { usePresetStore } from '../store/presetStore'
-import { useSettingsStore, type ExportLoudness } from '../store/settingsStore'
+import { useSettingsStore, type ExportLoudness, type VerticalFraming } from '../store/settingsStore'
+import { prepareVerticalFill } from '../lib/verticalFraming'
 import { useMenuCommand } from '../lib/menuCommands'
 import { formatIpcError } from '../lib/ipcError'
 import { formatTimecode } from '../lib/timelineRuler'
@@ -386,6 +387,8 @@ export function ExportDialog(): React.JSX.Element | null {
   const loudness = useSettingsStore((s) => s.exportLoudness)
   const setLoudness = useSettingsStore((s) => s.setExportLoudness)
   const engine = useSettingsStore((s) => s.exportEngine)
+  const verticalFraming = useSettingsStore((s) => s.verticalFraming)
+  const setVerticalFraming = useSettingsStore((s) => s.setVerticalFraming)
   const setEngine = useSettingsStore((s) => s.setExportEngine)
   const openFolderAfter = useSettingsStore((s) => s.exportOpenFolderAfter)
   const setOpenFolderAfter = useSettingsStore((s) => s.setExportOpenFolderAfter)
@@ -593,8 +596,18 @@ export function ExportDialog(): React.JSX.Element | null {
   async function runOne(
     job: ExportJob,
     outputPath: string
-  ): Promise<{ success: boolean; rangeStartSec?: number }> {
+  ): Promise<{ success: boolean; rangeStartSec?: number; exported: Project }> {
     setProgress({ percent: 0, stage: '準備中' })
+    // 縦(9:16)で書き出すときは、既定で横長の絵を人物に寄せて縦いっぱいに切り出す(書き出し用の写しだけ。
+    // 企画のクリップは変えない)。設定で「上下に黒帯」を選べば、今までどおり縮めて収める
+    let source = project
+    if (job.aspectRatio === '9:16' && job.format !== 'wav' && verticalFraming === 'fill') {
+      setProgress({ percent: 0, stage: '人物の位置を探しています' })
+      const fill = await prepareVerticalFill(project, job.range, (done, total) =>
+        setProgress({ percent: 0, stage: `人物の位置を探しています(${done}/${total})` })
+      )
+      source = fill.project
+    }
     // 音声だけのときは絵が無いので、テロップは描かない。範囲だけのときは、その範囲(繋ぎのぶん広がる)に
     // 掛かるテロップだけを描く(全部を描くと長尺で時間と一時ファイルが無駄になる)
     const telopLayer =
@@ -603,13 +616,13 @@ export function ExportDialog(): React.JSX.Element | null {
         : await telopLayerFor(
             job.aspectRatio,
             job.resolutionHeight,
-            job.range ? telopsNear(project, job.range) : project
+            job.range ? telopsNear(source, job.range) : source
           )
     try {
       // 描画のあいだに中止を押されていたら、書き出しを始めない(main 側の中止は、始まる前だと効かない)
       if (abortRef.current?.signal.aborted) throw new Error('EXPORT_CANCELED')
-      return await window.api.exportProject({
-        project,
+      const result = await window.api.exportProject({
+        project: source,
         aspectRatio: job.aspectRatio,
         resolutionHeight: job.resolutionHeight,
         quality: job.quality,
@@ -621,6 +634,7 @@ export function ExportDialog(): React.JSX.Element | null {
         format: job.format,
         ...(job.range ? { range: job.range } : {})
       })
+      return { ...result, exported: source }
     } finally {
       // 層の画像(main の一時フォルダ。長尺の 4K で数 GB)は、書き出しに渡らなかったときもここで片付ける
       // (書き出しに渡ったぶんは main が終わりに片付けている。2回目は何もしない)
@@ -667,16 +681,15 @@ export function ExportDialog(): React.JSX.Element | null {
       window.api.notifyDone('書き出しが終わりました', outputPath)
       // 書き出した動画をそのまま点検する(黒味・フリーズ・無音・ラウドネス・テロップ)
       if (sameProject && qcAfter)
-        void useQcStore
-          .getState()
-          .run(
-            outputPath,
-            loudness,
-            project,
-            job.range && result.rangeStartSec !== undefined
-              ? { ...job.range, exportStart: result.rangeStartSec }
-              : undefined
-          )
+        void useQcStore.getState().run(
+          outputPath,
+          loudness,
+          // 書き出した写し(縦の切り出しで発言テロップの位置を変えたもの)で確かめる
+          result.exported,
+          job.range && result.rangeStartSec !== undefined
+            ? { ...job.range, exportStart: result.rangeStartSec }
+            : undefined
+        )
       if (openFolderAfter) await window.api.showItemInFolder(outputPath).catch(() => {})
     } catch (e) {
       const message = formatIpcError(e)
@@ -1245,6 +1258,20 @@ export function ExportDialog(): React.JSX.Element | null {
                       </Select>
                     </FieldRow>
                     <FieldRow label="解像度">{resolutionSelect}</FieldRow>
+                    {project.aspectRatio === '9:16' && !videoOff && (
+                      <FieldRow label="縦の画">
+                        <Select
+                          aria-label="縦の画"
+                          value={verticalFraming}
+                          disabled={running}
+                          title="横長の素材を縦で書き出すときの収め方。人がクリップに決めた切り抜きはそのまま使います"
+                          onChange={(e) => setVerticalFraming(e.target.value as VerticalFraming)}
+                        >
+                          <option value="fill">人物に寄せて切り出す(画面いっぱい)</option>
+                          <option value="letterbox">横の絵をそのまま(上下に黒帯)</option>
+                        </Select>
+                      </FieldRow>
+                    )}
                     <FieldRow label="フレームレート">
                       <Fixed value={`${displayFps(fps)} fps`} note="素材と同じ" />
                     </FieldRow>

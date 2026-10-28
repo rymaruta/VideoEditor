@@ -51,3 +51,15 @@ export function newOverlayRange(
   const endTime = Math.max(startTime + MIN_OVERLAY_DURATION, Math.min(startTime + length, total))
   return { startTime, endTime }
 }
+
+/**
+ * テロップの設定欄(本文の欄があればそこ)を、区画の中で見える所へ送る。狭い区画では設定欄が一覧の下に
+ * 並ぶので、一覧の行を選んでも本文を直す欄が区画の外に隠れていた(試し編集 第2回)
+ */
+export function revealTelopDetail(
+  pane: Pick<Element, 'querySelector' | 'scrollIntoView'> | null
+): void {
+  if (!pane) return
+  const field = pane.querySelector('textarea')
+  ;(field ?? pane).scrollIntoView({ block: 'nearest' })
+}

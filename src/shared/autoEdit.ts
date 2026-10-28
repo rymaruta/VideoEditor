@@ -76,6 +76,16 @@ export interface AutoEditDecisions {
    */
   colorDone?: string
   /**
+   * SE・BGM・CG の工程の終わり方と結果の文。番組素材フォルダが未設定で省いた回・置く物が無かった回は
+   * 自動のトラックが残らないので、開き直すと「待機」になり「93% · 13 / 14 工程」と出ていた(試し編集 第2回)
+   */
+  soundDone?: { state: 'done' | 'skipped'; note: string }
+  /**
+   * 演出テロップの提案を AI に頼まずに省いたときの結果の文(AI を使わない設定など)。開き直しても「省略」と出す
+   * (「済み」にはしない。AI を使える設定にして作り直せば頼む)
+   */
+  effectsSkipped?: string
+  /**
    * 範囲だけ自動編集した所(共通の時刻。新しいものが後ろ)。全体を作り直すと、ここも作り直されることを
    * 作り直す前に知らせる(残したい所はロックする)。全体を作り直したら空にする
    */
@@ -241,6 +251,20 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
     ...(carriedTelops.length > 0 ? { carriedTelops } : {}),
     ...(sync ? { sync } : {}),
     ...(str(raw.colorDone) ? { colorDone: raw.colorDone } : {}),
+    ...(typeof raw.effectsSkipped === 'string' ? { effectsSkipped: raw.effectsSkipped } : {}),
+    ...(raw.soundDone &&
+    typeof raw.soundDone === 'object' &&
+    ((raw.soundDone as { state?: unknown }).state === 'done' ||
+      (raw.soundDone as { state?: unknown }).state === 'skipped')
+      ? {
+          soundDone: {
+            state: (raw.soundDone as { state: 'done' | 'skipped' }).state,
+            note: str((raw.soundDone as { note?: unknown }).note)
+              ? (raw.soundDone as { note: string }).note
+              : ''
+          }
+        }
+      : {}),
     ...(rangeRuns.length > 0 ? { rangeRuns } : {})
   }
 }

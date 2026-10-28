@@ -59,6 +59,23 @@ export interface SceneOptions {
   minTailSec?: number
 }
 
+/**
+ * 発話の文が、続きのある形で終わっているか(「…というのは」「…ですが」「…して」)。音声認識は声の間で発話を
+ * 区切るので、1つの文が2つの発話に分かれる。そこで場面を分けると、残した場面が文の途中から始まった
+ * (試し編集 第2回: 質問「思い切って10%価格を上げたというのは / ものすごい挑戦だったというふうに思うんです」の
+ * 間で分かれ、前の場面を落とした仕上がりが「ものすごい挑戦だった…」から始まった)
+ */
+export function continuesSentence(text: string): boolean {
+  const t = text.replace(/[\s\u3000]+$/u, '')
+  if (/[。．.!?！？]$/u.test(t)) return false
+  return /(?:[のにでとも]は|[をがてでにとし]|けど|けれど(?:も)?|から|ので|のに|ながら|たり|[、,，])$/u.test(
+    t
+  )
+}
+
+/** 長さで分けるとき、文の途中でも分けてよい間(秒)。これだけ黙っていれば話の切れ目とみなす */
+const LONG_PAUSE_SEC = 3
+
 export function buildScenes(
   lines: readonly TimedLine[],
   range: { start: number; end: number },
@@ -81,7 +98,13 @@ export function buildScenes(
     if (g) {
       const gEnd = ends.get(g) ?? -Infinity
       const gap = l.start - gEnd
-      const long = gEnd - g[0].start >= maxScene
+      const len = gEnd - g[0].start
+      // 長さで分けるのは、文の切れ目(続きのある形で終わっていない)か、長めの間のある所だけ。
+      // 長さの目安の倍を超えたら、文の途中でも分ける(場面が際限なく長くならないように)
+      const last = g[g.length - 1]
+      const long =
+        len >= maxScene &&
+        (len >= maxScene * 2 || gap >= LONG_PAUSE_SEC || !continuesSentence(last.text))
       if (gap < joinGap && !(long && gap >= 1)) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
@@ -272,6 +295,76 @@ function gameJudgement(s: Scene): SceneJudgement {
   }
 }
 
+/**
+ * 場面の中身の手掛かり(AI を使わない)。判定が場面に同じ点数を付けて区別できないとき、長さに合わせて
+ * 落とす場面をこれで選ぶ(並び順で決めない)。
+ * - density: 話している時間の割合
+ * - speakers: 話者の数(マイク1本では分けられないので 1)
+ * - numbers: 具体的な数字(「5%」「2024年」「10」)の数
+ * - names: 固有名詞らしい言葉(カタカナ語・英字・「○○さん」「○○社長」)の数
+ */
+export interface SceneCues {
+  density: number
+  speakers: number
+  numbers: number
+  names: number
+}
+
+const NUMBER_RE = /[0-9０-９]+(?:[.,．，][0-9０-９]+)?/gu
+const NAME_RE =
+  /[ァ-ヴ][ァ-ヴー]{2,}|[A-Za-z][A-Za-z0-9]+|[一-鿿々]{1,6}(?:さん|社長|会長|部長|様|氏|先生|総理|大臣|株式会社|建機|商事|工業|製作所)/gu
+
+export function sceneCues(s: Scene): SceneCues {
+  const dur = Math.max(0.1, s.end - s.start)
+  const text = s.lines.map((l) => l.text).join(' ')
+  return {
+    density: Math.min(1, s.speech / dur),
+    speakers: new Set(s.lines.map((l) => l.speaker ?? '?')).size,
+    numbers: text.match(NUMBER_RE)?.length ?? 0,
+    names: text.match(NAME_RE)?.length ?? 0
+  }
+}
+
+/**
+ * 場面の中身の濃さ(0〜100。`sceneCues` から)。数字・固有名詞は1分あたりの数で見る(長い場面ほど
+ * 多くなるのを除く)
+ */
+export function sceneSubstance(s: Scene): number {
+  if (s.lines.length === 0) return 0
+  const c = sceneCues(s)
+  const min = Math.max(0.1, s.end - s.start) / 60
+  return (
+    40 * Math.min(1, c.density / 0.7) +
+    15 * Math.min(1, (c.speakers - 1) / 3) +
+    25 * Math.min(1, c.numbers / min / 3) +
+    20 * Math.min(1, c.names / min / 3)
+  )
+}
+
+/** 場面の中身の手掛かりの短い説明(画面の「落とした理由」に添える) */
+export function describeCues(c: SceneCues): string {
+  return `発話 ${Math.round(c.density * 100)}% · 話者 ${c.speakers} · 数字 ${c.numbers} · 固有名詞 ${c.names}`
+}
+
+/** 判定が区別できていないとみなす場面の数の下限 */
+const MIN_SCENES_TO_DISTINGUISH = 3
+
+/**
+ * 判定が場面を区別できていないか(「不要」以外の全部の場面に同じ点数・同じ印を付けた)。区別できていなければ
+ * その点数と印。小さいモデルは全部の場面に「見どころ・85 点」を付けることがある(試し編集 第2回: 9 場面すべて)。
+ * そのまま長さに合わせると、落とす場面が並び順で決まっていた
+ */
+export function indistinctJudgements(
+  judgements: readonly SceneJudgement[]
+): { total: number; score: number; kind: SceneKind } | null {
+  const usable = judgements.filter((j) => j.kind !== 'unneeded')
+  if (usable.length < MIN_SCENES_TO_DISTINGUISH) return null
+  const first = usable[0]
+  return usable.every((j) => j.score === first.score && j.kind === first.kind)
+    ? { total: usable.length, score: first.score, kind: first.kind }
+    : null
+}
+
 export interface Selection {
   kept: string[]
   dropped: { sceneId: string; why: 'unneeded' | 'length' }[]
@@ -384,6 +477,8 @@ export function selectScenes(
   const keep = new Set(candidates.map((s) => s.id))
   let total = candidates.reduce((t, s) => t + estimate(s), 0)
   const score = (s: Scene): number => judge.get(s.id)?.score ?? 50
+  const substanceOf = new Map(scenes.map((s) => [s.id, sceneSubstance(s)]))
+  const substance = (s: Scene): number => substanceOf.get(s.id) ?? 0
   const index = new Map(scenes.map((s, i) => [s.id, i]))
   /** 前後の場面がすでに落ちている(落としても時間の飛ぶ所が増えない) */
   const besideDropped = (s: Scene): boolean => {
@@ -396,10 +491,17 @@ export function selectScenes(
     // 点数の同じ場面どうしでは、(1) 番組の頭と終わり(残っている最初と最後の場面)は残し、
     // (2) 前後がすでに落ちている場面を先に落とす(話の途中へ飛ぶ所を増やさない)。
     // 以前は時刻の早い順に落ちたため、点数がそろう簡易の判定では番組の頭(出演者・場所の紹介)から消えていた
+    // (3) 点数で区別が付かない場面どうしは、中身の手掛かり(発話の密度・話者の数・数字や固有名詞の多さ)の
+    // 少ない方から落とす(AI が全部の場面に同じ点数を付けると、並び順だけで決まっていた)
     const edge = (s: Scene): number => (s === left[0] || s === left[left.length - 1] ? 1 : 0)
     const s = left
       .filter((x) => score(x) === low)
-      .sort((a, b) => edge(a) - edge(b) || Number(besideDropped(b)) - Number(besideDropped(a)))[0]
+      .sort(
+        (a, b) =>
+          edge(a) - edge(b) ||
+          substance(a) - substance(b) ||
+          Number(besideDropped(b)) - Number(besideDropped(a))
+      )[0]
     keep.delete(s.id)
     total -= estimate(s)
     dropped.push({ sceneId: s.id, why: 'length' })

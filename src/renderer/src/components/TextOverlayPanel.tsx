@@ -6,7 +6,7 @@ import { defaultTextStyle, FONT_FAMILY_OPTIONS } from '@shared/textStyle'
 import { speakerColor } from '@shared/speaker'
 import { parseBulkFontSize } from '../lib/textOverlayInput'
 import { clampPage, pageCount, pageForTime, pageSlice } from '../lib/listPaging'
-import { newOverlayRange } from '../lib/textOverlayPlacement'
+import { newOverlayRange, revealTelopDetail } from '../lib/textOverlayPlacement'
 import { formatTimecode } from '../lib/timelineRuler'
 import { frameSeconds } from '@shared/frameRate'
 import { TelopInspector } from './TelopInspector'
@@ -47,6 +47,9 @@ export function TextOverlayPanel(): React.JSX.Element {
   const [multiIds, setMultiIds] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(0)
   const listRef = useRef<HTMLUListElement>(null)
+  const detailRef = useRef<HTMLDivElement>(null)
+  /** 一覧の行を押して選んだ(選んだテロップの設定欄を見える所へ送る) */
+  const revealDetail = useRef(false)
 
   /** 一覧は時刻順(足した順のままだと、後から足したテロップが末尾に紛れる) */
   const sorted = useMemo(
@@ -76,6 +79,13 @@ export function TextOverlayPanel(): React.JSX.Element {
   useEffect(() => {
     listRef.current?.querySelector('.telop-row.selected')?.scrollIntoView({ block: 'nearest' })
   }, [selectedOverlayId, page])
+  // 一覧の行を押して選んだら、本文を直す欄を見える所へ送る(狭い区画では一覧の下に並ぶので、選んでも欄が
+  // 区画の外に隠れていた)
+  useEffect(() => {
+    if (!revealDetail.current) return
+    revealDetail.current = false
+    revealTelopDetail(detailRef.current)
+  }, [selectedOverlayId])
 
   function handleRowClick(e: React.MouseEvent, o: TextOverlay): void {
     if (e.ctrlKey || e.metaKey) {
@@ -97,6 +107,8 @@ export function TextOverlayPanel(): React.JSX.Element {
       return
     }
     setMultiIds(new Set([o.id]))
+    revealDetail.current = o.id !== selectedOverlayId
+    if (o.id === selectedOverlayId) revealTelopDetail(detailRef.current)
     selectOverlay(o.id)
     seekTo(o.startTime)
   }
@@ -274,7 +286,7 @@ export function TextOverlayPanel(): React.JSX.Element {
             )}
           </div>
 
-          <div className="telop-detail-pane">
+          <div className="telop-detail-pane" ref={detailRef}>
             {effectiveMulti ? (
               <BulkStyleEditor
                 overlays={multiOverlays}

@@ -49,6 +49,7 @@ const SHORT_NOTE_KEY = 've-short-note'
 const EXPORT_RESOLUTION_KEY = 've-export-resolution'
 const EXPORT_ENGINE_KEY = 've-export-engine'
 const EXPORT_QUALITY_KEY = 've-export-quality'
+const VERTICAL_FRAMING_KEY = 've-export-vertical-framing'
 const EXPORT_LOUDNESS_KEY = 've-export-loudness'
 const EXPORT_OPEN_FOLDER_KEY = 've-export-open-folder'
 const EXPORT_FORMAT_KEY = 've-export-format'
@@ -211,6 +212,9 @@ function readExportEngine(): ExportEngine {
   }
 }
 
+/** 縦で書き出すときの横長の絵の収め方(`verticalFraming`) */
+export type VerticalFraming = 'fill' | 'letterbox'
+
 export interface EnvKeySources {
   youtubeApiKey: boolean
   jamendoClientId: boolean
@@ -241,6 +245,12 @@ interface SettingsState {
    */
   exportEngine: ExportEngine
   setExportEngine: (engine: ExportEngine) => void
+  /**
+   * 縦(9:16)で書き出すときの横長の絵の収め方。fill = 人物(顔)に寄せて縦いっぱいに切り出す(既定)、
+   * letterbox = 横長の絵をそのまま縮めて上下を黒にする。人がクリップに決めた切り抜きはどちらでもそのまま
+   */
+  verticalFraming: VerticalFraming
+  setVerticalFraming: (framing: VerticalFraming) => void
   /** 書き出しの画質・音量・終わったらフォルダを開くか。書き出し設定を次回も覚えておく */
   exportQuality: QualityPreset
   setExportQuality: (quality: QualityPreset) => void
@@ -398,6 +408,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       // 保存できなくても今回の起動の間は効く
     }
     set({ exportEngine: engine })
+  },
+  verticalFraming: readChoice<VerticalFraming>(VERTICAL_FRAMING_KEY, ['fill', 'letterbox'], 'fill'),
+  setVerticalFraming: (framing) => {
+    writeSetting(VERTICAL_FRAMING_KEY, framing)
+    set({ verticalFraming: framing })
   },
   exportQuality: readChoice<QualityPreset>(
     EXPORT_QUALITY_KEY,

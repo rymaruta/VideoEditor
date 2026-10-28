@@ -9,7 +9,7 @@ import { loadEditXml } from '../lib/editXml'
 import { formatIpcError } from '../lib/ipcError'
 import { DEFAULT_SHOW_STYLE, describeShowStyle, learnShowStyle } from '@shared/style/showStyle'
 import { formatTimecode } from '../lib/timelineRuler'
-import { sourceDuration } from '@shared/ingest/classify'
+import { recordingDuration, sourceDuration } from '@shared/ingest/classify'
 import { SpeechTelopLookSelect } from './SpeechTelopLookSelect'
 import { Segmented } from './AppearanceControls'
 import {
@@ -541,14 +541,7 @@ export function NewEpisodeDialog(): React.JSX.Element | null {
         <div className="dialog-footer">
           <span className="dialog-footer-label">
             素材はコピーせず、元の場所を参照します
-            {sources.length > 0 &&
-              ` · 合計 ${formatTimecode(
-                // 動画から取り出した音声トラックは元の動画と同じ時間なので数えない
-                usable
-                  .filter((s) => !s.files.some((f) => f.track))
-                  .reduce((t, s) => t + sourceDuration(s), 0),
-                30
-              )}`}
+            {sources.length > 0 && ` · 収録の長さ ${formatTimecode(recordingDuration(usable), 30)}`}
           </span>
           <div className="dialog-footer-spacer" />
           <button className="small-button" onClick={() => setOpen(false)}>

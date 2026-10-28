@@ -46,7 +46,8 @@ import {
   isManualEdit,
   mergeManualTelops,
   normalizeAutoSource,
-  rememberEditedTelops
+  rememberEditedTelops,
+  type WithAutoSource
 } from '@shared/telop/manual'
 import type { PlacedCg } from '@shared/finish/cg'
 import type { PlacedSound } from '@shared/finish/sound'
@@ -6399,6 +6400,24 @@ function followMainEdit(
   const videoOverlayTracks = mergeHandTracks(overlaySplit, next.videoOverlayTracks)
   /** 本編から消えて落とした、人が直した自動テロップ(作り直しで戻したとき、直した内容で出す) */
   const droppedEdited: TextOverlay[] = []
+  // 枚の文字を話している時刻(共通の時刻)。切られて残った所に、その枚の言葉が1文字でも残るかを見る
+  const utteranceOf = new Map((next.transcript ?? []).map((u) => [u.id, u]))
+  const spokenCommon = (o: TextOverlay): number[] | null => {
+    const times = (o as TextOverlay & WithAutoSource).autoSource?.times
+    const u = o.utteranceId ? utteranceOf.get(o.utteranceId) : undefined
+    const f = u ? fileOfAsset.get(u.assetId) : undefined
+    return times && times.length > 0 && f ? times.map((t) => toCommon(f, t)) : null
+  }
+  /** 変更前のタイムラインの [a, b) で、`common` の時刻の声が流れていたか */
+  const playedIn = (common: readonly number[], a: number, b: number): boolean =>
+    before.some((sp) => {
+      const lo = Math.max(a, sp.timeline)
+      const hi = Math.min(b, sp.timeline + (sp.end - sp.start))
+      if (hi - lo <= 1e-6) return false
+      const c0 = sp.start + (lo - sp.timeline)
+      const c1 = sp.start + (hi - sp.timeline)
+      return common.some((c) => c >= c0 - 1e-6 && c < c1 + 1e-6)
+    })
   const textOverlays = next.textOverlays.flatMap((o) => {
     if (speedOnly || o.linkedClipId || autoTelopKey(o) === null) return [o]
     // 長さの無いテロップは、その時刻の点を写す(区間として写すと、どこにも写らず消える)
@@ -6410,17 +6429,33 @@ function followMainEdit(
       return []
     }
     // 写した先で続いている所ごとにまとめる(並べ替え・詰めで、元の1枚がいくつかに分かれることがある)
-    const runs: { startTime: number; endTime: number; from: number }[] = []
+    const runs: {
+      startTime: number
+      endTime: number
+      from: number
+      parts: { from: number; to: number }[]
+    }[] = []
     for (const p of pieces) {
       const last = runs[runs.length - 1]
-      if (last && Math.abs(p.at - last.endTime) <= 1e-6) last.endTime = p.at + (p.to - p.from)
-      else runs.push({ startTime: p.at, endTime: p.at + (p.to - p.from), from: p.from })
+      if (last && Math.abs(p.at - last.endTime) <= 1e-6) {
+        last.endTime = p.at + (p.to - p.from)
+        last.parts.push(p)
+      } else
+        runs.push({ startTime: p.at, endTime: p.at + (p.to - p.from), from: p.from, parts: [p] })
     }
     // 使うのは最初の続いた所。ただし、切られて読めない長さ(仮編集の枚の最短 0.3 秒未満)になった所は使わず、
     // 次の読める長さの所を使う。どこも読めない長さなら、本編から消えたのと同じく消す
-    // (詰めで発言の頭や終わりの数フレームだけが残ると、全文が一瞬だけ出た。もとから短い枚はそのまま)
+    // (詰めで発言の頭や終わりの数フレームだけが残ると、全文が一瞬だけ出た。もとから短い枚はそのまま)。
+    // 切られて残った所に、その枚の言葉を話している時刻が1つも無いもの(声より少し前に出した頭・カットの
+    // 切れ目まで延ばした所だけが残った)も使わない。確認の画面で文を削除すると、その文の枚が、声の前に
+    // 出していた 0.3 秒だけ残り、書き出しにも出ていた
+    const whole = o.endTime - o.startTime - 1e-6
+    const common = point ? null : spokenCommon(o)
     const readable = (r: (typeof runs)[number]): boolean =>
-      r.endTime - r.startTime >= MIN_CARVED_SEC - 1e-6
+      r.endTime - r.startTime >= MIN_CARVED_SEC - 1e-6 &&
+      (!common ||
+        r.endTime - r.startTime >= whole ||
+        r.parts.some((p) => playedIn(common, p.from, p.to)))
     const run =
       point || o.endTime - o.startTime < MIN_CARVED_SEC - 1e-6 ? runs[0] : runs.find(readable)
     if (!run) {

@@ -400,6 +400,17 @@ export function sourceDuration(source: Pick<FootageSource, 'files'>): number {
   return source.files.reduce((s, f) => s + (Number.isFinite(f.duration) ? f.duration : 0), 0)
 }
 
+/**
+ * 収録の長さ(秒)の目安。カメラとマイクは同じ時間を同時に録っているので、素材の長さを足さずに一番長い
+ * 素材(機材)の長さにする。動画から取り出した音声トラックは元の動画と同じ時間なので数えない。
+ * 足すと、11 分のカメラと 11 分のピンマイクで「合計 22 分」と出ていた(試し編集 第2回)
+ */
+export function recordingDuration(sources: readonly Pick<FootageSource, 'files'>[]): number {
+  return sources
+    .filter((s) => !s.files.some((f) => f.track))
+    .reduce((m, s) => Math.max(m, sourceDuration(s)), 0)
+}
+
 /** 収録フォルダを読んだ結果 */
 export interface FootageScan {
   root: string

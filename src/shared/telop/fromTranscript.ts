@@ -265,7 +265,7 @@ function spreadZeroWords(out: TimedChar[], words: readonly AsrWord[]): void {
 export function wrapTelopLines(text: string, maxLineChars: number): string[] {
   const chars = [...text]
   let from = 0
-  return balancedLineEnds(chars, maxLineChars)
+  return balancedLineEnds(chars, maxLineChars, undefined, true)
     .map((end) => {
       const line = chars.slice(from, end).join('').trim()
       from = end

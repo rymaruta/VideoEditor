@@ -140,7 +140,7 @@ async function loadTranscriber(): Promise<{ asr: Transcriber; device: AsrDevice 
             type: 'status',
             stage: 'download',
             percent: total > 0 ? (loaded / total) * 100 : 0,
-            note: `モデルをダウンロード中(初回のみ・${(total / 1e9).toFixed(1)}GB)`
+            note: `モデルを読み込み中(初回はダウンロード・${(total / 1e9).toFixed(1)}GB)`
           })
         }
       } as Record<string, unknown>)) as unknown as Transcriber

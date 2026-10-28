@@ -96,6 +96,23 @@ describe('書き出し後の自動確認', () => {
     expect(report?.state).toBe('done')
   })
 
+  it('前の確認を止めたことを、次の確認の結果に残す(試し編集 第2回の不具合 9)', async () => {
+    const api = stubApi({ '/out/YouTube.mp4': measurement(), '/out/short.mp4': measurement() })
+    useQcStore.setState({ report: null })
+    useProjectStore.setState({ project })
+    const first = useQcStore.getState().run('/out/YouTube.mp4', 'off', project)
+    await tick()
+    const second = useQcStore.getState().run('/out/short.mp4', 'off', project)
+    await tick()
+    await tick()
+    api.resolve('/out/short.mp4')
+    await Promise.all([first, second])
+    const report = useQcStore.getState().report
+    expect(report?.path).toBe('/out/short.mp4')
+    expect(report?.state).toBe('done')
+    expect(report?.stopped).toBe('/out/YouTube.mp4')
+  })
+
   it('黒味などの時刻は、繋ぎのぶん短いファイルの秒ではなく、タイムラインの秒で出す', async () => {
     const api = stubApi({ '/a.mp4': measurement([{ start: 3.9, end: 7 }]) })
     useQcStore.setState({ report: null })

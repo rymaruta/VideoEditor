@@ -26,6 +26,11 @@ export interface QcReport {
   issues: QcIssue[]
   measurement: QcMeasurement | null
   error?: string
+  /**
+   * この確認を始めるために止めた、前の書き出しの確認のファイル(書き出しの直後に次の書き出しを始めたとき)。
+   * 止めた確認の結果は出ないので、止めたことを画面に残す
+   */
+  stopped?: string
 }
 
 interface QcState {
@@ -68,6 +73,8 @@ let runToken = 0
 let runCall = 0
 /** 測っている最中の確認(次の確認は、これを止めて終わるのを待ってから始める) */
 let measuring: Promise<unknown> | null = null
+/** 測っている最中の確認のファイル */
+let measuringPath: string | null = null
 
 /**
  * ファイルの秒で返る映像・音声の指摘を、タイムラインの秒へ直す(テロップの指摘・移る先と同じ秒)。
@@ -124,7 +131,9 @@ export const useQcStore = create<QcState>((set, get) => ({
     const project = exported ?? useProjectStore.getState().project
     // 前の書き出しの確認がまだ測っているなら止めて、終わるのを待つ(main は1つずつしか測らないので、
     // 新しい確認は「実行中です」で失敗し、あとから前のファイルの結果で上書きされていた)
+    let stopped: string | undefined
     if (measuring) {
+      stopped = measuringPath ?? undefined
       void window.api.qcCancel()
       await measuring.catch(() => {})
     }
@@ -135,7 +144,14 @@ export const useQcStore = create<QcState>((set, get) => ({
       (i) => !range || (i.end > range.start && i.start < range.end)
     )
     set({
-      report: { path, state: 'run', percent: 0, issues: sortIssues(telop), measurement: null }
+      report: {
+        path,
+        state: 'run',
+        percent: 0,
+        issues: sortIssues(telop),
+        measurement: null,
+        ...(stopped && stopped !== path ? { stopped } : {})
+      }
     })
     const off = window.api.onQcProgress((percent) => {
       if (call !== runCall) return
@@ -145,16 +161,22 @@ export const useQcStore = create<QcState>((set, get) => ({
     try {
       const pending = window.api.qcMeasure(path)
       measuring = pending
+      measuringPath = path
       let measurement: QcMeasurement
       try {
         measurement = await pending
       } finally {
-        if (measuring === pending) measuring = null
+        if (measuring === pending) {
+          measuring = null
+          measuringPath = null
+        }
       }
       // 測っている間に別のプロジェクトを開いた・次の確認が始まったなら、前の結果を書かない
       if (token !== runToken || call !== runCall) return
+      const stoppedNote = get().report?.stopped
       set({
         report: {
+          ...(stoppedNote ? { stopped: stoppedNote } : {}),
           path,
           state: 'done',
           percent: 100,

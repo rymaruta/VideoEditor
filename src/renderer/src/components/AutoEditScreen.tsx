@@ -42,6 +42,7 @@ import {
 } from '../lib/autoEditNext'
 import {
   commonSpan,
+  droppedSceneReason,
   formatDuration,
   overallProgress,
   sceneChips,
@@ -1217,6 +1218,12 @@ export function AutoEditScreen(): React.JSX.Element | null {
                               ))}
                             </span>
                             <span className="form-note structure-reason">{j?.reason}</span>
+                            {!kept && roughCut && (
+                              <span className="form-note structure-dropped-why">
+                                落とした理由:{' '}
+                                {droppedSceneReason(sc, j, judgements, keep[sc.id] === false)}
+                              </span>
+                            )}
                           </span>
                         </li>
                       )
