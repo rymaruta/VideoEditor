@@ -13,7 +13,7 @@ import {
 import { cropObjectPosition } from '@shared/videoFrame'
 import { useMenuCommand } from '../lib/menuCommands'
 import { formatIpcError } from '../lib/ipcError'
-import { formatTimecode } from '../lib/timelineRuler'
+import { formatTimecode, lengthClock } from '../lib/timelineRuler'
 import { buildTimedClips, findTimedClipAt, totalExportDuration } from '../lib/timelineMath'
 import { prepareTelopLayerForExport } from '../lib/telopRaster'
 import type { EpisodeKind } from '@shared/structure/kind'
@@ -165,17 +165,6 @@ function nowSeconds(): number {
 function displayFps(fps: number): string {
   // 29.97 / 59.94 などは小数2桁、整数のレートはそのまま
   return Math.abs(fps - Math.round(fps)) < 0.005 ? String(Math.round(fps)) : fps.toFixed(2)
-}
-
-/** 長さを「5:00」「1:02:03」の形で */
-function clockText(sec: number): string {
-  const v = Math.max(0, Math.round(sec))
-  const h = Math.floor(v / 3600)
-  const m = Math.floor((v % 3600) / 60)
-  const s = v % 60
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`
 }
 
 /** 数とその単位(「460」「MB」)に分ける(要約の欄は数を等幅で出す) */
@@ -1588,7 +1577,7 @@ export function ExportDialog(): React.JSX.Element | null {
                 <div className="ve-export-warn" role="alert">
                   <AlertTriangleIcon width={14} height={14} />
                   <span>
-                    ショートは {SHORT_MAX_SEC} 秒までです(今は {clockText(duration)})。
+                    ショートは {SHORT_MAX_SEC} 秒までです(今は {lengthClock(duration, fps)})。
                     {SHORT_MAX_SEC} 秒以下の範囲を選ぶと書き出せます。
                   </span>
                   <button
@@ -1649,7 +1638,7 @@ export function ExportDialog(): React.JSX.Element | null {
                 <div>
                   <dt>長さ</dt>
                   <dd>
-                    <span className="mono">{clockText(duration)}</span>
+                    <span className="mono">{lengthClock(duration, fps)}</span>
                   </dd>
                 </div>
                 <div>
