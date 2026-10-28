@@ -9,6 +9,22 @@ interface Killable {
 }
 
 const live = new Set<Killable>()
+
+/**
+ * 外部の処理(ffmpeg)を、その場で止める。中止はすべてこれを通す。
+ *
+ * ffmpeg 7 は SIGTERM・SIGINT を受けても、読んでいる入力の終わりまで処理してから終わる
+ * (試し編集 第4回: 前の自動確認を「止めた」のに 20 秒動き続け、次の書き出しが「準備中 0%」で待たされた。
+ * SIGKILL なら 0.01 秒)。止めた処理の出力は使わない(途中のファイルは呼ぶ側が消す)ので、後始末を待たずに止める。
+ * Windows では Node の kill はどのシグナルでも TerminateProcess(すぐ止まる)なので、同じ呼び方でよい
+ */
+export function stopNow(p: Killable): void {
+  try {
+    p.kill('SIGKILL')
+  } catch {
+    // すでに終わっている
+  }
+}
 let shuttingDown = false
 
 /** アプリを閉じている最中か(止めた処理を「失敗したので作り直す」に回さないため) */
@@ -19,11 +35,7 @@ export function isShuttingDown(): boolean {
 /** 登録し、終わったら外す関数を返す。閉じている最中に始まったものは、すぐ止める */
 export function trackProcess(p: Killable): () => void {
   if (shuttingDown) {
-    try {
-      p.kill('SIGKILL')
-    } catch {
-      // すでに終わっている
-    }
+    stopNow(p)
     return () => {}
   }
   live.add(p)
@@ -34,13 +46,7 @@ export function trackProcess(p: Killable): () => void {
 
 export function killLiveProcesses(): void {
   shuttingDown = true
-  for (const p of live) {
-    try {
-      p.kill('SIGKILL')
-    } catch {
-      // すでに終わっている
-    }
-  }
+  for (const p of live) stopNow(p)
   live.clear()
 }
 
@@ -61,11 +67,7 @@ export function trackUntilDone<T extends Watchable>(p: T, events = ['close', 'er
   // 起きた時点で閉じている最中なら、そこで止める(閉じた後に3時間ぶんの無音検出が走り続けていた)
   p.once('start', () => {
     if (!shuttingDown) return
-    try {
-      p.kill('SIGKILL')
-    } catch {
-      // すでに終わっている
-    }
+    stopNow(p)
   })
   return p
 }

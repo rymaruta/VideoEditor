@@ -24,7 +24,7 @@ import { premiereMarkers, premiereSrt } from '@shared/export/premiereMarkers'
 import type { PremiereExportPayload, PremiereExportResult } from '@shared/export/premiereTypes'
 import { safeFileBaseName } from '@shared/fileName'
 import { materializeTelopLayer } from './telopLayerStage'
-import { trackProcess } from './liveProcesses'
+import { stopNow, trackProcess } from './liveProcesses'
 import { describeFfmpegExit } from './ffmpegError'
 
 /**
@@ -267,7 +267,7 @@ function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Pr
       if (tail.length > 200) tail.shift()
     })
     const onAbort = (): void => {
-      child.kill('SIGKILL')
+      stopNow(child)
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     child.on('error', (e) => {

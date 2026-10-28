@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import type { Writable } from 'stream'
-import { trackProcess } from './liveProcesses'
+import { stopNow, trackProcess } from './liveProcesses'
 import {
   ENCODED_LOUDNESS_FILTER,
   OUTPUT_AUDIO_CODEC_ARGS,
@@ -59,7 +59,7 @@ export function meterEncodedAudio(
     )
     const untrack = trackProcess(meter)
     const onAbort = (): void => {
-      meter.kill('SIGKILL')
+      stopNow(meter)
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     // 測る側が先に終わったとき(失敗)の書き込みの失敗は、成否で拾う
@@ -104,12 +104,12 @@ export function meterEncodedAudio(
     feed(meter.stdin, stopFeed.signal).then(
       (ok) => {
         fed = ok
-        if (!ok) meter.kill('SIGKILL')
+        if (!ok) stopNow(meter)
         finish()
       },
       () => {
         fed = false
-        meter.kill('SIGKILL')
+        stopNow(meter)
         finish()
       }
     )
@@ -150,7 +150,7 @@ export function measureEncodedLoudness(
         )
         const untrack = trackProcess(enc)
         const onAbort = (): void => {
-          enc.kill('SIGKILL')
+          stopNow(enc)
         }
         signal?.addEventListener('abort', onAbort, { once: true })
         stop.addEventListener('abort', onAbort, { once: true })

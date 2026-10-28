@@ -26,7 +26,10 @@ vi.mock('../../src/main/ffmpegService', () => ({
   ffmpegPath: 'ffmpeg',
   probeMedia: async () => ({ duration: 10, hasVideo: true, hasAudio: true })
 }))
-vi.mock('../../src/main/liveProcesses', () => ({ trackProcess: () => () => {} }))
+vi.mock('../../src/main/liveProcesses', () => ({
+  trackProcess: () => () => {},
+  stopNow: (p: { kill: (s: string) => unknown }) => p.kill('SIGKILL')
+}))
 
 describe('自動確認を止めたときは「止めた」と返す', () => {
   it('止めた ffmpeg が 255 で終わっても、失敗(255)にしない', async () => {
