@@ -7,7 +7,7 @@ import {
 } from '@shared/telop/avoidFaces'
 import { liftAboveShortsUi, SHORTS_TELOP_BOTTOM } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
-import { projectFrameRate } from '@shared/frameRate'
+import { frameCountForDuration, projectFrameRate } from '@shared/frameRate'
 import { stackTopHeight, type CropWindow, type StackSplit } from '@shared/videoFrame'
 import type { Clip, MediaAsset, Project, TextOverlay } from '@shared/types'
 import type { EpisodeKind } from '@shared/structure/kind'
@@ -429,21 +429,26 @@ export function applyVerticalFill(
       const shots = speakerShots(options.speakers.lines, clipStart, clipEnd, keyOf)
       if (shots.length > 0) {
         switched++
-        // 切り替えの時刻はコマにそろえる(書き出しはクリップの両端をコマに丸める)
-        const snap = (t: number): number => Math.round(t * fps) / fps
-        const cuts = shots.map((s, i) => (i === 0 ? clipStart : snap(s.start)))
+        // 切り替えの時刻はコマにそろえ、素材の位置は書き出しが丸めたクリップの頭から数える。書き出しは
+        // クリップの頭を(タイムラインの累積で)コマに丸めた所から素材を読む(`computeMainTrackLayout`)ので、
+        // 丸める前の頭から数えると、分けた所で素材の位置が最大半コマずれ、音が途切れる・飛ぶ(1本目が
+        // 1.01 秒のとき切り替えの直前に約 10ms の無音、1.0167 秒のとき約 16ms の音飛び)。
+        // 丸めた頭から数えると、分けた後のクリップの頭のタイムラインの時刻も同じコマに丸まり、素材は続く
+        const frameAt = (t: number): number => frameCountForDuration(t, fps) / fps
+        const exportStart = frameAt(clipStart)
+        const sourceAt = shots.map((s, i) =>
+          i === 0 ? c.inPoint : c.inPoint + (frameAt(s.start) - exportStart) * speed
+        )
         return shots
           .map((s, i) => {
-            const a = cuts[i]
-            const b = i + 1 < cuts.length ? cuts[i + 1] : clipEnd
             const person = people[s.key]
             const id = i === 0 ? c.id : `${c.id}~v${i}`
             if (i > 0) originOf.set(id, c.id)
             const piece: Clip = {
               ...c,
               id,
-              inPoint: c.inPoint + (a - clipStart) * speed,
-              outPoint: i + 1 < cuts.length ? c.inPoint + (b - clipStart) * speed : c.outPoint,
+              inPoint: sourceAt[i],
+              outPoint: i + 1 < sourceAt.length ? sourceAt[i + 1] : c.outPoint,
               fillCrop: true,
               cropCenter: { x: person.cx, y: 0.5 }
             }
