@@ -49,6 +49,14 @@ export function TelopToolsBar({ onSelect }: { onSelect: (id: string) => void }):
 
   async function exportSrt(): Promise<void> {
     setMessage(null)
+    // T1 の「目」を閉じていても、明示の操作なので止めない。隠していることだけ確かめる
+    if (
+      useProjectStore.getState().project.telopTrackHidden &&
+      !confirm(
+        'テロップを隠しています(T1 の「目」)。動画の書き出しには出しませんが、字幕ファイル(SRT)には隠したテロップも書き出します。書き出しますか?'
+      )
+    )
+      return
     try {
       const path = await window.api.saveSubtitleFile(
         `${safeFileBaseName(projectName)}.srt`,

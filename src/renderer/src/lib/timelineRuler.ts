@@ -111,27 +111,34 @@ export function formatTimecode(seconds: number, fps: number): string {
 
 /**
  * `formatTimecode` の逆。`時:分:秒:フレーム`(区切りは `:` か `;`)を秒にする。
- * 後ろから詰めて読む(`12:05` は 12 秒 5 フレーム、`1:00:00` は 1 分)。区切りの無い数字だけなら
+ * 後ろから詰めて読む(`12:05` は 12 秒 5 フレーム、`1:00:00` は 1 分)。`.` を含む数は秒(`12.5` は 12.5 秒)。区切りの無い数字だけなら
  * `時分秒フレーム` を右から 2 桁ずつ読む(Premiere と同じ。`100` は 1 秒、`10000` は 1 分)。
  * 読めない・範囲の外(分・秒が 60 以上・フレームがレート以上)は null。
- * 29.97 / 59.94 はドロップフレームの番号として読む(`formatTimecode` と行って戻って同じ時刻)
+ * 29.97 / 59.94 はドロップフレームの番号として読む(`formatTimecode` と行って戻って同じ時刻)。
+ * 飛ばした番号(毎分の頭の `;00`・`;01` など)は、次の有効な番号として読む
  */
 export function parseTimecode(text: string, fps: number): number | null {
   const real = Number.isFinite(fps) && fps > 0 ? fps : 30
   const nominal = Math.round(real)
   const raw = text.trim()
   if (!raw) return null
+  // `.` を含む数は秒(小数)として読む(`12.5` は 12.5 秒)
+  if (/^\d*\.\d+$|^\d+\.$/.test(raw)) {
+    const sec = Number(raw)
+    return Number.isFinite(sec) && sec <= 99 * 3600 ? sec : null
+  }
   let parts: number[]
   if (/^\d+$/.test(raw)) {
     if (raw.length > 8) return null
     const padded = raw.padStart(Math.ceil(raw.length / 2) * 2, '0')
     parts = (padded.match(/\d{2}/g) ?? []).map(Number)
   } else {
-    if (!/^\d{1,2}([:;.]\d{1,2}){0,3}$/.test(raw)) return null
-    parts = raw.split(/[:;.]/).map(Number)
+    if (!/^\d{1,2}([:;]\d{1,2}){0,3}$/.test(raw)) return null
+    parts = raw.split(/[:;]/).map(Number)
   }
   if (parts.length === 0 || parts.length > 4) return null
-  const [f, s = 0, m = 0, h = 0] = [...parts].reverse()
+  const [f0, s = 0, m = 0, h = 0] = [...parts].reverse()
+  let f = f0
   if (f >= nominal || s >= 60 || m >= 60) return null
   const ntsc = Math.abs(real - (nominal * 1000) / 1001) < 0.01
   const dropFrame = (nominal === 30 || nominal === 60) && ntsc
@@ -139,6 +146,11 @@ export function parseTimecode(text: string, fps: number): number | null {
   if (dropFrame) {
     const drop = nominal === 30 ? 2 : 4
     const minutes = h * 60 + m
+    // 毎分の頭の飛ばした番号(10 分ごとを除く)は、次の有効な番号として読む
+    if (s === 0 && f < drop && m % 10 !== 0) {
+      f = drop
+      frame = ((h * 60 + m) * 60 + s) * nominal + f
+    }
     frame -= drop * (minutes - Math.floor(minutes / 10))
   }
   return frame / (ntsc ? real : nominal)
@@ -151,4 +163,21 @@ export function formatShortDuration(seconds: number): string {
   const m = Math.floor((s % 3600) / 60)
   const ss = String(s % 60).padStart(2, '0')
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+}
+
+/**
+ * タイムコードの入力欄で Enter を押したときに決める値。開いたときの表示のまま(打ち変えていない)なら
+ * 'unchanged'(決めない・取り消しの履歴にも積まない)、読めなければ null、読めれば min〜max に収めた秒
+ */
+export function timecodeEntryValue(
+  draft: string,
+  opened: string,
+  fps: number,
+  min: number,
+  max?: number
+): number | null | 'unchanged' {
+  if (draft.trim() === opened.trim()) return 'unchanged'
+  const t = parseTimecode(draft, fps)
+  if (t === null) return null
+  return Math.max(min, max === undefined ? t : Math.min(max, t))
 }

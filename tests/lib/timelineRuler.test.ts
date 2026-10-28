@@ -5,7 +5,8 @@ import {
   parseTimecode,
   rulerStep,
   rulerTicks,
-  rulerTiers
+  rulerTiers,
+  timecodeEntryValue
 } from '@renderer/lib/timelineRuler'
 import { NASTY_NUMBERS } from '../helpers/boundary'
 
@@ -118,7 +119,18 @@ describe('parseTimecode — タイムコードの入力欄', () => {
     expect(parseTimecode(' 00:00:02:00 ', 25)).toBe(2)
   })
   it('読めない・範囲の外は null', () => {
-    for (const bad of ['', 'abc', '00:61:00:00', '00:00:60:00', '00:00:00:30', '1:2:3:4:5', '-1'])
+    for (const bad of [
+      '',
+      'abc',
+      '1a',
+      '00:61:00:00',
+      '00:00:60:00',
+      '00:00:00:30',
+      '1:2:3:4:5',
+      '-1',
+      '-00:00:01:00',
+      '123456789'
+    ])
       expect(parseTimecode(bad, 30)).toBeNull()
   })
   it('formatTimecode と行って戻って同じ(整数・ドロップフレーム・23.976)', () => {
@@ -140,5 +152,49 @@ describe('formatShortDuration — 素材の格子の長さの札', () => {
     expect(formatShortDuration(3725)).toBe('1:02:05')
     expect(formatShortDuration(NaN)).toBe('0:00')
     expect(formatShortDuration(-3)).toBe('0:00')
+  })
+})
+
+describe('タイムコードの入力欄(監査の確かめを取り込んだもの)', () => {
+  const df = 30000 / 1001
+  it('`.` を含む数は秒の小数として読む', () => {
+    expect(parseTimecode('12.5', 30)).toBe(12.5)
+    expect(parseTimecode('1.5', 24)).toBe(1.5)
+    expect(parseTimecode('.5', 30)).toBe(0.5)
+  })
+  it('ドロップフレームで存在しない番号は、次の有効な番号として読む', () => {
+    // 00:01:00;00 と ;01 は飛ばす番号 → 00:01:00;02
+    for (const t of ['00:01:00;00', '00:01:00;01'])
+      expect(formatTimecode(parseTimecode(t, df)!, df)).toBe('00:01:00;02')
+    expect(formatTimecode(parseTimecode('00:01:00;02', df)!, df)).toBe('00:01:00;02')
+    // 10 分ごとは飛ばさない
+    expect(formatTimecode(parseTimecode('00:10:00;00', df)!, df)).toBe('00:10:00;00')
+    // 59.94 は 4 つ飛ばす
+    expect(formatTimecode(parseTimecode('00:01:00;03', 60000 / 1001)!, 60000 / 1001)).toBe(
+      '00:01:00;04'
+    )
+  })
+  it('ドロップフレームの最初の 20 分は、全部のコマで行って戻って同じ', () => {
+    let bad = 0
+    for (let f = 0; f < 30 * 60 * 20; f++) {
+      const back = parseTimecode(formatTimecode(f / df, df), df)!
+      if (Math.round(back * df) !== f) bad++
+    }
+    expect(bad).toBe(0)
+  })
+  it('整数・23.976・範囲の外・レートが壊れているとき', () => {
+    expect(parseTimecode('00:00:01:23', 24)).toBeCloseTo(1 + 23 / 24)
+    expect(parseTimecode('00:00:01:24', 24)).toBeNull()
+    expect(parseTimecode('01:00:00:00', 24000 / 1001)).toBeCloseTo(3600 * 1.001)
+    expect(parseTimecode('99:59:59:29', 30)).toBeCloseTo(99 * 3600 + 59 * 60 + 59 + 29 / 30)
+    expect(parseTimecode('00:00:05:00', NaN)).toBe(5)
+  })
+  it('開いたときのまま Enter を押しても決めない(半端な時刻を丸めて動かさない・取り消しに積まない)', () => {
+    const opened = formatTimecode(9.99, 30)
+    expect(timecodeEntryValue(opened, opened, 30, 0)).toBe('unchanged')
+    expect(timecodeEntryValue(` ${opened} `, opened, 30, 0)).toBe('unchanged')
+    expect(timecodeEntryValue('00:00:05:00', opened, 30, 0)).toBe(5)
+    expect(timecodeEntryValue('00:00:50:00', opened, 30, 0, 20)).toBe(20)
+    expect(timecodeEntryValue('abc', opened, 30, 0)).toBeNull()
   })
 })

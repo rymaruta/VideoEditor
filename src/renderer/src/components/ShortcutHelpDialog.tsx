@@ -5,7 +5,8 @@ import {
   getEditorKeymap,
   isMacPlatform,
   KEYMAP_SCHEME_LABELS,
-  matchesEditorBinding
+  matchesEditorBinding,
+  type KeymapScheme
 } from '../lib/keymap'
 import { shortcutHelpSections, useShortcutHelpStore } from '../lib/shortcutHelp'
 import '../assets/shortcutHelp.css'
@@ -13,12 +14,16 @@ import { DialogHeader } from './DialogHeader'
 
 /**
  * キー操作の一覧(? / Ctrl+/ で開け閉め、Esc・背景で閉じる)。今のキー配置の分だけを出す。
+ * 上の段で、キーの配置(標準・Premiere 式…)と、タイムラインのキーの一覧の帯を切り替えられる。
  * 開いている間は `.modal-backdrop` があるので、編集のキーは裏のタイムラインへ届かない
  */
 export function ShortcutHelpDialog(): React.JSX.Element | null {
   const open = useShortcutHelpStore((s) => s.open)
   const setOpen = useShortcutHelpStore((s) => s.setOpen)
   const scheme = useSettingsStore((s) => s.keymapScheme)
+  const setScheme = useSettingsStore((s) => s.setKeymapScheme)
+  const guideVisible = useSettingsStore((s) => s.shortcutGuideVisible)
+  const setGuideVisible = useSettingsStore((s) => s.setShortcutGuideVisible)
   const backdropRef = useRef<HTMLDivElement>(null)
   useEscapeToClose(backdropRef, () => setOpen(false), open)
 
@@ -60,6 +65,34 @@ export function ShortcutHelpDialog(): React.JSX.Element | null {
           }
           onClose={() => setOpen(false)}
         />
+        {/* キーの配置の選択と、タイムラインのキーの一覧の帯(ここから開ける・切り替えられる) */}
+        <div className="shortcut-help-settings">
+          <label className="shortcut-help-setting">
+            <span>キーの配置</span>
+            <select
+              value={scheme}
+              onChange={(e) => setScheme(e.target.value as KeymapScheme)}
+              aria-label="キーの配置"
+            >
+              {(Object.keys(KEYMAP_SCHEME_LABELS) as KeymapScheme[]).map((k) => (
+                <option key={k} value={k}>
+                  {KEYMAP_SCHEME_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="shortcut-help-setting">
+            <span id="shortcut-guide-label">タイムラインにキーの一覧を出す</span>
+            <button
+              type="button"
+              role="switch"
+              className="ve-switch"
+              aria-checked={guideVisible}
+              aria-labelledby="shortcut-guide-label"
+              onClick={() => setGuideVisible(!guideVisible)}
+            />
+          </label>
+        </div>
         <div className="shortcut-help-body">
           <div className="shortcut-help-grid">
             {sections.map((section) => (

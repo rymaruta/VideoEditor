@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { normalizeLoadedProject, useProjectStore } from '@renderer/store/projectStore'
 import { projectV1ToV2 } from '@shared/sequence/fromV1'
 import {
+  autoBottomHeight,
+  BOTTOM_SHARE,
+  defaultBottomHeight,
   defaultSideWidths,
   NARROW_WINDOW_WIDTH,
   timelineNaturalHeight
@@ -97,5 +100,24 @@ describe('画面の配分の既定', () => {
         lanesHeight: 310
       })
     ).toBe(80 + 310)
+  })
+})
+
+describe('タイムラインの自動の高さ(中身に合わせる。上限は使える高さの半分)', () => {
+  const chrome = 70
+  it('中身が少なければ中身の高さ(残りはプログラムへ)', () => {
+    expect(autoBottomHeight(1080, chrome, 180, 350)).toBe(350)
+    expect(autoBottomHeight(768, chrome, 180, 300)).toBe(300)
+  })
+  it('トラックを足して中身が増えても、使える高さの半分で止める(溢れた分は縦に送る)', () => {
+    // 1366×768 でトラックを 6 本足した(中身 700px)。モニターに半分を残す
+    expect(autoBottomHeight(768, chrome, 180, 700)).toBe(Math.round((768 - chrome) * BOTTOM_SHARE))
+    expect(autoBottomHeight(1080, chrome, 180, 1200)).toBe(
+      Math.round((1080 - chrome) * BOTTOM_SHARE)
+    )
+  })
+  it('とても低い窓でも下限(180)までは取る。測る前は今までの既定', () => {
+    expect(autoBottomHeight(400, chrome, 180, 900)).toBe(180)
+    expect(autoBottomHeight(768, chrome, 180, null)).toBe(defaultBottomHeight(768, chrome, 180))
   })
 })

@@ -850,7 +850,8 @@ export function Timeline({
         })
       }
     }
-    if (asset?.hasAudio) {
+    // 分離したクリップは素材を問わず戻せる(素材の音の有無の情報が古くても、戻す道を消さない)
+    if (asset?.hasAudio || clip.audioDetached) {
       items.push(
         clip.audioDetached
           ? { label: '音声の分離をやめる', onSelect: () => reattachClipAudio(clipId) }
@@ -1072,7 +1073,8 @@ export function Timeline({
   const captionLaneH = captionLaneHeight(captionRowTotal)
   // レーンの地は交互(#1c1c1c / #242424)。並びは上から V(n)…V2・V1・T1・A1…(場面の帯を 0 番目に数える)
   const nOverlayLanes = project.videoOverlayTracks.length
-  const hasTelopLane = project.textOverlays.length > 0
+  // T1 を隠しているときは、テロップが 0 枚でも見出しを出す(隠している状態を見えるように)
+  const hasTelopLane = project.textOverlays.length > 0 || project.telopTrackHidden === true
   const laneAlt = (displayIndex: number): string =>
     (displayIndex + 1) % 2 ? 've-lane-b' : 've-lane-a'
   // 場面の帯: 解析した場面(収録の時刻)を、今の本編の並びでタイムラインの時刻へ直す。
@@ -2110,7 +2112,7 @@ export function Timeline({
         if (id) setTextEditClipId(id)
       }
     },
-    ...(selectedClip && timedClips[selectedIndex]?.asset.hasAudio
+    ...(selectedClip && (selectedClip.audioDetached || timedClips[selectedIndex]?.asset.hasAudio)
       ? [
           selectedClip.audioDetached
             ? {
@@ -2486,7 +2488,7 @@ export function Timeline({
               </TrackHeadPopover>
             </span>
           </div>
-          {project.textOverlays.length > 0 && (
+          {hasTelopLane && (
             <div className="track-label" data-g3-kind="telop" style={{ height: captionLaneH }}>
               <span className="track-tag tag-telop">T1</span>
               <span className="track-label-name">テロップ</span>
@@ -3351,7 +3353,7 @@ export function Timeline({
             )}
           </div>
 
-          {project.textOverlays.length > 0 && (
+          {hasTelopLane && (
             <div
               className={`track-lane caption-lane ${laneAlt(nOverlayLanes + 1)} ${project.telopTrackHidden ? 'hidden' : ''}`}
               data-g3-kind="telop"

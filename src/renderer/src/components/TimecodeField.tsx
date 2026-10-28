@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { formatTimecode, parseTimecode } from '../lib/timelineRuler'
+import { formatTimecode, timecodeEntryValue } from '../lib/timelineRuler'
 
 /**
- * タイムコード(HH:MM:SS:FF)の入力欄。打って Enter で決める。Esc・外へ出ると今の値へ戻す。
+ * タイムコード(HH:MM:SS:FF。`12.5` のように `.` を含めば秒)の入力欄。打って Enter で決める
+ * (開いたときのまま Enter を押しても決めない)。Esc・外へ出ると今の値へ戻す。
  * 打っている間は値が動いても(再生中など)書き換えない。読めない字は赤い枠で知らせ、決めない。
  * 値は min〜max に収めて渡す
  */
@@ -25,6 +26,8 @@ export function TimecodeField({
   className?: string
 }): React.JSX.Element {
   const [draft, setDraft] = useState<string | null>(null)
+  // 開いたときの表示(同じまま Enter を押しても決めない)
+  const [opened, setOpened] = useState('')
   const [invalid, setInvalid] = useState(false)
   const shown = draft ?? formatTimecode(time, fps)
   return (
@@ -35,7 +38,9 @@ export function TimecodeField({
       spellCheck={false}
       value={shown}
       onFocus={(e) => {
-        setDraft(formatTimecode(time, fps))
+        const now = formatTimecode(time, fps)
+        setDraft(now)
+        setOpened(now)
         e.currentTarget.select()
       }}
       onChange={(e) => {
@@ -55,12 +60,12 @@ export function TimecodeField({
           return
         }
         if (e.key !== 'Enter') return
-        const t = parseTimecode(draft ?? '', fps)
+        const t = timecodeEntryValue(draft ?? opened, opened, fps, min, max)
         if (t === null) {
           setInvalid(true)
           return
         }
-        onCommit(Math.max(min, max === undefined ? t : Math.min(max, t)))
+        if (t !== 'unchanged') onCommit(t)
         setDraft(null)
         e.currentTarget.blur()
       }}

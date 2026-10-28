@@ -293,6 +293,9 @@ function shortProjectFromPlan(
     ).map((t) => ({ ...t, id: uuid() })),
     transcript: project.transcript,
     multicam: info,
-    audioEvents: project.audioEvents
+    audioEvents: project.audioEvents,
+    // 本編で隠したトラック(V1・T1 の「目」)は、ショートでも出さない(書き出しの決まりを一貫させる)
+    ...(project.mainVideoHidden ? { mainVideoHidden: true } : {}),
+    ...(project.telopTrackHidden ? { telopTrackHidden: true } : {})
   }
 }

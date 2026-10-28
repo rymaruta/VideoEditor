@@ -614,16 +614,13 @@ function registerWindowScopedIpcHandlers(): void {
     return withTelopLayer(payload.telopLayer, () =>
       runExclusiveExport((signal) =>
         writeExportGuarded(payload.outputPath, protectedPaths, (xmlWritePath) =>
-          exportPremiereXml(
-            { ...payload, project: projectForOutput(payload.project) },
-            xmlWritePath,
-            {
-              ffmpegPath,
-              onProgress,
-              signal,
-              probeChannels: probeAudioChannels
-            }
-          )
+          // 隠したテロップ(T1 の「目」)の扱いは exportPremiereXml の中で(章・コーナーのマーカーは残す)
+          exportPremiereXml(payload, xmlWritePath, {
+            ffmpegPath,
+            onProgress,
+            signal,
+            probeChannels: probeAudioChannels
+          })
         )
       )
     )

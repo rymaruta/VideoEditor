@@ -46,3 +46,20 @@ export function timelineNaturalHeight(m: {
   const chrome = Math.max(0, m.panelHeight - m.tracksClientHeight)
   return Math.ceil(chrome + Math.max(m.labelsHeight, m.lanesHeight))
 }
+
+/**
+ * 溝をドラッグしていないときのタイムラインの高さ: 中身(トラックの合計 + 目盛り + スクロールバー)に
+ * 合わせる。ただし使える高さの半分(`BOTTOM_SHARE`。低い窓では `minBottom`)を上限にし、溢れた
+ * トラックはタイムラインの中で縦に送る(トラックを足すたびにモニターが縮んで、1366×768 では
+ * 絵が 172×97px まで小さくなっていた)。中身をまだ測っていなければ `defaultBottomHeight`
+ */
+export function autoBottomHeight(
+  windowHeight: number,
+  chromeHeight: number,
+  minBottom: number,
+  natural: number | null
+): number {
+  if (natural === null) return defaultBottomHeight(windowHeight, chromeHeight, minBottom)
+  const available = Math.max(0, windowHeight - chromeHeight)
+  return Math.min(natural, Math.max(minBottom, Math.round(available * BOTTOM_SHARE)))
+}

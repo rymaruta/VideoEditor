@@ -19,7 +19,7 @@ import { PresetPanel } from './components/PresetPanel'
 import { Inspector } from './components/Inspector'
 import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
-import { defaultBottomHeight, defaultSideWidths } from './lib/layoutDefaults'
+import { autoBottomHeight, defaultSideWidths } from './lib/layoutDefaults'
 import { WorkflowBar } from './components/WorkflowBar'
 import { SideRail, type RailItem } from './components/SideRail'
 import { storedPanelTab } from './lib/panelTabs'
@@ -180,6 +180,14 @@ function readRightTab(): RightTab {
   const old = readStored(OLD_PANEL_TAB_KEY)
   const fallback = old === 'text' ? 'text' : 'inspector'
   return storedPanelTab(readStored(RIGHT_TAB_KEY), RIGHT_TABS, fallback) as RightTab
+}
+
+function removeStored(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // 消せなくても今回は既定に戻る
+  }
 }
 
 function storeValue(key: string, value: string): void {
@@ -375,9 +383,15 @@ function App(): React.JSX.Element {
     right: userSize.right ?? sideDefaults.right,
     bottom:
       userSize.bottom ??
-      timelineNatural ??
-      defaultBottomHeight(windowSize.h, CHROME_HEIGHT, MIN_BOTTOM_HEIGHT)
+      autoBottomHeight(windowSize.h, CHROME_HEIGHT, MIN_BOTTOM_HEIGHT, timelineNatural)
   })
+  // 溝のダブルクリック: 覚えた寸法を消して既定(タイムラインは中身に合わせる自動)へ戻す
+  const resetSize = (key: keyof LayoutSize): void => {
+    setUserSize((u) => ({ ...u, [key]: undefined }))
+    removeStored(
+      key === 'left' ? LEFT_WIDTH_KEY : key === 'right' ? RIGHT_WIDTH_KEY : BOTTOM_HEIGHT_KEY
+    )
+  }
   const [resizeDrag, setResizeDrag] = useState<ResizeDragState | null>(null)
 
   function beginResize(kind: ResizeDragState['kind'], e: React.MouseEvent): void {
@@ -489,7 +503,8 @@ function App(): React.JSX.Element {
           <div
             className={`split-handle split-col ${resizeDrag?.kind === 'left' ? 'active' : ''}`}
             onMouseDown={(e) => beginResize('left', e)}
-            title="ドラッグして幅を調整"
+            onDoubleClick={() => resetSize('left')}
+            title="ドラッグして幅を調整(ダブルクリックで既定の幅)"
           />
           <section className="frame frame-monitor ve-program" aria-label="プログラム">
             <div className="ve-panel-head">
@@ -543,7 +558,8 @@ function App(): React.JSX.Element {
           <div
             className={`split-handle split-col ${resizeDrag?.kind === 'right' ? 'active' : ''}`}
             onMouseDown={(e) => beginResize('right', e)}
-            title="ドラッグして幅を調整"
+            onDoubleClick={() => resetSize('right')}
+            title="ドラッグして幅を調整(ダブルクリックで既定の幅)"
           />
           <aside
             className="frame ve-inspector"
@@ -577,7 +593,8 @@ function App(): React.JSX.Element {
         <div
           className={`split-handle split-row ${resizeDrag?.kind === 'rows' ? 'active' : ''}`}
           onMouseDown={(e) => beginResize('rows', e)}
-          title="ドラッグして高さを調整"
+          onDoubleClick={() => resetSize('bottom')}
+          title="ドラッグして高さを調整(ダブルクリックで中身に合わせる)"
         />
 
         <section className="frame frame-timeline ve-timeline" style={{ height: size.bottom }}>
