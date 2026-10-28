@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   buildScenes,
   continuesSentence,
-  selectScenes,
   splitInnerTurns,
   type Scene,
-  type SceneJudgement,
   type TimedLine
 } from '../../src/shared/structure/scenes'
 import { TRIAL4_TRANSCRIPT } from './fixtures/trial4Transcript'
@@ -116,35 +114,5 @@ describe('N4: 区切りを文の境に寄せ、言いかけの短い場面を最
       const long = prev.end - scenes[i - 1].lines[0].start >= 90
       expect(head.start - prev.end >= 8 || long).toBe(true)
     }
-  })
-
-  it('仕上がりの最後に、前を落とした、文の途中から始まる短い場面だけが残るなら落とす', () => {
-    // 第4回の作りと同じ: s7 を落とし、文の途中から始まる 9 秒の s8 が最後に残る
-    const mk = (id: string, start: number, end: number, text: string): Scene => ({
-      id,
-      start,
-      end,
-      speech: end - start,
-      lines: [{ id: `${id}-l`, start, end, text, overlap: false, speaker: 'マイク1' }]
-    })
-    const scenes = [
-      mk('s1', 0, 100, '始めます'),
-      mk('s2', 100, 190, '…とても大事だと思っております'),
-      mk('s3', 190, 280, 'あとやはり我々は'),
-      mk('s4', 280, 289, '一緒に良いところも悪いところも頑張っていこうという形で'),
-      mk('s5', 289, 400, '政府の政策も活用されてきましたか')
-    ]
-    const j: SceneJudgement[] = scenes.map((s, i) => ({
-      sceneId: s.id,
-      score: 85 - i * 5,
-      kind: 'highlight',
-      reason: ''
-    }))
-    const r = selectScenes(scenes, j, 200)
-    expect(r.kept).toEqual(['s1', 's2'])
-    expect(r.dropped).toContainEqual({ sceneId: 's4', why: 'length', by: 'fragment' })
-    // 前の場面を残していれば(文がつながる)落とさない
-    const all = selectScenes(scenes, j, 1000)
-    expect(all.kept).toEqual(['s1', 's2', 's3', 's4', 's5'])
   })
 })

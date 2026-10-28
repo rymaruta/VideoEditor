@@ -35,6 +35,7 @@ import {
   demoteIndiscriminateHighlights,
   heuristicJudgements,
   selectScenes,
+  trailingFragment,
   type Scene,
   type SceneJudgement,
   type Selection,
@@ -499,6 +500,19 @@ export function planRoughCut(
     if (keep) keepSet.add(id)
     else keepSet.delete(id)
   }
+  // 仕上がりの最後に言いかけの切れ端が残るなら落とす(手で決めた分を当てた後の最後で見る)
+  const fragment = trailingFragment(
+    scenes,
+    checked.judgements,
+    keepSet,
+    policy.useTarget ? options.targetSec : 0,
+    new Set(
+      Object.entries(options.keep ?? {})
+        .filter(([, k]) => k)
+        .map(([id]) => id)
+    )
+  )
+  if (fragment) keepSet.delete(fragment)
   const kept = scenes.filter((s) => keepSet.has(s.id))
   const selection: Selection = {
     kept: kept.map((s) => s.id),
@@ -511,7 +525,10 @@ export function planRoughCut(
             : ('length' as const)
         // 長さに合わせて自動で落とした場面は、その決め手(`by`)も残す(落とした理由の文に使う。前は作り直す
         // ときに捨て、`dropBasis.lengthBy` が保存されず、理由の文が推測になっていた。試し編集 第4回)
-        const by = auto.dropped.find((d) => d.sceneId === s.id && d.why === 'length')?.by
+        const by =
+          s.id === fragment
+            ? ('fragment' as const)
+            : auto.dropped.find((d) => d.sceneId === s.id && d.why === 'length')?.by
         return { sceneId: s.id, why, ...(why === 'length' && by ? { by } : {}) }
       }),
     estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0),

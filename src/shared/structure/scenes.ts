@@ -73,12 +73,22 @@ export interface SceneOptions {
 export function continuesSentence(text: string): boolean {
   const t = text.replace(/[\s\u3000]+$/u, '')
   if (/[。．.!?！？]$/u.test(t)) return false
-  // 「…我々は」「…○○さんは」の「は」も続きのある形(挨拶の「こんにちは」「こんばんは」は除く)。前は「のは」
-  // 「には」などだけを見ていて、「あとやはり我々は / 一緒に…」の間で場面を分けていた(試し編集 第4回)
-  return /(?:(?<!こんにち|こんばん)は|[をがてでにとし]|けど|けれど(?:も)?|から|ので|のに|ながら|たり|[、,，])$/u.test(
-    t
-  )
+  // 「…我々は」「…○○さんは」の「は」も続きのある形。前は「のは」「には」などだけを見ていて、「あとやはり
+  // 我々は / 一緒に…」の間で場面を分けていた(試し編集 第4回)。挨拶(「こんにちは」「今日は」「本日は」)と、
+  // 言いさしの質問(「お名前は」「ご出身は」)は除く
+  if (/は$/u.test(t) && (GREETING_HA.test(t) || ASKING_HA.test(t))) return false
+  return /(?:は|[をがてでにとし]|けど|けれど(?:も)?|から|ので|のに|ながら|たり|[、,，])$/u.test(t)
 }
+
+/** 「は」で終わる挨拶(発話の終わり)。「こんにちは」「こんちは」「こんばんは」「今日は」「本日は」 */
+const GREETING_HA = /(?:こんにち|こんち|こんばん|今日|今晩|本日)は$/u
+/**
+ * 「は」で終わる言いさしの質問(「お名前は」「ご出身は」「ご感想は」「年齢は」)。発話が丁寧の「お」「ご」で
+ * 始まる短い名詞+「は」だけ、または問いによく使う名詞+「は」だけのもの(前置きの「では」「で」「それで」の後でも)。
+ * 「我々は」「私は」だけの発話は続きのある形のまま
+ */
+const ASKING_HA =
+  /^(?:(?:では|じゃあ|で|それで)[、,\s\u3000]?)?(?:[おご][^\s、,。．はをがにでの]{1,6}|年齢|名前|出身|趣味|感想|理由|きっかけ|目標|結果|今後|狙い|ポイント)は$/u
 
 /** 長さで分けるとき、文の途中でも分けてよい間(秒)。これだけ黙っていれば話の切れ目とみなす */
 const LONG_PAUSE_SEC = 3
@@ -345,14 +355,6 @@ export function buildScenes(
       }
       // 長さの目安の 1.5 倍を超えたら、文の途中・間が短くても分ける(場面が際限なく長くならないように)
       const tooLong = len >= maxScene * HOLD_MAX_RATIO
-      // 前の発話が続きのある形(「…我々は」「…という形で」)で終わっていれば、間があいても長い無言の手前までは
-      // 文の途中なので分けない(試し編集 第4回 N4: 「あとやはり我々は / 一緒に良いところも…」の間の 527.18 秒で
-      // 分かれ、文の途中から始まる 9 秒の場面ができた。仕上がりの最後に残り、言いかけで終わった)
-      if (gap >= joinGap && gap < quiet && !tooLong && continuesSentence(last.text)) {
-        g.push(l)
-        ends.set(g, Math.max(gEnd, l.end))
-        continue
-      }
       if (gap < joinGap && !(long && gap >= 1) && !tooLong) {
         g.push(l)
         ends.set(g, Math.max(gEnd, l.end))
@@ -383,6 +385,33 @@ export function buildScenes(
     // 戻すと上限(長さの目安の 1.5 倍)を超えるなら戻さない
     if (gEnd - g[0].start < minTail && gEnd - groups[i - 1][0].start <= maxScene * HOLD_MAX_RATIO) {
       groups[i - 1].push(...g)
+      groups.splice(i, 1)
+    }
+  }
+
+  // 文の途中で始まる短いまとまり(`minTail` 未満)は、前のまとまりへ戻す(長い無言を挟まず、
+  // 戻した後の長さが上限(長さの目安の 1.5 倍)に収まるときだけ)。試し編集 第4回 N4: 「あとやはり我々は /
+  // 一緒に良いところも…という形で」の間(5.8 秒)で分かれ、文の途中から始まる 9 秒の場面ができ、仕上がりの
+  // 最後に残って言いかけで終わった。前の直しは続きのある形の後の間を全部つないだので、場面が減りすぎ
+  // (合成で 4 分の 1)、つないだ後の長さも見ていなかった(監査の指摘)。文の途中で始まる短いまとまりだけを戻す
+  const spanOf = (g: TimedLine[]): { start: number; end: number } => ({
+    start: g[0].start,
+    end: Math.max(...g.map((x) => x.end))
+  })
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const g = groups[i]
+    const own = spanOf(g)
+    if (own.end - own.start >= minTail) continue
+    const prev = groups[i - 1]
+    const fits = (a: TimedLine[], b: TimedLine[]): boolean =>
+      spanOf(b).end - spanOf(a).start <= maxScene * HOLD_MAX_RATIO
+    if (
+      prev &&
+      own.start - spanOf(prev).end < quiet &&
+      continuesSentence(prev[prev.length - 1].text) &&
+      fits(prev, g)
+    ) {
+      prev.push(...g)
       groups.splice(i, 1)
     }
   }
@@ -650,6 +679,40 @@ const FRAGMENT_SEC = 20
  * 場面が文の途中で始まる(前の場面の最後の発話が続きのある形で終わる)か、文の途中で終わる(この場面の最後の
  * 発話が続きのある形で終わり、次の場面がある)か
  */
+/**
+ * 仕上がりの最後の場面が言いかけの切れ端なら、その場面の id(落とす)。手で決めた残す/落とすを当てた後の
+ * 残す場面(`kept`)で見る(手で後ろの場面を残していれば、それが最後)。落とすのは次の全部を満たすとき:
+ * - 長さの目標がある(目標なし・点数の下限で選ぶときは落とさない)
+ * - 前後を落とした、文の途中で始まる・終わる `FRAGMENT_SEC` 未満の場面
+ * - 見どころでも、番組の頭・終わりの場面でもなく、手で残した場面でもない
+ * - 点数が、残した場面の中で低い方(下半分)
+ * 前は長さの目標と関係なく、見どころ・番組の終わりの場面(「ありがとうございました」)まで落としていた
+ */
+export function trailingFragment(
+  scenes: readonly Scene[],
+  judgements: readonly SceneJudgement[],
+  kept: ReadonlySet<string>,
+  targetSec: number,
+  manualKeep: ReadonlySet<string> = new Set()
+): string | null {
+  if (!(targetSec > 0 && Number.isFinite(targetSec)) || kept.size < 2) return null
+  const i = scenes.map((x) => kept.has(x.id)).lastIndexOf(true)
+  if (i <= 0 || i >= scenes.length - 1) return null
+  const last = scenes[i]
+  if (manualKeep.has(last.id) || last.end - last.start >= FRAGMENT_SEC) return null
+  const judge = new Map(judgements.map((j) => [j.sceneId, j]))
+  const j = judge.get(last.id)
+  if (j?.kind === 'highlight') return null
+  const score = (id: string): number => judge.get(id)?.score ?? 50
+  const scores = scenes.filter((x) => kept.has(x.id)).map((x) => score(x.id))
+  const below = scores.filter((v) => v < score(last.id)).length
+  if (below >= Math.ceil(scores.length / 2)) return null
+  const cut = sceneCutsSentence(scenes, i)
+  const prevDropped = !kept.has(scenes[i - 1].id)
+  const nextDropped = !kept.has(scenes[i + 1].id)
+  return (cut.starts && prevDropped) || (cut.ends && nextDropped) ? last.id : null
+}
+
 export function sceneCutsSentence(
   scenes: readonly Scene[],
   i: number
@@ -872,23 +935,6 @@ export function selectScenes(
       if (d.why !== 'length' || d.by !== 'score') continue
       const me = score(sceneOf.get(d.sceneId)!)
       if (restored.some((x) => score(x) < me)) d.by = 'refit'
-    }
-  }
-  // 仕上がりの最後の場面が、前後を落とした、文の途中で始まる・終わる短い場面なら落とす(言いかけで終わらない
-  // ように)。試し編集 第4回 N4: 文の途中から始まる 9 秒の s8 が最後に残り、仕上がりが言いかけで終わった
-  if (keep.size > 1) {
-    const i = scenes.map((x) => keep.has(x.id)).lastIndexOf(true)
-    const last = scenes[i]
-    const cut = sceneCutsSentence(scenes, i)
-    const prevDropped = i > 0 && !keep.has(scenes[i - 1].id)
-    const nextDropped = i + 1 < scenes.length && !keep.has(scenes[i + 1].id)
-    if (
-      last.end - last.start < FRAGMENT_SEC &&
-      ((cut.starts && prevDropped) || (cut.ends && nextDropped))
-    ) {
-      keep.delete(last.id)
-      total -= estimate(last)
-      dropped.push({ sceneId: last.id, why: 'length', by: 'fragment' })
     }
   }
   return {
