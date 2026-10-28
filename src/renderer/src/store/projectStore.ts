@@ -6786,9 +6786,11 @@ const ORDER_SLACK_SEC = 0.05
  * - 前の本編で隣り合う塊(ほかのロックの塊とも。間にどのロックの塊でもない収録素材のクリップが無いもの)は、
  *   1つの並び(グループ)として、並びのまま動かす
  * - 前後・目印は、どのロックの塊にも入っていない収録素材のクリップの所(自由な所)だけで見る
- * - 中が共通の時刻の順に並び、前後の自由な所とも順に並ぶグループ(並べ替えていない元の所)は、作り直した
- *   本編の窓の所へ(グループの中でそのロックの塊がいちばん長いものを、そのロックの元の所とする)。ただし
- *   前の本編の順と窓の所の順が食い違わない組(長さの合計がいちばん長いもの)だけ
+ * - 中が共通の時刻の順に並び、前後の自由な所の少なくとも片側と順に並ぶグループ(並べ替えていない元の所。
+ *   隣へロックしていないクリップを並べ替えて置いても、順に並ぶ側を根拠に元の所とみなす。前後に自由な所が
+ *   無い側は根拠にしない)の塊は、作り直した本編のそれぞれのロックの窓の所へ(食い違う側の少ないグループ、
+ *   同じならそのロックの塊がいちばん長いものを、そのロックの元の所とする)。ただし前の本編の順と窓の所の順が
+ *   食い違わない組(長さの合計がいちばん長いもの)だけ
  * - 作り直した本編の窓の所は、どのロックもみな外す。元の所のグループが無いロックは、窓の所へは何も入れない
  *   (ロックは触らない約束なので、並べ替えた所へ戻さない)
  * - ほかのグループ(離れた所に置いた複製など)は、前の本編で直前にあった自由な所の終わり(共通の時刻)を目印に、
@@ -6850,28 +6852,46 @@ function pinLockedClips(
     start: g[0].b.start,
     end: g[g.length - 1].b.end
   })
-  /** 中が共通の時刻の順に並び、前後の自由な所とも順に並ぶ(並べ替えていない元の所) */
-  const inPlace = (g: Item[]): boolean => {
+  /**
+   * 並べ替えていない元の所か(`ok`)と、前後の自由な所と食い違う側の数(`bad`)。中が共通の時刻の順に並び、
+   * 前後の自由な所の少なくとも片側と順に並べば元の所とみなす(片側だけ食い違うのは、隣へロックしていない
+   * クリップを並べ替えて置いたとき。順に並ぶ側を根拠にする)。前後に自由な所が無い側(頭・終わり)は根拠に
+   * しない: 両側とも無ければ元の所、片側が無くもう片側が食い違えば元の所ではない(頭に置いた予告の複製)
+   */
+  const placeOf = (g: Item[]): { ok: boolean; bad: number } => {
     for (let k = 1; k < g.length; k++) {
       const a = g[k - 1].b.segs
-      if (a[a.length - 1].end > g[k].b.segs[0].start + ORDER_SLACK_SEC) return false
+      if (a[a.length - 1].end > g[k].b.segs[0].start + ORDER_SLACK_SEC) return { ok: false, bad: 2 }
     }
     const r = rangeOf(g)
     const last = g[g.length - 1].b.segs
-    return (
-      anchorBefore(r.start) <= g[0].b.segs[0].start + ORDER_SLACK_SEC &&
-      startAfter(r.end) >= last[last.length - 1].end - ORDER_SLACK_SEC
-    )
+    const before = anchorBefore(r.start)
+    const after = startAfter(r.end)
+    const hasBefore = before > -Infinity
+    const hasAfter = after < Infinity
+    const okBefore = hasBefore && before <= g[0].b.segs[0].start + ORDER_SLACK_SEC
+    const okAfter = hasAfter && after >= last[last.length - 1].end - ORDER_SLACK_SEC
+    return {
+      ok: okBefore || okAfter || (!hasBefore && !hasAfter),
+      bad: Number(hasBefore && !okBefore) + Number(hasAfter && !okAfter)
+    }
   }
-  // ロックごとの元の所のグループ(そのロックの塊がいちばん長いもの)
+  // ロックごとの元の所のグループ(食い違う側の少ないもの、同じならそのロックの塊がいちばん長いもの)。
+  // 順に並ぶ側の数で選ぶと、本編の頭・終わりにある元の所(片側に自由な所が無い)より、動かしたクリップの中の
+  // 短い塊を選んでしまった
   const mainOf = new Map<number, Item[]>()
+  const placeOfGroup = new Map(groups.map((g) => [g, placeOf(g)]))
   for (const g of groups) {
-    if (!inPlace(g)) continue
+    const pg = placeOfGroup.get(g)!
+    if (!pg.ok) continue
     for (const x of g) {
       const had = mainOf.get(x.li)
       const lenIn = (h: Item[]): number =>
         h.filter((y) => y.li === x.li).reduce((t, y) => Math.max(t, y.b.end - y.b.start), 0)
-      if (!had || lenIn(g) > lenIn(had) + 1e-9) mainOf.set(x.li, g)
+      const ph = had && placeOfGroup.get(had)!
+      const better =
+        !had || !ph || pg.bad < ph.bad || (pg.bad === ph.bad && lenIn(g) > lenIn(had) + 1e-9)
+      if (better) mainOf.set(x.li, g)
     }
   }
 
@@ -6888,23 +6908,29 @@ function pinLockedClips(
     clips = parts.clips
     slotOf.set(li, parts.before.length)
   })
-  // 元の所のグループは、それを元の所とするロックのうち、いちばん前の窓の所へ
-  const windowSlot = new Map<Item[], number>()
-  for (const [li, g] of [...mainOf].sort((a, b) => a[0] - b[0])) {
-    const slot = slotOf.get(li)
-    if (slot !== undefined && !windowSlot.has(g)) windowSlot.set(g, slot)
-  }
+  // 元の所のグループの塊は、それぞれのロックの窓の所へ(そのロックの元の所がこのグループのもの)。グループを
+  // まとめて最初の窓の所へ入れると、作り直した本編が窓どうしの間に入れた中身がグループの後ろへ回り、後ろの
+  // 塊の前後が食い違った
+  const ownSlot = (g: Item[], x: Item): number | undefined =>
+    mainOf.get(x.li) === g ? slotOf.get(x.li) : undefined
+  const slotsOf = (g: Item[]): number[] =>
+    g.flatMap((x) => {
+      const slot = ownSlot(g, x)
+      return slot === undefined ? [] : [slot]
+    })
   // 窓の所へ戻すグループは、前の本編の順と窓の所の順が食い違わないもの(長さの合計がいちばん長い組)だけ。
   // 食い違うもの(人が並べ替えたクリップの中のロック)を窓の所へ戻すと、ロックした塊どうしの前後が入れ替わった
-  const cand = groups.filter((g) => windowSlot.has(g))
+  const cand = groups.filter((g) => {
+    const ss = slotsOf(g)
+    return ss.length > 0 && ss.every((x, n) => n === 0 || ss[n - 1] <= x)
+  })
+  const first = (g: Item[]): number => slotsOf(g)[0]
+  const last = (g: Item[]): number => slotsOf(g)[slotsOf(g).length - 1]
   const weight = (g: Item[]): number => rangeOf(g).end - rangeOf(g).start
   const best = cand.map((g) => ({ w: weight(g), from: -1 }))
   cand.forEach((g, k) => {
     for (let m = 0; m < k; m++)
-      if (
-        windowSlot.get(cand[m])! <= windowSlot.get(g)! &&
-        best[m].w + weight(g) > best[k].w + 1e-9
-      )
+      if (last(cand[m]) <= first(g) && best[m].w + weight(g) > best[k].w + 1e-9)
         best[k] = { w: best[m].w + weight(g), from: m }
   })
   const atWindow = new Set<Item[]>()
@@ -6915,7 +6941,7 @@ function pinLockedClips(
   }
   // ほかのグループは、前の本編で直前にあった自由な所の終わりを目印に、作り直した本編でその時刻より前に始まる
   // 最後のクリップの後ろへ(差し込みの画と同じ置き方。目印が無ければ頭)。前の本編の順を保つよう、前の
-  // グループより前へ・次に窓の所へ戻すグループより後ろへは置かない
+  // 塊より前へ・次に窓の所へ戻すグループより後ろへは置かない
   const startsNow = clips.map((c) => {
     const f = fileOf.get(c.assetId)
     return f ? toCommon(f, c.inPoint) : -Infinity
@@ -6925,23 +6951,33 @@ function pinLockedClips(
     for (let n = 0; n < clips.length; n++) if (startsNow[n] < anchor - 0.02) idx = n
     return idx + 1
   }
-  const posOf = new Map<Item[], number>()
+  /** 入れる所ごとの、続いて並ぶ塊(前の本編の順) */
+  const units: { items: Item[]; pos: number }[] = []
   let lo = 0
   groups.forEach((g, gi) => {
-    let pos: number
-    if (atWindow.has(g)) pos = windowSlot.get(g)!
-    else {
-      const nextWin = groups.slice(gi + 1).find((h) => atWindow.has(h))
-      const hi = nextWin ? windowSlot.get(nextWin)! : clips.length
-      pos = Math.min(hi, Math.max(lo, anchorPos(anchorBefore(rangeOf(g).start))))
+    if (atWindow.has(g)) {
+      // 窓の所の無い塊(そのロックの元の所はほかのグループ)は、直前の塊に付けて入れる
+      let cur: { items: Item[]; pos: number } | null = null
+      for (const x of g) {
+        const slot = ownSlot(g, x)
+        if (slot !== undefined || !cur) {
+          cur = { items: [x], pos: slot ?? first(g) }
+          units.push(cur)
+        } else cur.items.push(x)
+      }
+      lo = cur!.pos
+      return
     }
-    posOf.set(g, pos)
+    const nextWin = groups.slice(gi + 1).find((h) => atWindow.has(h))
+    const hi = nextWin ? first(nextWin) : clips.length
+    const pos = Math.min(hi, Math.max(lo, anchorPos(anchorBefore(rangeOf(g).start))))
+    units.push({ items: g, pos })
     lo = pos
   })
   const usedExtras = new Set<string>()
-  const clipsOf = (g: Item[]): Clip[] => {
-    const r = rangeOf(g)
-    // グループに掛かる差し込みの画はグループの中の切れ端として入るので、入れ直さない
+  const clipsOf = (items: Item[]): Clip[] => {
+    const r = rangeOf(items)
+    // 塊に掛かる差し込みの画は塊の中の切れ端として入るので、入れ直さない
     previous.forEach((c, n) => {
       if (fileOf.has(c.assetId)) return
       if (prevTimes[n].end > r.start + 1e-6 && prevTimes[n].start < r.end - 1e-6)
@@ -6949,11 +6985,12 @@ function pinLockedClips(
     })
     return spliceClips(previous, [], r, splitId).inside
   }
-  // 後ろの所から入れる(前の所の番号が変わらないように)。同じ所に入るグループは前の本編の順に
-  const positions = [...new Set([...posOf.values(), ...slotOf.values()])].sort((a, b) => b - a)
+  // 後ろの所から入れる(前の所の番号が変わらないように)。同じ所に入る塊は前の本編の順に
+  const positions = [...new Set([...units.map((u) => u.pos), ...slotOf.values()])].sort(
+    (a, b) => b - a
+  )
   for (const pos of positions) {
-    const here = groups.filter((g) => posOf.get(g) === pos)
-    const inside = here.flatMap(clipsOf)
+    const inside = units.filter((u) => u.pos === pos).flatMap((u) => clipsOf(u.items))
     clips = [...clips.slice(0, pos), ...inside, ...clips.slice(pos)]
     // 入れた所の境(何も入れなければ、外した窓の所の前後)で、同じ素材の続いた所は1本に戻す
     clips = joinAt(joinAt(clips, pos + inside.length - 1), pos - 1)
@@ -6989,11 +7026,16 @@ function joinAt(clips: Clip[], i: number): Clip[] {
 const MIN_TELOP_PIECE_SEC = 0.05
 
 /** テロップの [a, b) の所(カラオケの言葉も切る)。短すぎれば無し */
-function telopPiece(o: TextOverlay, a: number, b: number): TextOverlay | null {
+function telopPiece(
+  o: TextOverlay,
+  a: number,
+  b: number,
+  min = MIN_TELOP_PIECE_SEC
+): TextOverlay | null {
   const start = Math.max(o.startTime, a)
   const end = Math.min(o.endTime, b)
   if (start <= o.startTime + 1e-9 && end >= o.endTime - 1e-9) return o
-  if (end - start < MIN_TELOP_PIECE_SEC) return null
+  if (end - start < min) return null
   const words = o.words?.filter((x) => {
     const m = (x.start + x.end) / 2
     return m >= start && m < end
@@ -7014,14 +7056,15 @@ function telopPiece(o: TextOverlay, a: number, b: number): TextOverlay | null {
  * 境の内側の新しい枚は、発言の切れ目の当て直しで境から少し離れて始まる(終わる)ことがある。片方が境に
  * 接し、間が `TELOP_EDGE_JOIN_GAP_SEC` 以内なら同じく1枚に戻す(境の手前に全文が 0.1 秒ほど一瞬出て、
  * 同じ文が出直していた)。
- * `locked`(ロックの中に戻した所)を渡すと、つなぐ間がその中に掛かるときはつながない(ロックの中の枚が
- * 境に接していないのにつなぐと、ロックの中の枚の終わりから境までが埋まり、ロックの中の時刻が変わった)
+ * `locked`(ロックの中に戻した所。どのロックの塊も)を渡すと、つなぐ間がそのどれかに掛かるときはつながない
+ * (ロックの中の枚が境に接していないのにつなぐと、ロックの中の枚の終わりから境までが埋まり、ロックの中の
+ * 時刻が変わった。隣り合う別の塊の中を埋めることもあった)
  */
 const TELOP_EDGE_JOIN_GAP_SEC = 0.3
 function joinTelopsAtEdges(
   list: TextOverlay[],
   edges: readonly number[],
-  locked?: TimelineRange
+  locked: readonly TimelineRange[] = []
 ): TextOverlay[] {
   const keyOf = (o: TextOverlay): string | null =>
     o.utteranceId && !o.linkedClipId ? `${o.utteranceId}#${o.utteranceChunk ?? 0}` : null
@@ -7052,7 +7095,7 @@ function joinTelopsAtEdges(
         gap < -EPS ||
         gap > TELOP_EDGE_JOIN_GAP_SEC + EPS ||
         (Math.abs(left.endTime - e) >= EPS && Math.abs(o.startTime - e) >= EPS) ||
-        (locked && Math.min(o.startTime, locked.end) - Math.max(left.endTime, locked.start) > 1e-6)
+        locked.some((w) => Math.min(o.startTime, w.end) - Math.max(left.endTime, w.start) > 1e-6)
       )
         continue
       const base = left.edited ? left : o.edited ? o : left.text.length >= o.text.length ? left : o
@@ -7086,11 +7129,15 @@ function telopOutside(o: TextOverlay, r: TimelineRange): TextOverlay[] {
 }
 
 /** テロップの、区間 `r` の中の所(またぐものは境で切る。長さの無いものは頭の時刻で決める) */
-function telopWithin<T extends TextOverlay>(o: T, r: TimelineRange): T[] {
+function telopWithin<T extends TextOverlay>(
+  o: T,
+  r: TimelineRange,
+  min = MIN_TELOP_PIECE_SEC
+): T[] {
   if (o.endTime - o.startTime <= 1e-6)
     return o.startTime >= r.start - 1e-6 && o.startTime < r.end - 1e-6 ? [o] : []
   if (o.endTime <= r.start + 1e-6 || o.startTime >= r.end - 1e-6) return []
-  const piece = telopPiece(o, r.start, r.end)
+  const piece = telopPiece(o, r.start, r.end, min)
   return piece ? [piece as T] : []
 }
 
@@ -7126,6 +7173,7 @@ function restoreLockedContent(project: Project, prev: Project, locks: readonly R
   let { audioTracks, videoOverlayTracks, textOverlays } = project
   // 塊ごとに(離れた所に差し戻した複製も、その塊の置かれた所へずらす)
   const windows = locks.flatMap((lock) => matchLockBlocks(prev.clips, project.clips, info, lock))
+  const lockedNow = windows.map((w) => w.now)
   for (const w of windows) {
     const now = w.now
     const shift = now.start - w.prev.start
@@ -7166,10 +7214,13 @@ function restoreLockedContent(project: Project, prev: Project, locks: readonly R
     })
     // 自動テロップ: 真ん中の時刻が範囲の中の新しいものは捨て、前のものを残す
     const isAuto = (o: TextOverlay): boolean => !o.linkedClipId && autoTelopKey(o) !== null
-    // 境をまたぐものは境で切る(新しいものは外側だけ、前のものは中だけ。2枚同時に出さない)
+    // 境をまたぐものは境で切る(新しいものは外側だけ、前のものは中だけ。2枚同時に出さない)。
+    // 前のものの、ロックの中に掛かるごく短い切れ端(速さを変えたクリップの境など)も一旦残し、境で外の同じ枚と
+    // つながればそのまま1枚にする(捨てると、ロックの中のテロップがその分だけ短くなった)。つながらずに残った
+    // ごく短い切れ端は、一瞬だけ出るので後で捨てる
     const back = prev.textOverlays
       .filter(isAuto)
-      .flatMap((o) => telopWithin(o, w.prev))
+      .flatMap((o) => telopWithin(o, w.prev, 1e-6))
       .map((o) => ({
         ...o,
         id: uuid(),
@@ -7184,8 +7235,15 @@ function restoreLockedContent(project: Project, prev: Project, locks: readonly R
         ...back
       ],
       [now.start, now.end],
-      now
+      lockedNow
     )
+    const slivers = new Set(
+      back.filter((o) => o.endTime - o.startTime < MIN_TELOP_PIECE_SEC).map((o) => o.id)
+    )
+    if (slivers.size > 0)
+      textOverlays = textOverlays.filter(
+        (o) => !slivers.has(o.id) || o.endTime - o.startTime >= MIN_TELOP_PIECE_SEC
+      )
   }
   return { ...project, audioTracks, videoOverlayTracks, textOverlays }
 }

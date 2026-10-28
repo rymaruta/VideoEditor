@@ -38,7 +38,17 @@ import {
 import type { Project } from '@shared/types'
 import { autoTelopKey } from '@shared/telop/manual'
 import { markIn, markOut, rippleDelete } from '@renderer/lib/editCommands'
-import { cov, episode2, inter, len, lockOrder, memory, project } from './h'
+import {
+  cov,
+  episode2,
+  inter,
+  len,
+  lockNeighborMismatches,
+  lockOrder,
+  memory,
+  project,
+  reversedLocks
+} from './h'
 
 const SEEDS = (process.env.SEEDS ?? '1,2,3,4,5,6,7,8').split(',').map(Number)
 const STEPS = Number(process.env.NSTEPS ?? 25)
@@ -488,6 +498,9 @@ describe('audit fuzz', () => {
           const mem = memory(before)
           const locks = before.autoEditLocks ?? []
           const order0 = lockOrder(before)
+          // どちらも元の所の塊が逆の順に並ぶとき(順を保つと前後はどちらか食い違う)は、そのロックを数えない
+          const reversed = reversedLocks(before)
+          const nb0 = lockNeighborMismatches(before, reversed)
           const lockCov = locks.map((l) => ({
             l,
             segs: inter(cov(before), [l])
@@ -593,6 +606,17 @@ describe('audit fuzz', () => {
           // ロックした塊の、タイムラインの順の中身の並びは変わらない(matchLockBlocks を使わない確かめ)
           if (lockOrder(now) !== order0)
             fail(`lock order changed\nbefore=${order0}\nafter =${lockOrder(now)}`)
+          // ロックした塊が、並べ替えたクリップに付いて動かない(前後の自由な所と食い違う側が増えない)
+          {
+            const nb1 = lockNeighborMismatches(now, reversed)
+            const lost = [...nb0.inPlace].filter((id) => !nb1.inPlace.has(id))
+            if (lost.length > 0)
+              fail(`lock left its place ${lost.length}\nbefore=${nb0.detail}\nafter =${nb1.detail}`)
+            if (nb1.count > nb0.count)
+              fail(
+                `lock neighbors mismatched ${nb0.count}->${nb1.count}\nbefore=${nb0.detail}\nafter =${nb1.detail}`
+              )
+          }
           for (const { l, segs } of lockCov) {
             const segsNow = inter(c, [l])
             const diff = len(subtractRanges(segs, segsNow)) + len(subtractRanges(segsNow, segs))
