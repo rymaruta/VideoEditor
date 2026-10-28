@@ -12,7 +12,7 @@ import {
 } from '@shared/loudness'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
-import ffprobeStatic from 'ffprobe-static'
+import ffprobeStatic from '@derhuerst/ffprobe-static'
 import { execFile } from 'child_process'
 import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
@@ -73,7 +73,16 @@ export const ffmpegPath = (ffmpegStatic as unknown as string).replace(
   'app.asar',
   'app.asar.unpacked'
 )
-export const ffprobePath = ffprobeStatic.path.replace('app.asar', 'app.asar.unpacked')
+/**
+ * ffprobe は ffmpeg-static と同じリポジトリ・同じリリースの @derhuerst/ffprobe-static(ffmpeg と同じビルド)。
+ * 前の ffprobe-static 3.x は ffmpeg(Linux 7.0.2)と別のビルドの 4.0.2 で、PCM を入れた MP4(ipcm)の音声を
+ * `codec_name=unknown` と読み、AVIF・HEIF の入れ物を開けず、新しい `-show_entries` の節(stream_side_data)も知らなかった
+ * (tests/e2e/ffprobeSameBuild.test.ts)
+ */
+export const ffprobePath = (ffprobeStatic as unknown as string).replace(
+  'app.asar',
+  'app.asar.unpacked'
+)
 
 ffmpeg.setFfmpegPath(ffmpegPath)
 ffmpeg.setFfprobePath(ffprobePath)
@@ -191,9 +200,11 @@ function displayDimensions(stream: Record<string, unknown> | undefined): {
 }
 
 /**
- * ffprobe が向きを読めない入れ物(Matroska の display matrix・JPEG の EXIF の向き)。同梱の ffprobe は
- * ffmpeg より古く、これらの回転を見ない。ffmpeg(書き出し・サムネイル)と Chromium は回して映すので、
- * アプリが持つ縦横だけが回す前のまま(縦の写真が横として扱われ、切り抜き位置・縦横比の印がずれる)だった
+ * ffprobe が向きを読めない入れ物(Matroska の display matrix・JPEG の EXIF の向き)。前に同梱していた
+ * ffprobe(4.0.2)は ffmpeg より古く、これらの回転を見なかった。ffmpeg(書き出し・サムネイル)と Chromium は
+ * 回して映すので、アプリが持つ縦横だけが回す前のまま(縦の写真が横として扱われ、切り抜き位置・縦横比の印が
+ * ずれる)だった。今の ffprobe は ffmpeg と同じビルドで Matroska の回転は読むが、JPEG の EXIF の向きは
+ * ffprobe の stream に出ない(実測)。FFPROBE_BIN で別の ffprobe を使われたときの守りも兼ねて残す
  */
 const ROTATION_BLIND_EXTENSIONS = new Set(['mkv', 'webm', 'jpg', 'jpeg'])
 

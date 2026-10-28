@@ -5,8 +5,11 @@ import { afterAll, describe, expect, it } from 'vitest'
 import {
   debianSourceFiles,
   ffmpegSourceUrl,
+  FFPROBE_PACKAGE,
   ffmpegStaticDocCandidates,
+  ffprobeExecutable,
   findFfmpegStaticDocs,
+  isSameBuild,
   looksLikeArchive,
   missingItems,
   parseReadmeVersions,
@@ -290,5 +293,56 @@ describe('GPL のソース一式: Windows 版(gyan.dev)の ffmpeg-static', () =>
     expect(byId.vidstab.url).toBe('https://github.com/georgmartius/vid.stab/archive/05829db.tar.gz')
     expect(missingItems([plan])).toEqual([])
     expect(plan.others.find((o) => o.name === 'libaom')?.version).toBe('3.8.0-180-g0eeb62d344')
+  })
+})
+
+describe('GPL のソース一式: ffprobe(ffmpeg-static と同じリリースの @derhuerst/ffprobe-static)', () => {
+  it('包みの中の実行ファイル・README・LICENSE の場所(Windows では ffprobe.exe・ffprobe.exe.README)', () => {
+    expect(FFPROBE_PACKAGE).toBe('@derhuerst/ffprobe-static')
+    expect(ffprobeExecutable('C:\\app\\p', 'win32', path.win32)).toBe('C:\\app\\p\\ffprobe.exe')
+    expect(ffprobeExecutable('/app/p', 'linux', path.posix)).toBe('/app/p/ffprobe')
+    const win = ffmpegStaticDocCandidates('C:\\app\\p\\ffprobe.exe', path.win32)
+    expect(win.readme[0]).toBe('C:\\app\\p\\ffprobe.exe.README')
+    expect(win.license).toContain('C:\\app\\p\\ffprobe.LICENSE')
+    // ffprobe の横の ffmpeg.README(無い物)を探しに行かない
+    expect(win.readme.some((r) => r.includes('ffmpeg'))).toBe(false)
+    const posix = ffmpegStaticDocCandidates('/app/p/ffprobe', path.posix)
+    expect(posix.readme[0]).toBe('/app/p/ffprobe.README')
+  })
+
+  it('版と configure が同じなら同じビルド。違えば別(4.0.2 の ffprobe と 7.0.2 の ffmpeg)', () => {
+    const ffmpeg = parseVersionOutput(VERSION_7)
+    const probe = parseVersionOutput(VERSION_7.replace('ffmpeg version', 'ffprobe version'))
+    expect(isSameBuild(ffmpeg, probe)).toBe(true)
+    const old = parseVersionOutput(
+      [
+        'ffprobe version 4.0.2-static https://johnvansickle.com/ffmpeg/',
+        'configuration: --enable-gpl --enable-version3 --enable-static --enable-libx264'
+      ].join('\n')
+    )
+    expect(isSameBuild(ffmpeg, old)).toBe(false)
+    // 構成だけ違う(同じ版の別のビルド)も別
+    expect(
+      isSameBuild(ffmpeg, { ...probe, configuration: `${probe.configuration} --enable-libfoo` })
+    ).toBe(false)
+    expect(isSameBuild(null, probe)).toBe(false)
+  })
+
+  it('同じビルドの ffprobe は ffmpeg の x264 の印・README で、ffmpeg と同じ入手先に決まる', () => {
+    const ffmpeg = planSources({
+      kind: 'ffmpeg',
+      versionText: VERSION_7,
+      readme: README,
+      x264Banner: X264
+    })
+    const probe = planSources({
+      kind: 'ffprobe',
+      versionText: VERSION_7.replace('ffmpeg version', 'ffprobe version'),
+      readme: README,
+      x264Banner: X264
+    })
+    const urls = (p: typeof ffmpeg): (string | null)[] => p.items.map((i) => i.url)
+    expect(urls(probe)).toEqual(urls(ffmpeg))
+    expect(probe.items.find((i) => i.id === 'ffprobe-x264')?.url).toContain('x264-4613ac3')
   })
 })

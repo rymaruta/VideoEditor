@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import ffmpegStatic from 'ffmpeg-static'
-import ffprobeStatic from 'ffprobe-static'
+import { ffprobePath } from '@main/ffmpegService'
 import { readdirSync } from 'fs'
 import { createWaveformPeaksService, generateWaveformPeaks } from '@main/waveformPeaks'
 
@@ -74,7 +74,7 @@ describe.skipIf(!has)('細かい波形の値(本物の ffmpeg)', () => {
     const cacheDir = join(dir, 'cache')
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir,
       directMaxSec: 0
     })
@@ -101,7 +101,7 @@ describe.skipIf(!has)('細かい波形の値(本物の ffmpeg)', () => {
     const wav = join(dir, 'stereo.wav')
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir: join(dir, 'cache'),
       directMaxSec: 0
     })
@@ -132,7 +132,7 @@ describe.skipIf(!has)('細かい波形の値(本物の ffmpeg)', () => {
     ])
     const svc = createWaveformPeaksService({
       ffmpegPath: ffmpeg,
-      ffprobePath: ffprobeStatic.path,
+      ffprobePath,
       cacheDir: join(dir, 'cache')
     })
     const p = await svc.get(wav, 0, 2, 50)

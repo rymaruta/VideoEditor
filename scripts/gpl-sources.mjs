@@ -3,7 +3,7 @@
 // 使い方: npm run gpl-sources [-- オプション]
 //
 //   --ffmpeg <path>      調べる ffmpeg(既定: node_modules/ffmpeg-static の、この PC 用のもの)
-//   --ffprobe <path>     調べる ffprobe(既定: node_modules/ffprobe-static の、この PC 用のもの)
+//   --ffprobe <path>     調べる ffprobe(既定: node_modules/@derhuerst/ffprobe-static の、この PC 用のもの)
 //   --out <dir>          出力先(既定: dist/gpl-sources)
 //   --source <id>=<url>  自動で決められなかった部品の入手先を手で与える(何度でも。id は MANIFEST の名前)
 //   --allow-missing      決められない部品が残っても作る(MANIFEST に「未取得」と書く。配布には使わない)
@@ -17,6 +17,8 @@
 // - ビルドに使われた GPL のライブラリ(x264・x265・xvid・rubberband・frei0r・vid.stab)。版は
 //   ffmpeg-static が配る README(ffmpeg.README)と、x264 で 1 コマだけ書いて読む版の印から決める
 // - 同梱した実行ファイルの -version の出力・README・LICENSE
+// ffprobe は @derhuerst/ffprobe-static(ffmpeg-static と同じリポジトリ・同じリリースの ffprobe)。ffmpeg と
+// 同じビルド(版と configure が同じ)なら、同じソースを指す(x264 の版は ffmpeg で読んだものを使い、取得は 1 回)
 // - MANIFEST.txt / manifest.json: 部品ごとの版・ライセンス・取得元・SHA-256。GPL 以外のライブラリ
 //   (LGPL・BSD など)も、使われていることと版を記録する
 //
@@ -110,7 +112,10 @@ export function parseReadmeVersions(readme) {
  */
 export function ffmpegStaticDocCandidates(exePath, pathApi = nodePath) {
   const dir = pathApi.dirname(exePath)
-  const bases = [...new Set([pathApi.basename(exePath), 'ffmpeg.exe', 'ffmpeg'])]
+  // ffprobe(@derhuerst/ffprobe-static。同じ install.js で ffprobe.README・ffprobe.exe.README を落とす)も同じ並び
+  const own = pathApi.basename(exePath)
+  const stem = /^ffprobe(\.exe)?$/i.test(own) ? 'ffprobe' : 'ffmpeg'
+  const bases = [...new Set([own, `${stem}.exe`, stem])]
   return {
     readme: bases.map((b) => pathApi.join(dir, `${b}.README`)),
     license: bases.map((b) => pathApi.join(dir, `${b}.LICENSE`))
@@ -447,19 +452,34 @@ function fileNameFor(item) {
   return `${item.id}--${tail}`
 }
 
+/**
+ * ffprobe の npm の包み。ffmpeg-static と同じリポジトリ(eugeneware/ffmpeg-static)・同じリリース(b6.1.1 など)から、
+ * この PC 用の ffprobe を 1 つだけ落とす(ffprobe-static 3.x は 4.0.2 という別のビルドを全 OS 分持っていた)
+ */
+export const FFPROBE_PACKAGE = '@derhuerst/ffprobe-static'
+
+/** ffprobe の包みの中の実行ファイル(install.js が置く場所。Windows では ffprobe.exe) */
+export function ffprobeExecutable(packageDir, platform = process.platform, pathApi = nodePath) {
+  return pathApi.join(packageDir, platform === 'win32' ? 'ffprobe.exe' : 'ffprobe')
+}
+
+/**
+ * ffmpeg と ffprobe が同じビルドか(版の文字列と configure の引数が同じ)。同じなら、同じソース一式が両方の
+ * 対応するソースになる(静的にリンクしたライブラリも同じ)
+ */
+export function isSameBuild(ffmpegParsed, ffprobeParsed) {
+  return (
+    Boolean(ffmpegParsed?.version) &&
+    ffmpegParsed.version === ffprobeParsed?.version &&
+    ffmpegParsed.configuration === ffprobeParsed?.configuration
+  )
+}
+
 function defaultBinaries(projectDir) {
   const exe = process.platform === 'win32' ? '.exe' : ''
   return {
     ffmpeg: join(projectDir, 'node_modules', 'ffmpeg-static', `ffmpeg${exe}`),
-    ffprobe: join(
-      projectDir,
-      'node_modules',
-      'ffprobe-static',
-      'bin',
-      process.platform,
-      process.arch,
-      `ffprobe${exe}`
-    )
+    ffprobe: ffprobeExecutable(join(projectDir, 'node_modules', ...FFPROBE_PACKAGE.split('/')))
   }
 }
 
@@ -474,20 +494,30 @@ export function main(argv, projectDir) {
 
   const plans = []
   const binaryDocs = []
+  /** ffmpeg で読んだ README と x264 の印(同じビルドの ffprobe にも使う) */
+  let ffmpegClues = { readme: '', banner: '', parsed: null }
   for (const kind of ['ffmpeg', 'ffprobe']) {
     const path = bins[kind]
     if (!existsSync(path)) throw new Error(`${kind} が見つかりません: ${path}(npm ci をやり直す)`)
     const versionText = run(path, ['-version'])
     // README・LICENSE は Windows では ffmpeg.exe.README・ffmpeg.exe.LICENSE(ffmpegStaticDocCandidates)。
-    // LICENSE が無ければ、リポジトリに置いた GPL v3 の全文を入れる
-    const docs =
-      kind === 'ffmpeg'
-        ? findFfmpegStaticDocs(path, join(projectDir, 'scripts', 'license-texts', 'GPL-3.0.txt'))
-        : { readme: null, license: null }
+    // ffprobe も同じ並び(ffprobe.README など)。LICENSE が無ければ、リポジトリに置いた GPL v3 の全文を入れる
+    const docs = findFfmpegStaticDocs(
+      path,
+      join(projectDir, 'scripts', 'license-texts', 'GPL-3.0.txt')
+    )
     const readmePath = docs.readme ?? ''
     const licensePath = docs.license ?? ''
-    const readme = readmePath && existsSync(readmePath) ? readFileSync(readmePath, 'utf-8') : ''
-    const banner = kind === 'ffmpeg' ? x264Banner(path) : ''
+    let readme = readmePath && existsSync(readmePath) ? readFileSync(readmePath, 'utf-8') : ''
+    let banner = ''
+    if (kind === 'ffmpeg') {
+      banner = x264Banner(path)
+      ffmpegClues = { readme, banner, parsed: parseVersionOutput(versionText) }
+    } else if (isSameBuild(ffmpegClues.parsed, parseVersionOutput(versionText))) {
+      // ffprobe は x264 で書けないので印を読めない。同じビルドなら ffmpeg の印・README がそのまま当てはまる
+      banner = ffmpegClues.banner
+      if (!readme) readme = ffmpegClues.readme
+    }
     plans.push(
       planSources({ kind, versionText, readme, x264Banner: banner, overrides: opts.overrides })
     )
@@ -517,6 +547,8 @@ export function main(argv, projectDir) {
 
   const files = []
   const seen = new Map()
+  /** Debian のソース(1 つの入手先に複数のファイル)。入手先 → 取ったファイル */
+  const seenDebian = new Map()
   const fetchChecked = (url, dest) => {
     console.log(`取得: ${url}`)
     download(url, dest)
@@ -527,6 +559,11 @@ export function main(argv, projectDir) {
   for (const item of all) {
     if (!item.url) continue
     if (item.debian) {
+      // ffmpeg と ffprobe が同じビルドなら同じ Debian のソースを指す。取るのは 1 回だけ
+      if (seenDebian.has(item.url)) {
+        for (const f of seenDebian.get(item.url)) files.push({ ...f, id: item.id })
+        continue
+      }
       // Debian のソース: 一覧を取り、元の版(orig)と Debian の変更(debian.tar)を取る。SHA-1 を照らし合わせる
       const listPath = join(stage, 'debian-srcfiles.json')
       download(
@@ -536,19 +573,23 @@ export function main(argv, projectDir) {
       const list = debianSourceFiles(JSON.parse(readFileSync(listPath, 'utf-8')), item.debian)
       rmSync(listPath, { force: true })
       if (list.length === 0) throw new Error(`Debian のソースが見つかりません: ${item.url}`)
+      const fetched = []
       for (const f of list) {
         const file = `${item.id}--${f.name}`
         const dest = join(stage, 'sources', file)
         fetchChecked(f.url, dest)
         if (sha1(dest) !== f.sha1) throw new Error(`SHA-1 が合いません: ${f.url}`)
-        files.push({
+        const entry = {
           id: item.id,
           file,
           url: f.url,
           sha256: sha256(dest),
           size: statSync(dest).size
-        })
+        }
+        fetched.push(entry)
+        files.push(entry)
       }
+      seenDebian.set(item.url, fetched)
       continue
     }
     // ffmpeg と ffprobe で同じ物(同じ URL)は 1 回だけ

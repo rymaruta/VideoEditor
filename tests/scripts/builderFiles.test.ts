@@ -50,7 +50,8 @@ function packs(files: Files, arch: string, rel: string): boolean {
 }
 
 const ORT = 'node_modules/onnxruntime-node/bin/napi-v6'
-const FFPROBE = 'node_modules/ffprobe-static/bin'
+/** ffprobe は ffmpeg-static と同じリリースのもの(npm install がこの PC 用の 1 つだけを置く) */
+const FFPROBE = 'node_modules/@derhuerst/ffprobe-static'
 const LLAMA = 'node_modules/@node-llama-cpp'
 
 /** どの OS でも入れる物(実行時に読む) */
@@ -111,7 +112,8 @@ describe('製品に入れるファイル(electron-builder.cjs の files)', () =>
       `${ORT}/win32/x64/DirectML.dll`,
       `${ORT}/win32/x64/dxcompiler.dll`,
       `${ORT}/win32/x64/dxil.dll`,
-      `${FFPROBE}/win32/x64/ffprobe.exe`,
+      `${FFPROBE}/ffprobe.exe`,
+      `${FFPROBE}/index.js`,
       `${LLAMA}/win-x64/bins/win-x64/llama-addon.node`,
       `${LLAMA}/win-x64-cuda/bins/win-x64-cuda/ggml-cuda.dll`,
       `${LLAMA}/win-x64-cuda-ext/bins/win-x64-cuda/fallback/ggml-cuda.dll`,
@@ -124,9 +126,6 @@ describe('製品に入れるファイル(electron-builder.cjs の files)', () =>
       `${ORT}/linux/x64/libonnxruntime.so.1`,
       `${ORT}/linux/arm64/libonnxruntime.so.1`,
       `${ORT}/darwin/arm64/libonnxruntime.1.24.3.dylib`,
-      `${FFPROBE}/win32/ia32/ffprobe.exe`,
-      `${FFPROBE}/linux/x64/ffprobe`,
-      `${FFPROBE}/darwin/arm64/ffprobe`,
       `${LLAMA}/win-arm64/bins/win-arm64/llama-addon.node`,
       `${LLAMA}/linux-x64-cuda/bins/linux-x64-cuda/libggml-cuda.so`
     ])
@@ -143,7 +142,7 @@ describe('製品に入れるファイル(electron-builder.cjs の files)', () =>
       `${ORT}/linux/x64/libonnxruntime.so.1`,
       `${ORT}/linux/x64/onnxruntime_binding.node`,
       `${ORT}/linux/x64/libonnxruntime_providers_shared.so`,
-      `${FFPROBE}/linux/x64/ffprobe`,
+      `${FFPROBE}/ffprobe`,
       `${LLAMA}/linux-x64/bins/linux-x64/llama-addon.node`,
       `${LLAMA}/linux-x64-cuda/bins/linux-x64-cuda/libggml-cuda.so`,
       `${LLAMA}/linux-x64-cuda-ext/bins/linux-x64-cuda/fallback/libggml-cuda.so`,
@@ -156,8 +155,6 @@ describe('製品に入れるファイル(electron-builder.cjs の files)', () =>
       `${ORT}/linux/x64/libonnxruntime_providers_tensorrt.so`,
       `${ORT}/linux/arm64/libonnxruntime.so.1`,
       `${ORT}/darwin/arm64/libonnxruntime.1.24.3.dylib`,
-      `${FFPROBE}/linux/ia32/ffprobe`,
-      `${FFPROBE}/darwin/x64/ffprobe`,
       `${LLAMA}/linux-arm64/bins/linux-arm64/llama-addon.node`,
       `${LLAMA}/linux-armv7l/bins/linux-armv7l/llama-addon.node`,
       'node_modules/@img/sharp-libvips-linuxmusl-x64/lib/libvips-cpp.so.8.17.3'
@@ -169,17 +166,12 @@ describe('製品に入れるファイル(electron-builder.cjs の files)', () =>
     const m = builder.mac.files
     for (const keep of [
       `${ORT}/darwin/arm64/libonnxruntime.1.24.3.dylib`,
-      `${FFPROBE}/darwin/arm64/ffprobe`,
-      `${FFPROBE}/darwin/x64/ffprobe`,
+      `${FFPROBE}/ffprobe`,
       `${LLAMA}/mac-arm64-metal/bins/mac-arm64-metal/llama-addon.node`,
       `${LLAMA}/mac-x64/bins/mac-x64/llama-addon.node`
     ])
       expect(packs(m, 'x64', keep), keep).toBe(true)
-    for (const drop of [
-      `${ORT}/win32/x64/DirectML.dll`,
-      `${FFPROBE}/linux/x64/ffprobe`,
-      `${LLAMA}/win-x64/x`
-    ])
+    for (const drop of [`${ORT}/win32/x64/DirectML.dll`, `${LLAMA}/win-x64/x`])
       expect(packs(m, 'arm64', drop), drop).toBe(false)
   })
 

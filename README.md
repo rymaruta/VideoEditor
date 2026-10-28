@@ -124,7 +124,7 @@ YouTubeショート動画向けの動画編集デスクトップアプリ(Electr
 ## 動作環境
 
 - 対応OS: Windows / macOS / Linux(Electronアプリとして各OS向けにビルド可能)
-- ffmpeg / ffprobe は `ffmpeg-static` / `ffprobe-static` としてアプリに同梱されているため、別途インストールする必要はありません
+- ffmpeg / ffprobe は `ffmpeg-static` / `@derhuerst/ffprobe-static`(同じリリースの同じビルド) としてアプリに同梱されているため、別途インストールする必要はありません
 - 開発・ビルドには [Node.js](https://nodejs.org/)(LTS版推奨)と npm が必要です
 - 一部機能(自動テロップの音声認識モデル)は初回実行時のみインターネット接続でモデルをダウンロードします。それ以外の基本編集機能はすべてオフラインで動作します
 
