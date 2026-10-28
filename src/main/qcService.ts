@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { ffmpegPath, probeMedia } from './ffmpegService'
-import { trackProcess } from './liveProcesses'
+import { stopNow, trackProcess } from './liveProcesses'
 import { QcLogParser, qcFilter, type QcMeasurement } from '@shared/qc/media'
 
 /**
@@ -82,7 +82,7 @@ async function measure(
     running = null
   })
   if (rest) parser.push(rest)
-  // 止めたときは、終わり方(シグナルなら null、ffmpeg が SIGTERM を受けて自分で終わると 255)に関わらず
+  // 止めたときは、終わり方(シグナルなら null、ffmpeg が自分で終わると 255 など)に関わらず
   // 「止めた」と返す。次の書き出しの確認を始めるときに前の確認を止めると、255 で終わり
   // 「自動確認に失敗しました(255)」と記録されていた
   if (cancelRequested) throw new Error('QC_CANCELED')
@@ -92,5 +92,6 @@ async function measure(
 
 export function cancelMeasureExport(): void {
   if (busy) cancelRequested = true
-  running?.kill()
+  // kill()(SIGTERM)では ffmpeg がファイルの終わりまで測り続け、次の書き出しが待たされていた
+  if (running) stopNow(running)
 }

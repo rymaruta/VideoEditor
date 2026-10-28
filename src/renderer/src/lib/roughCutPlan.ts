@@ -105,7 +105,16 @@ export function timedLines(project: Project, info: MulticamInfo): TimedLine[] {
       end: toCommon(f, u.sourceEnd),
       text: u.text,
       overlap: u.overlap,
-      source: f.sourceId
+      source: f.sourceId,
+      ...(u.words?.length
+        ? {
+            words: u.words.map((w) => ({
+              text: w.text,
+              start: toCommon(f, w.start),
+              end: toCommon(f, w.end)
+            }))
+          }
+        : {})
     })
   }
   return out.sort((a, b) => a.start - b.start)
@@ -495,13 +504,16 @@ export function planRoughCut(
     kept: kept.map((s) => s.id),
     dropped: scenes
       .filter((s) => !keepSet.has(s.id))
-      .map((s) => ({
-        sceneId: s.id,
-        why:
+      .map((s) => {
+        const why =
           checked.judgements.find((j) => j.sceneId === s.id)?.kind === 'unneeded'
-            ? 'unneeded'
-            : 'length'
-      })),
+            ? ('unneeded' as const)
+            : ('length' as const)
+        // 長さに合わせて自動で落とした場面は、その決め手(`by`)も残す(落とした理由の文に使う。前は作り直す
+        // ときに捨て、`dropBasis.lengthBy` が保存されず、理由の文が推測になっていた。試し編集 第4回)
+        const by = auto.dropped.find((d) => d.sceneId === s.id && d.why === 'length')?.by
+        return { sceneId: s.id, why, ...(why === 'length' && by ? { by } : {}) }
+      }),
     estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0),
     ...(auto.relaxed ? { relaxed: true } : {}),
     ...(auto.minScore !== undefined ? { minScore: auto.minScore } : {}),

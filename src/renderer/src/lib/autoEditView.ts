@@ -360,6 +360,19 @@ export function droppedSceneReason(
         : []
       const same = indistinctJudgements(judgements)
       const tied = sameKept ? sameKept.length > 0 : Boolean(same && judgement?.score === same.score)
+      if (by === 'fragment')
+        return `仕上がりの最後に残ると言いかけで終わるので落としました(前後の場面を落とした、文の途中で始まる・終わる短い場面 · ${cues})`
+      if (judgement && by === 'refit') {
+        // 戻した、より点の低い場面(短くて、戻しても目標に収まった)
+        const lower = (keptScenes ?? [])
+          .filter((k) => (byScore.get(k.id) ?? Infinity) < judgement.score)
+          .map((k) => `${byScore.get(k.id)} 点 · ${Math.round(k.end - k.start)} 秒`)
+        const note =
+          lower.length > 0
+            ? `。より点の低い場面(${lower.join('、')})は短く、戻しても目標の長さに収まるので残しました`
+            : '。より点の低い短い場面は、戻しても目標の長さに収まるので残しました'
+        return `仕上がりの長さに合わせて、点数の低い場面から落としました(${judgement.score} 点 · ${cues})。この場面は長く、戻すと目標を超えます${note}`
+      }
       if (judgement && by && by !== 'score' && by !== 'cues') {
         const lead = `仕上がりの長さに合わせて落としました。同じ点(${judgement.score} 点)の場面の中で、`
         if (by === 'fit')

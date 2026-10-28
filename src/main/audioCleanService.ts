@@ -6,7 +6,7 @@ import { basename, extname, join } from 'path'
 import rnnoiseModel from '../../resources/models/rnnoise_voice_lq.rnnn?asset'
 import type { DenoiseResult } from '@shared/denoise'
 import { escapeFilterPath, ffmpegPath, probeMedia } from './ffmpegService'
-import { trackProcess } from './liveProcesses'
+import { stopNow, trackProcess } from './liveProcesses'
 import { contentFingerprint } from './fileFingerprint'
 import { NO_SOURCE_METADATA_ARGS } from '@shared/sourceVideo'
 
@@ -193,6 +193,7 @@ export function cancelDenoise(): void {
   cancelGeneration++
   for (const child of running) {
     canceledChildren.add(child)
-    child.kill()
+    // kill()(SIGTERM)では ffmpeg が素材の終わりまでノイズ除去を続けていた(数時間の素材だと数十分)
+    stopNow(child)
   }
 }

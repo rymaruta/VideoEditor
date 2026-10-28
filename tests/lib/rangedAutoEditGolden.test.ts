@@ -21,7 +21,9 @@ import { projectFingerprint, runEpisode } from '../helpers/episodeHarness'
  * (試し編集 第2回の直しで、企画に覚える自動編集の判断に「SE・BGM・CG の工程の終わり方」(`soundDone`)と
  * 「演出テロップの提案を省いた理由」(`effectsSkipped`)が増えた分だけ値を直した。この2つを除いた指紋は
  * 前の値 29386:61599fc6 9779:bb562d7 19224:7625a6b7 のまま。再監査の直しで、場面を選んだ時の方針
- * (`dropBasis`)が増えた分も直した。これを除いた指紋は 29478:9eb3a69d 9871:b46015f4 19316:10de5e97 のまま)
+ * (`dropBasis`)が増えた分も直した。これを除いた指紋は 29478:9eb3a69d 9871:b46015f4 19316:10de5e97 のまま。
+ * 試し編集 第4回 N3 の直しで、長さで落とした場面の決め手(`dropBasis.lengthBy`)が保存されるようになった
+ * 分も直した。`lengthBy` を除いた指紋は 29575:934f592d 9969:a9359ac3 19508:adbd433c のまま)
  * ロックも範囲も使わない企画では、
  * 作り直しの道が1つも変わらないことを確かめる(変わったら、このファイルの値を直す前に理由を確かめる)
  */
@@ -87,6 +89,6 @@ async function scenario(): Promise<string> {
 describe('ロックも範囲も使わない作り直しは、足す前と同じ', () => {
   it('作り直しの結果の指紋が 91ce266 と一致する', async () => {
     const got = await scenario()
-    expect(got).toBe('29575:934f592d 9969:a9359ac3 19508:adbd433c')
+    expect(got).toBe('29575:934f592d 10006:1a096281 19558:3ae097d4')
   })
 })

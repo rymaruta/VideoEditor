@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from 'path'
 import { contentFingerprint } from './fileFingerprint'
 import { describeFfmpegExit } from './ffmpegError'
-import { trackUntilDone } from './liveProcesses'
+import { stopNow, trackUntilDone } from './liveProcesses'
 import { ENVELOPE_RATE, EnvelopeBuilder, SYNC_BAND_HZ } from '@shared/sync/correlate'
 
 /**
@@ -44,7 +44,7 @@ export function readPcm(
     const onAbort = (): void => {
       aborted = true
       try {
-        child.kill('SIGKILL')
+        stopNow(child)
       } catch {
         // すでに終わっている
       }

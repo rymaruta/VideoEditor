@@ -152,7 +152,7 @@ describe('(a) 上下に積む: 書き出し用の写し', () => {
     ).toEqual(c1.splitStack)
   })
 
-  it('発言テロップは、上下の境目にも、どちらの人の顔にも掛けない', () => {
+  it('発言テロップは、上下の継ぎ目に置き、どちらの人の顔にも掛けない(第4回 N2 で継ぎ目に置く形に変えた)', () => {
     // ふだんは下の人の顔の下(胸の高さ)に入る
     const normal = applyVerticalFill(
       base(),
@@ -171,14 +171,14 @@ describe('(a) 上下に積む: 書き出し用の写し', () => {
         const rect = pos
           ? { ...b, y: pos.y - b.h / 2 }
           : telopRect(o, CANVAS, o.style.position === 'top' ? 'top' : 'bottom')
-        // 境目に掛からない
-        expect(rect.y >= seam + 0.01 || rect.y + rect.h <= seam - 0.01).toBe(true)
+        // 継ぎ目の帯の中(上の段・下の段へ離れない)
+        expect(rect.y).toBeLessThan(seam + 0.2)
+        expect(rect.y + rect.h).toBeGreaterThan(seam - 0.12)
         // 顔に掛からない
         expect(coversFace(rect, onCanvas)).toBe(false)
         // Shorts の下の帯に隠れない
         expect(rect.y + rect.h).toBeLessThanOrEqual(0.84)
       }
-      if (faces === low) expect(r.movedTelops).toBeGreaterThan(0)
     }
   })
 })

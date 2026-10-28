@@ -1,4 +1,4 @@
-import { trackUntilDone } from './liveProcesses'
+import { stopNow, trackUntilDone } from './liveProcesses'
 import { HIDE_MAIN_VIDEO_FILTER } from '@shared/trackVisibility'
 import { meterEncodedAudio } from './encodedLoudness'
 import { colorMatchFilter } from '@shared/color/match'
@@ -667,7 +667,7 @@ function trackExportCommand(command: ffmpeg.FfmpegCommand): void {
   // 書き出しを始めた直後の「中止」は、起きた時点で効かせる(中止したのに書き出しが最後まで進み、
   // 「完了」になっていた)
   command.once('start', () => {
-    if (exportCancelRequested) command.kill('SIGKILL')
+    if (exportCancelRequested) stopNow(command)
   })
 }
 let exportInProgress = false
@@ -1015,7 +1015,7 @@ export function cancelExport(): void {
   // Also covers the window before .run() assigns currentExportCommand: the flag
   // makes the in-flight job abort as soon as its command handle exists.
   exportCancelRequested = true
-  currentExportCommand?.kill('SIGKILL')
+  if (currentExportCommand) stopNow(currentExportCommand)
 }
 
 /**
@@ -1888,7 +1888,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
         currentExportCommand = command
         trackExportCommand(command)
         // グラフ組み立て中にキャンセルが来ていたら、ハンドルが出来たいま倒す
-        if (exportCancelRequested) command.kill('SIGKILL')
+        if (exportCancelRequested) stopNow(command)
       } catch {
         cleanup()
         resolveMeasure(null)
@@ -1928,9 +1928,9 @@ export async function exportProject(options: ExportOptions): Promise<void> {
               .run()
             currentExportCommand = command
             trackExportCommand(command)
-            if (exportCancelRequested) command.kill('SIGKILL')
+            if (exportCancelRequested) stopNow(command)
             // 測る側が先に終わったら、読む相手のいない書き込みで止まらないよう止める
-            stop.addEventListener('abort', () => command.kill('SIGKILL'), { once: true })
+            stop.addEventListener('abort', () => stopNow(command), { once: true })
           } catch {
             done(false)
           }
@@ -2094,7 +2094,7 @@ export async function exportProject(options: ExportOptions): Promise<void> {
       trackExportCommand(command)
       // A cancel that arrived while the filter graph was still being built has no
       // command to kill yet, so honour it as soon as the handle exists.
-      if (exportCancelRequested) command.kill('SIGKILL')
+      if (exportCancelRequested) stopNow(command)
     } catch (e) {
       cleanupTempDirs()
       currentExportCommand = null

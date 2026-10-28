@@ -1,4 +1,4 @@
-import { trackProcess } from './liveProcesses'
+import { stopNow, trackProcess } from './liveProcesses'
 import {
   OUTPUT_AUDIO_CODEC_ARGS,
   fitEncodedLoudness,
@@ -166,7 +166,7 @@ function runFfmpeg(args: string[], signal?: AbortSignal): Promise<RunResult> {
       }
     })
     const onAbort = (): void => {
-      child.kill('SIGKILL')
+      stopNow(child)
     }
     signal?.addEventListener('abort', onAbort, { once: true })
     child.on('error', (e) => {

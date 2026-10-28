@@ -81,6 +81,15 @@ function blockHeightRatio(
   return h / canvasH
 }
 
+/** テロップの高さ(キャンバスの高さに対する比)。描くときと同じ配置で数える(`liftAboveShortsUi` と同じ) */
+export function telopBlockHeight(
+  o: Pick<TextOverlay, 'text' | 'style'>,
+  canvasH: number,
+  canvasW: number = canvasWidthFor(canvasH)
+): number {
+  return blockHeightRatio(o, canvasH, canvasW)
+}
+
 export function stackSimultaneousTelops<
   T extends Pick<TextOverlay, 'text' | 'style' | 'startTime' | 'endTime'>
 >(

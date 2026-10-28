@@ -5,7 +5,8 @@ import {
   type FaceBox,
   type Rect
 } from '@shared/telop/avoidFaces'
-import { liftAboveShortsUi, SHORTS_TELOP_BOTTOM } from '@shared/telop/stack'
+import { liftAboveShortsUi, SHORTS_TELOP_BOTTOM, telopBlockHeight } from '@shared/telop/stack'
+import { TEXT_MARGIN_H_RATIO, TEXT_MARGIN_V_RATIO } from '@shared/textStyle'
 import { textCanvasSize } from '@shared/resolution'
 import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import { frameCountForDuration, projectFrameRate } from '@shared/frameRate'
@@ -33,7 +34,7 @@ import { placedUtterances } from './transcriptTimeline'
  * 書き出しの時だけの写しに当てる(企画のクリップは変えない)。人がクリップに決めた切り抜き(枠を埋める・
  * 埋めない・切り取り位置)はそのまま使う。
  * 発言テロップは、切り出した絵の中で顔を避けて置き、Shorts の下の帯に隠れない高さへ上げる。上下に積んだ
- * 所では、上下の境目にも掛けない。
+ * 所では、縦の定番に合わせて2段の継ぎ目(縦の真ん中)に置く(行数が変わっても下端は同じ高さ)。
  */
 
 /** 顔として使う確からしさの下限(テロップの配置と同じ) */
@@ -57,8 +58,50 @@ const SHORT_ACK_SEC = 0.6
 const RUN_JOIN_SEC = 2.5
 /** 話者の切り替えの、1ショットの長さの下限(秒)。これより短くなる切り替えはしない */
 export const MIN_SHOT_SEC = 2
-/** 上下に積んだ所の境目の上下に、テロップを置かない幅(画面の高さに対する比) */
-const SEAM_MARGIN = 0.012
+/**
+ * 上下に積んだ所で、発言テロップを継ぎ目から動かしてよい幅(画面の高さに対する比)。顔に掛かるときだけ、
+ * この帯の中で掛からない所へずらす
+ */
+const SEAM_BAND = 0.12
+/** 継ぎ目の帯の中で顔を避けるとき、顔の何割に掛かったら避けるか(あごに掛かるのも避ける) */
+const SEAM_FACE_RATIO = 0.04
+
+/** 顔の枠に少しでも掛かるか(`SEAM_FACE_RATIO` 以上) */
+function touchesFace(r: Rect, faces: readonly FaceBox[]): boolean {
+  return faces.some((f) => {
+    if (f.score < MIN_SCORE) return false
+    const w = Math.min(f.x + f.w, r.x + r.w) - Math.max(f.x, r.x)
+    const h = Math.min(f.y + f.h, r.y + r.h) - Math.max(f.y, r.y)
+    return w > 0 && h > 0 && (w * h) / Math.max(1e-9, f.w * f.h) >= SEAM_FACE_RATIO
+  })
+}
+
+/**
+ * 上下に積んだ所の発言テロップの下端(画面の比)。2行のテロップが継ぎ目(縦の真ん中)をまたぐ高さを既定にし、
+ * 行数が違っても下端をそろえる(前は行数で上の段・下の段を行き来し、2〜3 秒ごとに位置が跳んだ。試し編集
+ * 第4回)。顔に掛かるときだけ、継ぎ目の帯の中で掛からない所へずらす。顔を見るときの範囲は文字の幅・行数に
+ * よらず、文字の置ける幅いっぱい・2行以上の高さで見る(同じ絵の続くテロップが同じ高さになる)。
+ * 帯の中のどこも掛かるなら継ぎ目のまま
+ */
+export function seamTelopBottom(
+  height: number,
+  twoLineHeight: number,
+  seamY: number,
+  faces: readonly FaceBox[]
+): number {
+  const base = seamY + twoLineHeight / 2
+  const h = Math.max(height, twoLineHeight)
+  const w = 1 - 2 * TEXT_MARGIN_H_RATIO
+  const fits = (bottom: number): boolean =>
+    bottom <= SHORTS_TELOP_BOTTOM + 1e-9 &&
+    bottom - h >= TEXT_MARGIN_V_RATIO - 1e-9 &&
+    !touchesFace({ x: TEXT_MARGIN_H_RATIO, y: bottom - h, w, h }, faces)
+  const STEP = 0.005
+  for (let k = 0; k * STEP <= SEAM_BAND + 1e-9; k++)
+    for (const bottom of k === 0 ? [base] : [base - k * STEP, base + k * STEP])
+      if (fits(bottom)) return bottom
+  return base
+}
 
 /** 縦の枠が横長の絵のどれだけの幅を占めるか(1 以上なら切らない) */
 export function windowFraction(source: { width: number; height: number }, aspect: number): number {
@@ -670,8 +713,6 @@ export function applyVerticalFill(
     Boolean(o.utteranceId) && o.style.position === 'bottom' && !o.style.customPosition
   const lifted = liftAboveShortsUi(project.textOverlays, canvas.h, { canvasW: canvas.w })
   const seamY = stackTopHeight(canvas.h) / canvas.h
-  /** 上下に積んだ所の境目に掛かるか */
-  const onSeam = (r: Rect): boolean => r.y < seamY + SEAM_MARGIN && r.y + r.h > seamY - SEAM_MARGIN
   let movedTelops = 0
   const textOverlays = project.textOverlays.map((o, i) => {
     // 自動のショートは、組み立てが上げていた枚(下のテロップ全部)を今までどおり上げる
@@ -683,36 +724,15 @@ export function applyVerticalFill(
     const bottomRect = telopRect(up, canvas, 'bottom')
     const rect = pos ? { ...bottomRect, y: pos.y - bottomRect.h / 2 } : bottomRect
     if (stack) {
-      // 上下に積んだ所: 顔にも境目にも掛からない所へ(上げた位置 → 上 → 下の人の顔のすぐ下 → 上の人の顔の
-      // すぐ下の順)。どこも掛かるなら上げた位置のまま
-      const clear = (r: Rect): boolean => !onSeam(r) && !coversFace(r, faceList)
-      if (clear(rect)) return up
-      const topRect = telopRect(o, canvas, 'top')
-      if (clear(topRect)) {
-        movedTelops++
-        return { ...o, style: { ...o.style, position: 'top' as const } }
+      // 上下に積んだ所: 2段の継ぎ目に置く。行数が変わっても下端は同じ。顔に掛かるときだけ帯の中でずらす
+      const h = telopBlockHeight(o, canvas.h, canvas.w)
+      const two = telopBlockHeight({ text: 'あ\nあ', style: o.style }, canvas.h, canvas.w)
+      const bottom = seamTelopBottom(h, two, seamY, faceList)
+      if (Math.abs(bottom - (seamY + two / 2)) > 1e-9) movedTelops++
+      return {
+        ...o,
+        style: { ...o.style, customPosition: { x: pos?.x ?? 0.5, y: bottom - h / 2 } }
       }
-      const below = (lo: number, hi: number): number | null => {
-        const faceBottom = Math.max(
-          lo,
-          ...faceList
-            .filter((f) => f.score >= MIN_SCORE && f.y < hi && f.y + f.h > lo)
-            .map((f) => f.y + f.h)
-        )
-        const y = faceBottom + SEAM_MARGIN
-        return y + rect.h <= hi ? y : null
-      }
-      for (const y of [below(seamY, SHORTS_TELOP_BOTTOM), below(0, seamY - SEAM_MARGIN)]) {
-        if (y === null) continue
-        const r = { ...rect, y }
-        if (!clear(r)) continue
-        movedTelops++
-        return {
-          ...up,
-          style: { ...up.style, customPosition: { x: pos?.x ?? 0.5, y: y + rect.h / 2 } }
-        }
-      }
-      return up
     }
     if (faceList.length > 0 && coversFace(rect, faceList)) {
       if (!coversFace(telopRect(o, canvas, 'top'), faceList)) {
