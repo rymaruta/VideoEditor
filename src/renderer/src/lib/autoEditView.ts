@@ -341,9 +341,6 @@ export function droppedSceneReason(
 ): string {
   const why = droppedWhy(judgement, manual, policy)
   const cues = describeCues(sceneCues(scene))
-  // 言いかけの切れ端として落とした場面は、方針(目標の有無)に関わらずその理由を書く
-  if (!manual && by === 'fragment')
-    return `仕上がりの最後に残ると言いかけで終わるので落としました(前後の場面を落とした、文の途中で始まる・終わる短い場面 · ${cues})`
   switch (why) {
     case 'manual':
       return '手で落としました'

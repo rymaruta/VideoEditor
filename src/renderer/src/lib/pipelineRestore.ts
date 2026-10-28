@@ -84,7 +84,7 @@ export function isLegacyNote(m: string): boolean {
  * 対応を作る(今の場面の ID → 前の場面の ID)。場面の ID は番号なので、区切りが変わると同じ ID が別の
  * 場面を指す。ID だけで当てると、判定・残す/落とすが別の場面に付く
  */
-function nearMatches(
+export function matchScenesByTime(
   prev: readonly { id: string; start: number; end: number }[],
   next: readonly { id: string; start: number; end: number }[]
 ): Map<string, string> {
@@ -121,89 +121,14 @@ function nearMatches(
   return out
 }
 
-/**
- * 今の場面ごとの、前の場面の元(今の場面 ID → 前の場面 ID の並び。先頭が判定を受け継ぐ場面)。
- * `nearMatches`(時刻がほぼ同じ・古い1つの場面が分かれた)に加えて、
- * - 前の場面の半分より多くを含む今の場面は、その前の場面を元に持つ(前の場面をいくつ含んでも)。場面を
- *   つないで1つになった今の場面が、前のどの場面とも対応せず、保存した企画の印が外れていた(試し編集 第4回の
- *   直しの監査: 旧9場面 → 新7場面で s1・s3・s4・s5 が対応しなかった)
- * - それでも元の無い今の場面は、半分以上が重なる前の場面を元にする
- * 先頭(判定を受け継ぐ場面)は、元の中で重なりがいちばん大きい場面
- */
-export function sceneOriginsByTime(
-  prev: readonly { id: string; start: number; end: number }[],
-  next: readonly { id: string; start: number; end: number }[]
-): Map<string, string[]> {
-  const near = nearMatches(prev, next)
-  const overlap = (a: { start: number; end: number }, b: { start: number; end: number }): number =>
-    Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start))
-  const out = new Map<string, string[]>()
-  for (const n of next) {
-    const len = n.end - n.start
-    if (!(len > 0)) continue
-    const inside = prev.filter(
-      (p) => p.end - p.start > 0 && overlap(n, p) > (p.end - p.start) * 0.5
-    )
-    const matched = near.get(n.id)
-    const ids = new Set(inside.map((p) => p.id))
-    if (matched) ids.add(matched)
-    let all = prev.filter((p) => ids.has(p.id))
-    if (all.length === 0) {
-      const best = prev.reduce<{ id: string; start: number; end: number } | null>(
-        (b, p) => (overlap(n, p) > (b ? overlap(n, b) : 0) ? p : b),
-        null
-      )
-      if (best && overlap(n, best) >= len * 0.5) all = [best]
-    }
-    if (all.length === 0) continue
-    // 1つだけの対応(ほぼ同じ・分かれた)はそのまま。いくつも含むなら重なりの大きい順
-    const sorted =
-      matched && all.length === 1 ? all : [...all].sort((x, y) => overlap(n, y) - overlap(n, x))
-    out.set(
-      n.id,
-      sorted.map((p) => p.id)
-    )
-  }
-  return out
-}
-
-/**
- * 前の場面の区切り(`prev`)から、今の場面(`next`)へ、判定を受け継ぐ前の場面の対応を作る(今の場面の ID →
- * 前の場面の ID。`sceneOriginsByTime` の先頭)。場面の ID は番号なので、区切りが変わると同じ ID が別の
- * 場面を指す。ID だけで当てると、判定・残す/落とすが別の場面に付く
- */
-export function matchScenesByTime(
-  prev: readonly { id: string; start: number; end: number }[],
-  next: readonly { id: string; start: number; end: number }[]
-): Map<string, string> {
-  return new Map([...sceneOriginsByTime(prev, next)].map(([id, from]) => [id, from[0]]))
-}
-
 /** 場面ごとの印(残す / 落とす)を、前の場面から時刻の対応で今の場面へ移す */
 export function remapSceneFlags(
   flags: Readonly<Record<string, boolean>>,
-  match: ReadonlyMap<string, string>,
-  /** 今の場面ごとの前の場面の元(`sceneOriginsByTime`)。いくつも含む場面の印をまとめる */
-  origins?: ReadonlyMap<string, readonly string[]>
+  match: ReadonlyMap<string, string>
 ): Record<string, boolean> {
   const out: Record<string, boolean> = {}
-  for (const [id, prevId] of match) {
-    const from = origins?.get(id) ?? [prevId]
-    const values = from.map((p) => flags[p])
-    // 元の印が全部同じならそれ。違えば残す側を優先(落とす印と印の無い場面が混ざれば、印を付けない)
-    if (values.some((v) => v === true)) out[id] = true
-    else if (values.every((v) => v === false)) out[id] = false
-  }
+  for (const [id, prevId] of match) if (flags[prevId] !== undefined) out[id] = flags[prevId]
   return out
-}
-
-/** 前の場面の ID の並び(残した場面など)を、今の場面へ移す。元のどれかが入っていれば入れる */
-export function remapSceneIds(
-  ids: readonly string[],
-  origins: ReadonlyMap<string, readonly string[]>
-): string[] {
-  const set = new Set(ids)
-  return [...origins].filter(([, from]) => from.some((p) => set.has(p))).map(([id]) => id)
 }
 
 /**
@@ -240,12 +165,7 @@ export function restorePipelineFromProject(
   const hype = saved?.hype ?? []
 
   // 構成の場面は、文字起こしと同期の情報から同じように切り直せる(声の盛り上がりは保存したもの)
-  // 字数から見積もった発話の中の切れ目は、保存した区切りの所にだけ置く(開き直しでは音を読まない)
-  const scenes = scenesFor(project, info, {
-    kind,
-    ...(saved?.hype ? { hype } : {}),
-    ...(saved ? { savedBounds: saved.scenes.slice(1).map((x) => x.start) } : {})
-  })
+  const scenes = scenesFor(project, info, { kind, ...(saved?.hype ? { hype } : {}) })
   const sameScenes =
     saved !== undefined &&
     saved.scenes.length === scenes.length &&
@@ -257,8 +177,7 @@ export function restorePipelineFromProject(
     )
   const heuristic = heuristicJudgements(scenes, kind)
   // 保存した場面と今の場面の対応(時刻がほぼ同じもの)。場面の区切りが変わったら、対応の無い場面は簡易の点数
-  const origins = sceneOriginsByTime(saved?.scenes ?? [], scenes)
-  const match = new Map([...origins].map(([id, from]) => [id, from[0]]))
+  const match = matchScenesByTime(saved?.scenes ?? [], scenes)
   const judgedBy = (list: readonly SceneJudgement[] | undefined): SceneJudgement[] => {
     const byId = new Map((list ?? []).map((j) => [j.sceneId, j]))
     return heuristic.map((h) => {
@@ -289,9 +208,9 @@ export function restorePipelineFromProject(
   const spans = project.clips.length > 0 ? spansOfClips(project.clips, info) : []
   const toNow = (ids: readonly string[]): string[] => {
     const set = new Set(ids)
-    return scenes.map((sc) => sc.id).filter((id) => (origins.get(id) ?? []).some((p) => set.has(p)))
+    return scenes.map((sc) => sc.id).filter((id) => set.has(match.get(id) ?? ''))
   }
-  const keep = saved ? remapSceneFlags(saved.keep, match, origins) : {}
+  const keep = saved ? remapSceneFlags(saved.keep, match) : {}
   // 見込みには、引き継いだ手の残す/落とすも当てる(作り直しと同じ。前の版の企画では残っている)
   const withKeep = (auto: readonly string[]): string[] => {
     const set = new Set(auto)

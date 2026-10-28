@@ -35,7 +35,6 @@ import {
   demoteIndiscriminateHighlights,
   heuristicJudgements,
   selectScenes,
-  trailingFragment,
   type Scene,
   type SceneJudgement,
   type Selection,
@@ -52,7 +51,7 @@ import { askAiJson, type AiProgress } from './ai'
 import { tightenRanges, totalLength, type CutRange, type TightenOptions } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
 import { buildRoughCut, roughTimelineAt, type RoughCut } from '@shared/roughCut/build'
-import { mixLevelDb, quietestIn, snapCutsToQuiet } from '@shared/roughCut/snap'
+import { mixLevelDb, snapCutsToQuiet } from '@shared/roughCut/snap'
 import { clampPieces, fitLength } from '@shared/roughCut/range'
 import { activityMask, placeEnvelope, TURN_RATE, type MicTrack } from '@shared/diarize/micTurns'
 import { mixResidual } from '@shared/ingest/tracks'
@@ -106,16 +105,7 @@ export function timedLines(project: Project, info: MulticamInfo): TimedLine[] {
       end: toCommon(f, u.sourceEnd),
       text: u.text,
       overlap: u.overlap,
-      source: f.sourceId,
-      ...(u.words?.length
-        ? {
-            words: u.words.map((w) => ({
-              text: w.text,
-              start: toCommon(f, w.start),
-              end: toCommon(f, w.end)
-            }))
-          }
-        : {})
+      source: f.sourceId
     })
   }
   return out.sort((a, b) => a.start - b.start)
@@ -500,19 +490,6 @@ export function planRoughCut(
     if (keep) keepSet.add(id)
     else keepSet.delete(id)
   }
-  // 仕上がりの最後に言いかけの切れ端が残るなら落とす(手で決めた分を当てた後の最後で見る)
-  const fragment = trailingFragment(
-    scenes,
-    checked.judgements,
-    keepSet,
-    policy.useTarget ? options.targetSec : 0,
-    new Set(
-      Object.entries(options.keep ?? {})
-        .filter(([, k]) => k)
-        .map(([id]) => id)
-    )
-  )
-  if (fragment) keepSet.delete(fragment)
   const kept = scenes.filter((s) => keepSet.has(s.id))
   const selection: Selection = {
     kept: kept.map((s) => s.id),
@@ -525,10 +502,7 @@ export function planRoughCut(
             : ('length' as const)
         // 長さに合わせて自動で落とした場面は、その決め手(`by`)も残す(落とした理由の文に使う。前は作り直す
         // ときに捨て、`dropBasis.lengthBy` が保存されず、理由の文が推測になっていた。試し編集 第4回)
-        const by =
-          s.id === fragment
-            ? ('fragment' as const)
-            : auto.dropped.find((d) => d.sceneId === s.id && d.why === 'length')?.by
+        const by = auto.dropped.find((d) => d.sceneId === s.id && d.why === 'length')?.by
         return { sceneId: s.id, why, ...(why === 'length' && by ? { by } : {}) }
       }),
     estimated: kept.reduce((t, s) => t + (tightenedLength.get(s.id) ?? 0), 0),
@@ -745,29 +719,13 @@ export function planRoughCut(
 export function scenesFor(
   project: Project,
   info: MulticamInfo,
-  options: {
-    kind?: EpisodeKind
-    hype?: readonly HypeMoment[]
-    /** 音の大きさ(`levelOf`)。発話の中で字数から見積もった切れ目を、静かな所へ寄せる */
-    level?: Float32Array
-    /**
-     * 保存した場面の区切り(共通の秒)。開き直したときは音を読まないので、字数から見積もった切れ目は、
-     * 前に音で寄せて区切った所(前後 1 秒の中の保存した区切り)にだけ置く(作った時と同じ場面になる)
-     */
-    savedBounds?: readonly number[]
-  } = {}
+  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[] } = {}
 ): Scene[] {
-  const level = options.level
-  const saved = options.savedBounds
-  const quietCut = level
-    ? (lo: number, hi: number) => quietestIn(level, lo, hi)
-    : saved
-      ? (lo: number, hi: number) => saved.find((b) => b >= lo && b <= hi) ?? null
-      : undefined
-  const scenes = buildScenes(timedLines(project, info), cameraRange(info), {
-    ...KIND_PROFILES[options.kind ?? 'location'].scene,
-    ...(quietCut ? { quietCut } : {})
-  })
+  const scenes = buildScenes(
+    timedLines(project, info),
+    cameraRange(info),
+    KIND_PROFILES[options.kind ?? 'location'].scene
+  )
   const hype = options.hype
   // 笑い・歓声・声の盛り上がりを測っていれば、場面ごとの回数を付ける(判定と AI への文に使う)
   const events = project.audioEvents
