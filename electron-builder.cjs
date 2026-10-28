@@ -41,7 +41,11 @@ module.exports = {
     executableName: product.name
   },
   nsis: {
-    artifactName: '${productName}-${version}-setup.${ext}',
+    // 持ち主の PC で試す版は名前で分かるようにする(配布用と取り違えない)
+    artifactName:
+      process.env.VE_PERSONAL_BUILD === '1'
+        ? '${productName}-${version}-personal-setup.${ext}'
+        : '${productName}-${version}-setup.${ext}',
     shortcutName: '${productName}',
     uninstallDisplayName: '${productName}',
     createDesktopShortcut: 'always'
@@ -91,7 +95,9 @@ module.exports = {
   // 配布用の出力(--dir 以外)なら、販売者・連絡先・GPL のソースの入手先が未定のままでは止める
   // (scripts/release-check.cjs。npm の build:win などは先にも検査して、長いビルドの前に止める)
   beforePack: (context) => {
-    if (isDistributionBuild(context && context.targets)) assertReleasable(__dirname)
+    // VE_PERSONAL_BUILD=1 は持ち主の PC で試すための版(配布しない)。販売者などの検査は掛けない
+    if (isDistributionBuild(context && context.targets) && process.env.VE_PERSONAL_BUILD !== '1')
+      assertReleasable(__dirname)
     execFileSync(process.execPath, [join(__dirname, 'scripts', 'third-party-notices.mjs')], {
       stdio: 'inherit'
     })

@@ -41,9 +41,9 @@ jobs:
       - name: Electron build
         run: npx electron-vite build
 
-  # 持ち主の PC で試す版(インストーラではなく、展開してそのまま起動するフォルダ)。
-  # 配布用ではないので release-check は通さない(electron-builder --dir は beforePack の検査に掛からない)。
-  # Actions の実行結果の「Artifacts」から VideoEditor-windows-<コミット> をダウンロードし、展開して VideoEditor.exe を起動する
+  # 持ち主の PC で試す版。展開して起動するフォルダ(VideoEditor-windows-<コミット>)と、
+  # インストーラ(VideoEditor-windows-installer-<コミット>)を Actions の「Artifacts」に置く。
+  # 配布用ではないので販売者などの検査は掛けない(フォルダは --dir、インストーラは VE_PERSONAL_BUILD=1)
   package:
     needs: gates
     runs-on: windows-latest
@@ -71,9 +71,24 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Upload
+      - name: Upload (folder)
         uses: actions/upload-artifact@v4
         with:
           name: VideoEditor-windows-${{ github.sha }}
           path: dist/win-unpacked
+          retention-days: 14
+
+      # 持ち主の PC で試すインストーラ(署名なし・配布しない)。スタートメニュー・デスクトップのショートカットと
+      # 「設定 > アプリ」からのアンインストールが付く
+      - name: Installer (personal, unsigned)
+        run: npx electron-builder --win nsis --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          VE_PERSONAL_BUILD: '1'
+
+      - name: Upload (installer)
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoEditor-windows-installer-${{ github.sha }}
+          path: dist/*-personal-setup.exe
           retention-days: 14
