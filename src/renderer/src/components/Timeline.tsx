@@ -141,8 +141,7 @@ import type { TimelineRange } from '@shared/roughCut/range'
 import { RangeAutoEditDialog } from './RangeAutoEditDialog'
 import { RangeReviewBar } from './RangeReviewBar'
 import { AutoEditLockBand, LockGlyph } from './AutoEditLockBand'
-import { commonWindowOf } from '@shared/roughCut/range'
-import { snapRangeBoundaries } from '../lib/timelineRange'
+import { lockTimelineRange } from '../lib/editCommands'
 import { TimelineMarks } from './TimelineMarks'
 import { ShortcutHelpDialog } from './ShortcutHelpDialog'
 import { useShortcutHelpStore } from '../lib/shortcutHelp'
@@ -849,12 +848,19 @@ export function Timeline({
   const [rangeDialog, setRangeDialog] = useState<{
     range: TimelineRange
     origin?: RangeOrigin
+    prefer?: 'A' | 'B' | 'C'
   } | null>(null)
   const dragRange = useProjectStore((s) => s.dragRange)
   const timelineIn = useProjectStore((s) => s.timelineIn)
   const timelineOut = useProjectStore((s) => s.timelineOut)
   const hasLocks = (project.autoEditLocks?.length ?? 0) > 0 && Boolean(project.multicam)
-  useEffect(() => onRangeAutoEditRequest((r) => setRangeDialog({ range: r, origin: 'scene' })), [])
+  useEffect(
+    () =>
+      onRangeAutoEditRequest((r, o) =>
+        setRangeDialog({ range: r, origin: o.origin ?? 'scene', prefer: o.prefer })
+      ),
+    []
+  )
   const [scrubbing, setScrubbing] = useState(false)
 
   function selectOnly(kind: 'clip' | 'audio' | 'videoOverlay' | 'caption'): void {
@@ -1051,19 +1057,9 @@ export function Timeline({
    * 共通の時刻で覚える
    */
   function lockRange(range: TimelineRange, exact: boolean): void {
-    const p = useProjectStore.getState().project
-    if (!p.multicam) return
-    const cw = commonWindowOf(
-      p.clips,
-      p.multicam,
-      exact ? range : snapRangeBoundaries(p, range, undefined)
-    )
-    if (!cw.ok) {
-      setSfxDropError(`ロックできません: ${cw.reason}`)
-      return
-    }
-    useProjectStore.getState().addAutoEditLock(cw.window)
-    useProjectStore.getState().setDragRange(null)
+    if (!useProjectStore.getState().project.multicam) return
+    const reason = lockTimelineRange(range, exact)
+    if (reason) setSfxDropError(`ロックできません: ${reason}`)
   }
 
   function openRangeMenu(
@@ -3952,6 +3948,7 @@ export function Timeline({
         <RangeAutoEditDialog
           range={rangeDialog.range}
           origin={rangeDialog.origin}
+          prefer={rangeDialog.prefer}
           onClose={() => setRangeDialog(null)}
         />
       )}

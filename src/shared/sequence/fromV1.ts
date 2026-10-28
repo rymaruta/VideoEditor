@@ -36,6 +36,36 @@ export interface FromV1Options {
  * 決まるので、手前のクリップより長い繋ぎがありうる。そのときは2本前のクリップとも重なる。
  * v2 でもその重なりをそのまま写す(重なりは必ず繋ぎの区間の中に収まる)。
  */
+/**
+ * タイムラインの区間(秒)を、書き出し(v2 のシーケンス)のフレームの区間へ直す(範囲の書き出し用)。
+ * 繋ぎのぶん書き出しは短いので、`projectV1ToV2` と同じ換算(`createExportTimeMap`)を通す。
+ * 本編の尺で頭打ちにし、空なら null。`startSec` は書き出しの中での範囲の始まり(秒)
+ */
+export function timelineRangeToExportFrames(
+  project: Pick<Project, 'clips' | 'assets'>,
+  startTimeline: number,
+  endTimeline: number
+): { startFrame: number; endFrame: number; startSec: number } | null {
+  if (!Number.isFinite(startTimeline) || !Number.isFinite(endTimeline)) return null
+  const rate = projectRate(project.clips, project.assets)
+  const fpsNum = rateValue(rate)
+  const assetIds = new Set(project.assets.map((a) => a.id))
+  const mainClips = project.clips.filter((c) => assetIds.has(c.assetId))
+  const layout = computeMainTrackLayout(mainClips, fpsNum)
+  const totalFrames = Math.round(layout.totalExportDuration * fpsNum)
+  const { toExportTime, toExportEndTime } = createExportTimeMap(
+    layout.timelineStarts,
+    layout.timelineDurations,
+    layout.exportStarts
+  )
+  const a = Math.min(startTimeline, endTimeline)
+  const b = Math.max(startTimeline, endTimeline)
+  const startFrame = Math.max(0, Math.round(toExportTime(a) * fpsNum))
+  const endFrame = Math.min(totalFrames, Math.round(toExportEndTime(a, b) * fpsNum))
+  if (endFrame - startFrame < 1) return null
+  return { startFrame, endFrame, startSec: startFrame / fpsNum }
+}
+
 export function projectV1ToV2(project: Project, options: FromV1Options = {}): ProjectV2 {
   const rate = projectRate(project.clips, project.assets)
   const fpsNum = rateValue(rate)

@@ -1,4 +1,4 @@
-import type { QualityPreset } from './types'
+import type { ExportFormat, QualityPreset } from './types'
 
 /**
  * 区間ごとの書き出しに要るディスクの見込み。
@@ -44,17 +44,67 @@ export function estimateSegmentedExportBytes(p: {
   quality: QualityPreset
   /** 速さを変えた音を先に書く長さ(秒)の合計 */
   stretchedSec?: number
+  /** 書き出す形式(既定は MP4) */
+  format?: ExportFormat
 }): SegmentedDiskEstimate {
   const sec = Number.isFinite(p.durationSec) && p.durationSec > 0 ? p.durationSec : 0
-  const bpp = VIDEO_BITS_PER_PIXEL[p.quality] ?? VIDEO_BITS_PER_PIXEL.standard
+  const format = p.format ?? 'mp4'
+  const bpp =
+    format === 'prores'
+      ? PRORES_BITS_PER_PIXEL
+      : (VIDEO_BITS_PER_PIXEL[p.quality] ?? VIDEO_BITS_PER_PIXEL.standard)
   const fps = Number.isFinite(p.fps) && p.fps > 0 ? p.fps : 30
-  const video = (Math.max(0, p.width) * Math.max(0, p.height) * fps * bpp * sec) / 8
+  const video =
+    format === 'wav' ? 0 : (Math.max(0, p.width) * Math.max(0, p.height) * fps * bpp * sec) / 8
   const stretched = Math.max(0, p.stretchedSec ?? 0) * SEGMENT_AUDIO_BYTES_PER_SEC
+  const outAudio = format === 'mp4' ? OUTPUT_AUDIO_BYTES_PER_SEC : PCM24_AUDIO_BYTES_PER_SEC
   return {
     temp: Math.ceil(video + sec * SEGMENT_AUDIO_BYTES_PER_SEC + stretched),
-    output: Math.ceil(video + sec * OUTPUT_AUDIO_BYTES_PER_SEC)
+    output: Math.ceil(video + sec * outAudio)
   }
 }
+
+/**
+ * ProRes 422 の 1 画素・1 フレームあたりのビット数の**少なめ**の見込み。
+ * Apple の公表値は 1920×1080・29.97fps で 147Mbps(約 2.37)。絵柄で 2 割ほど上下するので下に寄せる
+ */
+const PRORES_BITS_PER_PIXEL = 2.0
+
+/** 書き出しの音(PCM 24bit・48kHz・ステレオ)の 1 秒あたり。ProRes の .mov と WAV で使う */
+export const PCM24_AUDIO_BYTES_PER_SEC = 48000 * 2 * 3
+
+/**
+ * 書き出しの画面に出す「推定サイズ」の目安(中ほどの値)。止めるための見込み(`estimateSegmentedExportBytes`)は
+ * 少なめに寄せてあるので画面には使わない。x264 は絵柄で数倍変わるので、撮影素材のよくある値に置く
+ * (実測: 動きの少ない記録映像 0.011、動きの多い撮影素材 0.06〜0.13 の間)。WAV と ProRes は形式で決まる
+ */
+export function estimateOutputBytes(p: {
+  durationSec: number
+  width: number
+  height: number
+  fps: number
+  quality: QualityPreset
+  format: ExportFormat
+}): number {
+  const sec = Number.isFinite(p.durationSec) && p.durationSec > 0 ? p.durationSec : 0
+  const fps = Number.isFinite(p.fps) && p.fps > 0 ? p.fps : 30
+  const pixels = Math.max(0, p.width) * Math.max(0, p.height) * fps * sec
+  if (p.format === 'wav') return Math.ceil(sec * PCM24_AUDIO_BYTES_PER_SEC)
+  if (p.format === 'prores')
+    return Math.ceil((pixels * PRORES_TYPICAL_BITS_PER_PIXEL) / 8 + sec * PCM24_AUDIO_BYTES_PER_SEC)
+  const bpp = TYPICAL_BITS_PER_PIXEL[p.quality] ?? TYPICAL_BITS_PER_PIXEL.standard
+  return Math.ceil((pixels * bpp) / 8 + sec * OUTPUT_AUDIO_BYTES_PER_SEC)
+}
+
+/** 画面の目安に使う、x264 の画質の段ごとのよくある値 */
+const TYPICAL_BITS_PER_PIXEL: Record<QualityPreset, number> = {
+  high: 0.08,
+  standard: 0.05,
+  small: 0.025
+}
+
+/** 画面の目安に使う ProRes 422 の値(Apple の公表値) */
+const PRORES_TYPICAL_BITS_PER_PIXEL = 2.37
 
 /** バイト数を「1.2 GB」「850 MB」の形で */
 export function formatBytes(bytes: number): string {

@@ -26,11 +26,13 @@ import {
   estimateSegmentedExportBytes
 } from '@shared/exportDiskSpace'
 import { measureEncodedLoudness } from './encodedLoudness'
-import type { MediaAsset, QualityPreset, TextOverlay } from '@shared/types'
+import type { ExportFormat, MediaAsset, QualityPreset, TextOverlay } from '@shared/types'
 import type { ProjectV2, Sequence } from '@shared/sequence/types'
 import {
   defaultSegmentOptions,
   planSegments,
+  segmentsInRange,
+  snapExportRange,
   type Segment,
   type SegmentPlanOptions
 } from '@shared/sequence/segmentPlan'
@@ -118,6 +120,10 @@ export interface SegmentedExportOptions {
   tempDir?: string
   /** ディスクの空き(バイト)を返す。試験で差し替える。既定は `statfs` */
   diskFree?: (path: string) => number
+  /** 書き出す形式。既定は MP4(H.264 + AAC) */
+  format?: ExportFormat
+  /** 書き出す範囲(シーケンスのフレーム)。省略は全体。境は繋ぎを割らない位置へ広げる */
+  range?: { startFrame: number; endFrame: number }
 }
 
 export interface SegmentedExportResult {
@@ -299,6 +305,84 @@ export function videoEncodeArgs(
 }
 
 /**
+ * 保存用の高画質(Apple ProRes 422・10bit 4:2:2)のエンコードの引数。**全区間で同じ**であること。
+ * `prores_ks` は CPU で動く(GPU のエンコーダは無い)。入れ物は QuickTime(.mov)
+ */
+export function proresEncodeArgs(fps: string): string[] {
+  return [
+    '-c:v',
+    'prores_ks',
+    '-profile:v',
+    '2',
+    '-vendor',
+    'apl0',
+    '-pix_fmt',
+    'yuv422p10le',
+    '-r',
+    fps,
+    '-video_track_timescale',
+    '90000'
+  ]
+}
+
+/** 書き出しの最後に音を書く引数(形式ごと)。MP4 は AAC、ProRes の .mov と WAV は PCM 24bit */
+export function finalAudioCodecArgs(format: ExportFormat): string[] {
+  return format === 'mp4' ? OUTPUT_AUDIO_CODEC_ARGS : ['-c:a', 'pcm_s24le']
+}
+
+/**
+ * 区間の映像(再エンコードなしで連結)と区間の音をまとめる最後の ffmpeg の引数。
+ * 音声だけ(WAV)は映像を読まない。WAV は 4GiB を越えると大きさの欄があふれるので RF64 を許す
+ */
+export function finalMuxArgs(
+  format: ExportFormat,
+  videoList: string,
+  audioInput: readonly string[],
+  audioFilter: readonly string[],
+  outputPath: string
+): string[] {
+  if (format === 'wav')
+    return [
+      '-v',
+      'error',
+      ...audioInput,
+      '-map',
+      '0:a',
+      ...audioFilter,
+      ...finalAudioCodecArgs(format),
+      '-ar',
+      String(OUTPUT_SAMPLE_RATE),
+      '-rf64',
+      'auto',
+      ...NO_SOURCE_METADATA_ARGS,
+      outputPath
+    ]
+  return [
+    '-v',
+    'error',
+    '-f',
+    'concat',
+    '-safe',
+    '0',
+    '-i',
+    videoList,
+    ...audioInput,
+    '-map',
+    '0:v',
+    '-map',
+    '1:a',
+    '-c:v',
+    'copy',
+    ...audioFilter,
+    ...finalAudioCodecArgs(format),
+    '-movflags',
+    '+faststart',
+    ...NO_SOURCE_METADATA_ARGS,
+    outputPath
+  ]
+}
+
+/**
  * 同時に走らせる数。
  * - NVENC: GeForce は同時セッション数に上限がある(世代・ドライバで変わる)ため控えめに 4。
  * - libx264: 1本で複数コアを使うので、コア数の 1/4(最大6)。
@@ -374,13 +458,24 @@ export async function exportSequenceSegmented(
   options: SegmentedExportOptions
 ): Promise<SegmentedExportResult> {
   const { project, outputPath, quality, signal } = options
+  const format: ExportFormat = options.format ?? 'mp4'
+  const withVideo = format !== 'wav'
   const onProgress = options.onProgress ?? ((): void => {})
   const seq = project.sequence
   const fps = fpsExpr(seq)
-  const segments = planSegments(
+  const planned = planSegments(
     seq,
     options.segmentOptions ?? defaultSegmentOptions(seq.fps.num / seq.fps.den)
   )
+  // 範囲だけを書き出すときは、全体の区間の並びから範囲に掛かる所を切り出す(区間の作り方は全体と同じ)
+  const snapped = options.range
+    ? snapExportRange(seq, options.range.startFrame, options.range.endFrame)
+    : null
+  if (options.range && !snapped)
+    throw new Error('書き出す範囲に、タイムラインのクリップがありません')
+  const segments = snapped
+    ? segmentsInRange(planned, snapped.startFrame, snapped.endFrame)
+    : planned
   if (segments.length === 0) throw new Error('タイムラインにクリップがありません')
   assertReadableStills(
     project.assets,
@@ -393,11 +488,19 @@ export async function exportSequenceSegmented(
   const beyondSource = clipsBeyondSourceMessage(sequenceItemsBeyondSource(project))
   if (beyondSource) throw new Error(beyondSource)
   assertOutputFolderExists(outputPath)
-  const totalFrames = segments[segments.length - 1].endFrame
+  /** 書き出すフレームの数(範囲のときは範囲の長さ) */
+  const totalFrames = segments.reduce((n, s) => n + (s.endFrame - s.startFrame), 0)
 
-  const encoder =
-    options.encoder && options.encoder !== 'auto' ? options.encoder : await detectVideoEncoder()
+  // ProRes と音声だけは H.264 のエンコーダを使わない(GPU を調べない。並列の数は CPU の数で決める)
+  const encoder: VideoEncoder =
+    format !== 'mp4'
+      ? 'libx264'
+      : options.encoder && options.encoder !== 'auto'
+        ? options.encoder
+        : await detectVideoEncoder()
   const parallel = Math.max(1, options.maxParallel ?? defaultParallelism(encoder))
+  const encoderText =
+    format === 'prores' ? 'CPU: ProRes 422' : format === 'wav' ? '音声のみ' : encoderLabel(encoder)
 
   const diskFree = options.diskFree ?? freeBytes
   const work = makeWorkDir(
@@ -409,7 +512,8 @@ export async function exportSequenceSegmented(
       height: seq.height,
       fps: seq.fps.num / seq.fps.den,
       quality,
-      stretchedSec: stretchedSeconds(seq)
+      stretchedSec: stretchedSeconds(seq),
+      format
     }),
     diskFree
   )
@@ -478,7 +582,9 @@ export async function exportSequenceSegmented(
     let assPath: string | undefined
     let telopLayer: GraphContext['telopLayer']
     // 画像は描きながら main の置き場へ書いてある(`stagedId`)。バイト列で来たときだけここへ書く
-    const layer = options.telopLayer ? materializeTelopLayer(options.telopLayer, () => work) : null
+    // 音声だけの書き出しには絵が無いので、テロップは描かない
+    const layer =
+      withVideo && options.telopLayer ? materializeTelopLayer(options.telopLayer, () => work) : null
     if (layer) {
       if (layer.width !== seq.width || layer.height !== seq.height) {
         throw new Error('テロップの画像の大きさが書き出しの解像度と合いません')
@@ -486,7 +592,8 @@ export async function exportSequenceSegmented(
       telopLayer = { runs: layer.runs, imagePaths: layer.imagePaths }
     }
     // `null` は「画面のプロセスが描いた結果、出すテロップが無かった」。ASS で描き直さない
-    const overlays = telopLayer || options.telopLayer === null ? [] : telopsAsOverlays(seq)
+    const overlays =
+      !withVideo || telopLayer || options.telopLayer === null ? [] : telopsAsOverlays(seq)
     if (overlays.length > 0) {
       const wideEmByFont = await measureWideAdvances(ffmpegPath, overlays)
       const canvas = textCanvasSize(seq.width >= seq.height ? '16:9' : '9:16')
@@ -555,7 +662,7 @@ export async function exportSequenceSegmented(
     }
     // HDR を BT.709 へ寄せたときは、出力にもそう書く(全区間で同じ引数。SDR だけの書き出しは今までどおり)
     const encodeArgs = [
-      ...videoEncodeArgs(encoder, quality, fps),
+      ...(format === 'prores' ? proresEncodeArgs(fps) : videoEncodeArgs(encoder, quality, fps)),
       ...(sourceVideo.hasHdr ? SDR_COLOR_TAG_ARGS : [])
     ]
     const threadsPerJob =
@@ -566,36 +673,39 @@ export async function exportSequenceSegmented(
       // 区間が1つ書けるたびにも空きを見る(短い書き出しは見回りの間隔より先に終わる)
       checkDisk()
       onProgress(
-        Math.min(90, (doneFrames / (totalFrames * 2)) * 90),
-        `書き出し中(${segments.length}区間・${parallel}並列・${encoderLabel(encoder)})`
+        Math.min(90, (doneFrames / (totalFrames * (withVideo ? 2 : 1))) * 90),
+        `書き出し中(${segments.length}区間・${parallel}並列・${encoderText})`
       )
     }
     report()
 
     const name = (s: Segment, ext: string): string =>
       join(work, `seg_${String(s.index).padStart(5, '0')}.${ext}`)
+    // 区間の映像の入れ物(ProRes は MP4 に入らないので .mov)
+    const videoExt = format === 'prores' ? 'mov' : 'mp4'
     const jobs: (() => Promise<void>)[] = []
     for (const s of segments) {
-      jobs.push(() =>
-        withRetry(async () => {
-          const graph = buildSegmentVideoGraph(ctx, s)
-          await runFfmpeg(
-            [
-              '-v',
-              'error',
-              ...graphArgs(withDecoders(graph, alphaDecoders), name(s, 'v.txt')),
-              '-an',
-              ...NO_SOURCE_METADATA_ARGS,
-              ...encodeArgs,
-              ...(threadsPerJob > 0 ? ['-threads', String(threadsPerJob)] : []),
-              name(s, 'mp4')
-            ],
-            runSignal
-          )
-          doneFrames += s.endFrame - s.startFrame
-          report()
-        }, runSignal)
-      )
+      if (withVideo)
+        jobs.push(() =>
+          withRetry(async () => {
+            const graph = buildSegmentVideoGraph(ctx, s)
+            await runFfmpeg(
+              [
+                '-v',
+                'error',
+                ...graphArgs(withDecoders(graph, alphaDecoders), name(s, 'v.txt')),
+                '-an',
+                ...NO_SOURCE_METADATA_ARGS,
+                ...encodeArgs,
+                ...(threadsPerJob > 0 ? ['-threads', String(threadsPerJob)] : []),
+                name(s, videoExt)
+              ],
+              runSignal
+            )
+            doneFrames += s.endFrame - s.startFrame
+            report()
+          }, runSignal)
+        )
       jobs.push(() =>
         withRetry(async () => {
           const graph = buildSegmentAudioGraph(ctx, s)
@@ -626,7 +736,8 @@ export async function exportSequenceSegmented(
     const listLine = (p: string): string => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`
     const videoList = join(work, 'video.txt')
     const audioList = join(work, 'audio.txt')
-    writeFileSync(videoList, segments.map((s) => listLine(name(s, 'mp4'))).join('\n'), 'utf-8')
+    if (withVideo)
+      writeFileSync(videoList, segments.map((s) => listLine(name(s, videoExt))).join('\n'), 'utf-8')
     writeFileSync(audioList, segments.map((s) => listLine(name(s, 'wv'))).join('\n'), 'utf-8')
     const audioInput = ['-f', 'concat', '-safe', '0', '-i', audioList]
 
@@ -691,32 +802,7 @@ export async function exportSequenceSegmented(
     }
 
     onProgress(96, '仕上げ中')
-    await runFfmpeg(
-      [
-        '-v',
-        'error',
-        '-f',
-        'concat',
-        '-safe',
-        '0',
-        '-i',
-        videoList,
-        ...audioInput,
-        '-map',
-        '0:v',
-        '-map',
-        '1:a',
-        '-c:v',
-        'copy',
-        ...audioFilter,
-        ...OUTPUT_AUDIO_CODEC_ARGS,
-        '-movflags',
-        '+faststart',
-        ...NO_SOURCE_METADATA_ARGS,
-        outputPath
-      ],
-      runSignal
-    )
+    await runFfmpeg(finalMuxArgs(format, videoList, audioInput, audioFilter, outputPath), runSignal)
     onProgress(100, '完了')
     return { segments: segments.length, encoder, parallel, frames: totalFrames }
   } catch (e) {

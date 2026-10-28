@@ -237,11 +237,14 @@ function VariantCard({
 export function RangeAutoEditDialog({
   range,
   origin,
+  prefer,
   onClose
 }: {
   range: TimelineRange
   /** どこで決めた範囲か。イン点・アウト点なら境を寄せず、当てた後のイン点・アウト点も合わせる */
   origin?: RangeOrigin
+  /** 最初に選んでおく案(確認の画面の「残す」は案C「残す」)。省略は最初にできた案 */
+  prefer?: RangedVariantId
   onClose: () => void
 }): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
@@ -269,6 +272,17 @@ export function RangeAutoEditDialog({
   const backdropRef = useRef<HTMLDivElement>(null)
   const fps = 1 / frameSeconds(project.clips, project.assets)
   const specs = rangedVariantSpecs(editPolicy).filter((sp) => options.steps.cut || sp.id === 'A')
+  /** 最初に選ぶ案: 頼まれた案(ほかの案にまとめられていればその案)、無ければ最初の案 */
+  const firstPick = (list: readonly RangedPreview[]): RangedVariantId | null => {
+    const label = prefer ? specs.find((sp) => sp.id === prefer)?.label : undefined
+    const hit = prefer
+      ? list.find(
+          (p) =>
+            p.variant.id === prefer || (label !== undefined && p.variant.merged.includes(label))
+        )
+      : undefined
+    return hit?.variant.id ?? list[0]?.variant.id ?? null
+  }
 
   // 閉じたら(画面から外れたら)作っている案を止め、試しに当てた案をやめる
   useEffect(
@@ -323,14 +337,17 @@ export function RangeAutoEditDialog({
         onVariant: (list) => {
           if (signal.aborted) return
           setPreviews(list)
-          setSelected((s) => s ?? list[0]?.variant.id ?? null)
+          setSelected((s) => s ?? firstPick(list))
           setShowOptions(false)
         }
       })
       if (signal.aborted) return
       if (r.ok) {
         setPreviews(r.previews)
-        setSelected((s) => s ?? r.previews[0]?.variant.id ?? null)
+        // 頼まれた案が後からできたなら、そちらへ選び直す(作れた順に出すので、最初は案A)
+        setSelected((s) =>
+          prefer && s !== prefer ? firstPick(r.previews) : (s ?? firstPick(r.previews))
+        )
         setShowOptions(false)
       } else {
         setPreviews([])

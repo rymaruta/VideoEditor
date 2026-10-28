@@ -15,7 +15,7 @@ import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
 import { normalizeLoudnessTarget, type LoudnessTarget } from '@shared/loudness'
 import { app, shell, BrowserWindow, ipcMain, dialog, screen } from 'electron'
-import { withMp4Extension, withVeprojExtension } from './partialOutput'
+import { withExtension, withVeprojExtension } from './partialOutput'
 import {
   exportOutputConflict,
   projectSourcePaths,
@@ -29,7 +29,7 @@ import {
   type PremiereExportPayload
 } from './premiereExportService'
 import { basename, extname, join } from 'path'
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, rmSync, statSync, statfsSync, writeFileSync } from 'fs'
 import { describeOpenPathFailure, missingFileError } from './openPathError'
 import {
   LINUX_OPENER_COMMAND,
@@ -117,16 +117,18 @@ import {
   stopLibraryWatchers,
   toggleLibraryFavorite
 } from './libraryService'
-import { projectV1ToV2 } from '@shared/sequence/fromV1'
+import { projectV1ToV2, timelineRangeToExportFrames } from '@shared/sequence/fromV1'
 import { projectForOutput } from '@shared/trackVisibility'
 import type { TelopLayerPayload } from '@shared/telop/layer'
-import type {
-  AspectRatio,
-  ExportEngine,
-  HighlightSensitivity,
-  Project,
-  QualityPreset,
-  ResolutionHeight
+import {
+  EXPORT_FORMAT_EXT,
+  type AspectRatio,
+  type ExportEngine,
+  type ExportFormat,
+  type HighlightSensitivity,
+  type Project,
+  type QualityPreset,
+  type ResolutionHeight
 } from '@shared/types'
 
 /**
@@ -525,13 +527,29 @@ function registerWindowScopedIpcHandlers(): void {
     return result.filePaths[0]
   })
 
-  ipcMain.handle(IPC.selectExportPath, async (event, defaultName: string) => {
-    const result = await showSaveDialogForSender(event, {
-      defaultPath: defaultName,
-      filters: [{ name: 'MP4動画', extensions: ['mp4'] }]
-    })
-    if (result.canceled || !result.filePath) return null
-    return confirmExtendedPath(event, result.filePath, withMp4Extension(result.filePath))
+  ipcMain.handle(
+    IPC.selectExportPath,
+    async (event, defaultName: string, format: ExportFormat = 'mp4') => {
+      const ext = EXPORT_FORMAT_EXT[format] ?? 'mp4'
+      const result = await showSaveDialogForSender(event, {
+        defaultPath: defaultName,
+        filters: [{ name: EXPORT_FILTER_NAME[format] ?? 'MP4動画', extensions: [ext] }]
+      })
+      if (result.canceled || !result.filePath) return null
+      return confirmExtendedPath(event, result.filePath, withExtension(result.filePath, ext))
+    }
+  )
+
+  // 書き出し先のドライブの空き(書き出しの画面の「空き容量」)。フォルダが無い・測れなければ null
+  ipcMain.handle(IPC.exportDiskFree, (_event, folder: string) => {
+    try {
+      if (typeof folder !== 'string' || !folder) return null
+      const s = statfsSync(folder)
+      const free = Number(s.bavail) * Number(s.bsize)
+      return Number.isFinite(free) ? free : null
+    } catch {
+      return null
+    }
   })
 
   ipcMain.handle(IPC.selectExportFolder, async (event) => {
@@ -635,6 +653,13 @@ function registerWindowScopedIpcHandlers(): void {
   ipcMain.handle(IPC.telopLayerRelease, (_e, id: string) => releaseTelopLayer(id))
 }
 
+/** 保存のダイアログの種類の名前(形式ごと) */
+const EXPORT_FILTER_NAME: Record<ExportFormat, string> = {
+  mp4: 'MP4動画',
+  prores: 'QuickTime(ProRes 422)',
+  wav: 'WAV 音声'
+}
+
 interface ExportPayload {
   project: Project
   aspectRatio: AspectRatio
@@ -644,6 +669,10 @@ interface ExportPayload {
   loudnessNormalization?: boolean
   loudnessTarget?: LoudnessTarget
   engine?: ExportEngine
+  /** 形式(既定は MP4)。MP4 以外は区間に分けて書き出す方式で作る */
+  format?: ExportFormat
+  /** 書き出す範囲(タイムラインの秒)。省略は全体。範囲は区間に分けて書き出す方式で作る */
+  range?: { start: number; end: number }
   /**
    * 画面のプロセスが共通レンダラで描いたテロップの層(どちらの書き出し方式でも使う)。
    * `null` は「出すテロップが無い」、省略は「層が無いので ASS で焼く」
@@ -682,8 +711,18 @@ async function runExportTo(
 ): Promise<{ success: boolean }> {
   // 標準の書き出しが OS の決まり(コマンドラインの長さ・一度に開く入力の数)に収まらなければ、
   // 区間ごとの書き出しを使う(収まらないまま起こすと、Windows では main プロセスごと落ちる)
+  const format: ExportFormat =
+    payload.format === 'prores' || payload.format === 'wav' ? payload.format : 'mp4'
+  // ProRes・音声だけ・範囲は、区間に分けて書き出す方式だけが受ける(入れ物と範囲をそこで扱う)
+  const range = payload.range
+    ? timelineRangeToExportFrames(payload.project, payload.range.start, payload.range.end)
+    : null
+  if (payload.range && !range) throw new Error('書き出す範囲に、タイムラインのクリップがありません')
   const engine =
-    payload.engine === 'segmented' || !standardExportFits(payload.project, process.platform).fits
+    payload.engine === 'segmented' ||
+    format !== 'mp4' ||
+    range !== null ||
+    !standardExportFits(payload.project, process.platform).fits
       ? 'segmented'
       : payload.engine
   if (engine === 'segmented') {
@@ -701,7 +740,9 @@ async function runExportTo(
         loudnessTarget: normalizeLoudnessTarget(payload.loudnessTarget),
         telopLayer: payload.telopLayer,
         onProgress,
-        signal
+        signal,
+        format,
+        ...(range ? { range: { startFrame: range.startFrame, endFrame: range.endFrame } } : {})
       })
     )
     return { success: true }

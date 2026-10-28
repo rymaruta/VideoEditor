@@ -30,9 +30,26 @@ export interface QcReport {
 
 interface QcState {
   report: QcReport | null
-  /** `project`: 書き出したときのプロジェクト(書き出しの最中に直したテロップで確認しない) */
-  run: (path: string, loudness: LoudnessTarget | 'off', project?: Project) => Promise<void>
+  /**
+   * `project`: 書き出したときのプロジェクト(書き出しの最中に直したテロップで確認しない)。
+   * `range`: 範囲だけを書き出したときの範囲(タイムラインの秒)と、書き出しの中での始まり(秒)。
+   * ファイルの 0 秒は範囲の始まりなので、指摘の時刻をそのぶん後ろへずらし、テロップは範囲の中だけを見る
+   */
+  run: (
+    path: string,
+    loudness: LoudnessTarget | 'off',
+    project?: Project,
+    range?: QcRange
+  ) => Promise<void>
   cancel: () => void
+}
+
+/** 範囲だけを書き出したときの範囲 */
+export interface QcRange {
+  start: number
+  end: number
+  /** 書き出し(繋ぎのぶん縮んだ秒)の中での範囲の始まり */
+  exportStart: number
 }
 
 function telopCheck(project: Project): QcIssue[] {
@@ -56,7 +73,7 @@ let measuring: Promise<unknown> | null = null
  * ファイルの秒で返る映像・音声の指摘を、タイムラインの秒へ直す(テロップの指摘・移る先と同じ秒)。
  * 繋ぎのぶんファイルが短いので、直さないと押したときに手前へずれていた
  */
-function toTimelineIssues(issues: QcIssue[], project: Project): QcIssue[] {
+function toTimelineIssues(issues: QcIssue[], project: Project, fileOffset = 0): QcIssue[] {
   const assets = new Map(project.assets.map((a) => [a.id, a]))
   const clips = project.clips.filter((c) => assets.has(c.assetId))
   if (clips.length === 0) return issues
@@ -68,7 +85,7 @@ function toTimelineIssues(issues: QcIssue[], project: Project): QcIssue[] {
     )
   )
   const map = (t: number): number =>
-    exportToTimelineTime(t, layout.timelineStarts, layout.exportStarts)
+    exportToTimelineTime(t + fileOffset, layout.timelineStarts, layout.exportStarts)
   return issues.map((i) => ({ ...i, start: map(i.start), end: Math.max(map(i.start), map(i.end)) }))
 }
 
@@ -98,7 +115,7 @@ export function withoutStillOverlayFreezes(issues: QcIssue[], project: Project):
 
 export const useQcStore = create<QcState>((set, get) => ({
   report: null,
-  run: async (path, loudness, exported) => {
+  run: async (path, loudness, exported, range) => {
     // 書き出したプロジェクトが、もう開いているプロジェクトでなければ確かめない(前のプロジェクトの
     // 結果を今のプロジェクトに出さない)
     if (exported && exported.id !== useProjectStore.getState().project.id) return
@@ -114,7 +131,9 @@ export const useQcStore = create<QcState>((set, get) => ({
     // 文字の幅を測るので、書き出しと同じ書体が読み込まれてから
     await document.fonts?.ready
     if (token !== runToken || call !== runCall) return
-    const telop = telopCheck(project)
+    const telop = telopCheck(project).filter(
+      (i) => !range || (i.end > range.start && i.start < range.end)
+    )
     set({
       report: { path, state: 'run', percent: 0, issues: sortIssues(telop), measurement: null }
     })
@@ -141,7 +160,7 @@ export const useQcStore = create<QcState>((set, get) => ({
           percent: 100,
           issues: sortIssues([
             ...withoutStillOverlayFreezes(
-              toTimelineIssues(mediaIssues(measurement, loudness), project),
+              toTimelineIssues(mediaIssues(measurement, loudness), project, range?.exportStart),
               project
             ),
             ...telop

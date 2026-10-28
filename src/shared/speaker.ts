@@ -26,11 +26,20 @@ export const NO_SPEAKER_COLOR = '#8c8c8c'
  * テロップを足すたびに色が入れ替わって見分けの役に立たない)。
  */
 export function speakerColor(speaker: string | undefined): string {
+  const i = speakerIndex(speaker)
+  return i === null ? NO_SPEAKER_COLOR : SPEAKER_PALETTE[i]
+}
+
+/**
+ * 話者名の色の番号(0〜7。`SPEAKER_PALETTE` と画面の `--ve-speaker-*` の番号)。話者が無ければ null。
+ * `speakerColor` と同じく名前だけで決まる
+ */
+export function speakerIndex(speaker: string | undefined): number | null {
   const name = speaker?.trim()
-  if (!name) return NO_SPEAKER_COLOR
+  if (!name) return null
   let h = 0
   for (const ch of name) h = (h * 31 + (ch.codePointAt(0) ?? 0)) >>> 0
-  return SPEAKER_PALETTE[h % SPEAKER_PALETTE.length]
+  return h % SPEAKER_PALETTE.length
 }
 
 /** 企画の中に出てくる話者の一覧(多い順、同数なら名前順)。入力欄の候補に使う */

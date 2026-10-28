@@ -7,6 +7,9 @@ import {
   useProjectStore
 } from '../store/projectStore'
 import { hasNonMainSelection } from './timelineSelection'
+import { commonWindowOf, type TimelineRange } from '@shared/roughCut/range'
+import { angleAlternatives } from '@shared/roughCut/overrides'
+import { snapRangeBoundaries } from './timelineRange'
 
 /**
  * 編集画面のキー(Premiere の既定)から呼ぶ、本編への操作。
@@ -235,5 +238,78 @@ export function goToMarker(direction: -1 | 1): boolean {
     direction < 0 ? previousEditPoint(times, s.playheadTime) : nextEditPoint(times, s.playheadTime)
   if (t === null) return false
   s.seekTo(t)
+  return true
+}
+
+/**
+ * 範囲を自動編集で触らない範囲(ロック)にする。境はフレームへ寄せ(`exact` ならそのまま)、共通の時刻で覚える
+ * (タイムラインの右クリック・インスペクタ・確認の画面の「ロック」が同じ所を通る)。
+ * できなければ理由を返す(できたら null)
+ */
+export function lockTimelineRange(range: TimelineRange, exact: boolean): string | null {
+  const p = useProjectStore.getState().project
+  if (!p.multicam) return '同期した収録素材の企画で使えます'
+  const cw = commonWindowOf(
+    p.clips,
+    p.multicam,
+    exact ? range : snapRangeBoundaries(p, range, undefined)
+  )
+  if (!cw.ok) return cw.reason
+  useProjectStore.getState().addAutoEditLock(cw.window)
+  useProjectStore.getState().setDragRange(null)
+  return null
+}
+
+/**
+ * 範囲の本編を、同じ時間の別のカメラに替える(確認の画面のカメラの一覧)。
+ * 両端で分割し、間のクリップをそれぞれ `switchClipAngle` で替える——を1件の履歴にまとめる。
+ * そのカメラが録っていないクリップはそのまま。1本でも替えたら true
+ */
+export function switchRangeAngle(range: TimelineRange, sourceId: string): boolean {
+  if (!(range.end - range.start > EPS)) return false
+  const first = useProjectStore.getState()
+  if (first.project.mainTrackLocked || !first.project.multicam) return false
+  const before = first
+  const splitAt = (t: number): void => {
+    const s = useProjectStore.getState()
+    const span = mainSpans(s.project).find((x) => t > x.start + EPS && t < x.end - EPS)
+    if (span) s.splitClipAtTime(span.id, t)
+  }
+  let switched = 0
+  runAsOneUndoStep(() => {
+    splitAt(range.end)
+    splitAt(range.start)
+    const s = useProjectStore.getState()
+    const info = s.project.multicam
+    if (!info) return
+    const ids = mainSpans(s.project)
+      .filter((x) => {
+        const mid = (x.start + x.end) / 2
+        return mid > range.start && mid < range.end
+      })
+      .map((x) => x.id)
+    for (const id of ids) {
+      const st = useProjectStore.getState()
+      const clip = st.project.clips.find((c) => c.id === id)
+      if (!clip) continue
+      const alt = angleAlternatives(clip, info).find((a) => a.sourceId === sourceId)
+      if (!alt || alt.current || !alt.clips || alt.clips.length === 0) continue
+      const prevClips = st.project.clips
+      st.switchClipAngle(id, sourceId)
+      if (useProjectStore.getState().project.clips !== prevClips) switched++
+    }
+  })
+  if (switched === 0) {
+    // 替えたものが無いのに分割だけ残さない(始める前へ戻す)
+    const now = useProjectStore.getState()
+    if (now.project !== before.project)
+      useProjectStore.setState({
+        project: before.project,
+        past: before.past,
+        future: before.future,
+        isDirty: before.isDirty
+      })
+    return false
+  }
   return true
 }
