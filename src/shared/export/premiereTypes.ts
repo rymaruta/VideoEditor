@@ -35,6 +35,26 @@ export interface PremiereExportResult {
   srtPath: string
   /** 見た目どおりのテロップ(PNG のフォルダか、ProRes の動画) */
   telopPath?: string
+  /**
+   * XML の隣へ写した素材(アプリの設定フォルダの中のファイル。ノイズ除去後のマイクの音 など)。
+   * `dir` は `名前_media/`、`files` は写した名前と写した元
+   */
+  media?: { dir: string; files: { name: string; from: string }[] }
   warnings: string[]
   stats: PremiereXmlResult['stats']
+}
+
+/**
+ * XML の隣へ写した素材の知らせ(書き出しの画面に出す)。写したものが無ければ null
+ */
+export function premiereMediaNote(media: PremiereExportResult['media']): string | null {
+  if (!media || media.files.length === 0) return null
+  const folder = media.dir.split(/[/\\]/).pop() ?? media.dir
+  const names = media.files.map((f) => f.name)
+  const shown =
+    names.slice(0, 3).join('・') + (names.length > 3 ? ` ほか ${names.length - 3} 本` : '')
+  return (
+    `アプリの中のファイル(ノイズ除去後のマイクの音など)${names.length} 本を「${folder}」に写し、XML はそちらを指しています(${shown})。` +
+    '別の PC で開くときは、XML と一緒にこのフォルダも渡してください'
+  )
 }

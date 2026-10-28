@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { applyWhenNotTrying, useProjectStore } from '../store/projectStore'
-import type { VoicevoxSpeaker } from '@shared/types'
 import { formatIpcError } from '../lib/ipcError'
+import { useVoicevoxStore } from '../store/voicevoxStore'
 import { afterTrialNotice, NARRATION_NOTICE } from '../lib/afterTrial'
 import { MicIcon, WandIcon } from './icons'
 
@@ -10,41 +10,33 @@ function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
 }
 
-export function NarrationPanel(): React.JSX.Element {
+/**
+ * `active`: パネルが開いているか。VOICEVOX へは開いた時に初めてつなぐ(`useVoicevoxStore`)。左のパネルは
+ * 切り替えても消さないので、置いた時につなぐと、使わない人でも起動のたびに接続のエラーが記録に残っていた
+ */
+export function NarrationPanel({ active = true }: { active?: boolean }): React.JSX.Element {
   const audioTracks = useProjectStore((s) => s.project.audioTracks)
   const addAudioClipWithAsset = useProjectStore((s) => s.addAudioClipWithAsset)
 
-  const [speakers, setSpeakers] = useState<VoicevoxSpeaker[]>([])
-  const [connError, setConnError] = useState<string | null>(null)
-  const [loadingSpeakers, setLoadingSpeakers] = useState(true)
-  const [styleId, setStyleId] = useState<number | null>(null)
+  const speakers = useVoicevoxStore((s) => s.speakers)
+  const status = useVoicevoxStore((s) => s.status)
+  const connError = useVoicevoxStore((s) => s.error)
+  const connect = useVoicevoxStore((s) => s.connect)
+  const connectIfNeeded = useVoicevoxStore((s) => s.connectIfNeeded)
+  const loadingSpeakers = status === 'idle' || status === 'loading'
+  /** 選んだ話者(選んでいなければ、ずんだもん → 最初の話者の最初の型) */
+  const [pickedStyleId, setStyleId] = useState<number | null>(null)
+  const zundamon = speakers.find((s) => s.name.includes('ずんだもん'))
+  const styleId = pickedStyleId ?? (zundamon ?? speakers[0])?.styles[0]?.id ?? null
   const [text, setText] = useState('')
   const [trackId, setTrackId] = useState<string>('')
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [doneMessage, setDoneMessage] = useState<string | null>(null)
 
-  function loadSpeakers(): void {
-    setLoadingSpeakers(true)
-    setConnError(null)
-    window.api
-      .voicevoxListSpeakers()
-      .then((list) => {
-        setSpeakers(list)
-        const zundamon = list.find((s) => s.name.includes('ずんだもん'))
-        const firstStyle = (zundamon ?? list[0])?.styles[0]
-        if (firstStyle) setStyleId(firstStyle.id)
-      })
-      .catch((e) => setConnError(formatIpcError(e)))
-      .finally(() => setLoadingSpeakers(false))
-  }
-
   useEffect(() => {
-    // Kicks off an async IPC call to check for a locally running VOICEVOX Engine on mount —
-    // an external system fetch, not state derivable from props.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadSpeakers()
-  }, [])
+    if (active) connectIfNeeded()
+  }, [active, connectIfNeeded])
 
   async function handleGenerate(): Promise<void> {
     if (!text.trim() || styleId === null) return
@@ -97,7 +89,7 @@ export function NarrationPanel(): React.JSX.Element {
         <div className="error-text">
           {connError}
           <div>
-            <button className="small-button" onClick={loadSpeakers}>
+            <button className="small-button" onClick={() => void connect()}>
               再接続
             </button>
           </div>

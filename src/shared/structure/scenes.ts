@@ -282,10 +282,50 @@ export interface Selection {
    * (静かな回で「面白い所だけ」が空の仮編集にならないように)
    */
   relaxed?: boolean
+  /**
+   * 判定が全部の場面を「不要」にしたので、点数・発話の割合の上位の場面を仮に残した(要確認)。
+   * 空の仮編集にすると、自動編集がカットで止まる(小さい AI が聞き取れない文字起こしで全部を不要にした)。
+   * 人が手で全部を落としたときは、ここでは決めない(`planRoughCut` の `keep` で落ちる)
+   */
+  rescued?: { kept: number; total: number }
 }
 
 /** 点数の下限を越える場面が無いとき、残す上位の割合 */
 const RELAXED_KEEP_RATIO = 0.25
+
+/**
+ * 全部の場面が「不要」のとき、仮に残す場面の発話の割合の下限(簡易の点数で「会話がほとんど無い」とする所と
+ * 同じ 15%)。これを越える場面が無ければ、点数・発話の割合のいちばん上の 1 場面だけ残す
+ */
+const RESCUE_MIN_SPEECH_RATIO = 0.15
+
+/**
+ * 判定が全部の場面を「不要」にしたときに仮に残す場面(時刻順)。点数の高い順、同じなら発話の割合の高い順に
+ * 並べ、発話が `RESCUE_MIN_SPEECH_RATIO` 以上の場面を残す(無ければ上位の 1 場面)
+ */
+export function rescueScenes(
+  scenes: readonly Scene[],
+  judgements: readonly SceneJudgement[]
+): string[] {
+  if (scenes.length === 0) return []
+  const score = new Map(judgements.map((j) => [j.sceneId, j.score]))
+  const ratio = (s: Scene): number => {
+    const dur = s.end - s.start
+    return dur > 0 ? Math.min(1, s.speech / dur) : 0
+  }
+  const events = (s: Scene): number => (s.laughs ?? 0) + (s.cheers ?? 0) + (s.hype ?? 0)
+  const ranked = [...scenes].sort(
+    (a, b) =>
+      (score.get(b.id) ?? 0) - (score.get(a.id) ?? 0) ||
+      events(b) - events(a) ||
+      ratio(b) - ratio(a)
+  )
+  const talking = new Set(
+    ranked.filter((s) => ratio(s) >= RESCUE_MIN_SPEECH_RATIO || events(s) > 0).map((s) => s.id)
+  )
+  const keep = talking.size > 0 ? talking : new Set([ranked[0].id])
+  return scenes.filter((s) => keep.has(s.id)).map((s) => s.id)
+}
 
 /**
  * 仕上がりの長さに収まるよう、残す場面を選ぶ。
@@ -319,8 +359,19 @@ export function selectScenes(
     }
   }
   const dropped: Selection['dropped'] = []
+  // 全部の場面が「不要」(判定が見分けになっていない・聞き取れない文字起こし)なら、点数・発話の割合の
+  // 上位を仮に残す(空の仮編集にしない。どれを残したかは `rescued` で知らせ、人に確かめてもらう)
+  const rescue =
+    dropUnneeded && scenes.length > 0 && scenes.every((s) => judge.get(s.id)?.kind === 'unneeded')
+      ? new Set(rescueScenes(scenes, judgements))
+      : null
   const candidates = scenes.filter((s) => {
     const j = judge.get(s.id)
+    if (rescue) {
+      if (rescue.has(s.id)) return true
+      dropped.push({ sceneId: s.id, why: 'unneeded' })
+      return false
+    }
     if (
       (dropUnneeded && j?.kind === 'unneeded') ||
       (j && j.kind !== 'highlight' && j.score < minScore)
@@ -357,7 +408,8 @@ export function selectScenes(
     kept: scenes.filter((s) => keep.has(s.id)).map((s) => s.id),
     dropped,
     estimated: total,
-    ...(relaxed ? { relaxed } : {})
+    ...(relaxed ? { relaxed } : {}),
+    ...(rescue ? { rescued: { kept: keep.size, total: scenes.length } } : {})
   }
 }
 

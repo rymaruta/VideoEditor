@@ -171,3 +171,19 @@ export function jobFileName(projectName: string, job: ExportJob): string {
         : `${safeFileBaseName(projectName)}_${aspect}_${job.resolutionHeight}p_${QUALITY_NAME[job.quality]}${range}`
   return `${body}.${EXPORT_FORMAT_EXT[job.format]}`
 }
+
+/** 書き出しの画面のファイル名の欄を、どの書き出しのものとして覚えるか(動画・音声 / Premiere 用 XML) */
+export type ExportNameKind = 'media' | 'xml'
+
+/**
+ * 書き出しの画面のファイル名の欄に出す名前(拡張子なし)。手で書いた名前は、動画・音声と Premiere 用 XML で
+ * 別々に覚える(null は企画の名前のまま)。1つの欄を共にしていたため、YouTube 向けに「…_YouTube」と書いて
+ * 書き出した後に行き先を Premiere 用 XML へ替えると、XML の名前も「…_YouTube」のままになっていた
+ */
+export function exportBaseName(
+  typed: Readonly<Partial<Record<ExportNameKind, string | null>>>,
+  xml: boolean,
+  projectName: string
+): string {
+  return typed[xml ? 'xml' : 'media'] ?? safeFileBaseName(projectName)
+}

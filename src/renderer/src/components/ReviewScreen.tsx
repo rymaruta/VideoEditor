@@ -40,7 +40,7 @@ import { LockIcon, PauseIcon, PlayIcon, SparklesIcon } from './icons'
  * リップル削除、ロックは範囲のロック、カメラはクリップのアングルの差し替えをそのまま使う。
  */
 
-type FixTab = 'sync' | 'transcript' | 'effects'
+type FixTab = 'sync' | 'transcript' | 'effects' | 'structure'
 
 /** 時刻を「1:52」の形で(要確認・文字起こしの行) */
 function clock(sec: number): string {

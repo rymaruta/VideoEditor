@@ -18,7 +18,8 @@ import { joinTelopLines } from '@shared/qc/telop'
  * 「このままでよい」にした項目はプロジェクトに保存する(`project.reviewed`)。
  */
 
-export type ReviewArea = 'sync' | 'speaker' | 'telop' | 'color' | 'audio' | 'effects' | 'export'
+export type ReviewArea =
+  'sync' | 'speaker' | 'telop' | 'color' | 'audio' | 'effects' | 'export' | 'structure'
 
 export interface ReviewItem {
   key: string
@@ -30,7 +31,7 @@ export interface ReviewItem {
   /** そのテロップを選んで移る */
   overlayId?: string
   /** 自動編集の画面の、どのタブで直すか */
-  tab?: 'sync' | 'transcript' | 'effects'
+  tab?: 'sync' | 'transcript' | 'effects' | 'structure'
 }
 
 export interface ReviewSources {
@@ -46,6 +47,25 @@ export interface ReviewSources {
   effects: readonly { id: string; text: string; confidence: number }[]
   effectChosen: readonly string[]
   qc: QcReport | null
+  /** 構成が全部の場面を「不要」にしたので、仮に残した場面の数(`structureRescueOf`)。無ければ null */
+  structureRescue?: { kept: number; total: number } | null
+}
+
+/**
+ * 構成の判定が全部の場面を「不要」にし、自動で仮に残した場面があるか(`selectScenes` の `rescued`)。
+ * 保存した企画からも分かるよう、判定と今残している場面から求める。場面の残す/落とすを手で決めて
+ * いれば(`keep` に印がある)人が決めたことなので出さない。人が全部を外して残す場面が無いときも出さない
+ * (そのときはカットの工程が「残す場面がありません」で止まる)
+ */
+export function structureRescueOf(
+  judgements: readonly { kind: string }[],
+  keptIds: readonly string[] | undefined,
+  keep: Readonly<Record<string, boolean>>
+): { kept: number; total: number } | null {
+  if (judgements.length === 0 || !judgements.every((j) => j.kind === 'unneeded')) return null
+  if (Object.keys(keep).length > 0) return null
+  const kept = keptIds?.length ?? 0
+  return kept > 0 ? { kept, total: judgements.length } : null
 }
 
 export function issueKey(issue: SyncIssue): string {
@@ -152,6 +172,16 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       kind: '演出テロップ',
       text: `自信が低く自動では置かなかった提案が ${pending.length} 件あります(「演出テロップ」タブで選べます)`,
       tab: 'effects'
+    })
+
+  if (s.structureRescue)
+    items.push({
+      // 作り直すたびに出直さないよう、鍵は固定(「このままでよい」にしたら、作り直しても出さない)
+      key: 'structure-rescued',
+      area: 'structure',
+      kind: '構成',
+      text: `構成の判定が全 ${s.structureRescue.total} 場面を「不要」にしたため、点数・発話の多い ${s.structureRescue.kept} 場面を仮に残しました。「構成」タブで残す場面を確かめてください`,
+      tab: 'structure'
     })
 
   if (s.qc && s.qc.state === 'done')

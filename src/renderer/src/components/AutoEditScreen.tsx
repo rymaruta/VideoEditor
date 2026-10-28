@@ -38,7 +38,7 @@ import { nextAction, RESTART_CONFIRM, type NextActionId } from '../lib/autoEditN
 import {
   commonSpan,
   formatDuration,
-  overallFraction,
+  overallProgress,
   sceneChips,
   sceneTitle
 } from '../lib/autoEditView'
@@ -220,15 +220,13 @@ export function AutoEditScreen(): React.JSX.Element | null {
     )
 
   const doneCount = STEPS.filter((s) => steps[s.id].state === 'done').length
-  const overall =
-    STEPS.reduce((t, s) => t + (steps[s.id].state === 'done' ? 100 : steps[s.id].percent), 0) /
-    STEPS.length
   const current = STEPS.find((s) => steps[s.id].state === 'run')
-  const overallPct = Math.round(
-    overallFraction(
-      STEPS.map((st) => ({ state: steps[st.id].state, percent: steps[st.id].percent }))
-    ) * 100
+  // 割合・済んだ工程の数・バーの長さは同じ数え方で(止まった後は省略を数えない。`overallProgress`)
+  const progress = overallProgress(
+    STEPS.map((st) => ({ state: steps[st.id].state, percent: steps[st.id].percent })),
+    running
   )
+  const overallPct = progress.percent
   const keptOf = (id: string): boolean => keep[id] ?? roughCut?.keptIds.includes(id) ?? false
   const span = commonSpan(project)
   const usedSources = sources.filter((x) => x.kind !== 'skip')
@@ -462,7 +460,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
               ? '仮編集あり'
               : action.kind === 'error'
                 ? '止まりました'
-                : `${doneCount} / ${STEPS.length} 工程`}
+                : `${progress.finished} / ${progress.total} 工程`}
         </span>
         <div className="dialog-footer-spacer" />
         <button className="small-button" onClick={() => setOpen(false)}>
@@ -476,12 +474,10 @@ export function AutoEditScreen(): React.JSX.Element | null {
           <div className="auto-edit-overall">
             <div className="auto-edit-overall-row">
               <span className="auto-edit-overall-label">全体</span>
-              <span className="tc">
-                {overallPct}% · {doneCount} / {STEPS.length} 工程
-              </span>
+              <span className="tc">{progress.text}</span>
             </div>
             <div className="progress-bar">
-              <div className="progress-bar-fill" style={{ width: `${overall}%` }} />
+              <div className="progress-bar-fill" style={{ width: `${progress.percent}%` }} />
             </div>
             <div className="auto-edit-overall-row form-note">
               <span>
@@ -599,7 +595,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                 <div className="ae-metrics">
                   <MetricCard
                     label="工程"
-                    value={`${doneCount} / ${STEPS.length}`}
+                    value={`${progress.finished} / ${progress.total}`}
                     unit={running ? `· ${overallPct}%` : undefined}
                     tone="blue"
                   />

@@ -22,7 +22,8 @@ import {
   totalTimelineDuration,
   findTimedClipAt,
   rollDragStep,
-  fitZoomFor
+  fitZoomFor,
+  speedLabel
 } from '../lib/timelineMath'
 import { snapClamped, snapTime } from '../lib/snapping'
 // テロップの最短の長さは**追加のときと同じ数字**を使う。ここに別の数字を書いていたころ、
@@ -3569,7 +3570,7 @@ export function Timeline({
                     <span className="timeline-clip-index">{i + 1}</span>
                     <span className="timeline-clip-label" title={tc.asset.fileName}>
                       {tc.asset.fileName}
-                      {tc.clip.speed !== 1 && ` (${tc.clip.speed}x)`}
+                      {speedLabel(tc.clip.speed)}
                     </span>
                     {isAspectMismatch(tc.asset, project.aspectRatio) &&
                       (tc.clip.fillCrop ? (

@@ -261,8 +261,10 @@ export function restorePipelineFromProject(
       cameras.length <= 1
         ? { state: 'skipped', percent: 0, note: 'カメラが1台です' }
         : assets.some((a) => a.colorMatch)
-          ? done()
-          : unknown,
+          ? done(saved?.colorDone || undefined)
+          : saved?.colorDone !== undefined
+            ? done(saved.colorDone || undefined)
+            : unknown,
     denoise:
       mics.length === 0
         ? { state: 'skipped', percent: 0, note: 'ピンマイクがありません' }

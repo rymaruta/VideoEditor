@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DESTINATIONS,
   destinationSettings,
+  exportBaseName,
   jobFileName,
   matchDestination,
   sourceAspect,
@@ -170,5 +171,19 @@ describe('小さな波形の切れ(timelineWave)', () => {
     expect(Array.from(empty.peak)).toEqual([0, 0, 0, 0])
     expect(pieceColumns(piece, 0, 10, 100)).toBe(50)
     expect(pieceColumns(piece, 0, 0, 100)).toBe(1)
+  })
+})
+
+describe('書き出しの画面のファイル名の欄(exportBaseName)', () => {
+  it('動画で書いた名前(…_YouTube)を、Premiere 用 XML の名前に持ち越さない', () => {
+    const typed = { media: '試し編集_第1回_YouTube' }
+    expect(exportBaseName(typed, false, '試し編集 第1回')).toBe('試し編集_第1回_YouTube')
+    expect(exportBaseName(typed, true, '試し編集 第1回')).toBe('試し編集 第1回')
+  })
+  it('XML で書いた名前は XML だけに使い、動画へ戻ると動画で書いた名前に戻る', () => {
+    const typed = { media: '本編_YouTube', xml: '本編_編集用' }
+    expect(exportBaseName(typed, true, '本編')).toBe('本編_編集用')
+    expect(exportBaseName(typed, false, '本編')).toBe('本編_YouTube')
+    expect(exportBaseName({}, false, '本編')).toBe('本編')
   })
 })

@@ -499,7 +499,11 @@ function App(): React.JSX.Element {
               {leftPane('audio', '音源', <AudioLibraryPanel />)}
               {leftPane('preset', 'プリセット', <PresetPanel />)}
               {leftPane('template', 'テンプレート', <TemplatePanel />)}
-              {leftPane('narration', 'ナレーション', <NarrationPanel />)}
+              {leftPane(
+                'narration',
+                'ナレーション',
+                <NarrationPanel active={left === 'narration'} />
+              )}
               {leftPane('thumbnail', 'サムネイル', <ThumbnailPanel />)}
               {leftPane('metadata', 'メタデータ', <MetadataPanel />)}
               {leftPane('youtube', 'YouTube トレンド', <YouTubeTrendPanel />)}

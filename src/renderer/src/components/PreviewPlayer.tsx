@@ -39,7 +39,6 @@ import {
   audioClipDuration,
   buildTimedClips,
   findTimedClipAt,
-  findTimedClipById,
   nextTimedClip,
   totalTimelineDuration,
   totalExportDuration,
@@ -78,6 +77,7 @@ import type {
   VideoOverlayClip
 } from '@shared/types'
 import { previewSourceUrl } from '../lib/previewSource'
+import { previewClipFollow } from '../lib/previewClipFollow'
 import { activeVideoOverlayClips } from '../lib/videoOverlay'
 import { overlayClipSpeed } from '@shared/overlayClip'
 import { toPlaybackRate } from '../lib/playbackRate'
@@ -1279,23 +1279,20 @@ export function PreviewPlayer(): React.JSX.Element {
   // timeline (e.g. deleted) — otherwise the preview keeps playing the stale, now
   // detached clip until it happens to reach its old out-point.
   useEffect(() => {
-    const activeId = activeTimedClipRef.current?.clip.id
-    const current = findTimedClipById(timedClips, activeId)
-    if (activeId != null && !current) {
-      loadClipForTime(playheadTime, isPlaying)
+    // 読み込んでいたクリップが消えた・最初・素材のファイルが替わった(プレビュー用の軽い素材ができた)・
+    // 再生位置のクリップが替わった(範囲のカメラを替えた など)なら読み込み直す(`previewClipFollow`)
+    const follow = previewClipFollow(
+      timedClips,
+      activeTimedClipRef.current?.clip.id,
+      activeSrcRef.current,
+      playheadTime,
+      (tc) => previewSourceUrl(tc.asset)
+    )
+    if (follow.kind === 'load') {
+      loadClipForTime(follow.time, follow.initial ? false : isPlaying)
       return
     }
-    if (!activeTimedClipRef.current && timedClips.length > 0) {
-      loadClipForTime(0, false)
-      return
-    }
-    // The loaded clip's source file can change while it stays on the timeline: a
-    // preview proxy finishing its transcode swaps the asset's playback path. Without
-    // this the element keeps the old, undecodable src and never starts.
-    if (current && previewSourceUrl(current.asset) !== activeSrcRef.current) {
-      loadClipForTime(playheadTime, isPlaying)
-      return
-    }
+    const current = follow.current
     // `timedClips` は project が変わるたび作り直されるので、ref が指しているのは常に
     // 「1つ前の配列の」オブジェクト。中身(start / outPoint)も編集前のまま凍っている。
     // 再生を止めずに、今の配列の同じクリップへ差し替える。
