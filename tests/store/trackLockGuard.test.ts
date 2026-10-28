@@ -191,13 +191,14 @@ describe('トラックの固定はストアの 1 か所で守る', () => {
     expect(JSON.stringify(pick())).not.toBe(before)
   })
 
-  it('選ぶ操作とトラックの設定(音量)は止めない', () => {
+  it('トラックの設定(音量)は止めない。固定したトラックの選びは、企画が変わると外れる', () => {
     lockAll()
-    s().selectClip('c1')
+    // ストアの選ぶ操作そのものは止めない(タイムラインは固定したトラックを選ばせない)
     s().selectOverlay('t1')
-    s().setAudioTrackVolume('a1', 0.5)
     expect(s().selectedOverlayId).toBe('t1')
+    s().setAudioTrackVolume('a1', 0.5)
     expect(s().project.audioTracks[0].volume).toBe(0.5)
+    expect(s().selectedOverlayId).toBeNull()
   })
 
   it('本編のリップル: 固定したトラックで本編に紐づかないものは動かない', () => {

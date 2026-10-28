@@ -814,6 +814,21 @@ export function Timeline({
     useTimelineSubSelection.getState().setSubSelection(selectedAudioClip, selectedVideoOverlayClip)
   }, [selectedAudioClip, selectedVideoOverlayClip])
   useEffect(() => () => useTimelineSubSelection.getState().setSubSelection(null, null), [])
+  // 取り消し・やり直しで固定に戻ったトラックの、音声・PiP の選びを外す(固定する操作では見出しが外す)
+  useEffect(
+    () =>
+      useProjectStore.subscribe((st, prev) => {
+        if (st.project === prev.project) return
+        const locked = new Set([
+          ...st.project.audioTracks.filter((t) => t.locked).map((t) => t.id),
+          ...st.project.videoOverlayTracks.filter((t) => t.locked).map((t) => t.id)
+        ])
+        if (locked.size === 0) return
+        setSelectedAudioClip((cur) => (cur && locked.has(cur.trackId) ? null : cur))
+        setSelectedVideoOverlayClip((cur) => (cur && locked.has(cur.trackId) ? null : cur))
+      }),
+    []
+  )
   const [videoOverlayDrag, setVideoOverlayDrag] = useState<VideoOverlayDragState | null>(null)
   const [zoom, setZoom] = useState(1)
   const [draggedClipId, setDraggedClipId] = useState<string | null>(null)
