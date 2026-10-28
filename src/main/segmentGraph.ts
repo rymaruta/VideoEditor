@@ -194,7 +194,11 @@ export function buildSegmentVideoGraph(ctx: GraphContext, segment: Segment): Seg
       fit.fit === 'cover',
       'cropCenter' in fit ? fit.cropCenter : undefined,
       'blurBackground' in fit ? fit.blurBackground : undefined,
-      { labelSuffix: `_${label}`, fps }
+      {
+        labelSuffix: `_${label}`,
+        fps,
+        ...('splitStack' in fit && fit.splitStack ? { stack: fit.splitStack } : {})
+      }
     )
     parts.push(
       `[${idx}:v]${sourceOf(item)}setpts=PTS/${num(speed)}${shift},${colorOf(item)}${scale},setsar=1,${exactFrames(visEnd - visStart)},${VIDEO_FORMAT}[${label}]`

@@ -121,7 +121,8 @@ export function projectV1ToV2(project: Project, options: FromV1Options = {}): Pr
         kind: 'frame',
         fit: clip.fillCrop ? 'cover' : 'contain',
         ...(clip.cropCenter ? { cropCenter: { ...clip.cropCenter } } : {}),
-        ...(clip.blurBackground ? { blurBackground: true } : {})
+        ...(clip.blurBackground ? { blurBackground: true } : {}),
+        ...(clip.splitStack ? { splitStack: clip.splitStack } : {})
       },
       ...(clip.colorLabel ? { colorLabel: clip.colorLabel } : {})
     }

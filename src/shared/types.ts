@@ -4,6 +4,7 @@ import type { CameraSeg, CutOverrides } from './roughCut/overrides'
 import type { ColorMatch } from './color/match'
 import type { MulticamInfo } from './sync/multicam'
 import type { TranscriptUtterance } from './transcript'
+import type { StackSplit } from './videoFrame'
 export interface MediaAsset {
   id: string
   filePath: string
@@ -59,6 +60,11 @@ export interface Clip {
   cropCenter?: { x: number; y: number }
   /** 余白を黒帯ではなく、素材をぼかした背景で埋める(`fillCrop` がONなら余白が無いので無効) */
   blurBackground?: boolean
+  /**
+   * 2人を上下に積む分割(縦の書き出し用の写しで、2人が縦の枠に収まらないときに付ける。`@shared/videoFrame`)。
+   * 書き出しは `fillCrop`・`cropCenter` より優先する。画面のプレビューは `cropCenter`(上の人)で見せる
+   */
+  splitStack?: StackSplit
   audioDetached?: boolean
   colorLabel?: ClipColorLabel
 }

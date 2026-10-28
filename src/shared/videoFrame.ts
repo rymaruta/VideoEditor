@@ -120,6 +120,44 @@ export function thumbnailScaleFilter(width: number = THUMBNAIL_WIDTH): string {
   return `${SQUARE_PIXEL_FILTER},scale=${w}:-2`
 }
 
+/**
+ * 素材の中の切り出す窓(素材の幅・高さに対する比。左上と大きさ)。縦の書き出しで2人を上下に積む分割
+ * (`StackSplit`)の1人ぶん
+ */
+export interface CropWindow {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/**
+ * 2人を上下に積む分割(縦のショートの定番。上に1人・下に1人、それぞれ顔に寄せて切り出す)。
+ * 窓の縦横比は出力の半分(9:16 なら 9:8)。縦の書き出し用の写しのクリップにだけ付く
+ */
+export interface StackSplit {
+  top: CropWindow
+  bottom: CropWindow
+}
+
+/** 上下に積む分割の、上の段の高さ(偶数。下の段は残り) */
+export function stackTopHeight(h: number): number {
+  return Math.max(2, Math.floor(h / 4) * 2)
+}
+
+/** 窓の数を ffmpeg の式に(0〜1 に収める。NaN は 0) */
+function frac(v: number): string {
+  const x = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0
+  return String(Math.round(x * 1e6) / 1e6)
+}
+
+function cropWindowFilter(win: CropWindow): string {
+  // 窓は素材からはみ出さない(crop は x・y を内側へ収めるが、幅・高さは収めない)
+  const w = Math.min(1, Math.max(0.01, Number.isFinite(win.w) ? win.w : 1))
+  const h = Math.min(1, Math.max(0.01, Number.isFinite(win.h) ? win.h : 1))
+  return `crop=w=iw*${frac(w)}:h=ih*${frac(h)}:x=iw*${frac(win.x)}:y=ih*${frac(win.y)}`
+}
+
 /** フレームの格子へ揃える `fps`(格子の数え方は `scaleToFrameFilter` の注記) */
 export function fpsFilter(fps: number | string): string {
   return `fps=${fps}:start_time=0:round=up`
@@ -149,6 +187,11 @@ export function scaleToFrameFilter(
      * 29.97 のような値は `'30000/1001'` の形(ffmpeg の有理数表記)で渡せる。
      */
     fps?: number | string
+    /**
+     * 2人を上下に積む分割(`StackSplit`)。指定すると、素材から2つの窓を切り出して上下に積む
+     * (`fillCrop`・`cropCenter`・`blurBackground` は使わない)
+     */
+    stack?: StackSplit
   } = {}
 ): string {
   const labelSuffix = options.labelSuffix ?? ''
@@ -161,6 +204,21 @@ export function scaleToFrameFilter(
   // 画素を正方形に直すのは**この関数の責任**にする。呼び出し側の先頭に足す形にすると、
   // 分岐した経路(ぼかし背景・切り抜き)や、あとから増えた呼び出し元だけが素通しになる。
   const square = `${SQUARE_PIXEL_FILTER},`
+  if (options.stack) {
+    // 同じ入力を2つに分け、それぞれの窓を切り出して上下の段の大きさにし、積む。ぼかし背景と同じく
+    // `vstack` は2入力のタイミングを突き合わせるので、`fps` は積む前に両方へ付ける(後ろに付けない)
+    const topH = stackTopHeight(h)
+    const a = `stsrc${labelSuffix}`
+    const b = `sbsrc${labelSuffix}`
+    const aOut = `sttop${labelSuffix}`
+    const bOut = `sbbot${labelSuffix}`
+    return (
+      `${square}split=2[${a}][${b}];` +
+      `[${a}]${cropWindowFilter(options.stack.top)},scale=${w}:${topH},setsar=1${fpsPart}[${aOut}];` +
+      `[${b}]${cropWindowFilter(options.stack.bottom)},scale=${w}:${h - topH},setsar=1${fpsPart}[${bOut}];` +
+      `[${aOut}][${bOut}]vstack=inputs=2`
+    )
+  }
   if (!fillCrop && blurBackground) {
     // 同じ入力を2つに分け、片方を枠いっぱいに広げてぼかした背景に、
     // もう片方を収まるように縮めた前景として重ねる。

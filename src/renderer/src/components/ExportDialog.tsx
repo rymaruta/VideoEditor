@@ -249,12 +249,14 @@ function VerticalSampleThumbs({
   start,
   end,
   fill,
+  twoPeople,
   findFaces
 }: {
   project: Project
   start: number
   end: number
   fill: boolean
+  twoPeople: boolean
   findFaces: boolean
 }): React.JSX.Element {
   const times = useMemo(() => {
@@ -263,13 +265,13 @@ function VerticalSampleThumbs({
   }, [start, end])
   // 鍵には企画と、見本の時刻に掛かるクリップの中身(素材・区間・速さ・見え方)を入れる(別の企画・直した
   // クリップで前の見本を出さない)
-  const key = verticalSampleKey(project, times, fill, findFaces)
+  const key = verticalSampleKey(project, times, fill, findFaces, twoPeople)
   const [shown, setShown] = useState<{ key: string; list: (VerticalSample & { url: string })[] }>()
   useEffect(() => {
     let alive = true
     let p = verticalSampleCache.get(key)
     if (!p) {
-      p = verticalSamples(project, times, fill, findFaces)
+      p = verticalSamples(project, times, fill, findFaces, undefined, twoPeople)
       p.catch(() => verticalSampleCache.delete(key))
       rememberVerticalSamples(key, p)
     } else {
@@ -301,6 +303,33 @@ function VerticalSampleThumbs({
   return (
     <span className="ve-export-vertical-samples" title="書き出しと同じ切り出しの見本">
       {shown?.list.map((x) => {
+        // 2人を上下に積む所は、書き出しと同じ2つの窓を上下に並べて見せる
+        if (x.stack)
+          return (
+            <span
+              key={x.at}
+              className="ve-export-thumb ve-export-stack"
+              title="2人を上下に分けて切り出します"
+            >
+              {[x.stack.top, x.stack.bottom].map((win, k) => (
+                <span key={k} className="ve-export-stack-half">
+                  <img
+                    src={x.url}
+                    alt={k === 0 ? '縦の画の見本(上の人)' : '縦の画の見本(下の人)'}
+                    draggable={false}
+                    style={{
+                      position: 'absolute',
+                      maxWidth: 'none',
+                      width: `${100 / win.w}%`,
+                      height: `${100 / win.h}%`,
+                      left: `${(-win.x / win.w) * 100}%`,
+                      top: `${(-win.y / win.h) * 100}%`
+                    }}
+                  />
+                </span>
+              ))}
+            </span>
+          )
         const pos = cropObjectPosition(x.sourceAspect, 9 / 16, x.center)
         return (
           <span key={x.at} className="ve-export-thumb">
@@ -329,6 +358,7 @@ function ExportPreview({
   audioOnly,
   vertical,
   fill,
+  twoPeople,
   findFaces,
   fps
 }: {
@@ -340,6 +370,8 @@ function ExportPreview({
   vertical: boolean
   /** 縦の書き出しで枠を埋めて切り出す(見本も書き出しと同じ切り出しで見せる) */
   fill: boolean
+  /** 2人が収まらないとき上下に積む・話す人へ切り替える(false は1人に寄せる) */
+  twoPeople: boolean
   /** 顔を探して寄せる(ゲーム実況は真ん中) */
   findFaces: boolean
   fps: number
@@ -358,6 +390,7 @@ function ExportPreview({
               start={start}
               end={end}
               fill={fill}
+              twoPeople={twoPeople}
               findFaces={findFaces}
             />
           ) : (
@@ -712,11 +745,13 @@ export function ExportDialog(): React.JSX.Element | null {
     // ゲーム実況(企画の種類)はゲーム画面なので顔は探さず、真ん中で埋める(今までどおり)。顔探しは素材ごとの
     // 代表の画だけで、進み具合を出し、中止も効く
     let source = project
-    if (job.aspectRatio === '9:16' && job.format !== 'wav' && verticalFraming === 'fill') {
+    if (job.aspectRatio === '9:16' && job.format !== 'wav' && verticalFraming !== 'letterbox') {
       const findFaces = framesOnFaces(project, kindFallback())
       setProgress({ percent: 0, stage: findFaces ? '人物の位置を探しています' : '準備中' })
       const fill = await prepareVerticalFill(project, {
         findFaces,
+        // 2人が縦の枠に収まらないとき: 上下に積む・話している人へ切り替える(「1人に寄せる」なら前の形)
+        twoPeople: verticalFraming === 'fill',
         ...(job.range ? { range: job.range } : {}),
         signal: abortRef.current?.signal,
         onProgress: (done, total) =>
@@ -1387,7 +1422,10 @@ export function ExportDialog(): React.JSX.Element | null {
                           onChange={(e) => setVerticalFraming(e.target.value as VerticalFraming)}
                         >
                           <option value="fill">
-                            画面いっぱいに切り出す(人物に寄せる。ゲーム実況は真ん中)
+                            画面いっぱいに切り出す(人物に寄せる。2人が離れていれば上下に分けるか、話す人へ切り替える。ゲーム実況は真ん中)
+                          </option>
+                          <option value="single">
+                            画面いっぱいに切り出す(よく映る1人に寄せる)
                           </option>
                           <option value="letterbox">横の絵をそのまま(上下に黒帯)</option>
                         </Select>
@@ -1631,7 +1669,8 @@ export function ExportDialog(): React.JSX.Element | null {
                   end={span.end}
                   audioOnly={format === 'wav'}
                   vertical={project.aspectRatio === '9:16'}
-                  fill={verticalFraming === 'fill'}
+                  fill={verticalFraming !== 'letterbox'}
+                  twoPeople={verticalFraming === 'fill'}
                   findFaces={framesOnFaces(project, kindFallback())}
                   fps={fps}
                 />

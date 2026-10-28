@@ -1,4 +1,5 @@
 import type { MediaAsset, TextStyle, TranscriptWord, TransitionType } from '../types'
+import type { StackSplit } from '../videoFrame'
 
 /**
  * データモデル v2(長尺バラエティ向けの汎用マルチトラック)。
@@ -70,6 +71,8 @@ export type Placement =
       fit: 'contain' | 'cover'
       cropCenter?: { x: number; y: number }
       blurBackground?: boolean
+      /** 2人を上下に積む分割(縦の書き出し用の写しだけ。`Clip.splitStack`) */
+      splitStack?: StackSplit
     }
   | {
       /** 画面の隅を基準にした箱(ワイプの置き方) */
