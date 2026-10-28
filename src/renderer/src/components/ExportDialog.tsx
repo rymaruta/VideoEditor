@@ -1271,7 +1271,10 @@ export function ExportDialog(): React.JSX.Element | null {
                           onChange={(e) => setEngine(e.target.value as ExportEngine)}
                         >
                           <option value="segmented">
-                            {encoderName} · 区間に分けて並列(長尺向け)
+                            {/* 選べないときは、切れないよう短い名前だけを出す(理由は title) */}
+                            {running || videoOff || segmentedOnly
+                              ? encoderName
+                              : `${encoderName} · 区間に分けて並列(長尺向け)`}
                           </option>
                           <option value="standard">CPU(x264)· 全体を1回で</option>
                         </Select>

@@ -395,13 +395,13 @@ function RangeBar({
         >
           {range ? (
             <>
-              {/* 狭い列(1366 幅)ではコマを省いて 1 行に収める */}
+              {/* 狭い列(1366 幅)ではイン・アウトを 2 段に積み、コマまで出したまま幅を詰める */}
               <span className="ve-tc-full">
                 {formatTimecode(range.start, fps)} – {formatTimecode(range.end, fps)}
               </span>
               <span className="ve-tc-short">
-                {formatTimecode(range.start, fps).slice(0, 8)} –{' '}
-                {formatTimecode(range.end, fps).slice(0, 8)}
+                <span>{formatTimecode(range.start, fps)}</span>
+                <span>– {formatTimecode(range.end, fps)}</span>
               </span>
             </>
           ) : (
