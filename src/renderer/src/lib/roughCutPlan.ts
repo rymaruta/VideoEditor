@@ -105,7 +105,16 @@ export function timedLines(project: Project, info: MulticamInfo): TimedLine[] {
       end: toCommon(f, u.sourceEnd),
       text: u.text,
       overlap: u.overlap,
-      source: f.sourceId
+      source: f.sourceId,
+      ...(u.words?.length
+        ? {
+            words: u.words.map((w) => ({
+              text: w.text,
+              start: toCommon(f, w.start),
+              end: toCommon(f, w.end)
+            }))
+          }
+        : {})
     })
   }
   return out.sort((a, b) => a.start - b.start)

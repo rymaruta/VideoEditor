@@ -76,6 +76,16 @@ describe('第4回の場面(9 場面に時刻順で 85→45 点)', () => {
   })
 })
 
+describe('N4: 言いかけの短い場面を最後に残さないで落とした理由', () => {
+  it('落とした理由の文は「言いかけで終わる」(点数の文にしない)', () => {
+    const s = scene('s8', 527, 9)
+    const j: SceneJudgement = { sceneId: 's8', score: 50, kind: 'highlight', reason: '' }
+    const text = droppedSceneReason(s, j, [j], false, dropPolicyOf('tempo', 7.5), [], 'fragment')
+    expect(text).toContain('言いかけで終わる')
+    expect(text).not.toContain('点数の低い')
+  })
+})
+
 describe('仮編集を組むとき(planRoughCut)も決め手を残す', () => {
   const N = 6
   const LEN = 30

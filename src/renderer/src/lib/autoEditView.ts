@@ -360,6 +360,8 @@ export function droppedSceneReason(
         : []
       const same = indistinctJudgements(judgements)
       const tied = sameKept ? sameKept.length > 0 : Boolean(same && judgement?.score === same.score)
+      if (by === 'fragment')
+        return `仕上がりの最後に残ると言いかけで終わるので落としました(前後の場面を落とした、文の途中で始まる・終わる短い場面 · ${cues})`
       if (judgement && by === 'refit') {
         // 戻した、より点の低い場面(短くて、戻しても目標に収まった)
         const lower = (keptScenes ?? [])
