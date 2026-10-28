@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { buildScenes, endsQuestion, type TimedLine } from '../../src/shared/structure/scenes'
+import {
+  buildScenes,
+  endsQuestion,
+  indistinctJudgements,
+  sceneSubstance,
+  selectScenes,
+  type Scene,
+  type SceneJudgement,
+  type TimedLine
+} from '../../src/shared/structure/scenes'
 import { TRIAL3_TRANSCRIPT } from './fixtures/trial3Transcript'
 
 /** 試し編集 第3回(首相官邸の車座対話・11 分・マイク1本)で残った構成の不具合 */
@@ -89,5 +98,85 @@ describe('場面の区切りを質問の途中に入れない(#3)', () => {
     expect(of('q1')).toBe(of('r1'))
     expect(of('q1')).not.toBe(of('a0'))
     expect(scenes.find((s) => s.id === of('q1'))!.lines[0].id).toBe('q1')
+  })
+})
+
+describe('ほぼ同点・全部同点のときの場面の選び方(N2・N3)', () => {
+  const judge = (ids: string[], score = 85): SceneJudgement[] =>
+    ids.map((sceneId) => ({ sceneId, score, kind: 'highlight', reason: '' }))
+
+  it('9 場面中 8 場面が同じ点(第3回の本番: s2 だけ 80 点)も「区別できていない」とみなす', () => {
+    const j = judge(['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9']).map((x) =>
+      x.sceneId === 's2' ? { ...x, score: 80 } : x
+    )
+    expect(indistinctJudgements(j)).toEqual({ total: 8, score: 85, kind: 'highlight', of: 9 })
+    // 全部同じ点は今までどおり
+    expect(indistinctJudgements(judge(['a', 'b', 'c']))).toEqual({
+      total: 3,
+      score: 85,
+      kind: 'highlight'
+    })
+  })
+
+  // 全部同点(第3回で s2 を 85 点にして作り直した): 8 秒・9 秒の短い場面まで落とし、目標 8 分に 7:12 だった
+  let n = 0
+  const sceneOf = (id: string, start: number, dur: number, texts: string[], fill = 0.9): Scene => {
+    const step = dur / Math.max(1, texts.length)
+    const lines = texts.map((text, i) => ({
+      id: `${id}-${++n}`,
+      speaker: 'マイク1',
+      start: start + i * step,
+      end: start + i * step + step * fill,
+      text,
+      overlap: false
+    }))
+    return { id, start, end: start + dur, lines, speech: dur * fill }
+  }
+  const rich = (id: string, start: number, dur: number): Scene =>
+    sceneOf(id, start, dur, [
+      '今年2024年は社員1人当たり5%の賃上げを行いました',
+      '千崎社長の日立建機さんとは取引先様30社と交渉しました',
+      'コストは約10%上がりましたがパートさんも3%上げました'
+    ])
+  const scenes: Scene[] = [
+    rich('s1', 0, 60),
+    rich('s2', 60, 60),
+    rich('s3', 120, 60),
+    rich('s4', 180, 60),
+    sceneOf('s5', 240, 100, ['そうですねやっぱり皆さんと一緒に頑張っていこうという形で'], 0.85),
+    sceneOf('s6', 340, 8, ['はい'], 0.3),
+    sceneOf('s7', 348, 60, ['そうですね2年前にですねいろいろと考えまして'], 0.8),
+    sceneOf('s8', 408, 9, ['ええ'], 0.3),
+    rich('s9', 417, 60)
+  ]
+  const same = judge(scenes.map((s) => s.id))
+
+  it('目標に近づける: 1つ落とせば収まるなら目標を大きく下回る場面は選ばず、短い場面を落としすぎない', () => {
+    // 前提: 短い s6・s8 が中身の手掛かりのいちばん少ない場面、次が長い s5
+    const sub = Object.fromEntries(scenes.map((s) => [s.id, sceneSubstance(s)]))
+    expect(sub.s6).toBeLessThan(sub.s5)
+    expect(sub.s8).toBeLessThan(sub.s5)
+    const total = scenes.reduce((t, s) => t + s.end - s.start, 0)
+    const target = total - 37
+    const r = selectScenes(scenes, same, target)
+    expect(r.estimated).toBeLessThanOrEqual(target)
+    // 前は s6(8 秒)・s8(9 秒)・s5(100 秒)を落とし、目標を 80 秒下回った
+    expect(r.kept).toContain('s6')
+    expect(r.kept).toContain('s8')
+    expect(target - r.estimated).toBeLessThan(30)
+  })
+
+  it('落としすぎた短い場面は、戻しても目標に収まるなら戻す', () => {
+    const total = scenes.reduce((t, s) => t + s.end - s.start, 0)
+    const target = total - 120
+    const r = selectScenes(scenes, same, target)
+    expect(r.estimated).toBeLessThanOrEqual(target)
+    const back = r.kept.filter((id) => id === 's6' || id === 's8')
+    expect(back.length).toBeGreaterThan(0)
+    // 落とした場面のうち、戻しても収まるものは残っていない
+    for (const d of r.dropped) {
+      const s = scenes.find((x) => x.id === d.sceneId)!
+      expect(r.estimated + (s.end - s.start)).toBeGreaterThan(target)
+    }
   })
 })

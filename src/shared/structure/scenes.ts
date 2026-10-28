@@ -450,20 +450,33 @@ export function describeCues(c: SceneCues): string {
 
 /** 判定が区別できていないとみなす場面の数の下限 */
 const MIN_SCENES_TO_DISTINGUISH = 3
+/** 同じ点数・印の場面がこの割合以上なら、ほぼ同点(区別できていない)とみなす */
+const NEAR_TIE_RATIO = 0.75
 
 /**
- * 判定が場面を区別できていないか(「不要」以外の全部の場面に同じ点数・同じ印を付けた)。区別できていなければ
- * その点数と印。小さいモデルは全部の場面に「見どころ・85 点」を付けることがある(試し編集 第2回: 9 場面すべて)。
+ * 判定が場面を区別できていないか(「不要」以外の全部、またはほとんど(`NEAR_TIE_RATIO` 以上)の場面に同じ
+ * 点数・同じ印を付けた)。区別できていなければその点数と印と場面の数(ほとんどのときは `of` に全体の数)。小さいモデルは全部の場面に「見どころ・85 点」を付けることがある(試し編集 第2回: 9 場面すべて)。
  * そのまま長さに合わせると、落とす場面が並び順で決まっていた
  */
 export function indistinctJudgements(
   judgements: readonly SceneJudgement[]
-): { total: number; score: number; kind: SceneKind } | null {
+): { total: number; score: number; kind: SceneKind; of?: number } | null {
   const usable = judgements.filter((j) => j.kind !== 'unneeded')
   if (usable.length < MIN_SCENES_TO_DISTINGUISH) return null
-  const first = usable[0]
-  return usable.every((j) => j.score === first.score && j.kind === first.kind)
-    ? { total: usable.length, score: first.score, kind: first.kind }
+  // いちばん多い点数・印の組(同じ数なら先に出た方)
+  const counts = new Map<string, { n: number; score: number; kind: SceneKind }>()
+  for (const j of usable) {
+    const k = `${j.score}|${j.kind}`
+    const c = counts.get(k)
+    if (c) c.n++
+    else counts.set(k, { n: 1, score: j.score, kind: j.kind })
+  }
+  const top = [...counts.values()].reduce((a, b) => (b.n > a.n ? b : a))
+  if (top.n === usable.length) return { total: top.n, score: top.score, kind: top.kind }
+  // ほぼ同点(1〜2 場面だけ違う): 同じ点の場面どうしは区別できていない(試し編集 第3回: 9 場面中 8 場面が
+  // 85 点で、落とした 85 点の場面に「点数の低い場面から」と出て、要確認も出なかった)
+  return top.n >= MIN_SCENES_TO_DISTINGUISH && top.n >= usable.length * NEAR_TIE_RATIO
+    ? { total: top.n, score: top.score, kind: top.kind, of: usable.length }
     : null
 }
 
@@ -486,6 +499,9 @@ export interface Selection {
    */
   rescued?: { kept: number; total: number }
 }
+
+/** 長さに合わせて落とす最後の場面を選ぶとき、目標を下回る長さの差として許す幅(秒) */
+const COVER_SLACK_SEC = 15
 
 /** 点数の下限を越える場面が無いとき、残す上位の割合 */
 const RELAXED_KEEP_RATIO = 0.25
@@ -603,16 +619,46 @@ export function selectScenes(
     const beside = (a: Scene, b: Scene): number =>
       Number(besideDropped(b)) - Number(besideDropped(a))
     const byCues = (a: Scene, b: Scene): number => substance(a) - substance(b)
-    const s = left
+    const tied = left
       .filter((x) => score(x) === low)
       .sort((a, b) =>
         indistinct
           ? edge(a) - edge(b) || byCues(a, b) || beside(a, b)
           : edge(a) - edge(b) || beside(a, b) || byCues(a, b)
-      )[0]
+      )
+    // (4) 1つ落とせば目標に収まる所まで来たら、落とした後の長さが目標を下回りすぎない場面から選ぶ
+    // (下回りの少ない場面との差が `COVER_SLACK_SEC` か目標の 5% 以内なら、その中で (1)〜(3) の順)。
+    // 同じ点の中で中身の手掛かりだけで選ぶと、目標を大きく下回る長い場面を落としていた(試し編集 第3回:
+    // 全部同点で作り直すと 8 分の目標に 7:12)
+    const excess = total - targetSec
+    const covering = tied.filter((x) => edge(x) === 0 && estimate(x) >= excess)
+    let s = tied[0]
+    if (covering.length > 0) {
+      const least = Math.min(...covering.map((x) => estimate(x) - excess))
+      const slack = Math.max(COVER_SLACK_SEC, targetSec * 0.05)
+      s = covering.find((x) => estimate(x) - excess <= least + slack) ?? s
+    }
     keep.delete(s.id)
     total -= estimate(s)
     dropped.push({ sceneId: s.id, why: 'length' })
+  }
+  // 落としすぎた分を戻す: 長さで落とした場面のうち、戻しても目標に収まるものは戻す(点数の高い順、
+  // 同じなら中身の手掛かりの多い順)。短い場面を先に落とした後で長い場面を落とすと、短い場面まで
+  // 落とした分だけ目標を下回っていた(試し編集 第3回: 8 秒・9 秒の場面まで落ちた)
+  if (targetSec > 0) {
+    const byLength = scenes.filter((x) =>
+      dropped.some((d) => d.sceneId === x.id && d.why === 'length')
+    )
+    byLength.sort((a, b) => score(b) - score(a) || substance(b) - substance(a))
+    for (const x of byLength) {
+      if (total + estimate(x) > targetSec) continue
+      keep.add(x.id)
+      total += estimate(x)
+      dropped.splice(
+        dropped.findIndex((d) => d.sceneId === x.id),
+        1
+      )
+    }
   }
   return {
     kept: scenes.filter((s) => keep.has(s.id)).map((s) => s.id),

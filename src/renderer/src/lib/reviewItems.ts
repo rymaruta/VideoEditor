@@ -59,6 +59,8 @@ export interface ReviewSources {
 export interface StructureIndistinct {
   /** 同じ点数・印を付けた場面の数 */
   total: number
+  /** ほぼ同点(一部の場面だけ違う)のときの、「不要」以外の場面の数。全部同じ点なら無い */
+  of?: number
   score: number
   kind: SceneKind
   /** 長さに合わせて自動で落とした場面の数(人が落とした場面・「不要」・点数の下限で落とした場面は数えない) */
@@ -90,6 +92,8 @@ export function structureIndistinctOf(
     ? judgements.filter(
         (j) =>
           !kept.has(j.sceneId) &&
+          // ほぼ同点のときは、同じ点の中で選んだ場面だけ(点数の低い場面は点数で落とした)
+          (!same.of || j.score === same.score) &&
           droppedWhy(used.get(j.sceneId), keep[j.sceneId] === false, policy) === 'length'
       ).length
     : 0
@@ -241,7 +245,9 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       area: 'structure',
       kind: '構成',
       text:
-        `構成の${x.source === 'ai' ? ' AI ' : ''}判定が ${x.total} 場面すべてに同じ点(${x.score} 点・${kindLabel})を付けていて、場面の良し悪しを区別できていません。` +
+        (x.of
+          ? `構成の${x.source === 'ai' ? ' AI ' : ''}判定が ${x.of} 場面中 ${x.total} 場面に同じ点(${x.score} 点・${kindLabel})を付けていて、その場面どうしの良し悪しを区別できていません。`
+          : `構成の${x.source === 'ai' ? ' AI ' : ''}判定が ${x.total} 場面すべてに同じ点(${x.score} 点・${kindLabel})を付けていて、場面の良し悪しを区別できていません。`) +
         (x.droppedByLength > 0
           ? x.replaced
             ? `長さに合わせて落とした ${x.droppedByLength} 場面は、声の盛り上がり・笑い・発話の密度の点数で選びました。`

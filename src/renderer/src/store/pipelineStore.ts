@@ -1381,7 +1381,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       const byLength = plan.selection.dropped.filter((d) => d.why === 'length').length
       if (same)
         log(
-          `構成: 判定が ${same.total} 場面すべてに同じ点(${same.score} 点)を付け、場面を区別できていません(要確認)${byLength > 0 ? `。長さに合わせて落とした ${byLength} 場面は、発話の密度・話者の数・数字や固有名詞の多さで選びました` : ''}`
+          `構成: 判定が ${same.of ? `${same.of} 場面中 ${same.total} 場面` : `${same.total} 場面すべて`}に同じ点(${same.score} 点)を付け、場面を区別できていません(要確認)${byLength > 0 ? `。長さに合わせて落とした ${byLength} 場面は、同じ点の中で発話の密度・話者の数・数字や固有名詞の多さで選びました` : ''}`
         )
     }
     const raw = plan.selection.kept.reduce((t, id) => {

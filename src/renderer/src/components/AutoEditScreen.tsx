@@ -1227,7 +1227,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
                                   j,
                                   judgements,
                                   keep[sc.id] === false,
-                                  dropPolicyFor(roughCut.basis, editPolicy, targetMinutes)
+                                  dropPolicyFor(roughCut.basis, editPolicy, targetMinutes),
+                                  scenes.filter((x) => keptOf(x.id))
                                 )}
                               </span>
                             )}
