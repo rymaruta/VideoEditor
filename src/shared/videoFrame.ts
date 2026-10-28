@@ -204,7 +204,8 @@ export function scaleToFrameFilter(
   // 画素を正方形に直すのは**この関数の責任**にする。呼び出し側の先頭に足す形にすると、
   // 分岐した経路(ぼかし背景・切り抜き)や、あとから増えた呼び出し元だけが素通しになる。
   const square = `${SQUARE_PIXEL_FILTER},`
-  if (options.stack) {
+  // 上下に積むのは縦の出力だけ(16:9 にした企画に残っていても積まない)
+  if (options.stack && h > w) {
     // 同じ入力を2つに分け、それぞれの窓を切り出して上下の段の大きさにし、積む。ぼかし背景と同じく
     // `vstack` は2入力のタイミングを突き合わせるので、`fps` は積む前に両方へ付ける(後ろに付けない)
     const topH = stackTopHeight(h)

@@ -8,6 +8,7 @@ import {
   prepareVerticalFill,
   verticalSampleKey,
   verticalSamples,
+  withoutVerticalSplits,
   type VerticalSample
 } from '../lib/verticalFraming'
 import { cropObjectPosition } from '@shared/videoFrame'
@@ -744,11 +745,16 @@ export function ExportDialog(): React.JSX.Element | null {
     // 企画のクリップは変えない)。設定で「上下に黒帯」を選べば、今までどおり縮めて収める
     // ゲーム実況(企画の種類)はゲーム画面なので顔は探さず、真ん中で埋める(今までどおり)。顔探しは素材ごとの
     // 代表の画だけで、進み具合を出し、中止も効く
-    let source = project
+    // 上下に積む形・話す人で分けたクリップ(自動のショートで保存した企画に残る)は、縦で「人物に寄せる
+    // (2人は上下・話す人)」を選んだときだけ使う。ほかの選択・横の書き出しでは元の形に戻す
+    let source =
+      job.aspectRatio === '9:16' && verticalFraming === 'fill'
+        ? project
+        : withoutVerticalSplits(project)
     if (job.aspectRatio === '9:16' && job.format !== 'wav' && verticalFraming !== 'letterbox') {
       const findFaces = framesOnFaces(project, kindFallback())
       setProgress({ percent: 0, stage: findFaces ? '人物の位置を探しています' : '準備中' })
-      const fill = await prepareVerticalFill(project, {
+      const fill = await prepareVerticalFill(source, {
         findFaces,
         // 2人が縦の枠に収まらないとき: 上下に積む・話している人へ切り替える(「1人に寄せる」なら前の形)
         twoPeople: verticalFraming === 'fill',

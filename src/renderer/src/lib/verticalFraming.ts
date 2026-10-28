@@ -296,6 +296,38 @@ export function fillsVertical(
   return windowFraction(asset, aspect) < 1
 }
 
+/**
+ * 上下に積む形・話す人の切り替えで分けたクリップを、元の形に戻した写し(企画は変えない)。自動のショートで
+ * 保存した企画には、積む形(`splitStack`)と分けたクリップ(`<id>~v<n>`)が残る。書き出しの画面で「1人に
+ * 寄せる」「黒帯」を選んだとき・縦でない(16:9 にした)ときに、積んだまま・分けたまま書き出していた
+ * (監査の指摘 3)。分けたクリップは、続いている(同じ素材・同じ速さで、素材の位置が続く)ものだけ戻す
+ */
+export function withoutVerticalSplits(project: Project): Project {
+  if (!project.clips.some((c) => c.splitStack || c.id.includes('~v'))) return project
+  const out: Clip[] = []
+  for (const c of project.clips) {
+    const prev = out[out.length - 1]
+    const base = c.id.replace(/~v\d+$/, '')
+    if (
+      prev &&
+      base !== c.id &&
+      prev.id === base &&
+      prev.assetId === c.assetId &&
+      (prev.speed || 1) === (c.speed || 1) &&
+      Math.abs(prev.outPoint - c.inPoint) < 1e-6
+    ) {
+      out[out.length - 1] = { ...prev, outPoint: c.outPoint }
+      continue
+    }
+    if (c.splitStack) {
+      const plain = { ...c }
+      delete plain.splitStack
+      out.push(plain)
+    } else out.push(c)
+  }
+  return { ...project, clips: out }
+}
+
 /** タイムラインの区間 [a, b) に掛かる本編のクリップと、その頭の時刻 */
 export function clipsInRange(
   clips: readonly Clip[],
@@ -930,12 +962,13 @@ export async function verticalSamples(
   twoPeople = true
 ): Promise<VerticalSample[]> {
   const assets = new Map(project.assets.map((a) => [a.id, a]))
-  let framed = project
+  // 積む・切り替えは「人物に寄せる(2人は上下・話す人)」の設定のときだけ(保存した企画の分も)
+  let framed = fill && twoPeople ? project : withoutVerticalSplits(project)
   if (fill && times.length > 0) {
     const lo = Math.min(...times)
     const hi = Math.max(...times)
     framed = (
-      await prepareVerticalFill(project, {
+      await prepareVerticalFill(framed, {
         range: { start: lo, end: hi + 1e-3 },
         findFaces,
         twoPeople,
