@@ -113,7 +113,7 @@ describe('配布用のビルドの検査(販売者・ソースの入手先。連
     expect(typeof builder.beforePack).toBe('function')
     const src = readFileSync(join(root, 'electron-builder.cjs'), 'utf-8')
     expect(src).toMatch(
-      /isDistributionBuild\(context && context\.targets\)[^\n]*\n\s*assertReleasable\(__dirname\)/
+      /isDistributionBuild\(context && context\.targets\) && !PERSONAL\)\s*assertReleasable\(__dirname\)/
     )
   })
 

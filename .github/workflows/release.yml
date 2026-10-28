@@ -1,0 +1,255 @@
+name: Release (Windows)
+
+# 正式リリース。v で始まるタグ(v1.2.0 など)を push すると、Windows で正式のインストーラと GPL のソース一式を作り、
+# 同じ GitHub の Release に置く。アプリの自動更新(electron-updater)は、この Release の latest.yml を見る。
+# 手順は docs/RELEASE.md。
+#
+#   gates   … lint・typecheck・試験(タグのコミットで)
+#   build   … タグと package.json の version の照合 → 配布の検査(release-check)→ GPL のソース一式 →
+#             正式のインストーラ(+ latest.yml・blockmap)→ 作った物を起動して確かめる(煙の試験)
+#   publish … 上の 2 つが通ったときだけ、Release を下書きで作って全部を置き、最後に公開する
+#             (contents: write はこのジョブだけ。ここでは npm の物を何も走らせない)
+#
+# 手で走らせるとき(workflow_dispatch)は、出すタグを選ぶ(そのタグのコミットから作る)。dry_run にすると
+# Release は作らず、作った物を Actions の Artifacts に置くだけにする(手順を試すため)。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 出すタグ(例 v1.2.0)。先に push しておく
+        required: true
+        type: string
+      dry_run:
+        description: Release を作らない(作った物を Artifacts に置くだけ)
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# 同じタグを 2 つ同時に走らせない(Release の取り合いを防ぐ)
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  gates:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CI: true
+    steps:
+      - name: Checkout (tag)
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Tag matches package.json version
+        run: node scripts/release-version.cjs "$env:RELEASE_TAG"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and regression tests
+        run: npm test
+
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Checkout (tag)
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # タグ(v1.2.0)と package.json の version(1.2.0)が食い違えば、ここで止める
+      - name: Tag matches package.json version
+        id: version
+        run: node scripts/release-version.cjs "$env:RELEASE_TAG"
+
+      # 販売者・GPL のソースの入手先が決まっているか(scripts/release-check.cjs)。electron-builder の beforePack でも掛かる
+      - name: Release check
+        run: npm run release-check
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 同梱する ffmpeg / ffprobe の対応するソース一式(scripts/gpl-sources.mjs)。ネットから取る。
+      # 取れない・入手先を決められない部品があると終了コード 1 で止まり、Release は作られない(ソースの無い Release を出さない)。
+      # インストーラより先に作る(長いビルドの前に止める)。tar は Windows の物を使うので pwsh で走らせる
+      - name: GPL corresponding source (FFmpeg)
+        run: npm run gpl-sources
+
+      - name: Build app
+        run: |
+          npx electron-vite build
+          npm run licenses
+
+      - name: Signing certificate present?
+        shell: bash
+        env:
+          HAS_CERT: ${{ secrets.WIN_CSC_LINK != '' }}
+        run: |
+          if [ "$HAS_CERT" != "true" ]; then
+            echo "::warning::WIN_CSC_LINK が無いので、署名しないインストーラを作ります(SmartScreen の警告が出ます。docs/WINDOWS_SIGNING.md)"
+          fi
+
+      # 正式のインストーラ(VideoEditor-<版>-setup.exe)と、自動更新に要る latest.yml・.blockmap。
+      # アップロードは publish のジョブがするので、electron-builder は --publish never
+      - name: Installer (release)
+        run: npx electron-builder --win nsis --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      # インストーラと一緒にできた win-unpacked を起動して確かめる(scripts/smoke-electron.mjs)。
+      # app-update.yml が GitHub の Releases を指すことも確かめる
+      - name: Smoke test (launch the packaged app)
+        run: node scripts/smoke-electron.mjs --exe dist/win-unpacked/VideoEditor.exe --build release --out smoke
+
+      - name: Upload smoke test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoEditor-release-smoke-${{ env.RELEASE_TAG }}
+          path: smoke
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Release に置く物を 1 か所に集めて、揃っているかを確かめる
+      - name: Collect release assets
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          exe="dist/VideoEditor-${VERSION}-setup.exe"
+          for f in "$exe" "$exe.blockmap" dist/latest.yml; do
+            if [ ! -f "$f" ]; then echo "::error::$f がありません"; ls -la dist; exit 1; fi
+            cp "$f" release-assets/
+          done
+          # latest.yml がこの版のインストーラを指しているか(自動更新はこれを読む)
+          tr -d '\r' < dist/latest.yml > latest.check
+          grep -qx "version: ${VERSION}" latest.check || { echo "::error::latest.yml の version が ${VERSION} ではありません"; cat dist/latest.yml; exit 1; }
+          grep -qx "path: VideoEditor-${VERSION}-setup.exe" latest.check || { echo "::error::latest.yml が VideoEditor-${VERSION}-setup.exe を指していません"; cat dist/latest.yml; exit 1; }
+          shopt -s nullglob
+          tars=(dist/gpl-sources/VideoEditor-"${VERSION}"-ffmpeg-*-sources.tar)
+          if [ "${#tars[@]}" -ne 1 ]; then echo "::error::GPL のソース一式が 1 つではありません(${#tars[@]} 個)"; ls -la dist/gpl-sources || true; exit 1; fi
+          if [ ! -f "${tars[0]}.sha256" ]; then echo "::error::${tars[0]}.sha256 がありません"; exit 1; fi
+          cp "${tars[0]}" "${tars[0]}.sha256" release-assets/
+          ls -la release-assets
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoEditor-release-${{ env.RELEASE_TAG }}
+          path: release-assets
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [gates, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.build.outputs.version }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: VideoEditor-release-${{ env.RELEASE_TAG }}
+          path: release-assets
+
+      - name: Check assets
+        run: |
+          set -euo pipefail
+          cd release-assets
+          ls -la
+          test -f "VideoEditor-${VERSION}-setup.exe"
+          test -f "VideoEditor-${VERSION}-setup.exe.blockmap"
+          test -f latest.yml
+          ls VideoEditor-"${VERSION}"-ffmpeg-*-sources.tar
+          ls VideoEditor-"${VERSION}"-ffmpeg-*-sources.tar.sha256
+          sha256sum -c VideoEditor-"${VERSION}"-ffmpeg-*-sources.tar.sha256
+          if ls ./*personal* >/dev/null 2>&1; then echo "::error::持ち主が試す版が混ざっています"; exit 1; fi
+
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          src=$(cd release-assets && ls VideoEditor-"${VERSION}"-ffmpeg-*-sources.tar)
+          {
+            echo "## VideoEditor ${VERSION}(Windows 64 ビット)"
+            echo
+            echo "- インストーラ: \`VideoEditor-${VERSION}-setup.exe\`(入れてあるアプリは自動で更新されます)"
+            echo "- 同梱の FFmpeg / FFprobe(GPL)の対応するソース一式: \`${src}\`(SHA-256 は \`${src}.sha256\`)"
+            echo
+            echo "同梱の FFmpeg の対応するソース一式は、各版のこのページから入手できます(docs/GPL_COMPLIANCE.md)。"
+          } > release-notes.md
+
+      # 下書きで作って全部を置いてから公開する(途中で落ちても、ファイルの欠けた Release を公開しない)。
+      # すでに公開した Release があれば止める(上書きしない)。前の失敗で残った下書きは作り直す
+      - name: Create GitHub Release
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          # 下書きはタグで引けないので、一覧から同じタグの物を探す(id と下書きか)
+          existing=$(gh api "repos/$repo/releases" --paginate \
+            --jq '.[] | select(.tag_name == env.RELEASE_TAG) | "\(.id) \(.draft)"')
+          while read -r id draft; do
+            [ -z "$id" ] && continue
+            if [ "$draft" = "true" ]; then
+              echo "前の失敗で残った下書きの Release($id)を消して作り直します"
+              gh api -X DELETE "repos/$repo/releases/$id"
+            else
+              echo "::error::$RELEASE_TAG の Release はもう公開されています。版を上げて新しいタグで出してください"
+              exit 1
+            fi
+          done <<< "$existing"
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --repo "$repo" \
+            --verify-tag \
+            --draft \
+            --title "VideoEditor ${VERSION}" \
+            --notes-file release-notes.md \
+            --generate-notes \
+            "${flags[@]}"
+          gh release edit "$RELEASE_TAG" --repo "$repo" --draft=false
+          gh release view "$RELEASE_TAG" --repo "$repo"

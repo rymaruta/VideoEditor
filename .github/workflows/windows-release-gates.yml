@@ -43,7 +43,10 @@ jobs:
 
   # 持ち主の PC で試す版。展開して起動するフォルダ(VideoEditor-windows-<コミット>)と、
   # インストーラ(VideoEditor-windows-installer-<コミット>)を Actions の「Artifacts」に置く。
-  # 配布用ではないので販売者などの検査は掛けない(フォルダは --dir、インストーラは VE_PERSONAL_BUILD=1)
+  # 配布用ではないので販売者などの検査は掛けない(フォルダは --dir、インストーラは VE_PERSONAL_BUILD=1)。
+  # どちらも VE_PERSONAL_BUILD=1 で作り、自動更新をしない(正式版に置き換わらない。docs/RELEASE.md)。
+  # 正式版は .github/workflows/release.yml(v* のタグ)で作る。
+  # フォルダは作った後に起動して確かめる(煙の試験。scripts/smoke-electron.mjs)
   package:
     needs: gates
     runs-on: windows-latest
@@ -74,6 +77,23 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          VE_PERSONAL_BUILD: '1'
+
+      # 作った VideoEditor.exe を Playwright(playwright-core の _electron)で起動し、最初の窓に「書き出す」ボタンが
+      # 描かれること・ページのエラーが無いこと・製品の部品(ffmpeg・ffprobe・onnxruntime・DirectML)があること・
+      # 環境チェック(ffmpeg・onnxruntime・node-llama-cpp を読めるか)と ffprobe(probeMedia)が通ることを確かめる。
+      # 駄目ならジョブを落とす(配布物を小さくする files の絞り込みで壊れていないか)
+      - name: Smoke test (launch the packaged app)
+        run: node scripts/smoke-electron.mjs --exe dist/win-unpacked/VideoEditor.exe --build personal --out smoke
+
+      - name: Upload smoke test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoEditor-windows-smoke-${{ github.sha }}
+          path: smoke
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload (folder)
         uses: actions/upload-artifact@v4
