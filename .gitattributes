@@ -1,0 +1,21 @@
+# どの OS で取り出しても改行は LF(Windows の CI でソースを読む試験が CRLF で崩れないように)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp3 binary
+*.mp4 binary
+*.mov binary
+*.wav binary
+*.m4a binary
+*.onnx binary
+*.bin binary
+*.zip binary
