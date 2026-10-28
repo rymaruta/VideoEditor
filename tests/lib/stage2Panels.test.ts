@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { assetKind, countByKind, filterAssets } from '@renderer/lib/mediaFilter'
 import { decisionForClip } from '@renderer/lib/clipDecision'
 import {
+  makeLightProxies,
   assetsNeedingLightProxy,
   lightProxyFor,
   useProgramView,
@@ -110,6 +111,34 @@ describe('AI の判断(クリップの判断のまとめ)', () => {
     expect(d?.judgeSource).toBe('ai')
   })
 
+  it('手の判断は今の本編のクリップから読む(前に自動で組んだ本編と比べる)', () => {
+    const base = { multicam: info, autoEditLocks: [{ id: 'l', start: 100, end: 110 }] }
+    const analysis = { scenes, judgements, keep: {}, judgeSource: null }
+    // 自動では 100〜120 をカメラ2で組んでいた所を、今はカメラ1で映している → 替えた
+    const swapped = decisionForClip(
+      { assetId: 'a', inPoint: 0, outPoint: 10 },
+      {
+        ...base,
+        roughCutAuto: [{ start: 100, end: 120, cameraId: 'cam2' }]
+      },
+      analysis
+    )
+    expect(swapped?.manualAngle).toBe(true)
+    expect(swapped?.manualAdded).toBe(false)
+    expect(swapped?.locked).toBe(true)
+    // 自動で組んだ所の外(足した) / 同じカメラのまま(替えていない)
+    const added = decisionForClip(
+      { assetId: 'a', inPoint: 30, outPoint: 40 },
+      {
+        ...base,
+        roughCutAuto: [{ start: 100, end: 120, cameraId: 'cam1' }]
+      },
+      analysis
+    )
+    expect(added?.manualAngle).toBe(false)
+    expect(added?.manualAdded).toBe(true)
+  })
+
   it('同期した収録素材でない企画・クリップには判断が無い', () => {
     expect(
       decisionForClip(
@@ -170,5 +199,41 @@ describe('プログラムの表示の大きさと画質', () => {
     // 静止画は元の画像のまま
     expect(previewSourcePath(asset('v1', { still: true }))).toBe('/m/v1')
     useProgramView.setState({ quality: 'full', lightProxies: {} })
+  })
+})
+
+describe('軽い版を作る順番', () => {
+  it('作っている間に素材が増えたら残りも作り、「最高」に戻したら次からは作らない', async () => {
+    let list = [asset('v1'), asset('v2')]
+    const made: string[] = []
+    const g = globalThis as unknown as { window?: unknown }
+    const had = g.window
+    g.window = {
+      api: {
+        ensurePreviewProxy: async (filePath: string): Promise<string> => {
+          made.push(filePath)
+          // 1 本目を作っている間に素材が増える
+          if (made.length === 1) list = [...list, asset('v3')]
+          return `${filePath}.proxy.mp4`
+        }
+      }
+    }
+    try {
+      useProgramView.setState({ quality: 'light', lightProxies: {}, lightProgress: null })
+      await makeLightProxies(() => list)
+      expect(made).toEqual(['/m/v1', '/m/v2', '/m/v3'])
+      expect(useProgramView.getState().lightProgress).toBeNull()
+      // 「最高」に戻すと、次の 1 本からは作らない
+      list = [...list, asset('v4'), asset('v5')]
+      made.length = 0
+      const run = makeLightProxies(() => list)
+      useProgramView.getState().setQuality('full')
+      await run
+      expect(made.length).toBeLessThanOrEqual(1)
+      expect(useProgramView.getState().lightProgress).toBeNull()
+    } finally {
+      g.window = had
+      useProgramView.setState({ quality: 'full', lightProxies: {}, lightProgress: null })
+    }
   })
 })

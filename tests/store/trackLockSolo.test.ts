@@ -126,15 +126,10 @@ describe('トラックの固定(鍵)', () => {
     s().toggleTrackLocked({ kind: 'telop' })
     expect(s().project.telopTrackLocked).toBe(true)
     expect(s().selectedOverlayId).toBeNull()
-    const id = s().addTextOverlay({
-      text: 'x',
-      startTime: 0,
-      endTime: 1,
-      style: s().project.textOverlays[0]?.style ?? ({} as never)
-    })
-    // addTextOverlay は固定に関係なく足せる(自動の作り直しの経路)。手で消すのは効かない
-    s().removeTextOverlay(id)
-    expect(s().project.textOverlays.some((o) => o.id === id)).toBe(true)
+    // 固定中は手で足すことも消すこともできない(trackLockGuard)
+    const before = s().project.textOverlays
+    s().addTextOverlay({ text: 'x', startTime: 0, endTime: 1, style: {} as never })
+    expect(s().project.textOverlays).toBe(before)
   })
 
   it('保存した固定は読み込みで残り、true 以外は捨てる', () => {
@@ -170,6 +165,15 @@ describe('音声トラックのソロ(モニター用)', () => {
   it('ミュートはソロより強い。消したトラックのソロは数えない', () => {
     expect(trackSilencedInPreview(tracks[2], activeSoloIds(['a3'], tracks))).toBe(true)
     expect(activeSoloIds(['gone'], tracks)).toEqual([])
+  })
+
+  it('新しい企画・開いた企画ではソロを空にする(企画に保存しない)', () => {
+    s().toggleAudioTrackSolo('a1')
+    s().newProject()
+    expect(s().soloTrackIds).toEqual([])
+    s().toggleAudioTrackSolo('a1')
+    s().loadProject(project(), '/x/p.veproj')
+    expect(s().soloTrackIds).toEqual([])
   })
 
   it('ストアのソロは切り替えで足し引きし、企画も取り消しも変えない', () => {

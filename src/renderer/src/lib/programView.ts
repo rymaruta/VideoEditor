@@ -23,7 +23,7 @@ export const ZOOM_CHOICES: readonly { id: ProgramZoom; label: string }[] = [
 ]
 
 export const QUALITY_CHOICES: readonly { id: PreviewQuality; label: string; title: string }[] = [
-  { id: 'full', label: '最高', title: '元の素材で再生します(読めない形式だけ軽い版)' },
+  { id: 'full', label: '最高', title: '元の素材で再生します(プレビューで読めない形式だけ軽い版)' },
   {
     id: 'light',
     label: '軽い(540p)',
@@ -75,7 +75,7 @@ interface ProgramViewState {
   lightProgress: { done: number; total: number } | null
   lightError: string | null
   setZoom: (zoom: ProgramZoom) => void
-  setQuality: (quality: PreviewQuality, assets: readonly MediaAsset[]) => Promise<void>
+  setQuality: (quality: PreviewQuality) => void
 }
 
 let runToken = 0
@@ -87,44 +87,51 @@ export const useProgramView = create<ProgramViewState>((set) => ({
   lightProgress: null,
   lightError: null,
   setZoom: (zoom) => set({ zoom }),
-  setQuality: async (quality, assets) => {
+  setQuality: (quality) => {
     try {
       localStorage.setItem(QUALITY_KEY, quality)
     } catch {
       // 覚えられなくても今回は切り替わる
     }
-    set({ quality, lightError: null })
-    if (quality !== 'light') {
-      runToken++
-      set({ lightProgress: null })
-      return
-    }
-    // 作るのは見出しの部品(ProgramHeadMenus)が「軽い」の間に受け持つ。ここでは呼び出し側の
-    // 求めに応じて先に始める(同じ素材の変換は main 側で 1 本にまとまる)
-    if (!useProgramView.getState().lightProgress) await makeLightProxies(assets)
+    // 「最高」に戻したら、作っている途中の続きはやめる(作るのは「軽い」の間、見出しの部品が受け持つ)
+    if (quality !== 'light') runToken++
+    set({ quality, lightError: null, ...(quality !== 'light' ? { lightProgress: null } : {}) })
   }
 }))
 
-/** 軽い版が無い動画の軽い版を 1 本ずつ作る(作り終えたものから軽い版で再生する) */
-export async function makeLightProxies(assets: readonly MediaAsset[]): Promise<void> {
-  const st = useProgramView.getState()
-  const todo = assetsNeedingLightProxy(assets, st.lightProxies)
-  if (todo.length === 0 || typeof window === 'undefined' || !window.api?.ensurePreviewProxy) return
+/**
+ * 軽い版が無い動画の軽い版を 1 本ずつ作る(作り終えたものから軽い版で再生する)。
+ * `getAssets` は今の企画の素材を返す: 作っている間に素材が増えた・企画が替わったら、
+ * 終わったあとに残りも作る。「最高」に戻したら次の 1 本からは作らない
+ * (main 側の変換には止める仕組みが無いので、作っている途中の 1 本は終わるまで走る。結果は使わない)
+ */
+export async function makeLightProxies(getAssets: () => readonly MediaAsset[]): Promise<void> {
+  if (typeof window === 'undefined' || !window.api?.ensurePreviewProxy) return
   const token = ++runToken
-  useProgramView.setState({ lightProgress: { done: 0, total: todo.length } })
+  const alive = (): boolean => token === runToken && useProgramView.getState().quality === 'light'
   let failed = 0
-  for (let i = 0; i < todo.length; i++) {
-    if (token !== runToken || useProgramView.getState().quality !== 'light') return
-    const a = todo[i]
+  let done = 0
+  const tried = new Set<string>()
+  for (;;) {
+    if (!alive()) return
+    const todo = assetsNeedingLightProxy(
+      getAssets(),
+      useProgramView.getState().lightProxies
+    ).filter((a) => !tried.has(a.filePath))
+    if (todo.length === 0) break
+    const a = todo[0]
+    tried.add(a.filePath)
+    useProgramView.setState({ lightProgress: { done, total: done + todo.length } })
     try {
       const path = await window.api.ensurePreviewProxy(a.filePath, a.id)
+      if (!alive()) return
       useProgramView.setState((s) => ({ lightProxies: { ...s.lightProxies, [a.filePath]: path } }))
     } catch {
+      if (!alive()) return
       failed++
     }
-    useProgramView.setState({ lightProgress: { done: i + 1, total: todo.length } })
+    done++
   }
-  if (token !== runToken) return
   useProgramView.setState({
     lightProgress: null,
     lightError:

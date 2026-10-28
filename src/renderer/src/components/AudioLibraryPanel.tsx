@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import { applyWhenNotTrying, useProjectStore } from '../store/projectStore'
+import { lockReason } from '../lib/trackLock'
 import { useSettingsStore } from '../store/settingsStore'
 import { KeyStorageNote } from './KeyStorageNote'
 import { usePresetStore } from '../store/presetStore'
@@ -57,6 +58,10 @@ export function AudioLibraryPanel(): React.JSX.Element {
 
   const apiKey = kind === 'music' ? jamendoClientId : freesoundApiKey
   const trackName = kind === 'music' ? 'BGM' : '効果音'
+  // 足す先のトラックを固定していれば足せない(トラックの固定)
+  const trackLock = useProjectStore((s) =>
+    lockReason(s.project, { kind: 'audio', name: trackName })
+  )
 
   async function handleSearch(): Promise<void> {
     if (!apiKey) {
@@ -234,8 +239,8 @@ export function AudioLibraryPanel(): React.JSX.Element {
                 </button>
                 <button
                   className="icon-button"
-                  title="音声トラックに追加"
-                  disabled={busyId !== null}
+                  title={trackLock ? `追加できません(${trackLock})` : '音声トラックに追加'}
+                  disabled={busyId !== null || trackLock !== null}
                   onClick={() => handleAdd(t.id, t.audioUrl, `${t.title}.mp3`)}
                 >
                   {busyId === `add-${t.id}` ? '...' : <PlusIcon width={14} height={14} />}
@@ -286,8 +291,8 @@ export function AudioLibraryPanel(): React.JSX.Element {
                 </button>
                 <button
                   className="icon-button"
-                  title="音声トラックに追加"
-                  disabled={busyId !== null}
+                  title={trackLock ? `追加できません(${trackLock})` : '音声トラックに追加'}
+                  disabled={busyId !== null || trackLock !== null}
                   onClick={() => handleAdd(s.id, s.previewUrl, `${s.name}.mp3`)}
                 >
                   {busyId === `add-${s.id}` ? '...' : <PlusIcon width={14} height={14} />}

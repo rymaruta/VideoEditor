@@ -1126,6 +1126,11 @@ interface ProjectState {
    * テロップが、戻しても消えたままになっていた)
    */
   __followFrom?: Project
+  /**
+   * 全体の作り直し(仮編集を入れる・同期の結果を並べる)の印。トラックの固定を見ずに通す
+   * (`freezeLockedTracks`。作り直しは固定を見ない。始める前に画面で確かめる)
+   */
+  __lockBypass?: true
   currentFilePath: string | null
   isDirty: boolean
   selectedClipId: string | null
@@ -1441,9 +1446,11 @@ interface ProjectState {
   toggleAudioTrackSolo: (trackId: string) => void
   setLoopPlayback: (on: boolean) => void
   /**
-   * トラックの固定(鍵)。固定したトラックで選んでいたクリップ・テロップの選びは外す。
+   * トラックの固定(ピン)。固定したトラックで選んでいたクリップ・テロップの選びは外す。
    * 取り消しに積む(企画に保存する)
    */
+  /** 音声・重ねる映像のトラックの名前を変える(空・同じなら変えない。取り消しに積む) */
+  renameTrack: (target: { kind: 'audio' | 'overlay'; id: string }, name: string) => void
   toggleTrackLocked: (
     target: { kind: 'main' } | { kind: 'telop' } | { kind: 'audio' | 'overlay'; id: string }
   ) => void
@@ -2015,6 +2022,7 @@ function projectSwitchReset(): Pick<
   | 'timelineOut'
   | 'projectSession'
   | 'trial'
+  | 'soloTrackIds'
 > {
   return {
     projectSession: ++projectSessionCounter,
@@ -2036,7 +2044,9 @@ function projectSwitchReset(): Pick<
     sourceIn: null,
     sourceOut: null,
     timelineIn: null,
-    timelineOut: null
+    timelineOut: null,
+    // ソロはモニター用で企画に保存しない。別の企画へ持ち越さない
+    soloTrackIds: []
   }
 }
 
@@ -2125,6 +2135,59 @@ export function withTrialWrite<T>(fn: () => T): T {
   }
 }
 
+const sameJson = (a: unknown, b: unknown): boolean =>
+  a === b || JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * トラックの固定を、ストアの 1 か所で守る(取り消しに積む書き込みはすべてここを通る)。
+ * 書き込む前の企画で固定していたトラックの中身(クリップ・テロップ)は変えさせない:
+ * - 本編(V1)が変わる書き込みは丸ごと断る(null。本編に付いていく音・テロップの位置も本編から決まるため)
+ * - 固定したトラックを消す書き込みも丸ごと断る
+ * - テロップ・音声・重ねる映像の固定したトラックは、中身だけ書き込む前に戻す(ほかの変更は通す。
+ *   本編のリップルでも、固定したトラックは動かない)
+ * トラックの設定(音量・ミュート・名前・表示・固定そのもの)は変えられる。
+ * 選ぶ操作は止めない(Premiere と同じく、選べるが変えられない)
+ */
+export function freezeLockedTracks(before: Project, after: Project): Project | null {
+  if (before.mainTrackLocked && !sameJson(before.clips, after.clips)) return null
+  let out = after
+  if (before.telopTrackLocked && !sameJson(before.textOverlays, after.textOverlays))
+    out = { ...out, textOverlays: before.textOverlays }
+  for (const t of before.audioTracks) {
+    if (!t.locked) continue
+    const now = out.audioTracks.find((x) => x.id === t.id)
+    if (!now) return null
+    if (!sameJson(t.clips, now.clips))
+      out = {
+        ...out,
+        audioTracks: out.audioTracks.map((x) => (x.id === t.id ? { ...x, clips: t.clips } : x))
+      }
+  }
+  for (const t of before.videoOverlayTracks) {
+    if (!t.locked) continue
+    const now = out.videoOverlayTracks.find((x) => x.id === t.id)
+    if (!now) return null
+    if (!sameJson(t.clips, now.clips))
+      out = {
+        ...out,
+        videoOverlayTracks: out.videoOverlayTracks.map((x) =>
+          x.id === t.id ? { ...x, clips: t.clips } : x
+        )
+      }
+  }
+  return out
+}
+
+/** 固定しているトラックの名前(作り直しの前の確かめ・押せない理由に使う) */
+export function lockedTrackNames(p: Project): string[] {
+  return [
+    ...(p.mainTrackLocked ? ['本編'] : []),
+    ...(p.telopTrackLocked ? ['テロップ'] : []),
+    ...p.videoOverlayTracks.filter((t) => t.locked).map((t) => t.name),
+    ...p.audioTracks.filter((t) => t.locked).map((t) => t.name)
+  ]
+}
+
 function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<ProjectState> {
   return (set, get, api) => {
     const guardedSet: typeof set = (partial) => {
@@ -2178,6 +2241,16 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
           }
         } else if (patch.project && patch.project.clips !== state.project.clips)
           patch = { ...patch, project: followMainEdit(state.project, patch.project) }
+        // トラックの固定(全体の作り直しは通す)
+        if (patch.__lockBypass) patch = omitKeys(patch, ['__lockBypass'])
+        else if (patch.project) {
+          const frozen = freezeLockedTracks(state.project, patch.project)
+          if (frozen === null) {
+            restoreHistoryCoalescing(coalescingMark)
+            return state
+          }
+          if (frozen !== patch.project) patch = { ...patch, project: frozen }
+        }
         // まとめている1件の続きで、積んだ時(ドラッグの始まり)と同じ中身に戻ったなら、その1件を下ろす。
         // 1つ前の書き込みとだけ比べると、行って戻したドラッグが「中身の変わらない1件」と未保存の印を残し、
         // 取り消しを押しても画面が何も変わらなかった
@@ -2221,6 +2294,7 @@ function skipNoOpHistory(creator: StateCreator<ProjectState>): StateCreator<Proj
           '__historyPush',
           '__noFollow',
           '__followFrom',
+          '__lockBypass',
           'project',
           'past',
           'future',
@@ -2768,6 +2842,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
       }))
       return {
         __noFollow: true,
+        __lockBypass: true,
         ...pushHistory(state),
         project: {
           ...base,
@@ -4030,6 +4105,7 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
           : followedProject
       return {
         __noFollow: true,
+        __lockBypass: true,
         ...pushHistory(state),
         selectedClipId: null,
         multiSelectedClipIds: [],
@@ -4556,6 +4632,24 @@ const projectStateCreator: StateCreator<ProjectState> = (set, get) => ({
     })),
 
   setLoopPlayback: (on) => set({ loopPlayback: on }),
+
+  renameTrack: (target, name) =>
+    set((state) => {
+      const next = name.trim().slice(0, 40)
+      const p = state.project
+      const list = target.kind === 'audio' ? p.audioTracks : p.videoOverlayTracks
+      const cur = list.find((t) => t.id === target.id)
+      if (!next || !cur || cur.name === next) return state
+      const rename = <T extends { id: string; name: string }>(t: T): T =>
+        t.id === target.id ? { ...t, name: next } : t
+      return {
+        ...pushHistory(state),
+        project:
+          target.kind === 'audio'
+            ? { ...p, audioTracks: p.audioTracks.map(rename) }
+            : { ...p, videoOverlayTracks: p.videoOverlayTracks.map(rename) }
+      }
+    }),
 
   toggleTrackLocked: (target) =>
     set((state) => {

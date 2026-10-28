@@ -19,6 +19,7 @@ import {
   MEDIA_KIND_FILTERS,
   type MediaKindFilter
 } from '../lib/mediaFilter'
+import { useProgramView } from '../lib/programView'
 import { stillAssetFrom } from '../lib/stillAsset'
 import { relinkRefusal } from '../lib/relinkCheck'
 import { ASSET_DRAG_TYPE } from '../lib/assetDrag'
@@ -120,6 +121,10 @@ export function MediaBin(): React.JSX.Element {
       setProxyProgress((prev) => ({ ...prev, [assetId]: percent }))
     })
   }, [])
+
+  // 再生の解像度「軽い」で作った軽い版も同じ帯で進み具合を出す。作り終えたものは帯を出さない
+  // (素材の読み込みの変換は自分で消すが、軽い版はプログラムの見出しが作るので、ここで見る)
+  const lightProxies = useProgramView((s) => s.lightProxies)
 
   // Transcoding is the expensive fallback, so it only runs once the preview element
   // itself has said it cannot play the file. Chromium can decode HEVC on machines with
@@ -512,12 +517,20 @@ export function MediaBin(): React.JSX.Element {
       items.push({ label: 'ソースで開く', onSelect: () => openInSourceViewer(asset.id) })
       // 静止画は本編には置かない(長さを持たない)が、ワイプ・CG のトラックには置ける(ドラッグと同じ)
       if (asset.hasVideo && !asset.still) {
-        items.push({ label: '本編(V1)の末尾に追加', onSelect: () => addClipToTimeline(asset.id) })
+        const locked = useProjectStore.getState().project.mainTrackLocked
+        items.push({
+          label: locked ? '本編(V1)の末尾に追加(本編は固定されています)' : '本編(V1)の末尾に追加',
+          disabled: locked === true,
+          onSelect: () => addClipToTimeline(asset.id)
+        })
       }
       if (asset.hasVideo) {
         for (const t of videoOverlayTracks) {
           items.push({
-            label: `${t.name}(ワイプ)に追加`,
+            label: t.locked
+              ? `${t.name}(ワイプ)に追加(${t.name}は固定されています)`
+              : `${t.name}(ワイプ)に追加`,
+            disabled: t.locked === true,
             onSelect: () => addClipToVideoOverlayTrack(t.id, asset.id)
           })
         }
@@ -525,7 +538,8 @@ export function MediaBin(): React.JSX.Element {
       if (asset.hasAudio) {
         for (const t of audioTracks) {
           items.push({
-            label: `${t.name} に追加`,
+            label: t.locked ? `${t.name} に追加(${t.name}は固定されています)` : `${t.name} に追加`,
+            disabled: t.locked === true,
             onSelect: () => addClipToAudioTrack(t.id, asset.id)
           })
         }
@@ -904,7 +918,7 @@ export function MediaBin(): React.JSX.Element {
                         ? `${asset.width}×${asset.height}`
                         : '音声'}
                   </span>
-                  {proxyProgress[asset.id] !== undefined && (
+                  {proxyProgress[asset.id] !== undefined && !lightProxies[asset.filePath] && (
                     <span
                       className="media-row-progress"
                       title={`プレビュー用に変換中 ${proxyProgress[asset.id]}%(書き出しは元のファイルを使います)`}

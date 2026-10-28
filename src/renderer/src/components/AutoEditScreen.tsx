@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { sourceDuration } from '@shared/ingest/classify'
 import { usePipelineStore, STEPS, type StepStatus } from '../store/pipelineStore'
-import { onProjectSwitch, useProjectStore } from '../store/projectStore'
+import { lockedTrackNames, onProjectSwitch, useProjectStore } from '../store/projectStore'
 import { emitMenuCommand, useMenuCommand } from '../lib/menuCommands'
 import { useReviewItems } from '../lib/useReviewItems'
 import { buildRunReport, formatElapsed } from '../lib/runReport'
@@ -104,6 +104,16 @@ interface SyncLane {
   name: string
   basis: string
   bars: { key: string; path: string; start: number; duration: number; method: string }[]
+}
+
+/**
+ * 全体の作り直しはトラックの固定を見ない(固定したトラックも作り直す)。固定したトラックがあれば、
+ * 始める前に名前を並べて確かめる
+ */
+function confirmLockedRebuild(): boolean {
+  const names = lockedTrackNames(useProjectStore.getState().project)
+  if (names.length === 0) return true
+  return confirm(`固定中のトラック(${names.join('・')})も作り直しで変わります。続けますか`)
 }
 
 export function AutoEditScreen(): React.JSX.Element | null {
@@ -246,6 +256,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
       )
     )
       return
+    if (!confirmLockedRebuild()) return
     void usePipelineStore.getState().rebuildRoughCut()
   }
 
@@ -257,6 +268,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
         return
       case 'start':
       case 'retry':
+        if (!confirmLockedRebuild()) return
         void runPipeline()
         return
       case 'cancel':
@@ -527,6 +539,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                     !confirm(RESTART_CONFIRM)
                   )
                     return
+                  if (!confirmLockedRebuild()) return
                   void runPipeline()
                 }}
                 title="同期からやり直します(前に並べた収録素材と自動で置いたものは入れ替わります。手で入れたクリップ・トラックは残ります)"

@@ -4,10 +4,11 @@
    ========================================================================== */
 
 /* ---------- トラックの見出し ---------- */
-/* 右のトグルは右端にそろえる(鍵はどの段も右端、目は音声の S と同じ列)。
+/* 右のトグルは右端にそろえる(ピンはどの段も右端、目は音声の S と同じ列)。
    映像の段はトグルが 2 つなので、空いた分を名前に回す(「テロップ」が切れない) */
 .ve-track-toggles {
   width: auto;
+  gap: 2px;
 }
 /* トラックの名前はボタン。押すとトラックの設定が開く */
 .ve-track-name-button,
@@ -15,7 +16,7 @@
   flex: 1;
   min-width: 0;
   height: var(--ve-control-xs);
-  padding: 0 var(--ve-space-1);
+  padding: 0 2px;
   display: flex;
   align-items: center;
   border: 0;
@@ -35,25 +36,57 @@
 .ve-track-name-button.open .track-label-name {
   color: var(--ve-text-1);
 }
-/* 固定したトラック: 鍵は黄色、レーンのクリップは薄く・触れない印 */
-.ve-track-toggle.ve-track-lock[aria-pressed='true'],
-.ve-track-toggle.ve-track-lock[aria-pressed='true']:hover:not(:disabled) {
-  color: var(--ve-warning);
+/* 名前の右の ▾(押す・右クリックでトラックの設定) */
+.ve-track-name-button .ve-track-name-caret {
+  flex: none;
+  margin-left: 2px;
+  color: var(--ve-text-icon);
 }
-.track-label.is-locked .track-tag {
-  opacity: 0.6;
+.ve-track-name-button:hover:not(:disabled) .ve-track-name-caret,
+.ve-track-name-button.open .ve-track-name-caret {
+  color: var(--ve-text-1);
 }
-.track-lane.is-locked .timeline-clip,
-.track-lane.is-locked .timeline-audio-clip,
-.track-lane.is-locked .timeline-video-overlay-clip,
-.track-lane.is-locked .timeline-caption-clip {
-  opacity: 0.55;
+.ve-track-name-button .track-label-name {
+  flex: 0 1 auto;
+}
+.ve-track-name-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--ve-control-sm);
+}
+/* トグルのオンは #3a3a3a の面に #f2f2f2(目は隠したときだけオン)。S のオンは反転 */
+.ve-track-toggle.ve-track-solo[aria-pressed='true'],
+.ve-track-toggle.ve-track-solo[aria-pressed='true']:hover:not(:disabled) {
+  background-color: var(--ve-text-1);
+  color: var(--ve-surface-deep);
+}
+/* 固定したトラック: レーンに斜線、クリップは塗りだけを薄く(名前の字の濃さは保つ) */
+.timeline-panel .track-lane.is-locked {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--ve-lock-hatch) 0 4px,
+    transparent 4px 8px
+  );
+}
+.timeline-panel .track-lane.is-locked .timeline-clip,
+.timeline-panel .track-lane.is-locked .timeline-audio-clip,
+.timeline-panel .track-lane.is-locked .timeline-video-overlay-clip,
+.timeline-panel .track-lane.is-locked .timeline-caption-clip {
+  background-image: linear-gradient(var(--ve-clip-dim-locked), var(--ve-clip-dim-locked));
   cursor: not-allowed;
 }
 .track-lane.is-locked .timeline-clip-handle,
 .track-lane.is-locked .timeline-caption-handle,
 .track-lane.is-locked .timeline-roll-handle {
   display: none;
+}
+/* ソロで鳴らない・ミュートしたトラック: 塗りを 40% に、名前を灰に */
+.timeline-panel .timeline-tracks .track-lane.is-silent .timeline-audio-clip,
+.timeline-panel .timeline-tracks .track-lane.is-silent .timeline-audio-clip.selected {
+  background-image: linear-gradient(var(--ve-clip-dim-silent), var(--ve-clip-dim-silent));
+}
+.timeline-panel .track-lane.is-silent .timeline-audio-clip-label {
+  color: var(--ve-text-icon);
 }
 
 /* ---------- プログラムの右の縦の音量計(L/R) ---------- */
@@ -119,7 +152,7 @@
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-10);
   line-height: 1;
-  color: var(--ve-text-faint);
+  color: var(--ve-text-3);
 }
 /* 色の帯: 下から 90%(−6 dBFS)までは緑、95%(−3 dBFS)までは黄、上は赤 */
 .ve-meter-channel {
@@ -228,23 +261,38 @@
   padding: var(--ve-space-1) 0;
   border-bottom: 1px solid var(--ve-border-subtle);
 }
-.ve-color-slider {
+.ve-color-row {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 56px;
+  grid-template-columns: minmax(0, 1fr) 56px auto;
   align-items: center;
-  gap: var(--ve-space-2);
+  gap: 2px var(--ve-space-2);
   font-size: var(--ve-fs-12);
   color: var(--ve-text-2);
 }
-.ve-color-slider input[type='range'] {
+.ve-color-row .ve-color-row-label {
+  grid-column: 1 / -1;
+}
+.ve-color-row input[type='range'] {
   min-width: 0;
   width: 100%;
 }
-.ve-color-slider-value {
+.ve-color-row .ve-color-row-value {
+  width: 56px;
+  height: var(--ve-control-sm);
+  box-sizing: border-box;
+  padding: 0 var(--ve-space-1);
   text-align: right;
   font-family: var(--ve-font-mono);
   font-size: var(--ve-fs-11);
-  color: var(--ve-text-1);
+}
+.ve-color-row .ve-color-row-value::-webkit-inner-spin-button,
+.ve-color-row .ve-color-row-value::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ve-color-row .ve-color-row-reset {
+  height: var(--ve-control-sm);
+  padding: 0 var(--ve-space-2);
 }
 
 /* AI の判断 */
@@ -316,6 +364,11 @@
 .ve-export-solo-note {
   color: var(--ve-warning-ink);
 }
+.ve-decision-scene-head .structure-kind.highlight {
+  background: var(--ve-auto-soft);
+  color: var(--ve-auto-ink);
+  font-weight: var(--ve-fw-regular);
+}
 .ve-decision-scene-head .structure-kind {
   flex: none;
   padding: 1px var(--ve-space-2);
@@ -334,9 +387,10 @@
   display: flex;
   align-items: center;
   gap: var(--ve-space-1);
-  height: var(--ve-control-sm);
+  height: 28px;
+  box-sizing: border-box;
   padding: 0 var(--ve-space-2);
-  border: 1px solid var(--ve-border);
+  border: 1px solid var(--ve-stroke-field);
   border-radius: var(--ve-radius-md);
   background: var(--ve-surface-field);
   color: var(--ve-text-icon);
@@ -345,7 +399,8 @@
   border-color: var(--ve-primary);
 }
 .ve-media-search input,
-.ve-media-search input:focus {
+.ve-media-search input:focus,
+.ve-media-search input:focus-visible {
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -357,39 +412,84 @@
   color: var(--ve-text-1);
   font-size: var(--ve-fs-12);
 }
+/* 種類の絞り込み: セグメント(地 #171717・高さ 24・選んだものは #3a3a3a に #f2f2f2) */
 .ve-media-kinds {
   display: flex;
-  gap: var(--ve-space-1);
-  flex-wrap: wrap;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--ve-radius-md);
+  background: var(--ve-surface-field);
 }
 .ve-media-kind,
 .ve-media-kind:hover:not(:disabled) {
-  height: 22px;
-  padding: 0 var(--ve-space-2);
-  border: 1px solid var(--ve-border);
-  border-radius: var(--ve-radius-pill);
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--ve-space-1);
+  border: 0;
+  border-radius: var(--ve-radius-sm);
   background-image: none;
   box-shadow: none;
-  font-size: var(--ve-fs-11);
+  font-size: var(--ve-fs-12);
+  white-space: nowrap;
 }
 .ve-media-kind {
   background-color: transparent;
-  color: var(--ve-text-2);
+  color: var(--ve-text-3);
 }
 .ve-media-kind:hover:not(:disabled) {
-  background-color: var(--ve-surface-card);
   color: var(--ve-text-1);
 }
 .ve-media-kind[aria-pressed='true'],
 .ve-media-kind[aria-pressed='true']:hover:not(:disabled) {
-  border-color: var(--ve-primary);
-  background-color: var(--ve-primary-soft);
-  color: var(--ve-primary-ink);
+  background-color: var(--ve-surface-raised);
+  color: var(--ve-text-1);
 }
 .ve-media-kind:disabled {
-  opacity: 0.45;
+  color: var(--ve-text-faint);
 }
 .ve-media-none {
   padding: var(--ve-space-3);
   text-align: center;
+}
+
+/* インスペクタの下のボタンは折り返す(1366 で切れない) */
+.ve-inspector .inspector-button-row {
+  flex-wrap: wrap;
+}
+
+/* 固定したトラックのものを見るだけにする枠(並びは崩さない) */
+.ve-lock-fieldset {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.ve-lock-note {
+  margin: var(--ve-space-2) var(--ve-space-3) 0;
+  color: var(--ve-text-2);
+}
+
+/* 「+ トラック ▾」の段: トラックが溢れても列の下に貼り付けて必ず見せる(レーンの側も同じ高さの段で揃える) */
+.timeline-panel .ve-add-track-row {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--ve-surface-band);
+  border-top: 1px solid var(--ve-border-subtle);
+}
+.timeline-panel .ve-lanes-add-spacer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--ve-surface-ground);
+  border-top: 1px solid var(--ve-border-subtle);
+}
+
+/* 見出しの左右の余白を 6px に(名前に回す。「BGM」が切れない) */
+.timeline-panel .track-labels-col .track-label {
+  padding: 0 6px;
 }

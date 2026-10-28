@@ -118,7 +118,8 @@ import {
   MusicIcon,
   SparklesIcon,
   Volume2Icon,
-  LockIcon
+  PinIcon,
+  ChevronDownIcon
 } from './icons'
 import { stripTelopMarkup } from '@shared/telop/render'
 import { DraftNumber } from './DraftNumber'
@@ -146,6 +147,8 @@ import { TimelineMarks } from './TimelineMarks'
 import { ShortcutHelpDialog } from './ShortcutHelpDialog'
 import { useShortcutHelpStore } from '../lib/shortcutHelp'
 import { useTimelineSubSelection } from '../lib/timelineSelection'
+import { activeSoloIds, trackSilencedInPreview } from '../lib/monitorSolo'
+import { lockReason } from '../lib/trackLock'
 
 const PIP_POSITION_LABELS: Record<PipPosition, string> = {
   'top-left': '左上',
@@ -331,10 +334,22 @@ function TrackHeadPopover({
         aria-label={label}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={title ?? label}
+        title={title ?? (name !== undefined ? TRACK_SETTINGS_TITLE : label)}
         onClick={() => setOpen((v) => !v)}
       >
-        {name !== undefined ? <span className="track-label-name">{name}</span> : icon}
+        {name !== undefined ? (
+          <>
+            <span className="track-label-name">{name}</span>
+            <ChevronDownIcon
+              width={10}
+              height={10}
+              className="ve-track-name-caret"
+              aria-hidden="true"
+            />
+          </>
+        ) : (
+          icon
+        )}
       </button>
       {open && (
         <Popover
@@ -350,7 +365,52 @@ function TrackHeadPopover({
   )
 }
 
-/** トラックの固定(鍵)のトグル。固定したトラックのクリップは選ぶ・動かす・切る・削除・貼り付けの対象にしない */
+const TRACK_SETTINGS_TITLE = 'トラックの設定(名前・音・削除)'
+
+/** 見出しの右クリック: その段の名前のボタンを押したことにして、トラックの設定を開く */
+function openTrackSettingsFromHeader(e: React.MouseEvent<HTMLElement>): void {
+  const button = e.currentTarget.querySelector<HTMLButtonElement>('.ve-track-name-button')
+  if (!button) return
+  e.preventDefault()
+  if (button.getAttribute('aria-expanded') !== 'true') button.click()
+}
+
+/** トラックの名前の欄(設定の吹き出しの中。Enter・欄を離れたときに決める。Esc で戻す) */
+function TrackNameField({
+  name,
+  onCommit
+}: {
+  name: string
+  onCommit: (name: string) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(name)
+  return (
+    <label className="ve-track-setting">
+      <span>名前</span>
+      <input
+        type="text"
+        className="ve-track-name-input"
+        value={draft}
+        maxLength={40}
+        aria-label="トラックの名前"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => (draft.trim() ? onCommit(draft) : setDraft(name))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+          else if (e.key === 'Escape') {
+            e.stopPropagation()
+            setDraft(name)
+          }
+        }}
+      />
+    </label>
+  )
+}
+
+/**
+ * トラックの固定のトグル(ピン)。固定したトラックのクリップは選ぶ・動かす・切る・削除・貼り付けの対象にしない。
+ * 範囲の自動編集の「ロック」(鍵)とは別のもの(lib/terms)
+ */
 function TrackLockToggle({
   name,
   locked,
@@ -373,7 +433,7 @@ function TrackLockToggle({
       }
       onClick={onToggle}
     >
-      <LockIcon width={12} height={12} />
+      <PinIcon width={12} height={12} />
     </button>
   )
 }
@@ -684,6 +744,9 @@ export function Timeline({
   const toggleAudioTrackSolo = useProjectStore((s) => s.toggleAudioTrackSolo)
   const soloTrackIds = useProjectStore((s) => s.soloTrackIds)
   const toggleTrackLocked = useProjectStore((s) => s.toggleTrackLocked)
+  const renameTrack = useProjectStore((s) => s.renameTrack)
+  // ソロ・ミュートで鳴らないトラック(クリップの塗りを薄く、名前を灰にする)
+  const activeSolo = activeSoloIds(soloTrackIds, project.audioTracks)
   const toggleAudioTrackDucking = useProjectStore((s) => s.toggleAudioTrackDucking)
   const setAudioTrackVolume = useProjectStore((s) => s.setAudioTrackVolume)
   const updateAudioClipStart = useProjectStore((s) => s.updateAudioClipStart)
@@ -1020,6 +1083,14 @@ export function Timeline({
 
   /** メニューの「選んだ範囲を自動編集…」: 範囲が無ければ、選んでいるクリップ・再生位置のクリップ */
   function openRangeAutoEdit(): void {
+    const blocked = rangedEditBlockedReason(
+      useProjectStore.getState().project,
+      usePipelineStore.getState()
+    )
+    if (blocked) {
+      setSfxDropError(`この範囲を自動編集できません: ${blocked}`)
+      return
+    }
     const picked = currentRange()
     if (picked) return setRangeDialog(picked)
     const st = useProjectStore.getState()
@@ -2070,27 +2141,6 @@ export function Timeline({
     ? project.assets.find((a) => a.id === selectedVideoOverlayClipData.assetId)
     : undefined
 
-  // 目盛りの帯に出す、選んでいるものの範囲(イン〜アウト)。琥珀の淡い帯で示す
-  const selectedOverlayData = selectedOverlayId
-    ? project.textOverlays.find((o) => o.id === selectedOverlayId)
-    : undefined
-  const selectedRange: { start: number; end: number } | null =
-    selectedIndex >= 0
-      ? { start: timedClips[selectedIndex].start, end: timedClips[selectedIndex].end }
-      : selectedOverlayData
-        ? { start: selectedOverlayData.startTime, end: selectedOverlayData.endTime }
-        : selectedAudioClipData
-          ? {
-              start: selectedAudioClipData.startTime,
-              end: selectedAudioClipData.startTime + audioClipDuration(selectedAudioClipData)
-            }
-          : selectedVideoOverlayClipData
-            ? {
-                start: selectedVideoOverlayClipData.startTime,
-                end: overlayClipEnd(selectedVideoOverlayClipData)
-              }
-            : null
-
   // 中身の高さを測って知らせる(App はタイムラインの既定の高さに使う)
   const panelRef = useRef<HTMLDivElement>(null)
   const tracksRef = useRef<HTMLDivElement>(null)
@@ -2116,7 +2166,11 @@ export function Timeline({
         timelineNaturalHeight({
           panelHeight: panel.offsetHeight,
           tracksClientHeight: tracks.clientHeight,
-          labelsHeight: labels.scrollHeight,
+          // 中身の高さは子の合計で測る(`scrollHeight` は列の高さより小さくならないので、一度高くなると
+          // 中身が減っても縮まず、1920 で約 105px 空いたままになっていた)
+          labelsHeight:
+            [...labels.children].reduce((sum, el) => sum + (el as HTMLElement).offsetHeight, 0) +
+            scrollbar,
           lanesHeight: inner.offsetHeight + scrollbar
         })
       )
@@ -2136,6 +2190,11 @@ export function Timeline({
     return st.selectedClipId ?? findTimedClipAt(timedClips, st.playheadTime)?.clip.id ?? null
   }
   const hasAiTarget = selectedClip !== null || timedClips.length > 0
+  // 「自動編集 ▾」の操作は本編を変える(自動テロップはテロップを足す)。固定していれば押せない
+  const mainLock = lockReason(project, { kind: 'main' })
+  const telopLock = lockReason(project, { kind: 'telop' })
+  const lockedTitle = (reason: string | null, title?: string): string | undefined =>
+    reason ? `使えません(${reason})` : title
   const aiActions: OverflowAction[] = [
     {
       key: 'silence',
@@ -2144,8 +2203,11 @@ export function Timeline({
           ? `無音カット(${multiSelectedClipIds.length}件)`
           : '無音カット',
       icon: <WandIcon width={14} height={14} />,
-      title: '選んだクリップ(無ければ再生位置のクリップ)の無音区間を検出して削除します',
-      disabled: !hasAiTarget,
+      title: lockedTitle(
+        mainLock,
+        '選んだクリップ(無ければ再生位置のクリップ)の無音区間を検出して削除します'
+      ),
+      disabled: !hasAiTarget || Boolean(mainLock),
       onSelect: () => {
         if (multiSelectedClipIds.length > 1) {
           // 検出結果はタイムラインの並び順で見せる
@@ -2162,7 +2224,8 @@ export function Timeline({
       key: 'filler',
       label: 'フィラーカット',
       icon: <FillerWordIcon width={14} height={14} />,
-      disabled: !hasAiTarget,
+      title: lockedTitle(mainLock),
+      disabled: !hasAiTarget || Boolean(mainLock),
       onSelect: () => {
         const id = aiTargetId()
         if (id) setFillerWordClipId(id)
@@ -2172,7 +2235,8 @@ export function Timeline({
       key: 'caption',
       label: '自動テロップ',
       icon: <MicIcon width={14} height={14} />,
-      disabled: !hasAiTarget,
+      title: lockedTitle(telopLock),
+      disabled: !hasAiTarget || Boolean(telopLock),
       onSelect: () => {
         const id = aiTargetId()
         if (id) setAutoCaptionClipId(id)
@@ -2182,7 +2246,8 @@ export function Timeline({
       key: 'textEdit',
       label: 'テキストで編集',
       icon: <TypeIcon width={14} height={14} />,
-      disabled: !hasAiTarget,
+      title: lockedTitle(mainLock),
+      disabled: !hasAiTarget || Boolean(mainLock),
       onSelect: () => {
         const id = aiTargetId()
         if (id) setTextEditClipId(id)
@@ -2195,16 +2260,22 @@ export function Timeline({
                 key: 'reattach',
                 label: '音声を戻す',
                 icon: <MusicIcon width={14} height={14} />,
-                title:
-                  '分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください',
+                title: lockedTitle(
+                  mainLock,
+                  '分離をやめて、このクリップ自身の音声を鳴らします。分離した音声トラックが残っている場合は二重に鳴るので、不要なら音声トラック側を削除してください'
+                ),
+                disabled: Boolean(mainLock),
                 onSelect: () => reattachClipAudio(selectedClip.id)
               }
             : {
                 key: 'detach',
                 label: '音声を分離',
                 icon: <MusicIcon width={14} height={14} />,
-                title:
-                  '動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)',
+                title: lockedTitle(
+                  mainLock,
+                  '動画から音声を切り離し、独立した音声トラックに分けます(再生速度はそのまま引き継がれます)'
+                ),
+                disabled: Boolean(mainLock),
                 onSelect: () => detachClipAudio(selectedClip.id)
               }
         ]
@@ -2448,16 +2519,18 @@ export function Timeline({
                   key={track.id}
                   className={`track-label ${track.locked ? 'is-locked' : ''}`}
                   data-g3-kind="overlay"
+                  onContextMenu={openTrackSettingsFromHeader}
                 >
                   <span className="track-tag tag-video">{tag}</span>
-                  <TrackHeadPopover
-                    label={`${track.name}の設定`}
-                    title={`${track.name}(押すと設定)`}
-                    name={track.name}
-                  >
+                  <TrackHeadPopover label={`${track.name}の設定`} name={track.name}>
                     <div className="ve-track-settings">
+                      <TrackNameField
+                        key={track.name}
+                        name={track.name}
+                        onCommit={(n) => renameTrack({ kind: 'overlay', id: track.id }, n)}
+                      />
                       <label className="ve-track-setting">
-                        <span>{track.name}の音</span>
+                        <span>音</span>
                         <button
                           type="button"
                           role="switch"
@@ -2506,6 +2579,8 @@ export function Timeline({
                       <button
                         type="button"
                         className="small-button danger"
+                        disabled={track.locked === true}
+                        title={track.locked ? `${track.name}は固定されています` : undefined}
                         onClick={() => {
                           if (confirmRemoveTrack(track.name, track.clips.length)) {
                             removeVideoOverlayTrack(track.id)
@@ -2521,9 +2596,9 @@ export function Timeline({
                     <button
                       type="button"
                       className="ve-track-toggle"
-                      aria-label={`${track.name}を表示`}
-                      aria-pressed={!track.hidden}
-                      title={track.hidden ? '表示する' : '非表示(PiP合成をスキップ)'}
+                      aria-label={`${track.name}を隠す`}
+                      aria-pressed={track.hidden === true}
+                      title={track.hidden ? '表示する' : '隠す(PiP合成をスキップ)'}
                       onClick={() => toggleVideoOverlayTrackHidden(track.id)}
                     >
                       {track.hidden ? (
@@ -2549,9 +2624,10 @@ export function Timeline({
           <div
             className={`track-label track-label-video ${project.mainTrackLocked ? 'is-locked' : ''}`}
             data-g3-kind="video"
+            onContextMenu={openTrackSettingsFromHeader}
           >
             <span className="track-tag tag-video">V1</span>
-            <TrackHeadPopover label="本編の設定" title="本編(押すと設定)" name="本編">
+            <TrackHeadPopover label="本編の設定" name="本編">
               <div className="ve-track-settings">
                 <label className="ve-track-setting">
                   <span>本編の絵を表示</span>
@@ -2572,8 +2648,8 @@ export function Timeline({
               <button
                 type="button"
                 className="ve-track-toggle"
-                aria-label="本編を表示"
-                aria-pressed={!project.mainVideoHidden}
+                aria-label="本編を隠す"
+                aria-pressed={project.mainVideoHidden === true}
                 title={
                   project.mainVideoHidden
                     ? '本編の絵を表示する'
@@ -2599,9 +2675,10 @@ export function Timeline({
               className={`track-label ${project.telopTrackLocked ? 'is-locked' : ''}`}
               data-g3-kind="telop"
               style={{ height: captionLaneH }}
+              onContextMenu={openTrackSettingsFromHeader}
             >
               <span className="track-tag tag-telop">T1</span>
-              <TrackHeadPopover label="テロップの設定" title="テロップ(押すと設定)" name="テロップ">
+              <TrackHeadPopover label="テロップの設定" name="テロップ">
                 <div className="ve-track-settings">
                   <label className="ve-track-setting">
                     <span>テロップを表示</span>
@@ -2627,8 +2704,8 @@ export function Timeline({
                 <button
                   type="button"
                   className="ve-track-toggle"
-                  aria-label="テロップを表示"
-                  aria-pressed={!project.telopTrackHidden}
+                  aria-label="テロップを隠す"
+                  aria-pressed={project.telopTrackHidden === true}
                   title={
                     project.telopTrackHidden
                       ? 'テロップを表示する'
@@ -2657,16 +2734,18 @@ export function Timeline({
                 key={track.id}
                 className={`track-label ${track.locked ? 'is-locked' : ''}`}
                 data-g3-kind={audioKindOf(track)}
+                onContextMenu={openTrackSettingsFromHeader}
               >
                 <span className={`track-tag tag-audio ${track.autoRole ? 'tag-auto' : ''}`}>
                   {tag}
                 </span>
-                <TrackHeadPopover
-                  label={`${track.name}の設定`}
-                  title={`${track.name}(押すと設定)`}
-                  name={track.name}
-                >
+                <TrackHeadPopover label={`${track.name}の設定`} name={track.name}>
                   <div className="ve-track-settings">
+                    <TrackNameField
+                      key={track.name}
+                      name={track.name}
+                      onCommit={(n) => renameTrack({ kind: 'audio', id: track.id }, n)}
+                    />
                     <label className="ve-track-setting">
                       <span title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる">
                         ダッキング
@@ -2726,6 +2805,8 @@ export function Timeline({
                     <button
                       type="button"
                       className="small-button danger"
+                      disabled={track.locked === true}
+                      title={track.locked ? `${track.name}は固定されています` : undefined}
                       onClick={() => {
                         if (confirmRemoveTrack(track.name, track.clips.length)) {
                           removeAudioTrack(track.id)
@@ -2774,7 +2855,7 @@ export function Timeline({
                   </button>
                   <button
                     type="button"
-                    className="ve-track-toggle"
+                    className="ve-track-toggle ve-track-solo"
                     aria-label={`${track.name}をソロ`}
                     aria-pressed={soloTrackIds.includes(track.id)}
                     title={
@@ -2953,16 +3034,6 @@ export function Timeline({
                   {formatTimecode(t, rulerFps)}
                 </span>
               ))}
-              {selectedRange && selectedRange.end > selectedRange.start && (
-                <span
-                  className="g3-ruler-range"
-                  aria-hidden="true"
-                  style={{
-                    left: selectedRange.start * pixelsPerSecond,
-                    width: (selectedRange.end - selectedRange.start) * pixelsPerSecond
-                  }}
-                />
-              )}
               {dragRange && dragRange.end > dragRange.start && (
                 <span
                   className="g3-ruler-range g3-ruler-range-drag"
@@ -3649,8 +3720,8 @@ export function Timeline({
                 data-locked={track.locked ? 'true' : undefined}
                 data-g3-kind={audioKindOf(track)}
                 className={`track-lane audio-lane ${laneAlt(nOverlayLanes + (hasTelopLane ? 2 : 1) + trackIndex)} ${track.autoRole ? 'auto' : ''} ${track.locked ? 'is-locked' : ''} ${
-                  draggedAsset?.hasAudio ? 'drop-target' : ''
-                } ${
+                  trackSilencedInPreview(track, activeSolo) ? 'is-silent' : ''
+                } ${draggedAsset?.hasAudio ? 'drop-target' : ''} ${
                   (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
                   (audioDrag !== null &&
                     audioDrag.hoverTrackId === track.id &&

@@ -652,6 +652,17 @@ export function LockIcon(props: IconProps): React.JSX.Element {
   )
 }
 
+/** ピン(トラックの固定) */
+export function PinIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...base(props)}>
+      <path d="M9 4h6" />
+      <path d="M10 4v5l-3 4h10l-3-4V4" />
+      <path d="M12 13v7" />
+    </svg>
+  )
+}
+
 /** ループ(繰り返し再生) */
 export function RepeatIcon(props: IconProps): React.JSX.Element {
   return (

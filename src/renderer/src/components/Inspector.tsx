@@ -118,9 +118,23 @@ export function Inspector(): React.JSX.Element {
   const telopSelected = useProjectStore(
     (s) => s.selectedClipId === null && s.selectedOverlayId !== null
   )
+  const mainLocked = useProjectStore((s) => s.project.mainTrackLocked === true)
+  const telopLocked = useProjectStore((s) => s.project.telopTrackLocked === true)
   if (tab === 'color' && !telopSelected) return <InspectorColor />
   if (tab === 'decision' && !telopSelected) return <InspectorDecision />
-  return <InspectorProperties />
+  // 固定したトラックのものは見るだけ(変える欄は押せない。トラックの固定)
+  const locked = telopSelected ? telopLocked : mainLocked
+  if (!locked) return <InspectorProperties />
+  return (
+    <>
+      <p className="hint-text ve-lock-note" role="note">
+        {telopSelected ? 'テロップ' : '本編'}は固定されています(タイムラインのピンで外せます)
+      </p>
+      <fieldset className="ve-lock-fieldset" disabled>
+        <InspectorProperties />
+      </fieldset>
+    </>
+  )
 }
 
 function InspectorProperties(): React.JSX.Element {

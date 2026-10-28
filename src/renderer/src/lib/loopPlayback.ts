@@ -72,10 +72,12 @@ export function restartLoopAtEnd(): boolean {
 /** ふつうの再生でループの範囲の終わりを越えたら頭へ戻す見張り。外すときの関数を返す */
 export function installLoopWatcher(): () => void {
   let previous = useProjectStore.getState().playheadTime
-  return useProjectStore.subscribe((state) => {
+  return useProjectStore.subscribe((state, prevState) => {
     const now = state.playheadTime
     const before = previous
     previous = now
+    // 手で再生位置を動かした(シーク)ときは引き戻さない。動かした先から続けて、次に終わりを越えたら戻す
+    if (state.seekRequest !== prevState.seekRequest) return
     if (!state.isPlaying || !state.loopPlayback || isRangePlaying()) return
     if (now === before) return
     const b = loopBounds(state.timelineIn, state.timelineOut, getTotalDuration(state.project))

@@ -49,7 +49,7 @@ const overlapOf = (a: { start: number; end: number }, b: { start: number; end: n
 
 export function decisionForClip(
   clip: Pick<Clip, 'assetId' | 'inPoint' | 'outPoint'>,
-  project: Pick<Project, 'multicam' | 'cutOverrides' | 'autoEditLocks'>,
+  project: Pick<Project, 'multicam' | 'cutOverrides' | 'autoEditLocks' | 'roughCutAuto'>,
   analysis: {
     scenes: readonly Scene[]
     judgements: readonly SceneJudgement[]
@@ -79,14 +79,25 @@ export function decisionForClip(
       }
     })
   const source = info.sources.find((s) => s.id === segs[0].cameraId)
+  // 手の判断は今の本編のクリップから読む: 前に自動で組んだ本編(`roughCutAuto`)と比べ、
+  // 同じ時間を別のカメラで組んでいたら「替えた」、自動で組んだ所の外なら「足した」。
+  // 古い企画で自動の記録が無ければ、覚えている人の修正(`cutOverrides`)で見る
+  const auto = project.roughCutAuto
   const ov = project.cutOverrides
+  const camera = segs[0].cameraId
+  const autoOverlap = auto
+    ? segs.reduce((sum, seg) => sum + auto.reduce((x, a) => x + overlapOf(a, seg), 0), 0)
+    : 0
+  const clipLength = segs.reduce((sum, seg) => sum + (seg.end - seg.start), 0)
   return {
     scenes,
     camera: source ? { name: source.name, subject: source.subject } : null,
-    manualAngle: Boolean(
-      ov?.angles.some((a) => a.cameraId === segs[0].cameraId && overlapOf(a, span) > 0.02)
-    ),
-    manualAdded: Boolean(ov?.added.some((a) => overlapOf(a, span) > 0.02)),
+    manualAngle: auto
+      ? auto.some((a) => a.cameraId !== camera && segs.some((seg) => overlapOf(a, seg) > 0.02))
+      : Boolean(ov?.angles.some((a) => a.cameraId === camera && overlapOf(a, span) > 0.02)),
+    manualAdded: auto
+      ? clipLength - autoOverlap > 0.02
+      : Boolean(ov?.added.some((a) => overlapOf(a, span) > 0.02)),
     locked: Boolean(project.autoEditLocks?.some((l) => overlapOf(l, span) > 0.02)),
     judgeSource: analysis.judgeSource
   }

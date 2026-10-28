@@ -97,6 +97,10 @@ function syncTapSource(tap: Tap, ctx: AudioContext): void {
   const id = track?.id ?? null
   if (id === tap.trackId) return
   tap.source?.disconnect()
+  // 前の素材の写しのトラックは止める(残すと写しが裏で回り続ける)
+  tap.stream.getAudioTracks().forEach((t) => {
+    if (t !== track) t.stop()
+  })
   tap.source = null
   tap.trackId = id
   if (!track) return
@@ -110,6 +114,7 @@ function syncTapSource(tap: Tap, ctx: AudioContext): void {
 
 function dropTap(el: HTMLMediaElement, tap: Tap): void {
   tap.source?.disconnect()
+  tap.stream.getTracks().forEach((t) => t.stop())
   tap.gain.disconnect()
   taps.delete(el)
 }

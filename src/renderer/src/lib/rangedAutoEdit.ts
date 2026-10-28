@@ -344,9 +344,11 @@ export function summarizeRangedEdit(
 
 /** 範囲の自動編集・ロックが使えない理由(使えれば null) */
 export function rangedEditBlockedReason(
-  project: Pick<Project, 'multicam' | 'clips'>,
+  project: Pick<Project, 'multicam' | 'clips' | 'mainTrackLocked'>,
   pipeline: { scenes: readonly unknown[]; restored: { legacy: boolean } | null; running: boolean }
 ): string | null {
+  // 範囲の自動編集は本編を作り直す(トラックの固定)
+  if (project.mainTrackLocked) return '本編は固定されています'
   if (!project.multicam)
     return '同期した収録素材の企画で使えます(「新しい回を作る」で取り込んだ企画)'
   if (pipeline.scenes.length === 0)

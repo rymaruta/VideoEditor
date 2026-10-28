@@ -151,14 +151,24 @@ export function playRange(from: number, to: number): boolean {
   const startSession = s.projectSession
   s.seekTo(from)
   s.setIsPlaying(true)
-  const unsubscribe = useProjectStore.subscribe((state) => {
+  let ownSeek = useProjectStore.getState().seekRequest
+  let selfSeeking = false
+  const unsubscribe = useProjectStore.subscribe((state, prev) => {
     if (!state.isPlaying || state.projectSession !== startSession) {
+      stopRangePlayback()
+      return
+    }
+    // 手で再生位置を動かしたら、イン〜アウトの見張りはやめる(ふつうの再生として続ける。引き戻さない)
+    if (!selfSeeking && state.seekRequest !== prev.seekRequest && state.seekRequest !== ownSeek) {
       stopRangePlayback()
       return
     }
     if (state.playheadTime >= end - 1e-3) {
       if (state.loopPlayback) {
+        selfSeeking = true
         state.seekTo(from)
+        selfSeeking = false
+        ownSeek = useProjectStore.getState().seekRequest
         return
       }
       stopRangePlayback()

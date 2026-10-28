@@ -4,6 +4,7 @@ import { readProgramPeaks, releaseProgramMeter } from '../lib/previewMeter'
 import { getSharedAudioContext } from '../lib/previewAudio'
 import {
   METER_FLOOR_DB,
+  PEAK_HOLD_MS,
   meterFraction,
   meterZone,
   nextBarDb,
@@ -49,6 +50,8 @@ export function ProgramMeter({
     let last = performance.now()
     let frame = 0
     let quiet = false
+    // 合計が 0 dBFS を超えた時刻(赤の「クリップ」の印をしばらく出す)
+    let clippedAt = -Infinity
     const tick = (): void => {
       const now = performance.now()
       const dt = now - last
@@ -56,6 +59,7 @@ export function ProgramMeter({
       const root = rootRef.current
       const peaks = playingRef.current && root ? readProgramPeaks(root) : null
       const input = peaks ? [toDbfs(peaks.left), toDbfs(peaks.right)] : [-Infinity, -Infinity]
+      if (input[0] > 0 || input[1] > 0) clippedAt = now
       let anyLit = false
       for (let ch = 0; ch < 2; ch++) {
         bars[ch] = nextBarDb(bars[ch], input[ch], dt)
@@ -72,10 +76,27 @@ export function ProgramMeter({
           peak.dataset.zone = meterZone(shown)
         }
       }
+      const clipping = now - clippedAt <= PEAK_HOLD_MS
+      if (clipping) anyLit = true
       if (labelRef.current) {
-        const top = Math.max(peakHoldDisplay(holds[0], now), peakHoldDisplay(holds[1], now))
-        labelRef.current.textContent = top > METER_FLOOR_DB ? top.toFixed(1) : '−∞'
-        labelRef.current.dataset.zone = top > METER_FLOOR_DB ? meterZone(top) : 'ok'
+        // 目盛りは 0 dBFS で頭打ち。超えたら数字の代わりに赤の「クリップ」
+        const top = Math.min(
+          0,
+          Math.max(peakHoldDisplay(holds[0], now), peakHoldDisplay(holds[1], now))
+        )
+        labelRef.current.textContent = clipping
+          ? 'クリップ'
+          : top > METER_FLOOR_DB
+            ? top.toFixed(1)
+            : '−∞'
+        labelRef.current.dataset.zone = clipping
+          ? 'over'
+          : top > METER_FLOOR_DB
+            ? meterZone(top)
+            : 'ok'
+        labelRef.current.title = clipping
+          ? '合計が 0 dBFS を超えました(書き出しでは割れることがあります)'
+          : 'ピーク(dBFS)'
       }
       // 止まっていて全部消えたら、測るのも描くのも休む(再生を始めたら戻る)
       quiet = !anyLit && !playingRef.current

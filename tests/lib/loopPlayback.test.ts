@@ -91,6 +91,22 @@ describe('ループの再生(ストア)', () => {
     expect(s().isPlaying).toBe(true)
   })
 
+  it('手で再生位置を動かしたときは引き戻さない(イン〜アウトの再生の見張りもやめる)', () => {
+    uninstall = installLoopWatcher()
+    s().setLoopPlayback(true)
+    s().setIsPlaying(true)
+    s().setPlayheadTime(4)
+    s().seekTo(10)
+    s().setPlayheadTime(10.1)
+    expect(s().playheadTime).toBe(10.1)
+    // 範囲を超えて動かしても、そこから続ける
+    expect(playRange(2, 5)).toBe(true)
+    s().seekTo(8)
+    s().setPlayheadTime(8.1)
+    expect(s().isPlaying).toBe(true)
+    expect(s().playheadTime).toBe(8.1)
+  })
+
   it('Ctrl+Shift+Space(イン〜アウトを再生)は、オフならアウトで止まり、オンなら繰り返す', () => {
     expect(playRange(2, 5)).toBe(true)
     s().setPlayheadTime(5)

@@ -5,6 +5,7 @@ import { useTimelineSubSelection } from '../lib/timelineSelection'
 import { useInspectorTab, INSPECTOR_TABS } from '../lib/inspectorTab'
 import { decisionForClip, SCENE_KIND_LABEL } from '../lib/clipDecision'
 import { emitMenuCommand } from '../lib/menuCommands'
+import { rangedEditBlockedReason } from '../lib/rangedAutoEdit'
 import {
   COLOR_VERDICT_TEXT,
   describeColorMatch,
@@ -70,14 +71,19 @@ function EmptyNote({ text }: { text: string }): React.JSX.Element {
 const IDENTITY: ColorMatch = { gain: [1, 1, 1], offset: [0, 0, 0] }
 const CHANNELS = ['赤', '緑', '青'] as const
 
-/** つまみを離したときに反映する(取り消しは 1 回で戻る) */
-function ColorSlider({
+/**
+ * 色合わせの 1 行: 名前・つまみ・56px の数値の欄・「戻す」。
+ * つまみは離したとき、数値は Enter・欄を離れたときに当てる(取り消しは 1 回で戻る)。
+ * 数値の欄は表示の単位(`scale` 倍。足し込みは %)で入れる
+ */
+function ColorRow({
   label,
   value,
   min,
   max,
   step,
-  format,
+  scale = 1,
+  neutral,
   onCommit
 }: {
   label: string
@@ -85,33 +91,67 @@ function ColorSlider({
   min: number
   max: number
   step: number
-  format: (v: number) => string
+  scale?: number
+  /** 戻す先(倍率 1・足し込み 0) */
+  neutral: number
   onCommit: (v: number) => void
 }): React.JSX.Element {
   const [draft, setDraft] = useState<number | null>(null)
+  const [text, setText] = useState<string | null>(null)
   const shown = draft ?? value
+  const digits = scale === 1 ? 3 : 1
+  const clamp = (v: number): number => Math.min(max, Math.max(min, v))
   const commit = (): void => {
     if (draft === null) return
     setDraft(null)
     onCommit(draft)
   }
+  const commitText = (): void => {
+    if (text === null) return
+    const v = Number(text) / scale
+    setText(null)
+    if (Number.isFinite(v)) onCommit(clamp(v))
+  }
   return (
-    <label className="ve-color-slider">
-      <span>{label}</span>
+    <div className="ve-color-row">
+      <span className="ve-color-row-label">{label}</span>
       <input
         type="range"
         min={min}
         max={max}
         step={step}
         value={shown}
-        aria-valuetext={format(shown)}
+        aria-label={label}
         onChange={(e) => setDraft(Number(e.target.value))}
         onPointerUp={commit}
         onKeyUp={commit}
         onBlur={commit}
       />
-      <span className="ve-color-slider-value">{format(shown)}</span>
-    </label>
+      <input
+        type="number"
+        className="ve-color-row-value"
+        step={step * scale}
+        min={min * scale}
+        max={max * scale}
+        value={text ?? (shown * scale).toFixed(digits)}
+        aria-label={`${label}(数値)`}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commitText}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commitText()
+          else if (e.key === 'Escape') setText(null)
+        }}
+      />
+      <button
+        type="button"
+        className="small-button ve-color-row-reset"
+        disabled={Math.abs(value - neutral) < 1e-9}
+        title={`${label}を戻す`}
+        onClick={() => onCommit(neutral)}
+      >
+        戻す
+      </button>
+    </div>
   )
 }
 
@@ -164,22 +204,23 @@ export function InspectorColor(): React.JSX.Element {
         )}
         {CHANNELS.map((name, ch) => (
           <div key={name} className="ve-color-channel">
-            <ColorSlider
-              label={`${name}の倍率`}
+            <ColorRow
+              label={`${name}のゲイン`}
               value={(m ?? IDENTITY).gain[ch]}
               min={GAIN_LIMIT[0]}
               max={GAIN_LIMIT[1]}
               step={0.005}
-              format={(v) => `×${v.toFixed(3)}`}
+              neutral={1}
               onCommit={(v) => update('gain', ch, v)}
             />
-            <ColorSlider
-              label={`${name}の足し込み`}
+            <ColorRow
+              label={`${name}のオフセット`}
               value={(m ?? IDENTITY).offset[ch]}
               min={-OFFSET_LIMIT}
               max={OFFSET_LIMIT}
               step={0.002}
-              format={(v) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(1)}%`}
+              scale={100}
+              neutral={0}
               onCommit={(v) => update('offset', ch, v)}
             />
           </div>
@@ -221,12 +262,20 @@ export function InspectorDecision(): React.JSX.Element {
     keep,
     judgeSource
   })
+  // 範囲の自動編集・ロックは、同期した収録素材のクリップでだけ使える(押せないときは理由を出す)
+  const rangeBlocked = rangedEditBlockedReason(project, usePipelineStore.getState())
+  const lockBlocked = d ? null : '同期した収録素材から作ったクリップで使えます'
   const actions = (
     <div className="inspector-button-row">
       <button
         type="button"
         className="small-button"
-        title="選んだ範囲(無ければこのクリップ)だけを、指示を変えて自動編集し直します"
+        disabled={rangeBlocked !== null}
+        title={
+          rangeBlocked
+            ? `使えません(${rangeBlocked})`
+            : '選んだ範囲(無ければこのクリップ)だけを、指示を変えて自動編集し直します'
+        }
         onClick={() => emitMenuCommand('edit.rangeAutoEdit')}
       >
         <SparklesIcon width={12} height={12} />
@@ -235,7 +284,12 @@ export function InspectorDecision(): React.JSX.Element {
       <button
         type="button"
         className="small-button"
-        title="選んだ範囲(無ければこのクリップ)を、自動編集で作り直さない範囲にします"
+        disabled={lockBlocked !== null}
+        title={
+          lockBlocked
+            ? `使えません(${lockBlocked})`
+            : '選んだ範囲(無ければこのクリップ)を、自動編集で作り直さない範囲にします'
+        }
         onClick={() => emitMenuCommand('edit.rangeLock')}
       >
         <LockIcon width={12} height={12} />
