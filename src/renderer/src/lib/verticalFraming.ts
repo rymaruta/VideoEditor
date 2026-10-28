@@ -7,6 +7,7 @@ import {
 } from '@shared/telop/avoidFaces'
 import { liftAboveShortsUi, SHORTS_TELOP_BOTTOM } from '@shared/telop/stack'
 import { textCanvasSize } from '@shared/resolution'
+import { computeMainTrackLayout } from '@shared/mainTrackLayout'
 import { frameCountForDuration, projectFrameRate } from '@shared/frameRate'
 import { stackTopHeight, type CropWindow, type StackSplit } from '@shared/videoFrame'
 import type { Clip, MediaAsset, Project, TextOverlay } from '@shared/types'
@@ -434,6 +435,62 @@ export function speakerShots(
 }
 
 /**
+ * 話す人の切り替えで分けたクリップの素材の位置を、書き出しのコマにそろえる(その場で直す)。
+ * 書き出しはクリップの頭を `computeMainTrackLayout` でコマに丸めた所から素材を読む。分けた2本目以降の頭の
+ * 素材の位置を「1本目の頭のコマ + コマの差」から求めないと、分けた所で音が飛ぶ・途切れる。コマの番号は
+ * 書き出しと同じ関数・同じ入力(素材のある本編のクリップ・出力のフレームレート)で求め、整数のコマで差を取る
+ * (式を写して丸めると、ちょうど半コマの時刻で小数の誤差により1コマずれた: 25fps・前のクリップ 2.7 秒で
+ * 40ms、50fps・2.71 秒で 20ms)。分けた所のタイムラインの時刻は、コマの真ん中の側へごくわずか(1コマの
+ * 1万分の1)寄せて、半コマちょうどで丸めが揺れないようにする
+ */
+function alignSplitPieces(
+  clips: Clip[],
+  assets: ReadonlyMap<string, MediaAsset>,
+  originOf: ReadonlyMap<string, string>
+): void {
+  if (originOf.size === 0) return
+  const fps = projectFrameRate(
+    clips,
+    clips.map((c) => assets.get(c.assetId)).filter((a): a is MediaAsset => a !== undefined)
+  )
+  if (!(fps > 0)) return
+  for (let round = 0; round < 4; round++) {
+    // 素材のあるクリップ(書き出しの本編)の、並びの位置 → 書き出しの番号
+    const slot: number[] = []
+    const main: Clip[] = []
+    for (const c of clips) {
+      slot.push(assets.has(c.assetId) ? main.length : -1)
+      if (assets.has(c.assetId)) main.push(c)
+    }
+    const layout = computeMainTrackLayout(main, fps)
+    const frameAt = (i: number): number => Math.round(layout.exportStarts[slot[i]] * fps)
+    let changed = false
+    for (let i = 0; i < clips.length; i++) {
+      const origin = originOf.get(clips[i].id)
+      if (!origin || slot[i] < 0) continue
+      // 同じ元のクリップの1本目(分けたクリップは並んでいる)
+      let j = i
+      while (j > 0 && originOf.get(clips[j - 1].id) === origin) j--
+      j--
+      if (j < 0 || clips[j].id !== origin || slot[j] < 0) continue
+      const first = clips[j]
+      const f0 = frameAt(j)
+      const delta = layout.timelineStarts[slot[j]] * fps - f0
+      const frames = frameAt(i) - f0
+      const speed = first.speed || 1
+      // 半コマちょうどで丸めが揺れないよう、コマの真ん中の側へ 1万分の1コマ寄せる(素材の位置で 2µs 未満)
+      const want = first.inPoint + ((frames - delta * 1e-4) / fps) * speed
+      if (Math.abs(want - clips[i].inPoint) > 1e-12) {
+        changed = true
+        clips[i] = { ...clips[i], inPoint: want }
+        clips[i - 1] = { ...clips[i - 1], outPoint: want }
+      }
+    }
+    if (!changed) return
+  }
+}
+
+/**
  * 縦の書き出し用の写しを作る(企画は変えない)。`faces` はクリップの id → そのクリップの近くで顔を探した画。
  * 無いクリップは真ん中で切り出す
  */
@@ -472,7 +529,9 @@ export function applyVerticalFill(
     if (framing.kind === 'single') return [{ ...c, fillCrop: true, cropCenter: framing.center }]
     // 2人が収まらない: 話者と顔の対応があれば話している人へ切り替える。無ければ上下に積む
     const byFace = options.speakers?.faces.get(c.assetId)
-    if (byFace && options.speakers) {
+    // 速さを変えたクリップは分けない(分けると書き出しが速さの掛け直しで音をずらし・途切れさせる。
+    // 59.94fps・速さ 0.8 で 14.5ms のずれ、30fps・速さ 0.5 で途切れ)。上下に積む
+    if (byFace && options.speakers && (c.speed || 1) === 1) {
       const people = framing.people
       const keyOf = (speaker: string): number | null => {
         const x = byFace.get(speaker)
@@ -529,6 +588,7 @@ export function applyVerticalFill(
       }
     ]
   })
+  alignSplitPieces(clips, assets, originOf)
   const result = { filled, onFaces, stacked, switched }
   if (filled === 0 && !options.alwaysLift) return { project, ...result, movedTelops: 0 }
 
