@@ -2,7 +2,7 @@ import type { AsrWord, TranscriptUtterance } from '../transcript'
 import {
   applyDictionary,
   balancedLineEnds,
-  certainlyBadCount,
+  lineBreakScore,
   dictionaryNoCut,
   dictionaryPattern,
   FILLER,
@@ -91,11 +91,6 @@ export interface ChunkOptions {
   removeFillers?: boolean
   /** 用語の辞書 */
   dictionary?: readonly DictionaryEntry[]
-  /**
-   * 語の切れ目で切るために、1行だけ1字はみ出してよい(はみ出した行が描画の枠に収まるとき。
-   * `lineOverflowFits` で確かめて渡す)。無ければはみ出さない
-   */
-  overflowFits?: boolean
 }
 
 /**
@@ -268,15 +263,10 @@ function spreadZeroWords(out: TimedChar[], words: readonly AsrWord[]): void {
 }
 
 /** 1行に収まるよう改行を入れる(禁則を守り、句読点・助詞の後を優先) */
-export function wrapTelopLines(
-  text: string,
-  maxLineChars: number,
-  /** 語の切れ目で切るために1行だけ1字はみ出してよい(描画の枠に収まると確かめたとき。`lineOverflowFits`) */
-  overflow = false
-): string[] {
+export function wrapTelopLines(text: string, maxLineChars: number): string[] {
   const chars = [...text]
   let from = 0
-  return phraseLineEnds(chars, maxLineChars, overflow)
+  return phraseLineEnds(chars, maxLineChars)
     .map((end) => {
       const line = chars.slice(from, end).join('').trim()
       from = end
@@ -286,38 +276,19 @@ export function wrapTelopLines(
 }
 
 /**
- * 改行の位置。まず前の版(d110078)の選び方(`breakScore`。数字と単位の間では切らない直しだけ足したもの)で
- * 決め、新しい選び方(文節の見当 `lineBreakScore`)の改行は「明らかに良い」ときだけ採る:
- * (i) 前の版の改行に確実に悪い切れ目(`certainlyBadBreak`。漢字|漢字・漢字|送り仮名・1字だけの行・
- * 数字|単位 など)があり、(ii) 新しい改行にはそれが1つも無く、(iii) 行の数とはみ出しが増えない。
- * 新しい選び方を広く採ると、13・17 字などで前の版より悪い改行(「たくさ / ん」「戸 / 惑った」)が出た
- * (再監査)。はみ出しは、呼ぶ側が収まると確かめた1字(`overflow`)は数えず、それを超える行・2行目以上の
- * はみ出しを数える
+ * 改行の位置。まず今までの選び方(`breakScore`)で決め、その改行が文節の見当(`lineBreakScore`)で語の途中と
+ * 見えるときだけ、文節の見当で選び直した位置を使う(語の途中と見える改行が減り、行の数が変わらないときだけ)。
+ * 文節の見当で全部を選び直すと、今まで語の切れ目で切れていた文まで動き、別の所で語の途中に切れていた
+ * (「一生懸 / 命」「た / くさん」)
  */
-export function phraseLineEnds(chars: readonly string[], max: number, overflow = false): number[] {
+function phraseLineEnds(chars: readonly string[], max: number): number[] {
   const before = balancedLineEnds(chars, max)
-  if (certainlyBadCount(chars, before) === 0) return before
-  const after = balancedLineEnds(chars, max, undefined, true, overflow)
-  const overs = (ends: readonly number[]): number => {
-    let from = 0
-    let n = 0
-    let allowed = overflow ? 1 : 0
-    for (const e of ends) {
-      const len = chars.slice(from, e).join('').trim().length
-      if (len > max + 1) n++
-      else if (len > max) {
-        if (allowed > 0) allowed--
-        else n++
-      }
-      from = e
-    }
-    return n
-  }
-  return after.length <= before.length &&
-    certainlyBadCount(chars, after) === 0 &&
-    overs(after) <= overs(before)
-    ? after
-    : before
+  const inside = (ends: readonly number[]): number =>
+    ends.slice(0, -1).filter((e) => lineBreakScore(chars, e) < 0).length
+  const bad = inside(before)
+  if (bad === 0) return before
+  const after = balancedLineEnds(chars, max, undefined, true)
+  return after.length === before.length && inside(after) < bad ? after : before
 }
 
 /** 言いよどみを除き、辞書で直し、表示用に整える */
@@ -638,7 +609,7 @@ export function clipTelopChunk(
       if (clamped[0] <= Math.min(...times) && clamped[1] >= Math.max(...times)) range = clamped
     }
     return {
-      text: wrapTelopLines(text, options.maxLineChars ?? 14, options.overflowFits).join('\n'),
+      text: wrapTelopLines(text, options.maxLineChars ?? 14).join('\n'),
       times,
       spoken: spokenOf(vis),
       range,
@@ -808,7 +779,7 @@ export function utteranceToTelopChunks(
     const polished = polish(chars.slice(p.from, p.to).join(''))
     const vis = visOf[pi]
     const times = vis ? vis.map((v) => (v.lo + v.hi) / 2) : null
-    const lines = wrapTelopLines(polished, maxLine, options.overflowFits)
+    const lines = wrapTelopLines(polished, maxLine)
     const text = lines.join('\n')
     if (!text) return
     // 頭の、整えると消える文字(言いよどみ・句読点・空白)は時刻に入れない

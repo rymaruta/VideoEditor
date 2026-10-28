@@ -174,3 +174,88 @@ describe.skipIf(!HAVE_FFMPEG)('話す人の切り替えで分けた所の音(実
         }
       }, 120_000)
 })
+
+describe.skipIf(!HAVE_FFMPEG)(
+  '繋ぎのあるクリップは話す人の切り替えで分けない(実際の ffmpeg)',
+  () => {
+    const faces = new Map(
+      ['c0', 'c1'].map((id) => [
+        id,
+        [1, 3, 5].map((time) => ({ time, faces: [face(0.15), face(0.75)] }))
+      ])
+    )
+    for (const engine of ['standard', 'segmented'] as const)
+      it(`25fps・前 0〜2.7 秒・クロスフェード 0.3 秒・切り替え 4.72 秒(${engine})`, async () => {
+        // 最終監査の再現: 分けると繋ぎで書き出しの頭が数コマ動き、1〜2 コマ(最大 80ms)音が飛んだ
+        const p = {
+          id: 'p',
+          name: 'switch',
+          aspectRatio: '9:16',
+          assets: [assets.get(25)!],
+          clips: [
+            { id: 'c0', assetId: 'A', inPoint: 0, outPoint: 2.7, speed: 1 },
+            {
+              id: 'c1',
+              assetId: 'A',
+              inPoint: 2.7,
+              outPoint: 7.5,
+              speed: 1,
+              transitionIn: { type: 'crossfade', duration: 0.3 }
+            }
+          ],
+          audioTracks: [],
+          videoOverlayTracks: [],
+          textOverlays: []
+        } as unknown as Project
+        const lines = [
+          { speaker: '乙', start: 2.4, end: 4.7 },
+          { speaker: '甲', start: 4.72, end: 7.2 }
+        ]
+        const split = applyVerticalFill(p, faces, {
+          speakers: {
+            faces: new Map([
+              [
+                'A',
+                new Map([
+                  ['甲', 0.19],
+                  ['乙', 0.79]
+                ])
+              ]
+            ]),
+            lines
+          }
+        }).project
+        const whole = applyVerticalFill(p, faces).project
+        // 分けない(上下に積む)
+        expect(split.clips.map((c) => c.id)).toEqual(['c0', 'c1'])
+        const run = async (proj: Project, name: string): Promise<Int16Array> => {
+          const out = join(work, `${name}.mp4`)
+          if (engine === 'standard')
+            await exportProject({
+              project: proj,
+              aspectRatio: '9:16',
+              resolutionHeight: 480,
+              quality: 'standard',
+              outputPath: out,
+              telopLayer: null,
+              onProgress: () => {}
+            })
+          else
+            await exportSequenceSegmented({
+              project: projectV1ToV2(proj, { resolution: 480 }),
+              outputPath: out,
+              quality: 'standard',
+              encoder: 'libx264',
+              telopLayer: null
+            })
+          return pcm(out)
+        }
+        const a = await run(split, `xf-split-${engine}`)
+        const b = await run(whole, `xf-whole-${engine}`)
+        let maxDiff = 0
+        for (let i = Math.round(3.5 * RATE); i < Math.round(5.5 * RATE); i++)
+          maxDiff = Math.max(maxDiff, Math.abs(a[i] - b[i]))
+        expect(maxDiff / 32768).toBeLessThan(0.05)
+      }, 120_000)
+  }
+)

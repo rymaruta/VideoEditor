@@ -80,9 +80,6 @@ const KANJI = /[一-鿿々]/u
 const HIRAGANA = /[ぁ-ゟ]/u
 const KATAKANA = /[ァ-ヿ]/u
 const DIGIT = /[0-9０-９]/u
-/** それだけで立つ副詞(この前後は文節の切れ目) */
-const ADVERB =
-  /(?:ちょっと|すごく|とても|ずっと|いつも|もっと|やっぱり|やはり|なかなか|たくさん|いっぱい|ぜひ|必ず|すぐ|少し|ほとんど)/u
 /** 文節の終わりになる仮名(助詞・接続の「て」「ば」など)。この後ろは区切ってよい */
 const PHRASE_END = /[はがをにでともへやのねよてばどら]/u
 /** 前の言葉にくっつく仮名(助詞・助動詞・活用の頭・小さい仮名)。この前では区切らない */
@@ -98,11 +95,6 @@ const JOINS_PREVIOUS =
 
 /** 単語の途中で区切る良さ。ほかに区切れる所が無いときだけ選ばれるよう、どの区切りよりも低くする */
 export const INSIDE_WORD_SCORE = -3
-/**
- * 付属語(助詞・助動詞)の前で区切る良さ(「科学的なもの / だけ」「経済 / にとって」)。語の切れ目ではないが、
- * 語の途中(「科学 / 的」「つな / がって」)よりは読める。どちらでしか切れないときに、こちらを選ぶ
- */
-export const ATTACHED_WORD_SCORE = -2
 
 const wordSegmenter: Intl.Segmenter | null =
   typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
@@ -215,90 +207,20 @@ export function lineBreakScore(chars: readonly string[], k: number): number {
     wordBoundaries(chars)?.has(k - 1) === true
   )
     base = 2
-  // 「て・で」の後ろの補助の動詞(「増やして / いく」「頑張って / まいります」「させて / いただく」)は
-  // 別の文節。単語の区切りが「てい|く」と分けるので、語の途中とみなしていた(試し編集 第3回)
-  if (
-    base === INSIDE_WORD_SCORE &&
-    /[てで]/u.test(prev) &&
-    HIRAGANA.test(before) &&
-    /^(?:いく|いき|いけ|いっ|いる|いた|いま|おり|おる|くる|くれ|くだ|きた|きま|しま|みる|みた|みま|もら|いただ|あげ|まいり|ほし)/u.test(
-      chars.slice(k, k + 3).join('')
-    )
-  )
-    base = 1
   // 句点が無くても文の終わりらしい所(「…ました / それでは」「…ですね / 以前」)は、次が前にくっつく仮名で
   // なければ切ってよい(仮名の並びの中を全部語の途中とみなすと「ありがとうございまし / た…」になった)
   if (base > -Infinity && !ATTACHES.test(next) && endsSentence(chars, k)) return Math.max(base, 2)
-  // 複合の付属語(「について」「にとって」「としては」「に対して」)の中(「テーマに / ついて」)は語の途中
-  // (監査: 前の版は「テーマ / について」と付属語の前で切っていた)
-  if (/^(?:に(?:つい|とっ|対し|よっ|関し|おい)|として)/u.test(chars.slice(k - 1, k + 2).join('')))
-    return Math.min(base, INSIDE_WORD_SCORE)
-  // それだけで立つ副詞の後ろで、次が漢字・カタカナ(「必ず / 我々」)は文節の切れ目
-  if (
-    (KANJI.test(next) || KATAKANA.test(next)) &&
-    new RegExp(`${ADVERB.source}$`, 'u').test(chars.slice(Math.max(0, k - 4), k).join(''))
-  )
-    return Math.max(base, 1)
-  // 漢字の名詞に付く接尾の字(「科学 / 的」「可能 / 性」「自動 / 化」)の前は語の途中(試し編集 第3回)
-  if (KANJI.test(prev) && /[的性化]/u.test(next)) return Math.min(base, INSIDE_WORD_SCORE)
-  // 「…的な / もの」の「な」は文節の終わり(「科学的な / ものだけでは」)
-  if (
-    prev === 'な' &&
-    before === '的' &&
-    HIRAGANA.test(next) &&
-    (!ATTACHES.test(next) || /^(?:もの|こと|とこ|とき)/u.test(chars.slice(k, k + 2).join('')))
-  )
-    return Math.max(base, 1)
   if (HIRAGANA.test(next)) {
-    // 漢字+送り仮名+「す」の活用(「増や / していく」「減ら / して」「伸ば / した」)。送り仮名の「や」「か」を
-    // 助詞とみなして区切っていた(試し編集 第3回)
-    if (KANJI.test(before) && /[やらばわまか]/u.test(prev) && /[しすさせ]/u.test(next))
-      return Math.min(base, INSIDE_WORD_SCORE)
-    // 漢字の後ろの送り仮名(「焼 / いた」「お聞 / きする」)。助詞・助動詞・「まで」「など」で始まる所は除く
-    // (監査: 単語の区切りが「焼|い」と分けるので、語の切れ目とみなしていた)
-    // 言いよどみ(「えーと」「あのー」「まあ」)の頭は除く(言いよどみは言葉の外。前の言葉に付かない)
-    if (
-      KANJI.test(prev) &&
-      !/[はがをにでともへやのだ]/u.test(next) &&
-      !/^(?:え[ーぇっ]|あの[ーぉ]|ま[あー]|う[ーん]|ん[ーっ]|あ[ーぁ]|そのー)/u.test(
-        chars.slice(k, k + 3).join('')
-      ) &&
-      !/^(?:まで|より|など|くらい|ぐらい|しか|ほど|みたい|らしい|です|でし|なら|なの|ばかり|ばっか|すら|さえ|って|ね|よ|さん|さま|くん|ちゃん)/u.test(
-        chars.slice(k, k + 3).join('')
-      )
-    )
-      return Math.min(base, INSIDE_WORD_SCORE)
-    // 漢字・カタカナ・数字の後ろの助詞・送り仮名・「する」の活用(「経済 / にとって」「競合 / しない」)。
-    // 単語の区切りが言葉の切れ目と見る所(名詞の後ろの助詞)は、付属語の前(語の途中よりは軽い)
+    // 漢字・カタカナ・数字の後ろの助詞・送り仮名・「する」の活用(「経済 / にとって」「競合 / しない」)
     if (
       (KANJI.test(prev) || KATAKANA.test(prev) || DIGIT.test(prev)) &&
       (ATTACHES.test(next) || /[しすさせ]/u.test(next))
     )
-      return Math.min(
-        base,
-        wordBoundaries(chars)?.has(k) === true ? ATTACHED_WORD_SCORE : INSIDE_WORD_SCORE
-      )
+      return Math.min(base, INSIDE_WORD_SCORE)
     // 「…て / ですね」の「ですね」は前にくっつかない(言い直しの間の決まり文句)
     const filler = FREE_HEAD.test(chars.slice(k, k + 4).join(''))
-    // 言い切りの後ろの終助詞・接続助詞(「下げる / よ」「です / けども」「行った / から」)は付属語の前
-    // (語の途中より軽い。どちらでしか切れないときにこちらを選ぶ)
-    if (
-      /[るたいうだすく]/u.test(prev) &&
-      /^(?:よ|ね|けど|けれど|から|ので|のに|って|と(?!こ))/u.test(chars.slice(k, k + 3).join(''))
-    )
-      return Math.min(base, ATTACHED_WORD_SCORE)
-    // 仮名の言葉の途中(「つな / がって」「みたい / な」)。単語の区切りがあり、次がそれだけで立つ副詞
-    // (「お前もう / ちょっと」)なら途中ではない
-    const freeWord =
-      wordBoundaries(chars)?.has(k) === true &&
-      (new RegExp(`^${ADVERB.source}`, 'u').test(chars.slice(k, k + 4).join('')) ||
-        // それだけで立つ副詞の後ろ(「たくさん / やってる」)
-        new RegExp(`${ADVERB.source}$`, 'u').test(chars.slice(Math.max(0, k - 4), k).join('')))
-    if (HIRAGANA.test(prev) && !PHRASE_END.test(prev) && !freeWord)
+    if (HIRAGANA.test(prev) && (!PHRASE_END.test(prev) || (ATTACHES.test(next) && !filler)))
       return Math.min(base, INSIDE_WORD_SCORE)
-    // 文節の終わりの後ろの付属語の前(「もの / だけ」)。語の途中よりは軽い
-    if (HIRAGANA.test(prev) && ATTACHES.test(next) && !filler)
-      return Math.min(base, ATTACHED_WORD_SCORE)
   }
   // 「お」「ご」+漢字(「お聞かせ」「ご案内」)の間
   if (KANJI.test(next) && /[おご]/u.test(prev)) return Math.min(base, INSIDE_WORD_SCORE)
@@ -346,9 +268,6 @@ export function findBreak(
  * 残りを何行で書くかを先に決め、その平均の長さの近くで良い区切りを探す。
  * 各行は `maxLine` 以内(区切れる所が無いときの禁則のぶら下げで、1文字だけ超えうる)。
  */
-/** 語の切れ目で切るために1字はみ出してよい、1行の字数の下限(既定の 14 字の枠と、それより広いもの) */
-const MIN_OVERFLOW_LINE = 12
-
 export function balancedLineEnds(
   chars: readonly string[],
   maxLine: number,
@@ -358,12 +277,7 @@ export function balancedLineEnds(
    * 文節の切れ目の見当(`lineBreakScore`)で選ぶ。語の途中でしか切れないときは、1行増やしてでも語の切れ目で
    * 切る(テロップの1枚の中の改行。行が増えた分は次の枚になる)
    */
-  phrases = false,
-  /**
-   * 語の切れ目で切るために、1行だけ1字はみ出してよい(はみ出した行が描画の枠に収まると、呼ぶ側が
-   * 確かめたときだけ。`lineOverflowFits`)
-   */
-  overflow = false
+  phrases = false
 ): number[] {
   const score = phrases ? lineBreakScore : breakScore
   const ends: number[] = []
@@ -414,31 +328,6 @@ export function balancedLineEnds(
         }
       }
       if (alt > from) best = alt
-      // それでも語の切れ目が無ければ、1行だけ1文字はみ出してよいとして探す(禁則のぶら下げと同じ幅)。
-      // 「最終的につながりにも / つながっていったと思うんですが」(14字で 10 + 15)を「…つな / がって」と
-      // 切っていた(試し編集 第3回)。はみ出すのは最後の行か、この行のどちらか1行だけ。1行の字数が
-      // `MIN_OVERFLOW_LINE` より少ない(狭い枠に合わせた)ときははみ出さない(1字の重みが大きい)
-      else if (overflow && lines === 2 && max >= MIN_OVERFLOW_LINE) {
-        let over = -1
-        let overValue = -Infinity
-        for (let len = max + 1; len >= Math.max(1, remaining - max - 1); len--) {
-          // どちらの行も半分より短くしない(「いかに / 増やしていくかということをこの」のような偏りは避ける)
-          const half = Math.ceil(max / 2)
-          if (len >= remaining || len < half || remaining - len < half || noCut?.(from + len))
-            continue
-          const sc = lineBreakScore(chars, from + len)
-          if (sc < 0) continue
-          const value = sc - Math.abs(len - target) * 0.5
-          if (value > overValue) {
-            over = from + len
-            overValue = value
-          }
-        }
-        if (over > from) {
-          ends.push(over, chars.length)
-          break
-        }
-      }
     }
     const cut = best > from ? best : findBreak(chars, from, max, score)
     ends.push(cut)
@@ -466,93 +355,4 @@ export function dictionaryNoCut(
     }
   }
   return (index) => inside.has(index)
-}
-
-/** 数字の後ろに付く単位(数字との間で切らない) */
-const UNIT_CHAR = /[%％‰円人年月日時分秒歳個件回倍万億兆割]/u
-
-/**
- * 確実に悪い切れ目か(`chars[k]` の手前で改行する)。改行を前の版(d110078)から替えてよいかを決めるのに使う。
- * 文節の見当(`lineBreakScore`)やラベルに頼らず、字の種類と決まった並びだけで機械的に決める:
- * - 漢字|漢字(「戸 / 惑った」「改定名 / 団」「科学 / 的」)
- * - 漢字|送り仮名(「焼 / いた」「お聞 / きする」。助詞・助動詞・「まで」「など」・言いよどみの頭は除く)
- * - カタカナ|カタカナ(「オーネアレン / ティク」)、カタカナ|漢字1字の接尾(「コロナ / 禍で」)
- * - 数字|数字・数字|単位(「200 / 0円」「約4 / %」)
- * - 小さい「っ」で終わる行(「つながっ / て」)
- * - 仮名の言葉の途中の決まった形: 「ん」「ま(す)」で始まる行(「たくさ / ん」「あり / ました」)・「ま / す」、
- *   「た・な・し・み / い」「よ・そ・こ・ど / う」、
- *   「こ / と」「も / の」「と / ころ」「と / き」、仮名+「っ」の活用の途中(「つな / がって」)、
- *   「みたい / な」「よう / な」「そう / な」、漢字+送り仮名+す の活用の途中(「増や / して」)、「いただ / き」
- */
-export function certainlyBadBreak(chars: readonly string[], k: number): boolean {
-  if (k <= 0 || k >= chars.length) return false
-  const prev = chars[k - 1]
-  const next = chars[k]
-  const before = chars[k - 2] ?? ''
-  const after = chars[k + 1] ?? ''
-  const ahead = chars.slice(k, k + 3).join('')
-  const behind = chars.slice(Math.max(0, k - 4), k).join('')
-  if (KANJI.test(prev) && KANJI.test(next)) return true
-  if (
-    KANJI.test(prev) &&
-    HIRAGANA.test(next) &&
-    !/[はがをにでともへやのだ]/u.test(next) &&
-    !/^(?:まで|より|など|くらい|ぐらい|しか|ほど|みたい|らしい|です|でし|なら|なの|ばかり|ばっか|すら|さえ|って|ね|よ|さん|さま|くん|ちゃん)/u.test(
-      ahead
-    ) &&
-    !/^(?:え[ーぇっ]|あの[ーぉ]|ま[あー]|う[ーん]|ん[ーっ]|あ[ーぁ]|そのー)/u.test(ahead)
-  )
-    return true
-  if (KATAKANA.test(prev) && KATAKANA.test(next)) return true
-  if (KATAKANA.test(prev) && KANJI.test(next) && !KANJI.test(after)) return true
-  if (DIGIT.test(prev) && (DIGIT.test(next) || UNIT_CHAR.test(next))) return true
-  // 漢字+送り仮名1字+漢字(複合語の途中。「思い / 切った」「受け / 入れ」)
-  // 送り仮名はい段・え段(連用形)だけ(「違う / 人」「来た / 時」は言葉の切れ目)
-  if (
-    KANJI.test(next) &&
-    /[いきぎしじちびみりけげせぜてえべめれ]/u.test(prev) &&
-    KANJI.test(before)
-  )
-    return true
-  // 「お・ご」+漢字(「お / 客様」「ご / 案内」)
-  if (/[おご]/u.test(prev) && KANJI.test(next) && !KANJI.test(before)) return true
-  // 小さい「っ」で終わる行(「つながっ / て」「行っ / た」)
-  if (prev === 'っ' || prev === 'ッ') return true
-  if (HIRAGANA.test(prev)) {
-    if (next === 'ん') return true
-    // 「ます」の前・中(「あり / ました」「ございま / した」)
-    if (/^ま[すしせ]/u.test(ahead)) return true
-    if (prev === 'ま' && /[すしせ]/u.test(next)) return true
-    // 「〜たい・ない・しい・みたい」「よう・そう・こう・どう」の中(「みた / いな」「よ / うな」)
-    if (next === 'い' && /[たなしみ]/u.test(prev)) return true
-    if (next === 'う' && /[よそこど]/u.test(prev)) return true
-    // 活用の後ろの「て・で」(「させ / て」「読ん / で」)。「では・でも・です」は除く
-    if (next === 'て' || (next === 'で' && !/^で[はもす]/u.test(ahead))) return true
-    // 「〜ています」の中(「できて / います」)
-    if (prev === 'て' && /^いま/u.test(ahead)) return true
-    // 「〜たり・〜たら」の中(「図っ / たり」「図った / り」)
-    if (prev === 'た' && /[りら]/u.test(next)) return true
-    // 「ます・です」の後ろの終助詞の前(「できています / か」)
-    if (/[かねよ]/u.test(next) && /(?:ます|です)$/u.test(behind)) return true
-    if (/^(?:こと|もの|とこ|とき)$/u.test(prev + next)) return true
-    if (HIRAGANA.test(next) && after === 'っ') return true
-    if (/(?:みたい|よう|そう)$/u.test(behind) && /[なに]/u.test(next)) return true
-    if (KANJI.test(before) && /[やらばわまか]/u.test(prev) && /[しすさせ]/u.test(next)) return true
-    if (/いただ$/u.test(behind) && next === 'き') return true
-  }
-  return false
-}
-
-/**
- * 改行の並び(終わりの位置)の、確実に悪い切れ目の数。1字だけの行も1つと数える(最後の行も)
- */
-export function certainlyBadCount(chars: readonly string[], ends: readonly number[]): number {
-  let n = 0
-  let from = 0
-  for (const [i, e] of ends.entries()) {
-    if (i < ends.length - 1 && certainlyBadBreak(chars, e)) n++
-    if (ends.length > 1 && chars.slice(from, e).join('').trim().length === 1) n++
-    from = e
-  }
-  return n
 }

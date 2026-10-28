@@ -104,6 +104,23 @@ describe('保存した企画の積む形・分けたクリップ', () => {
     }
   })
 
+  it('人が切り抜きの位置を動かした分けたクリップはつながない(位置を保つ。最終監査の指摘 3)', () => {
+    for (const moved of [
+      { x: 0.79, y: 0.4 },
+      { x: 0.6, y: 0.5 }
+    ]) {
+      const edited = {
+        ...savedStack,
+        clips: savedStack.clips.map((c) => (c.id === 'c1~v1' ? { ...c, cropCenter: moved } : c))
+      }
+      const plain = withoutVerticalSplits(edited)
+      expect(plain.clips.map((c) => c.id)).toEqual(['c1', 'c1~v1', 'c2'])
+      expect(plain.clips[1].cropCenter).toEqual(moved)
+    }
+    // 動かしていなければつなぐ
+    expect(withoutVerticalSplits(savedStack).clips.map((c) => c.id)).toEqual(['c1', 'c2'])
+  })
+
   it('縦でない出力(16:9 にした企画)では積まない', () => {
     const stack = savedStack.clips[2].splitStack!
     expect(

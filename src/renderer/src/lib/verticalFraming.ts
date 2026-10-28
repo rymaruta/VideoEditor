@@ -51,6 +51,8 @@ const MIN_WINDOW_W = 0.2
  * (Shorts の下の帯より上)が入る余地を残す
  */
 const FACE_Y_IN_WINDOW = 0.36
+/** 番の切れ目としない、別の人の短い相づちの長さの上限(秒) */
+const SHORT_ACK_SEC = 0.6
 /** 同じ人の発話を1つの番としてまとめる間(秒) */
 const RUN_JOIN_SEC = 2.5
 /** 話者の切り替えの、1ショットの長さの下限(秒)。これより短くなる切り替えはしない */
@@ -310,7 +312,15 @@ export function fillsVertical(
  * (つないだクリップは1本目の位置)
  */
 function sameClipSettings(a: Clip, b: Clip): boolean {
-  const skip = new Set(['id', 'inPoint', 'outPoint', 'cropCenter', 'transitionIn', 'splitStack'])
+  const skip = new Set([
+    'id',
+    'inPoint',
+    'outPoint',
+    'cropCenter',
+    'autoCropCenter',
+    'transitionIn',
+    'splitStack'
+  ])
   const keys = new Set([...Object.keys(a), ...Object.keys(b)].filter((k) => !skip.has(k)))
   for (const k of keys) {
     const x = (a as unknown as Record<string, unknown>)[k]
@@ -318,6 +328,18 @@ function sameClipSettings(a: Clip, b: Clip): boolean {
     if (JSON.stringify(x ?? null) !== JSON.stringify(y ?? null)) return false
   }
   return true
+}
+
+/**
+ * 切り抜きの位置が、自動で分けたときのままか(人が動かしていない)。自動で分けた位置は縦が真ん中(0.5)で、
+ * 分けたときの位置(`autoCropCenter`)と同じ。人が動かした位置のクリップはつながない(位置を保つ)
+ */
+function autoCrop(c: Clip): boolean {
+  const cc = c.cropCenter
+  if (!cc) return true
+  if (Math.abs(cc.y - 0.5) > 1e-9) return false
+  const a = c.autoCropCenter
+  return !a || (Math.abs(a.x - cc.x) < 1e-9 && Math.abs(a.y - cc.y) < 1e-9)
 }
 
 export function withoutVerticalSplits(project: Project): Project {
@@ -332,6 +354,8 @@ export function withoutVerticalSplits(project: Project): Project {
       prev.id === base &&
       !c.transitionIn &&
       sameClipSettings(prev, c) &&
+      autoCrop(prev) &&
+      autoCrop(c) &&
       Math.abs(prev.outPoint - c.inPoint) < 1e-6
     ) {
       out[out.length - 1] = { ...prev, outPoint: c.outPoint }
@@ -429,7 +453,11 @@ export function speakerShots(
       if (x.key === l.key) {
         if (x.start <= runEnd + RUN_JOIN_SEC) runEnd = Math.max(runEnd, x.end)
         else break
-      } else if (x.start >= runEnd) break
+      } else if (x.start >= runEnd) {
+        // 間に入った別の人の短い相づち(「うん」0.6 秒未満)では番を切らない
+        if (x.end - x.start < SHORT_ACK_SEC) continue
+        break
+      }
     }
     runEnd = Math.min(end, runEnd)
     // 相づち: この番の間、今映している人も話している(半分以上重なる)なら切り替えない
@@ -529,7 +557,7 @@ export function applyVerticalFill(
   let switched = 0
   /** 話者の切り替えで分けたクリップの、元のクリップ(顔を探した画は元のクリップの id で覚えている) */
   const originOf = new Map<string, string>()
-  const clips = project.clips.flatMap((c): Clip[] => {
+  const clips = project.clips.flatMap((c, ci): Clip[] => {
     const asset = assets.get(c.assetId)
     if (!inRange.has(c.id) || !fillsVertical(c, asset, ASPECT, options.refineAutoFill)) return [c]
     filled++
@@ -547,7 +575,15 @@ export function applyVerticalFill(
     const byFace = options.speakers?.faces.get(c.assetId)
     // 速さを変えたクリップは分けない(分けると書き出しが速さの掛け直しで音をずらし・途切れさせる。
     // 59.94fps・速さ 0.8 で 14.5ms のずれ、30fps・速さ 0.5 で途切れ)。上下に積む
-    if (byFace && options.speakers && (c.speed || 1) === 1) {
+    // 繋ぎ(クロスフェードなど)に関わるクリップ(自分・前・次に繋ぎがある)も分けない。繋ぎで書き出しの
+    // 頭が数コマ手前へ動き、分けた所で 1〜2 コマ(最大 80ms)音が飛んだ(25fps・前 2.7 秒・繋ぎ 0.3 秒)
+    const nearTransition = [project.clips[ci - 1], c, project.clips[ci + 1]].some(
+      (x) =>
+        x?.transitionIn !== undefined &&
+        x.transitionIn.type !== 'none' &&
+        x.transitionIn.duration > 0
+    )
+    if (byFace && options.speakers && (c.speed || 1) === 1 && !nearTransition) {
       const people = framing.people
       const keyOf = (speaker: string): number | null => {
         const x = byFace.get(speaker)
@@ -584,7 +620,8 @@ export function applyVerticalFill(
               inPoint: sourceAt[i],
               outPoint: i + 1 < sourceAt.length ? sourceAt[i + 1] : c.outPoint,
               fillCrop: true,
-              cropCenter: { x: person.cx, y: 0.5 }
+              cropCenter: { x: person.cx, y: 0.5 },
+              autoCropCenter: { x: person.cx, y: 0.5 }
             }
             if (i > 0) delete piece.transitionIn
             return piece
