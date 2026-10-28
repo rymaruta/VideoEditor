@@ -1286,7 +1286,8 @@ export function PreviewPlayer(): React.JSX.Element {
       activeTimedClipRef.current?.clip.id,
       activeSrcRef.current,
       playheadTime,
-      (tc) => previewSourceUrl(tc.asset)
+      (tc) => previewSourceUrl(tc.asset),
+      isPlaying
     )
     if (follow.kind === 'load') {
       loadClipForTime(follow.time, follow.initial ? false : isPlaying)

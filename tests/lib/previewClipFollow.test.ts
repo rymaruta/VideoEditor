@@ -83,4 +83,23 @@ describe('本編が変わったときのプログラムの読み込み直し', (
     })
     expect(previewClipFollow(timed, 'c1', '/proxy.mp4', 2, url).kind).toBe('load')
   })
+
+  it('再生中は、再生位置が隣のクリップに掛かっても今のクリップを続ける(速さを上げた・前を詰めた)', () => {
+    const asset = { id: 'a', filePath: '/a.mp4' } as never
+    const mk = (id: string, start: number, end: number): TimedClip =>
+      ({
+        clip: { id, assetId: 'a', inPoint: start, outPoint: end, speed: 1 },
+        asset,
+        start,
+        end
+      }) as never
+    const timed = [mk('b', 0, 5), mk('c', 5, 15)]
+    // B の 8 秒で再生中に B を 2 倍にした: 再生位置 8 は C の上
+    expect(previewClipFollow(timed, 'b', '/a.mp4', 8, () => '/a.mp4', true).kind).toBe('keep')
+    // 止めているなら、タイムラインの位置と絵をそろえる
+    expect(previewClipFollow(timed, 'b', '/a.mp4', 8, () => '/a.mp4', false)).toEqual({
+      kind: 'load',
+      time: 8
+    })
+  })
 })

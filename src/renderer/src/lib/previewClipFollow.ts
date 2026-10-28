@@ -13,21 +13,26 @@ import { findTimedClipAt, findTimedClipById, type TimedClip } from './timelineMa
  * (4) が無かったため、確認の画面で範囲のカメラを替えた直後、範囲の頭のコマに前のカメラの絵が残っていた:
  * 替える範囲の頭で分けると、前のクリップ(id はそのまま)は範囲の頭で終わり、範囲は新しいクリップ(別のカメラ)
  * になる。読み込んでいたクリップは並びに残り、素材も同じなので「そのまま」と判断していた(再生位置は範囲の頭)。
- * 再生を始めると次のクリップへ進むので直り、書き出しも正しかった
+ * 再生を始めると次のクリップへ進むので直り、書き出しも正しかった。
+ *
+ * (4) は止めているときだけ見る(`playing`)。再生中に今のクリップの速さを上げる・前のクリップを詰めるなどで
+ * 再生位置が隣のクリップに掛かっても、読み込み直すと別の絵へ飛んで音も切れる。再生中は今のクリップを続け、
+ * 再生位置は tick が今のクリップから求め直す
  */
 export function previewClipFollow(
   timedClips: readonly TimedClip[],
   activeId: string | null | undefined,
   activeUrl: string | null,
   playheadTime: number,
-  urlOf: (tc: TimedClip) => string
+  urlOf: (tc: TimedClip) => string,
+  playing = false
 ): { kind: 'load'; time: number; initial?: boolean } | { kind: 'keep'; current: TimedClip | null } {
   const clips = timedClips as TimedClip[]
   const current = findTimedClipById(clips, activeId)
   if (activeId != null && !current) return { kind: 'load', time: playheadTime }
   if (activeId == null && clips.length > 0) return { kind: 'load', time: 0, initial: true }
   if (current && urlOf(current) !== activeUrl) return { kind: 'load', time: playheadTime }
-  if (current) {
+  if (current && !playing) {
     const atPlayhead = findTimedClipAt(clips, playheadTime)
     if (atPlayhead && atPlayhead.clip.id !== current.clip.id)
       return { kind: 'load', time: playheadTime }

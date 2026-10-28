@@ -125,6 +125,20 @@ describe('overallProgress(全体の進み具合の表示)', () => {
     expect(p.text).toBe('100% · 14 / 14 工程(省略 1)')
   })
 
+  it('失敗しても先へ進む工程(色合わせなど)の失敗では「止まりました」と出さない', () => {
+    const steps = [
+      ...of(Array<S['state']>(13).fill('done')).map((s, i) => ({ ...s, id: `s${i}` })),
+      { id: 'color', state: 'error' as const, percent: 0 }
+    ]
+    const p = overallProgress(steps, false, new Set(['color']))
+    expect(p.stopped).toBe(false)
+    expect(p.percent).toBe(100)
+    expect(p.text).toBe('100% · 14 / 14 工程(失敗して先へ進んだ 1)')
+    // 先へ進まない工程の失敗は止まった
+    const cut = [...steps.slice(0, 13), { id: 'cut', state: 'error' as const, percent: 0 }]
+    expect(overallProgress(cut, false, new Set(['color'])).stopped).toBe(true)
+  })
+
   it('動いている間は、進行中の割合も足す', () => {
     const steps: S[] = [
       { state: 'done', percent: 100 },

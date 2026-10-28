@@ -34,7 +34,12 @@ import { requestRangeAutoEdit } from '../lib/timelineRange'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import { timelineRangeOf } from '@shared/finish/sound'
 import { isModalOpen, isTypingTarget } from '../lib/useKeyboardShortcuts'
-import { nextAction, RESTART_CONFIRM, type NextActionId } from '../lib/autoEditNext'
+import {
+  CONTINUE_ON_ERROR,
+  nextAction,
+  RESTART_CONFIRM,
+  type NextActionId
+} from '../lib/autoEditNext'
 import {
   commonSpan,
   formatDuration,
@@ -223,8 +228,9 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const current = STEPS.find((s) => steps[s.id].state === 'run')
   // 割合・済んだ工程の数・バーの長さは同じ数え方で(止まった後は省略を数えない。`overallProgress`)
   const progress = overallProgress(
-    STEPS.map((st) => ({ state: steps[st.id].state, percent: steps[st.id].percent })),
-    running
+    STEPS.map((st) => ({ id: st.id, state: steps[st.id].state, percent: steps[st.id].percent })),
+    running,
+    CONTINUE_ON_ERROR
   )
   const overallPct = progress.percent
   const keptOf = (id: string): boolean => keep[id] ?? roughCut?.keptIds.includes(id) ?? false

@@ -60,8 +60,11 @@ export interface ReviewSources {
 export function structureRescueOf(
   judgements: readonly { kind: string }[],
   keptIds: readonly string[] | undefined,
-  keep: Readonly<Record<string, boolean>>
+  keep: Readonly<Record<string, boolean>>,
+  /** 方針が「不要」を落とすか(`POLICY_PROFILES`)。落とさない方針(軽く整える)では仮に残すことが無い */
+  dropUnneeded = true
 ): { kept: number; total: number } | null {
+  if (!dropUnneeded) return null
   if (judgements.length === 0 || !judgements.every((j) => j.kind === 'unneeded')) return null
   if (Object.keys(keep).length > 0) return null
   const kept = keptIds?.length ?? 0

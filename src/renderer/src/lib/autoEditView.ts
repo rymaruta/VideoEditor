@@ -47,13 +47,21 @@ export function overallFraction(steps: readonly { state: StepState; percent: num
  *   終われば 100% · 14 / 14(作り直しの後も「12 / 14」と、終わっていない数が出ていた)
  */
 export function overallProgress(
-  steps: readonly { state: StepState; percent: number }[],
-  running: boolean
+  steps: readonly { id?: string; state: StepState; percent: number }[],
+  running: boolean,
+  /** 失敗しても先へ進む工程(`CONTINUE_ON_ERROR`)。ここでの失敗は「止まった」にしない */
+  continueOnError: ReadonlySet<string> = new Set()
 ): { percent: number; finished: number; total: number; stopped: boolean; text: string } {
   const total = steps.length
   const done = steps.filter((s) => s.state === 'done').length
   const skipped = steps.filter((s) => s.state === 'skipped').length
-  if (!running && steps.some((s) => s.state === 'error')) {
+  const passedErrors = steps.filter(
+    (s) => s.state === 'error' && s.id != null && continueOnError.has(s.id)
+  ).length
+  const stoppingError = steps.some(
+    (s) => s.state === 'error' && !(s.id != null && continueOnError.has(s.id))
+  )
+  if (!running && stoppingError) {
     const percent = total > 0 ? Math.round((done / total) * 100) : 0
     return {
       percent,
@@ -63,14 +71,21 @@ export function overallProgress(
       text: `止まりました · ${done} / ${total} 工程`
     }
   }
-  const percent = Math.round(overallFraction(steps) * 100)
-  const finished = done + skipped
+  // 失敗しても先へ進んだ工程は「通り過ぎた」として数える(仮編集はできている)
+  const percent = Math.round(
+    (overallFraction(steps) + (total > 0 ? passedErrors / total : 0)) * 100
+  )
+  const finished = done + skipped + passedErrors
+  const notes = [
+    skipped > 0 ? `省略 ${skipped}` : '',
+    passedErrors > 0 ? `失敗して先へ進んだ ${passedErrors}` : ''
+  ].filter(Boolean)
   return {
     percent,
     finished,
     total,
     stopped: false,
-    text: `${percent}% · ${finished} / ${total} 工程${skipped > 0 ? `(省略 ${skipped})` : ''}`
+    text: `${percent}% · ${finished} / ${total} 工程${notes.length > 0 ? `(${notes.join('・')})` : ''}`
   }
 }
 

@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 import { usePipelineStore } from '../store/pipelineStore'
 import { useProjectStore } from '../store/projectStore'
 import { useQcStore } from '../store/qcStore'
+import { useSettingsStore } from '../store/settingsStore'
+import { POLICY_PROFILES } from '@shared/structure/kind'
 import { buildReviewItems, structureRescueOf, type ReviewItem } from './reviewItems'
 import { timelineRangeOf } from '@shared/finish/sound'
 import { spansOfClips } from '@shared/roughCut/overrides'
@@ -65,6 +67,8 @@ export function useReviewItems(): ReviewLists {
   const judgements = usePipelineStore((s) => s.judgements)
   const keptIds = usePipelineStore((s) => s.roughCut?.keptIds)
   const keep = usePipelineStore((s) => s.keep)
+  // 仮編集を作るときと同じ方針(pipelineStore は設定の editPolicy で作る)
+  const dropUnneeded = useSettingsStore((s) => POLICY_PROFILES[s.editPolicy]?.dropUnneeded ?? true)
 
   return useMemo(() => {
     const deps = [
@@ -80,7 +84,8 @@ export function useReviewItems(): ReviewLists {
       qc,
       judgements,
       keptIds,
-      keep
+      keep,
+      dropUnneeded
     ]
     return sharedLists(deps, () => {
       const sourceOf = new Map(syncedFiles.map((f) => [f.id, f.sourceId]))
@@ -99,7 +104,7 @@ export function useReviewItems(): ReviewLists {
         effects,
         effectChosen,
         qc,
-        structureRescue: structureRescueOf(judgements, keptIds, keep)
+        structureRescue: structureRescueOf(judgements, keptIds, keep, dropUnneeded)
       })
       const done = new Set(project.reviewed ?? [])
       return {
@@ -120,6 +125,7 @@ export function useReviewItems(): ReviewLists {
     qc,
     judgements,
     keptIds,
-    keep
+    keep,
+    dropUnneeded
   ])
 }

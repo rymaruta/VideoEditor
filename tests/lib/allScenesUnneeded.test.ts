@@ -165,6 +165,8 @@ describe('要確認', () => {
       )
     ).toBeNull()
     expect(structureRescueOf(allUnneeded, [], {})).toBeNull()
+    // 「不要」を落とさない方針(軽く整える)は全部を残すだけで、仮に残してはいない
+    expect(structureRescueOf(allUnneeded, ['s1', 's2', 's3'], {}, false)).toBeNull()
   })
 })
 
