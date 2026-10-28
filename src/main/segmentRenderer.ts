@@ -18,7 +18,7 @@ import {
 } from 'fs'
 import { rm, stat } from 'fs/promises'
 import { cpus, tmpdir } from 'os'
-import { dirname, join } from 'path'
+import nodePath, { dirname, join } from 'path'
 import {
   LOW_DISK_RESERVE_BYTES,
   chooseWorkLocation,
@@ -851,14 +851,45 @@ function forgetOutsideWorkDir(dir: string): void {
   if (dirs.includes(dir)) writeOutsideWorkDirs(dirs.filter((d) => d !== dir))
 }
 
+function errCode(e: unknown): string | undefined {
+  return (e as NodeJS.ErrnoException | null)?.code
+}
+
+/**
+ * stat が ENOENT になったパスが、本当に無いか。一番近くの在る祖先がフォルダなら「無い」と決める。
+ * ENOENT だけでは決められない:
+ * - Windows では、ファイルの下のパス(file\sub)の stat も、Linux・macOS の ENOTDIR でなく ENOENT になる
+ * - 切れたネットワークドライブ・外したドライブ(E:\)・つながらない共有(\\nas\share)も ENOENT になる
+ * 祖先がフォルダでない(ファイル)・根まで無い・祖先を調べられない(権限など)ときは「決められない」(false)。
+ * `pathApi`・`statFn` は試験用(path.win32 と、Windows の stat の振る舞いを真似たもの)
+ */
+export async function reallyMissing(
+  path: string,
+  pathApi: Pick<typeof nodePath, 'dirname'> = nodePath,
+  statFn: (p: string) => Promise<{ isDirectory(): boolean }> = stat
+): Promise<boolean> {
+  let cur = path
+  for (;;) {
+    const parent = pathApi.dirname(cur)
+    // 根(C:\・\\nas\share\・/)まで無い: ドライブ・共有が切れている
+    if (parent === cur) return false
+    try {
+      return (await statFn(parent)).isDirectory()
+    } catch (e) {
+      if (errCode(e) !== 'ENOENT') return false
+      cur = parent
+    }
+  }
+}
+
 /** 記録の上限(消せないまま残るもの・利用者が消したものが溜まり続けないように) */
 const MAX_OUTSIDE_WORK_RECORDS = 50
 
 /**
  * 記録した作業場(書き出し先のフォルダに作った `.ve-seg-*`)のうち、半日より古いものを消す。
  * 書き出し先は切れたネットワークドライブのこともあり、同期の stat はそこで main を止めうるので、
- * すべて非同期で後回しに調べる。記録から外すのは、消せたとき(と、名前が `.ve-seg-` で始まらない =
- * 自分の作ったものではないとき)だけ。名前の違うものは記録が壊れていても消さない
+ * すべて非同期で後回しに調べる。記録から外すのは、消せたとき・本当に無いとき(reallyMissing)と、
+ * 名前が `.ve-seg-` で始まらない(自分の作ったものではない)ときだけ。名前の違うものは記録が壊れていても消さない
  */
 export async function cleanupOutsideWorkDirs(now = Date.now()): Promise<void> {
   const removed = new Set<string>()
@@ -874,8 +905,9 @@ export async function cleanupOutsideWorkDirs(now = Date.now()): Promise<void> {
       await rm(dir, { recursive: true, force: true })
       removed.add(dir)
     } catch (e) {
-      // もう無ければ外す。それ以外(切れたドライブ・権限)は次の起動でまた試す
-      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') removed.add(dir)
+      // 本当に無ければ外す。それ以外(切れたドライブ・権限・ファイルの下のパス)は次の起動でまた試す。
+      // ENOENT だけでは決めない(Windows はファイルの下のパスも、切れたドライブも ENOENT になる)
+      if (errCode(e) === 'ENOENT' && (await reallyMissing(dir))) removed.add(dir)
     }
   }
   // 調べている間に書き出しが記録を足していることがあるので、読み直してから外す
