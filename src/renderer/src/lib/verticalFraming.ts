@@ -51,6 +51,8 @@ const MIN_WINDOW_W = 0.2
  * (Shorts の下の帯より上)が入る余地を残す
  */
 const FACE_Y_IN_WINDOW = 0.36
+/** 番の切れ目としない、別の人の短い相づちの長さの上限(秒) */
+const SHORT_ACK_SEC = 0.6
 /** 同じ人の発話を1つの番としてまとめる間(秒) */
 const RUN_JOIN_SEC = 2.5
 /** 話者の切り替えの、1ショットの長さの下限(秒)。これより短くなる切り替えはしない */
@@ -451,7 +453,11 @@ export function speakerShots(
       if (x.key === l.key) {
         if (x.start <= runEnd + RUN_JOIN_SEC) runEnd = Math.max(runEnd, x.end)
         else break
-      } else if (x.start >= runEnd) break
+      } else if (x.start >= runEnd) {
+        // 間に入った別の人の短い相づち(「うん」0.6 秒未満)では番を切らない
+        if (x.end - x.start < SHORT_ACK_SEC) continue
+        break
+      }
     }
     runEnd = Math.min(end, runEnd)
     // 相づち: この番の間、今映している人も話している(半分以上重なる)なら切り替えない

@@ -80,6 +80,28 @@ describe('答える人が短い発話を間を空けて続けても切り替え�
   })
 })
 
+describe('間に入った質問者の短い「うん」では番を切らない(最終監査の指摘 4)', () => {
+  it('A 0-9.5、B 10-11.5、A 11.7-12.2(うん)、B 12.5-14、A 20-30 → B の番 10〜20', () => {
+    const shots = speakerShots(
+      [
+        { speaker: 'A', start: 0, end: 9.5 },
+        { speaker: 'B', start: 10, end: 11.5 },
+        { speaker: 'A', start: 11.7, end: 12.2 },
+        { speaker: 'B', start: 12.5, end: 14 },
+        { speaker: 'A', start: 20, end: 30 }
+      ],
+      0,
+      30,
+      keyOf
+    )
+    expect(shots.map((s) => [s.start, s.key])).toEqual([
+      [0, 0],
+      [10, 1],
+      [20, 0]
+    ])
+  })
+})
+
 describe('話者の区間に重なりの印がある長い答えも、切り替えに使う', () => {
   it('overlap の付いた発話も残す(印は持ったまま)', () => {
     const project = {
