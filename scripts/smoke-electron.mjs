@@ -38,7 +38,7 @@ export function expectedPackagedFiles(platform, arch) {
     'app.asar',
     'app.asar.unpacked/resources/THIRD_PARTY_NOTICES.txt',
     `${unpacked}/ffmpeg-static/ffmpeg${exe}`,
-    `${unpacked}/ffprobe-static/bin/${platform}/${arch}/ffprobe${exe}`,
+    `${unpacked}/@derhuerst/ffprobe-static/ffprobe${exe}`,
     `${ort}/onnxruntime_binding.node`
   ]
   // Windows の文字起こしは DirectML(GPU)を先に試す(asrDeviceOrder)。その DLL を外していないか

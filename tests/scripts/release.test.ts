@@ -110,7 +110,7 @@ describe('起動の試験(smoke-electron.mjs)の判定', () => {
     const files = expectedPackagedFiles('win32', 'x64')
     expect(files).toContain('app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg.exe')
     expect(files).toContain(
-      'app.asar.unpacked/node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe'
+      'app.asar.unpacked/node_modules/@derhuerst/ffprobe-static/ffprobe.exe'
     )
     expect(files).toContain(
       'app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/DirectML.dll'
