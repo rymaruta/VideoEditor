@@ -8,7 +8,7 @@ import { fitByLevels, type FitResult } from './overflowFit'
  * - 帯の中で、回せる物を並べる行(`[data-fit-row]`)と、それ以外(題名・拡大縮小など。回さない)
  * - 見えない測り用の写し(`measureRef`)の中に、回せる物の普段の幅(`[data-fit-id="名前"]`)・詰めた幅
  *   (`[data-fit-narrow-id="名前"]`)・「その他」のボタン(`[data-fit-more]`)を置く
- * - 帯の直下の物は縮めない(flex-shrink: 0)
+ * - 帯の直下の物は縮めない(flex-shrink: 0)。右へ寄せる物は `data-fit-push`(左の auto の余白を数えない)
  * 帯の大きさ・中身が変わるたびに測り直す(ResizeObserver と key)。
  */
 export function useOverflowFit(
@@ -52,7 +52,9 @@ export function useOverflowFit(
           .filter((k) => k.getAttribute('data-fit-row') === null)
           .reduce((t, k) => {
             const s = getComputedStyle(k)
-            return t + width(k) + parseFloat(s.marginLeft) + parseFloat(s.marginRight)
+            // 右へ寄せる物(margin-left: auto)の左の余白は空きなので数えない
+            const left = k.hasAttribute('data-fit-push') ? 0 : parseFloat(s.marginLeft)
+            return t + width(k) + left + parseFloat(s.marginRight)
           }, 0) +
         colGap * Math.max(0, kids.length - 1)
       const next = fitByLevels({

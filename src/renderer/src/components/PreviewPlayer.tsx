@@ -14,7 +14,8 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { targetResolution, textCanvasSize } from '@shared/resolution'
 import { frameSeconds } from '@shared/frameRate'
-import { formatTimecode } from '../lib/timelineRuler'
+import { formatTimecode, parseTimecode } from '../lib/timelineRuler'
+import { goToEditPoint, markIn, markOut } from '../lib/editCommands'
 import { audibleClipDuration, fadeGainAt } from '@shared/audioFade'
 import {
   audioClipGain,
@@ -791,6 +792,65 @@ function AudioTrackClipLayer({
   return <audio ref={ref} src={audioSrc} style={{ display: 'none' }} />
 }
 
+/**
+ * 再生位置のタイムコードの入力欄(HH:MM:SS:FF)。打って Enter で移る。Esc・外へ出ると今の位置へ戻す。
+ * 打っている間は再生位置が動いても書き換えない
+ */
+function TimecodeField({
+  time,
+  fps,
+  max,
+  onSeek
+}: {
+  time: number
+  fps: number
+  max: number
+  onSeek: (t: number) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null)
+  const [invalid, setInvalid] = useState(false)
+  const shown = draft ?? formatTimecode(time, fps)
+  return (
+    <input
+      className={`tc preview-timecode-input ${invalid ? 'invalid' : ''}`}
+      aria-label="再生位置(タイムコードを入力)"
+      aria-invalid={invalid || undefined}
+      spellCheck={false}
+      value={shown}
+      onFocus={(e) => {
+        setDraft(formatTimecode(time, fps))
+        e.currentTarget.select()
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        setInvalid(false)
+      }}
+      onBlur={() => {
+        setDraft(null)
+        setInvalid(false)
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Escape') {
+          setDraft(null)
+          setInvalid(false)
+          e.currentTarget.blur()
+          return
+        }
+        if (e.key !== 'Enter') return
+        const t = parseTimecode(draft ?? '', fps)
+        if (t === null) {
+          setInvalid(true)
+          return
+        }
+        onSeek(Math.max(0, Math.min(max, t)))
+        setDraft(null)
+        e.currentTarget.blur()
+      }}
+    />
+  )
+}
+
 export function PreviewPlayer(): React.JSX.Element {
   const project = useProjectStore((s) => s.project)
   const isPlaying = useProjectStore((s) => s.isPlaying)
@@ -803,6 +863,9 @@ export function PreviewPlayer(): React.JSX.Element {
   // 本編と同じ合図から出すので、入れ直す時刻が食い違わない(理由は previewSync)。
   const seekToken = seekRequest?.token ?? 0
   const seekTo = useProjectStore((s) => s.seekTo)
+  // タイムラインのイン・アウト(プログラムの溝に重ねる)
+  const timelineIn = useProjectStore((s) => s.timelineIn)
+  const timelineOut = useProjectStore((s) => s.timelineOut)
   const updateTextOverlay = useProjectStore((s) => s.updateTextOverlay)
   const selectOverlay = useProjectStore((s) => s.selectOverlay)
   const selectedOverlayId = useProjectStore((s) => s.selectedOverlayId)
@@ -1614,11 +1677,29 @@ export function PreviewPlayer(): React.JSX.Element {
           </div>
         </div>
         <div className="preview-controls">
+          {/* 再生位置の溝(24px)。イン〜アウトは青い枠で重ねる */}
           <div className="preview-scrub-row">
-            <span className="time-label current">{formatTimecode(playheadTime, timecodeFps)}</span>
             <div
               ref={scrubTrackRef}
               className={`scrub-track ${scrubbingPreview ? 'scrubbing' : ''}`}
+              role="slider"
+              tabIndex={0}
+              aria-label="再生位置"
+              aria-valuemin={0}
+              aria-valuemax={Math.round(total * 100) / 100}
+              aria-valuenow={Math.round(Math.min(playheadTime, total) * 100) / 100}
+              aria-valuetext={formatTimecode(playheadTime, timecodeFps)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  stepFrame(e.key === 'ArrowLeft' ? -1 : 1)
+                } else if (e.key === 'Home' || e.key === 'End') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  seekTo(e.key === 'Home' ? 0 : total)
+                }
+              }}
               onMouseDown={(e) => {
                 if (total <= 0) return
                 const rect = e.currentTarget.getBoundingClientRect()
@@ -1633,22 +1714,140 @@ export function PreviewPlayer(): React.JSX.Element {
                   width: total > 0 ? `${Math.min(100, (playheadTime / total) * 100)}%` : '0%'
                 }}
               />
+              {total > 0 && (timelineIn !== null || timelineOut !== null) && (
+                <div
+                  className="scrub-range"
+                  aria-hidden="true"
+                  title={`イン ${formatTimecode(timelineIn ?? 0, timecodeFps)} / アウト ${formatTimecode(timelineOut ?? total, timecodeFps)}`}
+                  style={{
+                    left: `${Math.min(100, ((timelineIn ?? 0) / total) * 100)}%`,
+                    width: `${Math.max(0, Math.min(100, (((timelineOut ?? total) - (timelineIn ?? 0)) / total) * 100))}%`
+                  }}
+                />
+              )}
+              <div
+                className="scrub-knob"
+                aria-hidden="true"
+                style={{
+                  left: total > 0 ? `${Math.min(100, (playheadTime / total) * 100)}%` : '0%'
+                }}
+              />
             </div>
-            <span className="time-label total">{formatTimecode(total, timecodeFps)}</span>
-            {exportTotal < total - 0.005 && (
-              <span
-                className="time-label export-total"
-                title="つなぎは2本のクリップを重ねるため、書き出したファイルはタイムラインよりつなぎの秒数ぶん短くなります"
-              >
-                (書き出し {formatTimecode(exportTotal, timecodeFps)})
-              </span>
-            )}
           </div>
           <div className="preview-transport-row">
             <div className="transport-side transport-side-left">
+              <TimecodeField time={playheadTime} fps={timecodeFps} max={total} onSeek={seekTo} />
+              <span className="time-label total">/ {formatTimecode(total, timecodeFps)}</span>
+              {exportTotal < total - 0.005 && (
+                <span
+                  className="time-label export-total"
+                  title="つなぎは2本のクリップを重ねるため、書き出したファイルはタイムラインよりつなぎの秒数ぶん短くなります"
+                >
+                  (書き出し {formatTimecode(exportTotal, timecodeFps)})
+                </span>
+              )}
+            </div>
+            <div className="transport-center">
+              <button
+                className="icon-button transport-mark"
+                aria-label="イン点を打つ (I)"
+                title="イン点を打つ (I)"
+                disabled={!activeSrc}
+                onClick={() => markIn()}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M10 3H6v10h4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                </svg>
+              </button>
+              <button
+                className="icon-button transport-ends"
+                aria-label="先頭へ"
+                title="先頭へ (Home)"
+                disabled={!activeSrc}
+                onClick={() => seekTo(0)}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2.5 3H4v10H2.5zM9 3v10L4.5 8zM14 3v10L9.5 8z" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                className="icon-button"
+                aria-label="前の編集点へ"
+                title="前の編集点へ (↑)"
+                disabled={!activeSrc}
+                onClick={() => goToEditPoint(-1)}
+              >
+                <SkipBackIcon width={14} height={14} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="1フレーム戻る"
+                title="1フレーム戻る (←)"
+                disabled={!activeSrc}
+                onClick={() => stepFrame(-1)}
+              >
+                <StepBackIcon width={14} height={14} />
+              </button>
+              <button
+                className="play-button"
+                aria-label={isPlaying ? '一時停止 (スペース)' : '再生 (スペース)'}
+                title={isPlaying ? '一時停止 (スペース)' : '再生 (スペース)'}
+                onClick={togglePlayback}
+                disabled={!activeSrc}
+              >
+                {isPlaying ? (
+                  <PauseIcon width={16} height={16} />
+                ) : (
+                  <PlayIcon width={16} height={16} />
+                )}
+              </button>
+              <button
+                className="icon-button"
+                aria-label="1フレーム進む"
+                title="1フレーム進む (→)"
+                disabled={!activeSrc}
+                onClick={() => stepFrame(1)}
+              >
+                <StepForwardIcon width={14} height={14} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="次の編集点へ"
+                title="次の編集点へ (↓)"
+                disabled={!activeSrc}
+                onClick={() => goToEditPoint(1)}
+              >
+                <SkipForwardIcon width={14} height={14} />
+              </button>
+              <button
+                className="icon-button transport-ends"
+                aria-label="末尾へ"
+                title="末尾へ (End)"
+                disabled={!activeSrc}
+                onClick={() => seekTo(total)}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M12 3h1.5v10H12zM7 3v10l4.5-5zM2 3v10l4.5-5z" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                className="icon-button transport-mark"
+                aria-label="アウト点を打つ (O)"
+                title="アウト点を打つ (O)"
+                disabled={!activeSrc}
+                onClick={() => markOut()}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M6 3h4v10H6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                </svg>
+              </button>
+            </div>
+            <div className="transport-side transport-side-right">
               {project.aspectRatio === '9:16' && (
                 <button
                   className={`icon-button ${showShortsUi ? 'active' : ''}`}
+                  aria-pressed={showShortsUi}
+                  aria-label="Shorts の画面を重ねる"
                   title="YouTube Shorts の実際の画面イメージを重ねて表示(いいね/コメントなどのUIにテロップが隠れないか確認できます)"
                   onClick={() => setShowShortsUi((v) => !v)}
                 >
@@ -1658,6 +1857,7 @@ export function PreviewPlayer(): React.JSX.Element {
               <button
                 className={`icon-button ${safeGuideOn ? 'active' : ''}`}
                 aria-pressed={safeGuideOn}
+                aria-label={project.aspectRatio === '9:16' ? 'セーフエリア' : '安全枠'}
                 title={
                   project.aspectRatio === '9:16'
                     ? 'セーフエリアの目安線を表示(この線の外はYouTubeのUIに隠れやすい範囲です。線は画面だけのもので、書き出しには写りません)'
@@ -1675,52 +1875,11 @@ export function PreviewPlayer(): React.JSX.Element {
               >
                 <TargetIcon width={14} height={14} />
               </button>
-            </div>
-            <div className="transport-center">
-              <button
-                className="icon-button"
-                title="先頭へ"
-                disabled={!activeSrc}
-                onClick={() => seekTo(0)}
-              >
-                <SkipBackIcon width={14} height={14} />
-              </button>
-              <button
-                className="icon-button"
-                title="1フレーム戻る (←)"
-                disabled={!activeSrc}
-                onClick={() => stepFrame(-1)}
-              >
-                <StepBackIcon width={14} height={14} />
-              </button>
-              <button className="play-button" onClick={togglePlayback} disabled={!activeSrc}>
-                {isPlaying ? (
-                  <PauseIcon width={16} height={16} />
-                ) : (
-                  <PlayIcon width={16} height={16} />
-                )}
-              </button>
-              <button
-                className="icon-button"
-                title="1フレーム進む (→)"
-                disabled={!activeSrc}
-                onClick={() => stepFrame(1)}
-              >
-                <StepForwardIcon width={14} height={14} />
-              </button>
-              <button
-                className="icon-button"
-                title="末尾へ"
-                disabled={!activeSrc}
-                onClick={() => seekTo(total)}
-              >
-                <SkipForwardIcon width={14} height={14} />
-              </button>
-            </div>
-            <div className="transport-side transport-side-right">
               <div className="preview-volume">
                 <button
                   className="icon-button"
+                  aria-label="ミュート"
+                  aria-pressed={muted}
                   title={muted ? 'ミュート解除' : 'ミュート'}
                   onClick={() => setMuted((v) => !v)}
                 >
@@ -1736,6 +1895,8 @@ export function PreviewPlayer(): React.JSX.Element {
                   max={1}
                   step={0.05}
                   value={muted ? 0 : volume}
+                  aria-label="プレビューの音量"
+                  aria-valuetext={`${Math.round((muted ? 0 : volume) * 100)}%`}
                   onChange={(e) => {
                     const v = Number(e.target.value)
                     setVolume(v)
@@ -1746,6 +1907,8 @@ export function PreviewPlayer(): React.JSX.Element {
               </div>
               <button
                 className={`icon-button ${isExpanded ? 'active' : ''}`}
+                aria-pressed={isExpanded}
+                aria-label="実サイズで表示"
                 title={isExpanded ? '実サイズ表示を閉じる (Esc)' : '実サイズで表示'}
                 onClick={() => setIsExpanded((v) => !v)}
               >

@@ -31,8 +31,7 @@ const COLOR = /#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d/g
 const COLOR_BUDGET: Record<string, number> = {
   'assets/autoEditG3.css': 22,
   'assets/dialogsG3.css': 8,
-  'assets/graphite3.css': 28,
-  'assets/main.css': 22,
+  'assets/main.css': 15,
   'components/gradientEditor.css': 4,
   'components/rangeAutoEdit.css': 5
 }

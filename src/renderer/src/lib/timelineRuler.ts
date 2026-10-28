@@ -22,6 +22,50 @@ export function rulerStep(
   return candidates.find((s) => s * pixelsPerSecond >= minSpacingPx) ?? STEPS[STEPS.length - 1]
 }
 
+/** 数字(HH:MM:SS:FF)同士の最小の間隔(画素)。11px の等幅で 11 字 + 余白 */
+export const RULER_LABEL_SPACING_PX = 110
+
+/** 数字の間隔ごとの、中の目盛りと細かい目盛りの間隔(秒)。30 秒なら 10 秒と 2 秒(デザイン案の 3 段) */
+const TIERS: Record<number, [mid: number, minor: number]> = {
+  1: [0.5, 0.1],
+  2: [1, 0.5],
+  5: [1, 0.5],
+  10: [5, 1],
+  15: [5, 1],
+  30: [10, 2],
+  60: [30, 10],
+  120: [60, 10],
+  300: [60, 10],
+  600: [300, 60],
+  900: [300, 60],
+  1800: [600, 120],
+  3600: [1800, 600]
+}
+
+/** 中の目盛りが詰まりすぎない最小の間隔(画素)・細かい目盛りの最小の間隔(画素) */
+const MID_MIN_PX = 12
+const MINOR_MIN_PX = 4
+
+/**
+ * 目盛りの 3 段(数字の付く目盛り・中の目盛り・細かい目盛り)の間隔(秒)。拡大に合わせて間隔を変える。
+ * 中・細かい目盛りは、詰まりすぎる(画素が足りない)ときや 1 コマより細かいときは出さない(null)
+ */
+export function rulerTiers(
+  pixelsPerSecond: number,
+  fps: number
+): { label: number; mid: number | null; minor: number | null } {
+  const label = rulerStep(pixelsPerSecond, fps, RULER_LABEL_SPACING_PX)
+  const frame = Number.isFinite(fps) && fps > 0 ? 1 / fps : 1 / 30
+  const tier = TIERS[label]
+  const fits = (step: number | null, minPx: number): number | null =>
+    step !== null && step >= frame - 1e-9 && step * pixelsPerSecond >= minPx ? step : null
+  if (!tier) {
+    // 1 秒より細かい数字の間隔: 1 コマごとの細かい目盛りだけ
+    return { label, mid: null, minor: label > frame + 1e-9 ? fits(frame, MINOR_MIN_PX) : null }
+  }
+  return { label, mid: fits(tier[0], MID_MIN_PX), minor: fits(tier[1], MINOR_MIN_PX) }
+}
+
 /** [from, to] 秒に入る目盛りの時刻(間隔の整数倍)。数が多すぎるときは打ち切る */
 export function rulerTicks(from: number, to: number, step: number, max = 400): number[] {
   if (!(step > 0) || !Number.isFinite(from) || !Number.isFinite(to) || to < from) return []
@@ -63,4 +107,39 @@ export function formatTimecode(seconds: number, fps: number): string {
   const f = frame % nominal
   const s = Math.floor(frame / nominal)
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}${dropFrame ? ';' : ':'}${pad(f)}`
+}
+
+/**
+ * `formatTimecode` の逆。`時:分:秒:フレーム`(区切りは `:` か `;`)を秒にする。
+ * 後ろから詰めて読む(`12:05` は 12 秒 5 フレーム、`1:00:00` は 1 分)。区切りの無い数字だけなら
+ * `時分秒フレーム` を右から 2 桁ずつ読む(Premiere と同じ。`100` は 1 秒、`10000` は 1 分)。
+ * 読めない・範囲の外(分・秒が 60 以上・フレームがレート以上)は null。
+ * 29.97 / 59.94 はドロップフレームの番号として読む(`formatTimecode` と行って戻って同じ時刻)
+ */
+export function parseTimecode(text: string, fps: number): number | null {
+  const real = Number.isFinite(fps) && fps > 0 ? fps : 30
+  const nominal = Math.round(real)
+  const raw = text.trim()
+  if (!raw) return null
+  let parts: number[]
+  if (/^\d+$/.test(raw)) {
+    if (raw.length > 8) return null
+    const padded = raw.padStart(Math.ceil(raw.length / 2) * 2, '0')
+    parts = (padded.match(/\d{2}/g) ?? []).map(Number)
+  } else {
+    if (!/^\d{1,2}([:;.]\d{1,2}){0,3}$/.test(raw)) return null
+    parts = raw.split(/[:;.]/).map(Number)
+  }
+  if (parts.length === 0 || parts.length > 4) return null
+  const [f, s = 0, m = 0, h = 0] = [...parts].reverse()
+  if (f >= nominal || s >= 60 || m >= 60) return null
+  const ntsc = Math.abs(real - (nominal * 1000) / 1001) < 0.01
+  const dropFrame = (nominal === 30 || nominal === 60) && ntsc
+  let frame = ((h * 60 + m) * 60 + s) * nominal + f
+  if (dropFrame) {
+    const drop = nominal === 30 ? 2 : 4
+    const minutes = h * 60 + m
+    frame -= drop * (minutes - Math.floor(minutes / 10))
+  }
+  return frame / (ntsc ? real : nominal)
 }

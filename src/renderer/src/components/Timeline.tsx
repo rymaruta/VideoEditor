@@ -3,7 +3,7 @@ import { angleAlternatives } from '@shared/roughCut/overrides'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { inWindow, pinnedIds, useVisibleWindow } from '../lib/timelineWindow'
 import { useMenuCommand } from '../lib/menuCommands'
-import { formatTimecode, rulerStep, rulerTicks } from '../lib/timelineRuler'
+import { formatTimecode, rulerTicks, rulerTiers } from '../lib/timelineRuler'
 import { frameSeconds } from '@shared/frameRate'
 import { v4 as uuid } from 'uuid'
 import {
@@ -104,9 +104,7 @@ import {
   PlusIcon,
   GaugeIcon,
   LayersIcon,
-  Volume2Icon,
   VolumeXIcon,
-  DuckingIcon,
   WandIcon,
   FillerWordIcon,
   TypeIcon,
@@ -121,7 +119,9 @@ import {
   MaximizeIcon,
   EyeIcon,
   EyeOffIcon,
-  MusicIcon
+  MusicIcon,
+  KnobIcon,
+  MoreVerticalIcon
 } from './icons'
 import { stripTelopMarkup } from '@shared/telop/render'
 import { DraftNumber } from './DraftNumber'
@@ -303,6 +303,51 @@ function fadeExceedsClip(clip: AudioTrackClip): boolean {
   return n.fadeIn + n.fadeOut < raw - 1e-9
 }
 
+/**
+ * トラックの見出しの 20px のボタンから開く小さな吹き出し(音量・トラックの設定)。
+ * 見出しは 184px しかないので、つまみ・選択の欄・削除はここへまとめる
+ */
+function TrackHeadPopover({
+  label,
+  title,
+  icon,
+  children
+}: {
+  label: string
+  title?: string
+  icon: React.ReactNode
+  children: React.ReactNode
+}): React.JSX.Element {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className={`ve-track-toggle ${open ? 'open' : ''}`}
+        aria-label={label}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={title ?? label}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {icon}
+      </button>
+      {open && (
+        <Popover
+          anchorRef={ref}
+          label={label}
+          onClose={() => setOpen(false)}
+          className="ve-track-popover"
+        >
+          {children}
+        </Popover>
+      )}
+    </>
+  )
+}
+
 /** タイムライン左上の今の位置(時:分:秒:フレーム)。再生位置だけを購読する小さな部品 */
 function TimelineTimecode({ fps }: { fps: number }): React.JSX.Element {
   const playheadTime = useProjectStore((s) => s.playheadTime)
@@ -364,8 +409,8 @@ function viewFraction(t: number, start: number, end: number): number {
   return Math.max(0, Math.min(1, (t - start) / (end - start)))
 }
 
-/** 場面の帯の色(場面ごとに順に使う) */
-const SCENE_HUES = ['#6B7CFF', '#FF5FA2', '#A77BFF', '#2ED3B7'] as const
+/** 音のレーンの波形の高さ(レーンの高さ 48 / 32 / 40 からクリップの上下 4px ずつを引いたもの) */
+const AUDIO_WAVE_HEIGHT: Record<'bgm' | 'se' | 'dialog', number> = { dialog: 40, bgm: 24, se: 32 }
 
 /** 音声トラックの種類(レーンの色): 自動の BGM=劇伴・自動の SE=効果音・それ以外=台詞 */
 function audioKindOf(track: { autoRole?: 'se' | 'bgm' }): 'bgm' | 'se' | 'dialog' {
@@ -397,13 +442,10 @@ function TimelineSceneBand({
         <span
           key={`${r.start}-${i}`}
           className={`g3-scene ${i === current ? 'current' : ''}`}
-          style={
-            {
-              left: r.start * pixelsPerSecond + 1,
-              width: Math.max(2, (r.end - r.start) * pixelsPerSecond - 2),
-              '--g3-hue': SCENE_HUES[i % SCENE_HUES.length]
-            } as React.CSSProperties
-          }
+          style={{
+            left: r.start * pixelsPerSecond + 1,
+            width: Math.max(2, (r.end - r.start) * pixelsPerSecond - 2)
+          }}
           title={`場面 ${i + 1}`}
           onContextMenu={onSceneMenu ? (e) => onSceneMenu(e, r) : undefined}
         >
@@ -1019,6 +1061,11 @@ export function Timeline(): React.JSX.Element {
   )
   const captionRowTotal = captionRowCount(captionRows)
   const captionLaneH = captionLaneHeight(captionRowTotal)
+  // レーンの地は交互(#1c1c1c / #242424)。並びは上から V(n)…V2・V1・T1・A1…(場面の帯を 0 番目に数える)
+  const nOverlayLanes = project.videoOverlayTracks.length
+  const hasTelopLane = project.textOverlays.length > 0
+  const laneAlt = (displayIndex: number): string =>
+    (displayIndex + 1) % 2 ? 've-lane-b' : 've-lane-a'
   // 場面の帯: 解析した場面(収録の時刻)を、今の本編の並びでタイムラインの時刻へ直す。
   // 解析していない企画では出さない(無いデータの飾りは作らない)
   const analyzedScenes = usePipelineStore((s) => s.scenes)
@@ -1652,7 +1699,9 @@ export function Timeline(): React.JSX.Element {
   const timelineWidth = Math.max(total * pixelsPerSecond, 400)
   // 時間目盛りの刻み(フレームレートはプロジェクトの素材から。書き出しと同じ数え方)
   const rulerFps = 1 / frameSeconds(project.clips, project.assets)
-  const rulerStepSeconds = rulerStep(pixelsPerSecond, rulerFps)
+  // 目盛りは 3 段(数字・中・細かい)。案の拡大では 30 秒 / 10 秒 / 2 秒。拡大に合わせて間隔を変える
+  const rulerTier = rulerTiers(pixelsPerSecond, rulerFps)
+  const rulerStepSeconds = rulerTier.label
   const pinned = pinnedIds([
     selectedClipId,
     multiSelectedClipIds,
@@ -2225,52 +2274,59 @@ export function Timeline(): React.JSX.Element {
         </button>
       </span>
       <div className="panel-header" ref={headerRef}>
-        <h2>タイムライン</h2>
-        <div className="timeline-zoom">
-          <button
-            className="icon-button"
-            title="縮小"
-            onClick={() => setZoom((z) => Math.max(currentMinZoom(), z / 1.4))}
-          >
-            <ZoomOutIcon width={14} height={14} />
-          </button>
-          <span className="hint-text zoom-label">{Math.round(zoom * 100)}%</span>
-          <button
-            className="icon-button"
-            title="拡大"
-            onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))}
-          >
-            <ZoomInIcon width={14} height={14} />
-          </button>
-          <button className="icon-button" title="タイムライン全体を表示" onClick={handleZoomToFit}>
-            <MaximizeIcon width={14} height={14} />
-          </button>
-          <button
-            className={`icon-button ${snapEnabled ? 'active' : ''}`}
-            title={snapEnabled ? 'スナップを無効化' : 'スナップを有効化'}
-            onClick={() => setSnapEnabled(!snapEnabled)}
-          >
-            <MagnetIcon width={14} height={14} />
-          </button>
-          <div className="timeline-tools" role="group" aria-label="編集ツール">
-            {(
-              [
-                ['select', 'A', '選択', 'クリップを選んで並べ替える'],
-                ['trim', 'T', 'トリム', 'クリップの端と、隣との境界(ロールトリム)を調整する'],
-                ['razor', 'B', 'カミソリ', 'クリックした位置でクリップを分割する']
-              ] as const
-            ).map(([tool, key, label, hint]) => (
-              <button
-                key={tool}
-                className={`small-button ${editTool === tool ? 'active' : ''}`}
-                title={`${label} (${key}) — ${hint}`}
-                onClick={() => setEditTool(tool)}
-              >
-                {key}
-              </button>
-            ))}
-          </div>
+        <h2 className="ve-visually-hidden">タイムライン</h2>
+        <div className="timeline-tools" role="group" aria-label="編集ツール">
+          {(
+            [
+              ['select', 'A', '選択', 'クリップを選んで並べ替える'],
+              ['trim', 'T', 'トリム', 'クリップの端と、隣との境界(ロールトリム)を調整する'],
+              ['razor', 'B', 'カミソリ', 'クリックした位置でクリップを分割する']
+            ] as const
+          ).map(([tool, key, label, hint]) => (
+            <button
+              key={tool}
+              type="button"
+              className={`small-button ${editTool === tool ? 'active' : ''}`}
+              aria-pressed={editTool === tool}
+              aria-label={`${label} (${key})`}
+              title={`${label} (${key}) — ${hint}`}
+              onClick={() => setEditTool(tool)}
+            >
+              {tool === 'select' ? (
+                <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M3.5 2.5l9 5-4 1-2 4z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  />
+                </svg>
+              ) : tool === 'razor' ? (
+                <ScissorsIcon width={14} height={14} />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M2.5 3v10M13.5 3v10M2.5 8h11"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  />
+                </svg>
+              )}
+            </button>
+          ))}
         </div>
+        <button
+          type="button"
+          className={`icon-button timeline-snap ${snapEnabled ? 'active' : ''}`}
+          aria-pressed={snapEnabled}
+          aria-label="吸着"
+          title={snapEnabled ? 'スナップを無効化' : 'スナップを有効化'}
+          onClick={() => setSnapEnabled(!snapEnabled)}
+        >
+          <MagnetIcon width={14} height={14} />
+        </button>
+        <span className="ve-bar-sep" aria-hidden="true" />
         {project.beatGrid && (
           <div className="beat-grid-info" title={`解析元: ${project.beatGrid.sourceLabel}`}>
             <button
@@ -2405,6 +2461,41 @@ export function Timeline(): React.JSX.Element {
             貼り付け{clipboardClips.length > 1 ? `(${clipboardClips.length}個)` : ''}
           </button>
         )}
+        <div className="timeline-zoom" data-fit-push>
+          <span className="ve-timeline-counts">
+            カット <span className="tc">{project.clips.length.toLocaleString()}</span> · テロップ{' '}
+            <span className="tc">{project.textOverlays.length.toLocaleString()}</span>
+          </span>
+          <span className="ve-bar-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="縮小"
+            title="縮小"
+            onClick={() => setZoom((z) => Math.max(currentMinZoom(), z / 1.4))}
+          >
+            <ZoomOutIcon width={14} height={14} />
+          </button>
+          <span className="hint-text zoom-label">{Math.round(zoom * 100)}%</span>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="拡大"
+            title="拡大"
+            onClick={() => setZoom((z) => Math.min(MAX_ZOOM, z * 1.4))}
+          >
+            <ZoomInIcon width={14} height={14} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="タイムライン全体を表示"
+            title="タイムライン全体を表示"
+            onClick={handleZoomToFit}
+          >
+            <MaximizeIcon width={14} height={14} />
+          </button>
+        </div>
       </div>
 
       <div className="timeline-shortcut-bar">
@@ -2487,146 +2578,200 @@ export function Timeline(): React.JSX.Element {
               ロック
             </div>
           )}
+          {/* 並びは上から V(n)…V2・V1・T1・A1…(案の並び。重なる映像ほど上) */}
+          {project.videoOverlayTracks
+            .map((track, trackIndex) => ({ track, trackIndex }))
+            .reverse()
+            .map(({ track, trackIndex }) => {
+              const tag = `V${trackIndex + 2}`
+              return (
+                <div key={track.id} className="track-label" data-g3-kind="overlay">
+                  <span className="track-tag tag-video">{tag}</span>
+                  <span className="track-label-name" title={track.name}>
+                    {track.name}
+                  </span>
+                  <button
+                    type="button"
+                    className="ve-track-toggle"
+                    aria-label={`${tag}を表示`}
+                    aria-pressed={!track.hidden}
+                    title={track.hidden ? '表示する' : '非表示(PiP合成をスキップ)'}
+                    onClick={() => toggleVideoOverlayTrackHidden(track.id)}
+                  >
+                    {track.hidden ? (
+                      <EyeOffIcon width={12} height={12} />
+                    ) : (
+                      <EyeIcon width={12} height={12} />
+                    )}
+                  </button>
+                  <TrackHeadPopover
+                    label={`${tag}の設定`}
+                    icon={<MoreVerticalIcon width={12} height={12} />}
+                  >
+                    <div className="ve-track-settings">
+                      <label className="ve-track-setting">
+                        <span>ワイプの音</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          className="ve-switch"
+                          aria-checked={!track.audioMuted}
+                          title={
+                            track.audioMuted
+                              ? 'ワイプの音を鳴らす(いまは絵だけ。顔カメラの声はマイクの音声トラックで鳴らしています)'
+                              : 'ワイプの音を鳴らさない(絵は出したまま)'
+                          }
+                          onClick={() => toggleVideoOverlayTrackAudio(track.id)}
+                        />
+                      </label>
+                      <label className="ve-track-setting">
+                        <span>表示位置</span>
+                        <select
+                          value={track.position}
+                          onChange={(e) =>
+                            setVideoOverlayTrackPosition(track.id, e.target.value as PipPosition)
+                          }
+                        >
+                          {(Object.keys(PIP_POSITION_LABELS) as PipPosition[]).map((p) => (
+                            <option key={p} value={p}>
+                              {PIP_POSITION_LABELS[p]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="ve-track-setting">
+                        <span>サイズ</span>
+                        <input
+                          type="range"
+                          min={0.15}
+                          max={0.5}
+                          step={0.01}
+                          value={track.scale}
+                          aria-valuetext={`${Math.round(track.scale * 100)}%`}
+                          onChange={(e) =>
+                            setVideoOverlayTrackScale(track.id, Number(e.target.value))
+                          }
+                        />
+                        <span className="ve-track-setting-value">
+                          {Math.round(track.scale * 100)}%
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        className="small-button danger"
+                        onClick={() => {
+                          if (confirmRemoveTrack(track.name, track.clips.length)) {
+                            removeVideoOverlayTrack(track.id)
+                          }
+                        }}
+                      >
+                        <TrashIcon width={12} height={12} />
+                        トラックを削除
+                      </button>
+                    </div>
+                  </TrackHeadPopover>
+                </div>
+              )
+            })}
           <div className="track-label track-label-video" data-g3-kind="video">
-            <span className="track-tag tag-video">V1</span>本編
+            <span className="track-tag tag-video">V1</span>
+            <span className="track-label-name">本編</span>
           </div>
-          {project.videoOverlayTracks.map((track, trackIndex) => (
-            <div key={track.id} className="track-label" data-g3-kind="overlay">
-              <span className="track-label-name" title={track.name}>
-                <span className="track-tag tag-video">V{trackIndex + 2}</span>
-                {track.name}
-              </span>
-              <div className="track-label-controls">
-                <button
-                  className="icon-button"
-                  title={track.hidden ? '表示' : '非表示(PiP合成をスキップ)'}
-                  onClick={() => toggleVideoOverlayTrackHidden(track.id)}
-                >
-                  {track.hidden ? (
-                    <EyeOffIcon width={14} height={14} />
-                  ) : (
-                    <EyeIcon width={14} height={14} />
-                  )}
-                </button>
-                <button
-                  className="icon-button"
-                  aria-pressed={!track.audioMuted}
-                  title={
-                    track.audioMuted
-                      ? 'ワイプの音を鳴らす(いまは絵だけ。顔カメラの声はマイクの音声トラックで鳴らしています)'
-                      : 'ワイプの音を鳴らさない(絵は出したまま)'
-                  }
-                  onClick={() => toggleVideoOverlayTrackAudio(track.id)}
-                >
-                  {track.audioMuted ? (
-                    <VolumeXIcon width={14} height={14} />
-                  ) : (
-                    <Volume2Icon width={14} height={14} />
-                  )}
-                </button>
-                <select
-                  value={track.position}
-                  title="ワイプの表示位置"
-                  onChange={(e) =>
-                    setVideoOverlayTrackPosition(track.id, e.target.value as PipPosition)
-                  }
-                >
-                  {(Object.keys(PIP_POSITION_LABELS) as PipPosition[]).map((p) => (
-                    <option key={p} value={p}>
-                      {PIP_POSITION_LABELS[p]}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="range"
-                  min={0.15}
-                  max={0.5}
-                  step={0.01}
-                  value={track.scale}
-                  title="ワイプのサイズ"
-                  onChange={(e) => setVideoOverlayTrackScale(track.id, Number(e.target.value))}
-                />
-                <button
-                  className="icon-button danger"
-                  title="トラック削除"
-                  onClick={() => {
-                    if (confirmRemoveTrack(track.name, track.clips.length)) {
-                      removeVideoOverlayTrack(track.id)
-                    }
-                  }}
-                >
-                  <TrashIcon width={12} height={12} />
-                </button>
-              </div>
+          {project.textOverlays.length > 0 && (
+            <div className="track-label" data-g3-kind="telop" style={{ height: captionLaneH }}>
+              <span className="track-tag tag-telop">T1</span>
+              <span className="track-label-name">テロップ</span>
             </div>
-          ))}
-          {project.audioTracks.map((track, trackIndex) => (
-            <div key={track.id} className="track-label" data-g3-kind={audioKindOf(track)}>
-              <span className="track-label-name" title={track.name}>
+          )}
+          {project.audioTracks.map((track, trackIndex) => {
+            const tag = `A${trackIndex + 1}`
+            return (
+              <div key={track.id} className="track-label" data-g3-kind={audioKindOf(track)}>
                 <span className={`track-tag tag-audio ${track.autoRole ? 'tag-auto' : ''}`}>
-                  A{trackIndex + 1}
+                  {tag}
                 </span>
-                {track.name}
-              </span>
-              <div className="track-label-controls">
-                <button
-                  className="icon-button"
-                  title="このトラックの音声からBPMを解析してビートグリッドを表示"
-                  disabled={bpmAnalyzingTrackId === track.id || track.clips.length === 0}
-                  onClick={() => handleAnalyzeBpm(track)}
+                <span className="track-label-name" title={track.name}>
+                  {track.name}
+                </span>
+                <TrackHeadPopover
+                  label={`${tag}のトラック音量`}
+                  title={`${tag}のトラック音量 ${Math.round(track.volume * 100)}%`}
+                  icon={<KnobIcon width={12} height={12} />}
                 >
-                  {bpmAnalyzingTrackId === track.id ? '…' : <ActivityIcon width={14} height={14} />}
-                </button>
+                  <label className="ve-track-setting">
+                    <span>音量</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={3}
+                      step={0.05}
+                      value={track.volume}
+                      aria-label={`${tag}のトラック音量`}
+                      aria-valuetext={`${Math.round(track.volume * 100)}%`}
+                      onChange={(e) => setAudioTrackVolume(track.id, Number(e.target.value))}
+                    />
+                    <span className="ve-track-setting-value">
+                      {Math.round(track.volume * 100)}%
+                    </span>
+                  </label>
+                </TrackHeadPopover>
                 <button
-                  className="icon-button"
+                  type="button"
+                  className="ve-track-toggle"
+                  aria-label={`${tag}をミュート`}
+                  aria-pressed={track.muted}
                   title={track.muted ? 'ミュート解除' : 'ミュート'}
                   onClick={() => toggleAudioTrackMute(track.id)}
                 >
-                  {track.muted ? (
-                    <VolumeXIcon width={14} height={14} />
-                  ) : (
-                    <Volume2Icon width={14} height={14} />
-                  )}
+                  <span className="ve-track-toggle-text" aria-hidden="true">
+                    M
+                  </span>
                 </button>
-                <button
-                  className={`icon-button ${track.duckingEnabled ? 'active' : ''}`}
-                  title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる"
-                  onClick={() => toggleAudioTrackDucking(track.id)}
+                <TrackHeadPopover
+                  label={`${tag}の設定`}
+                  icon={<MoreVerticalIcon width={12} height={12} />}
                 >
-                  <DuckingIcon width={14} height={14} />
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={3}
-                  step={0.05}
-                  value={track.volume}
-                  title={`音量 ${Math.round(track.volume * 100)}%`}
-                  onChange={(e) => setAudioTrackVolume(track.id, Number(e.target.value))}
-                />
-                <span className="hint-text volume-percent">{Math.round(track.volume * 100)}%</span>
-                <button
-                  className="icon-button danger"
-                  title="トラック削除"
-                  onClick={() => {
-                    if (confirmRemoveTrack(track.name, track.clips.length)) {
-                      removeAudioTrack(track.id)
-                    }
-                  }}
-                >
-                  <TrashIcon width={12} height={12} />
-                </button>
+                  <div className="ve-track-settings">
+                    <label className="ve-track-setting">
+                      <span title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる">
+                        ダッキング
+                      </span>
+                      <button
+                        type="button"
+                        role="switch"
+                        className="ve-switch"
+                        aria-checked={track.duckingEnabled}
+                        title="他の音声(ナレーション/本編)がある時にこのトラックの音量を自動で下げる"
+                        onClick={() => toggleAudioTrackDucking(track.id)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="small-button"
+                      title="このトラックの音声からBPMを解析してビートグリッドを表示"
+                      disabled={bpmAnalyzingTrackId === track.id || track.clips.length === 0}
+                      onClick={() => handleAnalyzeBpm(track)}
+                    >
+                      <ActivityIcon width={12} height={12} />
+                      {bpmAnalyzingTrackId === track.id ? 'BPM を解析中…' : 'BPM を解析'}
+                    </button>
+                    <button
+                      type="button"
+                      className="small-button danger"
+                      onClick={() => {
+                        if (confirmRemoveTrack(track.name, track.clips.length)) {
+                          removeAudioTrack(track.id)
+                        }
+                      }}
+                    >
+                      <TrashIcon width={12} height={12} />
+                      トラックを削除
+                    </button>
+                  </div>
+                </TrackHeadPopover>
               </div>
-            </div>
-          ))}
-          {project.textOverlays.length > 0 && (
-            <div className="track-label" data-g3-kind="telop" style={{ height: captionLaneH }}>
-              <span className="track-label-name">
-                <span className="track-tag tag-telop">T1</span>
-                テロップ
-              </span>
-            </div>
-          )}
+            )
+          })}
         </div>
 
         {/* 繋ぎの吹き出し。document.body に出す(トラックの枠の overflow で切れて、見えも押せもしなかった)。
@@ -2703,8 +2848,11 @@ export function Timeline(): React.JSX.Element {
             style={
               {
                 width: timelineWidth,
-                // 細かい目盛り(数字の刻みを5つに割る)の間隔
-                '--g3-minor': `${(rulerStepSeconds * pixelsPerSecond) / 5}px`
+                // 中の目盛り・細かい目盛りの間隔(背景の縞で描く。0 なら描かない)
+                '--ve-tick-mid': rulerTier.mid ? `${rulerTier.mid * pixelsPerSecond}px` : '0px',
+                '--ve-tick-minor': rulerTier.minor
+                  ? `${rulerTier.minor * pixelsPerSecond}px`
+                  : '0px'
               } as React.CSSProperties
             }
             onMouseDown={(e) => {
@@ -2806,10 +2954,215 @@ export function Timeline(): React.JSX.Element {
               style={{ left: activeSnapGuideTime * pixelsPerSecond }}
             />
           )}
+          <TimelinePlayhead
+            total={total}
+            pixelsPerSecond={pixelsPerSecond}
+            scrubbing={scrubbing}
+            onScrubStart={() => setScrubbing(true)}
+            lanesRef={trackLanesColRef}
+          />
+          {project.videoOverlayTracks
+            .map((track, trackIndex) => ({ track, trackIndex }))
+            .reverse()
+            .map(({ track, trackIndex }) => (
+              <div
+                key={track.id}
+                data-track-kind="videoOverlay"
+                data-track-id={track.id}
+                data-g3-kind="overlay"
+                data-g3-auto={track.autoRole ? 'true' : undefined}
+                className={`track-lane video-overlay-lane ${laneAlt(nOverlayLanes - 1 - trackIndex)} ${track.hidden ? 'hidden' : ''} ${
+                  draggedAsset?.hasVideo ? 'drop-target' : ''
+                } ${
+                  (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
+                  (videoOverlayDrag !== null &&
+                    videoOverlayDrag.hoverTrackId === track.id &&
+                    videoOverlayDrag.trackId !== track.id)
+                    ? 'drop-active'
+                    : ''
+                }`}
+                style={{ width: timelineWidth }}
+                onDragOver={(e) => {
+                  if (isSourceRangeDrag(e.dataTransfer.types)) return
+                  if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo) return
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'copy'
+                  setDropIndicator({ kind: 'time', laneId: track.id, time: dropTimeAt(e) })
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                  setDropIndicator(null)
+                }}
+                onDrop={(e) => {
+                  if (!isAssetDrag(e.dataTransfer.types)) return
+                  e.preventDefault()
+                  const assetId = assetIdFromDrop(e)
+                  const startTime = dropTimeAt(e)
+                  endAssetDrag()
+                  const asset = project.assets.find((a) => a.id === assetId)
+                  if (!assetId || !asset?.hasVideo) return
+                  addClipToVideoOverlayTrack(track.id, assetId, startTime)
+                }}
+              >
+                {dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id && (
+                  <div
+                    className="timeline-drop-marker"
+                    style={{ left: dropIndicator.time * pixelsPerSecond }}
+                  />
+                )}
+                {track.clips.map((clip) => {
+                  if (
+                    !inWindow(visibleWindow, clip.startTime, overlayClipEnd(clip)) &&
+                    !pinned.has(clip.id)
+                  ) {
+                    return null
+                  }
+                  const asset = project.assets.find((a) => a.id === clip.assetId)
+                  if (!asset) return null
+                  const isTrimmingThis =
+                    mediaTrimDrag?.kind === 'videoOverlay' && mediaTrimDrag.clipId === clip.id
+                  const inPoint = isTrimmingThis ? mediaTrimDrag.liveInPoint : clip.inPoint
+                  const outPoint = isTrimmingThis ? mediaTrimDrag.liveOutPoint : clip.outPoint
+                  // 幅はタイムラインの秒(速くしたワイプは素材の秒数より短い。音声クリップと同じ)
+                  const dur = overlayClipDuration({ inPoint, outPoint, speed: clip.speed })
+                  const clipWidth = dur * pixelsPerSecond
+                  const isDraggingThis = videoOverlayDrag?.clipId === clip.id
+                  const displayStart = isTrimmingThis
+                    ? mediaTrimDrag.liveStartTime
+                    : isDraggingThis
+                      ? videoOverlayDrag.liveStartTime
+                      : clip.startTime
+                  return (
+                    <div
+                      key={clip.id}
+                      className={`timeline-video-overlay-clip ${
+                        selectedVideoOverlayClip?.clipId === clip.id ? 'selected' : ''
+                      } ${isDraggingThis ? 'dragging' : ''} ${
+                        isTrimmingThis ? 'trimming' : ''
+                      } tool-${editTool}`}
+                      style={{
+                        left: displayStart * pixelsPerSecond,
+                        width: clipWidth
+                      }}
+                      onContextMenu={(e) => openVideoOverlayClipMenu(e, track.id, clip.id)}
+                      onMouseDown={(e) => {
+                        // 右クリックはメニュー用。ここで掴むとメニューを出しながらクリップが動く。
+                        if (e.button !== 0) return
+                        e.stopPropagation()
+                        // カミソリ中は掴ませない(音声クリップと同じ理由)。
+                        if (editTool === 'razor') return
+                        videoOverlayHoverTrackRef.current = track.id
+                        setVideoOverlayDrag({
+                          trackId: track.id,
+                          clipId: clip.id,
+                          startX: e.clientX,
+                          duration: dur,
+                          originalStartTime: clip.startTime,
+                          liveStartTime: clip.startTime,
+                          snapGuideTime: null,
+                          hoverTrackId: track.id
+                        })
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        // カミソリは押した位置で切る(本編クリップと同じ規則)。
+                        if (editTool === 'razor') {
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          const localSeconds = (e.clientX - rect.left) / pixelsPerSecond
+                          splitVideoOverlayClipAtTime(
+                            track.id,
+                            clip.id,
+                            clip.startTime + localSeconds
+                          )
+                          return
+                        }
+                        selectOnly('videoOverlay')
+                        setSelectedVideoOverlayClip({ trackId: track.id, clipId: clip.id })
+                      }}
+                      title={asset.fileName}
+                    >
+                      <div
+                        className="timeline-clip-handle timeline-clip-handle-left"
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                          setMediaTrimDrag({
+                            kind: 'videoOverlay',
+                            trackId: track.id,
+                            clipId: clip.id,
+                            edge: 'left',
+                            startX: e.clientX,
+                            // マウスの移動量(タイムラインの秒)を素材の秒へ直す倍率(音声クリップと同じ)
+                            speed: overlayClipSpeed(clip),
+                            assetDuration: asset.duration,
+                            originalStartTime: clip.startTime,
+                            originalInPoint: clip.inPoint,
+                            originalOutPoint: clip.outPoint,
+                            liveStartTime: clip.startTime,
+                            liveInPoint: clip.inPoint,
+                            liveOutPoint: clip.outPoint,
+                            snapGuideTime: null
+                          })
+                        }}
+                      />
+                      <span className="timeline-audio-clip-label">{asset.fileName}</span>
+                      {/* 音を鳴らすワイプは波形を出す(音を切ったワイプは絵だけなので出さない) */}
+                      {asset.hasAudio && !track.audioMuted && clipWidth < 24 && (
+                        <span className="ve-clip-peak" aria-hidden="true" />
+                      )}
+                      {asset.hasAudio && !track.audioMuted && clipWidth >= 24 && (
+                        <div className="timeline-clip-waveform">
+                          <Waveform
+                            filePath={asset.filePath}
+                            start={inPoint}
+                            end={outPoint}
+                            width={clipWidth}
+                            height={16}
+                            variant="video"
+                            viewFrom={viewFraction(
+                              visibleWindow.from,
+                              displayStart,
+                              displayStart + dur
+                            )}
+                            viewTo={viewFraction(
+                              visibleWindow.to,
+                              displayStart,
+                              displayStart + dur
+                            )}
+                          />
+                        </div>
+                      )}
+                      <div
+                        className="timeline-clip-handle timeline-clip-handle-right"
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                          setMediaTrimDrag({
+                            kind: 'videoOverlay',
+                            trackId: track.id,
+                            clipId: clip.id,
+                            edge: 'right',
+                            startX: e.clientX,
+                            speed: overlayClipSpeed(clip),
+                            assetDuration: asset.duration,
+                            originalStartTime: clip.startTime,
+                            originalInPoint: clip.inPoint,
+                            originalOutPoint: clip.outPoint,
+                            liveStartTime: clip.startTime,
+                            liveInPoint: clip.inPoint,
+                            liveOutPoint: clip.outPoint,
+                            snapGuideTime: null
+                          })
+                        }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+
           <div
             ref={videoLaneRef}
             data-g3-kind="video"
-            className={`track-lane video-lane ${
+            className={`track-lane video-lane ${laneAlt(nOverlayLanes)} ${
               draggedAsset?.hasVideo ? 'drop-target' : ''
             } ${dropIndicator?.kind === 'index' ? 'drop-active' : ''}`}
             style={{ width: timelineWidth }}
@@ -3011,9 +3364,8 @@ export function Timeline(): React.JSX.Element {
                       style={{ background: clipColorOf(tc.clip.colorLabel) ?? undefined }}
                     />
                   )}
-                  {/* 頭の名前帯と、中のコマ(素材の見本の1コマを並べる。新しく絵は作らない) */}
-                  <span className="g3-clip-head" aria-hidden="true" />
-                  {tc.asset.thumbnailDataUrl && (
+                  {/* 左端に素材の見本の 1 コマ(幅 120px 以上のときだけ。新しく絵は作らない) */}
+                  {tc.asset.thumbnailDataUrl && clipWidth >= 120 && (
                     <span
                       className="g3-clip-frames"
                       aria-hidden="true"
@@ -3049,14 +3401,17 @@ export function Timeline(): React.JSX.Element {
                       <VolumeXIcon width={12} height={12} />
                     </span>
                   )}
-                  {tc.asset.hasAudio && !tc.clip.audioDetached && clipWidth > 24 && (
+                  {tc.asset.hasAudio && !tc.clip.audioDetached && clipWidth < 24 && (
+                    <span className="ve-clip-peak" aria-hidden="true" />
+                  )}
+                  {tc.asset.hasAudio && !tc.clip.audioDetached && clipWidth >= 24 && (
                     <div className="timeline-clip-waveform">
                       <Waveform
                         filePath={tc.asset.filePath}
                         start={tc.clip.inPoint}
                         end={tc.clip.outPoint}
                         width={clipWidth}
-                        height={28}
+                        height={20}
                         variant="video"
                         viewFrom={viewFraction(visibleWindow.from, tc.start, tc.end)}
                         viewTo={viewFraction(visibleWindow.to, tc.start, tc.end)}
@@ -3071,174 +3426,95 @@ export function Timeline(): React.JSX.Element {
                 素材をここへドラッグして並べてください
               </p>
             )}
-            <TimelinePlayhead
-              total={total}
-              pixelsPerSecond={pixelsPerSecond}
-              scrubbing={scrubbing}
-              onScrubStart={() => setScrubbing(true)}
-              lanesRef={trackLanesColRef}
-            />
           </div>
 
-          {project.videoOverlayTracks.map((track) => (
+          {project.textOverlays.length > 0 && (
             <div
-              key={track.id}
-              data-track-kind="videoOverlay"
-              data-track-id={track.id}
-              data-g3-kind="overlay"
-              data-g3-auto={track.autoRole ? 'true' : undefined}
-              className={`track-lane video-overlay-lane ${track.hidden ? 'hidden' : ''} ${
-                draggedAsset?.hasVideo ? 'drop-target' : ''
-              } ${
-                (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
-                (videoOverlayDrag !== null &&
-                  videoOverlayDrag.hoverTrackId === track.id &&
-                  videoOverlayDrag.trackId !== track.id)
-                  ? 'drop-active'
-                  : ''
-              }`}
-              style={{ width: timelineWidth }}
-              onDragOver={(e) => {
-                if (isSourceRangeDrag(e.dataTransfer.types)) return
-                if (!isAssetDrag(e.dataTransfer.types) || !draggingAssetNow()?.hasVideo) return
-                e.preventDefault()
-                e.dataTransfer.dropEffect = 'copy'
-                setDropIndicator({ kind: 'time', laneId: track.id, time: dropTimeAt(e) })
-              }}
-              onDragLeave={(e) => {
-                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-                setDropIndicator(null)
-              }}
-              onDrop={(e) => {
-                if (!isAssetDrag(e.dataTransfer.types)) return
-                e.preventDefault()
-                const assetId = assetIdFromDrop(e)
-                const startTime = dropTimeAt(e)
-                endAssetDrag()
-                const asset = project.assets.find((a) => a.id === assetId)
-                if (!assetId || !asset?.hasVideo) return
-                addClipToVideoOverlayTrack(track.id, assetId, startTime)
-              }}
+              className={`track-lane caption-lane ${laneAlt(nOverlayLanes + 1)}`}
+              data-g3-kind="telop"
+              style={{ width: timelineWidth, height: captionLaneH }}
             >
-              {dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id && (
-                <div
-                  className="timeline-drop-marker"
-                  style={{ left: dropIndicator.time * pixelsPerSecond }}
-                />
-              )}
-              {track.clips.map((clip) => {
+              {project.textOverlays.map((overlay) => {
                 if (
-                  !inWindow(visibleWindow, clip.startTime, overlayClipEnd(clip)) &&
-                  !pinned.has(clip.id)
+                  !inWindow(visibleWindow, overlay.startTime, overlay.endTime) &&
+                  !pinned.has(overlay.id)
                 ) {
                   return null
                 }
-                const asset = project.assets.find((a) => a.id === clip.assetId)
-                if (!asset) return null
-                const isTrimmingThis =
-                  mediaTrimDrag?.kind === 'videoOverlay' && mediaTrimDrag.clipId === clip.id
-                const inPoint = isTrimmingThis ? mediaTrimDrag.liveInPoint : clip.inPoint
-                const outPoint = isTrimmingThis ? mediaTrimDrag.liveOutPoint : clip.outPoint
-                // 幅はタイムラインの秒(速くしたワイプは素材の秒数より短い。音声クリップと同じ)
-                const dur = overlayClipDuration({ inPoint, outPoint, speed: clip.speed })
-                const clipWidth = dur * pixelsPerSecond
-                const isDraggingThis = videoOverlayDrag?.clipId === clip.id
-                const displayStart = isTrimmingThis
-                  ? mediaTrimDrag.liveStartTime
-                  : isDraggingThis
-                    ? videoOverlayDrag.liveStartTime
-                    : clip.startTime
+                const isDragging = overlayDrag?.overlayId === overlay.id
+                const displayStart = isDragging ? overlayDrag.liveStartTime : overlay.startTime
+                const displayEnd = isDragging ? overlayDrag.liveEndTime : overlay.endTime
                 return (
                   <div
-                    key={clip.id}
-                    className={`timeline-video-overlay-clip ${
-                      selectedVideoOverlayClip?.clipId === clip.id ? 'selected' : ''
-                    } ${isDraggingThis ? 'dragging' : ''} ${
-                      isTrimmingThis ? 'trimming' : ''
-                    } tool-${editTool}`}
-                    style={{
-                      left: displayStart * pixelsPerSecond,
-                      width: clipWidth
-                    }}
-                    onContextMenu={(e) => openVideoOverlayClipMenu(e, track.id, clip.id)}
+                    key={overlay.id}
+                    className={`timeline-caption-clip ${overlay.source === 'auto' ? 'auto' : ''} ${
+                      selectedOverlayId === overlay.id ? 'selected' : ''
+                    } ${isDragging ? 'dragging' : ''}`}
+                    style={
+                      {
+                        left: displayStart * pixelsPerSecond,
+                        width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond),
+                        ...captionRowRect(captionRows.get(overlay.id) ?? 0, captionRowTotal),
+                        // 話者の色(テロップ一覧と同じ色。話者が無ければ灰)
+                        '--g3-spk': speakerColor(overlay.speaker)
+                      } as React.CSSProperties
+                    }
+                    title={stripTelopMarkup(overlay.text)}
                     onMouseDown={(e) => {
-                      // 右クリックはメニュー用。ここで掴むとメニューを出しながらクリップが動く。
-                      if (e.button !== 0) return
                       e.stopPropagation()
-                      // カミソリ中は掴ませない(音声クリップと同じ理由)。
-                      if (editTool === 'razor') return
-                      videoOverlayHoverTrackRef.current = track.id
-                      setVideoOverlayDrag({
-                        trackId: track.id,
-                        clipId: clip.id,
+                      // 端のつまみと同じく、他の種類の選択を外してから選ぶ。
+                      // ここだけ外していなかったため、本編クリップを選んだあとテロップを
+                      // 掴むと**両方が選ばれたまま**になり、Delete を1回押すと
+                      // テロップと本編クリップが2件とも消えていた
+                      // (貼り付け・複製の経路は上の `useProjectStore.subscribe` で塞いでいる)。
+                      selectOnly('caption')
+                      setSelectedOverlayId(overlay.id)
+                      setOverlayDrag({
+                        overlayId: overlay.id,
+                        mode: 'move',
                         startX: e.clientX,
-                        duration: dur,
-                        originalStartTime: clip.startTime,
-                        liveStartTime: clip.startTime,
-                        snapGuideTime: null,
-                        hoverTrackId: track.id
+                        originalStartTime: overlay.startTime,
+                        originalEndTime: overlay.endTime,
+                        liveStartTime: overlay.startTime,
+                        liveEndTime: overlay.endTime,
+                        snapGuideTime: null
                       })
                     }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      // カミソリは押した位置で切る(本編クリップと同じ規則)。
-                      if (editTool === 'razor') {
-                        const rect = e.currentTarget.getBoundingClientRect()
-                        const localSeconds = (e.clientX - rect.left) / pixelsPerSecond
-                        splitVideoOverlayClipAtTime(
-                          track.id,
-                          clip.id,
-                          clip.startTime + localSeconds
-                        )
-                        return
-                      }
-                      selectOnly('videoOverlay')
-                      setSelectedVideoOverlayClip({ trackId: track.id, clipId: clip.id })
-                    }}
-                    title={asset.fileName}
                   >
                     <div
-                      className="timeline-clip-handle timeline-clip-handle-left"
+                      className="timeline-caption-handle timeline-caption-handle-left"
                       onMouseDown={(e) => {
                         e.stopPropagation()
-                        setMediaTrimDrag({
-                          kind: 'videoOverlay',
-                          trackId: track.id,
-                          clipId: clip.id,
-                          edge: 'left',
+                        selectOnly('caption')
+                        setSelectedOverlayId(overlay.id)
+                        setOverlayDrag({
+                          overlayId: overlay.id,
+                          mode: 'trim-left',
                           startX: e.clientX,
-                          // マウスの移動量(タイムラインの秒)を素材の秒へ直す倍率(音声クリップと同じ)
-                          speed: overlayClipSpeed(clip),
-                          assetDuration: asset.duration,
-                          originalStartTime: clip.startTime,
-                          originalInPoint: clip.inPoint,
-                          originalOutPoint: clip.outPoint,
-                          liveStartTime: clip.startTime,
-                          liveInPoint: clip.inPoint,
-                          liveOutPoint: clip.outPoint,
+                          originalStartTime: overlay.startTime,
+                          originalEndTime: overlay.endTime,
+                          liveStartTime: overlay.startTime,
+                          liveEndTime: overlay.endTime,
                           snapGuideTime: null
                         })
                       }}
                     />
-                    <span className="timeline-audio-clip-label">{asset.fileName}</span>
+                    {/* 帯には描かれる文字だけを出す(`**強調**` などの印は外す) */}
+                    {stripTelopMarkup(overlay.text)}
                     <div
-                      className="timeline-clip-handle timeline-clip-handle-right"
+                      className="timeline-caption-handle timeline-caption-handle-right"
                       onMouseDown={(e) => {
                         e.stopPropagation()
-                        setMediaTrimDrag({
-                          kind: 'videoOverlay',
-                          trackId: track.id,
-                          clipId: clip.id,
-                          edge: 'right',
+                        selectOnly('caption')
+                        setSelectedOverlayId(overlay.id)
+                        setOverlayDrag({
+                          overlayId: overlay.id,
+                          mode: 'trim-right',
                           startX: e.clientX,
-                          speed: overlayClipSpeed(clip),
-                          assetDuration: asset.duration,
-                          originalStartTime: clip.startTime,
-                          originalInPoint: clip.inPoint,
-                          originalOutPoint: clip.outPoint,
-                          liveStartTime: clip.startTime,
-                          liveInPoint: clip.inPoint,
-                          liveOutPoint: clip.outPoint,
+                          originalStartTime: overlay.startTime,
+                          originalEndTime: overlay.endTime,
+                          liveStartTime: overlay.startTime,
+                          liveEndTime: overlay.endTime,
                           snapGuideTime: null
                         })
                       }}
@@ -3247,15 +3523,14 @@ export function Timeline(): React.JSX.Element {
                 )
               })}
             </div>
-          ))}
-
-          {project.audioTracks.map((track) => (
+          )}
+          {project.audioTracks.map((track, trackIndex) => (
             <div
               key={track.id}
               data-track-kind="audio"
               data-track-id={track.id}
               data-g3-kind={audioKindOf(track)}
-              className={`track-lane audio-lane ${track.autoRole ? 'auto' : ''} ${
+              className={`track-lane audio-lane ${laneAlt(nOverlayLanes + (hasTelopLane ? 2 : 1) + trackIndex)} ${track.autoRole ? 'auto' : ''} ${
                 draggedAsset?.hasAudio ? 'drop-target' : ''
               } ${
                 (dropIndicator?.kind === 'time' && dropIndicator.laneId === track.id) ||
@@ -3401,14 +3676,16 @@ export function Timeline(): React.JSX.Element {
                       }}
                     />
                     <span className="timeline-audio-clip-label">{asset.fileName}</span>
-                    {clipWidth > 24 && (
+                    {/* 幅 24px 未満は波形の代わりにピークの印 */}
+                    {clipWidth < 24 && <span className="ve-clip-peak" aria-hidden="true" />}
+                    {clipWidth >= 24 && (
                       <div className="timeline-clip-waveform">
                         <Waveform
                           filePath={asset.filePath}
                           start={inPoint}
                           end={outPoint}
                           width={clipWidth}
-                          height={30}
+                          height={AUDIO_WAVE_HEIGHT[audioKindOf(track)]}
                           variant={track.autoRole ? 'auto' : 'audio'}
                           viewFrom={viewFraction(
                             visibleWindow.from,
@@ -3446,103 +3723,6 @@ export function Timeline(): React.JSX.Element {
               })}
             </div>
           ))}
-
-          {project.textOverlays.length > 0 && (
-            <div
-              className="track-lane caption-lane"
-              data-g3-kind="telop"
-              style={{ width: timelineWidth, height: captionLaneH }}
-            >
-              {project.textOverlays.map((overlay) => {
-                if (
-                  !inWindow(visibleWindow, overlay.startTime, overlay.endTime) &&
-                  !pinned.has(overlay.id)
-                ) {
-                  return null
-                }
-                const isDragging = overlayDrag?.overlayId === overlay.id
-                const displayStart = isDragging ? overlayDrag.liveStartTime : overlay.startTime
-                const displayEnd = isDragging ? overlayDrag.liveEndTime : overlay.endTime
-                return (
-                  <div
-                    key={overlay.id}
-                    className={`timeline-caption-clip ${overlay.source === 'auto' ? 'auto' : ''} ${
-                      selectedOverlayId === overlay.id ? 'selected' : ''
-                    } ${isDragging ? 'dragging' : ''}`}
-                    style={
-                      {
-                        left: displayStart * pixelsPerSecond,
-                        width: Math.max(4, (displayEnd - displayStart) * pixelsPerSecond),
-                        ...captionRowRect(captionRows.get(overlay.id) ?? 0, captionRowTotal),
-                        // 話者の色(テロップ一覧と同じ色。話者が無ければ灰)
-                        '--g3-spk': speakerColor(overlay.speaker)
-                      } as React.CSSProperties
-                    }
-                    title={stripTelopMarkup(overlay.text)}
-                    onMouseDown={(e) => {
-                      e.stopPropagation()
-                      // 端のつまみと同じく、他の種類の選択を外してから選ぶ。
-                      // ここだけ外していなかったため、本編クリップを選んだあとテロップを
-                      // 掴むと**両方が選ばれたまま**になり、Delete を1回押すと
-                      // テロップと本編クリップが2件とも消えていた
-                      // (貼り付け・複製の経路は上の `useProjectStore.subscribe` で塞いでいる)。
-                      selectOnly('caption')
-                      setSelectedOverlayId(overlay.id)
-                      setOverlayDrag({
-                        overlayId: overlay.id,
-                        mode: 'move',
-                        startX: e.clientX,
-                        originalStartTime: overlay.startTime,
-                        originalEndTime: overlay.endTime,
-                        liveStartTime: overlay.startTime,
-                        liveEndTime: overlay.endTime,
-                        snapGuideTime: null
-                      })
-                    }}
-                  >
-                    <div
-                      className="timeline-caption-handle timeline-caption-handle-left"
-                      onMouseDown={(e) => {
-                        e.stopPropagation()
-                        selectOnly('caption')
-                        setSelectedOverlayId(overlay.id)
-                        setOverlayDrag({
-                          overlayId: overlay.id,
-                          mode: 'trim-left',
-                          startX: e.clientX,
-                          originalStartTime: overlay.startTime,
-                          originalEndTime: overlay.endTime,
-                          liveStartTime: overlay.startTime,
-                          liveEndTime: overlay.endTime,
-                          snapGuideTime: null
-                        })
-                      }}
-                    />
-                    {/* 帯には描かれる文字だけを出す(`**強調**` などの印は外す) */}
-                    {stripTelopMarkup(overlay.text)}
-                    <div
-                      className="timeline-caption-handle timeline-caption-handle-right"
-                      onMouseDown={(e) => {
-                        e.stopPropagation()
-                        selectOnly('caption')
-                        setSelectedOverlayId(overlay.id)
-                        setOverlayDrag({
-                          overlayId: overlay.id,
-                          mode: 'trim-right',
-                          startX: e.clientX,
-                          originalStartTime: overlay.startTime,
-                          originalEndTime: overlay.endTime,
-                          liveStartTime: overlay.startTime,
-                          liveEndTime: overlay.endTime,
-                          snapGuideTime: null
-                        })
-                      }}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          )}
         </div>
       </div>
 

@@ -4899,7 +4899,7 @@ h3 {
 }
 .media-row.in-source,
 .media-row.menu-open {
-  background: #1d1a12;
+  background: var(--ve-selection-fill);
   box-shadow: inset 2px 0 0 var(--ve-primary);
 }
 .media-row.missing .media-col-name {
@@ -5009,7 +5009,7 @@ h3 {
   background: var(--ve-surface-3);
 }
 .telop-row.selected {
-  background: #1d1a12;
+  background: var(--ve-selection-fill);
   box-shadow: inset 2px 0 0 var(--ve-primary);
 }
 .telop-row-tc {
@@ -5452,7 +5452,7 @@ h3 {
   background: var(--ve-surface-3);
 }
 .telop-style-item.selected {
-  background: #1d1a12;
+  background: var(--ve-selection-fill);
   box-shadow: inset 2px 0 0 var(--ve-primary);
 }
 .telop-style-glyph {
@@ -5705,7 +5705,7 @@ h3 {
   border-left: 3px solid transparent;
 }
 .auto-edit-step.run {
-  background: #1d1a12;
+  background: var(--ve-selection-fill);
   border-left-color: var(--ve-primary);
 }
 .auto-edit-step-mark {
@@ -7707,7 +7707,7 @@ select.telop-kind-add {
   padding: 4px;
   border-radius: var(--ve-radius-lg);
   background: var(--ve-bg);
-  box-shadow: inset 0 0 0 1px #1f2329;
+  box-shadow: inset 0 0 0 1px var(--ve-gutter);
 }
 .workflow-step {
   height: 30px;
@@ -7826,7 +7826,7 @@ select.telop-kind-add {
   padding: 2px;
   gap: 2px;
   background: var(--ve-bg);
-  box-shadow: inset 0 0 0 1px #1f2329;
+  box-shadow: inset 0 0 0 1px var(--ve-gutter);
 }
 .seg-button {
   border: 0;
@@ -7849,7 +7849,7 @@ select.telop-kind-add {
 /* 選んだ選択肢(カード)は琥珀の内枠 */
 .choice:has(input:checked) {
   border-color: var(--ve-primary);
-  background: #1d1a12;
+  background: var(--ve-selection-fill);
 }
 
 /* 浮く窓(ダイアログ・メニュー)は 12px の角と影 */

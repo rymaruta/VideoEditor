@@ -1,0 +1,865 @@
+/* =====================================================================
+   編集の画面の骨組みと部品(デザイン案 design1/project/Main.dc.html)。最後に読み込む(main.tsx)。
+   - 上の帯 44 → レール 80・左のパネル 288・プログラム・インスペクタ 312 → 横いっぱいのタイムライン
+   - 区画の間は 1px の溝(--ve-gutter)。面は平ら(光・グラデーション・浮いたカードは使わない)
+   - 色・寸法は tokens.css の名前だけを使う(色の直書きはしない)
+   ===================================================================== */
+
+/* ---------- 地と部品の共通 ---------- */
+body {
+  background: var(--ve-surface-deep);
+  color: var(--ve-text-1);
+}
+.app-shell {
+  background: var(--ve-surface-deep);
+}
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: var(--ve-focus-outline);
+  outline-offset: var(--ve-focus-offset);
+}
+
+/* 副ボタン(ふつうのボタン): #3a3a3a の地・#4a4a4a の枠、hover で枠の色の地 */
+button {
+  border-radius: var(--ve-radius-md);
+  box-shadow: none;
+}
+button:hover:not(:disabled) {
+  background-color: var(--ve-surface-raised-hover);
+  background-image: none;
+}
+button:active:not(:disabled) {
+  background-color: var(--ve-surface-card);
+  background-image: none;
+}
+/* 主ボタン: #2a6fd0 の塗り・白い字・光らせない(hover #3a7de0) */
+.primary-button,
+.primary-button:hover:not(:disabled),
+.primary-button:active:not(:disabled) {
+  background-image: none;
+  background-color: var(--ve-primary-solid);
+  border-color: transparent;
+  color: var(--ve-text-on-primary);
+  box-shadow: none;
+  filter: none;
+}
+.primary-button:hover:not(:disabled) {
+  background-color: var(--ve-primary-solid-hover);
+}
+/* ゴーストの操作(地も枠も無い。hover はカードの地) */
+.icon-button,
+.icon-button:hover:not(:disabled) {
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+.icon-button {
+  background-color: transparent;
+  color: var(--ve-text-2);
+}
+.icon-button:hover:not(:disabled) {
+  background-color: var(--ve-surface-card);
+  color: var(--ve-text-1);
+}
+.icon-button.active,
+.icon-button.active:hover:not(:disabled),
+.icon-button[aria-pressed='true'] {
+  background-image: none;
+  background-color: var(--ve-surface-raised);
+  color: var(--ve-primary);
+  box-shadow: none;
+}
+/* 入力欄: くぼみの地・#6b6b6b の枠(hover #8c8c8c) */
+input:where(:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color'])),
+select,
+textarea {
+  background-color: var(--ve-surface-field);
+  border-color: var(--ve-stroke-field);
+  border-radius: var(--ve-radius-md);
+}
+input:where(
+    :not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color'])
+  ):hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--ve-stroke-field-hover);
+}
+input[type='range'] {
+  accent-color: var(--ve-text-1);
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--ve-primary);
+}
+
+/* ---------- 上の帯 44px ---------- */
+.workflow-bar {
+  height: var(--ve-bar-workflow);
+  padding-left: var(--ve-space-2);
+  gap: var(--ve-space-2);
+  background: var(--ve-surface-band);
+  box-shadow: inset 0 -1px 0 var(--ve-gutter);
+}
+.workflow-bar-project {
+  gap: var(--ve-space-2);
+}
+.workflow-bar-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-primary-solid);
+  color: var(--ve-white);
+  box-shadow: none;
+}
+.workflow-bar-logo svg {
+  width: 10px;
+  height: 10px;
+}
+.workflow-bar-product {
+  flex-shrink: 0;
+  font-weight: var(--ve-fw-bold);
+  white-space: nowrap;
+}
+.workflow-bar-slash {
+  flex-shrink: 0;
+  color: var(--ve-text-icon);
+}
+.workflow-bar-name {
+  font-weight: var(--ve-fw-regular);
+  color: var(--ve-text-2);
+}
+.workflow-bar-saved,
+.workflow-bar-saved.dirty {
+  gap: var(--ve-space-1);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-3);
+}
+.workflow-bar-saved-dot,
+.workflow-bar-saved.dirty .workflow-bar-saved-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--ve-text-2);
+  box-shadow: none;
+}
+.workflow-bar-saved:not(.dirty) .workflow-bar-saved-dot {
+  background: var(--ve-success);
+}
+/* 工程: 最も奥の地に 4 つ。今いる所は #3a3a3a の地・太字 */
+.workflow-steps {
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-hair);
+  border: 1px solid var(--ve-gutter);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-deep);
+  box-shadow: none;
+}
+.workflow-step,
+.workflow-step:hover:not(:disabled) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ve-space-2);
+  height: var(--ve-control-md);
+  padding: var(--ve-control-pad-md);
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background-image: none;
+  box-shadow: none;
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-regular);
+  color: var(--ve-text-2);
+}
+.workflow-step {
+  background-color: transparent;
+}
+.workflow-step:hover:not(:disabled) {
+  background-color: var(--ve-surface-card);
+  color: var(--ve-text-1);
+}
+.workflow-step.current,
+.workflow-step.current:hover:not(:disabled) {
+  background-image: none;
+  background-color: var(--ve-surface-raised);
+  color: var(--ve-text-1);
+  font-weight: var(--ve-fw-bold);
+  box-shadow: none;
+}
+/* 確認の件数(注意の琥珀) */
+.workflow-step-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--ve-space-1);
+  border-radius: var(--ve-radius-pill);
+  background: var(--ve-warning-soft);
+  color: var(--ve-warning-ink);
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-bold);
+  line-height: 1;
+}
+.workflow-bar-actions {
+  gap: var(--ve-space-1);
+}
+.workflow-icon,
+.workflow-menu-button {
+  width: var(--ve-control-lg);
+  height: var(--ve-control-lg);
+  border-radius: var(--ve-radius-md);
+  color: var(--ve-text-2);
+}
+.workflow-icon:disabled {
+  color: var(--ve-text-faint);
+}
+.workflow-export,
+.workflow-export:hover:not(:disabled),
+.workflow-export:active:not(:disabled) {
+  height: var(--ve-control-lg);
+  margin-left: var(--ve-space-2);
+  padding: var(--ve-control-pad-lg);
+  gap: var(--ve-space-2);
+  border-radius: var(--ve-radius-lg);
+  font-weight: var(--ve-fw-bold);
+  box-shadow: none;
+}
+/* Windows / Linux: 右端は重ねたボタン(138px)の分を空ける。env() が使えない所(プレビュー)では 0 */
+.workflow-bar {
+  padding-right: calc(
+    var(--ve-space-3) + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)
+  );
+}
+
+/* ---------- 骨組み ---------- */
+.ve-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ve-gutter);
+}
+.ve-upper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.ve-upper > * {
+  min-height: 0;
+}
+.frame {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0;
+  background: var(--ve-surface-panel);
+  box-shadow: none;
+}
+.ve-left,
+.ve-inspector {
+  flex-shrink: 0;
+}
+.ve-program {
+  flex: 1;
+  background: var(--ve-surface-ground);
+}
+.ve-timeline {
+  flex-shrink: 0;
+  background: var(--ve-surface-ground);
+}
+/* 区画の溝 1px。押せる所は左右(上下)に 3px ずつ広げる。hover・ドラッグ中は差し色 */
+.split-handle,
+.split-handle:hover,
+.split-handle.active {
+  position: relative;
+  flex-shrink: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--ve-gutter);
+}
+.split-handle.split-col {
+  width: 1px;
+  cursor: col-resize;
+}
+.split-handle.split-row {
+  height: 1px;
+  cursor: row-resize;
+}
+.split-handle::before {
+  content: '';
+  position: absolute;
+  z-index: var(--ve-z-sticky);
+}
+.split-handle.split-col::before {
+  inset: 0 -3px;
+}
+.split-handle.split-row::before {
+  inset: -3px 0;
+}
+.split-handle:hover,
+.split-handle.active {
+  background: var(--ve-primary);
+}
+/* レールと左のパネルの間も 1px の溝 */
+.ve-rail {
+  margin-right: 1px;
+}
+
+/* ---------- 左のレール 80px ---------- */
+.ve-rail {
+  width: var(--ve-rail-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ve-space-1);
+  padding: var(--ve-space-2) 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  background: var(--ve-surface-band);
+}
+.ve-rail-button,
+.ve-rail-button:hover:not(:disabled) {
+  width: 72px;
+  height: 56px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ve-space-2);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ve-radius-lg);
+  background-image: none;
+  box-shadow: none;
+}
+.ve-rail-button {
+  background-color: transparent;
+  color: var(--ve-text-2);
+}
+.ve-rail-button:hover:not(:disabled) {
+  background-color: var(--ve-surface-card);
+  color: var(--ve-text-1);
+}
+.ve-rail-button.on,
+.ve-rail-button.on:hover:not(:disabled),
+.ve-rail-button.open {
+  background-color: var(--ve-surface-raised);
+  color: var(--ve-text-1);
+}
+.ve-rail-label {
+  font-size: var(--ve-fs-11);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* ---------- パネルの見出し 40px(タブ・名前) ---------- */
+.ve-panel-head {
+  height: var(--ve-bar-panel-head);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  padding: 0 var(--ve-space-1);
+  background: var(--ve-surface-panel);
+  border-bottom: 1px solid var(--ve-gutter);
+}
+.ve-panel-head .panel-tabs-list {
+  display: flex;
+  align-items: stretch;
+  gap: var(--ve-space-1);
+  min-width: 0;
+}
+/* タブ: 字 13・選んだタブは白の太字と下に 2px の差し色 */
+.ve-panel-head .panel-tab,
+.ve-panel-head .panel-tab:hover:not(:disabled),
+.ve-panel-head .panel-tab.active,
+.ve-panel-head .panel-tab.active:hover:not(:disabled) {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: auto;
+  padding: 0 var(--ve-space-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-regular);
+  color: var(--ve-text-3);
+}
+.ve-panel-head .panel-tab:hover:not(:disabled):not(.active) {
+  color: var(--ve-text-1);
+}
+.ve-panel-head .panel-tab.active,
+.ve-panel-head .panel-tab.active:hover:not(:disabled) {
+  color: var(--ve-text-1);
+  font-weight: var(--ve-fw-bold);
+}
+.ve-panel-head .panel-tab::after {
+  left: var(--ve-space-2);
+  right: var(--ve-space-2);
+  bottom: -1px;
+  border-radius: 0;
+}
+.ve-panel-head .panel-tab.active::after {
+  background: var(--ve-primary);
+}
+
+/* 左のパネル: 中の見出し(.panel-header)を 40px の帯にする(名前 + 右に操作) */
+.ve-left .tab-pane > .panel,
+.ve-inspector .tab-pane > .panel {
+  padding: var(--ve-space-3);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.ve-left .tab-pane > .panel > .panel-header {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: var(--ve-bar-panel-head);
+  margin: calc(var(--ve-space-3) * -1) calc(var(--ve-space-3) * -1) var(--ve-space-3);
+  padding: 0 var(--ve-space-2) 0 var(--ve-space-3);
+  border-bottom: 1px solid var(--ve-gutter);
+}
+.ve-left .tab-pane > .panel > .panel-header h2 {
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-bold);
+}
+/* インスペクタ: タブに名前が出ているので、中の見出しの名前は出さない(ボタンは残す) */
+.ve-inspector .tab-pane > .panel > .panel-header > h2 {
+  display: none;
+}
+.ve-inspector .tab-pane > .panel > .panel-header {
+  justify-content: flex-end;
+  margin-bottom: var(--ve-space-2);
+}
+.ve-inspector .tab-pane > .panel > .panel-header:empty {
+  display: none;
+}
+/* 節の小見出し(11px 太字・補足の灰) */
+.ve-inspector .prop-section-title,
+.ve-inspector .inspector-section-title {
+  font-size: var(--ve-fs-11);
+  font-weight: var(--ve-fw-bold);
+  letter-spacing: 0.04em;
+  color: var(--ve-text-3);
+}
+
+/* 素材: プロジェクト / ライブラリの切り替えは小さな組に */
+.media-bin .media-bin-tabs {
+  display: flex;
+  gap: var(--ve-space-hair);
+  padding: var(--ve-space-hair);
+  border-radius: var(--ve-radius-lg);
+  background: var(--ve-surface-field);
+}
+.media-bin .media-bin-tab,
+.media-bin .media-bin-tab:hover:not(:disabled) {
+  height: var(--ve-control-sm);
+  padding: 0 var(--ve-space-2);
+  border: 0;
+  border-radius: var(--ve-radius-md);
+  background-image: none;
+  box-shadow: none;
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+.media-bin .media-bin-tab {
+  background-color: transparent;
+}
+.media-bin .media-bin-tab.active,
+.media-bin .media-bin-tab.active:hover:not(:disabled) {
+  background-color: var(--ve-surface-raised);
+  color: var(--ve-text-1);
+  font-weight: var(--ve-fw-bold);
+}
+.media-import-buttons .primary-button,
+.media-import-buttons .primary-button:hover:not(:disabled) {
+  height: var(--ve-control-sm);
+  padding: var(--ve-control-pad-sm);
+  gap: var(--ve-space-1);
+  background-color: var(--ve-surface-raised);
+  background-image: none;
+  border: 1px solid var(--ve-border);
+  color: var(--ve-text-1);
+  font-size: var(--ve-fs-12);
+}
+.media-import-buttons .primary-button:hover:not(:disabled) {
+  background-color: var(--ve-surface-raised-hover);
+}
+/* 素材の格子: 2 列・16:9 の枠・下に波形の帯・右下に時間 */
+.ve-left .media-list.media-grid {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: var(--ve-space-3) var(--ve-space-2);
+  padding: 0;
+}
+.media-tile-thumb,
+.media-tile-thumb img {
+  border-radius: var(--ve-radius-md);
+}
+.media-tile-thumb {
+  overflow: hidden;
+  background: var(--ve-black);
+  box-shadow: none;
+}
+.media-row.media-tile:hover .media-tile-thumb {
+  box-shadow: 0 0 0 1px var(--ve-text-icon);
+}
+.media-row.media-tile.in-source .media-tile-thumb,
+.media-row.media-tile.menu-open .media-tile-thumb {
+  box-shadow: 0 0 0 2px var(--ve-text-1);
+}
+.media-tile-thumb.audio {
+  background: var(--ve-clip-voice);
+}
+.media-tile .media-col-name {
+  font-family: var(--ve-font-sans);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-2);
+}
+.media-tile-dur {
+  right: var(--ve-space-1);
+  bottom: 18px;
+  padding: 0 var(--ve-space-1);
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-clip-label-bg);
+  font-weight: var(--ve-fw-regular);
+  line-height: 16px;
+}
+.media-tile-thumb.audio .media-tile-dur {
+  bottom: var(--ve-space-1);
+}
+/* タイムラインで使っている印: 右上の小さな点 */
+.media-tile-used {
+  left: auto;
+  right: var(--ve-space-1);
+  top: var(--ve-space-1);
+  bottom: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ve-radius-round);
+  background: var(--ve-text-2);
+  box-shadow: 0 0 0 1px var(--ve-clip-label-bg);
+}
+/* 音のある素材の波形: 動画は下に 14px の帯、音声は枠の真ん中に大きく */
+.media-tile-wave {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+  overflow: hidden;
+  background: var(--ve-clip-label-bg);
+  pointer-events: none;
+}
+.media-tile-thumb.audio .media-tile-wave {
+  top: 20%;
+  bottom: 20%;
+  height: auto;
+  background: transparent;
+}
+.media-tile-wave .waveform-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.media-tile-wave {
+  --g3-wave-peak: var(--ve-wave);
+  --g3-wave-rms: var(--ve-wave);
+}
+
+/* ---------- プログラム ---------- */
+.ve-program .tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.ve-program .tab-pane {
+  overflow: hidden;
+}
+.ve-program .preview-player {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.frame-monitor .preview-frame-wrapper {
+  background: var(--ve-surface-ground);
+}
+.preview-frame {
+  background: var(--ve-black);
+  box-shadow: none;
+}
+.frame-monitor .preview-controls {
+  background: var(--ve-surface-ground);
+  box-shadow: none;
+}
+.preview-player .time-label.current {
+  font-size: var(--ve-fs-15);
+  font-weight: var(--ve-fw-regular);
+  color: var(--ve-text-1);
+}
+.preview-player .time-label.total,
+.preview-player .time-label.export-total {
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-3);
+}
+.scrub-track {
+  background: var(--ve-border);
+}
+.scrub-fill {
+  background: var(--ve-text-2);
+}
+/* 再生ボタンは 40px の白い丸 */
+.play-button,
+.play-button:hover:not(:disabled) {
+  width: var(--ve-control-xl);
+  height: var(--ve-control-xl);
+  border-radius: var(--ve-radius-round);
+  border-color: transparent;
+  background-image: none;
+  background-color: var(--ve-text-1);
+  color: var(--ve-surface-ground);
+  box-shadow: none;
+}
+/* 選んだテロップの枠と札は差し色 */
+.overlay-text.overlay-hitbox-only.selected {
+  box-shadow: 0 0 0 2px var(--ve-primary);
+}
+.overlay-text.overlay-hitbox-only .overlay-selected-tag {
+  color: var(--ve-text-on-primary) !important;
+  background: var(--ve-primary-solid) !important;
+}
+
+/* ---------- ステータスバー ---------- */
+.status-bar {
+  height: var(--ve-bar-status);
+  margin-top: 0;
+  background: var(--ve-surface-band);
+  border-top: 1px solid var(--ve-gutter);
+  color: var(--ve-text-3);
+}
+
+/* ---------- 浮く物(メニュー・ポップオーバー・ダイアログ) ---------- */
+.clip-context-menu,
+.app-popover,
+.color-popover,
+.recent-projects-list {
+  background: var(--ve-surface-card);
+  border-color: var(--ve-border);
+  border-radius: var(--ve-radius-lg);
+}
+.modal,
+.export-dialog,
+.telop-style-dialog,
+.new-episode-dialog,
+.look-picker {
+  background: var(--ve-surface-panel);
+  border-color: var(--ve-border);
+  border-radius: var(--ve-radius-xl);
+  box-shadow: var(--ve-shadow-dialog);
+}
+.dialog-titlebar,
+.dialog-footer,
+.auto-edit-header {
+  background: var(--ve-surface-band);
+}
+.panel-more-item.current,
+.panel-more-item.current:hover:not(:disabled) {
+  background-image: none;
+  background-color: var(--ve-surface-raised);
+  box-shadow: none;
+}
+.panel-more-item.current .panel-more-item-label {
+  color: var(--ve-text-1);
+  font-weight: var(--ve-fw-bold);
+}
+.ve-rail-menu {
+  width: 280px;
+}
+
+/* ---------- 低い窓(1366×768 など) ---------- */
+@media (max-height: 899px) {
+  .ve-rail-button,
+  .ve-rail-button:hover:not(:disabled) {
+    height: 48px;
+    gap: var(--ve-space-1);
+  }
+}
+
+/* パネルの見出しの名前(タブが 1 つだけのとき) */
+.ve-panel-title {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--ve-space-2);
+  font-size: var(--ve-fs-13);
+  font-weight: var(--ve-fw-bold);
+  color: var(--ve-text-1);
+}
+
+/* 素材: プロジェクト / ライブラリの切り替えは見出しの下の段に(案の絞り込みの組と同じ形) */
+.media-bin-switch {
+  flex-shrink: 0;
+  margin-bottom: var(--ve-space-3);
+}
+.media-bin-switch .media-bin-tabs {
+  width: 100%;
+}
+.media-bin-switch .media-bin-tab {
+  flex: 1;
+}
+.media-bin .panel-header .media-import-buttons {
+  gap: var(--ve-space-1);
+}
+
+/* ---------- プログラムの下の再生まわり: 溝 24px + 操作 48px ---------- */
+.frame-monitor .preview-controls,
+.ve-program .preview-controls {
+  container-type: inline-size;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 var(--ve-space-3);
+  box-shadow: none;
+}
+.ve-program .preview-scrub-row {
+  height: 24px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--ve-space-1);
+}
+.ve-program .scrub-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  overflow: visible;
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-border);
+  cursor: pointer;
+}
+/* 細い溝でも押しやすいよう、上下に透明の当たり判定を足す */
+.ve-program .scrub-track::before {
+  content: '';
+  position: absolute;
+  inset: -10px 0;
+}
+.ve-program .scrub-fill {
+  height: 100%;
+  border-radius: var(--ve-radius-xs);
+  background: var(--ve-text-2);
+}
+.ve-program .scrub-range {
+  position: absolute;
+  top: -3px;
+  height: 10px;
+  border-left: 2px solid var(--ve-primary);
+  border-right: 2px solid var(--ve-primary);
+  background: color-mix(in srgb, var(--ve-primary) 25%, transparent);
+  pointer-events: none;
+}
+.ve-program .scrub-knob {
+  position: absolute;
+  top: -3px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: var(--ve-radius-round);
+  background: var(--ve-text-1);
+  pointer-events: none;
+}
+.ve-program .preview-transport-row {
+  height: 48px;
+  flex: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ve-space-2);
+}
+.ve-program .transport-side {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  min-width: max-content;
+}
+.ve-program .transport-side-left {
+  gap: var(--ve-space-2);
+}
+.ve-program .transport-side-right {
+  justify-content: flex-end;
+}
+.ve-program .transport-center {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+  color: var(--ve-text-2);
+}
+.ve-program .transport-center .icon-button,
+.ve-program .transport-side .icon-button {
+  width: var(--ve-control-lg);
+  height: var(--ve-control-lg);
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.preview-timecode-input {
+  width: 120px;
+  height: var(--ve-control-md);
+  padding: 0 var(--ve-space-2);
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-15);
+  color: var(--ve-text-1);
+}
+.preview-timecode-input.invalid {
+  border-color: var(--ve-danger);
+}
+.ve-program .time-label.total {
+  font-family: var(--ve-font-mono);
+  font-size: var(--ve-fs-12);
+  color: var(--ve-text-3);
+}
+.ve-program .preview-volume {
+  display: flex;
+  align-items: center;
+  gap: var(--ve-space-1);
+}
+.ve-program .preview-volume input[type='range'] {
+  width: 56px;
+}
+/* 狭いプログラム(1366 幅など): 先頭・末尾は Home / End のキーで(ボタンは隠す)、ボタンは 28px */
+@container (max-width: 760px) {
+  .ve-program .transport-center .transport-ends {
+    display: none;
+  }
+  .ve-program .transport-center .icon-button,
+  .ve-program .transport-side .icon-button {
+    width: var(--ve-control-md);
+    height: var(--ve-control-md);
+  }
+  .ve-program .preview-player .time-label.export-total {
+    display: none;
+  }
+}
+/* 低い窓でも 2 段のまま(graphite3.css の 1 段に詰める指定を戻す) */
+@media (max-height: 899px) {
+  .ve-program .preview-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0 var(--ve-space-3);
+  }
+  .ve-program .preview-transport-row {
+    height: 44px;
+  }
+  .ve-program .play-button {
+    width: 36px;
+    height: 36px;
+  }
+}

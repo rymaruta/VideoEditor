@@ -1,6 +1,7 @@
 import { describeColorMatch } from '@shared/color/match'
 import { useEffect, useRef, useState } from 'react'
 import { LibraryPanel } from './LibraryPanel'
+import { Waveform } from './Waveform'
 import { ClipContextMenu, type ContextMenuItem } from './ClipContextMenu'
 import { formatTimecode } from '../lib/timelineRuler'
 import { useMenuCommand } from '../lib/menuCommands'
@@ -26,7 +27,8 @@ import {
   MusicIcon,
   AlertTriangleIcon,
   ImageIcon,
-  LayersIcon
+  LayersIcon,
+  PlusIcon
 } from './icons'
 import { readMediaLayout, storeMediaLayout } from '../lib/uiPrefs'
 
@@ -661,6 +663,42 @@ export function MediaBin(): React.JSX.Element {
   return (
     <div className="panel media-bin">
       <div className="panel-header">
+        <h2>素材</h2>
+        <div className="media-import-buttons">
+          {view === 'project' && (
+            <button
+              className="icon-button"
+              aria-pressed={layout === 'grid'}
+              title={layout === 'grid' ? '一覧で表示' : '格子(サムネイル)で表示'}
+              onClick={() => setLayout(layout === 'grid' ? 'list' : 'grid')}
+            >
+              {layout === 'grid' ? (
+                <LayersIcon width={14} height={14} />
+              ) : (
+                <ImageIcon width={14} height={14} />
+              )}
+            </button>
+          )}
+          <button
+            className="primary-button"
+            onClick={handleImportVideo}
+            disabled={importing}
+            title="素材(動画・音声・画像)を読み込む"
+          >
+            <PlusIcon width={12} height={12} />
+            読み込む
+          </button>
+          <button
+            className="icon-button"
+            onClick={handleImportAudio}
+            disabled={importing}
+            title="音楽/音声を追加"
+          >
+            <MusicIcon width={14} height={14} />
+          </button>
+        </div>
+      </div>
+      <div className="media-bin-switch">
         <div className="media-bin-tabs" role="tablist" aria-label="素材の表示">
           <button
             role="tab"
@@ -678,34 +716,6 @@ export function MediaBin(): React.JSX.Element {
             title="一度読み込んだフォルダの素材を、どのプロジェクトからでも使えます"
           >
             ライブラリ
-          </button>
-        </div>
-        <div className="media-import-buttons">
-          {view === 'project' && (
-            <button
-              className="icon-button"
-              aria-pressed={layout === 'grid'}
-              title={layout === 'grid' ? '一覧で表示' : '格子(サムネイル)で表示'}
-              onClick={() => setLayout(layout === 'grid' ? 'list' : 'grid')}
-            >
-              {layout === 'grid' ? (
-                <LayersIcon width={14} height={14} />
-              ) : (
-                <ImageIcon width={14} height={14} />
-              )}
-            </button>
-          )}
-          <button className="primary-button" onClick={handleImportVideo} disabled={importing}>
-            <UploadIcon width={14} height={14} />
-            動画
-          </button>
-          <button
-            className="icon-button"
-            onClick={handleImportAudio}
-            disabled={importing}
-            title="音楽/音声を追加"
-          >
-            <MusicIcon width={14} height={14} />
           </button>
         </div>
       </div>
@@ -770,7 +780,10 @@ export function MediaBin(): React.JSX.Element {
                   onDragEnd={() => setDraggingAssetId(null)}
                 >
                   {layout === 'grid' && (
-                    <span className="media-tile-thumb" aria-hidden>
+                    <span
+                      className={`media-tile-thumb ${asset.hasVideo ? '' : 'audio'}`}
+                      aria-hidden
+                    >
                       {asset.thumbnailDataUrl ? (
                         <img src={asset.thumbnailDataUrl} alt="" draggable={false} />
                       ) : (
@@ -780,6 +793,18 @@ export function MediaBin(): React.JSX.Element {
                           ) : (
                             <MusicIcon width={20} height={20} />
                           )}
+                        </span>
+                      )}
+                      {/* 音のある素材は必ず波形を出す(動画は下の帯・音声は枠の真ん中) */}
+                      {asset.hasAudio && !isMissing && asset.duration > 0 && (
+                        <span className="media-tile-wave">
+                          <Waveform
+                            filePath={asset.filePath}
+                            start={0}
+                            end={asset.duration}
+                            width={128}
+                            height={asset.hasVideo ? 14 : 40}
+                          />
                         </span>
                       )}
                       <span className="media-tile-dur tc">

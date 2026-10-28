@@ -8,15 +8,7 @@
 body {
   font-family: var(--ve-font-sans);
   line-height: 1.45;
-  background:
-    radial-gradient(
-      900px 520px at 8% -8%,
-      color-mix(in srgb, var(--ve-violet) 16%, transparent),
-      transparent 62%
-    ),
-    radial-gradient(900px 600px at 100% 110%, rgba(0, 190, 170, 0.1), transparent 60%),
-    radial-gradient(1400px 600px at 50% -20%, #151a2a 0%, var(--ve-bg) 62%), var(--ve-bg);
-  background-attachment: fixed;
+  background: var(--ve-surface-deep);
 }
 .app-shell {
   background: transparent;
@@ -39,7 +31,7 @@ button {
   box-shadow: var(--ve-shadow-control);
 }
 button:hover:not(:disabled) {
-  background-image: linear-gradient(180deg, #32385a, #262b45);
+  background-image: var(--ve-surface-3-fill-hover);
   border-color: var(--ve-border-hover);
 }
 button:active:not(:disabled) {
@@ -119,9 +111,7 @@ button.icon-button:disabled {
   );
   border-color: transparent;
   color: var(--ve-primary-ink);
-  box-shadow:
-    inset 0 0 0 1px var(--ve-primary-line),
-    0 0 12px rgba(255, 160, 40, 0.12);
+  box-shadow: none;
 }
 .toggle-chip.active {
   background-image: var(--ve-primary-fill);
@@ -135,14 +125,9 @@ textarea {
 
 /* ---------- 上の帯 ---------- */
 .workflow-bar {
-  height: 46px;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--ve-primary-warm) 7%, transparent),
-    color-mix(in srgb, var(--ve-violet) 7%, transparent) 50%,
-    rgba(0, 190, 170, 0.05)
-  );
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ve-edge) 10%, transparent);
+  height: var(--ve-bar-workflow);
+  background: var(--ve-surface-band);
+  box-shadow: inset 0 -1px 0 var(--ve-gutter);
 }
 .workflow-bar-logo {
   width: 26px;
@@ -151,11 +136,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #1c1404;
-  background: linear-gradient(145deg, #ffd25c, #ff7a1f 70%, #e8459b);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 35%, transparent),
-    0 2px 8px color-mix(in srgb, var(--ve-primary-press) 25%, transparent);
+  color: var(--ve-white);
+  background: var(--ve-primary-solid);
 }
 .workflow-bar-name {
   font-size: var(--ve-fs-13);
@@ -197,7 +179,7 @@ textarea {
 }
 .workflow-step:hover:not(:disabled) {
   background-image: none;
-  background-color: #171a26;
+  background-color: var(--ve-surface-card);
 }
 .workflow-step.current,
 .workflow-step.current:hover:not(:disabled) {
@@ -208,7 +190,7 @@ textarea {
     var(--ve-drop-sm);
 }
 .workflow-step-dot {
-  box-shadow: 0 0 10px #ff9a2b;
+  box-shadow: none;
 }
 .workflow-step-count {
   background: color-mix(in srgb, var(--ve-primary) 14%, transparent);
@@ -276,7 +258,7 @@ textarea {
 }
 .panel-tab:hover:not(:disabled):not(.active) {
   background-image: none;
-  background-color: #1a1d2c;
+  background-color: var(--ve-surface-card);
 }
 .panel-tab.active {
   background-color: transparent;
@@ -328,16 +310,11 @@ textarea {
 /* ---------- モニター ---------- */
 /* 周りは暗く、淡い色の光(映像を邪魔しない程度) */
 .frame-monitor .preview-frame-wrapper {
-  background:
-    radial-gradient(60% 55% at 45% 58%, rgba(120, 170, 90, 0.14), transparent 70%),
-    radial-gradient(40% 40% at 72% 38%, rgba(70, 130, 220, 0.12), transparent 70%),
-    radial-gradient(30% 35% at 20% 80%, rgba(255, 90, 160, 0.06), transparent 70%), var(--ve-well);
+  background: var(--ve-well);
 }
 .preview-frame {
   border-radius: 0;
-  box-shadow:
-    0 0 0 1px #16191e,
-    var(--ve-drop-lg);
+  box-shadow: none;
 }
 /* 安全枠(動きの安全 5%・文字の安全 10%) */
 .preview-safe-frame {
@@ -401,7 +378,7 @@ textarea {
   width: 42px;
   height: 42px;
   background-color: var(--ve-text-1);
-  background-image: linear-gradient(180deg, var(--ve-text-1), #d9dce1);
+  background-image: none;
   color: var(--ve-bg);
   border-color: transparent;
   box-shadow:
@@ -424,11 +401,8 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #ffe0ee;
-  background: linear-gradient(145deg, #b0287a, #5a1240);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--ve-white) 20%, transparent),
-    0 4px 14px rgba(200, 40, 120, 0.35);
+  color: var(--ve-clip-ink);
+  background: var(--ve-clip-telop);
 }
 .telop-insp-title {
   display: flex;
@@ -519,13 +493,13 @@ textarea {
   letter-spacing: 0.06em;
 }
 .telop-metric.shown .telop-metric-label {
-  color: #9fb4ff;
+  color: var(--ve-text-3);
 }
 .telop-metric.speed .telop-metric-label {
-  color: #7ff0bf;
+  color: var(--ve-text-3);
 }
 .telop-metric.chars .telop-metric-label {
-  color: #ffc07a;
+  color: var(--ve-text-3);
 }
 .telop-metric-value {
   font-size: var(--ve-fs-14);
@@ -720,15 +694,8 @@ textarea {
   -webkit-app-region: drag;
   /* 右端は、重ねた最小化・最大化・閉じるのボタンの幅を空ける(Windows / Linux。無い OS では 0) */
   padding-right: calc(12px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
-  /* 右端(重ねたボタンの下)は、ボタンの地の色(#0b121a)へ寄せて継ぎ目を見せない */
-  background:
-    linear-gradient(90deg, transparent calc(100% - 220px), var(--ve-surface-sunken)),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--ve-primary-warm) 7%, transparent),
-      color-mix(in srgb, var(--ve-violet) 7%, transparent) 50%,
-      rgba(0, 190, 170, 0.05)
-    );
+  /* 重ねたボタンの地(TITLE_BAR_OVERLAY_COLOR)と同じ見出しの帯の灰で、継ぎ目を見せない */
+  background: var(--ve-surface-band);
 }
 .workflow-bar button,
 .workflow-bar a,
@@ -757,7 +724,7 @@ textarea {
 }
 /* 自動編集の画面は帯の下に重ねる(帯は 1 本のまま。窓を動かす・閉じるは帯で) */
 .auto-edit-screen {
-  inset: 46px 0 0 0;
+  inset: var(--ve-bar-workflow) 0 0 0;
 }
 
 /* ---------- 上段左のパネルのタブ: よく使うものを表に、残りは「その他」に(lib/panelTabs) ---------- */
@@ -799,7 +766,7 @@ textarea {
   vertical-align: middle;
   border-radius: var(--ve-radius-round);
   background: var(--ve-primary);
-  box-shadow: 0 0 8px rgba(255, 154, 43, 0.8);
+  box-shadow: none;
 }
 .app-popover.panel-more-menu {
   width: 300px;
@@ -839,7 +806,7 @@ textarea {
 }
 .panel-more-item:hover:not(:disabled),
 .panel-more-item:focus-visible {
-  background-color: #262b45;
+  background-color: var(--ve-surface-card);
 }
 .panel-more-item:focus-visible {
   outline: 2px solid var(--ve-primary);

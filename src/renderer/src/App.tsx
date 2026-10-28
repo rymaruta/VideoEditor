@@ -21,7 +21,7 @@ import { useAppMenu, useMenuCommand } from './lib/menuCommands'
 import { StatusBar } from './components/StatusBar'
 import { defaultBottomHeight } from './lib/layoutDefaults'
 import { WorkflowBar } from './components/WorkflowBar'
-import { PanelTabBar } from './components/PanelTabBar'
+import { SideRail, type RailItem } from './components/SideRail'
 import { storedPanelTab } from './lib/panelTabs'
 import { PanelBoundary } from './components/PanelBoundary'
 import { AutosaveRestoreModal } from './components/AutosaveRestoreModal'
@@ -34,8 +34,8 @@ import { useSettingsStore } from './store/settingsStore'
 import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts'
 import { installModalFocusTrap } from './lib/modalFocus'
 import {
-  SparklesIcon,
-  TypeIcon,
+  LayoutGridIcon,
+  MediaIcon,
   YoutubeIcon,
   MicIcon,
   ImageIcon,
@@ -44,57 +44,34 @@ import {
   MegaphoneIcon,
   StarIcon
 } from './components/icons'
-import type { SVGProps } from 'react'
 import { PRODUCT_NAME } from '@shared/product'
 
-type RightTab =
-  | 'inspector'
-  | 'template'
-  | 'text'
-  | 'narration'
-  | 'thumbnail'
+/** 左のパネル(レールで選ぶ) */
+type LeftPanel =
+  | 'media'
   | 'audio'
   | 'preset'
-  | 'gametrend'
-  | 'youtube'
+  | 'template'
+  | 'narration'
+  | 'thumbnail'
   | 'metadata'
+  | 'youtube'
+  | 'gametrend'
 
-interface TabDef {
-  id: RightTab
-  label: string
-  icon: (props: SVGProps<SVGSVGElement>) => React.JSX.Element
-  description: string
-}
+/** 右のインスペクタのタブ */
+type RightTab = 'inspector' | 'text'
 
-const EDIT_TABS: TabDef[] = [
+/** レールに並べるもの(よく使う順) */
+const RAIL_ITEMS: RailItem[] = [
   {
-    id: 'inspector',
-    label: 'インスペクタ',
-    icon: TargetIcon,
-    description: '選択したクリップの尺・速度・フレーミング・繋ぎ・音声をまとめて編集'
-  },
-  {
-    id: 'template',
-    label: 'テンプレート',
-    icon: SparklesIcon,
-    description: 'ショート動画のトレンド構成テンプレートを適用'
-  },
-  { id: 'text', label: 'テロップ', icon: TypeIcon, description: 'テロップの追加・編集' },
-  {
-    id: 'narration',
-    label: 'ボイス',
-    icon: MicIcon,
-    description: 'VOICEVOXによるナレーション音声合成'
-  },
-  {
-    id: 'thumbnail',
-    label: 'サムネイル',
-    icon: ImageIcon,
-    description: 'サムネイル画像の自動生成'
+    id: 'media',
+    label: '素材',
+    icon: MediaIcon,
+    description: '読み込んだ素材(動画・音声・画像)とライブラリ'
   },
   {
     id: 'audio',
-    label: 'BGM/SE',
+    label: 'BGM・SE',
     icon: MusicIcon,
     description: 'BGM・効果音ライブラリの検索と追加'
   },
@@ -103,107 +80,172 @@ const EDIT_TABS: TabDef[] = [
     label: 'プリセット',
     icon: StarIcon,
     description: 'お気に入り登録したテロップスタイル・効果音の管理'
+  },
+  {
+    id: 'template',
+    label: 'テンプレート',
+    icon: LayoutGridIcon,
+    description: 'ショート動画のトレンド構成テンプレートを適用'
   }
 ]
 
-const PUBLISH_TABS: TabDef[] = [
+/** レールの「その他」の中(用途ごと) */
+const RAIL_MORE: { label: string; items: RailItem[] }[] = [
   {
-    id: 'gametrend',
-    label: 'ゲームトレンド',
-    icon: TargetIcon,
-    description: 'ゲームトレンド分析(YouTube+Gemini)'
+    label: '素材づくり',
+    items: [
+      {
+        id: 'narration',
+        label: 'ボイス',
+        icon: MicIcon,
+        description: 'VOICEVOXによるナレーション音声合成'
+      },
+      {
+        id: 'thumbnail',
+        label: 'サムネイル',
+        icon: ImageIcon,
+        description: 'サムネイル画像の自動生成'
+      }
+    ]
   },
   {
-    id: 'youtube',
-    label: 'YouTube',
-    icon: YoutubeIcon,
-    description: 'YouTubeトレンド・キーワード調査'
-  },
-  {
-    id: 'metadata',
-    label: '投稿準備',
-    icon: MegaphoneIcon,
-    description: '投稿用タイトル・概要欄・ハッシュタグの自動生成'
+    label: '投稿',
+    items: [
+      {
+        id: 'metadata',
+        label: '投稿準備',
+        icon: MegaphoneIcon,
+        description: '投稿用タイトル・概要欄・ハッシュタグの自動生成'
+      },
+      {
+        id: 'youtube',
+        label: 'YouTube',
+        icon: YoutubeIcon,
+        description: 'YouTubeトレンド・キーワード調査'
+      },
+      {
+        id: 'gametrend',
+        label: 'ゲームトレンド',
+        icon: TargetIcon,
+        description: 'ゲームトレンド分析(YouTube+Gemini)'
+      }
+    ]
   }
 ]
 
-const ALL_TABS = [...EDIT_TABS, ...PUBLISH_TABS]
+const LEFT_PANELS: readonly { id: LeftPanel; label: string }[] = [
+  ...RAIL_ITEMS,
+  ...RAIL_MORE.flatMap((g) => g.items)
+].map(({ id, label }) => ({ id: id as LeftPanel, label }))
 
-/** メニューバーの「ウィンドウ」に並べる右側のパネル */
-const MENU_WINDOWS = ALL_TABS.map(({ id, label }) => ({ id, label }))
+const RIGHT_TABS: readonly { id: RightTab; label: string; description: string }[] = [
+  {
+    id: 'inspector',
+    label: 'プロパティ',
+    description: '選択したクリップの尺・速度・フレーミング・繋ぎ・音声をまとめて編集'
+  },
+  { id: 'text', label: 'テロップ', description: 'テロップの一覧・追加・編集' }
+]
 
-/** 上段左のパネルで選んだタブ(次に開いたときもそのタブにする) */
-const PANEL_TAB_KEY = 've-panel-tab'
+/**
+ * メニューバーの「ウィンドウ」に並べるパネル(右のタブと左のパネル)。
+ * id は前の並び(window.inspector / window.text / window.audio …)のまま
+ */
+const MENU_WINDOWS = [
+  { id: 'inspector', label: 'インスペクタ' },
+  { id: 'text', label: 'テロップ' },
+  ...LEFT_PANELS
+]
 
-function readStoredTab(): RightTab {
+const LEFT_PANEL_KEY = 've-left-panel'
+const RIGHT_TAB_KEY = 've-right-tab'
+/** 前の配置の「上段左のパネル」で選んでいたタブ(左右どちらかへ引き継ぐ) */
+const OLD_PANEL_TAB_KEY = 've-panel-tab'
+
+function readStored(key: string): string | null {
   try {
-    return storedPanelTab(localStorage.getItem(PANEL_TAB_KEY), ALL_TABS, 'inspector') as RightTab
+    return localStorage.getItem(key)
   } catch {
-    return 'inspector'
+    return null
+  }
+}
+
+function readLeftPanel(): LeftPanel {
+  const old = readStored(OLD_PANEL_TAB_KEY)
+  const fallback = old && LEFT_PANELS.some((p) => p.id === old) ? old : 'media'
+  return storedPanelTab(readStored(LEFT_PANEL_KEY), LEFT_PANELS, fallback) as LeftPanel
+}
+
+function readRightTab(): RightTab {
+  const old = readStored(OLD_PANEL_TAB_KEY)
+  const fallback = old === 'text' ? 'text' : 'inspector'
+  return storedPanelTab(readStored(RIGHT_TAB_KEY), RIGHT_TABS, fallback) as RightTab
+}
+
+function storeValue(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // 覚えられなくても今回は効く
   }
 }
 
 /**
- * 画面の配置(Windows の編集ソフト・Premiere と同じ並び)。
+ * 画面の配置(デザイン案 Main.dc.html)。区画の間は 1px の溝。
  *
- *   ┌──────────────┬─────────────────────┐
- *   │ パネル(タブ)  │ プログラムモニター   │  上段
- *   ├──────────────┼─────────────────────┤
- *   │ プロジェクト  │ タイムライン          │  下段
- *   └──────────────┴─────────────────────┘
- *   ステータスバー
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │ 上の帯 44px(工程・取り消し・書き出す)                 │
+ *   ├────┬────────┬────────────────────────┬──────────┤
+ *   │レール│ 左のパネル │ プログラム(ソース)            │ インスペクタ │
+ *   │ 80 │  288    │                        │   312     │
+ *   ├────┴────────┴────────────────────────┴──────────┤
+ *   │ タイムライン(横いっぱい)                              │
+ *   ├──────────────────────────────────────────────────────┤
+ *   │ ステータスバー                                          │
+ *   └──────────────────────────────────────────────────────┘
  *
- * 上段の左は「ソース・インスペクタ・テロップ・BGM/SE・書き出し…」をタブで切り替える。
- * 下段の左は素材(プロジェクト / ライブラリ)。境目はどれもドラッグで動かせ、大きさは次回も残る。
+ * 左のパネルと右のインスペクタの幅・タイムラインの高さは溝をドラッグして変えられ、次回も残る。
  */
-const PROPS_WIDTH_KEY = 've-layout2-props-width'
-const BIN_WIDTH_KEY = 've-layout2-bin-width'
-const BOTTOM_HEIGHT_KEY = 've-layout2-bottom-height'
+const LEFT_WIDTH_KEY = 've-layout3-left-width'
+const RIGHT_WIDTH_KEY = 've-layout3-right-width'
+const BOTTOM_HEIGHT_KEY = 've-layout3-bottom-height'
 
-const DEFAULT_PROPS_WIDTH = 520
-const DEFAULT_BIN_WIDTH = 320
-const MIN_PROPS_WIDTH = 300
-const MIN_BIN_WIDTH = 220
+const DEFAULT_LEFT_WIDTH = 288
+const DEFAULT_RIGHT_WIDTH = 312
+const MIN_LEFT_WIDTH = 220
+const MIN_RIGHT_WIDTH = 260
+const RAIL_WIDTH = 80
 const MIN_MONITOR_WIDTH = 360
-const MIN_TIMELINE_WIDTH = 420
 const MIN_BOTTOM_HEIGHT = 180
 const MIN_TOP_HEIGHT = 220
-/** 枠・境目・上の帯(作業の流れ 46px)・ステータスバーなど、パネル以外が使う高さ */
-const CHROME_HEIGHT = 112
+/** 上の帯 44・ステータスバー 24・溝 */
+const CHROME_HEIGHT = 70
 
 function readStoredSize(key: string, fallback: number): number {
-  try {
-    const raw = localStorage.getItem(key)
-    const n = raw ? Number(raw) : NaN
-    return Number.isFinite(n) && n > 0 ? n : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function storeSize(key: string, value: number): void {
-  try {
-    localStorage.setItem(key, String(Math.round(value)))
-  } catch {
-    // 残せなくても今回の配置は効く
-  }
+  const raw = readStored(key)
+  const n = raw ? Number(raw) : NaN
+  return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-/** 窓の大きさに収まるよう、3つの寸法を詰める(縮めた窓でモニターやタイムラインが消えないように) */
-function fitLayout(size: { props: number; bin: number; bottom: number }): {
-  props: number
-  bin: number
+interface LayoutSize {
+  left: number
+  right: number
   bottom: number
-} {
+}
+
+/** 窓の大きさに収まるよう、3つの寸法を詰める(縮めた窓でプログラムやタイムラインが消えないように) */
+function fitLayout(size: LayoutSize): LayoutSize {
   const w = window.innerWidth
   const h = window.innerHeight
+  const room = w - RAIL_WIDTH - MIN_MONITOR_WIDTH
+  const right = clamp(size.right, MIN_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, room - MIN_LEFT_WIDTH))
   return {
-    props: clamp(size.props, MIN_PROPS_WIDTH, Math.max(MIN_PROPS_WIDTH, w - MIN_MONITOR_WIDTH)),
-    bin: clamp(size.bin, MIN_BIN_WIDTH, Math.max(MIN_BIN_WIDTH, w - MIN_TIMELINE_WIDTH)),
+    right,
+    left: clamp(size.left, MIN_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, room - right)),
     bottom: clamp(
       size.bottom,
       MIN_BOTTOM_HEIGHT,
@@ -212,26 +254,18 @@ function fitLayout(size: { props: number; bin: number; bottom: number }): {
   }
 }
 
-type PanelTab = RightTab | 'source'
-
 interface ResizeDragState {
-  kind: 'props' | 'bin' | 'rows'
+  kind: 'left' | 'right' | 'rows'
   startX: number
   startY: number
-  start: { props: number; bin: number; bottom: number }
+  start: LayoutSize
 }
 
 function App(): React.JSX.Element {
-  const [tab, setTab] = useState<PanelTab>(readStoredTab)
-  // 選んだタブを覚える(ソースは素材を開いている間だけなので覚えない)
-  useEffect(() => {
-    if (tab === 'source') return
-    try {
-      localStorage.setItem(PANEL_TAB_KEY, tab)
-    } catch {
-      // 覚えられなくても今回は効く
-    }
-  }, [tab])
+  const [left, setLeft] = useState<LeftPanel>(readLeftPanel)
+  const [right, setRight] = useState<RightTab>(readRightTab)
+  useEffect(() => storeValue(LEFT_PANEL_KEY, left), [left])
+  useEffect(() => storeValue(RIGHT_TAB_KEY, right), [right])
   const projectName = useProjectStore((s) => s.project.name)
   // 試しに当てている間は、試す前の未保存の印(試しの案は保存しない)
   const isDirty = useProjectStore((s) => projectToSave(s).isDirty)
@@ -239,7 +273,7 @@ function App(): React.JSX.Element {
   const refreshAutosave = useAutosaveStore((s) => s.refresh)
   const sourceAssetId = useProjectStore((s) => s.sourceAssetId)
 
-  // メニューバー(ファイル / 編集 / … / ウィンドウ)。ウィンドウの欄には上段左のパネルを並べる
+  // メニューバー(ファイル / 編集 / … / ウィンドウ)。ウィンドウの欄には左右のパネルを並べる
   useAppMenu(MENU_WINDOWS)
 
   // ダイアログを開いている間、Tab・フォーカスをダイアログの中に閉じ込める(裏のボタンを押せていた)
@@ -293,28 +327,39 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval)
   }, [])
 
-  // 素材をソースで開いたら、上段左を「ソース」にする。閉じたら元のタブへ戻す
+  // 素材をソースで開いたら、中央をソースにする。閉じたらプログラムへ戻す
+  const [monitor, setMonitor] = useState<'program' | 'source'>('program')
   const [prevSource, setPrevSource] = useState(sourceAssetId)
   if (prevSource !== sourceAssetId) {
     setPrevSource(sourceAssetId)
-    if (sourceAssetId) setTab('source')
-    else if (tab === 'source') setTab('inspector')
+    setMonitor(sourceAssetId ? 'source' : 'program')
+  }
+  const showSource = monitor === 'source' && Boolean(sourceAssetId)
+  // ソースとプログラムは同じ区画のタブ。プログラムが再生を始めたら(スペース・メニュー・タイムライン)
+  // プログラムを見せる(隠れたまま音だけ鳴らさない)
+  const programPlaying = useProjectStore((s) => s.isPlaying)
+  const [prevPlaying, setPrevPlaying] = useState(programPlaying)
+  if (prevPlaying !== programPlaying) {
+    setPrevPlaying(programPlaying)
+    if (programPlaying && monitor === 'source') setMonitor('program')
   }
 
-  // メニューバーの「ウィンドウ」「テロップの一覧」で上段左のパネルを切り替える
+  // メニューバーの「ウィンドウ」「テロップの一覧」で左右のパネルを切り替える
   useMenuCommand((id) => {
     const target = id.startsWith('window.')
-      ? (id.slice('window.'.length) as RightTab)
+      ? id.slice('window.'.length)
       : id === 'telop.list'
         ? 'text'
         : null
-    if (target && MENU_WINDOWS.some((w) => w.id === target)) setTab(target)
+    if (!target) return
+    if (RIGHT_TABS.some((t) => t.id === target)) setRight(target as RightTab)
+    else if (LEFT_PANELS.some((p) => p.id === target)) setLeft(target as LeftPanel)
   })
 
-  const [size, setSize] = useState(() =>
+  const [size, setSize] = useState<LayoutSize>(() =>
     fitLayout({
-      props: readStoredSize(PROPS_WIDTH_KEY, DEFAULT_PROPS_WIDTH),
-      bin: readStoredSize(BIN_WIDTH_KEY, DEFAULT_BIN_WIDTH),
+      left: readStoredSize(LEFT_WIDTH_KEY, DEFAULT_LEFT_WIDTH),
+      right: readStoredSize(RIGHT_WIDTH_KEY, DEFAULT_RIGHT_WIDTH),
       bottom: readStoredSize(
         BOTTOM_HEIGHT_KEY,
         defaultBottomHeight(window.innerHeight, CHROME_HEIGHT, MIN_BOTTOM_HEIGHT)
@@ -337,10 +382,10 @@ function App(): React.JSX.Element {
       const s = resizeDrag.start
       setSize(
         fitLayout(
-          resizeDrag.kind === 'props'
-            ? { ...s, props: s.props + dx }
-            : resizeDrag.kind === 'bin'
-              ? { ...s, bin: s.bin + dx }
+          resizeDrag.kind === 'left'
+            ? { ...s, left: s.left + dx }
+            : resizeDrag.kind === 'right'
+              ? { ...s, right: s.right - dx }
               : { ...s, bottom: s.bottom - dy }
         )
       )
@@ -363,9 +408,9 @@ function App(): React.JSX.Element {
   }, [resizeDrag])
 
   useEffect(() => {
-    storeSize(PROPS_WIDTH_KEY, size.props)
-    storeSize(BIN_WIDTH_KEY, size.bin)
-    storeSize(BOTTOM_HEIGHT_KEY, size.bottom)
+    storeValue(LEFT_WIDTH_KEY, String(Math.round(size.left)))
+    storeValue(RIGHT_WIDTH_KEY, String(Math.round(size.right)))
+    storeValue(BOTTOM_HEIGHT_KEY, String(Math.round(size.bottom)))
   }, [size])
 
   // 窓そのものの大きさが変わったら詰め直す(前回の大きさのまま狭い窓で開いたときも)
@@ -377,113 +422,148 @@ function App(): React.JSX.Element {
 
   useKeyboardShortcuts()
 
+  // 左のパネルの中身。どれも閉じずに隠すだけ(AI・API の頼みを走らせたまま、戻れば結果が残る)
+  const leftPane = (id: LeftPanel, name: string, node: React.ReactNode): React.JSX.Element => (
+    <div className={`tab-pane ${left === id ? 'active' : ''}`}>
+      <PanelBoundary name={name}>{node}</PanelBoundary>
+    </div>
+  )
+
   return (
     <div className="app-shell">
       <PanelBoundary name="作業の流れ">
         <WorkflowBar
-          telopOpen={tab === 'text'}
-          // 「編集」はインスペクタへ戻す(テロップ以外のパネルを出しているときも、押せば移る)
-          onEdit={() => setTab('inspector')}
-          onTelop={() => setTab('text')}
+          telopOpen={right === 'text'}
+          // 「編集」はインスペクタのプロパティへ戻す
+          onEdit={() => setRight('inspector')}
+          onTelop={() => setRight('text')}
         />
       </PanelBoundary>
-      <div className="workspace">
-        {/* ===== 上段: パネル(タブ) / プログラムモニター ===== */}
-        <div className="workspace-row" style={{ flex: 1 }}>
-          <section className="frame frame-props" style={{ width: size.props }}>
-            {/* よく使うタブを表に、残りは「その他」に用途ごとにまとめる(1366 幅でも横に送らずに見つかる) */}
-            <PanelTabBar
-              tabs={ALL_TABS}
-              current={tab}
-              onSelect={(id) => setTab(id as PanelTab)}
-              leadingTab={
-                sourceAssetId
-                  ? { id: 'source', label: 'ソース', description: '素材をソースで確認する' }
-                  : undefined
-              }
+      <div className="ve-workspace">
+        <div className="ve-upper">
+          <PanelBoundary name="レール">
+            <SideRail
+              items={RAIL_ITEMS}
+              more={RAIL_MORE}
+              current={left}
+              onSelect={(id) => setLeft(id as LeftPanel)}
             />
-            {/* All tab panels stay mounted (hidden via CSS) rather than being unmounted on
-                switch, so an in-progress AI/API request (Gemini, VOICEVOX, YouTube, etc.) in
-                one tab keeps running and its result is still there when the user comes back,
-                instead of being silently discarded by switching tabs to do something else. */}
+          </PanelBoundary>
+          {/* All tab panels stay mounted (hidden via CSS) rather than being unmounted on
+              switch, so an in-progress AI/API request (Gemini, VOICEVOX, YouTube, etc.) in
+              one tab keeps running and its result is still there when the user comes back,
+              instead of being silently discarded by switching tabs to do something else. */}
+          <section
+            className="frame ve-left"
+            style={{ width: size.left }}
+            aria-label={LEFT_PANELS.find((p) => p.id === left)?.label}
+          >
+            <div className="tab-content">
+              {leftPane('media', '素材', <MediaBin />)}
+              {leftPane('audio', '音源', <AudioLibraryPanel />)}
+              {leftPane('preset', 'プリセット', <PresetPanel />)}
+              {leftPane('template', 'テンプレート', <TemplatePanel />)}
+              {leftPane('narration', 'ナレーション', <NarrationPanel />)}
+              {leftPane('thumbnail', 'サムネイル', <ThumbnailPanel />)}
+              {leftPane('metadata', 'メタデータ', <MetadataPanel />)}
+              {leftPane('youtube', 'YouTube トレンド', <YouTubeTrendPanel />)}
+              {leftPane('gametrend', 'ゲームトレンド', <GameTrendPanel />)}
+            </div>
+          </section>
+          <div
+            className={`split-handle split-col ${resizeDrag?.kind === 'left' ? 'active' : ''}`}
+            onMouseDown={(e) => beginResize('left', e)}
+            title="ドラッグして幅を調整"
+          />
+          <section className="frame frame-monitor ve-program" aria-label="プログラム">
+            <div className="ve-panel-head">
+              {!sourceAssetId && <h2 className="ve-panel-title">プログラム</h2>}
+              <div
+                className={`panel-tabs-list ${sourceAssetId ? '' : 've-visually-hidden'}`}
+                role="tablist"
+                aria-label="モニター"
+              >
+                {sourceAssetId && (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={showSource}
+                    className={`panel-tab ${showSource ? 'active' : ''}`}
+                    title="素材をソースで確認する"
+                    onClick={() => setMonitor('source')}
+                  >
+                    ソース
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!showSource}
+                  className={`panel-tab ${showSource ? '' : 'active'}`}
+                  onClick={() => setMonitor('program')}
+                >
+                  プログラム
+                </button>
+              </div>
+            </div>
             <div className="tab-content">
               {/* Keyed by asset so switching clips remounts the viewer: transport position,
                   play state and shuttle speed all belong to the clip being auditioned and
                   must not carry over to the next one. */}
-              <div className={`tab-pane ${tab === 'source' ? 'active' : ''}`}>
+              <div className={`tab-pane ${showSource ? 'active' : ''}`}>
                 {sourceAssetId && (
                   <PanelBoundary key={sourceAssetId} name="ソース">
                     <SourceViewer key={sourceAssetId} />
                   </PanelBoundary>
                 )}
               </div>
-              <div className={`tab-pane ${tab === 'inspector' ? 'active' : ''}`}>
-                <PanelBoundary name="インスペクタ">
-                  <Inspector />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'template' ? 'active' : ''}`}>
-                <PanelBoundary name="テンプレート">
-                  <TemplatePanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'text' ? 'active' : ''}`}>
-                <PanelBoundary name="テロップ">
-                  <TextOverlayPanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'narration' ? 'active' : ''}`}>
-                <PanelBoundary name="ナレーション">
-                  <NarrationPanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'thumbnail' ? 'active' : ''}`}>
-                <PanelBoundary name="サムネイル">
-                  <ThumbnailPanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'audio' ? 'active' : ''}`}>
-                <PanelBoundary name="音源">
-                  <AudioLibraryPanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'preset' ? 'active' : ''}`}>
-                <PanelBoundary name="プリセット">
-                  <PresetPanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'gametrend' ? 'active' : ''}`}>
-                <PanelBoundary name="ゲームトレンド">
-                  <GameTrendPanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'youtube' ? 'active' : ''}`}>
-                <PanelBoundary name="YouTube トレンド">
-                  <YouTubeTrendPanel />
-                </PanelBoundary>
-              </div>
-              <div className={`tab-pane ${tab === 'metadata' ? 'active' : ''}`}>
-                <PanelBoundary name="メタデータ">
-                  <MetadataPanel />
+              <div className={`tab-pane ve-program-pane ${showSource ? '' : 'active'}`}>
+                <PanelBoundary name="プログラムモニター">
+                  <PreviewPlayer />
                 </PanelBoundary>
               </div>
             </div>
           </section>
           <div
-            className={`split-handle split-col ${resizeDrag?.kind === 'props' ? 'active' : ''}`}
-            onMouseDown={(e) => beginResize('props', e)}
+            className={`split-handle split-col ${resizeDrag?.kind === 'right' ? 'active' : ''}`}
+            onMouseDown={(e) => beginResize('right', e)}
             title="ドラッグして幅を調整"
           />
-          <section className="frame frame-monitor">
-            <div className="panel-tabs" role="tablist" aria-label="モニター">
-              <button type="button" role="tab" aria-selected className="panel-tab active">
-                プログラム
-              </button>
+          <aside
+            className="frame ve-inspector"
+            style={{ width: size.right }}
+            aria-label="インスペクタ"
+          >
+            <div className="ve-panel-head">
+              <div className="panel-tabs-list" role="tablist" aria-label="インスペクタ">
+                {RIGHT_TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={right === t.id}
+                    className={`panel-tab ${right === t.id ? 'active' : ''}`}
+                    title={t.description}
+                    onClick={() => setRight(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <PanelBoundary name="プログラムモニター">
-              <PreviewPlayer />
-            </PanelBoundary>
-          </section>
+            <div className="tab-content">
+              <div className={`tab-pane ${right === 'inspector' ? 'active' : ''}`}>
+                <PanelBoundary name="インスペクタ">
+                  <Inspector />
+                </PanelBoundary>
+              </div>
+              <div className={`tab-pane ${right === 'text' ? 'active' : ''}`}>
+                <PanelBoundary name="テロップ">
+                  <TextOverlayPanel />
+                </PanelBoundary>
+              </div>
+            </div>
+          </aside>
         </div>
 
         <div
@@ -492,24 +572,11 @@ function App(): React.JSX.Element {
           title="ドラッグして高さを調整"
         />
 
-        {/* ===== 下段: プロジェクト / タイムライン ===== */}
-        <div className="workspace-row" style={{ height: size.bottom }}>
-          <section className="frame frame-bin" style={{ width: size.bin }}>
-            <PanelBoundary name="プロジェクト">
-              <MediaBin />
-            </PanelBoundary>
-          </section>
-          <div
-            className={`split-handle split-col ${resizeDrag?.kind === 'bin' ? 'active' : ''}`}
-            onMouseDown={(e) => beginResize('bin', e)}
-            title="ドラッグして幅を調整"
-          />
-          <section className="frame frame-timeline">
-            <PanelBoundary name="タイムライン">
-              <Timeline />
-            </PanelBoundary>
-          </section>
-        </div>
+        <section className="frame frame-timeline ve-timeline" style={{ height: size.bottom }}>
+          <PanelBoundary name="タイムライン">
+            <Timeline />
+          </PanelBoundary>
+        </section>
       </div>
       <PanelBoundary name="ステータスバー">
         <StatusBar />

@@ -83,12 +83,12 @@ describe('取り消しの振り分け(上の帯のボタン・メニュー)', ()
 })
 
 describe('見え方の記憶', () => {
-  it('素材の並べ方: 既定は一覧。格子を選んだら覚える', () => {
-    expect(readMediaLayout()).toBe('list')
-    storeMediaLayout('grid')
+  it('素材の並べ方: 既定は格子(デザイン案)。一覧を選んだら覚える', () => {
     expect(readMediaLayout()).toBe('grid')
     storeMediaLayout('list')
     expect(readMediaLayout()).toBe('list')
+    storeMediaLayout('grid')
+    expect(readMediaLayout()).toBe('grid')
   })
   it('安全枠: 既定は出さない。出すと決めたら覚える', () => {
     expect(readSafeFrame()).toBe(false)
