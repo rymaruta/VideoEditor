@@ -35,8 +35,12 @@ describe('製品の身元は product.json の1か所から', () => {
     expect(PRODUCT_NAME).toBe(json.name)
     expect(PRODUCT_VENDOR_EMAIL).toBe(json.vendorEmail)
     expect(SOURCE_OFFER_URL).toBe(json.sourceOfferUrl)
-    // 販売者・ソースの入手先は持ち主が決めるまで未定(配布用のビルドは scripts/release-check.cjs が止める)
-    expect(typeof json.sourceOfferUrl).toBe('string')
+    // ソースは公開している GitHub の Releases に置く。連絡先は使わない(空文字。2026-10-28 に持ち主が決定)
+    expect(json.sourceOfferUrl).toBe('https://github.com/rymaruta/VideoEditor/releases')
+    expect(json.vendorEmail).toBe('')
+    expect(isPlaceholder(PRODUCT_VENDOR_EMAIL)).toBe(true)
+    expect(isPlaceholder(SOURCE_OFFER_URL)).toBe(false)
+    expect(isPlaceholder(PRODUCT_VENDOR)).toBe(false)
   })
 
   it('画面・main のコードに古い製品名を直書きしない(PRODUCT_NAME を使う)', () => {
@@ -70,8 +74,14 @@ describe('製品の身元は product.json の1か所から', () => {
 
   it('package.json の説明・販売者が product.json と食い違わない', () => {
     expect(pkg.description).toBe(PRODUCT_DESCRIPTION)
-    expect((pkg.author as { name: string }).name).toBe(PRODUCT_VENDOR)
-    expect(builder.linux.maintainer).toContain(PRODUCT_VENDOR)
+    const author = pkg.author as { name: string; email?: string; url?: string }
+    expect(author.name).toBe(PRODUCT_VENDOR)
+    // 連絡先が無ければ author に email を置かない(あれば product.json と同じ値)
+    if (PRODUCT_VENDOR_EMAIL === '') expect(author.email).toBeUndefined()
+    else expect(author.email).toBe(PRODUCT_VENDOR_EMAIL)
+    expect(author.url).toBe('https://github.com/rymaruta/VideoEditor')
+    // linux の maintainer は連絡先の代わりに製品の URL
+    expect(builder.linux.maintainer).toBe('VideoEditor <https://github.com/rymaruta/VideoEditor>')
     expect(pkg.license).toBeTruthy()
   })
 

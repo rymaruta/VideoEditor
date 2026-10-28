@@ -3,6 +3,7 @@
   "appId": "com.videoeditor.app",
   "description": "撮影素材から自動でカット・テロップ・BGM を付けて書き出す、デスクトップの動画編集アプリ",
   "vendor": "VideoEditor",
-  "vendorEmail": "noreply@example.invalid",
+  "vendorEmail": "",
+  "homepage": "https://github.com/rymaruta/VideoEditor",
   "sourceOfferUrl": "https://github.com/rymaruta/VideoEditor/releases"
 }

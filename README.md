@@ -188,8 +188,8 @@ npm run build:linux
 
 ビルドが完了すると `dist/` フォルダにインストーラーが出力されるので、それを実行してインストールしてください。
 
-> **販売者(`src/shared/product.json` の `vendor`・`vendorEmail`)と GPL のソースの入手先(`sourceOfferUrl`)が
-> 未定(`TBD`)の間は、`build:win` / `build:mac` / `build:linux` は最初の検査(`scripts/release-check.cjs`)で止まります**
+> **販売者(`src/shared/product.json` の `vendor`)と GPL のソースの入手先(`sourceOfferUrl`)が
+> 未定(`TBD`)の間は(連絡先の `vendorEmail` は任意で、空でも止まりません)、`build:win` / `build:mac` / `build:linux` は最初の検査(`scripts/release-check.cjs`)で止まります**
 > (配布用のため。docs/GPL_COMPLIANCE.md)。確認だけなら `npm run build:win:test`(Windows。`dist/win-unpacked/` に
 > 起動できる形を作る。インストーラーは作らない)か `npm run build:unpack` を使います。
 

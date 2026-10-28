@@ -5,7 +5,11 @@
 const { execFileSync } = require('child_process')
 const { join } = require('path')
 const product = require('./src/shared/product.json')
-const { assertReleasable, isDistributionBuild } = require('./scripts/release-check.cjs')
+const {
+  assertReleasable,
+  isDistributionBuild,
+  linuxMaintainer
+} = require('./scripts/release-check.cjs')
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /** @type {import('electron-builder').Configuration} */
@@ -83,8 +87,9 @@ module.exports = {
   },
   linux: {
     target: ['AppImage', 'snap', 'deb'],
-    // 販売者が決まったら product.json の vendor / vendorEmail を直す(未定のままでは配布用のビルドが止まる)
-    maintainer: `${product.vendor} <${product.vendorEmail}>`,
+    // product.json の vendor と連絡先。連絡先(vendorEmail)が無ければ製品の URL(homepage)を使う
+    // (例: VideoEditor <https://github.com/rymaruta/VideoEditor>)
+    maintainer: linuxMaintainer(product),
     category: 'Utility'
   },
   appImage: {
@@ -92,7 +97,7 @@ module.exports = {
   },
   npmRebuild: false,
   // 同梱する部品のライセンス表記を、詰める直前に node_modules から作り直す(古い表記・表記なしで出さない)。
-  // 配布用の出力(--dir 以外)なら、販売者・連絡先・GPL のソースの入手先が未定のままでは止める
+  // 配布用の出力(--dir 以外)なら、販売者・GPL のソースの入手先が未定のままでは止める
   // (scripts/release-check.cjs。npm の build:win などは先にも検査して、長いビルドの前に止める)
   beforePack: (context) => {
     // VE_PERSONAL_BUILD=1 は持ち主の PC で試すための版(配布しない)。販売者などの検査は掛けない
