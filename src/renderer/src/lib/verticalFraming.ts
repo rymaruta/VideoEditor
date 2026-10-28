@@ -999,7 +999,7 @@ export async function verticalSamples(
 
 /**
  * 書き出し画面の見本の覚え方の鍵。企画・設定と、見本の時刻に掛かるクリップの中身(素材・区間・速さ・
- * 見え方)の指紋(企画の中身が変われば別の鍵)
+ * 見え方)と、話者・文字起こしの指紋(企画の中身が変われば別の鍵)
  */
 export function verticalSampleKey(
   project: Project,
@@ -1026,6 +1026,12 @@ export function verticalSampleKey(
       c.blurBackground ?? ''
     ].join(':')
   })
+  // 話者と文字起こし(話す人への切り替えは発話の話者・時刻で決まる。話者を直したら見本も作り直す)
+  if (twoPeople)
+    for (const u of project.transcript ?? [])
+      parts.push(
+        `${u.assetId}:${u.speaker ?? ''}:${u.sourceStart}:${u.sourceEnd}:${u.overlap ? 1 : 0}`
+      )
   let h = 0x811c9dc5
   const text = parts.join('|')
   for (let i = 0; i < text.length; i++) {

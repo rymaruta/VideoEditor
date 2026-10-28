@@ -506,9 +506,17 @@ export function indistinctJudgements(
     : null
 }
 
+/**
+ * 長さに合わせて落とした場面を、何で選んだか(落とした理由の文に使う)。score = 残った中で点数がいちばん
+ * 低かった、cues = 同じ点の中で中身の手掛かりが少なかった、beside = 同じ点の中で前後がすでに落ちていた、
+ * edge = 同じ点の場面が番組の頭・終わりしか残っていなかった、fit = 同じ点の中で、落とすと目標の長さに
+ * いちばん近くなった
+ */
+export type LengthDropBy = 'score' | 'cues' | 'beside' | 'edge' | 'fit'
+
 export interface Selection {
   kept: string[]
-  dropped: { sceneId: string; why: 'unneeded' | 'length' }[]
+  dropped: { sceneId: string; why: 'unneeded' | 'length'; by?: LengthDropBy }[]
   /** 残した場面の、詰めた後の見込みの長さ(秒) */
   estimated: number
   /**
@@ -664,9 +672,29 @@ export function selectScenes(
       const slack = Math.max(COVER_SLACK_SEC, targetSec * 0.05)
       s = covering.find((x) => estimate(x) - excess <= least + slack) ?? s
     }
+    // 何で選んだか(落とした理由の文を、実際の選び方に合わせる)
+    let by: LengthDropBy = 'score'
+    if (s !== tied[0]) by = 'fit'
+    else if (tied.length > 1) {
+      const [a, b] = tied
+      const order: [LengthDropBy, number][] = indistinct
+        ? [
+            ['edge', edge(a) - edge(b)],
+            ['cues', byCues(a, b)],
+            ['beside', beside(a, b)]
+          ]
+        : [
+            ['edge', edge(a) - edge(b)],
+            ['beside', beside(a, b)],
+            ['cues', byCues(a, b)]
+          ]
+      by = order.find(([, d]) => d !== 0)?.[0] ?? 'cues'
+      // 頭・終わりの場面しか残っていなかった(残りの同じ点の場面はどれも頭・終わり)
+      if (by !== 'edge' && edge(a) === 1) by = 'edge'
+    }
     keep.delete(s.id)
     total -= estimate(s)
-    dropped.push({ sceneId: s.id, why: 'length' })
+    dropped.push({ sceneId: s.id, why: 'length', by })
   }
   // 落としすぎた分を戻す: 長さで落とした場面のうち、戻しても目標に収まるものは戻す(点数の高い順、
   // 同じなら中身の手掛かりの多い順)。短い場面を先に落とした後で長い場面を落とすと、短い場面まで

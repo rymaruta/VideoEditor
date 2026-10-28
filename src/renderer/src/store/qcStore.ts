@@ -52,7 +52,13 @@ interface QcState {
    * 次の書き出しと CPU を取り合い、書き出しが遅くなっていた(試し編集 第3回: ショート 24.1 → 40.6 秒)。
    * 止めたことは、次の書き出しの確認の欄に「止めました」と出す(続けて書き出したときと同じ)
    */
-  stopForExport: () => Promise<void>
+  stopForExport: (options?: {
+    /**
+     * 止めたことを次の確認の欄に出す(既定)。自動のショート(確認をしない書き出し)は false にする
+     * (出すと、次の手動の書き出しの確認に、関係の無い「止めました」が残っていた)
+     */
+    note?: boolean
+  }) => Promise<void>
 }
 
 /** 範囲だけを書き出したときの範囲 */
@@ -83,6 +89,12 @@ let measuring: Promise<unknown> | null = null
 let measuringPath: string | null = null
 /** 次の書き出しを始めるために止めた確認のファイル(次の確認の欄に「止めました」と出す) */
 let stoppedForExport: string | null = null
+/**
+ * 始めたが、まだ測り始めていない確認のファイル(書体の読み込み・前の確認の終わりを待っている間)。
+ * この間に次の書き出しを始めたら、測り始める前に止める(前は測っている最中しか止められず、待っている間に
+ * 止めようとすると、書き出しの最中に測り始めていた)
+ */
+let startingPath: string | null = null
 
 /**
  * ファイルの秒で返る映像・音声の指摘を、タイムラインの秒へ直す(テロップの指摘・移る先と同じ秒)。
@@ -136,6 +148,7 @@ export const useQcStore = create<QcState>((set, get) => ({
     if (exported && exported.id !== useProjectStore.getState().project.id) return
     const token = runToken
     const call = ++runCall
+    startingPath = path
     const project = exported ?? useProjectStore.getState().project
     // 前の書き出しの確認がまだ測っているなら止めて、終わるのを待つ(main は1つずつしか測らないので、
     // 新しい確認は「実行中です」で失敗し、あとから前のファイルの結果で上書きされていた)
@@ -149,6 +162,7 @@ export const useQcStore = create<QcState>((set, get) => ({
     // 文字の幅を測るので、書き出しと同じ書体が読み込まれてから
     await document.fonts?.ready
     if (token !== runToken || call !== runCall) return
+    startingPath = null
     const telop = telopCheck(project).filter(
       (i) => !range || (i.end > range.start && i.start < range.end)
     )
@@ -215,13 +229,17 @@ export const useQcStore = create<QcState>((set, get) => ({
   cancel: () => {
     void window.api.qcCancel()
   },
-  stopForExport: async () => {
+  stopForExport: async (options = {}) => {
     const pending = measuring
-    if (!pending) return
-    stoppedForExport = measuringPath
-    // 止めた確認の欄は残さない(結果は出ない。次の確認の欄に止めたことを出す)
+    const starting = startingPath
+    if (!pending && !starting) return
+    if (options.note !== false) stoppedForExport = measuringPath ?? starting
+    // 止めた確認の欄は残さない(結果は出ない。次の確認の欄に止めたことを出す)。測り始める前の確認は、
+    // 番号が替わったので測り始めない
     runCall++
+    startingPath = null
     set({ report: null })
+    if (!pending) return
     void window.api.qcCancel()
     await pending.catch(() => {})
   }
@@ -232,6 +250,7 @@ export const useQcStore = create<QcState>((set, get) => ({
 onProjectSwitch(() => {
   runToken++
   stoppedForExport = null
+  startingPath = null
   if (useQcStore.getState().report?.state === 'run') void window.api.qcCancel()
   useQcStore.setState({ report: null })
 })
