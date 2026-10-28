@@ -51,8 +51,8 @@ const MIN_WINDOW_W = 0.2
  * (Shorts の下の帯より上)が入る余地を残す
  */
 const FACE_Y_IN_WINDOW = 0.36
-/** 同じ人の発話の続きとみなす間(秒) */
-const RUN_JOIN_SEC = 1
+/** 同じ人の発話を1つの番としてまとめる間(秒) */
+const RUN_JOIN_SEC = 2.5
 /** 話者の切り替えの、1ショットの長さの下限(秒)。これより短くなる切り替えはしない */
 export const MIN_SHOT_SEC = 2
 /** 上下に積んだ所の境目の上下に、テロップを置かない幅(画面の高さに対する比) */
@@ -404,10 +404,9 @@ export function speakerShots(
     const l = inside[i]
     const cur = shots[shots.length - 1]
     if (l.key === cur.key || l.start <= start) continue
-    // この人が話し続ける間: この発話の終わりから、同じ人の続きの発話(間が `RUN_JOIN_SEC` まで)をつなぎ、
-    // 終わった後に別の人が話し始めたら止める(終わりの前に重なって始まる別の人の相づちでは止めない)。
-    // 前は「次に別の人が話し始めるまで」としていて、話し続ける人の途中の 0.5 秒の相づちで、相づちの
-    // 人を元の人の次の発話まで(7 秒)映していた
+    // この人の番: この発話から、同じ人の続きの発話(間が `RUN_JOIN_SEC` まで。間に別の人が話し始めない
+    // もの)を1つの番としてまとめ、長さを測る。答える人が短い発話を間を空けて続けても1つの番になる
+    // (前は間 1 秒までしかつながず、2 秒未満の発話を 1 秒以上空けて話すと一度も切り替わらなかった)
     let runEnd = l.end
     for (const x of inside.slice(i + 1)) {
       if (x.key === l.key) {
@@ -416,16 +415,16 @@ export function speakerShots(
       } else if (x.start >= runEnd) break
     }
     runEnd = Math.min(end, runEnd)
-    // 今映している人が、この発話の間ずっと話している(重なった相づち)なら切り替えない
-    const curUntil = Math.max(
-      -Infinity,
-      ...inside.filter((x) => x.key === cur.key && x.start <= l.start).map((x) => x.end)
-    )
+    // 相づち: この番の間、今映している人も話している(半分以上重なる)なら切り替えない
+    let covered = 0
+    for (const x of inside)
+      if (x.key === cur.key)
+        covered += Math.max(0, Math.min(x.end, runEnd) - Math.max(x.start, l.start))
     if (
       l.start - cur.start < minShot ||
       end - l.start < minShot ||
       runEnd - l.start < minShot ||
-      curUntil >= runEnd
+      covered >= (runEnd - l.start) * 0.5
     )
       continue
     cur.end = l.start
