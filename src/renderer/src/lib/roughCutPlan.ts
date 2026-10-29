@@ -41,12 +41,18 @@ import {
   type TimedLine
 } from '@shared/structure/scenes'
 import {
+  applySceneMoves,
+  planSceneMoves,
+  suspectBoundaries,
+  type SceneMove
+} from '@shared/structure/boundaryAi'
+import {
   buildStructurePrompt,
   chunkScenes,
   parseStructureAnswer,
   structureSchema
 } from '@shared/structure/llm'
-import type { AiProvider } from '@shared/llm'
+import { localModelBillions, type AiProvider } from '@shared/llm'
 import { askAiJson, type AiProgress } from './ai'
 import { tightenRanges, totalLength, type CutRange, type TightenOptions } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
@@ -218,6 +224,94 @@ const levelOfActivity = new WeakMap<Uint8Array, Float32Array>()
 /** `loadActivity` で読んだ音の大きさ(範囲の境を静かな所へ寄せるのに使う)。読んでいなければ無し */
 export function levelOf(activity: Uint8Array): Float32Array | undefined {
   return levelOfActivity.get(activity)
+}
+
+/**
+ * 区切りの確認に使う、このPCの AI のモデルの大きさの下限(十億)。これより小さいモデル(GPU の無い PC の 1.5B)
+ * は、答えの決まった例文でも中身によらず同じ答えを返し(試し編集 第4回の文字起こしで 2 回とも)、毎回
+ * 何も直さずに工程が約 34 秒伸びるだけだったので、頼まない
+ */
+export const MIN_BOUNDARY_MODEL_B = 3
+/** 答えの決まった例文をこの回数続けて外したモデルは、次から区切りの確認を頼まない */
+export const BOUNDARY_MISS_LIMIT = 2
+const BOUNDARY_MISSES_KEY = 've-scene-boundary-misses'
+
+function readMisses(): Record<string, number> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BOUNDARY_MISSES_KEY) ?? '{}') as unknown
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    return Object.fromEntries(
+      Object.entries(raw).filter((e): e is [string, number] => typeof e[1] === 'number')
+    )
+  } catch {
+    return {}
+  }
+}
+
+function writeMisses(m: Record<string, number>): void {
+  try {
+    localStorage.setItem(BOUNDARY_MISSES_KEY, JSON.stringify(m))
+  } catch {
+    // 覚えられなくても、次も確かめるだけ
+  }
+}
+
+/**
+ * 怪しい場面の区切り(言いかけで終わる区切り)を AI に確かめさせ、直す区切りを返す
+ * (`planSceneMoves`。話の途中で切れていると2通りの頼み方の両方が答えた所だけ)。AI を使わない設定・鍵が
+ * 無い・使えない(読み込めない・答えない)ときは直さない(公開中の版と同じ区切り)。中止は中止のまま投げる。
+ * このPCの AI が小さいモデル(`MIN_BOUNDARY_MODEL_B` 未満)・例文を続けて外したモデルなら、AI を一度も
+ * 呼ばずに省く(`skipped`)
+ */
+export async function checkSceneBoundaries(
+  scenes: readonly Scene[],
+  options: { provider: AiProvider; apiKey: string; kind?: EpisodeKind },
+  onProgress?: (p: AiProgress) => void
+): Promise<{
+  moves: SceneMove[]
+  asked: number
+  requests: number
+  untrusted?: 'missed-control'
+  failure?: string
+  /** 頼まずに省いた理由と、そのモデル */
+  skipped?: { reason: 'small-model' | 'missed-before'; model: string }
+}> {
+  if (options.provider === 'off' || (options.provider === 'gemini' && !options.apiKey))
+    return { moves: [], asked: 0, requests: 0 }
+  const provider = options.provider
+  const sceneOptions = KIND_PROFILES[options.kind ?? 'location'].scene
+  const asked = suspectBoundaries(scenes, sceneOptions).length
+  if (asked === 0) return { moves: [], asked: 0, requests: 0 }
+  // このPCの AI は、使うモデルを読み込まずに確かめる(前の版のアプリ・試験の偽物には無い)
+  let model: string | undefined
+  if (provider === 'local' && typeof window.api.llmPlan === 'function') {
+    const plan = await window.api.llmPlan().catch(() => null)
+    model = plan?.model
+    if (model) {
+      const b = localModelBillions(model)
+      if (b !== null && b < MIN_BOUNDARY_MODEL_B)
+        return { moves: [], asked, requests: 0, skipped: { reason: 'small-model', model } }
+      if ((readMisses()[model] ?? 0) >= BOUNDARY_MISS_LIMIT)
+        return { moves: [], asked, requests: 0, skipped: { reason: 'missed-before', model } }
+    }
+  }
+  try {
+    const plan = await planSceneMoves(scenes, sceneOptions, async (requests) => {
+      const r = await askAiJson(provider, options.apiKey, requests, onProgress)
+      model ??= r.model
+      return r.results
+    })
+    // 例文を外した回数を覚える(通ったら数え直す)。このPCの AI のモデルだけ
+    if (provider === 'local' && model) {
+      const misses = readMisses()
+      misses[model] = plan.untrusted ? (misses[model] ?? 0) + 1 : 0
+      writeMisses(misses)
+    }
+    return plan
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('LLM_CANCELED')) throw e
+    return { moves: [], asked: 0, requests: 0, failure: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 /**
@@ -715,17 +809,21 @@ export function planRoughCut(
   }
 }
 
-/** 場面を作る(カメラが録っている範囲で) */
+/**
+ * 場面を作る(カメラが録っている範囲で)。`moves` は AI が直した区切り(`planSceneMoves`。企画に保存したもの)。
+ * 区切りは公開中の版と同じ切り方で切り、直しはその後に当てる(開き直しでも同じ直しを当てる。AI に聞き直さない)
+ */
 export function scenesFor(
   project: Project,
   info: MulticamInfo,
-  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[] } = {}
+  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[]; moves?: readonly SceneMove[] } = {}
 ): Scene[] {
-  const scenes = buildScenes(
-    timedLines(project, info),
-    cameraRange(info),
-    KIND_PROFILES[options.kind ?? 'location'].scene
-  )
+  const sceneOptions = KIND_PROFILES[options.kind ?? 'location'].scene
+  const built = buildScenes(timedLines(project, info), cameraRange(info), sceneOptions)
+  const scenes =
+    options.moves && options.moves.length > 0
+      ? applySceneMoves(built, options.moves, sceneOptions).scenes
+      : built
   const hype = options.hype
   // 笑い・歓声・声の盛り上がりを測っていれば、場面ごとの回数を付ける(判定と AI への文に使う)
   const events = project.audioEvents

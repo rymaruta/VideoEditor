@@ -62,6 +62,7 @@ const QC_WORDS_KEY = 've-qc-words'
 const SHOW_KIT_KEY = 've-show-kit-folder'
 const SHOW_STYLE_KEY = 've-show-style'
 const AI_PROVIDER_KEY = 've-ai-provider'
+const SCENE_BOUNDARY_AI_KEY = 've-scene-boundary-ai'
 const SPEECH_TELOP_LOOK_KEY = 've-speech-telop-look'
 const EPISODE_KIND_KEY = 've-episode-kind'
 const EDIT_POLICY_KEY = 've-edit-policy'
@@ -300,6 +301,12 @@ interface SettingsState {
   aiProvider: AiProvider
   setAiProvider: (provider: AiProvider) => void
   /**
+   * 構成で、怪しい場面の区切り(言いかけで終わる・短い場面の端)を AI に確かめさせて直す(既定は ON)。
+   * AI を使わない設定・AI が使えないときは、ON でも直さない(公開中の版と同じ区切り)
+   */
+  sceneBoundaryAi: boolean
+  setSceneBoundaryAi: (on: boolean) => void
+  /**
    * 自動で入れる発言テロップの見た目。テロップの型(`tpl-…`)か、登録したテロップスタイルの id。
    * 話者にスタイルを割り当てた発言は、そちらが優先
    */
@@ -533,6 +540,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setAiProvider: (provider) => {
     writeSetting(AI_PROVIDER_KEY, provider)
     set({ aiProvider: provider })
+  },
+  sceneBoundaryAi: readChoice(SCENE_BOUNDARY_AI_KEY, ['on', 'off'], 'on') === 'on',
+  setSceneBoundaryAi: (on) => {
+    writeSetting(SCENE_BOUNDARY_AI_KEY, on ? 'on' : 'off')
+    set({ sceneBoundaryAi: on })
   },
   speechTelopLook: (() => {
     try {

@@ -150,6 +150,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
   const [dictOpen, setDictOpen] = useState(false)
   const dictionary = useSettingsStore((s) => s.telopDictionary)
   const aiProvider = useSettingsStore((s) => s.aiProvider)
+  const sceneBoundaryAi = useSettingsStore((s) => s.sceneBoundaryAi)
   const editPolicy = useSettingsStore((s) => s.editPolicy)
   const scenes = usePipelineStore((s) => s.scenes)
   // 仮編集で見どころを点数の判定に置き換えたなら、そちらを見せる(残した・落とした場面と合う)
@@ -988,6 +989,18 @@ export function AutoEditScreen(): React.JSX.Element | null {
                   </select>
                 </label>
                 {aiProvider === 'local' && <LocalAiRetry refreshKey={running} />}
+                {aiProvider !== 'off' && (
+                  <label title="言いかけで終わる・短い場面の区切りを AI に確かめさせ、話の途中で切れている所だけ直します(AI が使えないときは直しません)">
+                    <input
+                      type="checkbox"
+                      checked={sceneBoundaryAi}
+                      onChange={(e) =>
+                        useSettingsStore.getState().setSceneBoundaryAi(e.target.checked)
+                      }
+                    />
+                    区切りを AI で確かめる
+                  </label>
+                )}
                 <label title={EDIT_POLICY_HINT[editPolicy]}>
                   大事にすること
                   <select
