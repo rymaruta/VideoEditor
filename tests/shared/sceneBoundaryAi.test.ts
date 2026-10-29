@@ -443,7 +443,7 @@ describe('人の残す/落とすは覆らない', () => {
     // 直しが当たらなくなって元の区切りに戻ったとき(保存: 直した場面 → 今: 元の場面)
     for (const flag of [true, false]) {
       const flags = Object.fromEntries(moved.map((s) => [s.id, flag]))
-      const back = remapSceneFlags(flags, matchScenesAcrossMoves(moved, base))
+      const back = remapSceneFlags(flags, matchScenesAcrossMoves(moved, base, plan.moves))
       expect(Object.keys(back).sort()).toEqual(base.map((s) => s.id).sort())
       expect(Object.values(back).every((v) => v === flag)).toBe(true)
     }
@@ -461,7 +461,7 @@ describe('人の残す/落とすは覆らない', () => {
       const moved = applySceneMoves(base, plan.moves).scenes
       const r = rng(c.lines.length)
       const flags = Object.fromEntries(moved.map((s) => [s.id, r() < 0.5]))
-      const back = remapSceneFlags(flags, matchScenesAcrossMoves(moved, base))
+      const back = remapSceneFlags(flags, matchScenesAcrossMoves(moved, base, plan.moves))
       for (const b of base) {
         const owner = moved
           .map((m) => ({ m, ov: Math.min(m.end, b.end) - Math.max(m.start, b.start) }))

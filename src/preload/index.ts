@@ -4,7 +4,13 @@ import type { SecretName, SecretsSnapshot } from '@shared/secrets'
 import type { ShowKit } from '@shared/finish/sound'
 import type { DenoiseResult } from '@shared/denoise'
 import type { QcMeasurement } from '@shared/qc/media'
-import type { LlmLoadFailure, LlmRequest, LlmWorkerMessage, LocalModelPlan } from '@shared/llm'
+import type {
+  LlmLoadFailure,
+  LlmRequest,
+  LlmRunOptions,
+  LlmWorkerMessage,
+  LocalModelPlan
+} from '@shared/llm'
 type LlmProgressMessage = Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>
 import type { FaceBox } from '@shared/telop/avoidFaces'
 import type { AsrJob, AsrJobResult, AsrLanguage, AsrWorkerMessage } from '@shared/transcript'
@@ -350,8 +356,8 @@ const api = {
   asrSetLanguage: (language: AsrLanguage): Promise<void> =>
     ipcRenderer.invoke(IPC.asrSetLanguage, language),
   asrCancel: (): Promise<void> => ipcRenderer.invoke(IPC.asrCancel),
-  llmRun: (requests: LlmRequest[]): Promise<(unknown | null)[]> =>
-    ipcRenderer.invoke(IPC.llmRun, requests),
+  llmRun: (requests: LlmRequest[], options?: LlmRunOptions): Promise<(unknown | null)[]> =>
+    ipcRenderer.invoke(IPC.llmRun, requests, options),
   llmCancel: (): Promise<void> => ipcRenderer.invoke(IPC.llmCancel),
   /** このPCで読み込めなかった AI のモデル(次から試さない) */
   llmLoadFailures: (): Promise<LlmLoadFailure[]> => ipcRenderer.invoke(IPC.llmLoadFailures),

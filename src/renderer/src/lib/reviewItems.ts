@@ -53,6 +53,11 @@ export interface ReviewSources {
   structureRescue?: { kept: number; total: number } | null
   /** 構成の判定が場面を区別できていない(`structureIndistinctOf`)。無ければ null */
   structureIndistinct?: StructureIndistinct | null
+  /**
+   * 今の場面に実際に当たっている AI の区切りの直し(自動編集の画面の状態)。無ければ企画に保存したもの
+   * (当たらなくなった直しは数えない)
+   */
+  sceneMoves?: readonly { at: number; to: number }[]
 }
 
 /** 構成の判定が場面を区別できていないことの知らせ */
@@ -233,7 +238,7 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
     })
 
   // AI が直した場面の区切り(企画に保存したもの。開き直しても出す)
-  const moves = s.project.autoEdit?.sceneMoves ?? []
+  const moves = s.sceneMoves ?? s.project.autoEdit?.sceneMoves ?? []
   if (moves.length > 0)
     items.push({
       // 作り直すたびに出直さないよう、鍵は固定

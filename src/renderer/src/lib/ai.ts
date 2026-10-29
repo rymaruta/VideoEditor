@@ -1,4 +1,4 @@
-import type { AiProvider, LlmRequest } from '@shared/llm'
+import type { AiProvider, LlmRequest, LlmRunOptions } from '@shared/llm'
 import { fetchJson, parseModelJsonObject } from './httpJson'
 
 /**
@@ -34,7 +34,9 @@ export async function askAiJson(
   provider: Exclude<AiProvider, 'off'>,
   apiKey: string,
   requests: LlmRequest[],
-  onProgress?: (p: AiProgress) => void
+  onProgress?: (p: AiProgress) => void,
+  /** このPCの AI に渡す決まり(`LlmRunOptions`。区切りの確認では、読み込めなかったモデルを覚えない) */
+  llmOptions?: LlmRunOptions
 ): Promise<{ results: (unknown | null)[]; device?: string; model?: string }> {
   if (provider === 'local') {
     let device: string | undefined
@@ -51,7 +53,13 @@ export async function askAiJson(
         })
     })
     try {
-      return { results: await window.api.llmRun(requests), device, model }
+      return {
+        results: await (llmOptions
+          ? window.api.llmRun(requests, llmOptions)
+          : window.api.llmRun(requests)),
+        device,
+        model
+      }
     } catch (e) {
       // Electron が付ける前置き(Error invoking remote method 'llm:run': Error: …)を外して、理由だけにする
       const message = e instanceof Error ? e.message : String(e)

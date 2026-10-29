@@ -52,7 +52,12 @@ import {
   parseStructureAnswer,
   structureSchema
 } from '@shared/structure/llm'
-import { localModelBillions, type AiProvider } from '@shared/llm'
+import {
+  localModelBillions,
+  type AiProvider,
+  type LlmRequest,
+  type LocalModelPlan
+} from '@shared/llm'
 import { askAiJson, type AiProgress } from './ai'
 import { tightenRanges, totalLength, type CutRange, type TightenOptions } from '@shared/cut/tighten'
 import { chooseAngles, type Shot } from '@shared/angles/choose'
@@ -256,36 +261,94 @@ function writeMisses(m: Record<string, number>): void {
   }
 }
 
+/** 区切りの確認の例文を続けて外したため、次から確認を頼まないモデル */
+export function boundaryMissedModels(): string[] {
+  return Object.entries(readMisses())
+    .filter(([, n]) => n >= BOUNDARY_MISS_LIMIT)
+    .map(([m]) => m)
+}
+
+/** 例文を外した回数を消す(次からまた区切りの確認を頼む) */
+export function clearBoundaryMisses(): void {
+  try {
+    localStorage.removeItem(BOUNDARY_MISSES_KEY)
+  } catch {
+    // 消せなくても、通れば数え直す
+  }
+}
+
 /**
- * 怪しい場面の区切り(言いかけで終わる区切り)を AI に確かめさせ、直す区切りを返す
- * (`planSceneMoves`。話の途中で切れていると2通りの頼み方の両方が答えた所だけ)。AI を使わない設定・鍵が
- * 無い・使えない(読み込めない・答えない)ときは直さない(公開中の版と同じ区切り)。中止は中止のまま投げる。
- * このPCの AI が小さいモデル(`MIN_BOUNDARY_MODEL_B` 未満)・例文を続けて外したモデルなら、AI を一度も
- * 呼ばずに省く(`skipped`)
+ * 「このPCの AI をもう一度試す」: 読み込めなかったモデルの記録と、区切りの確認の例文を外した回数を消す
+ * (前は読み込めなかった記録だけで、外した回数が残って区切りの確認を省き続けた)
+ */
+export async function retryLocalAi(): Promise<void> {
+  clearBoundaryMisses()
+  await window.api.llmClearLoadFailures()
+}
+
+/**
+ * 区切りの確認の1回の頼みの上限時間(ミリ秒。モデルの読み込み + 1件あたり)。超えたら頼みを止めて、
+ * 区切りの確認だけ省く(構成は続ける)
+ */
+export const BOUNDARY_ASK_BASE_MS = 90_000
+export const BOUNDARY_ASK_PER_REQUEST_MS = 20_000
+
+/** 区切りの確認の頼みが上限時間を超えた(理由の文) */
+class BoundaryTimeout extends Error {}
+
+/**
+ * 怪しい場面の区切り(言いかけで終わる区切り)を、このPCの AI に確かめさせ、直す区切りを返す
+ * (`planSceneMoves`。話の途中で切れていると2通りの頼み方の両方が答えた所だけ)。試験的な後段(設定の既定は
+ * OFF)。直さない(公開中の版と同じ区切り)のは:
+ * - AI を使わない設定・Gemini(聞く回数が増え、直後の場面の判定が回数の上限(429)で簡易の点数に落ちうる)
+ * - このPCの AI が小さいモデル(`MIN_BOUNDARY_MODEL_B` 未満)・例文を続けて外したモデル(AI を一度も呼ばない)
+ * - 使うモデルを確かめられない・読み込めない・答えない・上限時間を超えた(`failure`。読み込めなかった
+ *   モデルとしては覚えない)
+ * 中止は各段の前後で確かめ、中止のまま投げる(`isCanceled`・LLM_CANCELED)
  */
 export async function checkSceneBoundaries(
   scenes: readonly Scene[],
-  options: { provider: AiProvider; apiKey: string; kind?: EpisodeKind },
+  options: {
+    provider: AiProvider
+    apiKey: string
+    kind?: EpisodeKind
+    /** 自動編集を中止したか(各段の前後で見る) */
+    isCanceled?: () => boolean
+    /** 1回の頼みの上限時間(試験用。既定は `BOUNDARY_ASK_BASE_MS` + 件数 × `BOUNDARY_ASK_PER_REQUEST_MS`) */
+    askTimeoutMs?: (requests: number) => number
+  },
   onProgress?: (p: AiProgress) => void
 ): Promise<{
   moves: SceneMove[]
   asked: number
   requests: number
-  untrusted?: 'missed-control'
+  untrusted?: 'missed-control' | 'no-answer'
   failure?: string
   /** 頼まずに省いた理由と、そのモデル */
-  skipped?: { reason: 'small-model' | 'missed-before'; model: string }
+  skipped?: { reason: 'small-model' | 'missed-before' | 'gemini'; model?: string }
 }> {
-  if (options.provider === 'off' || (options.provider === 'gemini' && !options.apiKey))
-    return { moves: [], asked: 0, requests: 0 }
-  const provider = options.provider
+  const canceled = (): void => {
+    if (options.isCanceled?.()) throw new Error('LLM_CANCELED')
+  }
+  if (options.provider === 'off') return { moves: [], asked: 0, requests: 0 }
   const sceneOptions = KIND_PROFILES[options.kind ?? 'location'].scene
   const asked = suspectBoundaries(scenes, sceneOptions).length
   if (asked === 0) return { moves: [], asked: 0, requests: 0 }
-  // このPCの AI は、使うモデルを読み込まずに確かめる(前の版のアプリ・試験の偽物には無い)
+  if (options.provider === 'gemini')
+    return { moves: [], asked, requests: 0, skipped: { reason: 'gemini' } }
+  canceled()
+  // 使うモデルを読み込まずに確かめる(前の版のアプリ・試験の偽物には無い)
   let model: string | undefined
-  if (provider === 'local' && typeof window.api.llmPlan === 'function') {
-    const plan = await window.api.llmPlan().catch(() => null)
+  if (typeof window.api.llmPlan === 'function') {
+    let plan: LocalModelPlan | null
+    try {
+      plan = await window.api.llmPlan()
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      if (message.includes('LLM_CANCELED')) throw new Error('LLM_CANCELED')
+      return { moves: [], asked, requests: 0, failure: message }
+    }
+    canceled()
     model = plan?.model
     if (model) {
       const b = localModelBillions(model)
@@ -295,22 +358,47 @@ export async function checkSceneBoundaries(
         return { moves: [], asked, requests: 0, skipped: { reason: 'missed-before', model } }
     }
   }
-  try {
-    const plan = await planSceneMoves(scenes, sceneOptions, async (requests) => {
-      const r = await askAiJson(provider, options.apiKey, requests, onProgress)
-      model ??= r.model
-      return r.results
+  const limit =
+    options.askTimeoutMs ??
+    ((n: number): number => BOUNDARY_ASK_BASE_MS + n * BOUNDARY_ASK_PER_REQUEST_MS)
+  const ask = async (requests: LlmRequest[]): Promise<(unknown | null)[]> => {
+    canceled()
+    const running = askAiJson('local', '', requests, onProgress, { recordLoadFailures: false })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new BoundaryTimeout()), limit(requests.length))
     })
-    // 例文を外した回数を覚える(通ったら数え直す)。このPCの AI のモデルだけ
-    if (provider === 'local' && model) {
+    try {
+      const r = await Promise.race([running, timeout])
+      model ??= r.model
+      canceled()
+      return r.results
+    } catch (e) {
+      if (e instanceof BoundaryTimeout) {
+        // 頼みを止め、プロセスが閉じるまで待つ(待たないと、続く場面の判定が「実行中」で断られる)
+        await window.api.llmCancel?.()
+        await running.catch(() => undefined)
+        throw new Error(
+          `区切りの確認が上限時間(${Math.round(limit(requests.length) / 1000)} 秒)を超えました`
+        )
+      }
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  try {
+    const plan = await planSceneMoves(scenes, sceneOptions, ask)
+    // 例文を外した回数を覚える(通ったら数え直す)。答えが読めなかった回は数えない
+    if (model && plan.untrusted !== 'no-answer') {
       const misses = readMisses()
-      misses[model] = plan.untrusted ? (misses[model] ?? 0) + 1 : 0
+      misses[model] = plan.untrusted === 'missed-control' ? (misses[model] ?? 0) + 1 : 0
       writeMisses(misses)
     }
     return plan
   } catch (e) {
     if (e instanceof Error && e.message.includes('LLM_CANCELED')) throw e
-    return { moves: [], asked: 0, requests: 0, failure: e instanceof Error ? e.message : String(e) }
+    return { moves: [], asked, requests: 0, failure: e instanceof Error ? e.message : String(e) }
   }
 }
 
@@ -818,20 +906,32 @@ export function scenesFor(
   info: MulticamInfo,
   options: { kind?: EpisodeKind; hype?: readonly HypeMoment[]; moves?: readonly SceneMove[] } = {}
 ): Scene[] {
+  return scenesWithMoves(project, info, options).scenes
+}
+
+/** `scenesFor` と同じ場面と、実際に当たった直し(当たらなくなった直しは含めない。保存し直すときに捨てる) */
+export function scenesWithMoves(
+  project: Project,
+  info: MulticamInfo,
+  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[]; moves?: readonly SceneMove[] } = {}
+): { scenes: Scene[]; applied: SceneMove[] } {
   const sceneOptions = KIND_PROFILES[options.kind ?? 'location'].scene
   const built = buildScenes(timedLines(project, info), cameraRange(info), sceneOptions)
-  const scenes =
+  const { scenes, applied } =
     options.moves && options.moves.length > 0
-      ? applySceneMoves(built, options.moves, sceneOptions).scenes
-      : built
+      ? applySceneMoves(built, options.moves, sceneOptions)
+      : { scenes: built, applied: [] }
   const hype = options.hype
   // 笑い・歓声・声の盛り上がりを測っていれば、場面ごとの回数を付ける(判定と AI への文に使う)
   const events = project.audioEvents
-  return scenes.map((s) => ({
-    ...s,
-    ...(events && events.length > 0 ? countEvents(events, s.start, s.end) : {}),
-    ...(hype ? { hype: countHype(hype, s.start, s.end) } : {})
-  }))
+  return {
+    scenes: scenes.map((s) => ({
+      ...s,
+      ...(events && events.length > 0 ? countEvents(events, s.start, s.end) : {}),
+      ...(hype ? { hype: countHype(hype, s.start, s.end) } : {})
+    })),
+    applied
+  }
 }
 
 /** 演出テロップの提案に渡す発言(仮編集に残っているものだけ、時刻は仮編集のタイムライン) */

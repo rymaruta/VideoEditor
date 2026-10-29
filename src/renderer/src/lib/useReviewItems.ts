@@ -76,6 +76,8 @@ export function useReviewItems(): ReviewLists {
   const keep = usePipelineStore((s) => s.keep)
   const judgeSource = usePipelineStore((s) => s.judgeSource)
   const planJudgements = usePipelineStore((s) => s.planJudgements)
+  // 実際に当たっている区切りの直し(画面に場面があるときだけ。無ければ企画に保存したもの)
+  const sceneMoves = usePipelineStore((s) => (s.scenes.length > 0 ? s.sceneMoves : undefined))
   const targetMinutes = usePipelineStore((s) => s.targetMinutes)
   const policyName = useSettingsStore((s) => s.editPolicy)
   // 仮編集を作るときと同じ方針(pipelineStore は設定の editPolicy で作る)
@@ -101,7 +103,8 @@ export function useReviewItems(): ReviewLists {
       planJudgements,
       targetMinutes,
       policyName,
-      basis
+      basis,
+      sceneMoves
     ]
     return sharedLists(deps, () => {
       const sourceOf = new Map(syncedFiles.map((f) => [f.id, f.sourceId]))
@@ -128,7 +131,8 @@ export function useReviewItems(): ReviewLists {
           keep,
           dropPolicyFor(basis, policyName, targetMinutes),
           judgeSource
-        )
+        ),
+        ...(sceneMoves ? { sceneMoves } : {})
       })
       const done = new Set(project.reviewed ?? [])
       return {
@@ -155,6 +159,7 @@ export function useReviewItems(): ReviewLists {
     planJudgements,
     targetMinutes,
     policyName,
-    basis
+    basis,
+    sceneMoves
   ])
 }
