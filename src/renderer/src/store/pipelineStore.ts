@@ -1212,7 +1212,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       stopIfCanceled()
       moves = checked.moves
       const sec = ((Date.now() - startedAt) / 1000).toFixed(0)
-      if (checked.failure)
+      if (checked.skipped)
+        log(
+          checked.skipped.reason === 'small-model'
+            ? `構成: このPCの AI は小さいので区切りの確認は省きました(${checked.skipped.model})`
+            : `構成: このPCの AI(${checked.skipped.model})は前に答えの決まった例文を続けて外したので、区切りの確認は省きました`
+        )
+      else if (checked.failure)
         log(
           `構成: 場面の区切りを AI で確かめられなかったため、そのままにしました(${checked.failure})`
         )

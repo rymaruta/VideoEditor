@@ -33,6 +33,8 @@ interface WorkerInput {
   skipModels?: LlmLoadFailure[]
   /** アプリの版(読み込めなかった記録の環境と比べる) */
   appVersion?: string
+  /** 使うモデルを決めるだけ(ダウンロード・読み込みをしない。`llmPlan`) */
+  planOnly?: boolean
 }
 
 childMain<WorkerInput>(async (input, send) => {
@@ -58,6 +60,18 @@ childMain<WorkerInput>(async (input, send) => {
   const label = input.modelUri ? uri.replace(/^hf:/, '') : choice.label
   if (input.modelUri && failures.some((f) => f.uri === uri && sameLoadEnv(f.env, env)))
     throw new Error(skippedModelMessage(label))
+  // 使うモデルを知らせるだけ(構成の区切りの確認を、小さいモデルでは頼む前に省く)
+  if (input.planOnly) {
+    post({
+      type: 'device',
+      device: (llama.gpu || 'cpu') as 'cuda' | 'vulkan' | 'metal' | 'cpu',
+      model: label,
+      uri,
+      vramGb: vram
+    })
+    post({ type: 'done', results: [] })
+    return
+  }
   // 軽いモデルを使う理由を知らせる(「GPU が無いため軽いモデルを使います」)
   const choiceNote = !input.modelUri && pick.kind === 'use' ? pick.note : undefined
   if (choiceNote) post({ type: 'status', stage: 'load', percent: 0, note: choiceNote })

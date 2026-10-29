@@ -3,7 +3,7 @@ import { cachedEnvelope } from './audioPcm'
 import { readFile, stat, writeFile } from 'fs/promises'
 import { cancelAsr, runAsr, setAsrLanguage } from './asrService'
 import { detectFaces } from './faceService'
-import { cancelLlm, clearLlmLoadFailures, listLlmLoadFailures, runLlm } from './llmService'
+import { cancelLlm, clearLlmLoadFailures, listLlmLoadFailures, planLlm, runLlm } from './llmService'
 import { cancelMeasureExport, measureExport } from './qcService'
 import { readFramesRgb } from './frameService'
 import { cancelDenoise, denoiseFiles } from './audioCleanService'
@@ -1194,6 +1194,7 @@ app.whenReady().then(() => {
   // 読み込めなかったモデルの記録(次から試さない)と、「このPCの AI をもう一度試す」
   ipcMain.handle(IPC.llmLoadFailures, () => listLlmLoadFailures())
   ipcMain.handle(IPC.llmClearLoadFailures, () => clearLlmLoadFailures())
+  ipcMain.handle(IPC.llmPlan, () => planLlm())
   ipcMain.handle(IPC.qcMeasure, (event, filePath: string) =>
     measureExport(filePath, (percent) => notifySender(event, IPC.qcProgress, percent))
   )

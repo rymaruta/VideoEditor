@@ -64,6 +64,19 @@ export const CPU_LOCAL_MODEL = {
 
 export type LocalModel = (typeof LOCAL_MODELS)[number] | typeof CPU_LOCAL_MODEL
 
+/** このPCの AI がこれから使うモデル(`llmPlan`。モデルを読み込まずに、`pickLocalModel` と同じ選び方で決める) */
+export interface LocalModelPlan {
+  /** モデルの名前(`LOCAL_MODELS`・`CPU_LOCAL_MODEL` の label。指定のモデルなら URI) */
+  model: string
+  device: 'cuda' | 'vulkan' | 'metal' | 'cpu'
+}
+
+/** モデルの名前から、パラメータの数(十億。「Qwen2.5 1.5B」→ 1.5)。読めなければ null */
+export function localModelBillions(label: string): number | null {
+  const m = /(\d+(?:\.\d+)?)\s*B\b/iu.exec(label)
+  return m ? Number(m[1]) : null
+}
+
 /** 使うモデル。`hasGpu` が false(GPU が無い)なら CPU 用の 1.5B */
 export function chooseLocalModel(vramGb: number, hasGpu = true): LocalModel {
   if (!hasGpu) return CPU_LOCAL_MODEL

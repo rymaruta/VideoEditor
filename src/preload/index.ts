@@ -4,7 +4,7 @@ import type { SecretName, SecretsSnapshot } from '@shared/secrets'
 import type { ShowKit } from '@shared/finish/sound'
 import type { DenoiseResult } from '@shared/denoise'
 import type { QcMeasurement } from '@shared/qc/media'
-import type { LlmLoadFailure, LlmRequest, LlmWorkerMessage } from '@shared/llm'
+import type { LlmLoadFailure, LlmRequest, LlmWorkerMessage, LocalModelPlan } from '@shared/llm'
 type LlmProgressMessage = Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>
 import type { FaceBox } from '@shared/telop/avoidFaces'
 import type { AsrJob, AsrJobResult, AsrLanguage, AsrWorkerMessage } from '@shared/transcript'
@@ -357,6 +357,8 @@ const api = {
   llmLoadFailures: (): Promise<LlmLoadFailure[]> => ipcRenderer.invoke(IPC.llmLoadFailures),
   /** 「このPCの AI をもう一度試す」: 読み込めなかった記録を消す */
   llmClearLoadFailures: (): Promise<void> => ipcRenderer.invoke(IPC.llmClearLoadFailures),
+  /** このPCの AI がこれから使うモデル(読み込まない。分からなければ null) */
+  llmPlan: (): Promise<LocalModelPlan | null> => ipcRenderer.invoke(IPC.llmPlan),
   qcMeasure: (filePath: string): Promise<QcMeasurement> =>
     ipcRenderer.invoke(IPC.qcMeasure, filePath),
   qcCancel: (): Promise<void> => ipcRenderer.invoke(IPC.qcCancel),

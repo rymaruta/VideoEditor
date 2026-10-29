@@ -15,11 +15,14 @@ import {
   loadCrashedMessage,
   type LlmLoadFailure,
   type LlmRequest,
-  type LlmWorkerMessage
+  type LlmWorkerMessage,
+  type LocalModelPlan
 } from '@shared/llm'
 
 /** このPCの言語モデルの呼び出し口(計算は llmWorker、別プロセス)。答えられなかった頼みは null */
 let running: UtilityProcess | null = null
+/** これから使うモデル(`planLlm`) */
+let planned: LocalModelPlan | null = null
 let canceling: (() => void) | null = null
 let failures: LlmLoadFailures | null = null
 /** アプリの終了中(終了で閉じられた解析のプロセスを「読み込めなかった」と覚えない。trackQuitting) */
@@ -40,6 +43,48 @@ export function listLlmLoadFailures(): LlmLoadFailure[] {
 /** 「このPCの AI をもう一度試す」: 読み込めなかった記録を消す */
 export function clearLlmLoadFailures(): void {
   loadFailures().clear()
+  // 使うモデルが変わる(読み込めなかった大きいモデルをまた試す)
+  planned = null
+}
+
+/**
+ * このPCの AI がこれから使うモデル(アプリを起動している間は覚える)。AI を動かすたびに、実際に選んだ
+ * モデルで覚え直す。覚えていなければ、モデルを読み込まずに選び方(`pickLocalModel`)だけを別プロセスで
+ * 確かめる(GPU を探すので数秒)。分からない・AI を動かしている最中なら null
+ */
+export async function planLlm(): Promise<LocalModelPlan | null> {
+  if (planned) return planned
+  if (running) return null
+  const cacheDir = join(app.getPath('userData'), 'models')
+  return new Promise((resolve) => {
+    let found: LocalModelPlan | null = null
+    running = runChild(
+      llmWorkerPath,
+      {
+        requests: [],
+        cacheDir,
+        modelUri: process.env.VE_LOCAL_LLM_MODEL || undefined,
+        appVersion: app.getVersion(),
+        skipModels: listLlmLoadFailures(),
+        planOnly: true
+      },
+      (raw) => {
+        const m = raw as unknown as LlmWorkerMessage
+        if (m.type === 'device') found = { model: m.model, device: m.device }
+        if (m.type === 'done' || m.type === 'error') {
+          running = null
+          if (found) planned = found
+          resolve(found)
+          return true
+        }
+        return false
+      },
+      () => {
+        running = null
+        resolve(null)
+      }
+    )
+  })
 }
 
 /**
@@ -90,6 +135,7 @@ export function runLlm(
           return true
         }
         tracker.observe(m)
+        if (m.type === 'device') planned = { model: m.model, device: m.device }
         onMessage(m)
         return false
       },

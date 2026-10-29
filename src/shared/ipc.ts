@@ -77,6 +77,7 @@ export const IPC = {
   llmCancel: 'llm:cancel',
   llmLoadFailures: 'llm:loadFailures',
   llmClearLoadFailures: 'llm:clearLoadFailures',
+  llmPlan: 'llm:plan',
   qcMeasure: 'qc:measure',
   qcProgress: 'qc:progress',
   qcCancel: 'qc:cancel',
