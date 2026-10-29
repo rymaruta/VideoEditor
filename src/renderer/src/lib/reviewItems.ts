@@ -120,6 +120,12 @@ export function structureRescueOf(
   return kept > 0 ? { kept, total: judgements.length } : null
 }
 
+/** 収録の時刻(共通の時刻の秒)を「分:秒」に */
+function clockOf(sec: number): string {
+  const t = Math.max(0, Math.round(sec))
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+}
+
 export function issueKey(issue: SyncIssue): string {
   switch (issue.kind) {
     case 'unsynced':
@@ -224,6 +230,18 @@ export function buildReviewItems(s: ReviewSources): ReviewItem[] {
       kind: '演出テロップ',
       text: `自信が低く自動では置かなかった提案が ${pending.length} 件あります(「演出テロップ」タブで選べます)`,
       tab: 'effects'
+    })
+
+  // AI が直した場面の区切り(企画に保存したもの。開き直しても出す)
+  const moves = s.project.autoEdit?.sceneMoves ?? []
+  if (moves.length > 0)
+    items.push({
+      // 作り直すたびに出直さないよう、鍵は固定
+      key: 'structure-boundaries',
+      area: 'structure',
+      kind: '構成',
+      text: `AI が ${moves.length} か所の場面の区切りを直しました(話の途中・言いかけで切れていた所。${moves.map((m) => `${clockOf(m.at)}→${clockOf(m.to)}`).join('、')})。「構成」タブで場面の頭と終わりを確かめてください`,
+      tab: 'structure'
     })
 
   if (s.structureRescue)

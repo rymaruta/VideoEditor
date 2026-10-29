@@ -1,6 +1,7 @@
 import type { LengthDropBy } from './structure/scenes'
 import type { EffectKind, EffectProposal } from './telop/effects'
 import type { HypeMoment } from './structure/hype'
+import type { SceneMove } from './structure/boundaryAi'
 import type { EpisodeKind } from './structure/kind'
 import type { SceneJudgement, SceneKind } from './structure/scenes'
 import type { PlacementMethod } from './sync/solve'
@@ -33,6 +34,11 @@ export interface AutoEditDecisions {
   /** 場面を切ったときの番組の種類と、声の盛り上がり(同じ場面に切り直すのに使う) */
   kind?: EpisodeKind
   hype?: HypeMoment[]
+  /**
+   * AI が直した場面の区切り(`planSceneMoves`)。開き直しでは AI に聞き直さず、公開中の版と同じ切り方で
+   * 切った場面にこれを当てる(作った時と同じ区切りにする)。無ければ直していない
+   */
+  sceneMoves?: SceneMove[]
   /** 判定した場面の区切り(切り直した場面が同じかを確かめる) */
   scenes: { id: string; start: number; end: number }[]
   judgements: SceneJudgement[]
@@ -222,6 +228,12 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
         (h): h is HypeMoment => isObj(h) && num(h.start) && num(h.end) && num(h.riseDb)
       )
     : undefined
+  // AI が直した場面の区切り(時刻の組だけ。当てられるかは開き直しで `applySceneMoves` が確かめる)
+  const sceneMoves = Array.isArray(raw.sceneMoves)
+    ? raw.sceneMoves
+        .filter((m): m is Record<string, unknown> => isObj(m) && num(m.at) && num(m.to))
+        .map((m) => ({ at: m.at as number, to: m.to as number }))
+    : []
   const planJudgements = Array.isArray(raw.planJudgements)
     ? judgementsOf(raw.planJudgements)
     : undefined
@@ -238,6 +250,7 @@ export function normalizeAutoEdit(raw: unknown): AutoEditDecisions | undefined {
   return {
     ...(raw.kind === 'location' || raw.kind === 'game' ? { kind: raw.kind } : {}),
     ...(hype ? { hype } : {}),
+    ...(sceneMoves.length > 0 ? { sceneMoves } : {}),
     scenes,
     judgements: judgementsOf(raw.judgements),
     ...(planJudgements ? { planJudgements } : {}),

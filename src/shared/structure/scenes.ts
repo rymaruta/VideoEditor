@@ -94,7 +94,7 @@ const MAX_QUESTION_SEC = 45
  * 場面の長さの上限(長さの目安に対する倍率)。質問〜答えの頭をつなぐときも、文の途中で分けるときも、
  * これを超えたら分ける
  */
-const HOLD_MAX_RATIO = 1.5
+export const HOLD_MAX_RATIO = 1.5
 /** 質問とみなす文(前置き〜疑問の文末)の字数の下限(依頼の形は短くても質問) */
 const MIN_QUESTION_CHARS = 20
 /** 質問の後、答えの頭からこの秒数は同じ場面に入れる(質問と答えを分けない) */
@@ -300,7 +300,7 @@ export function buildScenes(
 }
 
 /** 発話の時間の合計(重なった分は1回だけ数える) */
-function speechSeconds(lines: readonly TimedLine[]): number {
+export function speechSeconds(lines: readonly TimedLine[]): number {
   const iv = lines.map((l) => [l.start, l.end] as [number, number]).sort((a, b) => a[0] - b[0])
   let total = 0
   let curS = -Infinity

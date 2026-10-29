@@ -40,6 +40,7 @@ import {
   type Selection,
   type TimedLine
 } from '@shared/structure/scenes'
+import { applySceneMoves, planSceneMoves, type SceneMove } from '@shared/structure/boundaryAi'
 import {
   buildStructurePrompt,
   chunkScenes,
@@ -218,6 +219,37 @@ const levelOfActivity = new WeakMap<Uint8Array, Float32Array>()
 /** `loadActivity` で読んだ音の大きさ(範囲の境を静かな所へ寄せるのに使う)。読んでいなければ無し */
 export function levelOf(activity: Uint8Array): Float32Array | undefined {
   return levelOfActivity.get(activity)
+}
+
+/**
+ * 怪しい場面の区切り(言いかけで終わる・短い場面の端)を AI に確かめさせ、直す区切りを返す
+ * (`planSceneMoves`。話の途中で切れていると2通りの頼み方の両方が答えた所だけ)。AI を使わない設定・鍵が
+ * 無い・使えない(読み込めない・答えない)ときは直さない(公開中の版と同じ区切り)。中止は中止のまま投げる
+ */
+export async function checkSceneBoundaries(
+  scenes: readonly Scene[],
+  options: { provider: AiProvider; apiKey: string; kind?: EpisodeKind },
+  onProgress?: (p: AiProgress) => void
+): Promise<{
+  moves: SceneMove[]
+  asked: number
+  requests: number
+  untrusted?: 'missed-control'
+  failure?: string
+}> {
+  if (options.provider === 'off' || (options.provider === 'gemini' && !options.apiKey))
+    return { moves: [], asked: 0, requests: 0 }
+  const provider = options.provider
+  try {
+    return await planSceneMoves(
+      scenes,
+      KIND_PROFILES[options.kind ?? 'location'].scene,
+      async (requests) => (await askAiJson(provider, options.apiKey, requests, onProgress)).results
+    )
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('LLM_CANCELED')) throw e
+    return { moves: [], asked: 0, requests: 0, failure: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 /**
@@ -715,17 +747,21 @@ export function planRoughCut(
   }
 }
 
-/** 場面を作る(カメラが録っている範囲で) */
+/**
+ * 場面を作る(カメラが録っている範囲で)。`moves` は AI が直した区切り(`planSceneMoves`。企画に保存したもの)。
+ * 区切りは公開中の版と同じ切り方で切り、直しはその後に当てる(開き直しでも同じ直しを当てる。AI に聞き直さない)
+ */
 export function scenesFor(
   project: Project,
   info: MulticamInfo,
-  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[] } = {}
+  options: { kind?: EpisodeKind; hype?: readonly HypeMoment[]; moves?: readonly SceneMove[] } = {}
 ): Scene[] {
-  const scenes = buildScenes(
-    timedLines(project, info),
-    cameraRange(info),
-    KIND_PROFILES[options.kind ?? 'location'].scene
-  )
+  const sceneOptions = KIND_PROFILES[options.kind ?? 'location'].scene
+  const built = buildScenes(timedLines(project, info), cameraRange(info), sceneOptions)
+  const scenes =
+    options.moves && options.moves.length > 0
+      ? applySceneMoves(built, options.moves, sceneOptions).scenes
+      : built
   const hype = options.hype
   // 笑い・歓声・声の盛り上がりを測っていれば、場面ごとの回数を付ける(判定と AI への文に使う)
   const events = project.audioEvents

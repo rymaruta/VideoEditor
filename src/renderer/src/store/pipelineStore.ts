@@ -58,8 +58,10 @@ import { usePresetStore } from './presetStore'
 import type { Project, TextOverlay } from '@shared/types'
 import type { MulticamInfo } from '@shared/sync/multicam'
 import type { Scene, SceneJudgement } from '@shared/structure/scenes'
+import { describeSceneMove, type SceneMove } from '@shared/structure/boundaryAi'
 import {
   cameraRange,
+  checkSceneBoundaries,
   judgeScenes,
   loadActivity,
   effectLines,
@@ -283,6 +285,11 @@ interface PipelineState {
   carriedTelops: Omit<TextOverlay, 'id'>[]
   /** 場面を切ったときの番組の種類(企画に覚えて、開き直したときに同じ場面に切り直す) */
   sceneKind: EpisodeKind | null
+  /**
+   * AI が直した場面の区切り(`AutoEditDecisions.sceneMoves`)。開き直し・切り直しでは AI に聞き直さず、
+   * これを当てる(作った時と同じ区切りにする)
+   */
+  sceneMoves: SceneMove[]
   /** 演出テロップの提案(AI)と、置くと決めたもの */
   effects: EffectProposal[]
   effectChosen: string[]
@@ -1135,6 +1142,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     const decisions: AutoEditDecisions = {
       kind: s.sceneKind ?? useSettingsStore.getState().episodeKind,
       ...(s.hype.length > 0 ? { hype: s.hype } : {}),
+      ...(s.sceneMoves.length > 0 ? { sceneMoves: s.sceneMoves } : {}),
       scenes: s.scenes.map((sc) => ({ id: sc.id, start: sc.start, end: sc.end })),
       judgements: s.judgements,
       ...(s.planJudgements ? { planJudgements: s.planJudgements } : {}),
@@ -1183,9 +1191,43 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       hype = hypeMomentsFor(project, info, await activityOf(project, info))
       log(`声の盛り上がり(叫び・大声): ${hype.length} 回`)
     }
-    const scenes = scenesFor(project, info, { kind, hype })
     const range = cameraRange(info)
-    const { geminiApiKey: apiKey, aiProvider: provider } = useSettingsStore.getState()
+    const {
+      geminiApiKey: apiKey,
+      aiProvider: provider,
+      sceneBoundaryAi
+    } = useSettingsStore.getState()
+    const built = scenesFor(project, info, { kind, hype })
+    // 怪しい区切りだけ AI に確かめさせて直す(足し算の後段。AI を使えなければ公開中の版と同じ区切り)
+    let moves: SceneMove[] = []
+    if (sceneBoundaryAi && provider !== 'off') {
+      setStep('structure', { percent: 0, note: '場面の区切りを AI で確かめています' })
+      const startedAt = Date.now()
+      const checked = await checkSceneBoundaries(built, { provider, apiKey, kind }, (p) =>
+        setStep('structure', {
+          percent: p.percent,
+          note: `場面の区切りを確かめています: ${p.note}`
+        })
+      )
+      stopIfCanceled()
+      moves = checked.moves
+      const sec = ((Date.now() - startedAt) / 1000).toFixed(0)
+      if (checked.failure)
+        log(
+          `構成: 場面の区切りを AI で確かめられなかったため、そのままにしました(${checked.failure})`
+        )
+      else if (checked.untrusted)
+        log(
+          `構成: AI の答えが話の途中と切れ目を見分けていなかったため(答えの決まった例文を外した)、場面の区切りはそのままにしました(${sec} 秒)`
+        )
+      else if (checked.asked > 0)
+        log(
+          moves.length > 0
+            ? `構成: AI が ${moves.length} か所の区切りを直しました(怪しい区切り ${checked.asked} か所を確認・${sec} 秒): ${moves.map((m) => describeSceneMove(m, built)).join('、')}`
+            : `構成: 怪しい区切り ${checked.asked} か所を AI で確かめ、直す所はありませんでした(${sec} 秒)`
+        )
+    }
+    const scenes = moves.length > 0 ? scenesFor(project, info, { kind, hype, moves }) : built
     const { judgements, source, failure, model, device } = await judgeScenes(
       scenes,
       range.end - range.start,
@@ -1211,13 +1253,16 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
       keepTouched: [],
       rangeRuns: [],
       hype: hype ?? [],
-      sceneKind: kind
+      sceneKind: kind,
+      sceneMoves: moves
     })
     forgetUsedTouches()
     setStep('structure', {
       state: 'done',
       percent: 100,
-      note: structureNote(judgements, source, false)
+      note:
+        structureNote(judgements, source, false) +
+        (moves.length > 0 ? ` · AI が区切りを ${moves.length} か所直しました` : '')
     })
     persistDecisions()
     log(
@@ -1704,6 +1749,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     rangeRuns: [],
     carriedTelops: [],
     sceneKind: null,
+    sceneMoves: [],
     roughCut: null,
     telopReviews: [],
     colorIssues: [],
@@ -1738,6 +1784,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         keepTouched: r.keepTouched.filter((id) => !ownedScenes(project, r.scenes).has(id)),
         carriedTelops: r.carriedTelops,
         sceneKind: project.autoEdit?.kind ?? kind,
+        sceneMoves: r.sceneMoves,
         hype: r.hype,
         targetMinutes: r.targetMinutes,
         editNote: r.editNote,
@@ -1989,7 +2036,11 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
             project.multicam,
             await activityOf(project, project.multicam)
           )
-          const scenes = scenesFor(project, project.multicam, { kind, hype })
+          const scenes = scenesFor(project, project.multicam, {
+            kind,
+            hype,
+            moves: get().sceneMoves
+          })
           // 切り直した場面に、残す/落とすを当て直す(時刻がほぼ同じ場面だけ。ID は番号なので別の場面を指す)
           const match = matchScenesByTime(get().scenes, scenes)
           set({
@@ -2065,6 +2116,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         rangeReview: null,
         carriedTelops: [],
         sceneKind: null,
+        sceneMoves: [],
         // 仕上がりの長さ・方針は人が入れたものなので、ここでは捨てない(新しい回の画面・自動編集の画面で
         // 決めてすぐ始めると、始めるときにここで捨てていた)。企画を替えたときだけ入れ替える
         roughCut: null,
@@ -2116,6 +2168,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         rangeReview: null,
         carriedTelops: [],
         sceneKind: null,
+        sceneMoves: [],
         roughCut: null,
         telopReviews: [],
         colorIssues: [],
