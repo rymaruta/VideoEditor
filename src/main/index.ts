@@ -9,7 +9,7 @@ import { readFramesRgb } from './frameService'
 import { cancelDenoise, denoiseFiles } from './audioCleanService'
 import { scanShowKit } from './showKitService'
 import { cancelAudioEvents, detectAudioEvents } from './eventService'
-import type { LlmRequest } from '@shared/llm'
+import type { LlmRequest, LlmRunOptions } from '@shared/llm'
 import type { AsrJob } from '@shared/transcript'
 import { cancelSync, runSync, scanFootage } from './footageService'
 import type { SyncInputFile } from '@shared/sync/report'
@@ -1187,8 +1187,10 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(IPC.asrSetLanguage, (_e, language: unknown) => setAsrLanguage(language))
   ipcMain.handle(IPC.asrCancel, () => cancelAsr())
-  ipcMain.handle(IPC.llmRun, (event, requests: LlmRequest[]) =>
-    runLlm(requests, (m) => notifySender(event, IPC.llmProgress, m))
+  ipcMain.handle(IPC.llmRun, (event, requests: LlmRequest[], options?: LlmRunOptions) =>
+    runLlm(requests, (m) => notifySender(event, IPC.llmProgress, m), {
+      recordLoadFailures: options?.recordLoadFailures !== false
+    })
   )
   ipcMain.handle(IPC.llmCancel, () => cancelLlm())
   // 読み込めなかったモデルの記録(次から試さない)と、「このPCの AI をもう一度試す」

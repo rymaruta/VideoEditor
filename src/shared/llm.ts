@@ -14,6 +14,15 @@ export interface LlmRequest {
   maxTokens?: number
 }
 
+/** このPCの AI を動かすときの決まり */
+export interface LlmRunOptions {
+  /**
+   * 読み込みの途中で落ちたモデルを「読み込めなかった」と覚えるか(既定は覚える)。構成の区切りの確認
+   * (試験的な後段)では覚えない(覚えると、同じ回の場面の判定まで小さいモデルに下がる)
+   */
+  recordLoadFailures?: boolean
+}
+
 export type LlmWorkerMessage =
   | { type: 'status'; stage: 'download' | 'load'; percent: number; note: string }
   | {

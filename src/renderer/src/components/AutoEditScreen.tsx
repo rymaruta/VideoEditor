@@ -989,8 +989,8 @@ export function AutoEditScreen(): React.JSX.Element | null {
                   </select>
                 </label>
                 {aiProvider === 'local' && <LocalAiRetry refreshKey={running} />}
-                {aiProvider !== 'off' && (
-                  <label title="言いかけで終わる・短い場面の区切りを AI に確かめさせ、話の途中で切れている所だけ直します(AI が使えないときは直しません)">
+                {aiProvider === 'local' && (
+                  <label title="試験的な機能です。言いかけで終わる場面の区切りをこのPCの AI に確かめさせ、話の途中で切れている所だけ直します。ON にすると構成の工程が長くなります(GPU のある PC の大きい AI 向け。小さい AI・AI が使えないときは直しません)">
                     <input
                       type="checkbox"
                       checked={sceneBoundaryAi}
@@ -998,7 +998,7 @@ export function AutoEditScreen(): React.JSX.Element | null {
                         useSettingsStore.getState().setSceneBoundaryAi(e.target.checked)
                       }
                     />
-                    区切りを AI で確かめる
+                    区切りを AI で確かめる(試験的・大きい AI 向け・構成が長くなります)
                   </label>
                 )}
                 <label title={EDIT_POLICY_HINT[editPolicy]}>

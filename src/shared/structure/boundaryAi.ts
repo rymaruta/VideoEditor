@@ -366,8 +366,11 @@ export interface ScenePlan {
   /** 聞いた区切りの数・頼んだ数(記録用) */
   asked: number
   requests: number
-  /** AI の答えを使わなかった理由(確かめの切れ目を外した = 中身を見分けていない)。使ったときは無い */
-  untrusted?: 'missed-control'
+  /**
+   * AI の答えを使わなかった理由(missed-control = 確かめの切れ目を外した・中身を見分けていない、no-answer =
+   * 確かめの答えが1つも読めなかった)。使ったときは無い
+   */
+  untrusted?: 'missed-control' | 'no-answer'
 }
 
 /**
@@ -394,6 +397,9 @@ export async function planSceneMoves(
   const trusted =
     control.every((v, i) => v === null || v === controls[i].expect) &&
     control.some((v, i) => v === controls[i].expect)
+  // 例文の答えが1つも読めなかった(全部壊れた・答えなかった)のは、見分けられないのとは別(数えない)
+  if (r0.every((a) => parseGapAnswer(a) === null))
+    return { moves: [], asked: questions.length, requests, untrusted: 'no-answer' }
   if (!trusted) return { moves: [], asked: questions.length, requests, untrusted: 'missed-control' }
   // 2回目: 今の区切りは話の途中か
   const first = questions.flatMap((q) => gapRequests(q.all, q.cut))

@@ -160,6 +160,14 @@ export class LlmLoadTracker {
  */
 export type LlmExitKind = 'canceled' | 'quitting' | 'clean' | 'crashed'
 
+/**
+ * 読み込みの途中で落ちたモデルを「読み込めなかった」と覚えるか。構成の区切りの確認(試験的な後段。
+ * `recordLoadFailures: false`)で落ちたものは覚えない(覚えると、同じ回の場面の判定が小さいモデルに下がる)
+ */
+export function shouldRecordLoadFailure(options: { recordLoadFailures?: boolean }): boolean {
+  return options.recordLoadFailures !== false
+}
+
 export function classifyLlmExit(e: {
   canceled: boolean
   quitting: boolean

@@ -301,8 +301,9 @@ interface SettingsState {
   aiProvider: AiProvider
   setAiProvider: (provider: AiProvider) => void
   /**
-   * 構成で、怪しい場面の区切り(言いかけで終わる・短い場面の端)を AI に確かめさせて直す(既定は ON)。
-   * AI を使わない設定・AI が使えないときは、ON でも直さない(公開中の版と同じ区切り)
+   * 構成で、怪しい場面の区切り(言いかけで終わる区切り)をこのPCの AI に確かめさせて直す(試験的。既定は OFF)。
+   * 短い場面を隣へ入れると入れた場面が長くなり、長さ合わせで見どころが減る方へ偏った(監査の乱数比較)ので、
+   * 既定では行わない(公開中の版と同じ区切り)。ON でも、Gemini・小さいモデル・AI が使えないときは直さない
    */
   sceneBoundaryAi: boolean
   setSceneBoundaryAi: (on: boolean) => void
@@ -541,7 +542,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     writeSetting(AI_PROVIDER_KEY, provider)
     set({ aiProvider: provider })
   },
-  sceneBoundaryAi: readChoice(SCENE_BOUNDARY_AI_KEY, ['on', 'off'], 'on') === 'on',
+  // 試験的な機能なので既定は OFF(公開中の版と同じ区切り)
+  sceneBoundaryAi: readChoice(SCENE_BOUNDARY_AI_KEY, ['on', 'off'], 'off') === 'on',
   setSceneBoundaryAi: (on) => {
     writeSetting(SCENE_BOUNDARY_AI_KEY, on ? 'on' : 'off')
     set({ sceneBoundaryAi: on })

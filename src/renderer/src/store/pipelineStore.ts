@@ -1203,11 +1203,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
     if (sceneBoundaryAi && provider !== 'off') {
       setStep('structure', { percent: 0, note: '場面の区切りを AI で確かめています' })
       const startedAt = Date.now()
-      const checked = await checkSceneBoundaries(built, { provider, apiKey, kind }, (p) =>
-        setStep('structure', {
-          percent: p.percent,
-          note: `場面の区切りを確かめています: ${p.note}`
-        })
+      const checked = await checkSceneBoundaries(
+        built,
+        { provider, apiKey, kind, isCanceled: () => runCanceled },
+        (p) =>
+          setStep('structure', {
+            percent: p.percent,
+            note: `場面の区切りを確かめています: ${p.note}`
+          })
       )
       stopIfCanceled()
       moves = checked.moves
@@ -1216,11 +1219,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => {
         log(
           checked.skipped.reason === 'small-model'
             ? `構成: このPCの AI は小さいので区切りの確認は省きました(${checked.skipped.model})`
-            : `構成: このPCの AI(${checked.skipped.model})は前に答えの決まった例文を続けて外したので、区切りの確認は省きました`
+            : checked.skipped.reason === 'gemini'
+              ? '構成: 区切りの確認はこのPCの AI だけで行います(Gemini では、頼む回数が増えて場面の判定が回数の上限に当たらないよう省きました)'
+              : `構成: このPCの AI(${checked.skipped.model})は前に答えの決まった例文を続けて外したので、区切りの確認は省きました`
         )
       else if (checked.failure)
         log(
           `構成: 場面の区切りを AI で確かめられなかったため、そのままにしました(${checked.failure})`
+        )
+      else if (checked.untrusted === 'no-answer')
+        log(
+          `構成: AI が区切りの確認に答えなかったため、場面の区切りはそのままにしました(${sec} 秒)`
         )
       else if (checked.untrusted)
         log(

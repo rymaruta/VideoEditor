@@ -97,14 +97,13 @@ describe('小さいモデルでは区切りの確認を頼まない', () => {
     expect(r.skipped).toEqual({ reason: 'missed-before', model: 'Qwen2.5 7B' })
   })
 
-  it('Gemini は大きさを確かめずに頼む', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('{}'))
-    )
-    const llmRun = stub({ model: CPU_LOCAL_MODEL.label, device: 'cpu' }, (r) => r.map(answer))
+  it('Gemini では区切りの確認を行わない(頼む回数が増え、直後の場面の判定が 429 で簡易の点数に落ちうる)', async () => {
+    const fetch = vi.fn(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetch)
+    const llmRun = stub({ model: 'Qwen2.5 7B', device: 'cuda' }, (r) => r.map(answer))
     const r = await checkSceneBoundaries(scenes, { provider: 'gemini', apiKey: 'k' })
+    expect(fetch).not.toHaveBeenCalled()
     expect(llmRun).not.toHaveBeenCalled()
-    expect(r.skipped).toBeUndefined()
+    expect(r).toMatchObject({ moves: [], requests: 0, skipped: { reason: 'gemini' } })
   })
 })

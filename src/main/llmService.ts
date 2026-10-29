@@ -7,6 +7,7 @@ import { runChild } from './childRunner'
 import {
   classifyLlmExit,
   deleteModelFiles,
+  shouldRecordLoadFailure,
   LlmLoadFailures,
   LlmLoadTracker,
   trackQuitting
@@ -47,18 +48,44 @@ export function clearLlmLoadFailures(): void {
   planned = null
 }
 
+/** 使うモデルを確かめる(`planLlm`)の上限時間(ミリ秒)。GPU を探すのに数秒。固まったら確かめをあきらめる */
+export const LLM_PLAN_TIMEOUT_MS = 30_000
+
 /**
  * このPCの AI がこれから使うモデル(アプリを起動している間は覚える)。AI を動かすたびに、実際に選んだ
  * モデルで覚え直す。覚えていなければ、モデルを読み込まずに選び方(`pickLocalModel`)だけを別プロセスで
- * 確かめる(GPU を探すので数秒)。分からない・AI を動かしている最中なら null
+ * 確かめる(GPU を探すので数秒)。分からない・AI を動かしている最中なら null。
+ * 確かめのプロセスは `running` を使わない(ふさぐと、その間の AI の頼みを「実行中」で断っていた)。
+ * 中止(`cancelLlm`)は LLM_CANCELED で、上限時間(`LLM_PLAN_TIMEOUT_MS`)を超えたら理由つきで投げる
  */
-export async function planLlm(): Promise<LocalModelPlan | null> {
+let planning: { child: UtilityProcess; cancel: () => void } | null = null
+
+export async function planLlm(timeoutMs = LLM_PLAN_TIMEOUT_MS): Promise<LocalModelPlan | null> {
   if (planned) return planned
-  if (running) return null
+  if (running || planning) return null
   const cacheDir = join(app.getPath('userData'), 'models')
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let found: LocalModelPlan | null = null
-    running = runChild(
+    let settled = false
+    let canceled = false
+    const finish = (f: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      planning = null
+      f()
+    }
+    const timer = setTimeout(() => {
+      finish(() =>
+        reject(
+          new Error(
+            `AI のモデルを確かめるのに時間がかかりすぎました(${Math.round(timeoutMs / 1000)} 秒)`
+          )
+        )
+      )
+      child.kill()
+    }, timeoutMs)
+    const child = runChild(
       llmWorkerPath,
       {
         requests: [],
@@ -72,18 +99,17 @@ export async function planLlm(): Promise<LocalModelPlan | null> {
         const m = raw as unknown as LlmWorkerMessage
         if (m.type === 'device') found = { model: m.model, device: m.device }
         if (m.type === 'done' || m.type === 'error') {
-          running = null
-          if (found) planned = found
-          resolve(found)
+          finish(() => {
+            if (found) planned = found
+            resolve(found)
+          })
           return true
         }
         return false
       },
-      () => {
-        running = null
-        resolve(null)
-      }
+      () => finish(() => (canceled ? reject(new Error('LLM_CANCELED')) : resolve(found)))
     )
+    planning = { child, cancel: () => (canceled = true) }
   })
 }
 
@@ -103,7 +129,8 @@ export function crashMessage(
 
 export function runLlm(
   requests: LlmRequest[],
-  onMessage: (m: Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>) => void
+  onMessage: (m: Exclude<LlmWorkerMessage, { type: 'done' | 'error' }>) => void,
+  options: { recordLoadFailures?: boolean } = {}
 ): Promise<(unknown | null)[]> {
   if (running) return Promise.reject(new Error('AI はすでに実行中です'))
   const cacheDir = join(app.getPath('userData'), 'models')
@@ -148,7 +175,7 @@ export function runLlm(
         const loading = tracker.loading()
         if (kind === 'clean')
           return reject(new Error('AI が答えを返さずに終わりました(次はもう一度試します)'))
-        if (loading?.uri) {
+        if (loading?.uri && shouldRecordLoadFailure(options)) {
           loadFailures().add(loading.uri, loading.label, {
             appVersion: app.getVersion(),
             gpu: loading.gpu,
@@ -167,4 +194,6 @@ export function runLlm(
 export function cancelLlm(): void {
   canceling?.()
   running?.kill()
+  planning?.cancel()
+  planning?.child.kill()
 }

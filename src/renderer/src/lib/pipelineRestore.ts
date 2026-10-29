@@ -6,7 +6,7 @@ import type { EffectProposal } from '@shared/telop/effects'
 import type { EditPolicy } from '@shared/structure/kind'
 import { spansOfClips } from '@shared/roughCut/overrides'
 import { cutSignature } from '@shared/autoEdit'
-import { autoKeptScenes, scenesFor } from './roughCutPlan'
+import { autoKeptScenes, scenesWithMoves } from './roughCutPlan'
 import type { SceneMove } from '@shared/structure/boundaryAi'
 
 type StepState = 'wait' | 'run' | 'done' | 'error' | 'skipped'
@@ -126,22 +126,28 @@ export function matchScenesByTime(
 
 /**
  * AI が区切りを直した場面(`AutoEditDecisions.sceneMoves`)を含む企画の、前の場面から今の場面への対応。
- * `matchScenesByTime`(公開中の版と同じ)で付かなかった今の場面は、その時間の半分より多くを占める前の場面に
- * 対応させる(直しで動いた区間は小さい方なので、場面の大半を占める前の場面の判定・残す/落とすを引き継ぐ。
- * 「残す」を優先するような決まりは入れない)。保存した直しが当たらなくなった(文字起こしを直した など)ときに、
- * 短い場面を入れた場面・区切りを動かした場面の印が外れないように
+ * `matchScenesByTime`(公開中の版と同じ。重なりが 8 割)で付かなかった今の場面のうち、直しに関わる場面
+ * (直した区切りの前後・動かした先を含む場面)だけ、その時間の半分より多くを占める前の場面に対応させる
+ * (直しで動いた区間は小さい方なので、大半を占める前の場面の判定・残す/落とすを引き継ぐ。「残す」を優先する
+ * ような決まりは入れない)。直しと関係の無い場面は今までどおり 8 割で見る(前は直しが1つでもあると、関係の
+ * 無い場面まで 5 割で当てていた)
  */
 export function matchScenesAcrossMoves(
   prev: readonly { id: string; start: number; end: number }[],
-  next: readonly { id: string; start: number; end: number }[]
+  next: readonly { id: string; start: number; end: number }[],
+  moves: readonly { at: number; to: number }[]
 ): Map<string, string> {
   const out = matchScenesByTime(prev, next)
+  const times = moves.flatMap((m) => [m.at, m.to])
+  const involved = (s: { start: number; end: number }): boolean =>
+    times.some((t) => t >= s.start - 1e-3 && t <= s.end + 1e-3)
   for (const n of next) {
-    if (out.has(n.id)) continue
+    if (out.has(n.id) || !involved(n)) continue
     const len = n.end - n.start
     if (!(len > 0)) continue
     let best: { id: string; overlap: number } | null = null
     for (const p of prev) {
+      if (!involved(p)) continue
       const overlap = Math.min(n.end, p.end) - Math.max(n.start, p.start)
       if (overlap > len * 0.5 && (!best || overlap > best.overlap)) best = { id: p.id, overlap }
     }
@@ -195,11 +201,12 @@ export function restorePipelineFromProject(
 
   // 構成の場面は、文字起こしと同期の情報から同じように切り直せる(声の盛り上がりは保存したもの)。
   // AI が直した区切りは保存したものを当てる(聞き直さない。作った時と同じ区切りになる)
-  const sceneMoves = saved?.sceneMoves ?? []
-  const scenes = scenesFor(project, info, {
+  // 当たらなくなった直し(文字起こしを直した など)は捨てる(保存し直すときに残さない・要確認の数に入れない)
+  const savedMoves = saved?.sceneMoves ?? []
+  const { scenes, applied: sceneMoves } = scenesWithMoves(project, info, {
     kind,
     ...(saved?.hype ? { hype } : {}),
-    ...(sceneMoves.length > 0 ? { moves: sceneMoves } : {})
+    ...(savedMoves.length > 0 ? { moves: savedMoves } : {})
   })
   const sameScenes =
     saved !== undefined &&
@@ -213,10 +220,10 @@ export function restorePipelineFromProject(
   const heuristic = heuristicJudgements(scenes, kind)
   // 保存した場面と今の場面の対応(時刻がほぼ同じもの)。場面の区切りが変わったら、対応の無い場面は簡易の点数
   // AI が区切りを直した企画では、直しが当たらなくなった場面の印も、大半を占める前の場面から引き継ぐ
-  const match = (sceneMoves.length > 0 ? matchScenesAcrossMoves : matchScenesByTime)(
-    saved?.scenes ?? [],
-    scenes
-  )
+  const match =
+    savedMoves.length > 0
+      ? matchScenesAcrossMoves(saved?.scenes ?? [], scenes, savedMoves)
+      : matchScenesByTime(saved?.scenes ?? [], scenes)
   const judgedBy = (list: readonly SceneJudgement[] | undefined): SceneJudgement[] => {
     const byId = new Map((list ?? []).map((j) => [j.sceneId, j]))
     return heuristic.map((h) => {
